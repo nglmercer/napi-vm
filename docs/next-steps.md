@@ -97,21 +97,41 @@ much of the backend they need, and runs single-threaded on Windows x86_64
 | `t5` | suspended 64 frames deep | a long unwind, as a real `yield` produces |
 | `t6` | nested, both suspended | unwinding a stack that owns another stack |
 
-A fault is a *process* fault, so the log shows which stage was reached and
-nothing after it. That reads out directly:
+**Verdict, from
+[run 33529798397](https://github.com/hernan-lc/napi-vm/actions/runs/33529798397):
+all six pass on Windows x86_64**, and `generator_stress` still faults in the
+same place. 200 forced unwinds with destructors, 64-frame-deep suspensions and
+nested coroutines survive with no interpreter attached.
 
-- **A stage faults** → the bug is in the stack-switching backend, and the
-  failing stage *is* the upstream reproducer. File it, then pin, patch or fall
-  back until it lands.
-- **All six pass and `generator_stress` still faults** → the backend is fine
-  and the fault is in our teardown: the `Interpreter`, `Env` and `Value`
-  destructors that run on the coroutine stack during the unwind.
-  `GeneratorInner`'s drop and `Value::drop` (which drains children onto an
-  explicit work stack) are where to look.
+So `corosensei`'s Windows forced-unwind is sound and **the fault is ours** —
+in what runs on the coroutine stack *during* the unwind: the `Interpreter`,
+`Env` and `Value` destructors of the generator's own body. The TEB-corruption
+hypothesis recorded here earlier is refuted; that is what the experiment was
+for. Nothing to file upstream.
 
-All six pass on Linux, which is expected and proves nothing — this is
-stack-switching assembly behaviour and Linux has no TEB to corrupt. The next
-Windows run is the one that answers it.
+Where to look, in order:
+`GeneratorInner`'s teardown, `Value::drop` (which drains children onto an
+explicit work stack rather than recursing), and the `Env` chain a body's
+frame holds — every one of those releases `Rc`s the *driver* on the main
+stack still owns.
+
+**Next, and pushed with this:** two things that answer "where" without another
+guess.
+
+1. `generator_stress` gains `abandoning_a_few_suspended_generators` (10) and
+   `abandoning_many_suspended_generators` (100) — the same abandonment with
+   the aliasing removed. They sort before `cloned_…`, so the last name the
+   log prints separates *structural* (10 is enough) from *cumulative* (only
+   100 faults) from *specific to that test's aliasing* (both pass).
+2. An `if: failure()` step re-runs the faulting binary under `cdb`, the
+   Windows SDK debugger on the runner image, and prints `!analyze -v` plus
+   `kP 100`. `CARGO_PROFILE_RELEASE_DEBUG: line-tables-only` on that job is
+   what makes those frames readable. It is diagnostic only — it cannot change
+   the verdict, and it is a no-op once the suite is green.
+
+An access violation is not a Rust panic: no backtrace, no message, just an
+exit code. That step is the difference between reading the faulting frame and
+guessing at it again.
 
 **Options if it proves hard:** mark `generator_stress` as
 `#[cfg_attr(windows, ignore)]` with the reason recorded, and file it — better
@@ -196,7 +216,7 @@ than an unimplemented stub, revert `7ab6b0b`.
 ## Health
 
 - **Tests:** 1378 (bun) · 184 Rust · 27 LSP protocol · 17 Node-compat ·
-  17 generator stress · 7 WASM · 6 coroutine backend.
+  19 generator stress · 7 WASM · 6 coroutine backend.
 - **Gate:** `lint`, `build`, `test`, `test:node`, `test:rust`, `test:wasm` —
   all green locally, on every target including `wasm32`, `wasm32-wasip2` and
   `aarch64-pc-windows-msvc`.

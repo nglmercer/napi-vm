@@ -201,6 +201,36 @@ jobs:
       - name: Run generator stress suite (deterministic)
         run: cargo test --release --test generator_stress -- --test-threads=1 --nocapture
 
+      # A `STATUS_ACCESS_VIOLATION` is not a Rust panic: no backtrace, no
+      # message, just an exit code. Re-run the same binary under `cdb` (the
+      # Windows SDK debugger, preinstalled on the runner image) to get the
+      # faulting instruction and the stack that reached it. `line-tables-only`
+      # debug info above is what makes those frames readable.
+      #
+      # Diagnostic only -- it never changes the job's verdict, and it is a
+      # no-op once the suite is green.
+      - name: Capture the faulting stack
+        if: failure()
+        shell: pwsh
+        run: |
+          $exe = (cargo test --release --test generator_stress --no-run --message-format=json |
+                  ForEach-Object { $_ | ConvertFrom-Json } |
+                  Where-Object { $_.reason -eq 'compiler-artifact' -and $_.executable } |
+                  Select-Object -Last 1).executable
+          Write-Host "test binary: $exe"
+
+          $cdb = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe' -EA SilentlyContinue
+          if (-not $cdb) {
+            Write-Host '::warning::cdb.exe not found on this image; no stack captured.'
+            exit 0
+          }
+
+          # -g/-G skip the loader and process-exit breakpoints, so the only
+          # break is the fault itself. `kP 100` prints it with arguments.
+          & $cdb.FullName -g -G -c '.echo ===RUNNING===; g; .echo ===FAULT===; r; .echo ===ANALYZE===; !analyze -v; .echo ===STACK===; kP 100; q' `
+            $exe --test-threads=1 --nocapture 2>&1 | Select-Object -Last 220
+          exit 0
+
       - name: Run Rust tests (full)
         run: cargo test --release
 
@@ -399,6 +429,11 @@ jobs:
   win-x64:
     name: Windows x86_64
     runs-on: windows-latest
+    # Emit PDBs for the release build. `line-tables-only` is the cheap tier --
+    # enough for a debugger to name frames in the crash captured below, without
+    # the build-time cost of full debug info.
+    env:
+      CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -444,6 +479,36 @@ jobs:
 
       - name: Run generator stress suite (deterministic)
         run: cargo test --release --test generator_stress -- --test-threads=1 --nocapture
+
+      # A `STATUS_ACCESS_VIOLATION` is not a Rust panic: no backtrace, no
+      # message, just an exit code. Re-run the same binary under `cdb` (the
+      # Windows SDK debugger, preinstalled on the runner image) to get the
+      # faulting instruction and the stack that reached it. `line-tables-only`
+      # debug info above is what makes those frames readable.
+      #
+      # Diagnostic only -- it never changes the job's verdict, and it is a
+      # no-op once the suite is green.
+      - name: Capture the faulting stack
+        if: failure()
+        shell: pwsh
+        run: |
+          $exe = (cargo test --release --test generator_stress --no-run --message-format=json |
+                  ForEach-Object { $_ | ConvertFrom-Json } |
+                  Where-Object { $_.reason -eq 'compiler-artifact' -and $_.executable } |
+                  Select-Object -Last 1).executable
+          Write-Host "test binary: $exe"
+
+          $cdb = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe' -EA SilentlyContinue
+          if (-not $cdb) {
+            Write-Host '::warning::cdb.exe not found on this image; no stack captured.'
+            exit 0
+          }
+
+          # -g/-G skip the loader and process-exit breakpoints, so the only
+          # break is the fault itself. `kP 100` prints it with arguments.
+          & $cdb.FullName -g -G -c '.echo ===RUNNING===; g; .echo ===FAULT===; r; .echo ===ANALYZE===; !analyze -v; .echo ===STACK===; kP 100; q' `
+            $exe --test-threads=1 --nocapture 2>&1 | Select-Object -Last 220
+          exit 0
 
       - name: Run Rust tests (full)
         run: cargo test --release

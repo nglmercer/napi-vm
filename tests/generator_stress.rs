@@ -107,6 +107,53 @@ fn generators_abandoned_while_suspended() {
     assert_eq!(out, "200");
 }
 
+/// The same abandonment as above, at two scales.
+///
+/// These exist to bisect a `STATUS_ACCESS_VIOLATION` that only Windows
+/// x86_64 shows, in `cloned_generator_values_share_one_coroutine`. libtest
+/// runs single-threaded tests in name order, and a fault kills the process,
+/// so the last name printed is the answer: `a_few` faulting means the bug is
+/// structural, only `many` faulting means it is cumulative, and both passing
+/// means something specific to that test's aliasing is involved.
+///
+/// `tests/coroutine_backend.rs` already rules out the coroutine backend
+/// itself: it survives 200 of these unwinds with no interpreter attached.
+#[test]
+fn abandoning_a_few_suspended_generators() {
+    let out = run(r#"
+        function* counter() { yield 1; yield 2; yield 3; }
+        let sum = 0;
+        let i = 0;
+        while (i < 10) {
+            const g = counter();
+            sum = sum + g.next().value;
+            sum = sum + g.next().value;
+            sum = sum + g.next().value;
+            i = i + 1;
+        }
+        sum;
+    "#);
+    assert_eq!(out, "60");
+}
+
+#[test]
+fn abandoning_many_suspended_generators() {
+    let out = run(r#"
+        function* counter() { yield 1; yield 2; yield 3; }
+        let sum = 0;
+        let i = 0;
+        while (i < 100) {
+            const g = counter();
+            sum = sum + g.next().value;
+            sum = sum + g.next().value;
+            sum = sum + g.next().value;
+            i = i + 1;
+        }
+        sum;
+    "#);
+    assert_eq!(out, "600");
+}
+
 #[test]
 fn generators_abandoned_by_breaking_out_of_for_of() {
     let out = run(r#"
