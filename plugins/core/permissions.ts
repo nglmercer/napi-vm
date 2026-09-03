@@ -15,14 +15,14 @@
 import * as nodePath from "node:path";
 
 import { PermissionDeniedError, PluginManifestError } from "./errors";
-import type { HostFileSystem } from "./host-filesystem";
+import type { HostFileSystem } from "../fs/host-filesystem";
 import {
   compileFetchPermission,
   type CompiledFetchPermissions,
   type FetchPolicy,
-} from "./fetch-capability";
+} from "../capabilities/fetch-capability";
 import type { FsPermission, PluginManifest } from "./manifest";
-import type { TimersCapabilityOptions } from "./timers-capability";
+import type { TimersCapabilityOptions } from "../capabilities/timers-capability";
 import {
   compilePattern,
   escapesRoot,
@@ -31,7 +31,7 @@ import {
   normalizeSegments,
   toPosix,
   type PathRule,
-} from "./path-rules";
+} from "../fs/path-rules";
 
 export type FsAccessMode = "read" | "write";
 
@@ -45,8 +45,13 @@ export interface CompiledPermissions {
   path: boolean;
   crypto: boolean;
   timers: boolean;
+  /** Requested dynamic capabilities: name → `true` or options. */
+  capabilities: Record<string, unknown>;
   fetch: CompiledFetchPermissions;
 }
+
+/** One dynamic capability grant: `true` for defaults, or granted options. */
+export type CapabilityGrant = boolean | Record<string, unknown>;
 
 export interface PluginHostPolicy {
   fs: {
@@ -63,6 +68,11 @@ export interface PluginHostPolicy {
   crypto?: boolean;
   /** Permit `napi:timers`, optionally with a coarsened clock. */
   timers?: boolean | TimersCapabilityOptions;
+  /**
+   * Dynamic capability grants: `{ "<name>": true }` or `{ "<name>": {...} }`.
+   * Absent or `false` means denied. Unknown names are inert until defined.
+   */
+  capabilities?: Record<string, CapabilityGrant>;
   /** Origins `napi:fetch` may reach. An absent allowlist permits nothing. */
   fetch?: FetchPolicy;
 }
@@ -75,6 +85,7 @@ export function defaultPolicy(): PluginHostPolicy {
     fs: { absoluteRead: false, absoluteWrite: false },
     crypto: false,
     timers: false,
+    capabilities: {},
     fetch: {},
   };
 }
@@ -140,6 +151,7 @@ export function compilePermissions(manifest: PluginManifest): CompiledPermission
     path: manifest.permissions?.path === true,
     crypto: manifest.permissions?.crypto === true,
     timers: manifest.permissions?.timers === true,
+    capabilities: { ...(manifest.permissions?.capabilities ?? {}) },
     fetch: compileFetchPermission(manifest.permissions?.fetch),
   };
 }

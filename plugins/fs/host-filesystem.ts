@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 
-import { ResourceLimitError } from "./errors";
+import { ResourceLimitError } from "../core/errors";
 
 /**
  * The host-side filesystem backend.

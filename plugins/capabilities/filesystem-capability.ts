@@ -6,13 +6,17 @@
  * grants nothing on its own.
  */
 
-import type { Vm } from "../index";
+import type { Vm } from "../../index";
 
-import type { HostFileSystem } from "./host-filesystem";
-import type { FsPermissionChecker } from "./permissions";
+import type { HostFileSystem } from "../fs/host-filesystem";
+import type { FsPermissionChecker } from "../core/permissions";
+import {
+  unbindCapabilityModule,
+  type CapabilityTeardown,
+} from "./capability-registry";
 
 /** Host globals backing `napi:fs`. Names are convention, never security. */
-export const FS_GLOBALS = [
+const FS_GLOBALS = [
   "__cap_fs_readText",
   "__cap_fs_writeText",
   "__cap_fs_exists",
@@ -39,8 +43,12 @@ export interface FsCapabilityOptions {
   fs: HostFileSystem;
 }
 
-/** Expose the checked filesystem functions and register `napi:fs`. */
-export function installFsCapability(vm: Vm, options: FsCapabilityOptions): void {
+/**
+ * Expose the checked filesystem functions and register `napi:fs`.
+ * Returns its own teardown — the host runs it on unload, no separate
+ * `uninstallFsCapability` to remember.
+ */
+export function installFsCapability(vm: Vm, options: FsCapabilityOptions): CapabilityTeardown {
   const { checker, fs } = options;
 
   vm.exposeFunction("__cap_fs_readText", (requestedPath: unknown) => {
@@ -66,10 +74,5 @@ export function installFsCapability(vm: Vm, options: FsCapabilityOptions): void 
   });
 
   vm.registerModule(FS_MODULE_NAME, FS_MODULE_SOURCE);
-}
-
-/** Remove everything `installFsCapability` added. */
-export function uninstallFsCapability(vm: Vm): void {
-  vm.removeModule(FS_MODULE_NAME);
-  for (const name of FS_GLOBALS) vm.removeGlobal(name);
+  return () => unbindCapabilityModule(vm, FS_MODULE_NAME, FS_GLOBALS);
 }

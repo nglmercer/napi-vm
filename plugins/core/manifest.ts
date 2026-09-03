@@ -5,19 +5,27 @@
  * intersected with the host policy later (see `permissions.ts`).
  */
 
+import { CAPABILITY_NAME_PATTERN } from "../capabilities/capability-registry";
 import { PluginManifestError } from "./errors";
-import { compileFetchPermission } from "./fetch-capability";
+import { compileFetchPermission } from "../capabilities/fetch-capability";
 import {
   escapesRoot,
   isAbsoluteGuestPath,
   normalizeSegments,
   toPosix,
-} from "./path-rules";
+} from "../fs/path-rules";
 
 /** The only manifest API version this host understands. */
 export const SUPPORTED_API_VERSION = 1;
 
 export type FsPermission = boolean | "*" | string | string[];
+
+/**
+ * One dynamic capability request: `true` for defaults, or an options object
+ * the capability's installer validates. Names resolve against the host's
+ * capability registry at load time — an unknown name fails the load.
+ */
+export type CapabilityRequest = boolean | Record<string, unknown>;
 
 export interface PluginManifest {
   name: string;
@@ -32,6 +40,11 @@ export interface PluginManifest {
     path?: boolean;
     crypto?: boolean;
     timers?: boolean;
+    /**
+     * Dynamic capabilities: `{ "<name>": true }` or `{ "<name>": {...} }`.
+     * Request ∩ host grant = installed. Unknown names fail the load.
+     */
+    capabilities?: Record<string, CapabilityRequest>;
     /**
      * Origins the plugin asks to reach. `true`/`"*"` requests any, which the
      * host policy must still permit.
@@ -144,6 +157,42 @@ export function validateManifest(raw: unknown): PluginManifest {
         }
         manifest.permissions[flag] = perms[flag] as boolean;
       }
+    }
+
+    if (perms.capabilities !== undefined) {
+      // Shape only: whether a name exists is decided at load time against
+      // the host registry, so a typo fails the load instead of the parse.
+      if (
+        typeof perms.capabilities !== "object" ||
+        perms.capabilities === null ||
+        Array.isArray(perms.capabilities)
+      ) {
+        throw new PluginManifestError("permissions.capabilities must be an object");
+      }
+      const requested = perms.capabilities as Record<string, unknown>;
+      const compiled: Record<string, CapabilityRequest> = {};
+      for (const [name, value] of Object.entries(requested)) {
+        if (!CAPABILITY_NAME_PATTERN.test(name)) {
+          throw new PluginManifestError(
+            `permissions.capabilities has an invalid capability name "${name}"`,
+          );
+        }
+        if (typeof value === "boolean") {
+          compiled[name] = value;
+        } else if (
+          typeof value === "object" &&
+          value !== null &&
+          !Array.isArray(value) &&
+          Object.getPrototypeOf(value) === Object.prototype
+        ) {
+          compiled[name] = value as Record<string, unknown>;
+        } else {
+          throw new PluginManifestError(
+            `permissions.capabilities["${name}"] must be a boolean or an options object`,
+          );
+        }
+      }
+      manifest.permissions.capabilities = compiled;
     }
 
     if (perms.fetch !== undefined) {

@@ -14,7 +14,7 @@
  * Everything else is literal.
  */
 
-import { PluginManifestError } from "./errors";
+import { PluginManifestError } from "../core/errors";
 
 export type PathRuleKind = "all" | "relative" | "absolute";
 

@@ -17,33 +17,28 @@
  * host.reload("example-plugin");
  * host.unload("example-plugin");
  * ```
+ *
+ * Layout: `core/` (host engine), `capabilities/` (guest modules),
+ * `native/` (npm/`.node` bridging), `fs/` (filesystem + path support).
  */
+
+// ── core: host engine ──────────────────────────────────────────────
 
 export {
   PermissionDeniedError,
   PluginLoadError,
   PluginManifestError,
   ResourceLimitError,
-} from "./errors";
+} from "./core/errors";
 
 export {
   parseManifest,
   validateManifest,
   SUPPORTED_API_VERSION,
+  type CapabilityRequest,
   type FsPermission,
   type PluginManifest,
-} from "./manifest";
-
-export {
-  compilePattern,
-  escapesRoot,
-  matchRule,
-  normalizeSegments,
-  toPosix,
-  isAbsoluteGuestPath,
-  type PathRule,
-  type PathRuleKind,
-} from "./path-rules";
+} from "./core/manifest";
 
 export {
   compileFsPermission,
@@ -51,64 +46,13 @@ export {
   compilePolicy,
   defaultPolicy,
   FsPermissionChecker,
+  type CapabilityGrant,
   type CompiledFsPermissions,
   type CompiledPermissions,
   type FsAccessMode,
   type PluginHostPolicy,
   type ResolvedPath,
-} from "./permissions";
-
-export {
-  createNodeFileSystem,
-  DEFAULT_MAX_FILE_BYTES,
-  type HostFileSystem,
-  type NodeFileSystemOptions,
-} from "./host-filesystem";
-
-export {
-  installFsCapability,
-  uninstallFsCapability,
-  FS_GLOBALS,
-  FS_MODULE_NAME,
-} from "./filesystem-capability";
-
-export {
-  installPathCapability,
-  uninstallPathCapability,
-  PATH_GLOBALS,
-  PATH_MODULE_NAME,
-} from "./path-capability";
-
-export {
-  installCryptoCapability,
-  uninstallCryptoCapability,
-  CRYPTO_GLOBALS,
-  CRYPTO_MODULE_NAME,
-  MAX_RANDOM_BYTES,
-} from "./crypto-capability";
-
-export {
-  installTimersCapability,
-  uninstallTimersCapability,
-  TIMERS_GLOBALS,
-  TIMERS_MODULE_NAME,
-  type TimersCapabilityOptions,
-} from "./timers-capability";
-
-export {
-  checkFetchOrigin,
-  compileFetchPermission,
-  installFetchCapability,
-  uninstallFetchCapability,
-  DEFAULT_MAX_RESPONSE_BYTES,
-  FETCH_GLOBALS,
-  FETCH_MODULE_NAME,
-  type CompiledFetchPermissions,
-  type FetchCapabilityOptions,
-  type FetchPermission,
-  type FetchPolicy,
-  type FetchTransport,
-} from "./fetch-capability";
+} from "./core/permissions";
 
 export {
   bootstrapSource,
@@ -121,11 +65,122 @@ export {
   type PluginShape,
   type UnloadContext,
   type UnloadReason,
-} from "./lifecycle";
+} from "./core/lifecycle";
 
 export {
   PluginHost,
   MANIFEST_FILENAME,
   type LoadedPlugin,
   type PluginHostOptions,
-} from "./plugin-host";
+} from "./core/plugin-host";
+
+// ── fs: filesystem + path support ──────────────────────────────────
+
+export {
+  createNodeFileSystem,
+  DEFAULT_MAX_FILE_BYTES,
+  type HostFileSystem,
+  type NodeFileSystemOptions,
+} from "./fs/host-filesystem";
+
+export {
+  compilePattern,
+  escapesRoot,
+  matchRule,
+  normalizeSegments,
+  toPosix,
+  isAbsoluteGuestPath,
+  type PathRule,
+  type PathRuleKind,
+} from "./fs/path-rules";
+
+// ── capabilities: guest modules ────────────────────────────────────
+
+export {
+  applyCapabilityOptions,
+  defineCapability,
+  getCapability,
+  hasCapability,
+  listCapabilities,
+  unbindCapabilityModule,
+  unregisterCapability,
+  CAPABILITY_NAME_PATTERN,
+  type CapabilityContext,
+  type CapabilityDefinition,
+  type CapabilityFieldSchema,
+  type CapabilityOptionsSchema,
+  type CapabilityTeardown,
+} from "./capabilities/capability-registry";
+
+export {
+  installFsCapability,
+  FS_MODULE_NAME,
+  type FsCapabilityOptions,
+} from "./capabilities/filesystem-capability";
+
+export {
+  installPathCapability,
+  PATH_MODULE_NAME,
+} from "./capabilities/path-capability";
+
+export {
+  CRYPTO_CAPABILITY,
+  CRYPTO_MODULE_NAME,
+  MAX_RANDOM_BYTES,
+} from "./capabilities/crypto-capability";
+
+export {
+  TIMERS_CAPABILITY,
+  TIMERS_MODULE_NAME,
+  type TimersCapabilityOptions,
+} from "./capabilities/timers-capability";
+
+export {
+  checkFetchOrigin,
+  compileFetchPermission,
+  FETCH_CAPABILITY,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  FETCH_MODULE_NAME,
+  type CompiledFetchPermissions,
+  type FetchPermission,
+  type FetchPolicy,
+  type FetchTransport,
+} from "./capabilities/fetch-capability";
+
+export {
+  AUDIO_CAPABILITY,
+  AUDIO_DEFINITION,
+  AUDIO_MODULE_NAME,
+  DEFAULT_MAX_AUDIO_BYTES,
+  type AudioPlayerLike,
+  type AudioPolicyOptions,
+} from "./capabilities/audio-capability";
+
+// ── native: npm / `.node` bridging (host-side, operator-gated) ─────
+
+export {
+  installNativeModule,
+  uninstallNativeModule,
+  type InstalledNativeModule,
+  type NativeMethodPolicy,
+  type NativeModuleDefinition,
+  type NativeModuleHost,
+} from "./native/native-loader";
+
+export {
+  assertTrustedSpec,
+  ensureModulesDir,
+  extractTarball,
+  installTrustedPackage,
+  nativePackageCapability,
+  packageTarballUrl,
+  verifyIntegrity,
+  DEFAULT_MODULES_DIR,
+  DEFAULT_REGISTRY,
+  MAX_TARBALL_BYTES,
+  MAX_TARBALL_FILES,
+  type LoadedTrustedPackage,
+  type NativePackageCapabilityOptions,
+  type TrustedModulesPolicy,
+  type TrustedPackageSpec,
+} from "./native/trusted-modules";

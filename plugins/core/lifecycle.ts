@@ -6,7 +6,7 @@
  * wrapper functions the host can reach with `vm.callFunction`.
  */
 
-import type { Vm } from "../index";
+import type { Vm } from "../../index";
 
 export const PLUGIN_MODULE_PREFIX = "plugin:";
 

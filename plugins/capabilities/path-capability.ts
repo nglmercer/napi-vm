@@ -11,9 +11,13 @@
 
 import * as nodePath from "node:path";
 
-import type { Vm } from "../index";
+import type { Vm } from "../../index";
+import {
+  unbindCapabilityModule,
+  type CapabilityTeardown,
+} from "./capability-registry";
 
-export const PATH_GLOBALS = [
+const PATH_GLOBALS = [
   "__cap_path_join",
   "__cap_path_normalize",
   "__cap_path_dirname",
@@ -47,8 +51,8 @@ export function extname(path) {
 
 const posix = nodePath.posix;
 
-/** Expose the POSIX path helpers and register `napi:path`. */
-export function installPathCapability(vm: Vm): void {
+/** Expose the POSIX path helpers and register `napi:path`; returns its teardown. */
+export function installPathCapability(vm: Vm): CapabilityTeardown {
   vm.exposeFunction("__cap_path_join", (...parts: unknown[]) =>
     posix.join(...parts.map((part) => String(part))),
   );
@@ -62,10 +66,5 @@ export function installPathCapability(vm: Vm): void {
   vm.exposeFunction("__cap_path_extname", (path: unknown) => posix.extname(String(path)));
 
   vm.registerModule(PATH_MODULE_NAME, PATH_MODULE_SOURCE);
-}
-
-/** Remove everything `installPathCapability` added. */
-export function uninstallPathCapability(vm: Vm): void {
-  vm.removeModule(PATH_MODULE_NAME);
-  for (const name of PATH_GLOBALS) vm.removeGlobal(name);
+  return () => unbindCapabilityModule(vm, PATH_MODULE_NAME, PATH_GLOBALS);
 }

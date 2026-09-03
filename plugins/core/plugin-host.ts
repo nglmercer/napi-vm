@@ -8,14 +8,11 @@
 
 import * as nodePath from "node:path";
 
-import { Vm } from "../index";
+import { Vm } from "../../index";
 
 import { PermissionDeniedError, PluginLoadError } from "./errors";
-import {
-  installFsCapability,
-  uninstallFsCapability,
-} from "./filesystem-capability";
-import { createNodeFileSystem, type HostFileSystem } from "./host-filesystem";
+import { installFsCapability } from "../capabilities/filesystem-capability";
+import { createNodeFileSystem, type HostFileSystem } from "../fs/host-filesystem";
 import {
   bootstrapSource,
   describePlugin,
@@ -33,22 +30,19 @@ import {
   type CompiledPermissions,
   type PluginHostPolicy,
 } from "./permissions";
+import { installPathCapability } from "../capabilities/path-capability";
+import { CRYPTO_CAPABILITY } from "../capabilities/crypto-capability";
+import { TIMERS_CAPABILITY } from "../capabilities/timers-capability";
+import { AUDIO_CAPABILITY } from "../capabilities/audio-capability";
 import {
-  installPathCapability,
-  uninstallPathCapability,
-} from "./path-capability";
-import {
-  installCryptoCapability,
-  uninstallCryptoCapability,
-} from "./crypto-capability";
-import {
-  installTimersCapability,
-  uninstallTimersCapability,
-} from "./timers-capability";
-import {
-  installFetchCapability,
-  uninstallFetchCapability,
-} from "./fetch-capability";
+  applyCapabilityOptions,
+  defineCapability,
+  getCapability,
+  hasCapability,
+  type CapabilityDefinition,
+  type CapabilityTeardown,
+} from "../capabilities/capability-registry";
+import { FETCH_CAPABILITY } from "../capabilities/fetch-capability";
 
 export const MANIFEST_FILENAME = "plugin.json";
 
@@ -58,10 +52,41 @@ export interface LoadedPlugin {
   root: string;
   vm: Vm;
   permissions: CompiledPermissions;
+  /** Dynamic capabilities installed in this VM, for teardown. */
+  capabilities: string[];
   status: "loaded" | "error";
   error?: Error;
   /** Whatever the last `onLoad` / `onReload` returned. */
   loadResult?: unknown;
+}
+
+/**
+ * Built-in registry entries. Operators add more with `defineCapability`;
+ * everything the host installs — built-in or custom — goes through the same
+ * request ∩ grant ∩ kill-switch loop below.
+ */
+let builtinsRegistered = false;
+function ensureBuiltinCapabilities(): void {
+  if (builtinsRegistered) return;
+  builtinsRegistered = true;
+  for (const definition of [
+    CRYPTO_CAPABILITY,
+    TIMERS_CAPABILITY,
+    FETCH_CAPABILITY,
+    AUDIO_CAPABILITY,
+  ]) {
+    if (!hasCapability(definition.name)) defineCapability(definition);
+  }
+}
+
+/** A plain JSON object (not array/class instance): options-shaped. */
+function isOptionsObject(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.getPrototypeOf(value) === Object.prototype
+  );
 }
 
 export interface PluginHostOptions {
@@ -83,11 +108,46 @@ export class PluginHost {
   private readonly compiledPolicy: ReturnType<typeof compilePolicy>;
   private readonly fs: HostFileSystem;
   private readonly plugins = new Map<string, LoadedPlugin>();
+  /** Capabilities disabled at runtime via {@link setCapabilityEnabled}. */
+  private readonly disabled = new Set<string>();
+  /**
+   * Teardowns returned by each install, per plugin. Kept out of
+   * `LoadedPlugin` (public surface) — `dispose` is the only consumer.
+   */
+  private readonly teardowns = new WeakMap<LoadedPlugin, CapabilityTeardown[]>();
 
   constructor(options: PluginHostOptions = {}) {
+    ensureBuiltinCapabilities();
     this.policy = options.policy ?? defaultPolicy();
     this.compiledPolicy = compilePolicy(this.policy);
     this.fs = options.fs ?? createNodeFileSystem();
+  }
+
+  /**
+   * Register a capability (trusted-operator API). The definition is what a
+   * verified download plus {@link installNativeModule} produces. Throws when
+   * the name is taken or malformed.
+   */
+  defineCapability(definition: CapabilityDefinition): void {
+    defineCapability(definition);
+  }
+
+  /**
+   * Enable or disable a registered capability at runtime. Disabled names are
+   * skipped on the next load/reload; already-loaded VMs are untouched (use
+   * `reload` to apply). Throws for unknown names.
+   */
+  setCapabilityEnabled(name: string, enabled: boolean): void {
+    if (!hasCapability(name)) {
+      throw new PluginLoadError(`unknown capability "${name}"`);
+    }
+    if (enabled) this.disabled.delete(name);
+    else this.disabled.add(name);
+  }
+
+  /** Runtime state from {@link setCapabilityEnabled}; granted names start enabled. */
+  isCapabilityEnabled(name: string): boolean {
+    return hasCapability(name) && !this.disabled.has(name);
   }
 
   /** Load a plugin directory and run `onLoad`. */
@@ -239,29 +299,20 @@ export class PluginHost {
       root,
       vm,
       permissions,
+      capabilities: [],
       status: "loaded",
     };
 
     try {
-      installFsCapability(vm, { checker, fs: this.fs });
-      if (permissions.path) installPathCapability(vm);
-      // Each remaining capability needs *both* the manifest's request and the
-      // host policy: neither side can widen the other.
-      if (permissions.crypto && this.policy.crypto === true) {
-        installCryptoCapability(vm);
-      }
-      if (permissions.timers && this.policy.timers) {
-        installTimersCapability(
-          vm,
-          typeof this.policy.timers === "object" ? this.policy.timers : {},
-        );
-      }
-      if ((permissions.fetch.any || permissions.fetch.origins.length > 0) && this.policy.fetch) {
-        installFetchCapability(vm, {
-          requested: permissions.fetch,
-          policy: this.policy.fetch,
-        });
-      }
+      // Substrate: always present, not requested. `napi:fs` is installed
+      // unconditionally because the checker itself needs no grant to exist —
+      // every call through it is still authorized per path.
+      const teardowns: CapabilityTeardown[] = [
+        installFsCapability(vm, { checker, fs: this.fs }),
+      ];
+      if (permissions.path) teardowns.push(installPathCapability(vm));
+      this.teardowns.set(plugin, teardowns);
+      this.installDynamicCapabilities(plugin, checker);
 
       const moduleName = pluginModuleName(manifest.name);
       vm.registerModule(moduleName, entrySource);
@@ -321,16 +372,83 @@ export class PluginHost {
     }
   }
 
+  /**
+   * The policy grant for a capability: the dynamic map first, then the
+   * legacy per-capability policy fields. Absent/`false` means denied.
+   */
+  private grantFor(name: string): unknown {
+    const dynamic = this.policy.capabilities?.[name];
+    if (dynamic !== undefined) return dynamic;
+    switch (name) {
+      case "crypto":
+        return this.policy.crypto === true ? true : undefined;
+      case "timers":
+        return this.policy.timers;
+      case "fetch":
+        return this.policy.fetch;
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Install every requested capability through one loop: the dynamic
+   * `capabilities` map plus the legacy boolean flags (`crypto`, `timers`,
+   * `fetch`), which behave as aliases. Every requested name must exist
+   * (unknown fails the load); then request ∩ grant ∩ kill-switch decides.
+   * Sorted for a deterministic install order. Each install returns its own
+   * teardown — there is no per-capability uninstall function.
+   */
+  private installDynamicCapabilities(plugin: LoadedPlugin, checker: FsPermissionChecker): void {
+    const { manifest, vm, permissions } = plugin;
+    const requested: Record<string, unknown> = { ...(manifest.permissions?.capabilities ?? {}) };
+    if (manifest.permissions?.crypto === true) requested.crypto ??= true;
+    if (manifest.permissions?.timers === true) requested.timers ??= true;
+    // Mirror the historic gate: an empty origins list installs nothing.
+    if (permissions.fetch.any || permissions.fetch.origins.length > 0) {
+      requested.fetch ??= manifest.permissions?.fetch;
+    }
+    const teardowns = this.teardowns.get(plugin) ?? [];
+    for (const name of Object.keys(requested).sort()) {
+      const options = requested[name];
+      if (options === false) continue;
+      const definition = getCapability(name);
+      if (!definition) {
+        throw new PluginLoadError(
+          `plugin "${manifest.name}" requests unknown capability "${name}"`,
+        );
+      }
+      const grant = this.grantFor(name);
+      if (grant === undefined || grant === false || this.disabled.has(name)) continue;
+      if (definition.schema === undefined && isOptionsObject(options) && Object.keys(options).length > 0) {
+        throw new PluginLoadError(`capability "${name}" takes no options`);
+      }
+      const effective =
+        definition.schema !== undefined
+          ? applyCapabilityOptions(name, definition.schema, options)
+          : options;
+      teardowns.push(
+        definition.install({ vm, manifest, permissions, checker, options: effective, grant }),
+      );
+      plugin.capabilities.push(name);
+    }
+  }
+
   /** Detach every host capability and drop the module graph. */
   private dispose(plugin: LoadedPlugin): void {
     const { vm } = plugin;
     try {
       uninstallLifecycle(vm, pluginModuleName(plugin.manifest.name));
-      uninstallFetchCapability(vm);
-      uninstallTimersCapability(vm);
-      uninstallCryptoCapability(vm);
-      uninstallPathCapability(vm);
-      uninstallFsCapability(vm);
+      const teardowns = this.teardowns.get(plugin) ?? [];
+      this.teardowns.delete(plugin);
+      // Reverse install order: dynamic capabilities first, substrate last.
+      for (const teardown of teardowns.reverse()) {
+        try {
+          teardown();
+        } catch {
+          // One capability's teardown must not block the rest.
+        }
+      }
     } catch {
       // A half-built VM is being thrown away anyway.
     }

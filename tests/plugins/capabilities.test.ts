@@ -4,26 +4,49 @@ import { Vm } from "../../index.js";
 import {
   checkFetchOrigin,
   compileFetchPermission,
-  installCryptoCapability,
-  installFetchCapability,
-  installTimersCapability,
-  uninstallCryptoCapability,
-  uninstallFetchCapability,
-  uninstallTimersCapability,
+  compilePermissions,
+  CRYPTO_CAPABILITY,
+  FETCH_CAPABILITY,
+  TIMERS_CAPABILITY,
   validateManifest,
+  type CapabilityDefinition,
 } from "../../plugins";
+import { manifestWith } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // The capability modules beyond `napi:fs` and `napi:path`: `napi:crypto`,
-// `napi:timers` and `napi:fetch`. Each is installed only when the manifest
-// asks *and* the host policy permits, and each is removable.
+// `napi:timers` and `napi:fetch`. Each is a registry definition installed
+// through one interface; each install returns its own teardown, so there is
+// no per-capability uninstall function to remember.
 // ---------------------------------------------------------------------------
+
+const DEFS: Record<string, CapabilityDefinition> = {
+  crypto: CRYPTO_CAPABILITY,
+  timers: TIMERS_CAPABILITY,
+  fetch: FETCH_CAPABILITY,
+};
+
+/** Install a built-in definition directly, returning its teardown. */
+function installForTest(
+  name: keyof typeof DEFS,
+  vm: Vm,
+  setup?: { manifestPermissions?: unknown; grant?: unknown },
+): () => void {
+  const manifest = validateManifest(manifestWith(setup?.manifestPermissions ?? {}));
+  return DEFS[name].install({
+    vm,
+    manifest,
+    permissions: compilePermissions(manifest),
+    options: true,
+    grant: setup?.grant ?? true,
+  });
+}
 
 // --- napi:crypto ------------------------------------------------------------
 
 test("crypto provides UUIDs, random bytes and digests", () => {
   const vm = new Vm();
-  installCryptoCapability(vm);
+  installForTest("crypto", vm);
   expect(vm.run("import { randomUUID } from 'napi:crypto'; randomUUID().length;")).toBe("36");
   expect(vm.run("import { randomBytes } from 'napi:crypto'; randomBytes(4).length;")).toBe("4");
   expect(
@@ -33,7 +56,7 @@ test("crypto provides UUIDs, random bytes and digests", () => {
 
 test("getRandomValues fills a typed array", () => {
   const vm = new Vm();
-  installCryptoCapability(vm);
+  installForTest("crypto", vm);
   expect(
     vm.run("import { getRandomValues } from 'napi:crypto'; getRandomValues(new Uint8Array(3)).length;"),
   ).toBe("3");
@@ -41,7 +64,7 @@ test("getRandomValues fills a typed array", () => {
 
 test("a huge randomBytes request is refused", () => {
   const vm = new Vm();
-  installCryptoCapability(vm);
+  installForTest("crypto", vm);
   expect(() => vm.run("import { randomBytes } from 'napi:crypto'; randomBytes(999999);")).toThrow(
     "limited to",
   );
@@ -49,7 +72,7 @@ test("a huge randomBytes request is refused", () => {
 
 test("an unknown digest algorithm is refused", () => {
   const vm = new Vm();
-  installCryptoCapability(vm);
+  installForTest("crypto", vm);
   expect(() => vm.run("import { digest } from 'napi:crypto'; digest('rot13', 'x');")).toThrow(
     "unsupported digest algorithm",
   );
@@ -58,9 +81,9 @@ test("an unknown digest algorithm is refused", () => {
 test("crypto is absent until installed, and gone after removal", () => {
   const vm = new Vm();
   expect(() => vm.run("import { randomUUID } from 'napi:crypto'; randomUUID();")).toThrow();
-  installCryptoCapability(vm);
+  const teardown = installForTest("crypto", vm);
   expect(vm.run("import { randomUUID } from 'napi:crypto'; typeof randomUUID();")).toBe("string");
-  uninstallCryptoCapability(vm);
+  teardown();
   expect(() => vm.run("import { randomUUID } from 'napi:crypto'; randomUUID();")).toThrow();
 });
 
@@ -68,22 +91,22 @@ test("crypto is absent until installed, and gone after removal", () => {
 
 test("timers exposes the host clock", () => {
   const vm = new Vm();
-  installTimersCapability(vm);
+  installForTest("timers", vm);
   expect(vm.run("import { now } from 'napi:timers'; typeof now();")).toBe("number");
   expect(vm.run("import { now } from 'napi:timers'; now() > 1600000000000;")).toBe("true");
 });
 
 test("a coarsened clock hides precision", () => {
   const vm = new Vm();
-  installTimersCapability(vm, { resolutionMs: 1000 });
+  installForTest("timers", vm, { grant: { resolutionMs: 1000 } });
   // Rounded down to the second, so the remainder is always zero.
   expect(vm.run("import { now } from 'napi:timers'; now() % 1000;")).toBe("0");
 });
 
 test("timers is removable", () => {
   const vm = new Vm();
-  installTimersCapability(vm);
-  uninstallTimersCapability(vm);
+  const teardown = installForTest("timers", vm);
+  teardown();
   expect(() => vm.run("import { now } from 'napi:timers'; now();")).toThrow();
 });
 
@@ -189,58 +212,78 @@ test("a non-boolean crypto flag is rejected", () => {
 type Transport = (url: string, init?: unknown) => Promise<Response>;
 
 /// The capability needs an async host call, which parks the VM thread — so it
-/// runs through `runAsync`, not `run`.
-function fetchVm(requested: unknown, allow: string[], transport: Transport): Vm {
+/// runs through `runAsync`, not `run`. Its only transport is the global
+/// `fetch`, stubbed per test.
+function fetchVm(requested: unknown, allow: string[]): Vm {
   const vm = new Vm();
-  installFetchCapability(vm, {
-    requested: compileFetchPermission(requested),
-    policy: { allow },
-    transport,
+  installForTest("fetch", vm, {
+    manifestPermissions: { fetch: requested },
+    grant: { allow },
   });
   return vm;
 }
 
+/** Run with a stubbed global fetch; always restored. */
+async function withFetchStub(transport: Transport, fn: () => Promise<void>): Promise<void> {
+  const previous = globalThis.fetch;
+  globalThis.fetch = transport as typeof fetch;
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = previous;
+  }
+}
+
 test("a permitted request reaches the transport", async () => {
   const seen: string[] = [];
-  const vm = fetchVm("https://api.example.com", ["https://api.example.com"], async (url) => {
+  await withFetchStub(async (url) => {
     seen.push(String(url));
     return new Response("hello", { status: 200 });
+  }, async () => {
+    const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
+    const result = await vm.runAsync(
+      "import { fetch } from 'napi:fetch'; const r = await fetch('https://api.example.com/x'); r.status + ':' + r.text();",
+    );
+    expect(result).toBe("200:hello");
+    expect(seen).toEqual(["https://api.example.com/x"]);
+    vm.dispose();
   });
-  const result = await vm.runAsync(
-    "import { fetch } from 'napi:fetch'; const r = await fetch('https://api.example.com/x'); r.status + ':' + r.text();",
-  );
-  expect(result).toBe("200:hello");
-  expect(seen).toEqual(["https://api.example.com/x"]);
-  vm.dispose();
 });
 
 test("a denied origin never reaches the transport", async () => {
   let called = false;
-  const vm = fetchVm("https://api.example.com", ["https://api.example.com"], async () => {
+  await withFetchStub(async () => {
     called = true;
     return new Response("", { status: 200 });
+  }, async () => {
+    const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
+    const result = await vm.runAsync(
+      "import { fetch } from 'napi:fetch'; try { await fetch('https://evil.example.com/x'); 'allowed'; } catch (e) { 'denied'; }",
+    );
+    expect(result).toBe("denied");
+    expect(called).toBe(false);
+    vm.dispose();
   });
-  const result = await vm.runAsync(
-    "import { fetch } from 'napi:fetch'; try { await fetch('https://evil.example.com/x'); 'allowed'; } catch (e) { 'denied'; }",
-  );
-  expect(result).toBe("denied");
-  expect(called).toBe(false);
-  vm.dispose();
 });
 
 test("json() parses the body", async () => {
-  const vm = fetchVm("https://api.example.com", ["https://api.example.com"], async () =>
-    new Response('{"a":1}', { status: 200 }));
-  expect(
-    await vm.runAsync(
-      "import { fetch } from 'napi:fetch'; const r = await fetch('https://api.example.com/x'); r.json().a;",
-    ),
-  ).toBe("1");
-  vm.dispose();
+  await withFetchStub(async () => new Response('{"a":1}', { status: 200 }), async () => {
+    const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
+    expect(
+      await vm.runAsync(
+        "import { fetch } from 'napi:fetch'; const r = await fetch('https://api.example.com/x'); r.json().a;",
+      ),
+    ).toBe("1");
+    vm.dispose();
+  });
 });
 
-test("fetch is removable", () => {
-  const vm = fetchVm("*", ["*"], async () => new Response(""));
-  uninstallFetchCapability(vm);
+test("fetch is removable through its teardown", () => {
+  const vm = new Vm();
+  const teardown = installForTest("fetch", vm, {
+    manifestPermissions: { fetch: "*" },
+    grant: { allow: ["*"] },
+  });
+  teardown();
   expect(() => vm.run("import { fetch } from 'napi:fetch'; fetch;")).toThrow();
 });

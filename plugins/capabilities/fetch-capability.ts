@@ -8,10 +8,15 @@
  * only to origins that pass the same check.
  */
 
-import { PermissionDeniedError, PluginManifestError } from "./errors";
-import type { Vm } from "../index";
+import { PermissionDeniedError, PluginManifestError } from "../core/errors";
+import type { Vm } from "../../index";
 
-export const FETCH_GLOBALS = ["__cap_fetch"] as const;
+import {
+  unbindCapabilityModule,
+  type CapabilityDefinition,
+} from "./capability-registry";
+
+const FETCH_GLOBALS = ["__cap_fetch"] as const;
 
 export const FETCH_MODULE_NAME = "napi:fetch";
 
@@ -122,21 +127,29 @@ export type FetchTransport = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-export interface FetchCapabilityOptions {
-  requested: CompiledFetchPermissions;
-  policy: FetchPolicy;
-  /**
-   * The HTTP client to use. Injectable so a host can supply its own — a proxy,
-   * a recorded transport, a stub in tests — without the capability having to
-   * know. Defaults to the global `fetch`.
-   */
-  transport?: FetchTransport;
-}
+/**
+ * Registry entry. Requested origins arrive compiled in `permissions.fetch`
+ * (malformed origins already failed the load); the host *grant* carries the
+ * policy. The transport is always the global `fetch` — tests stub it —
+ * because letting either side inject an HTTP client would move the trust
+ * boundary into an invisible parameter.
+ */
+export const FETCH_CAPABILITY: CapabilityDefinition = {
+  name: "fetch",
+  install: ({ vm, permissions, grant }) => {
+    const policy = (grant !== null && typeof grant === "object" ? grant : {}) as FetchPolicy;
+    installFetch(vm, permissions.fetch, policy);
+    return () => unbindCapabilityModule(vm, FETCH_MODULE_NAME, FETCH_GLOBALS);
+  },
+};
 
-/** Expose the checked HTTP client and register `napi:fetch`. */
-export function installFetchCapability(vm: Vm, options: FetchCapabilityOptions): void {
-  const { requested, policy } = options;
-  const transport = options.transport ?? globalThis.fetch;
+/** Implementation shared by the definition above; unexported on purpose. */
+function installFetch(
+  vm: Vm,
+  requested: CompiledFetchPermissions,
+  policy: FetchPolicy,
+): void {
+  const transport: FetchTransport = globalThis.fetch;
   const maxBytes = policy.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   const maxRedirects = policy.maxRedirects ?? 3;
 
@@ -203,10 +216,4 @@ export function installFetchCapability(vm: Vm, options: FetchCapabilityOptions):
   });
 
   vm.registerModule(FETCH_MODULE_NAME, FETCH_MODULE_SOURCE);
-}
-
-/** Remove everything `installFetchCapability` added. */
-export function uninstallFetchCapability(vm: Vm): void {
-  vm.removeModule(FETCH_MODULE_NAME);
-  for (const name of FETCH_GLOBALS) vm.removeGlobal(name);
 }

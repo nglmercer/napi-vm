@@ -225,16 +225,32 @@ allocated it.
 
 ```text
 plugins/
-  index.ts                  public surface
-  plugin-host.ts            load / reload / unload
-  manifest.ts               plugin.json types and validation
-  permissions.ts            compilation, policy intersection, enforcement
-  path-rules.ts             guest path normalization and glob matching
-  filesystem-capability.ts  napi:fs
-  path-capability.ts        napi:path
-  host-filesystem.ts        the swappable backend
-  lifecycle.ts              guest-side bootstrap and hook wrappers
+  index.ts                  public surface (barrel, organized by layer)
+  core/                     host engine
+    plugin-host.ts          load / reload / unload
+    manifest.ts             plugin.json types and validation
+    permissions.ts          compilation, policy intersection, enforcement
+    lifecycle.ts            guest-side bootstrap and hook wrappers
+    errors.ts               error types
+  capabilities/             guest modules
+    capability-registry.ts  dynamic capability names (no hardcoded enum)
+    filesystem-capability.ts  napi:fs
+    path-capability.ts      napi:path
+    crypto-capability.ts    napi:crypto
+    timers-capability.ts    napi:timers
+    fetch-capability.ts     napi:fetch
+    audio-capability.ts     napi:audio via miniaudio_node (registry entry)
+  native/                   npm/`.node` bridging (host-side, operator-gated)
+    native-loader.ts        loaded code → guest module bridge
+    trusted-modules.ts      pinned download + verify + require
+  fs/                       filesystem + path support
+    host-filesystem.ts      the swappable backend
+    path-rules.ts           guest path normalization and glob matching
 ```
+
+External code imports only the barrel (`../plugins`); internal
+cross-imports are relative (`../core/errors`, `../fs/path-rules`), so files
+can move between layers without touching consumers.
 
 The capability installers use `exposeFunction` + `registerModule` so the host
 runs against any published napi-vm build; `vm.registerHostModule()` (see the
@@ -252,11 +268,98 @@ symlink escapes, policy intersection, lifecycle and reload.
 | `napi:crypto` | Random bytes, UUIDs, digests | `crypto: true` | `crypto: true` |
 | `napi:timers` | The host clock | `timers: true` | `timers: true` or `{ resolutionMs }` |
 | `napi:fetch` | HTTP to named origins | `fetch: [...]` | `fetch: { allow, deny, ... }` |
+| `napi:audio` | Native playback (`miniaudio_node`) | `capabilities: { audio: true }` | `capabilities: { audio: true }` |
 
 Every one of them is installed only when the manifest asks *and* the host
 policy permits. Neither side can widen the other, and the default policy
 grants none of them: a host that wants the network, the clock or a
 cryptographic source says so.
+
+## Dynamic capabilities
+
+Beyond the built-ins, a plugin requests `capabilities: { "<name>": true }`
+(or `{ "<name>": { ...options } }`). Names resolve against a host-side
+registry — there is no manifest enum to extend:
+
+```json
+{ "permissions": { "capabilities": { "audio": true } } }
+```
+
+```ts
+const host = new PluginHost({
+  policy: { fs: { absoluteRead: false, absoluteWrite: false },
+            capabilities: { audio: true } },
+});
+host.defineCapability(myCapability);   // trusted-operator API
+host.setCapabilityEnabled("audio", false); // runtime kill-switch
+```
+
+Request ∩ policy ∩ runtime switch = installed. Unknown names fail the load
+(a typo never becomes a silent grant); requested-but-ungranted names stay
+absent. `napi:audio` is the first registry entry — playback through
+`miniaudio_node`, with every `loadFile` path resolved through the plugin's
+own `fs.read` permission first.
+
+### Authoring a capability (subplugin shape)
+
+Every capability — built-in or custom — is one `CapabilityDefinition`:
+a `name`, an option `schema` with defaults, and an `install` that returns
+its own teardown. There is no per-capability uninstall function; the host
+runs the returned teardowns in reverse install order on unload, reload and
+failed hooks:
+
+```ts
+import { defineCapability, unbindCapabilityModule } from "napi-vm/plugins";
+
+defineCapability({
+  name: "greet",
+  schema: { voice: { type: "string", default: "alto", enum: ["alto", "bass"] } },
+  install: ({ vm, options }) => {
+    // Already schema-validated with defaults by the host; the cast only
+    // recovers the static type.
+    const { voice } = options as { voice: string };
+    const globals = vm.registerHostModule("napi:greet", {
+      hello: (name) => `${voice}: hi ${name}`,
+    });
+    return () => unbindCapabilityModule(vm, "napi:greet", globals);
+  },
+});
+```
+
+Schema rules: `true` in the manifest means "defaults" (`{}` when no schema
+exists); unknown or mistyped options fail the load; numeric `min`/`max`,
+`integer`, string `enum` and string arrays are enforced. A definition
+without a schema takes no options at all. Policy-side extras (clock
+precision, fetch allowlists, player factories) arrive via the `grant`, never
+the manifest — guest-requested privilege would let the plugin choose its
+own limits.
+
+`napi:fs` and `napi:path` are the exception: they are substrate, not
+registry entries — installed unconditionally (`fs`) or by boolean flag
+(`path`) — because the permission checker itself stands on them.
+
+## Trusted native packages
+
+Downloading and exposing an npm / `.node` package is an operator action,
+never a guest one. The native code is `require`d on the host; the VM only
+ever sees wrapped functions through `registerHostModule`:
+
+```ts
+import { installTrustedPackage, nativePackageCapability } from "napi-vm/plugins";
+
+const loaded = await installTrustedPackage(
+  { dir: ".napi-vm/modules", allow: ["miniaudio_node"] },
+  { package: "miniaudio_node", version: "1.6.3",
+    integrity: "sha512-…" },   // pinned, verified before extraction
+);
+nativePackageCapability({ exposeAs: "audio", loaded, definition: {...} });
+```
+
+Fail-closed rules: exact pinned versions only (no ranges, no `latest`),
+integrity verified with `timingSafeEqual` before anything is written,
+tarball entries that escape their directory refused, and anything outside
+the `allow` list is refused before any network happens. Verified installs
+are cached on disk (`.verified.json`), so repeat loads need no network.
 
 ### `napi:crypto`
 
