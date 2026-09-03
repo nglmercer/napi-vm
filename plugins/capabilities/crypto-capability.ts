@@ -13,10 +13,14 @@ import * as nodeCrypto from "node:crypto";
 
 import { PermissionDeniedError } from "../core/errors";
 
+import { booleanPermissionSchema, definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import {
   unbindCapabilityModule,
   type CapabilityDefinition,
 } from "./capability-registry";
+
+definePermissionSchema("crypto", booleanPermissionSchema());
+definePermissionBinding("crypto", {});
 
 const CRYPTO_GLOBALS = [
   "__cap_crypto_random_bytes",

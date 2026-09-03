@@ -24,7 +24,7 @@ import type { Vm } from "../../index";
 
 import { PluginLoadError } from "../core/errors";
 import { DEFAULT_MAX_FILE_BYTES } from "../fs/host-filesystem";
-import type { FsPermissionChecker } from "../core/permissions";
+import type { FsPermissionChecker } from "../fs/checker";
 
 /** Per-method exposure policy inside a {@link NativeModuleDefinition}. */
 export interface NativeMethodPolicy {

@@ -13,6 +13,7 @@ import { Vm } from "../../index";
 import { PermissionDeniedError, PluginLoadError } from "./errors";
 import { installFsCapability } from "../capabilities/filesystem-capability";
 import { createNodeFileSystem, type HostFileSystem } from "../fs/host-filesystem";
+import { validateEntryPath } from "../fs/path-rules";
 import {
   bootstrapSource,
   describePlugin,
@@ -21,16 +22,26 @@ import {
   type PluginContext,
   type UnloadReason,
 } from "./lifecycle";
-import { parseManifest, type PluginManifest } from "./manifest";
+import {
+  getPermissionBinding,
+  isPermissionGranted,
+  parseManifest,
+  type PluginManifest,
+} from "./manifest";
 import {
   compilePermissions,
-  compilePolicy,
-  defaultPolicy,
-  FsPermissionChecker,
+  type CapabilityGrant,
   type CompiledPermissions,
-  type PluginHostPolicy,
 } from "./permissions";
-import { installPathCapability } from "../capabilities/path-capability";
+import {
+  compileFsPolicy,
+  defaultFsPolicy,
+  FsPermissionChecker,
+  type CompiledFsPermissions,
+  type CompiledFsPolicy,
+  type FsPolicyOptions,
+} from "../fs/checker";
+import { PATH_CAPABILITY } from "../capabilities/path-capability";
 import { CRYPTO_CAPABILITY } from "../capabilities/crypto-capability";
 import { TIMERS_CAPABILITY } from "../capabilities/timers-capability";
 import { AUDIO_CAPABILITY } from "../capabilities/audio-capability";
@@ -70,6 +81,7 @@ function ensureBuiltinCapabilities(): void {
   if (builtinsRegistered) return;
   builtinsRegistered = true;
   for (const definition of [
+    PATH_CAPABILITY,
     CRYPTO_CAPABILITY,
     TIMERS_CAPABILITY,
     FETCH_CAPABILITY,
@@ -89,6 +101,30 @@ function isOptionsObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
+export interface PluginHostPolicy {
+  /**
+   * Substrate filesystem policy (absolute-path escape hatches). Everything
+   * else is granted per capability name below — there are no per-capability
+   * top-level fields.
+   */
+  fs?: FsPolicyOptions;
+  /**
+   * Per-capability grants keyed by CAPABILITY name (post-resolve):
+   * `{ "<name>": true }` or `{ "<name>": {...} }`. Absent, null or `false`
+   * means denied. Unknown names are inert until defined.
+   */
+  capabilities?: Record<string, CapabilityGrant>;
+}
+
+/** The conservative default: plugins are confined to their own directory. */
+export function defaultPolicy(): PluginHostPolicy {
+  // Everything a plugin could reach outside itself is off by default.
+  return {
+    fs: defaultFsPolicy(),
+    capabilities: {},
+  };
+}
+
 export interface PluginHostOptions {
   policy?: PluginHostPolicy;
   /** Swap in a Bun/Deno/Rust-backed filesystem. Defaults to `node:fs`. */
@@ -105,7 +141,7 @@ interface PreparedPlugin {
 
 export class PluginHost {
   private readonly policy: PluginHostPolicy;
-  private readonly compiledPolicy: ReturnType<typeof compilePolicy>;
+  private readonly compiledPolicy: CompiledFsPolicy;
   private readonly fs: HostFileSystem;
   private readonly plugins = new Map<string, LoadedPlugin>();
   /** Capabilities disabled at runtime via {@link setCapabilityEnabled}. */
@@ -119,7 +155,7 @@ export class PluginHost {
   constructor(options: PluginHostOptions = {}) {
     ensureBuiltinCapabilities();
     this.policy = options.policy ?? defaultPolicy();
-    this.compiledPolicy = compilePolicy(this.policy);
+    this.compiledPolicy = compileFsPolicy(this.policy.fs);
     this.fs = options.fs ?? createNodeFileSystem();
   }
 
@@ -262,6 +298,9 @@ export class PluginHost {
       throw new PluginLoadError(`missing ${MANIFEST_FILENAME} in ${pluginDirectory}`);
     }
     const manifest = parseManifest(this.fs.readText(manifestPath));
+    // Entry containment is enforced textually here and canonically below
+    // (`realpath`); the manifest itself carries the raw string.
+    manifest.entry = validateEntryPath(manifest.entry);
     const permissions = compilePermissions(manifest);
 
     // The entry file is read by the host, not by the plugin, so it is not
@@ -280,12 +319,9 @@ export class PluginHost {
     }
     const entrySource = this.fs.readText(entryReal);
 
-    const checker = new FsPermissionChecker(
-      root,
-      permissions.fs,
-      this.compiledPolicy,
-      this.fs,
-    );
+    // No `fs` request means no rules: default-deny, never undefined.
+    const fsRules = (permissions.fs ?? { read: [], write: [] }) as CompiledFsPermissions;
+    const checker = new FsPermissionChecker(root, fsRules, this.compiledPolicy, this.fs);
 
     return { manifest, root, entrySource, permissions, checker };
   }
@@ -304,13 +340,13 @@ export class PluginHost {
     };
 
     try {
-      // Substrate: always present, not requested. `napi:fs` is installed
-      // unconditionally because the checker itself needs no grant to exist —
-      // every call through it is still authorized per path.
+      // Substrate: `napi:fs` is installed unconditionally because the
+      // checker itself needs no grant to exist — every call through it is
+      // still authorized per path. Everything else, including `napi:path`,
+      // flows through the capability loop below.
       const teardowns: CapabilityTeardown[] = [
         installFsCapability(vm, { checker, fs: this.fs }),
       ];
-      if (permissions.path) teardowns.push(installPathCapability(vm));
       this.teardowns.set(plugin, teardowns);
       this.installDynamicCapabilities(plugin, checker);
 
@@ -373,64 +409,53 @@ export class PluginHost {
   }
 
   /**
-   * The policy grant for a capability: the dynamic map first, then the
-   * legacy per-capability policy fields. Absent/`false` means denied.
-   */
-  private grantFor(name: string): unknown {
-    const dynamic = this.policy.capabilities?.[name];
-    if (dynamic !== undefined) return dynamic;
-    switch (name) {
-      case "crypto":
-        return this.policy.crypto === true ? true : undefined;
-      case "timers":
-        return this.policy.timers;
-      case "fetch":
-        return this.policy.fetch;
-      default:
-        return undefined;
-    }
-  }
-
-  /**
-   * Install every requested capability through one loop: the dynamic
-   * `capabilities` map plus the legacy boolean flags (`crypto`, `timers`,
-   * `fetch`), which behave as aliases. Every requested name must exist
-   * (unknown fails the load); then request ∩ grant ∩ kill-switch decides.
-   * Sorted for a deterministic install order. Each install returns its own
-   * teardown — there is no per-capability uninstall function.
+   * Install every requested permission through one loop — no per-capability
+   * branches. Each manifest key expands through its binding (`resolve`),
+   * each expanded capability resolves against the registry (unknown fails
+   * the load), and the binding's `allows` decides request ∩ grant. The
+   * runtime kill-switch (`setCapabilityEnabled`) applies last. Sorted for a
+   * deterministic install order. Each install returns its own teardown.
    */
   private installDynamicCapabilities(plugin: LoadedPlugin, checker: FsPermissionChecker): void {
     const { manifest, vm, permissions } = plugin;
-    const requested: Record<string, unknown> = { ...(manifest.permissions?.capabilities ?? {}) };
-    if (manifest.permissions?.crypto === true) requested.crypto ??= true;
-    if (manifest.permissions?.timers === true) requested.timers ??= true;
-    // Mirror the historic gate: an empty origins list installs nothing.
-    if (permissions.fetch.any || permissions.fetch.origins.length > 0) {
-      requested.fetch ??= manifest.permissions?.fetch;
-    }
+    const requested = (manifest.permissions ?? {}) as Record<string, unknown>;
     const teardowns = this.teardowns.get(plugin) ?? [];
     for (const name of Object.keys(requested).sort()) {
       const options = requested[name];
       if (options === false) continue;
-      const definition = getCapability(name);
-      if (!definition) {
+      const binding = getPermissionBinding(name);
+      if (!binding) {
         throw new PluginLoadError(
-          `plugin "${manifest.name}" requests unknown capability "${name}"`,
+          `plugin "${manifest.name}" has no permission binding for "${name}"`,
         );
       }
-      const grant = this.grantFor(name);
-      if (grant === undefined || grant === false || this.disabled.has(name)) continue;
-      if (definition.schema === undefined && isOptionsObject(options) && Object.keys(options).length > 0) {
-        throw new PluginLoadError(`capability "${name}" takes no options`);
+      const resolved = binding.resolve ? binding.resolve(options) : [{ capability: name, options }];
+      for (const { capability, options: capOptions } of resolved) {
+        if (capOptions === false) continue;
+        const definition = getCapability(capability);
+        if (!definition) {
+          throw new PluginLoadError(
+            `plugin "${manifest.name}" requests unknown capability "${capability}"`,
+          );
+        }
+        if (this.disabled.has(capability)) continue;
+        const grant = this.policy.capabilities?.[capability];
+        const allows = binding.allows
+          ? binding.allows(capOptions, grant)
+          : isPermissionGranted(grant);
+        if (!allows) continue;
+        if (definition.schema === undefined && isOptionsObject(capOptions) && Object.keys(capOptions).length > 0) {
+          throw new PluginLoadError(`capability "${capability}" takes no options`);
+        }
+        const effective =
+          definition.schema !== undefined
+            ? applyCapabilityOptions(capability, definition.schema, capOptions)
+            : capOptions;
+        teardowns.push(
+          definition.install({ vm, manifest, permissions, checker, options: effective, grant }),
+        );
+        plugin.capabilities.push(capability);
       }
-      const effective =
-        definition.schema !== undefined
-          ? applyCapabilityOptions(name, definition.schema, options)
-          : options;
-      teardowns.push(
-        definition.install({ vm, manifest, permissions, checker, options: effective, grant }),
-      );
-      plugin.capabilities.push(name);
     }
   }
 

@@ -47,6 +47,13 @@ entry (which must stay inside the plugin directory) and every permission
 pattern. Malformed patterns fail at load time, not on the first filesystem
 call.
 
+Each `permissions` key is validated by a schema registered for it
+(`definePermissionSchema`) — the manifest module itself names no key, so new
+capabilities add keys without touching it. An unknown key fails the load:
+a typo'd permission is never silently ignored. The entry string is checked
+for shape at parse time and normalized plus containment-checked by the host
+(`validateEntryPath`, then `realpath`).
+
 | Value | Meaning |
 |-------|---------|
 | missing / `false` | denied |

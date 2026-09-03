@@ -32,26 +32,30 @@ export {
 } from "./core/errors";
 
 export {
+  booleanPermissionSchema,
+  definePermissionBinding,
+  definePermissionSchema,
+  getPermissionBinding,
+  hasPermissionBinding,
+  hasPermissionSchema,
+  isPermissionGranted,
+  listPermissionBindings,
+  listPermissionSchemas,
   parseManifest,
+  unregisterPermissionBinding,
+  unregisterPermissionSchema,
   validateManifest,
   SUPPORTED_API_VERSION,
-  type CapabilityRequest,
-  type FsPermission,
+  type PermissionBinding,
+  type PermissionResolved,
+  type PermissionSchema,
   type PluginManifest,
 } from "./core/manifest";
 
 export {
-  compileFsPermission,
   compilePermissions,
-  compilePolicy,
-  defaultPolicy,
-  FsPermissionChecker,
   type CapabilityGrant,
-  type CompiledFsPermissions,
   type CompiledPermissions,
-  type FsAccessMode,
-  type PluginHostPolicy,
-  type ResolvedPath,
 } from "./core/permissions";
 
 export {
@@ -69,12 +73,25 @@ export {
 
 export {
   PluginHost,
+  defaultPolicy,
   MANIFEST_FILENAME,
   type LoadedPlugin,
   type PluginHostOptions,
+  type PluginHostPolicy,
 } from "./core/plugin-host";
 
-// ── fs: filesystem + path support ──────────────────────────────────
+// ── fs: filesystem + path + permission-check support ───────────────
+
+export {
+  compileFsPolicy,
+  defaultFsPolicy,
+  FsPermissionChecker,
+  type CompiledFsPermissions,
+  type CompiledFsPolicy,
+  type FsAccessMode,
+  type FsPolicyOptions,
+  type ResolvedPath,
+} from "./fs/checker";
 
 export {
   createNodeFileSystem,
@@ -90,6 +107,7 @@ export {
   normalizeSegments,
   toPosix,
   isAbsoluteGuestPath,
+  validateEntryPath,
   type PathRule,
   type PathRuleKind,
 } from "./fs/path-rules";
@@ -109,17 +127,21 @@ export {
   type CapabilityDefinition,
   type CapabilityFieldSchema,
   type CapabilityOptionsSchema,
+  type CapabilityRequest,
   type CapabilityTeardown,
 } from "./capabilities/capability-registry";
 
 export {
+  compileFsPermission,
   installFsCapability,
   FS_MODULE_NAME,
   type FsCapabilityOptions,
+  type FsPermission,
 } from "./capabilities/filesystem-capability";
 
 export {
   installPathCapability,
+  PATH_CAPABILITY,
   PATH_MODULE_NAME,
 } from "./capabilities/path-capability";
 

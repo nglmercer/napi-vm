@@ -26,9 +26,66 @@
 
 import type { Vm } from "../../index";
 
-import { PluginLoadError } from "../core/errors";
-import type { CompiledPermissions, FsPermissionChecker } from "../core/permissions";
+import { PluginLoadError, PluginManifestError } from "../core/errors";
+import { definePermissionBinding, definePermissionSchema } from "../core/manifest";
+import type { CompiledPermissions } from "../core/permissions";
+import type { FsPermissionChecker } from "../fs/checker";
 import type { PluginManifest } from "../core/manifest";
+
+/**
+ * One dynamic capability request: `true` for defaults, or an options object
+ * the capability's installer validates. Names resolve against the host's
+ * capability registry at load time — an unknown name fails the load.
+ */
+export type CapabilityRequest = boolean | Record<string, unknown>;
+
+definePermissionBinding("capabilities", {
+  // One map entry becomes one capability install; unknown names fail the
+  // load at registry lookup, exactly like a directly requested name.
+  resolve: (request) =>
+    Object.entries(request as Record<string, unknown>).map(([capability, options]) => ({
+      capability,
+      options,
+    })),
+});
+
+definePermissionSchema("capabilities", {
+  // Shape only: whether a name exists is decided at load time against
+  // the host registry, so a typo fails the load instead of the parse.
+  validate(value, field) {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value)
+    ) {
+      throw new PluginManifestError(`${field} must be an object`);
+    }
+    const requested = value as Record<string, unknown>;
+    const compiled: Record<string, CapabilityRequest> = {};
+    for (const [name, entry] of Object.entries(requested)) {
+      if (!CAPABILITY_NAME_PATTERN.test(name)) {
+        throw new PluginManifestError(
+          `${field} has an invalid capability name "${name}"`,
+        );
+      }
+      if (typeof entry === "boolean") {
+        compiled[name] = entry;
+      } else if (
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        Object.getPrototypeOf(entry) === Object.prototype
+      ) {
+        compiled[name] = entry as Record<string, unknown>;
+      } else {
+        throw new PluginManifestError(
+          `${field}["${name}"] must be a boolean or an options object`,
+        );
+      }
+    }
+    return compiled;
+  },
+});
 
 /** What an installed capability may use. */
 export interface CapabilityContext {

@@ -14,9 +14,10 @@ import {
   assertTrustedSpec,
   AUDIO_CAPABILITY,
   compilePermissions,
-  compilePolicy,
+  compileFsPolicy,
   createNodeFileSystem,
   defaultPolicy,
+  type CompiledFsPermissions,
   defineCapability,
   ensureModulesDir,
   extractTarball,
@@ -524,8 +525,9 @@ function makeAudioVm(root: string): {
   const permissions = compilePermissions(manifest);
   const checker = new FsPermissionChecker(
     root,
-    permissions.fs,
-    compilePolicy(defaultPolicy()),
+    // Sound cast: the `fs` binding compiled these rules at load.
+    permissions.fs as CompiledFsPermissions,
+    compileFsPolicy(defaultPolicy().fs),
     createNodeFileSystem(),
   );
   const vm = new Vm();
@@ -664,8 +666,9 @@ test("real player decodes a wav through the guest bridge", () => {
     const permissions = compilePermissions(manifest);
     const checker = new FsPermissionChecker(
       root,
-      permissions.fs,
-      compilePolicy(defaultPolicy()),
+      // Sound cast: the `fs` binding compiled these rules at load.
+      permissions.fs as CompiledFsPermissions,
+      compileFsPolicy(defaultPolicy().fs),
       createNodeFileSystem(),
     );
     const vm = new Vm();

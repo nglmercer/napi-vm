@@ -3,54 +3,159 @@
  *
  * A manifest is a *request*, never an authorization: it is validated here and
  * intersected with the host policy later (see `permissions.ts`).
+ *
+ * This module is agnostic to every capability: it names no permission key.
+ * Each key is validated by a `PermissionSchema` registered for it — the
+ * filesystem shape lives with the filesystem capability, the fetch shape
+ * with the fetch capability, and so on. New capabilities add keys without
+ * touching this file, and a key nobody registered fails the load instead of
+ * being silently ignored.
+ *
+ * Schemas register as a side effect of importing their module, so consumers
+ * import the `plugins` barrel (never this file alone).
  */
 
-import { CAPABILITY_NAME_PATTERN } from "../capabilities/capability-registry";
 import { PluginManifestError } from "./errors";
-import { compileFetchPermission } from "../capabilities/fetch-capability";
-import {
-  escapesRoot,
-  isAbsoluteGuestPath,
-  normalizeSegments,
-  toPosix,
-} from "../fs/path-rules";
 
 /** The only manifest API version this host understands. */
 export const SUPPORTED_API_VERSION = 1;
-
-export type FsPermission = boolean | "*" | string | string[];
-
-/**
- * One dynamic capability request: `true` for defaults, or an options object
- * the capability's installer validates. Names resolve against the host's
- * capability registry at load time — an unknown name fails the load.
- */
-export type CapabilityRequest = boolean | Record<string, unknown>;
 
 export interface PluginManifest {
   name: string;
   version: string;
   apiVersion: number;
+  /** Raw entry string; the host normalizes it (`validateEntryPath`). */
   entry: string;
-  permissions?: {
-    fs?: {
-      read?: FsPermission;
-      write?: FsPermission;
-    };
-    path?: boolean;
-    crypto?: boolean;
-    timers?: boolean;
-    /**
-     * Dynamic capabilities: `{ "<name>": true }` or `{ "<name>": {...} }`.
-     * Request ∩ host grant = installed. Unknown names fail the load.
-     */
-    capabilities?: Record<string, CapabilityRequest>;
-    /**
-     * Origins the plugin asks to reach. `true`/`"*"` requests any, which the
-     * host policy must still permit.
-     */
-    fetch?: boolean | string | string[];
+  /**
+   * Per-key validated by the registered `PermissionSchema` for that key.
+   * Values are the schema-normalized forms; consumers read known keys with
+   * a cast (sound because the schema ran at parse time).
+   */
+  permissions?: Record<string, unknown>;
+}
+
+/**
+ * Validates and normalizes one `permissions.<key>` value. Throws
+ * `PluginManifestError` on anything the key does not accept.
+ */
+export interface PermissionSchema {
+  validate(value: unknown, field: string): unknown;
+}
+
+const permissionSchemas = new Map<string, PermissionSchema>();
+
+const PERMISSION_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_-]*$/;
+
+/** Register the validator for one `permissions.<key>`. Throws when taken. */
+export function definePermissionSchema(key: string, schema: PermissionSchema): void {
+  if (!PERMISSION_KEY_PATTERN.test(key)) {
+    throw new Error(`permission key must match ${PERMISSION_KEY_PATTERN}`);
+  }
+  if (typeof schema?.validate !== "function") {
+    throw new Error(`permission "${key}" needs a validate function`);
+  }
+  if (permissionSchemas.has(key)) {
+    throw new Error(`permission "${key}" is already defined`);
+  }
+  permissionSchemas.set(key, schema);
+}
+
+export function hasPermissionSchema(key: string): boolean {
+  return permissionSchemas.has(key);
+}
+
+/** Registered permission keys, sorted. */
+export function listPermissionSchemas(): string[] {
+  return [...permissionSchemas.keys()].sort();
+}
+
+/** Remove a registration (operator teardown, tests). `false` when absent. */
+export function unregisterPermissionSchema(key: string): boolean {
+  return permissionSchemas.delete(key);
+}
+
+/** Shared schema for boolean flags (`path`, `crypto`, `timers`, ...). */
+export function booleanPermissionSchema(): PermissionSchema {
+  return {
+    validate(value, field) {
+      if (typeof value !== "boolean") {
+        throw new PluginManifestError(`${field} must be a boolean`);
+      }
+      return value;
+    },
   };
+}
+
+/** One expanded install: which capability, with which options. */
+export interface PermissionResolved {
+  capability: string;
+  options: unknown;
+}
+
+/**
+ * The policy/install half of a permission key. Schemas validate the manifest
+ * side; bindings decide what installs and with what compiled form:
+ *
+ * - `resolve` expands a manifest request into capability installs. Default:
+ *   `[{ capability: key, options: request }]`. The `capabilities` map
+ *   expands each entry; infrastructure keys like `fs` resolve to `[]`
+ *   (no guest module — their compiled form feeds shared plumbing instead).
+ * - `compileRequest` builds the installer-facing form stored in the compiled
+ *   map. Default: the request as-is.
+ * - `allows` is the request ∩ grant decision. Default: granted unless the
+ *   grant is absent, null, or `false`.
+ */
+export interface PermissionBinding {
+  resolve?(request: unknown): PermissionResolved[];
+  compileRequest?(request: unknown): unknown;
+  allows?(request: unknown, grant: unknown): boolean;
+}
+
+/** Default install gate: denied when the grant is absent, null, or `false`. */
+export function isPermissionGranted(grant: unknown): boolean {
+  return grant !== undefined && grant !== null && grant !== false;
+}
+
+const permissionBindings = new Map<string, PermissionBinding>();
+
+/**
+ * Register the policy/install behavior for one permission key. Throws when
+ * taken. Mirrors `definePermissionSchema(key, schema)` — same key space,
+ * one registry per side.
+ */
+export function definePermissionBinding(key: string, binding: PermissionBinding): void {
+  if (!PERMISSION_KEY_PATTERN.test(key)) {
+    throw new Error(`permission key must match ${PERMISSION_KEY_PATTERN}`);
+  }
+  if (
+    (binding.resolve !== undefined && typeof binding.resolve !== "function") ||
+    (binding.compileRequest !== undefined && typeof binding.compileRequest !== "function") ||
+    (binding.allows !== undefined && typeof binding.allows !== "function")
+  ) {
+    throw new Error(`permission binding "${key}" has an invalid hook`);
+  }
+  if (permissionBindings.has(key)) {
+    throw new Error(`permission binding "${key}" is already defined`);
+  }
+  permissionBindings.set(key, binding);
+}
+
+export function hasPermissionBinding(key: string): boolean {
+  return permissionBindings.has(key);
+}
+
+export function getPermissionBinding(key: string): PermissionBinding | undefined {
+  return permissionBindings.get(key);
+}
+
+/** Registered binding keys, sorted. */
+export function listPermissionBindings(): string[] {
+  return [...permissionBindings.keys()].sort();
+}
+
+/** Remove a registration (operator teardown, tests). `false` when absent. */
+export function unregisterPermissionBinding(key: string): boolean {
+  return permissionBindings.delete(key);
 }
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -60,37 +165,6 @@ function requireString(value: unknown, field: string): string {
     throw new PluginManifestError(`${field} must be a non-empty string`);
   }
   return value;
-}
-
-function validateFsPermission(value: unknown, field: string): FsPermission | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "boolean" || typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      if (typeof entry !== "string") {
-        throw new PluginManifestError(`${field} array entries must be strings`);
-      }
-    }
-    return value as string[];
-  }
-  throw new PluginManifestError(`${field} must be boolean, string, or string[]`);
-}
-
-/**
- * Validate the entry path: it must be a relative POSIX path that stays inside
- * the plugin directory.
- */
-function validateEntry(value: unknown): string {
-  const raw = requireString(value, "entry");
-  const posix = toPosix(raw);
-  if (isAbsoluteGuestPath(posix)) {
-    throw new PluginManifestError("entry must be a path inside the plugin directory");
-  }
-  const normalized = normalizeSegments(posix, false);
-  if (normalized === "" || escapesRoot(normalized)) {
-    throw new PluginManifestError("entry must be a path inside the plugin directory");
-  }
-  return normalized;
 }
 
 /** Validate a parsed `plugin.json` value, returning a normalized manifest. */
@@ -119,7 +193,7 @@ export function validateManifest(raw: unknown): PluginManifest {
     );
   }
 
-  const entry = validateEntry(source.entry);
+  const entry = requireString(source.entry, "entry");
 
   const manifest: PluginManifest = { name, version, apiVersion, entry };
 
@@ -128,79 +202,15 @@ export function validateManifest(raw: unknown): PluginManifest {
     if (typeof permissions !== "object" || permissions === null || Array.isArray(permissions)) {
       throw new PluginManifestError("permissions must be an object");
     }
-    const perms = permissions as Record<string, unknown>;
-    manifest.permissions = {};
-
-    if (perms.fs !== undefined) {
-      if (typeof perms.fs !== "object" || perms.fs === null || Array.isArray(perms.fs)) {
-        throw new PluginManifestError("permissions.fs must be an object");
+    const compiled: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(permissions)) {
+      const schema = permissionSchemas.get(key);
+      if (!schema) {
+        throw new PluginManifestError(`unknown permission "${key}"`);
       }
-      const fs = perms.fs as Record<string, unknown>;
-      manifest.permissions.fs = {};
-      const read = validateFsPermission(fs.read, "permissions.fs.read");
-      const write = validateFsPermission(fs.write, "permissions.fs.write");
-      if (read !== undefined) manifest.permissions.fs.read = read;
-      if (write !== undefined) manifest.permissions.fs.write = write;
+      compiled[key] = schema.validate(value, `permissions.${key}`);
     }
-
-    if (perms.path !== undefined) {
-      if (typeof perms.path !== "boolean") {
-        throw new PluginManifestError("permissions.path must be a boolean");
-      }
-      manifest.permissions.path = perms.path;
-    }
-
-    for (const flag of ["crypto", "timers"] as const) {
-      if (perms[flag] !== undefined) {
-        if (typeof perms[flag] !== "boolean") {
-          throw new PluginManifestError(`permissions.${flag} must be a boolean`);
-        }
-        manifest.permissions[flag] = perms[flag] as boolean;
-      }
-    }
-
-    if (perms.capabilities !== undefined) {
-      // Shape only: whether a name exists is decided at load time against
-      // the host registry, so a typo fails the load instead of the parse.
-      if (
-        typeof perms.capabilities !== "object" ||
-        perms.capabilities === null ||
-        Array.isArray(perms.capabilities)
-      ) {
-        throw new PluginManifestError("permissions.capabilities must be an object");
-      }
-      const requested = perms.capabilities as Record<string, unknown>;
-      const compiled: Record<string, CapabilityRequest> = {};
-      for (const [name, value] of Object.entries(requested)) {
-        if (!CAPABILITY_NAME_PATTERN.test(name)) {
-          throw new PluginManifestError(
-            `permissions.capabilities has an invalid capability name "${name}"`,
-          );
-        }
-        if (typeof value === "boolean") {
-          compiled[name] = value;
-        } else if (
-          typeof value === "object" &&
-          value !== null &&
-          !Array.isArray(value) &&
-          Object.getPrototypeOf(value) === Object.prototype
-        ) {
-          compiled[name] = value as Record<string, unknown>;
-        } else {
-          throw new PluginManifestError(
-            `permissions.capabilities["${name}"] must be a boolean or an options object`,
-          );
-        }
-      }
-      manifest.permissions.capabilities = compiled;
-    }
-
-    if (perms.fetch !== undefined) {
-      // Validated eagerly, so a malformed origin fails at load time rather
-      // than on the first request — the same rule the path patterns follow.
-      compileFetchPermission(perms.fetch);
-      manifest.permissions.fetch = perms.fetch as boolean | string | string[];
-    }
+    manifest.permissions = compiled;
   }
 
   return manifest;

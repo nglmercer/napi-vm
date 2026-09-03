@@ -38,6 +38,9 @@ import {
   type CapabilityDefinition,
   type CapabilityOptionsSchema,
 } from "./capability-registry";
+import { definePermissionBinding } from "../core/manifest";
+
+definePermissionBinding("audio", {});
 
 export const AUDIO_MODULE_NAME = "napi:audio";
 

@@ -1,6 +1,10 @@
 import { test, expect } from "bun:test";
 
-import { parseManifest, validateManifest } from "../../plugins";
+import {
+  listPermissionSchemas,
+  parseManifest,
+  validateManifest,
+} from "../../plugins";
 
 function base(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -17,9 +21,23 @@ test("accepts a well-formed manifest", () => {
     base({ permissions: { fs: { read: "./**", write: ["./cache/**"] }, path: true } }),
   );
   expect(manifest.name).toBe("example-plugin");
-  expect(manifest.entry).toBe("plugin.js");
-  expect(manifest.permissions?.fs?.read).toBe("./**");
-  expect(manifest.permissions?.path).toBe(true);
+  // The entry stays raw here; the host normalizes it (`validateEntryPath`).
+  expect(manifest.entry).toBe("./plugin.js");
+  const permissions = manifest.permissions as { fs?: { read?: unknown }; path?: unknown };
+  expect(permissions.fs?.read).toBe("./**");
+  expect(permissions.path).toBe(true);
+});
+
+test("rejects an unknown permission key instead of ignoring it", () => {
+  expect(() => validateManifest(base({ permissions: { cryto: true } }))).toThrow(
+    /unknown permission "cryto"/,
+  );
+});
+
+test("every built-in permission key has a schema", () => {
+  expect(listPermissionSchemas()).toEqual(
+    expect.arrayContaining(["fs", "path", "crypto", "timers", "fetch", "capabilities"]),
+  );
 });
 
 test("permissions are optional", () => {
@@ -51,20 +69,6 @@ test("rejects a non-integer apiVersion", () => {
 
 test("rejects an unsupported apiVersion", () => {
   expect(() => validateManifest(base({ apiVersion: 2 }))).toThrow(/is not supported/);
-});
-
-test("rejects an entry outside the plugin directory", () => {
-  expect(() => validateManifest(base({ entry: "../../../outside.js" }))).toThrow(
-    /inside the plugin directory/,
-  );
-  expect(() => validateManifest(base({ entry: "/etc/passwd" }))).toThrow(
-    /inside the plugin directory/,
-  );
-});
-
-test("normalizes the entry path", () => {
-  expect(validateManifest(base({ entry: "./src/../plugin.js" })).entry).toBe("plugin.js");
-  expect(validateManifest(base({ entry: "src\\main.js" })).entry).toBe("src/main.js");
 });
 
 test("rejects a numeric fs permission", () => {
@@ -101,20 +105,8 @@ test("parseManifest round-trips a valid document", () => {
   expect(manifest.version).toBe("1.0.0");
 });
 
-test("an entry whose first segment merely starts with `..` is accepted", () => {
-  const manifest = validateManifest({
-    name: "p",
-    version: "1.0.0",
-    apiVersion: 1,
-    entry: "./..build/plugin.js",
-  });
-  expect(manifest.entry).toBe("..build/plugin.js");
-});
-
-test("an entry with a real `..` segment is still rejected", () => {
-  for (const entry of ["../plugin.js", "..", "a/../../plugin.js"]) {
-    expect(() =>
-      validateManifest({ name: "p", version: "1.0.0", apiVersion: 1, entry }),
-    ).toThrow(/inside the plugin directory/);
-  }
+test("rejects an empty entry", () => {
+  expect(() => validateManifest(base({ entry: "" }))).toThrow(
+    /entry must be a non-empty string/,
+  );
 });

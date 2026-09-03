@@ -11,6 +11,7 @@
 import { PermissionDeniedError, PluginManifestError } from "../core/errors";
 import type { Vm } from "../../index";
 
+import { definePermissionBinding, definePermissionSchema, isPermissionGranted } from "../core/manifest";
 import {
   unbindCapabilityModule,
   type CapabilityDefinition,
@@ -65,6 +66,26 @@ export interface CompiledFetchPermissions {
  * scoping is deliberately not offered: a same-origin path restriction is not
  * a security boundary a client can enforce.
  */
+definePermissionSchema("fetch", {
+  // Validated eagerly, so a malformed origin fails at load time rather
+  // than on the first request — the same rule the path patterns follow.
+  // The raw value is stored; the binding compiles it again at load.
+  validate(value, field) {
+    compileFetchPermission(value, field);
+    return value;
+  },
+});
+
+definePermissionBinding("fetch", {
+  compileRequest: (request) => compileFetchPermission(request),
+  // Mirror the historic gate: an empty origins list installs nothing.
+  allows: (request, grant) =>
+    isPermissionGranted(grant) &&
+    (request === true ||
+      (typeof request === "string" && request !== "") ||
+      (Array.isArray(request) && request.length > 0)),
+});
+
 export function compileFetchPermission(
   value: unknown,
   field = "permissions.fetch",
@@ -138,7 +159,8 @@ export const FETCH_CAPABILITY: CapabilityDefinition = {
   name: "fetch",
   install: ({ vm, permissions, grant }) => {
     const policy = (grant !== null && typeof grant === "object" ? grant : {}) as FetchPolicy;
-    installFetch(vm, permissions.fetch, policy);
+    // Sound cast: the `fetch` binding compiled these origins at load.
+    installFetch(vm, permissions.fetch as CompiledFetchPermissions, policy);
     return () => unbindCapabilityModule(vm, FETCH_MODULE_NAME, FETCH_GLOBALS);
   },
 };

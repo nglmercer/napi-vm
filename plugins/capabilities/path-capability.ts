@@ -12,10 +12,23 @@
 import * as nodePath from "node:path";
 
 import type { Vm } from "../../index";
+import { booleanPermissionSchema, definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import {
   unbindCapabilityModule,
+  type CapabilityDefinition,
   type CapabilityTeardown,
 } from "./capability-registry";
+
+definePermissionSchema("path", booleanPermissionSchema());
+
+// Manifest-only gate, like before: `path: true` installs with no host grant.
+// The grant is ignored on purpose — path helpers cannot reach the host fs.
+definePermissionBinding("path", { allows: (request) => request === true });
+
+export const PATH_CAPABILITY: CapabilityDefinition = {
+  name: "path",
+  install: ({ vm }) => installPathCapability(vm),
+};
 
 const PATH_GLOBALS = [
   "__cap_path_join",

@@ -145,6 +145,30 @@ export function compilePattern(pattern: string, field: string): PathRule {
  * absolute POSIX path for `absolute` rules — in both cases already normalized
  * and canonicalized by the caller. Never call this with a raw guest string.
  */
+/**
+ * Validate a manifest entry path: it must be a relative POSIX path that
+ * stays inside the plugin directory. Returns the normalized form.
+ *
+ * This lives here (not in `manifest.ts`) so the manifest module stays
+ * agnostic to paths: the host calls it after parsing. The canonical
+ * containment check still happens on the real path in the host — this is
+ * the fail-fast textual gate with the same error wording.
+ */
+export function validateEntryPath(value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new PluginManifestError("entry must be a non-empty string");
+  }
+  const posix = toPosix(value);
+  if (isAbsoluteGuestPath(posix)) {
+    throw new PluginManifestError("entry must be a path inside the plugin directory");
+  }
+  const normalized = normalizeSegments(posix, false);
+  if (normalized === "" || escapesRoot(normalized)) {
+    throw new PluginManifestError("entry must be a path inside the plugin directory");
+  }
+  return normalized;
+}
+
 export function matchRule(rule: PathRule, candidate: string): boolean {
   if (rule.kind === "all") return true;
   if (!rule.regex) return false;

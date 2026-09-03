@@ -11,10 +11,14 @@
 
 import { PermissionDeniedError } from "../core/errors";
 
+import { booleanPermissionSchema, definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import {
   unbindCapabilityModule,
   type CapabilityDefinition,
 } from "./capability-registry";
+
+definePermissionSchema("timers", booleanPermissionSchema());
+definePermissionBinding("timers", {});
 
 const TIMERS_GLOBALS = ["__cap_timers_now", "__cap_timers_hrtime"] as const;
 
