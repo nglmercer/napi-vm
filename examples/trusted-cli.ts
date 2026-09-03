@@ -23,12 +23,15 @@
 import { join } from "node:path";
 
 import {
-  DEFAULT_MODULES_DIR,
-  installTrustedPackage,
   listCapabilities,
   PluginHost,
   type PluginHostPolicy,
 } from "../plugins";
+import {
+  DEFAULT_MODULES_DIR,
+  installTrustedPackage,
+  nodePlatform,
+} from "../plugins/node";
 
 function flag(name: string, fallback?: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
@@ -53,7 +56,7 @@ async function main(): Promise<void> {
 
   if (command === "caps") {
     // Constructing a host registers the built-ins.
-    new PluginHost();
+    new PluginHost({ platform: nodePlatform() });
     console.log(listCapabilities().join("\n"));
     return;
   }
@@ -92,10 +95,9 @@ async function main(): Promise<void> {
     const capabilities: Record<string, true> = {};
     for (const name of grants) capabilities[name] = true;
     const policy: PluginHostPolicy = {
-      fs: { absoluteRead: false, absoluteWrite: false },
       capabilities,
     };
-    const host = new PluginHost({ policy });
+    const host = new PluginHost({ policy, platform: nodePlatform() });
     for (const name of disables) host.setCapabilityEnabled(name, false);
     const plugin = host.load(pluginDir);
     console.log(`loaded ${plugin.manifest.name}@${plugin.manifest.version}`);

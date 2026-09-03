@@ -1,39 +1,12 @@
+/**
+ * Node/Bun filesystem backend built on `node:fs`. Node-only: portable hosts
+ * implement {@link HostFileSystem} against their own storage instead.
+ */
+
 import * as fs from "node:fs";
 
 import { ResourceLimitError } from "../core/errors";
-
-/**
- * The host-side filesystem backend.
- *
- * Everything the plugin host needs from the outside world goes through this
- * interface, so the same permission logic can sit on top of Node, Bun, Deno or
- * a future Rust implementation without the guest-facing API changing.
- *
- * All paths crossing this interface are *native, already-permitted* paths. No
- * implementation of this interface performs permission checks — that happened
- * before the call.
- */
-export interface HostFileSystem {
-  /**
-   * Fully resolved real path (symlinks followed), or `null` when the path does
-   * not exist. Any other failure must throw.
-   */
-  realpath(nativePath: string): string | null;
-  readText(nativePath: string): string;
-  writeText(nativePath: string, contents: string): void;
-  exists(nativePath: string): boolean;
-}
-
-/**
- * Default cap on a single `readText`/`writeText`, in bytes.
- *
- * Permission to read a path is not permission to spend unbounded host memory
- * on it. The VM's own 16 MiB string ceiling only rejects the value *after*
- * Node has allocated the whole file, so a permitted 2 GiB file would still be
- * read, marshalled and only then refused. 8 MiB leaves headroom under that
- * ceiling while staying far above any plausible plugin source or config file.
- */
-export const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
+import { DEFAULT_MAX_FILE_BYTES, type HostFileSystem } from "../platform";
 
 export interface NodeFileSystemOptions {
   /** Largest file `readText` will load. Defaults to 8 MiB. */

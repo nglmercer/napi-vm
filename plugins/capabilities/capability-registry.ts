@@ -1,12 +1,12 @@
 /**
- * Dynamic capability registry: names are data, not syntax — and every
- * capability shares one lifecycle.
+ * Capability registry: names are data, not syntax — and every capability
+ * shares one lifecycle.
  *
- * A capability is a small subplugin: it declares a `name`, an option
- * `schema` (validated with defaults applied), and an `install` that wires
- * guest modules and returns its own teardown. There is no
- * `uninstallXCapability` per capability; the host runs the returned
- * teardowns on unload, reload and failed hooks.
+ * A capability is a small subplugin declared in ONE place. It validates its
+ * own manifest value, decides its own install shape, and wires guest modules
+ * in `install`, returning its own teardown. There is no per-capability
+ * uninstall function; the host runs the returned teardowns on unload, reload
+ * and failed hooks.
  *
  * ```ts
  * defineCapability({
@@ -27,10 +27,10 @@
 import type { Vm } from "../../index";
 
 import { PluginLoadError, PluginManifestError } from "../core/errors";
-import { definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import type { CompiledPermissions } from "../core/permissions";
 import type { FsPermissionChecker } from "../fs/checker";
 import type { PluginManifest } from "../core/manifest";
+import type { HostPlatform } from "../platform";
 
 /**
  * One dynamic capability request: `true` for defaults, or an options object
@@ -38,54 +38,6 @@ import type { PluginManifest } from "../core/manifest";
  * capability registry at load time — an unknown name fails the load.
  */
 export type CapabilityRequest = boolean | Record<string, unknown>;
-
-definePermissionBinding("capabilities", {
-  // One map entry becomes one capability install; unknown names fail the
-  // load at registry lookup, exactly like a directly requested name.
-  resolve: (request) =>
-    Object.entries(request as Record<string, unknown>).map(([capability, options]) => ({
-      capability,
-      options,
-    })),
-});
-
-definePermissionSchema("capabilities", {
-  // Shape only: whether a name exists is decided at load time against
-  // the host registry, so a typo fails the load instead of the parse.
-  validate(value, field) {
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      Array.isArray(value)
-    ) {
-      throw new PluginManifestError(`${field} must be an object`);
-    }
-    const requested = value as Record<string, unknown>;
-    const compiled: Record<string, CapabilityRequest> = {};
-    for (const [name, entry] of Object.entries(requested)) {
-      if (!CAPABILITY_NAME_PATTERN.test(name)) {
-        throw new PluginManifestError(
-          `${field} has an invalid capability name "${name}"`,
-        );
-      }
-      if (typeof entry === "boolean") {
-        compiled[name] = entry;
-      } else if (
-        typeof entry === "object" &&
-        entry !== null &&
-        !Array.isArray(entry) &&
-        Object.getPrototypeOf(entry) === Object.prototype
-      ) {
-        compiled[name] = entry as Record<string, unknown>;
-      } else {
-        throw new PluginManifestError(
-          `${field}["${name}"] must be a boolean or an options object`,
-        );
-      }
-    }
-    return compiled;
-  },
-});
 
 /** What an installed capability may use. */
 export interface CapabilityContext {
@@ -95,9 +47,11 @@ export interface CapabilityContext {
   /**
    * The loading plugin's path checker. Optional because most capabilities
    * never touch a path; definitions that expose a path sink fail closed
-   * without one (see `native-loader.ts`).
+   * without one (see `core/native-bridge.ts`).
    */
   checker?: FsPermissionChecker;
+  /** The host platform (filesystem, paths, crypto, native loader). */
+  platform: HostPlatform;
   /** Manifest-side value after schema defaults: `{}` when requested as `true`. */
   options: unknown;
   /** Policy-side value: `true` or the granted options object. */
@@ -111,16 +65,51 @@ export interface CapabilityContext {
  */
 export type CapabilityTeardown = () => void;
 
+/** One expanded install: which capability, with which options. */
+export interface PermissionResolved {
+  capability: string;
+  options: unknown;
+}
+
 export interface CapabilityDefinition {
   /** Registry name, e.g. `"audio"`. Validated, not free-form. */
   readonly name: string;
+  /**
+   * Validate and normalize the manifest's `permissions.<name>` value. Throws
+   * `PluginManifestError` on anything the key does not accept; absent means
+   * the raw value passes through untouched.
+   */
+  validate?(value: unknown, field: string): unknown;
+  /**
+   * Expand a manifest request into capability installs. Default: one install
+   * of this same name with the request as options.
+   *
+   * A definition WITH `resolve` is infrastructure (an expander like `fs` or
+   * `capabilities`): the host runs the expansion and never calls `install`.
+   * A definition WITHOUT it installs itself through `install`.
+   */
+  resolve?(request: unknown): PermissionResolved[];
+  /**
+   * Build the installer-facing form stored in the compiled permission map.
+   * Default: the request as-is.
+   */
+  compile?(request: unknown): unknown;
+  /**
+   * The request ∩ grant decision. Default: granted unless the grant is
+   * absent, null, or `false`.
+   */
+  allows?(request: unknown, grant: unknown): boolean;
   /**
    * Manifest-side options, validated with defaults applied before `install`
    * runs. Absent means "no options": `true` installs with `{}`, and any
    * options object is refused.
    */
   readonly schema?: CapabilityOptionsSchema;
-  install(ctx: CapabilityContext): CapabilityTeardown;
+  /**
+   * Wire the guest module; return its teardown. Absent only on expander
+   * entries (`fs`, `capabilities`), which the host never installs directly.
+   */
+  install?(ctx: CapabilityContext): CapabilityTeardown;
 }
 
 /** Remove a guest module and its bridge globals — the shared teardown. */
@@ -131,6 +120,19 @@ export function unbindCapabilityModule(
 ): void {
   vm.removeModule(moduleName);
   for (const name of globals) vm.removeGlobal(name);
+}
+
+/** Default install gate: denied when the grant is absent, null, or `false`. */
+export function isPermissionGranted(grant: unknown): boolean {
+  return grant !== undefined && grant !== null && grant !== false;
+}
+
+/** Shared manifest validator for boolean flags (`path`, `crypto`, …). */
+export function booleanPermissionValue(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new PluginManifestError(`${field} must be a boolean`);
+  }
+  return value;
 }
 
 // ── option schemas (no dependency; deliberately small) ─────────────
@@ -241,7 +243,10 @@ function assertName(name: string): void {
 /** Register a capability. Throws when the name is taken — no shadowing. */
 export function defineCapability(definition: CapabilityDefinition): void {
   assertName(definition.name);
-  if (typeof definition.install !== "function") {
+  if (
+    definition.install !== undefined &&
+    typeof definition.install !== "function"
+  ) {
     throw new Error(`capability "${definition.name}" needs an install function`);
   }
   if (registry.has(definition.name)) {
@@ -267,3 +272,51 @@ export function listCapabilities(): string[] {
 export function unregisterCapability(name: string): boolean {
   return registry.delete(name);
 }
+
+// ── the `capabilities` map: the generic extension point ────────────
+
+defineCapability({
+  name: "capabilities",
+  // Shape only: whether a name exists is decided at load time against
+  // the registry, so a typo fails the load instead of the parse.
+  validate(value, field) {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      Array.isArray(value)
+    ) {
+      throw new PluginManifestError(`${field} must be an object`);
+    }
+    const requested = value as Record<string, unknown>;
+    const compiled: Record<string, CapabilityRequest> = {};
+    for (const [name, entry] of Object.entries(requested)) {
+      if (!CAPABILITY_NAME_PATTERN.test(name)) {
+        throw new PluginManifestError(
+          `${field} has an invalid capability name "${name}"`,
+        );
+      }
+      if (typeof entry === "boolean") {
+        compiled[name] = entry;
+      } else if (
+        typeof entry === "object" &&
+        entry !== null &&
+        !Array.isArray(entry) &&
+        Object.getPrototypeOf(entry) === Object.prototype
+      ) {
+        compiled[name] = entry as Record<string, unknown>;
+      } else {
+        throw new PluginManifestError(
+          `${field}["${name}"] must be a boolean or an options object`,
+        );
+      }
+    }
+    return compiled;
+  },
+  // One map entry becomes one capability install; unknown names fail the
+  // load at registry lookup, exactly like a directly requested name.
+  resolve: (request) =>
+    Object.entries(request as Record<string, unknown>).map(([capability, options]) => ({
+      capability,
+      options,
+    })),
+});

@@ -11,14 +11,12 @@
 
 import { PermissionDeniedError } from "../core/errors";
 
-import { booleanPermissionSchema, definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import {
+  booleanPermissionValue,
+  defineCapability,
   unbindCapabilityModule,
   type CapabilityDefinition,
 } from "./capability-registry";
-
-definePermissionSchema("timers", booleanPermissionSchema());
-definePermissionBinding("timers", {});
 
 const TIMERS_GLOBALS = ["__cap_timers_now", "__cap_timers_hrtime"] as const;
 
@@ -56,6 +54,7 @@ export interface TimersCapabilityOptions {
  */
 export const TIMERS_CAPABILITY: CapabilityDefinition = {
   name: "timers",
+  validate: booleanPermissionValue,
   install: ({ vm, grant }) => {
     const policy = (grant !== null && typeof grant === "object" ? grant : {}) as TimersCapabilityOptions;
     const resolution = policy.resolutionMs ?? 0;
@@ -72,3 +71,5 @@ export const TIMERS_CAPABILITY: CapabilityDefinition = {
     return () => unbindCapabilityModule(vm, TIMERS_MODULE_NAME, TIMERS_GLOBALS);
   },
 };
+
+defineCapability(TIMERS_CAPABILITY);

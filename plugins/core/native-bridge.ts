@@ -22,8 +22,8 @@
 
 import type { Vm } from "../../index";
 
-import { PluginLoadError } from "../core/errors";
-import { DEFAULT_MAX_FILE_BYTES } from "../fs/host-filesystem";
+import { DEFAULT_MAX_FILE_BYTES } from "../platform";
+import { PluginLoadError } from "./errors";
 import type { FsPermissionChecker } from "../fs/checker";
 
 /** Per-method exposure policy inside a {@link NativeModuleDefinition}. */
@@ -59,8 +59,10 @@ export interface NativeModuleHost {
   checker?: FsPermissionChecker;
 }
 
+const encoder = new TextEncoder();
+
 function byteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
+  return encoder.encode(value).length;
 }
 
 /** An installed native module: globals plus its own teardown. */

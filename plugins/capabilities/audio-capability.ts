@@ -3,7 +3,7 @@
  * `miniaudio_node` npm package (native rodio backend).
  *
  * The native library is loaded on the HOST, never inside the interpreter
- * (see `native-loader.ts` for why). Each VM gets its own `AudioPlayer`, so
+ * (see `native-bridge.ts` for why). Each VM gets its own `AudioPlayer`, so
  * unloading the plugin drops playback state with the VM. Every file path the
  * guest passes is resolved through the plugin's `FsPermissionChecker` first:
  * `loadFile("/etc/passwd")` is a permission error, not a native open.
@@ -27,20 +27,17 @@
  *   getDuration() / getCurrentTime() / getCurrentFile() / seekTo(seconds)
  */
 
-import { createRequire } from "node:module";
-
 import type { AudioPlayer } from "miniaudio_node";
 
 import { PluginLoadError } from "../core/errors";
-import { installNativeModule } from "../native/native-loader";
+import { installNativeModule } from "../core/native-bridge";
+import type { HostPlatform } from "../platform";
 import {
   applyCapabilityOptions,
+  defineCapability,
   type CapabilityDefinition,
   type CapabilityOptionsSchema,
 } from "./capability-registry";
-import { definePermissionBinding } from "../core/manifest";
-
-definePermissionBinding("audio", {});
 
 export const AUDIO_MODULE_NAME = "napi:audio";
 
@@ -81,12 +78,25 @@ export interface AudioPolicyOptions {
   createPlayer?: () => AudioPlayerLike;
 }
 
-function defaultCreatePlayer(): AudioPlayerLike {
+/**
+ * Default player built from a host-side `miniaudio_node` copy. The platform
+ * supplies the loader (`requireNative` on Node); platforms without one must
+ * pass `createPlayer` in the grant instead.
+ */
+function defaultCreatePlayer(platform: HostPlatform): AudioPlayerLike {
+  if (!platform.requireNative) {
+    throw new PluginLoadError(
+      'napi:audio needs a player: grant { createPlayer } (or createMiniaudioPlayer ' +
+        'from "napi-vm/plugins/node") — this platform has no native module loader',
+    );
+  }
   let AudioPlayerCtor: new () => AudioPlayer;
   try {
-    const require = createRequire(import.meta.url);
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    AudioPlayerCtor = require("miniaudio_node").AudioPlayer;
+    AudioPlayerCtor = (
+      platform.requireNative("miniaudio_node") as {
+        AudioPlayer: new () => AudioPlayer;
+      }
+    ).AudioPlayer;
   } catch {
     throw new PluginLoadError(
       'napi:audio needs the "miniaudio_node" package: npm install miniaudio_node',
@@ -154,7 +164,7 @@ const AUDIO_SCHEMA: CapabilityOptionsSchema = {
 export const AUDIO_CAPABILITY: CapabilityDefinition = {
   name: "audio",
   schema: AUDIO_SCHEMA,
-  install: ({ vm, checker, options, grant }) => {
+  install: ({ vm, checker, options, grant, platform }) => {
     if (!checker) {
       throw new PluginLoadError('capability "audio" needs a filesystem checker');
     }
@@ -169,7 +179,7 @@ export const AUDIO_CAPABILITY: CapabilityDefinition = {
       // widen its own payload ceiling.
       maxAudioBytes = Math.floor(policy.maxAudioBytes);
     }
-    const player = (policy.createPlayer ?? defaultCreatePlayer)();
+    const player = (policy.createPlayer ?? (() => defaultCreatePlayer(platform)))();
     const installed = installNativeModule(
       vm,
       { ...AUDIO_DEFINITION, maxStringBytes: maxAudioBytes },
@@ -178,3 +188,5 @@ export const AUDIO_CAPABILITY: CapabilityDefinition = {
     return () => installed.uninstall(vm);
   },
 };
+
+defineCapability(AUDIO_CAPABILITY);

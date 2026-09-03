@@ -11,8 +11,9 @@
 import { PermissionDeniedError, PluginManifestError } from "../core/errors";
 import type { Vm } from "../../index";
 
-import { definePermissionBinding, definePermissionSchema, isPermissionGranted } from "../core/manifest";
 import {
+  defineCapability,
+  isPermissionGranted,
   unbindCapabilityModule,
   type CapabilityDefinition,
 } from "./capability-registry";
@@ -66,25 +67,7 @@ export interface CompiledFetchPermissions {
  * scoping is deliberately not offered: a same-origin path restriction is not
  * a security boundary a client can enforce.
  */
-definePermissionSchema("fetch", {
-  // Validated eagerly, so a malformed origin fails at load time rather
-  // than on the first request — the same rule the path patterns follow.
-  // The raw value is stored; the binding compiles it again at load.
-  validate(value, field) {
-    compileFetchPermission(value, field);
-    return value;
-  },
-});
 
-definePermissionBinding("fetch", {
-  compileRequest: (request) => compileFetchPermission(request),
-  // Mirror the historic gate: an empty origins list installs nothing.
-  allows: (request, grant) =>
-    isPermissionGranted(grant) &&
-    (request === true ||
-      (typeof request === "string" && request !== "") ||
-      (Array.isArray(request) && request.length > 0)),
-});
 
 export function compileFetchPermission(
   value: unknown,
@@ -157,6 +140,20 @@ export type FetchTransport = (
  */
 export const FETCH_CAPABILITY: CapabilityDefinition = {
   name: "fetch",
+  // Validated eagerly, so a malformed origin fails at load time rather
+  // than on the first request — the same rule the path patterns follow.
+  // The raw value is stored; the definition compiles it again at load.
+  validate(value, field) {
+    compileFetchPermission(value, field);
+    return value;
+  },
+  compile: (request) => compileFetchPermission(request),
+  // Mirror the historic gate: an empty origins list installs nothing.
+  allows: (request, grant) =>
+    isPermissionGranted(grant) &&
+    (request === true ||
+      (typeof request === "string" && request !== "") ||
+      (Array.isArray(request) && request.length > 0)),
   install: ({ vm, permissions, grant }) => {
     const policy = (grant !== null && typeof grant === "object" ? grant : {}) as FetchPolicy;
     // Sound cast: the `fetch` binding compiled these origins at load.
@@ -164,6 +161,8 @@ export const FETCH_CAPABILITY: CapabilityDefinition = {
     return () => unbindCapabilityModule(vm, FETCH_MODULE_NAME, FETCH_GLOBALS);
   },
 };
+
+defineCapability(FETCH_CAPABILITY);
 
 /** Implementation shared by the definition above; unexported on purpose. */
 function installFetch(

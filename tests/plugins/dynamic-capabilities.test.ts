@@ -11,30 +11,32 @@ import type { PlaybackState } from "miniaudio_node";
 import { Vm } from "../../index.js";
 import {
   applyCapabilityOptions,
-  assertTrustedSpec,
   AUDIO_CAPABILITY,
   compilePermissions,
-  compileFsPolicy,
-  createNodeFileSystem,
   defaultPolicy,
   type CompiledFsPermissions,
   defineCapability,
-  ensureModulesDir,
-  extractTarball,
   FsPermissionChecker,
   getCapability,
   hasCapability,
-  installTrustedPackage,
   listCapabilities,
-  nativePackageCapability,
-  packageTarballUrl,
   unbindCapabilityModule,
   unregisterCapability,
   validateManifest,
-  verifyIntegrity,
   type AudioPlayerLike,
-  type TrustedModulesPolicy,
 } from "../../plugins";
+import {
+  assertTrustedSpec,
+  createNodeFileSystem,
+  ensureModulesDir,
+  extractTarball,
+  installTrustedPackage,
+  nativePackageCapability,
+  nodePlatform,
+  packageTarballUrl,
+  verifyIntegrity,
+  type TrustedModulesPolicy,
+} from "../../plugins/node";
 import { cleanup, makeHost, makePlugin, manifestWith } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -527,15 +529,15 @@ function makeAudioVm(root: string): {
     root,
     // Sound cast: the `fs` binding compiled these rules at load.
     permissions.fs as CompiledFsPermissions,
-    compileFsPolicy(defaultPolicy().fs),
     createNodeFileSystem(),
   );
   const vm = new Vm();
-  const teardown = AUDIO_CAPABILITY.install({
+  const teardown = AUDIO_CAPABILITY.install!({
     vm,
     manifest,
     permissions,
     checker,
+    platform: nodePlatform(),
     options: true,
     grant: { createPlayer: () => player },
   });
@@ -668,16 +670,16 @@ test("real player decodes a wav through the guest bridge", () => {
       root,
       // Sound cast: the `fs` binding compiled these rules at load.
       permissions.fs as CompiledFsPermissions,
-      compileFsPolicy(defaultPolicy().fs),
       createNodeFileSystem(),
     );
     const vm = new Vm();
     // No factory injected: the default `require("miniaudio_node")` runs.
-    const teardown = AUDIO_CAPABILITY.install({
+    const teardown = AUDIO_CAPABILITY.install!({
       vm,
       manifest,
       permissions,
       checker,
+      platform: nodePlatform(),
       options: true,
       grant: true,
     });

@@ -92,10 +92,10 @@ test("a non-string path is refused", () => {
   );
 });
 
-test("an absolute path is not a traversal error but a policy error", () => {
+test("an absolute path is not a traversal error but a confinement error", () => {
   const { dir, plugin } = probe({ fs: { read: "*" } });
   const outside = join(outsideDir(dir), "outside.txt");
   expect(() => plugin.vm.callFunction("__cap_fs_readText", [outside])).toThrow(
-    /disabled by host policy/,
+    /outside the plugin root/,
   );
 });

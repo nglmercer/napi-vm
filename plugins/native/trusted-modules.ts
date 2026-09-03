@@ -8,7 +8,7 @@
  *      downloads the tarball into the modules folder, verifies the
  *      `sha512-…` integrity, extracts it, and `require`s it on the HOST.
  *   3. `nativePackageCapability` wraps the loaded code in a closed
- *      allowlist (`native-loader.ts`) and registers it with
+ *      allowlist (`native-bridge.ts`) and registers it with
  *      `defineCapability`, so plugins request it by name and the host
  *      policy grants or denies it like any other capability.
  *
@@ -31,7 +31,7 @@ import type { FetchTransport } from "../capabilities/fetch-capability";
 import {
   installNativeModule,
   type NativeModuleDefinition,
-} from "./native-loader";
+} from "../core/native-bridge";
 
 export const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 export const DEFAULT_MODULES_DIR = ".napi-vm/modules";
@@ -335,7 +335,7 @@ export interface NativePackageCapabilityOptions {
   exposeAs: string;
   /** Result of {@link installTrustedPackage}. */
   loaded: { exports: Record<string, unknown> };
-  /** Closed allowlist over the loaded exports (see `native-loader.ts`). */
+  /** Closed allowlist over the loaded exports (see `native-bridge.ts`). */
   definition: NativeModuleDefinition;
 }
 

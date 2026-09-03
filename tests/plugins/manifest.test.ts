@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 
 import {
-  listPermissionSchemas,
+  listCapabilities,
   parseManifest,
   validateManifest,
 } from "../../plugins";
@@ -34,8 +34,8 @@ test("rejects an unknown permission key instead of ignoring it", () => {
   );
 });
 
-test("every built-in permission key has a schema", () => {
-  expect(listPermissionSchemas()).toEqual(
+test("every built-in permission key is registered", () => {
+  expect(listCapabilities()).toEqual(
     expect.arrayContaining(["fs", "path", "crypto", "timers", "fetch", "capabilities"]),
   );
 });

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { PluginHost, type PluginHostOptions } from "../../plugins";
+import { nodePlatform } from "../../plugins/node";
 
 const roots: string[] = [];
 
@@ -68,7 +69,9 @@ export function outsideDir(pluginDir: string): string {
 const hosts: PluginHost[] = [];
 
 export function makeHost(options: PluginHostOptions = {}): PluginHost {
-  const host = new PluginHost(options);
+  // Tests run on Node/Bun: every host gets the Node platform unless the test
+  // overrides `platform` (or `fs`, which wins over `platform.fs`).
+  const host = new PluginHost({ platform: nodePlatform(), ...options });
   hosts.push(host);
   return host;
 }

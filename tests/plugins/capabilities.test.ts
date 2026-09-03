@@ -11,6 +11,7 @@ import {
   validateManifest,
   type CapabilityDefinition,
 } from "../../plugins";
+import { nodePlatform } from "../../plugins/node";
 import { manifestWith } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -33,10 +34,11 @@ function installForTest(
   setup?: { manifestPermissions?: unknown; grant?: unknown },
 ): () => void {
   const manifest = validateManifest(manifestWith(setup?.manifestPermissions ?? {}));
-  return DEFS[name].install({
+  return DEFS[name].install!({
     vm,
     manifest,
     permissions: compilePermissions(manifest),
+    platform: nodePlatform(),
     options: true,
     grant: setup?.grant ?? true,
   });

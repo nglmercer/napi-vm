@@ -9,11 +9,11 @@
 import type { Vm } from "../../index";
 
 import { PluginManifestError } from "../core/errors";
-import type { HostFileSystem } from "../fs/host-filesystem";
+import type { HostFileSystem } from "../platform";
 import { compilePattern, type PathRule } from "../fs/path-rules";
 import type { FsPermissionChecker } from "../fs/checker";
-import { definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import {
+  defineCapability,
   unbindCapabilityModule,
   type CapabilityTeardown,
 } from "./capability-registry";
@@ -33,7 +33,11 @@ function validateFsPermission(value: unknown, field: string): FsPermission | und
   throw new PluginManifestError(`${field} must be boolean, string, or string[]`);
 }
 
-definePermissionSchema("fs", {
+defineCapability({
+  name: "fs",
+  // Infrastructure key: `fs` installs no guest module through the loop — the
+  // host builds the shared checker from its compiled form up front. The `fs`
+  // capability itself is substrate, always present.
   validate(value, field) {
     if (typeof value !== "object" || value === null || Array.isArray(value)) {
       throw new PluginManifestError(`${field} must be an object`);
@@ -51,14 +55,8 @@ definePermissionSchema("fs", {
     if (write !== undefined) out.write = write;
     return out;
   },
-});
-
-// Infrastructure key: `fs` installs no guest module through the loop — the
-// host builds the shared checker from its compiled form up front. The `fs`
-// capability itself is substrate, always present.
-definePermissionBinding("fs", {
   resolve: () => [],
-  compileRequest: (request) => {
+  compile: (request) => {
     const fs = request as { read?: FsPermission; write?: FsPermission };
     return {
       read: compileFsPermission(fs.read, "permissions.fs.read"),

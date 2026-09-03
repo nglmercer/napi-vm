@@ -4,16 +4,25 @@
  * The host owns every decision the guest is not allowed to make: what the
  * manifest may request, where `"./"` points, which capabilities exist in the
  * VM, and when the VM is thrown away and rebuilt.
+ *
+ * The host is portable: every outside-world access (filesystem, paths,
+ * crypto, native loading) goes through the injected {@link HostPlatform}.
+ * Node/Bun hosts pass `platform: nodePlatform()` from
+ * `"napi-vm/plugins/node"`; other runtimes assemble
+ * `portablePlatform(theirFileSystem)`.
  */
-
-import * as nodePath from "node:path";
 
 import { Vm } from "../../index";
 
 import { PermissionDeniedError, PluginLoadError } from "./errors";
 import { installFsCapability } from "../capabilities/filesystem-capability";
-import { createNodeFileSystem, type HostFileSystem } from "../fs/host-filesystem";
 import { validateEntryPath } from "../fs/path-rules";
+import {
+  missingFileSystem,
+  portablePlatform,
+  type HostFileSystem,
+  type HostPlatform,
+} from "../platform";
 import {
   bootstrapSource,
   describePlugin,
@@ -22,25 +31,13 @@ import {
   type PluginContext,
   type UnloadReason,
 } from "./lifecycle";
-import {
-  getPermissionBinding,
-  isPermissionGranted,
-  parseManifest,
-  type PluginManifest,
-} from "./manifest";
+import { parseManifest, type PluginManifest } from "./manifest";
 import {
   compilePermissions,
   type CapabilityGrant,
   type CompiledPermissions,
 } from "./permissions";
-import {
-  compileFsPolicy,
-  defaultFsPolicy,
-  FsPermissionChecker,
-  type CompiledFsPermissions,
-  type CompiledFsPolicy,
-  type FsPolicyOptions,
-} from "../fs/checker";
+import { FsPermissionChecker, type CompiledFsPermissions } from "../fs/checker";
 import { PATH_CAPABILITY } from "../capabilities/path-capability";
 import { CRYPTO_CAPABILITY } from "../capabilities/crypto-capability";
 import { TIMERS_CAPABILITY } from "../capabilities/timers-capability";
@@ -50,6 +47,7 @@ import {
   defineCapability,
   getCapability,
   hasCapability,
+  isPermissionGranted,
   type CapabilityDefinition,
   type CapabilityTeardown,
 } from "../capabilities/capability-registry";
@@ -103,12 +101,6 @@ function isOptionsObject(value: unknown): value is Record<string, unknown> {
 
 export interface PluginHostPolicy {
   /**
-   * Substrate filesystem policy (absolute-path escape hatches). Everything
-   * else is granted per capability name below — there are no per-capability
-   * top-level fields.
-   */
-  fs?: FsPolicyOptions;
-  /**
    * Per-capability grants keyed by CAPABILITY name (post-resolve):
    * `{ "<name>": true }` or `{ "<name>": {...} }`. Absent, null or `false`
    * means denied. Unknown names are inert until defined.
@@ -116,18 +108,27 @@ export interface PluginHostPolicy {
   capabilities?: Record<string, CapabilityGrant>;
 }
 
-/** The conservative default: plugins are confined to their own directory. */
+/**
+ * The default policy: no grants at all. Confinement to the plugin's own
+ * directory is enforced unconditionally by the checker itself.
+ */
 export function defaultPolicy(): PluginHostPolicy {
-  // Everything a plugin could reach outside itself is off by default.
-  return {
-    fs: defaultFsPolicy(),
-    capabilities: {},
-  };
+  return { capabilities: {} };
 }
 
 export interface PluginHostOptions {
   policy?: PluginHostPolicy;
-  /** Swap in a Bun/Deno/Rust-backed filesystem. Defaults to `node:fs`. */
+  /**
+   * The outside world: filesystem, paths, crypto, native loader. Node/Bun
+   * hosts pass `nodePlatform()` from `"napi-vm/plugins/node"`; portable
+   * hosts pass `portablePlatform(theirFileSystem)`.
+   */
+  platform?: HostPlatform;
+  /**
+   * Filesystem override, winning over `platform.fs`. Handy for tests and for
+   * hosts that only need to swap the backend (e.g. byte limits) while
+   * keeping the platform's paths and crypto.
+   */
   fs?: HostFileSystem;
 }
 
@@ -141,8 +142,7 @@ interface PreparedPlugin {
 
 export class PluginHost {
   private readonly policy: PluginHostPolicy;
-  private readonly compiledPolicy: CompiledFsPolicy;
-  private readonly fs: HostFileSystem;
+  private readonly platform: HostPlatform;
   private readonly plugins = new Map<string, LoadedPlugin>();
   /** Capabilities disabled at runtime via {@link setCapabilityEnabled}. */
   private readonly disabled = new Set<string>();
@@ -155,14 +155,14 @@ export class PluginHost {
   constructor(options: PluginHostOptions = {}) {
     ensureBuiltinCapabilities();
     this.policy = options.policy ?? defaultPolicy();
-    this.compiledPolicy = compileFsPolicy(this.policy.fs);
-    this.fs = options.fs ?? createNodeFileSystem();
+    const base = options.platform ?? portablePlatform(missingFileSystem());
+    this.platform = options.fs ? { ...base, fs: options.fs } : base;
   }
 
   /**
    * Register a capability (trusted-operator API). The definition is what a
-   * verified download plus {@link installNativeModule} produces. Throws when
-   * the name is taken or malformed.
+   * verified download plus the native bridge produces. Throws when the name
+   * is taken or malformed.
    */
   defineCapability(definition: CapabilityDefinition): void {
     defineCapability(definition);
@@ -287,17 +287,18 @@ export class PluginHost {
 
   /** Read + validate the manifest and entry file; compile permissions. */
   private prepare(pluginDirectory: string): PreparedPlugin {
-    const resolvedRoot = nodePath.resolve(pluginDirectory);
-    const root = this.fs.realpath(resolvedRoot);
+    const { fs, path } = this.platform;
+    const resolvedRoot = path.resolve(pluginDirectory);
+    const root = fs.realpath(resolvedRoot);
     if (root === null) {
       throw new PluginLoadError(`plugin directory not found: ${pluginDirectory}`);
     }
 
-    const manifestPath = nodePath.join(root, MANIFEST_FILENAME);
-    if (!this.fs.exists(manifestPath)) {
+    const manifestPath = path.join(root, MANIFEST_FILENAME);
+    if (!fs.exists(manifestPath)) {
       throw new PluginLoadError(`missing ${MANIFEST_FILENAME} in ${pluginDirectory}`);
     }
-    const manifest = parseManifest(this.fs.readText(manifestPath));
+    const manifest = parseManifest(fs.readText(manifestPath));
     // Entry containment is enforced textually here and canonically below
     // (`realpath`); the manifest itself carries the raw string.
     manifest.entry = validateEntryPath(manifest.entry);
@@ -306,22 +307,19 @@ export class PluginHost {
     // The entry file is read by the host, not by the plugin, so it is not
     // subject to `permissions.fs` — but it must still live inside the root,
     // symlinks included.
-    const entryNative = nodePath.resolve(
-      root,
-      manifest.entry.split("/").join(nodePath.sep),
-    );
-    const entryReal = this.fs.realpath(entryNative);
+    const entryNative = path.resolve(root, manifest.entry.split("/").join(path.sep));
+    const entryReal = fs.realpath(entryNative);
     if (entryReal === null) {
       throw new PluginLoadError(`entry file not found: ${manifest.entry}`);
     }
-    if (entryReal !== root && !entryReal.startsWith(root + nodePath.sep)) {
+    if (entryReal !== root && !entryReal.startsWith(root + path.sep)) {
       throw new PluginLoadError("entry must be a path inside the plugin directory");
     }
-    const entrySource = this.fs.readText(entryReal);
+    const entrySource = fs.readText(entryReal);
 
     // No `fs` request means no rules: default-deny, never undefined.
     const fsRules = (permissions.fs ?? { read: [], write: [] }) as CompiledFsPermissions;
-    const checker = new FsPermissionChecker(root, fsRules, this.compiledPolicy, this.fs);
+    const checker = new FsPermissionChecker(root, fsRules, fs, path);
 
     return { manifest, root, entrySource, permissions, checker };
   }
@@ -345,7 +343,7 @@ export class PluginHost {
       // still authorized per path. Everything else, including `napi:path`,
       // flows through the capability loop below.
       const teardowns: CapabilityTeardown[] = [
-        installFsCapability(vm, { checker, fs: this.fs }),
+        installFsCapability(vm, { checker, fs: this.platform.fs }),
       ];
       this.teardowns.set(plugin, teardowns);
       this.installDynamicCapabilities(plugin, checker);
@@ -410,10 +408,12 @@ export class PluginHost {
 
   /**
    * Install every requested permission through one loop — no per-capability
-   * branches. Each manifest key expands through its binding (`resolve`),
-   * each expanded capability resolves against the registry (unknown fails
-   * the load), and the binding's `allows` decides request ∩ grant. The
-   * runtime kill-switch (`setCapabilityEnabled`) applies last. Sorted for a
+   * branches. A manifest key WITH `resolve` is infrastructure (an expander
+   * like `fs` or `capabilities`): it expands into capability installs and is
+   * never installed itself. A key WITHOUT it installs itself directly.
+   * Each expanded capability resolves against the registry (unknown fails
+   * the load), and the key's `allows` decides request ∩ grant. The runtime
+   * kill-switch (`setCapabilityEnabled`) applies last. Sorted for a
    * deterministic install order. Each install returns its own teardown.
    */
   private installDynamicCapabilities(plugin: LoadedPlugin, checker: FsPermissionChecker): void {
@@ -423,13 +423,13 @@ export class PluginHost {
     for (const name of Object.keys(requested).sort()) {
       const options = requested[name];
       if (options === false) continue;
-      const binding = getPermissionBinding(name);
-      if (!binding) {
+      const key = getCapability(name);
+      if (!key) {
         throw new PluginLoadError(
           `plugin "${manifest.name}" has no permission binding for "${name}"`,
         );
       }
-      const resolved = binding.resolve ? binding.resolve(options) : [{ capability: name, options }];
+      const resolved = key.resolve ? key.resolve(options) : [{ capability: name, options }];
       for (const { capability, options: capOptions } of resolved) {
         if (capOptions === false) continue;
         const definition = getCapability(capability);
@@ -440,8 +440,8 @@ export class PluginHost {
         }
         if (this.disabled.has(capability)) continue;
         const grant = this.policy.capabilities?.[capability];
-        const allows = binding.allows
-          ? binding.allows(capOptions, grant)
+        const allows = key.allows
+          ? key.allows(capOptions, grant)
           : isPermissionGranted(grant);
         if (!allows) continue;
         if (definition.schema === undefined && isOptionsObject(capOptions) && Object.keys(capOptions).length > 0) {
@@ -451,8 +451,21 @@ export class PluginHost {
           definition.schema !== undefined
             ? applyCapabilityOptions(capability, definition.schema, capOptions)
             : capOptions;
+        if (typeof definition.install !== "function") {
+          throw new PluginLoadError(
+            `plugin "${manifest.name}" requests "${capability}", which cannot be installed directly`,
+          );
+        }
         teardowns.push(
-          definition.install({ vm, manifest, permissions, checker, options: effective, grant }),
+          definition.install({
+            vm,
+            manifest,
+            permissions,
+            checker,
+            platform: this.platform,
+            options: effective,
+            grant,
+          }),
         );
         plugin.capabilities.push(capability);
       }

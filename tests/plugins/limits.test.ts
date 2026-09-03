@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  createNodeFileSystem,
   DEFAULT_MAX_FILE_BYTES,
   ResourceLimitError,
 } from "../../plugins";
+import { createNodeFileSystem } from "../../plugins/node";
 import { cleanup, makeHost, makePlugin, manifestWith } from "./helpers";
 
 afterEach(cleanup);

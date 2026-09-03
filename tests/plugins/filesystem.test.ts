@@ -194,9 +194,9 @@ test("read: true behaves like \"*\" and is bounded by the plugin root", () => {
   expect(makeHost().load(dir).loadResult).toBe("anything");
 });
 
-// ── host policy: absolute access ─────────────────────────────────────
+// ── confinement: no outside-root access, ever ─────────────────────────
 
-test("absolute read denied by host policy", () => {
+test("absolute read is confined to the plugin root", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "/**" } }),
     entry: "export default { onLoad() {} };",
@@ -206,11 +206,11 @@ test("absolute read denied by host policy", () => {
 
   const plugin = makeHost().load(dir);
   expect(() => plugin.vm.callFunction("__cap_fs_readText", [outside])).toThrow(
-    /absolute filesystem reads are disabled by host policy/,
+    /absolute filesystem reads are outside the plugin root/,
   );
 });
 
-test("absolute read allowed when host policy grants it", () => {
+test("an absolute manifest grant cannot reach outside the root", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "/**" } }),
     entry: "export default { onLoad() {} };",
@@ -218,12 +218,14 @@ test("absolute read allowed when host policy grants it", () => {
   const outside = join(outsideDir(dir), "outside.txt");
   writeFileSync(outside, "outside data");
 
-  const host = makeHost({ policy: { fs: { absoluteRead: true, absoluteWrite: false } } });
-  const plugin = host.load(dir);
-  expect(plugin.vm.callFunction("__cap_fs_readText", [outside])).toBe("outside data");
+  const plugin = makeHost().load(dir);
+  expect(() => plugin.vm.callFunction("__cap_fs_readText", [outside])).toThrow(
+    /outside the plugin root/,
+  );
+  expect(readFileSync(outside, "utf8")).toBe("outside data");
 });
 
-test("absolute read still needs a matching manifest rule", () => {
+test("absolute read denied even when the manifest grants a subtree", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "./**" } }),
     entry: "export default { onLoad() {} };",
@@ -231,10 +233,9 @@ test("absolute read still needs a matching manifest rule", () => {
   const outside = join(outsideDir(dir), "outside.txt");
   writeFileSync(outside, "outside data");
 
-  const host = makeHost({ policy: { fs: { absoluteRead: true, absoluteWrite: false } } });
-  const plugin = host.load(dir);
+  const plugin = makeHost().load(dir);
   expect(() => plugin.vm.callFunction("__cap_fs_readText", [outside])).toThrow(
-    /fs.read is not permitted/,
+    /absolute filesystem reads are outside the plugin root/,
   );
 });
 
@@ -246,74 +247,20 @@ test("absolute write denied even when the manifest asks for \"*\"", () => {
   const outside = join(outsideDir(dir), "outside.txt");
   writeFileSync(outside, "original");
 
-  const host = makeHost({ policy: { fs: { absoluteRead: true, absoluteWrite: false } } });
-  const plugin = host.load(dir);
+  const plugin = makeHost().load(dir);
   expect(() => plugin.vm.callFunction("__cap_fs_writeText", [outside, "hacked"])).toThrow(
-    /absolute filesystem writes are disabled by host policy/,
+    /absolute filesystem writes are outside the plugin root/,
   );
   expect(readFileSync(outside, "utf8")).toBe("original");
 });
 
-test("absolute write allowed when host policy grants it", () => {
-  const dir = makePlugin({
-    manifest: manifestWith({ fs: { write: "*" } }),
-    entry: "export default { onLoad() {} };",
-  });
-  const outside = join(outsideDir(dir), "outside.txt");
-  writeFileSync(outside, "original");
-
-  const host = makeHost({ policy: { fs: { absoluteRead: true, absoluteWrite: true } } });
-  const plugin = host.load(dir);
-  expect(plugin.vm.callFunction("__cap_fs_writeText", [outside, "granted"])).toBe(true);
-  expect(readFileSync(outside, "utf8")).toBe("granted");
-});
-
-test("\"*\" inside the plugin root works without absolute policy", () => {
+test("\"*\" inside the plugin root works with the default policy", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "*" } }),
     entry: readEntry("./config.json"),
     files: { "config.json": "in-root" },
   });
   expect(makeHost().load(dir).loadResult).toBe("in-root");
-});
-
-test("policy.deny wins over an absolute grant", () => {
-  const dir = makePlugin({
-    manifest: manifestWith({ fs: { read: "*" } }),
-    entry: "export default { onLoad() {} };",
-  });
-  const outside = join(outsideDir(dir), "outside.txt");
-  writeFileSync(outside, "outside data");
-
-  const host = makeHost({
-    policy: {
-      fs: { absoluteRead: true, absoluteWrite: false, deny: [`${outsideDir(dir)}/**`] },
-    },
-  });
-  const plugin = host.load(dir);
-  expect(() => plugin.vm.callFunction("__cap_fs_readText", [outside])).toThrow(
-    /path is outside allowed scope/,
-  );
-});
-
-test("policy.allow restricts absolute access to a whitelist", () => {
-  const dir = makePlugin({
-    manifest: manifestWith({ fs: { read: "*" } }),
-    entry: "export default { onLoad() {} };",
-  });
-  const allowed = join(outsideDir(dir), "allowed.txt");
-  const other = join(outsideDir(dir), "other.txt");
-  writeFileSync(allowed, "yes");
-  writeFileSync(other, "no");
-
-  const host = makeHost({
-    policy: { fs: { absoluteRead: true, absoluteWrite: false, allow: [allowed] } },
-  });
-  const plugin = host.load(dir);
-  expect(plugin.vm.callFunction("__cap_fs_readText", [allowed])).toBe("yes");
-  expect(() => plugin.vm.callFunction("__cap_fs_readText", [other])).toThrow(
-    /path is outside allowed scope/,
-  );
 });
 
 // ── error hygiene ────────────────────────────────────────────────────

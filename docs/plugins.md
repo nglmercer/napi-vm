@@ -47,12 +47,13 @@ entry (which must stay inside the plugin directory) and every permission
 pattern. Malformed patterns fail at load time, not on the first filesystem
 call.
 
-Each `permissions` key is validated by a schema registered for it
-(`definePermissionSchema`) — the manifest module itself names no key, so new
-capabilities add keys without touching it. An unknown key fails the load:
-a typo'd permission is never silently ignored. The entry string is checked
-for shape at parse time and normalized plus containment-checked by the host
-(`validateEntryPath`, then `realpath`).
+Each `permissions` key is validated by the capability registered for it
+(one `defineCapability` call holds the manifest validator, the install
+shape and the guest module together) — the manifest module itself names no
+key, so new capabilities add keys without touching it. An unknown key fails
+the load: a typo'd permission is never silently ignored. The entry string
+is checked for shape at parse time and normalized plus containment-checked
+by the host (`validateEntryPath`, then `realpath`).
 
 | Value | Meaning |
 |-------|---------|
@@ -60,7 +61,7 @@ for shape at parse time and normalized plus containment-checked by the host
 | `true` | same as `"*"` |
 | `"*"` | requests unrestricted access |
 | `"./assets/**"` | a plugin-relative subtree |
-| `"/usr/share/app/**"` | an absolute path (host policy still decides) |
+| `"/usr/share/app/**"` | an absolute path (refused outside the plugin root) |
 | `["./a", "./b/**"]` | any of several patterns |
 
 Glob syntax is deliberately small: `*` matches within one path segment, `**`
@@ -73,20 +74,20 @@ requested permissions  ∩  host policy  =  effective permissions
 ```
 
 ```ts
+import { PluginHost } from "napi-vm/plugins";
+import { nodePlatform } from "napi-vm/plugins/node";
+
 const host = new PluginHost({
+  platform: nodePlatform(),
   policy: {
-    fs: {
-      absoluteRead: false,   // may the plugin read outside its own root?
-      absoluteWrite: false,  // may it write outside? dangerous
-      deny: ["/etc/**"],     // always refused
-      allow: ["/srv/data/**"], // when present, out-of-root paths must match
-    },
+    capabilities: { path: true, timers: true },
   },
 });
 ```
 
 A plugin asking for `"read": "*"` gets unrestricted reads *inside its own
-directory*; anything beyond that needs `absoluteRead`.
+directory*; anything beyond that is refused — plugins are confined to their
+own root unconditionally, and every capability needs an explicit grant above.
 
 ## Path resolution
 
@@ -95,7 +96,7 @@ resolves its path before checking anything:
 
 ```text
 guest path → fold separators → resolve . and .. → resolve against plugin root
-  → canonicalize (follow symlinks) → host policy → manifest permission → I/O
+  → canonicalize (follow symlinks) → confinement gate → manifest permission → I/O
 ```
 
 Because the check happens on the canonical path, `./cache/../../secret.txt` and
@@ -162,7 +163,7 @@ information and is deliberately withheld. `onUnload` also receives
 ## Host API
 
 ```ts
-const host = new PluginHost({ policy });
+const host = new PluginHost({ policy, platform: nodePlatform() });
 
 const plugin = host.load("./examples/plugins/example-plugin");
 plugin.loadResult;      // whatever onLoad returned
@@ -186,18 +187,40 @@ them immediately as well — an errored plugin never keeps a live `napi:fs` — 
 a failed `onUnload` still unloads the plugin. The registry keeps the errored
 entry so `reload()` can rebuild it from disk.
 
-## Swapping the filesystem
+## Platforms: bringing your own outside world
 
-Everything the host touches goes through one small interface, so the same
-permission logic can sit on Node, Bun, Deno or a Rust backend without the
+Everything the host touches goes through one injected `HostPlatform`
+(filesystem, paths, crypto, native loading), so the same permission logic
+runs on Node, Bun, Deno, a Tauri renderer or a Rust backend without the
 guest-facing API changing:
 
 ```ts
+import { portablePlatform, type HostFileSystem } from "napi-vm/plugins";
+
+const tauriFs: HostFileSystem = { realpath, readText, writeText, exists };
+
 new PluginHost({
   policy,
-  fs: { realpath, readText, writeText, exists },
+  platform: portablePlatform(tauriFs), // POSIX paths + WebCrypto defaults
 });
 ```
+
+Node and Bun hosts use the ready-made platform instead:
+
+```ts
+import { nodePlatform } from "napi-vm/plugins/node";
+
+new PluginHost({
+  policy,
+  platform: nodePlatform({ maxReadBytes: 1024 * 1024 }),
+});
+```
+
+A top-level `fs` option overrides just `platform.fs` (handy for tests and
+for byte-limit tuning without rebuilding the platform). With no platform at
+all the host fails fast on the first filesystem access, pointing at
+`nodePlatform()` — a host that cannot read its plugin directory is a wiring
+error, not a default worth guessing.
 
 ### Size limits
 
@@ -206,14 +229,22 @@ it. The default Node backend caps each read and write at 8 MiB and raises
 `ResourceLimitError` (`e.name === "ResourceLimit"` in guest code) past that:
 
 ```ts
-import { createNodeFileSystem, PluginHost } from "napi-vm/plugins";
+import { PluginHost } from "napi-vm/plugins";
+import { createNodeFileSystem, nodePlatform } from "napi-vm/plugins/node";
 
 new PluginHost({
   policy,
-  fs: createNodeFileSystem({
+  platform: nodePlatform({
     maxReadBytes: 1 * 1024 * 1024,
     maxWriteBytes: 256 * 1024,
   }),
+});
+
+// …or keep your platform and swap only the backend:
+new PluginHost({
+  policy,
+  platform: nodePlatform(),
+  fs: createNodeFileSystem({ maxReadBytes: 1 * 1024 * 1024 }),
 });
 ```
 
@@ -232,32 +263,41 @@ allocated it.
 
 ```text
 plugins/
-  index.ts                  public surface (barrel, organized by layer)
-  core/                     host engine
+  index.ts                  portable surface (no node:* anywhere below it)
+  node.ts                   Node/Bun adapter (nodePlatform, trusted packages)
+  platform.ts               HostPlatform/HostPath/HostFileSystem/HostCrypto
+                            + pure-POSIX paths and WebCrypto defaults
+  core/                     host engine (portable)
     plugin-host.ts          load / reload / unload
     manifest.ts             plugin.json types and validation
     permissions.ts          compilation, policy intersection, enforcement
     lifecycle.ts            guest-side bootstrap and hook wrappers
+    native-bridge.ts        loaded code → guest module bridge (allowlist)
     errors.ts               error types
-  capabilities/             guest modules
-    capability-registry.ts  dynamic capability names (no hardcoded enum)
+  capabilities/             guest modules (portable; one defineCapability each)
+    capability-registry.ts  the single registry (validate/resolve/compile/
+                            allows/schema/install per capability)
     filesystem-capability.ts  napi:fs
     path-capability.ts      napi:path
-    crypto-capability.ts    napi:crypto
+    crypto-capability.ts    napi:crypto (primitives from platform.crypto)
     timers-capability.ts    napi:timers
     fetch-capability.ts     napi:fetch
-    audio-capability.ts     napi:audio via miniaudio_node (registry entry)
-  native/                   npm/`.node` bridging (host-side, operator-gated)
-    native-loader.ts        loaded code → guest module bridge
+    audio-capability.ts     napi:audio (player via grant or requireNative)
+  node/                     Node-only platform pieces
+    node-platform.ts        nodePlatform (node:fs/path/crypto/module)
+    node-filesystem.ts      createNodeFileSystem
+    miniaudio.ts            createMiniaudioPlayer
+  native/                   npm/`.node` downloading (Node-only, operator-gated)
     trusted-modules.ts      pinned download + verify + require
-  fs/                       filesystem + path support
-    host-filesystem.ts      the swappable backend
+  fs/                       path support (portable)
+    checker.ts              confinement gate + manifest permission checks
     path-rules.ts           guest path normalization and glob matching
 ```
 
-External code imports only the barrel (`../plugins`); internal
-cross-imports are relative (`../core/errors`, `../fs/path-rules`), so files
-can move between layers without touching consumers.
+Portable hosts import only the barrel (`napi-vm/plugins`); Node hosts add
+`napi-vm/plugins/node`. Internal cross-imports are relative
+(`../core/errors`, `../fs/path-rules`), so files can move between layers
+without touching consumers.
 
 The capability installers use `exposeFunction` + `registerModule` so the host
 runs against any published napi-vm build; `vm.registerHostModule()` (see the
@@ -270,7 +310,7 @@ symlink escapes, policy intersection, lifecycle and reload.
 
 | Module | Grants | Manifest | Host policy |
 |--------|--------|----------|-------------|
-| `napi:fs` | Reading and writing inside the granted patterns | `fs.read`, `fs.write` | `fs.absoluteRead`, `fs.absoluteWrite`, `fs.deny`, `fs.allow` |
+| `napi:fs` | Reading and writing inside the granted patterns | `fs.read`, `fs.write` | — (always confined to the plugin root) |
 | `napi:path` | POSIX path manipulation (no I/O) | `path: true` | — |
 | `napi:crypto` | Random bytes, UUIDs, digests | `crypto: true` | `crypto: true` |
 | `napi:timers` | The host clock | `timers: true` | `timers: true` or `{ resolutionMs }` |
@@ -294,8 +334,7 @@ registry — there is no manifest enum to extend:
 
 ```ts
 const host = new PluginHost({
-  policy: { fs: { absoluteRead: false, absoluteWrite: false },
-            capabilities: { audio: true } },
+  policy: { capabilities: { audio: true } },
 });
 host.defineCapability(myCapability);   // trusted-operator API
 host.setCapabilityEnabled("audio", false); // runtime kill-switch
@@ -305,15 +344,22 @@ Request ∩ policy ∩ runtime switch = installed. Unknown names fail the load
 (a typo never becomes a silent grant); requested-but-ungranted names stay
 absent. `napi:audio` is the first registry entry — playback through
 `miniaudio_node`, with every `loadFile` path resolved through the plugin's
-own `fs.read` permission first.
+own `fs.read` permission first. Its player comes from the grant
+(`policy.capabilities.audio.createPlayer`, or `createMiniaudioPlayer` from
+`napi-vm/plugins/node`); on Node the default loads `miniaudio_node`
+through the platform, while platforms without a module loader must pass an
+explicit factory.
 
 ### Authoring a capability (subplugin shape)
 
 Every capability — built-in or custom — is one `CapabilityDefinition`:
-a `name`, an option `schema` with defaults, and an `install` that returns
-its own teardown. There is no per-capability uninstall function; the host
-runs the returned teardowns in reverse install order on unload, reload and
-failed hooks:
+a `name`, a manifest `validate` hook, an option `schema` with defaults, and
+an `install` that returns its own teardown. (`resolve`/`compile`/`allows`
+hooks cover the odd shapes: `fs` compiles to checker rules instead of
+installing, `capabilities` expands one map entry per install, `fetch`
+refuses empty requests.) There is no per-capability uninstall function; the
+host runs the returned teardowns in reverse install order on unload, reload
+and failed hooks:
 
 ```ts
 import { defineCapability, unbindCapabilityModule } from "napi-vm/plugins";
@@ -352,7 +398,7 @@ never a guest one. The native code is `require`d on the host; the VM only
 ever sees wrapped functions through `registerHostModule`:
 
 ```ts
-import { installTrustedPackage, nativePackageCapability } from "napi-vm/plugins";
+import { installTrustedPackage, nativePackageCapability } from "napi-vm/plugins/node";
 
 const loaded = await installTrustedPackage(
   { dir: ".napi-vm/modules", allow: ["miniaudio_node"] },
@@ -375,7 +421,11 @@ reaches outside the process or observes anything about it, so there is no path
 or origin to check — but it is still a capability, because a host may want to
 withhold a cryptographic source (a deterministic replay harness, or a plugin
 that has no business generating keys). One `randomBytes` call is capped, so a
-plugin cannot ask for a gigabyte of entropy.
+plugin cannot ask for a gigabyte of entropy. The primitives come from
+`platform.crypto`: the Node platform uses `node:crypto` (sync digests
+included), the portable default uses WebCrypto randomness and UUIDs while
+`digest()` reports itself unavailable — a host that needs digests off Node
+supplies its own `HostCrypto`.
 
 ### `napi:timers`
 

@@ -7,20 +7,19 @@
  * cryptographic source is a capability a host may want to withhold (a
  * deterministic replay harness, say, or a plugin that has no business
  * generating keys).
+ *
+ * The actual primitives come from the host platform (`platform.crypto`): the
+ * Node platform backs them with `node:crypto`, portable hosts with WebCrypto.
  */
-
-import * as nodeCrypto from "node:crypto";
 
 import { PermissionDeniedError } from "../core/errors";
 
-import { booleanPermissionSchema, definePermissionBinding, definePermissionSchema } from "../core/manifest";
 import {
+  booleanPermissionValue,
+  defineCapability,
   unbindCapabilityModule,
   type CapabilityDefinition,
 } from "./capability-registry";
-
-definePermissionSchema("crypto", booleanPermissionSchema());
-definePermissionBinding("crypto", {});
 
 const CRYPTO_GLOBALS = [
   "__cap_crypto_random_bytes",
@@ -65,7 +64,9 @@ export function digest(algorithm, data) {
  */
 export const CRYPTO_CAPABILITY: CapabilityDefinition = {
   name: "crypto",
-  install: ({ vm }) => {
+  validate: booleanPermissionValue,
+  install: ({ vm, platform }) => {
+    const crypto = platform.crypto;
     vm.exposeFunction("__cap_crypto_random_bytes", (size: unknown) => {
       const count = Number(size);
       if (!Number.isInteger(count) || count < 0) {
@@ -76,10 +77,10 @@ export const CRYPTO_CAPABILITY: CapabilityDefinition = {
           `randomBytes is limited to ${MAX_RANDOM_BYTES} bytes per call`,
         );
       }
-      return new Uint8Array(nodeCrypto.randomBytes(count));
+      return crypto.randomBytes(count);
     });
 
-    vm.exposeFunction("__cap_crypto_random_uuid", () => nodeCrypto.randomUUID());
+    vm.exposeFunction("__cap_crypto_random_uuid", () => crypto.randomUUID());
 
     vm.exposeFunction("__cap_crypto_digest", (algorithm: unknown, data: unknown) => {
       const name = String(algorithm).toLowerCase();
@@ -90,10 +91,12 @@ export const CRYPTO_CAPABILITY: CapabilityDefinition = {
         data instanceof Uint8Array
           ? data
           : new TextEncoder().encode(typeof data === "string" ? data : String(data));
-      return nodeCrypto.createHash(name).update(bytes).digest("hex");
+      return crypto.digest(name, bytes);
     });
 
     vm.registerModule(CRYPTO_MODULE_NAME, CRYPTO_MODULE_SOURCE);
     return () => unbindCapabilityModule(vm, CRYPTO_MODULE_NAME, CRYPTO_GLOBALS);
   },
 };
+
+defineCapability(CRYPTO_CAPABILITY);

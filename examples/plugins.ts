@@ -12,16 +12,17 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { PluginHost, type PluginHostPolicy } from "../plugins";
+import { nodePlatform } from "../plugins/node";
 
 const PLUGIN_DIR = join(import.meta.dir, "plugins/example-plugin");
 
-// The host is the final authority: the manifest may *request* absolute paths,
-// but only this policy can grant them.
+// The host is the final authority: plugins are confined to their own
+// directory, and every capability needs an explicit grant here.
 const policy: PluginHostPolicy = {
-  fs: { absoluteRead: false, absoluteWrite: false },
+  capabilities: {},
 };
 
-const host = new PluginHost({ policy });
+const host = new PluginHost({ policy, platform: nodePlatform() });
 
 // ── load ────────────────────────────────────────────────────────────
 
@@ -41,7 +42,7 @@ for (const attempt of [
   "./plugin.json", // outside the granted patterns
   "./assets/../plugin.json", // traversal, normalized first
   "../../../etc/passwd", // escapes the plugin root
-  "/etc/passwd", // absolute, denied by host policy
+  "/etc/passwd", // absolute, outside the plugin root
 ]) {
   try {
     plugin.vm.callFunction("__cap_fs_readText", [attempt]);
