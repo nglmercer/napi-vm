@@ -707,7 +707,7 @@ impl Parser {
                         };
                     } else {
                         // Optional member: obj?.prop
-                        let p = self.ident()?;
+                        let p = self.ident_or_keyword()?;
                         e = Expr::OptionalChain {
                             object: Box::new(e),
                             property: Box::new(Expr::String(p)),

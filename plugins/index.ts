@@ -170,7 +170,6 @@ export {
   compileFetchPermission,
   FETCH_CAPABILITY,
   DEFAULT_MAX_RESPONSE_BYTES,
-  FETCH_MODULE_NAME,
   type CompiledFetchPermissions,
   type FetchPermission,
   type FetchPolicy,
@@ -185,3 +184,34 @@ export {
   type AudioPlayerLike,
   type AudioPolicyOptions,
 } from "./capabilities/audio-capability";
+
+// ── npm: pure guest package source ─────────────────────────────────
+
+export {
+  GuestPackageLoader,
+  GuestPackageResolver,
+  IdentityCompiler,
+  SwcCompiler,
+  NpmCompatibilityError,
+  canonicalModuleId,
+  parsePackageJson,
+  parsePackageSpecifier,
+  resolveExportTarget,
+  rewriteModuleSpecifiers,
+  scanModuleSource,
+  type CompilerMode,
+  type GuestCompiler,
+  type GuestCompilerInput,
+  type GuestCompilerOutput,
+  type GuestPackage,
+  type GuestPackageJson,
+  type GuestPackageLoaderOptions,
+  type GuestSyntax,
+  type NpmCompatibilityCategory,
+  type ResolvedPackageModule,
+  type ScannedModuleSource,
+  type StaticImport,
+  type SwcBackend,
+  type SwcTransformOptions,
+  type SwcTransformResult,
+} from "./npm";

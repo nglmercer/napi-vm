@@ -17,6 +17,15 @@ export declare class Vm {
   constructor()
   run(source: string): string
   /**
+   * Lex and parse module source without evaluating it or resolving imports.
+   *
+   * This uses the same lexer and parser as execution. In particular, it
+   * does not register or run the module, invoke host functions, or apply
+   * side effects. Callers can use it to decide whether optional source
+   * transformation is needed before registration.
+   */
+  validateModule(source: string): ValidationResult
+  /**
    * Define a guest module *without* evaluating it.
    *
    * The body runs the first time something imports the module. Deferring it
@@ -139,3 +148,17 @@ export interface NapiHover {
 }
 
 export declare function runCode(source: string): string
+
+/** One parse-only diagnostic returned by `VM.validateModule`. */
+export interface ValidationDiagnostic {
+  line: number
+  column: number
+  message: string
+  kind: "syntax" | "unsupported-syntax" | "parse-limit"
+}
+
+/** Result of lexing and parsing guest source without executing it. */
+export interface ValidationResult {
+  valid: boolean
+  diagnostics: Array<ValidationDiagnostic>
+}

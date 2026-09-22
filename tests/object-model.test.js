@@ -13,6 +13,10 @@ test("delete removes the property", () => {
   expect(runCode("const o = { a: 1, b: 2 }; delete o.a; JSON.stringify(o);")).toBe('{"b":2}');
 });
 
+test("object literal duplicate keys use the last value and keep insertion order", () => {
+  expect(runCode("JSON.stringify({ a: 1, b: 2, a: 3 });")).toBe('{"a":3,"b":2}');
+});
+
 test("delete reports success", () => {
   expect(runCode("const o = { a: 1 }; delete o.a;")).toBe("true");
 });
@@ -188,6 +192,18 @@ test("defineProperty installs a getter and a setter together", () => {
       "let v = 0; const o = {}; Object.defineProperty(o, 'a', { get() { return v; }, set(x) { v = x * 2; } }); o.a = 5; o.a;",
     ),
   ).toBe("10");
+});
+
+test("object literal getter and setter declarations combine", () => {
+  expect(
+    runCode("let value = 0; const o = { get x() { return value; }, set x(n) { value = n; } }; o.x = 5; o.x;"),
+  ).toBe("5");
+});
+
+test("object spread reads an accessor and copies its current value", () => {
+  expect(
+    runCode("let value = 1; const source = { get x() { return value; } }; const copy = { ...source }; value = 2; copy.x;"),
+  ).toBe("1");
 });
 
 test("defineProperties installs several at once", () => {

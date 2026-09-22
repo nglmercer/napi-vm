@@ -347,6 +347,9 @@ impl Interpreter {
                 }
                 Ok(Value::Undefined)
             }
+            (Value::Function(_), Value::String(k)) => {
+                Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
+            }
             (Value::Generator { .. }, Value::String(k)) => {
                 if k == "next" {
                     Ok(Value::NativeFunction {
@@ -399,7 +402,7 @@ impl Interpreter {
                         _ => Ok(Value::Undefined),
                     }
                 } else {
-                    Ok(Value::Undefined)
+                    Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
                 }
             }
 
@@ -458,7 +461,7 @@ impl Interpreter {
                 if k == "name" {
                     Ok(Value::String(name.to_string()))
                 } else {
-                    Ok(Value::Undefined)
+                    Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
                 }
             }
             // Symbol-keyed property access: `arr[Symbol.iterator]`,

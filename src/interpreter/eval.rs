@@ -1,6 +1,7 @@
 //! Statement and expression evaluation: the two big `match` dispatchers.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{BindKind, Env, Environment, Interpreter, Lookup, ModifyOutcome};
@@ -15,6 +16,65 @@ use crate::value::{ClassData, FunctionData, PromiseState, Value};
 /// binding is a refcount bump, not a heap allocation.
 fn intern_params(params: &[String]) -> Rc<Vec<Rc<str>>> {
     Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ObjectAccessorKind {
+    Getter,
+    Setter,
+}
+
+/// Add an object-literal property, replacing an earlier value for the same
+/// key while preserving a getter/setter pair for accessor properties.
+fn insert_object_property(
+    props: &mut Vec<Option<(String, Value)>>,
+    positions: &mut HashMap<String, Vec<usize>>,
+    accessors: &mut HashMap<usize, ObjectAccessorKind>,
+    key: String,
+    value: Value,
+    kind: Option<ObjectAccessorKind>,
+) {
+    let existing = positions.get(&key).cloned().unwrap_or_default();
+
+    if let Some(kind) = kind {
+        if let Some(index) = existing
+            .iter()
+            .copied()
+            .find(|index| accessors.get(index) == Some(&kind))
+        {
+            props[index] = Some((key, value));
+            return;
+        }
+        if !existing.is_empty() && existing.iter().all(|index| accessors.contains_key(index)) {
+            let index = props.len();
+            props.push(Some((key.clone(), value)));
+            positions.entry(key).or_default().push(index);
+            accessors.insert(index, kind);
+            return;
+        }
+    }
+
+    if let Some(index) = existing.first().copied() {
+        props[index] = Some((key.clone(), value));
+        for duplicate in existing.iter().skip(1) {
+            props[*duplicate] = None;
+        }
+        if let Some(kind) = kind {
+            accessors.insert(index, kind);
+        } else {
+            for index in &existing {
+                accessors.remove(index);
+            }
+        }
+        positions.insert(key, vec![index]);
+    } else {
+        let index = props.len();
+        props.push(Some((key.clone(), value)));
+        positions.insert(key, vec![index]);
+        if let Some(kind) = kind {
+            accessors.insert(index, kind);
+        }
+    }
 }
 
 fn push_call_arg(args: &mut Vec<Value>, value: Value) -> Result<(), VmErr> {
@@ -1020,6 +1080,147 @@ impl Interpreter {
         scope
     }
 
+    fn eval_object_literal(&mut self, props: &[ObjectProp]) -> Result<Value, VmErr> {
+        let mut object = Vec::new();
+        let mut positions = HashMap::new();
+        let mut accessors = HashMap::new();
+        for prop in props {
+            match prop {
+                ObjectProp::Shorthand(name) => {
+                    let value = self.global.borrow().get(name).unwrap_or(Value::Undefined);
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        name.clone(),
+                        value,
+                        None,
+                    );
+                }
+                ObjectProp::KeyValue(key, expression) => {
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        key.clone(),
+                        self.eval_expr(expression)?,
+                        None,
+                    );
+                }
+                ObjectProp::Computed(key_expression, value_expression) => {
+                    let key_value = self.eval_expr(key_expression)?;
+                    let key = match &key_value {
+                        Value::String(value) => value.clone(),
+                        Value::Number(value) => value.to_string(),
+                        Value::Symbol(value) => super::symbol_slot_key(value),
+                        _ => continue,
+                    };
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        key,
+                        self.eval_expr(value_expression)?,
+                        None,
+                    );
+                }
+                ObjectProp::Method {
+                    name,
+                    params,
+                    body,
+                    is_async,
+                    is_generator,
+                } => {
+                    let function = Value::Function(Box::new(FunctionData {
+                        name: Some(name.as_str().into()),
+                        params: intern_params(params),
+                        body: Rc::new(body.clone()),
+                        closure: Some(self.global.clone()),
+                        is_arrow: false,
+                        is_async: *is_async,
+                        is_generator: *is_generator,
+                        uses_arguments: stmts_reference(body, "arguments"),
+                    }));
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        name.clone(),
+                        function,
+                        None,
+                    );
+                }
+                ObjectProp::Getter { name, body } => {
+                    let function = Value::Function(Box::new(FunctionData {
+                        name: Some(format!("get {name}").into()),
+                        params: Rc::new(vec![]),
+                        body: Rc::new(body.clone()),
+                        closure: Some(self.global.clone()),
+                        is_arrow: false,
+                        is_async: false,
+                        is_generator: false,
+                        uses_arguments: stmts_reference(body, "arguments"),
+                    }));
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        name.clone(),
+                        function,
+                        Some(ObjectAccessorKind::Getter),
+                    );
+                }
+                ObjectProp::Setter { name, param, body } => {
+                    let function = Value::Function(Box::new(FunctionData {
+                        name: Some(format!("set {name}").into()),
+                        params: Rc::new(vec![Rc::from(param.as_str())]),
+                        body: Rc::new(body.clone()),
+                        closure: Some(self.global.clone()),
+                        is_arrow: false,
+                        is_async: false,
+                        is_generator: false,
+                        uses_arguments: stmts_reference(body, "arguments"),
+                    }));
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        name.clone(),
+                        function,
+                        Some(ObjectAccessorKind::Setter),
+                    );
+                }
+                ObjectProp::Spread(expression) => {
+                    let value = self.eval_expr(expression)?;
+                    if matches!(&value, Value::Object { .. }) {
+                        for key in self.keys(&value) {
+                            let property_value = self.member(&value, &key)?;
+                            insert_object_property(
+                                &mut object,
+                                &mut positions,
+                                &mut accessors,
+                                key.clone(),
+                                property_value,
+                                None,
+                            );
+                            if positions.len() > crate::value::MAX_OBJECT_PROPS {
+                                return Err(crate::value::limit_err(
+                                    "Maximum object property count exceeded",
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            if positions.len() > crate::value::MAX_OBJECT_PROPS {
+                return Err(crate::value::limit_err(
+                    "Maximum object property count exceeded",
+                ));
+            }
+        }
+        Value::checked_object(object.into_iter().flatten().collect())
+    }
+
     /// Run a `switch`'s cases inside the scope the caller already pushed.
     ///
     /// All cases share that one block scope, because fall-through means a
@@ -1161,99 +1362,22 @@ impl Interpreter {
                 }
                 Value::checked_array(v)
             }
-            Expr::Object(props) => {
-                let mut o = Vec::new();
-                for prop in props {
-                    match prop {
-                        ObjectProp::Shorthand(name) => {
-                            let val = self.global.borrow().get(name).unwrap_or(Value::Undefined);
-                            o.push((name.clone(), val));
-                        }
-                        ObjectProp::KeyValue(k, v) => {
-                            o.push((k.clone(), self.eval_expr(v)?));
-                        }
-                        ObjectProp::Computed(k, v) => {
-                            let key_val = self.eval_expr(k)?;
-                            let key = match &key_val {
-                                Value::String(s) => s.clone(),
-                                Value::Number(n) => n.to_string(),
-                                // Symbol keys are stored under an internal
-                                // mangled name so they can be resolved later.
-                                Value::Symbol(s) => super::symbol_slot_key(s),
-                                _ => continue,
-                            };
-                            o.push((key, self.eval_expr(v)?));
-                        }
-                        ObjectProp::Method {
-                            name,
-                            params,
-                            body,
-                            is_async,
-                            is_generator,
-                        } => {
-                            let fn_val = Value::Function(Box::new(FunctionData {
-                                name: Some(name.as_str().into()),
-                                params: intern_params(params),
-                                body: Rc::new(body.clone()),
-                                closure: Some(self.global.clone()),
-                                is_arrow: false,
-                                is_async: *is_async,
-                                is_generator: *is_generator,
-                                uses_arguments: stmts_reference(body, "arguments"),
-                            }));
-                            o.push((name.clone(), fn_val));
-                        }
-                        ObjectProp::Getter { name, body } => {
-                            let fn_val = Value::Function(Box::new(FunctionData {
-                                name: Some(format!("get {}", name).into()),
-                                params: Rc::new(vec![]),
-                                body: Rc::new(body.clone()),
-                                closure: Some(self.global.clone()),
-                                is_arrow: false,
-                                is_async: false,
-                                is_generator: false,
-                                uses_arguments: stmts_reference(body, "arguments"),
-                            }));
-                            o.push((name.clone(), fn_val));
-                        }
-                        ObjectProp::Setter { name, param, body } => {
-                            let fn_val = Value::Function(Box::new(FunctionData {
-                                name: Some(format!("set {}", name).into()),
-                                params: Rc::new(vec![Rc::from(param.as_str())]),
-                                body: Rc::new(body.clone()),
-                                closure: Some(self.global.clone()),
-                                is_arrow: false,
-                                is_async: false,
-                                is_generator: false,
-                                uses_arguments: stmts_reference(body, "arguments"),
-                            }));
-                            o.push((name.clone(), fn_val));
-                        }
-                        ObjectProp::Spread(expr) => {
-                            let val = self.eval_expr(expr)?;
-                            if let Value::Object { props: sprops, .. } = &val {
-                                let props = sprops.borrow();
-                                if o.len().saturating_add(props.len())
-                                    > crate::value::MAX_OBJECT_PROPS
-                                {
-                                    return Err(crate::value::limit_err(
-                                        "Maximum object property count exceeded",
-                                    ));
-                                }
-                                o.extend(props.iter().cloned());
-                            }
-                        }
-                    }
-                    if o.len() > crate::value::MAX_OBJECT_PROPS {
-                        return Err(crate::value::limit_err(
-                            "Maximum object property count exceeded",
-                        ));
-                    }
-                }
-                Value::checked_object(o)
-            }
+            Expr::Object(props) => self.eval_object_literal(props),
             Expr::Binary { op, left, right } => {
                 let l = self.eval_expr(left)?;
+                match op {
+                    crate::parser::BinOp::And if !self.truthy(&l) => return Ok(l),
+                    crate::parser::BinOp::Or if self.truthy(&l) => return Ok(l),
+                    crate::parser::BinOp::Nullish
+                        if !matches!(l, Value::Null | Value::Undefined) =>
+                    {
+                        return Ok(l);
+                    }
+                    crate::parser::BinOp::And
+                    | crate::parser::BinOp::Or
+                    | crate::parser::BinOp::Nullish => return self.eval_expr(right),
+                    _ => {}
+                }
                 let r = self.eval_expr(right)?;
                 // A proxy's `has` trap answers `in`. It runs guest code, so it
                 // cannot live in `bin_op`, which does not borrow mutably.

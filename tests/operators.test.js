@@ -98,6 +98,12 @@ test("logical OR short-circuit returns value", () => {
   expect(runCode("null || 'default';")).toBe("default");
 });
 
+test("logical operators do not evaluate a short-circuited right operand", () => {
+  expect(runCode("let n = 0; true || (n = 1); n;" )).toBe("0");
+  expect(runCode("let n = 0; false && (n = 1); n;" )).toBe("0");
+  expect(runCode("let n = 0; 1 ?? (n = 1); n;" )).toBe("0");
+});
+
 test("truthiness", () => {
   expect(runCode("!!0;")).toBe("false");
   expect(runCode("!!1;")).toBe("true");

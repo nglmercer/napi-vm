@@ -9,6 +9,34 @@ use crate::value::{ObjectCell, PropAttrs, Value};
 
 pub(super) fn install(e: &mut Environment) {
     let Some(o) = e.get("Object") else { return };
+    let prototype = Value::object(vec![]);
+    prototype
+        .set_prop(
+            "hasOwnProperty".to_string(),
+            nf("hasOwnProperty", object_has_own_property),
+        )
+        .expect("built-in Object.prototype property");
+    if let Value::Object { props } = &prototype {
+        props.meta.borrow_mut().set_attrs(
+            "hasOwnProperty",
+            PropAttrs {
+                enumerable: false,
+                ..PropAttrs::default()
+            },
+        );
+    }
+    o.set_prop("prototype".to_string(), prototype.clone())
+        .expect("built-in Object.prototype");
+    if let Value::Object { props } = &o {
+        props.meta.borrow_mut().set_attrs(
+            "prototype",
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+    }
     let methods: &[(&str, super::NativeFn)] = &[
         ("keys", object_keys),
         ("values", object_values),
@@ -197,14 +225,9 @@ fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
     Value::checked_object(props)
 }
 
-fn object_has_own(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    let key = match a.get(1) {
-        Some(Value::String(k)) => k.clone(),
-        Some(Value::Number(n)) => crate::format::number_string(*n),
-        Some(Value::Symbol(s)) => crate::interpreter::symbol_slot_key(s),
-        _ => "undefined".to_string(),
-    };
+    let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
     let found = match &v {
         Value::Object { props } => props.borrow().iter().any(|(k, _)| *k == key),
         Value::Array(items) => {
@@ -216,6 +239,18 @@ fn object_has_own(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value,
         _ => false,
     };
     Ok(Value::Bool(found))
+}
+
+fn object_has_own_property(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    object_has_own(
+        interp,
+        Value::Undefined,
+        vec![this, args.first().cloned().unwrap_or(Value::Undefined)],
+    )
 }
 
 fn object_is(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

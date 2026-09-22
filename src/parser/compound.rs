@@ -235,7 +235,7 @@ impl Parser {
         } else if self.eat(&Token::Star) {
             // `export * from 'm'` / `export * as ns from 'm'`.
             let alias = if self.eat(&Token::KwAs) {
-                Some(self.ident()?)
+                Some(self.ident_or_keyword()?)
             } else {
                 None
             };
@@ -266,7 +266,7 @@ impl Parser {
                     if self.eat(&Token::KwDefault) {
                         "default".to_string()
                     } else {
-                        self.ident()?
+                        self.ident_or_keyword()?
                     }
                 } else {
                     l.clone()
@@ -361,7 +361,7 @@ impl Parser {
         if self.eat(&Token::KwDefault) {
             return Some("default".to_string());
         }
-        self.ident()
+        self.ident_or_keyword()
     }
 
     pub(super) fn import(&mut self) -> Option<Statement> {

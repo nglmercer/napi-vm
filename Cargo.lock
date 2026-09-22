@@ -614,6 +614,7 @@ dependencies = [
  "js-sys",
  "napi",
  "napi-derive",
+ "regex-syntax",
  "serde",
  "serde_json",
  "sha2",

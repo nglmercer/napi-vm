@@ -39,6 +39,8 @@ Every claim below was checked against the current build.
   with defaults, nesting and rest elements (`tests/destructuring.test.js`)
 - Spread (via the iterator protocol), rest, optional chaining, nullish
   coalescing, template literals
+- Logical `&&`, `||`, and `??` short-circuit without evaluating an unused
+  right operand (`tests/operators.test.js`)
 - **Tagged templates**: the tag receives the cooked chunks, a `raw` companion
   array, and the interpolated values (`tests/builtin-constructors.test.js`)
 - **Logical assignment**: `&&=`, `||=`, `??=`, with short-circuit evaluation
@@ -119,6 +121,8 @@ Every claim below was checked against the current build.
   modules can each declare `helper` and neither leaks to the global object
 - Namespace objects expose the default export as `"default"`
   (`tests/modules-linking.test.js`)
+- `Vm.validateModule()` lexes and parses source without resolving imports or
+  executing side effects (`tests/vm-validation.test.js`)
 
 ### Host integration
 
@@ -130,8 +134,8 @@ Every claim below was checked against the current build.
   shared references, in both directions. A VM **function** crosses as a host
   callable that re-enters the interpreter, keeping its closure
   (`tests/bridge-values.test.js`)
-- Plugin capability host: manifests, permissions, and the capability modules
-  — `napi:fs`, `napi:path`, `napi:crypto`, `napi:timers` and `napi:fetch`,
+- Plugin capability host: manifests, permissions, and the capability APIs
+  — `napi:fs`, `napi:path`, `napi:crypto`, `napi:timers` and standard `fetch()`,
   each installed only when the manifest asks *and* the host policy permits
   (`tests/plugins/capabilities.test.ts`, `docs/plugins.md`)
 - **LSP**: synchronization, completion, hover, document symbols, definition,
@@ -139,6 +143,14 @@ Every claim below was checked against the current build.
   semantic tokens, formatting and code actions (`tests/lsp_protocol.rs`)
 
 ## Partial
+
+- **npm guest packages** — `GuestPackageLoader` resolves ESM `exports`,
+  subpaths, relative modules and dependencies into canonical guest IDs, then
+  registers source with `defineModule`. The verified Valibot 1.5.0 fixture
+  matches Node and Bun for primitives, nested schemas, variants and a
+  transformation pipeline. CommonJS/native packages and computed dynamic
+  imports are not supported yet; compiler mode defaults to `none`
+  (`tests/npm-loader.test.js`, `tests/compat/valibot.test.js`)
 
 - **Generators on `wasm32`** — the browser target has no stack switching, so a
   body cannot be suspended. It runs once to completion on the first `next()`
@@ -185,13 +197,13 @@ Every claim below was checked against the current build.
 
 Reported as errors rather than silently mis-executed:
 
-- The web-like globals that reach outside the sandbox — `fetch`, `Headers`,
-  `Request`, `Response`, `WebSocket`, `crypto`, `localStorage` and friends —
-  remain inert shapes, and are meant to. What they would grant arrives instead
-  through the capability host: `napi:fetch`, `napi:crypto` and `napi:timers`
-  are implemented there, where a request is checked against the manifest and
-  the host policy before anything is reached. The guest gets nothing by
-  default.
+- Network operations remain unavailable unless the host grants them. Standard
+  `fetch()` is installed only through the fetch capability;
+  `crypto` and `timers` continue to use their explicit capability APIs. Every
+  request is checked against the manifest and host policy before network I/O.
+- `WebSocket` is still a non-callable placeholder. The runtime does not yet
+  have a thread-safe external-event queue for delivering host messages at a
+  safe interpreter checkpoint, so there is no WebSocket transport installed.
 - `Intl`, `Object.groupBy`, and the other recent library additions not listed
   above.
 - `with`, which is not in the grammar at all. (Labelled `break` and `continue`

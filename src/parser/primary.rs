@@ -113,11 +113,6 @@ impl Parser {
                     let is_method = self.starts_accessor(&Token::KwGet) && self.eat(&Token::KwGet);
                     let is_setter = self.starts_accessor(&Token::KwSet) && self.eat(&Token::KwSet);
                     let key = match self.cur() {
-                        Token::Identifier(n) => {
-                            let v = n.clone();
-                            self.adv();
-                            v
-                        }
                         Token::String(s) => {
                             let v = s.clone();
                             self.adv();
@@ -127,20 +122,6 @@ impl Parser {
                             let v = n.to_string();
                             self.adv();
                             v
-                        }
-                        // `get` and `set` are contextual: reaching here means
-                        // no property name followed, so they name the property.
-                        Token::KwGet => {
-                            self.adv();
-                            "get".to_string()
-                        }
-                        Token::KwSet => {
-                            self.adv();
-                            "set".to_string()
-                        }
-                        Token::KwAsync => {
-                            self.adv();
-                            "async".to_string()
                         }
                         Token::LBracket => {
                             self.adv();
@@ -220,7 +201,12 @@ impl Parser {
                                 _ => return None,
                             }
                         }
-                        _ => break,
+                        // Object literal keys use IdentifierName, so reserved
+                        // words such as `default` and `class` are valid here.
+                        _ => match self.ident_or_keyword() {
+                            Some(key) => key,
+                            None => break,
+                        },
                     };
                     if is_setter {
                         self.eat(&Token::LParen);
@@ -343,10 +329,15 @@ impl Parser {
                 self.semi();
                 Some(Expr::Undefined)
             }
-            Token::Identifier(n) => {
-                let nm = n.clone();
+            Token::Identifier(_)
+            | Token::KwAs
+            | Token::KwConstructor
+            | Token::KwFrom
+            | Token::KwGet
+            | Token::KwOf
+            | Token::KwSet => {
                 let span = self.cur_span();
-                self.adv();
+                let nm = self.ident()?;
                 // Every identifier read in expression position is a reference
                 // the language server can resolve back to its declaration.
                 self.record(&nm, span, crate::parser::Occurrence::Reference, None);
@@ -444,9 +435,8 @@ impl Parser {
             match self.cur() {
                 Token::DotDotDot => {
                     self.adv();
-                    if let Token::Identifier(n) = self.cur() {
-                        params.push(format!("...{}", n));
-                        self.adv();
+                    if let Some(name) = self.ident() {
+                        params.push(format!("...{}", name));
                     } else {
                         self.pos = save;
                         return None;
@@ -472,9 +462,11 @@ impl Parser {
                     });
                     params.push(slot);
                 }
-                Token::Identifier(n) => {
-                    let name = n.clone();
-                    self.adv();
+                _ => {
+                    let Some(name) = self.ident() else {
+                        self.pos = save;
+                        return None;
+                    };
                     if self.eat(&Token::Equal) {
                         match self.assign() {
                             Some(d) => defaults.push(Parser::default_guard(&name, d)),
@@ -485,10 +477,6 @@ impl Parser {
                         }
                     }
                     params.push(name);
-                }
-                _ => {
-                    self.pos = save;
-                    return None;
                 }
             }
             if !self.eat(&Token::Comma) {
@@ -504,13 +492,7 @@ impl Parser {
 
     /// Parse a function expression after its `function` (and any `*`) token.
     fn fn_expr_tail(&mut self, is_generator: bool, is_async: bool) -> Option<Expr> {
-        let n = if let Token::Identifier(x) = self.cur() {
-            let v = x.clone();
-            self.adv();
-            Some(v)
-        } else {
-            None
-        };
+        let n = self.ident();
         self.eat(&Token::LParen);
         let (p, defaults) = self.params();
         self.expect(&Token::RParen);

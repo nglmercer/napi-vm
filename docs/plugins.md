@@ -281,8 +281,13 @@ plugins/
     path-capability.ts      napi:path
     crypto-capability.ts    napi:crypto (primitives from platform.crypto)
     timers-capability.ts    napi:timers
-    fetch-capability.ts     napi:fetch
+    fetch-capability.ts     standard fetch(), installed by the fetch capability
     audio-capability.ts     napi:audio (player via grant or requireNative)
+  npm/                      pure guest source loader (portable)
+    resolver.ts             package exports and ESM entry resolution
+    module-graph.ts          dependency scanning and canonical linking
+    guest-package-loader.ts  validate, compile optionally, then defineModule
+    compiler.ts              identity and optional SWC adapters
   node/                     Node-only platform pieces
     node-platform.ts        nodePlatform (node:fs/path/crypto/module)
     node-filesystem.ts      createNodeFileSystem
@@ -314,7 +319,7 @@ symlink escapes, policy intersection, lifecycle and reload.
 | `napi:path` | POSIX path manipulation (no I/O) | `path: true` | — |
 | `napi:crypto` | Random bytes, UUIDs, digests | `crypto: true` | `crypto: true` |
 | `napi:timers` | The host clock | `timers: true` | `timers: true` or `{ resolutionMs }` |
-| `napi:fetch` | HTTP to named origins | `fetch: [...]` | `fetch: { allow, deny, ... }` |
+| `fetch()` | HTTP to named origins | `fetch: [...]` | `fetch: { allow, deny, ... }` |
 | `napi:audio` | Native playback (`miniaudio_node`) | `capabilities: { audio: true }` | `capabilities: { audio: true }` |
 
 Every one of them is installed only when the manifest asks *and* the host
@@ -391,11 +396,46 @@ own limits.
 registry entries — installed unconditionally (`fs`) or by boolean flag
 (`path`) — because the permission checker itself stands on them.
 
+## Pure JavaScript npm packages
+
+`GuestPackageLoader` resolves npm metadata and reads package source as text.
+It registers canonical `/npm/name@version/path` module IDs with `defineModule`,
+so the package body executes only after guest code imports it. It never calls
+host `require()` or `import()` on a guest package:
+
+```ts
+import { Vm } from "napi-vm";
+import { GuestPackageLoader } from "napi-vm/plugins";
+import { nodePlatform } from "napi-vm/plugins/node";
+
+const vm = new Vm();
+const packages = new GuestPackageLoader(vm, {
+  platform: nodePlatform(),
+  compilerMode: "none",
+});
+
+await packages.loadPackage("valibot");
+vm.run(`import * as v from "valibot"; typeof v.object;`);
+```
+
+The loader resolves ESM `exports` conditions, relative imports, subpath
+exports, and dependencies, then rewrites resolved specifiers to canonical
+guest module IDs. CommonJS, native addons, and computed dynamic imports are
+reported as compatibility errors. The guest still has only the globals and
+host capabilities installed in its `Vm`.
+
+Compilation is independent from package resolution. `none` (the default)
+validates and registers source unchanged. `auto` uses source unchanged when
+`vm.validateModule()` accepts it, then tries an injected compiler or optional
+`@swc/core` only after a validation failure. `swc` always transforms first.
+Every transformed module is validated again by napi-vm before registration;
+SWC success alone never marks source executable.
+
 ## Trusted native packages
 
-Downloading and exposing an npm / `.node` package is an operator action,
-never a guest one. The native code is `require`d on the host; the VM only
-ever sees wrapped functions through `registerHostModule`:
+Native addons and other explicitly trusted host packages follow a separate
+operator controlled path. Their native code is `require`d on the host; the VM
+only ever sees wrapped functions through `registerHostModule`:
 
 ```ts
 import { installTrustedPackage, nativePackageCapability } from "napi-vm/plugins/node";
@@ -441,7 +481,7 @@ policy: { timers: { resolutionMs: 100 } }
 rounds the clock down before the guest sees it, which is what makes timing
 side channels expensive to use.
 
-### `napi:fetch`
+### `fetch()`
 
 The capability that actually reaches outside the machine, so its checks are
 the ones that matter:
@@ -456,13 +496,20 @@ the ones that matter:
   origin cannot bounce a request to a denied one.
 - Only `http:` and `https:`; the response body is capped.
 
-`napi:fetch` performs an async host call, which parks the VM thread, so it
-runs under `runAsync`:
+When the capability is granted, the VM installs the standard global
+`fetch()`, backed by the existing permission-checked async host call. Without
+the grant, the global is absent. It runs under `runAsync`:
 
 ```ts
 await vm.runAsync(`
-  import { fetch } from "napi:fetch";
   const response = await fetch("https://api.example.com/items");
-  response.json();
+  const items = await response.json();
+  items.length;
 `);
 ```
+
+The current facade supports string request bodies and the common `Headers`,
+`Request`, and `Response` operations. Unsupported body types fail explicitly;
+abort signals, streaming bodies, and the full Web Fetch surface are not
+implemented yet. The origin, redirect, timeout, and response-size checks stay
+in the host capability.

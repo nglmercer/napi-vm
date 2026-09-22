@@ -16,7 +16,7 @@ import { manifestWith } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // The capability modules beyond `napi:fs` and `napi:path`: `napi:crypto`,
-// `napi:timers` and `napi:fetch`. Each is a registry definition installed
+// `napi:timers` and standard `fetch()`. Each is a registry definition installed
 // through one interface; each install returns its own teardown, so there is
 // no per-capability uninstall function to remember.
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ test("the VM's own timers stay clock-free without the capability", () => {
   expect(() => vm.run("import { now } from 'napi:timers'; now();")).toThrow();
 });
 
-// --- napi:fetch: the permission check ---------------------------------------
+// --- fetch: the permission check --------------------------------------------
 
 function permitted(requested: unknown, policyAllow: string[], url: string): boolean {
   try {
@@ -207,7 +207,7 @@ test("a non-boolean crypto flag is rejected", () => {
   ).toThrow("must be a boolean");
 });
 
-// --- napi:fetch: end to end -------------------------------------------------
+// --- standard fetch(): end to end -------------------------------------------
 
 /// A stub transport. Typed loosely because the tests only exercise the one
 /// call shape the capability makes.
@@ -244,10 +244,28 @@ test("a permitted request reaches the transport", async () => {
   }, async () => {
     const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
     const result = await vm.runAsync(
-      "import { fetch } from 'napi:fetch'; const r = await fetch('https://api.example.com/x'); r.status + ':' + r.text();",
+      "const r = await fetch('https://api.example.com/x'); const text = await r.text(); r.status + ':' + text;",
     );
     expect(result).toBe("200:hello");
     expect(seen).toEqual(["https://api.example.com/x"]);
+    vm.dispose();
+  });
+});
+
+test("fetch accepts a Request created by the guest facade", async () => {
+  const seen: string[] = [];
+  await withFetchStub(async (url, init) => {
+    seen.push(`${String(url)}:${(init as { method?: string }).method}`);
+    return new Response("ok", { status: 200 });
+  }, async () => {
+    const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
+    const result = await vm.runAsync(`
+      const request = new Request("https://api.example.com/from-request");
+      const response = await fetch(request);
+      await response.text();
+    `);
+    expect(result).toBe("ok");
+    expect(seen).toEqual(["https://api.example.com/from-request:GET"]);
     vm.dispose();
   });
 });
@@ -260,7 +278,7 @@ test("a denied origin never reaches the transport", async () => {
   }, async () => {
     const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
     const result = await vm.runAsync(
-      "import { fetch } from 'napi:fetch'; try { await fetch('https://evil.example.com/x'); 'allowed'; } catch (e) { 'denied'; }",
+      "try { await fetch('https://evil.example.com/x'); 'allowed'; } catch (e) { 'denied'; }",
     );
     expect(result).toBe("denied");
     expect(called).toBe(false);
@@ -269,15 +287,61 @@ test("a denied origin never reaches the transport", async () => {
 });
 
 test("json() parses the body", async () => {
-  await withFetchStub(async () => new Response('{"a":1}', { status: 200 }), async () => {
+  await withFetchStub(async () => new Response('{"a":1}', {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  }), async () => {
     const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
     expect(
       await vm.runAsync(
-        "import { fetch } from 'napi:fetch'; const r = await fetch('https://api.example.com/x'); r.json().a;",
+        "const r = await fetch('https://api.example.com/x'); const data = await r.json(); data.a;",
       ),
     ).toBe("1");
+    expect(vm.run("typeof Headers + ':' + typeof Request + ':' + typeof Response;")).toBe(
+      "function:function:function",
+    );
     vm.dispose();
   });
+});
+
+test("fetch capability installs the common Headers, Request, and Response surface", async () => {
+  const vm = fetchVm("https://api.example.com", ["https://api.example.com"]);
+  const result = await vm.runAsync(`
+    const headers = new Headers({ "X-Name": "Ada" });
+    headers.append("x-name", "Lovelace");
+    const copied = new Headers(headers);
+    const request = new Request("https://api.example.com/user", {
+      method: "post", headers: copied, body: "payload",
+    });
+    const response = new Response("body", { status: 201, headers });
+    const clone = response.clone();
+    await response.text();
+    JSON.stringify({
+      header: copied.get("X-NAME"),
+      deleted: (copied.delete("x-name"), copied.has("x-name")),
+      method: request.method,
+      body: request.body,
+      status: response.status,
+      used: response.bodyUsed,
+      cloneUsed: clone.bodyUsed,
+    });
+  `);
+  expect(JSON.parse(result as string)).toEqual({
+    header: "Ada, Lovelace",
+    deleted: false,
+    method: "POST",
+    body: "payload",
+    status: 201,
+    used: true,
+    cloneUsed: false,
+  });
+  vm.dispose();
+});
+
+test("fetch is absent until its permission is installed", () => {
+  const vm = new Vm();
+  expect(vm.run("typeof fetch;")).toBe("undefined");
+  vm.dispose();
 });
 
 test("fetch is removable through its teardown", () => {
@@ -287,5 +351,5 @@ test("fetch is removable through its teardown", () => {
     grant: { allow: ["*"] },
   });
   teardown();
-  expect(() => vm.run("import { fetch } from 'napi:fetch'; fetch;")).toThrow();
+  expect(vm.run("typeof fetch;")).toBe("undefined");
 });

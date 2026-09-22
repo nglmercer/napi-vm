@@ -57,6 +57,10 @@ fn host_module_prefix(name: &str) -> String {
 /// and turn a rejectable input into ungrammatical generated code.
 fn is_export_identifier(key: &str) -> bool {
     crate::lexer::is_binding_identifier(key)
+        && !matches!(
+            key,
+            "async" | "from" | "as" | "of" | "get" | "set" | "constructor"
+        )
 }
 
 pub fn run_source(source: &str, is_main: bool) -> Result<String, VmErr> {
@@ -181,6 +185,23 @@ pub struct VM {
     state: Arc<VMState>,
 }
 
+/// One parse-only diagnostic returned by `VM.validateModule`.
+#[napi(object)]
+pub struct ValidationDiagnostic {
+    pub line: u32,
+    pub column: u32,
+    pub message: String,
+    #[napi(ts_type = "\"syntax\" | \"unsupported-syntax\" | \"parse-limit\"")]
+    pub kind: String,
+}
+
+/// Result of lexing and parsing guest source without executing it.
+#[napi(object)]
+pub struct ValidationResult {
+    pub valid: bool,
+    pub diagnostics: Vec<ValidationDiagnostic>,
+}
+
 impl Default for VM {
     fn default() -> Self {
         Self::new()
@@ -281,6 +302,17 @@ impl VM {
                     napi::Error::from_reason(runtime.interp.enrich_error(error, None).to_string())
                 })
         })
+    }
+
+    /// Lex and parse module source without evaluating it or resolving imports.
+    ///
+    /// This uses the same lexer and parser as execution. In particular, it
+    /// does not register or run the module, invoke host functions, or apply
+    /// side effects. Callers can use it to decide whether optional source
+    /// transformation is needed before registration.
+    #[napi(js_name = "validateModule")]
+    pub fn validate_module(&self, source: String) -> ValidationResult {
+        validate_module_source(&source)
     }
 
     /// Define a guest module *without* evaluating it.
@@ -999,6 +1031,34 @@ fn execute_source(interp: &mut Interpreter, source: &str) -> Result<Value, VmErr
         Err(error) => {
             let _ = interp.drain_jobs();
             Err(error)
+        }
+    }
+}
+
+/// Parse module source without touching interpreter state.
+fn validate_module_source(source: &str) -> ValidationResult {
+    let tokens = Lexer::new(source).tokenize_with_spans();
+    let mut parser = Parser::new_with_spans(tokens);
+    match parser.parse_program() {
+        Ok(_) => ValidationResult {
+            valid: true,
+            diagnostics: Vec::new(),
+        },
+        Err(error) => {
+            let (kind, message) = if parser.depth_exceeded {
+                ("parse-limit", "Maximum parse depth exceeded".to_string())
+            } else {
+                ("syntax", error.message)
+            };
+            ValidationResult {
+                valid: false,
+                diagnostics: vec![ValidationDiagnostic {
+                    line: u32::try_from(error.span.line).unwrap_or(u32::MAX),
+                    column: u32::try_from(error.span.col).unwrap_or(u32::MAX),
+                    message,
+                    kind: kind.to_string(),
+                }],
+            }
         }
     }
 }

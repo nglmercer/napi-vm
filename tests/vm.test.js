@@ -99,7 +99,8 @@ test("builtins", () => {
 
 test("web APIs exist", () => {
   const vm = new Vm();
-  expect(vm.run("typeof fetch;")).toBe("object");
+  // Network I/O is exposed through a granted capability, not ambiently.
+  expect(vm.run("typeof fetch;")).toBe("undefined");
   expect(vm.run("typeof WebSocket;")).toBe("object");
   expect(vm.run("typeof URL;")).toBe("object");
   // `Map` and `Set` are real constructors, so they report as functions.

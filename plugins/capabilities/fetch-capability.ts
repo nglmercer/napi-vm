@@ -1,5 +1,5 @@
 /**
- * The `napi:fetch` capability: HTTP, against an explicit allowlist.
+ * The standard guest `fetch()` capability: HTTP, against an explicit allowlist.
  *
  * This is the capability that actually reaches outside the machine, so it is
  * the one whose checks matter. Every request is matched against the plugin's
@@ -14,13 +14,10 @@ import type { Vm } from "../../index";
 import {
   defineCapability,
   isPermissionGranted,
-  unbindCapabilityModule,
   type CapabilityDefinition,
 } from "./capability-registry";
 
-const FETCH_GLOBALS = ["__cap_fetch"] as const;
-
-export const FETCH_MODULE_NAME = "napi:fetch";
+const FETCH_GLOBALS = ["__cap_fetch", "fetch", "Headers", "Request", "Response"] as const;
 
 /** An origin pattern: an exact origin, or `*` for any. */
 export type FetchPermission = boolean | string | string[];
@@ -28,19 +25,121 @@ export type FetchPermission = boolean | string | string[];
 /** Default ceiling on a response body, so one reply cannot exhaust memory. */
 export const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-const FETCH_MODULE_SOURCE = `
-export async function fetch(url, options) {
-  const response = await __cap_fetch(url, options ?? {});
-  return {
-    ok: response.ok,
-    status: response.status,
-    statusText: response.statusText,
-    url: response.url,
-    headers: response.headers,
-    text() { return response.body; },
-    json() { return JSON.parse(response.body); },
+const FETCH_GLOBAL_SOURCE = `
+(() => {
+  class Headers {
+    constructor(init) {
+      this._values = Object.create(null);
+      this._isHeaders = true;
+      if (init && init._isHeaders === true) {
+        for (const name of Object.keys(init._values)) this.set(name, init._values[name]);
+      } else if (Array.isArray(init)) {
+        for (const pair of init) this.append(pair[0], pair[1]);
+      } else if (init && typeof init === "object") {
+        for (const name of Object.keys(init)) this.append(name, init[name]);
+      }
+    }
+    append(name, value) {
+      const key = String(name).toLowerCase();
+      const text = String(value);
+      this._values[key] = this._values[key] === undefined ? text : this._values[key] + ", " + text;
+    }
+    set(name, value) { this._values[String(name).toLowerCase()] = String(value); }
+    get(name) {
+      const key = String(name).toLowerCase();
+      return this._values[key] === undefined ? null : this._values[key];
+    }
+    has(name) { return this.get(name) !== null; }
+    forEach(callback, thisArg) {
+      for (const name of Object.keys(this._values)) callback.call(thisArg, this._values[name], name, this);
+    }
+    entries() {
+      const pairs = [];
+      for (const name of Object.keys(this._values)) pairs.push([name, this._values[name]]);
+      return pairs;
+    }
+    keys() { return Object.keys(this._values); }
+    values() {
+      const values = [];
+      for (const name of Object.keys(this._values)) values.push(this._values[name]);
+      return values;
+    }
+  }
+  Headers.prototype.delete = function(name) {
+    delete this._values[String(name).toLowerCase()];
   };
-}
+
+  class Request {
+    constructor(input, init) {
+      const options = init ?? {};
+      const source = input && input._isRequest === true ? input : undefined;
+      this._isRequest = true;
+      this.url = source ? source.url : String(input);
+      this.method = String(options.method ?? (source ? source.method : "GET")).toUpperCase();
+      this.headers = new Headers(options.headers ?? (source ? source.headers : undefined));
+      this.body = options.body ?? (source ? source.body : null);
+      this.signal = options.signal ?? (source ? source.signal : undefined);
+    }
+  }
+
+  class Response {
+    constructor(body, init) {
+      const options = init ?? {};
+      this.body = body === null || body === undefined ? "" : String(body);
+      this.status = options.status ?? 200;
+      this.statusText = options.statusText ?? "";
+      this.ok = this.status >= 200 && this.status < 300;
+      this.url = options.url ?? "";
+      this.headers = new Headers(options.headers);
+      this.bodyUsed = false;
+    }
+    async text() {
+      if (this.bodyUsed) throw new TypeError("Response body is already used");
+      this.bodyUsed = true;
+      return this.body;
+    }
+    async json() {
+      if (this.bodyUsed) throw new TypeError("Response body is already used");
+      this.bodyUsed = true;
+      return JSON.parse(this.body);
+    }
+    clone() {
+      if (this.bodyUsed) throw new TypeError("Response body is already used");
+      return new Response(this.body, {
+        status: this.status,
+        statusText: this.statusText,
+        headers: this.headers,
+        url: this.url,
+      });
+    }
+  }
+
+  async function fetch(input, init) {
+    const request = new Request(input, init);
+    if (request.signal !== undefined && request.signal !== null) {
+      throw new TypeError("AbortSignal is not supported by this fetch capability");
+    }
+    if (request.body !== null && typeof request.body !== "string") {
+      throw new TypeError("This fetch capability accepts string request bodies");
+    }
+    const raw = await __cap_fetch(request.url, {
+      method: request.method,
+      headers: request.headers._values,
+      body: request.body,
+    });
+    return new Response(raw.body, {
+      status: raw.status,
+      statusText: raw.statusText,
+      headers: raw.headers,
+      url: raw.url,
+    });
+  }
+
+  globalThis.Headers = Headers;
+  globalThis.Request = Request;
+  globalThis.Response = Response;
+  globalThis.fetch = fetch;
+})();
 `;
 
 export interface FetchPolicy {
@@ -158,7 +257,9 @@ export const FETCH_CAPABILITY: CapabilityDefinition = {
     const policy = (grant !== null && typeof grant === "object" ? grant : {}) as FetchPolicy;
     // Sound cast: the `fetch` binding compiled these origins at load.
     installFetch(vm, permissions.fetch as CompiledFetchPermissions, policy);
-    return () => unbindCapabilityModule(vm, FETCH_MODULE_NAME, FETCH_GLOBALS);
+    return () => {
+      for (const name of FETCH_GLOBALS) vm.removeGlobal(name);
+    };
   },
 };
 
@@ -236,5 +337,5 @@ function installFetch(
     };
   });
 
-  vm.registerModule(FETCH_MODULE_NAME, FETCH_MODULE_SOURCE);
+  vm.run(FETCH_GLOBAL_SOURCE);
 }

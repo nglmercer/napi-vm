@@ -26,9 +26,9 @@ test("self is sandboxed object", () => {
   expect(vm.run("typeof self;")).toBe("object");
 });
 
-test("fetch is sandboxed object", () => {
+test("fetch is absent until granted as a capability", () => {
   const vm = new Vm();
-  expect(vm.run("typeof fetch;")).toBe("object");
+  expect(vm.run("typeof fetch;")).toBe("undefined");
 });
 
 test("setTimeout schedules without a clock", () => {

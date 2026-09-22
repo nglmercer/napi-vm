@@ -13,6 +13,11 @@ pub enum ClassItem {
         kind: Shorthand,
         negated: bool,
     },
+    /// A Unicode property escape, compiled to sorted scalar-value ranges.
+    UnicodeProperty {
+        ranges: Vec<(char, char)>,
+        negated: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,6 +400,9 @@ impl Parser {
             return Err("Trailing backslash in regular expression".to_string());
         };
         self.pos += 1;
+        if self.unicode && matches!(e, 'p' | 'P') {
+            return self.unicode_property(e == 'P');
+        }
         Ok(match e {
             'd' => ClassItem::Shorthand {
                 kind: Shorthand::Digit,
@@ -433,6 +441,10 @@ impl Parser {
         };
         self.pos += 1;
         Ok(match e {
+            'p' | 'P' if self.unicode => Node::Class {
+                negated: false,
+                items: vec![self.unicode_property(e == 'P')?],
+            },
             'd' | 'D' | 'w' | 'W' | 's' | 'S' => {
                 let (kind, negated) = match e {
                     'd' => (Shorthand::Digit, false),
@@ -468,6 +480,40 @@ impl Parser {
             }
             other => Node::Char(self.escaped_char(other)?),
         })
+    }
+
+    /// Parse `\p{Property}` / `\P{Property}` using regex-syntax's Unicode
+    /// property tables, then keep only the compact character ranges needed by
+    /// the VM's backtracking matcher.
+    fn unicode_property(&mut self, negated: bool) -> ParseResult<ClassItem> {
+        if !self.eat('{') {
+            return Err("Invalid Unicode property escape".to_string());
+        }
+        let start = self.pos;
+        while let Some(c) = self.peek()
+            && c != '}'
+        {
+            self.pos += 1;
+        }
+        if !self.eat('}') || self.pos - start <= 1 {
+            return Err("Invalid Unicode property escape".to_string());
+        }
+        let property: String = self.chars[start..self.pos - 1].iter().collect();
+        let pattern = format!(r"\p{{{property}}}");
+        let hir = regex_syntax::Parser::new()
+            .parse(&pattern)
+            .map_err(|error| format!("Invalid Unicode property escape: {error}"))?;
+        let regex_syntax::hir::HirKind::Class(regex_syntax::hir::Class::Unicode(class)) =
+            hir.kind()
+        else {
+            return Err("Invalid Unicode property escape".to_string());
+        };
+        let ranges = class
+            .ranges()
+            .iter()
+            .map(|range| (range.start(), range.end()))
+            .collect();
+        Ok(ClassItem::UnicodeProperty { ranges, negated })
     }
 
     /// Resolve a single-character escape: the control abbreviations, the

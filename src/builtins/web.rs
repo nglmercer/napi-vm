@@ -1,10 +1,11 @@
 //! The web-platform globals that are pure computation.
 //!
 //! `TextEncoder`/`TextDecoder`, `URLSearchParams` and `structuredClone` need
-//! no capability: they transform values the guest already holds. The ones that
-//! reach outside the sandbox — `fetch`, `Request`, `Response` and friends —
-//! deliberately stay inert shapes, to be granted through the capability host
-//! (as `napi:fs` is) rather than made ambient.
+//! no capability: they transform values the guest already holds. APIs that
+//! reach outside the sandbox are installed by their capability host. For
+//! example, the fetch capability installs working `fetch`, `Request`,
+//! `Response` and `Headers` globals over the inert placeholders after
+//! permission has been granted.
 
 use std::rc::Rc;
 

@@ -174,6 +174,20 @@ impl Matcher<'_> {
                     };
                     base != *negated
                 }
+                ClassItem::UnicodeProperty { ranges, negated } => {
+                    let contains = ranges
+                        .binary_search_by(|(start, end)| {
+                            if *end < c {
+                                std::cmp::Ordering::Less
+                            } else if *start > c {
+                                std::cmp::Ordering::Greater
+                            } else {
+                                std::cmp::Ordering::Equal
+                            }
+                        })
+                        .is_ok();
+                    contains != *negated
+                }
             };
             if matched {
                 hit = true;

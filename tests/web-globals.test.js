@@ -134,11 +134,11 @@ test("primitives pass through", () => {
 
 // --- The capability boundary is unchanged ----------------------------------
 
-test("network globals remain inert shapes", () => {
+test("network APIs remain unavailable or inert before capabilities are granted", () => {
   const vm = new Vm();
   // These need a capability the host grants explicitly; they are deliberately
   // not ambient.
-  expect(vm.run("typeof fetch;")).toBe("object");
+  expect(vm.run("typeof fetch;")).toBe("undefined");
   expect(vm.run("typeof Request;")).toBe("object");
   expect(vm.run("typeof WebSocket;")).toBe("object");
 });

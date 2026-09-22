@@ -14,9 +14,11 @@ use crate::span::Span;
 /// Maximum statement/expression nesting the parser accepts. The parser is
 /// recursive descent, so each nesting level costs native stack frames;
 /// 100k-deep parentheses would overflow the stack and SIGSEGV the host.
-/// Bailing out at 256 turns that into a catchable parse error. Legitimate
-/// code rarely nests beyond a few dozen levels.
-const MAX_PARSE_DEPTH: u32 = 256;
+/// Each recursive expression level passes through several parser functions,
+/// so even 256 levels can exhaust the smaller native stacks used by embedded
+/// runtimes before this guard unwinds. Legitimate code rarely nests beyond a
+/// few dozen levels.
+const MAX_PARSE_DEPTH: u32 = 64;
 
 /// Render a token the way a syntax error should name it.
 ///
@@ -234,12 +236,6 @@ impl Parser {
             scope: self.current_scope,
             detail,
         });
-    }
-
-    /// Record a declaration at the *current* token, before it is consumed.
-    pub(crate) fn record_decl_here(&mut self, name: &str, kind: index::DeclKind) {
-        let span = self.cur_span();
-        self.record(name, span, index::Occurrence::Declaration(kind), None);
     }
 
     /// Span of the token under the cursor.

@@ -1011,31 +1011,37 @@ impl Lexer {
 /// Whether `name` may be used as a binding identifier in guest source --
 /// a `function` name, a `let`/`const` binding, an export name.
 ///
-/// This asks the lexer rather than consulting a hand-kept keyword list: a
-/// name qualifies exactly when it tokenizes to a single `Identifier` spanning
-/// the whole input. Any second definition of "identifier" drifts the moment a
-/// keyword is added to `read_ident`, which is how `null`, `true`, `async`,
-/// `from`, `of`, `get` and `set` once passed an ASCII-shape check and then
-/// produced ungrammatical generated source downstream.
+/// Reserved words are rejected, while ECMAScript contextual words such as
+/// `async`, `from`, `get` and `set` remain valid bindings even though the
+/// lexer keeps dedicated tokens for their grammar roles.
 pub fn is_binding_identifier(name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
     let toks = Lexer::new(name).tokenize();
     // `tokenize` always appends `Token::EOF`, so a lone identifier is 2 tokens.
-    toks.len() == 2
-        && toks[1] == Token::EOF
-        && matches!(&toks[0], Token::Identifier(ident) if ident == name)
+    if toks.len() != 2 || toks[1] != Token::EOF {
+        return false;
+    }
+    matches!(&toks[0], Token::Identifier(ident) if ident == name)
+        || matches!(
+            &toks[0],
+            Token::KwAs
+                | Token::KwAsync
+                | Token::KwConstructor
+                | Token::KwFrom
+                | Token::KwGet
+                | Token::KwOf
+                | Token::KwSet
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every keyword `read_ident` recognises must be rejected as a binding
-    /// identifier. This list is the drift alarm: add a keyword to `read_ident`
-    /// without adding it here and `keyword_list_is_exhaustive` fails, which is
-    /// the signal to re-check every consumer that pastes a name into source.
+    /// Reserved words must be rejected as bindings. Contextual words are
+    /// listed separately because ECMAScript permits them as names.
     const ALL_KEYWORDS: &[&str] = &[
         "var",
         "let",
@@ -1059,9 +1065,6 @@ mod tests {
         "super",
         "import",
         "export",
-        "from",
-        "as",
-        "async",
         "await",
         "yield",
         "try",
@@ -1071,7 +1074,6 @@ mod tests {
         "typeof",
         "instanceof",
         "in",
-        "of",
         "true",
         "false",
         "null",
@@ -1079,10 +1081,10 @@ mod tests {
         "delete",
         "void",
         "static",
-        "get",
-        "set",
-        "constructor",
     ];
+
+    const CONTEXTUAL_IDENTIFIERS: &[&str] =
+        &["as", "async", "constructor", "from", "get", "of", "set"];
 
     #[test]
     fn no_keyword_is_a_binding_identifier() {
@@ -1095,17 +1097,21 @@ mod tests {
     }
 
     #[test]
-    fn keyword_list_is_exhaustive() {
-        // Anything `read_ident` maps to a non-`Identifier` token is a keyword.
-        // Scanning the whole ASCII-identifier space is impractical, so this
-        // checks the inverse: every entry above really is a keyword today, and
-        // a plain identifier is not accidentally in the list.
+    fn reserved_word_list_is_exhaustive() {
+        // Every reserved word listed above must lex as a non-Identifier.
         for kw in ALL_KEYWORDS {
             let toks = Lexer::new(kw).tokenize();
             assert!(
                 !matches!(&toks[0], Token::Identifier(_)),
                 "`{kw}` is listed as a keyword but lexes as an identifier"
             );
+        }
+    }
+
+    #[test]
+    fn contextual_words_remain_valid_bindings() {
+        for name in CONTEXTUAL_IDENTIFIERS {
+            assert!(is_binding_identifier(name), "`{name}` should be accepted");
         }
     }
 
@@ -1126,6 +1132,13 @@ mod tests {
             "asyncFn",
             "getter",
             "classy",
+            "get",
+            "set",
+            "async",
+            "from",
+            "as",
+            "of",
+            "constructor",
         ] {
             assert!(is_binding_identifier(name), "`{name}` should be accepted");
         }

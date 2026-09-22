@@ -245,9 +245,8 @@ impl Parser {
                 self.expect(&Token::RBrace);
                 Some(Pattern::Object(props))
             }
-            Token::Identifier(n) => {
-                let name = n.clone();
-                self.adv();
+            _ => {
+                let name = self.ident()?;
                 if self.eat(&Token::Equal) {
                     Some(Pattern::Default(
                         Box::new(Pattern::Ident(name)),
@@ -257,7 +256,6 @@ impl Parser {
                     Some(Pattern::Ident(name))
                 }
             }
-            _ => None,
         }
     }
 
@@ -276,10 +274,10 @@ impl Parser {
         // Generator declaration: `function*`.
         let is_generator = self.eat(&Token::Star);
         let name_span = self.cur_span();
-        let n = match (self.cur(), fallback) {
-            (Token::Identifier(_), _) => self.ident()?,
-            (_, Some(name)) => name.to_string(),
-            _ => return None,
+        let n = if let Some(name) = self.ident() {
+            name
+        } else {
+            fallback?.to_string()
         };
         // The function's own name belongs to the enclosing scope; its
         // parameters and body belong to a new one.
@@ -563,54 +561,58 @@ impl Parser {
         let mut names = Vec::new();
         let mut defaults = Vec::new();
         while self.until(&Token::RParen) {
-            match self.cur() {
-                Token::DotDotDot => {
-                    self.adv();
-                    if let Token::Identifier(n) = self.cur() {
-                        let name = n.clone();
-                        self.record_decl_here(&name, crate::parser::DeclKind::Parameter);
-                        names.push(format!("...{}", name));
-                        self.adv();
-                    }
+            if self.eat(&Token::DotDotDot) {
+                let span = self.cur_span();
+                if let Some(name) = self.ident() {
+                    self.record(
+                        &name,
+                        span,
+                        crate::parser::Occurrence::Declaration(crate::parser::DeclKind::Parameter),
+                        None,
+                    );
+                    names.push(format!("...{}", name));
                 }
-                Token::Identifier(n) => {
-                    let name = n.clone();
-                    self.record_decl_here(&name, crate::parser::DeclKind::Parameter);
-                    self.adv();
+            } else if matches!(self.cur(), Token::LBracket | Token::LBrace) {
+                // A destructured parameter — `function f({ a, b })`. The
+                // slot takes a synthetic name and the body opens with a
+                // declaration that unpacks it, which reuses the declaration
+                // path rather than duplicating the binding logic.
+                let Some(pattern) = self.pattern() else {
+                    break;
+                };
+                let slot = format!("*pattern{}*", names.len());
+                let mut init: Expr = Expr::Identifier(slot.clone());
+                if self.eat(&Token::Equal)
+                    && let Some(default) = self.assign()
+                {
+                    // `function f({ a } = {})`: the default applies to the
+                    // whole parameter before it is unpacked.
+                    defaults.push(Self::default_guard(&slot, default));
+                    init = Expr::Identifier(slot.clone());
+                }
+                defaults.push(Statement::VarDecl {
+                    kind: VarKind::Let,
+                    name: String::new(),
+                    init: Some(Box::new(init)),
+                    destructuring: Some(Box::new(pattern)),
+                });
+                names.push(slot);
+            } else {
+                let span = self.cur_span();
+                if let Some(name) = self.ident() {
+                    self.record(
+                        &name,
+                        span,
+                        crate::parser::Occurrence::Declaration(crate::parser::DeclKind::Parameter),
+                        None,
+                    );
                     if self.eat(&Token::Equal)
                         && let Some(d) = self.assign()
                     {
                         defaults.push(Self::default_guard(&name, d));
                     }
                     names.push(name);
-                }
-                // A destructured parameter — `function f({ a, b })`. The
-                // slot takes a synthetic name and the body opens with a
-                // declaration that unpacks it, which reuses the declaration
-                // path rather than duplicating the binding logic.
-                Token::LBracket | Token::LBrace => {
-                    let Some(pattern) = self.pattern() else {
-                        break;
-                    };
-                    let slot = format!("*pattern{}*", names.len());
-                    let mut init: Expr = Expr::Identifier(slot.clone());
-                    if self.eat(&Token::Equal)
-                        && let Some(default) = self.assign()
-                    {
-                        // `function f({ a } = {})`: the default applies to the
-                        // whole parameter before it is unpacked.
-                        defaults.push(Self::default_guard(&slot, default));
-                        init = Expr::Identifier(slot.clone());
-                    }
-                    defaults.push(Statement::VarDecl {
-                        kind: VarKind::Let,
-                        name: String::new(),
-                        init: Some(Box::new(init)),
-                        destructuring: Some(Box::new(pattern)),
-                    });
-                    names.push(slot);
-                }
-                _ => {
+                } else {
                     self.adv();
                 }
             }
@@ -628,8 +630,24 @@ impl Parser {
                 self.adv();
                 Some(v)
             }
+            // These words are contextual in ECMAScript, not reserved binding
+            // names. The lexer keeps dedicated tokens for their grammar roles
+            // (async functions, accessors and module syntax), while binding
+            // positions may still use them as identifiers.
+            Token::KwAs => self.consume_contextual_identifier("as"),
+            Token::KwAsync => self.consume_contextual_identifier("async"),
+            Token::KwConstructor => self.consume_contextual_identifier("constructor"),
+            Token::KwFrom => self.consume_contextual_identifier("from"),
+            Token::KwGet => self.consume_contextual_identifier("get"),
+            Token::KwOf => self.consume_contextual_identifier("of"),
+            Token::KwSet => self.consume_contextual_identifier("set"),
             _ => None,
         }
+    }
+
+    fn consume_contextual_identifier(&mut self, name: &str) -> Option<String> {
+        self.adv();
+        Some(name.to_string())
     }
 
     /// Like `ident()`, but also accepts keywords as property names (valid after

@@ -17,6 +17,7 @@ mod symbol;
 mod typedarray;
 mod web;
 
+pub(crate) use function::function_method;
 pub(crate) use promise::promise_method;
 
 pub use array::array_method;
@@ -54,7 +55,6 @@ pub fn setup_builtins(env: &Env) {
         "globalThis",
         "self",
         "window",
-        "fetch",
         "URLSearchParams",
         "Headers",
         "Request",

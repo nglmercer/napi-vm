@@ -18,6 +18,23 @@ pub(super) fn install(e: &mut Environment) {
     }
 }
 
+/// Methods shared by guest and native callable values.
+pub(crate) fn function_method(name: &str) -> Option<Value> {
+    Some(match name {
+        "call" => super::nf("call", function_call),
+        _ => return None,
+    })
+}
+
+fn function_call(
+    interp: &mut Interpreter,
+    target: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let receiver = args.first().cloned().unwrap_or(Value::Undefined);
+    interp.call_this(&target, receiver, args.into_iter().skip(1).collect())
+}
+
 fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let mut params: Vec<String> = Vec::new();
     for value in a.iter().take(a.len().saturating_sub(1)) {
