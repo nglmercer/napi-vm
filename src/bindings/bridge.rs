@@ -514,6 +514,48 @@ impl HostBridge for NapiHostBridge {
         from_napi(self.env, result)
     }
 
+    fn construct_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
+        if self.on_vm_thread.load(Ordering::Acquire) != 0 {
+            return Err(VmErr::Msg(
+                "host constructors cannot run on the async VM worker".to_string(),
+            ));
+        }
+        let func_ref = *self
+            .funcs
+            .borrow()
+            .get(&id)
+            .ok_or_else(|| VmErr::Msg(format!("host function #{} is not registered", id)))?;
+        let mut constructor = ptr::null_mut();
+        chk(unsafe { sys::napi_get_reference_value(self.env, func_ref, &mut constructor) })?;
+        let mut argv = Vec::with_capacity(args.len());
+        for arg in &args {
+            argv.push(to_napi(self.env, arg)?);
+        }
+        let mut result = ptr::null_mut();
+        let status = unsafe {
+            sys::napi_new_instance(
+                self.env,
+                constructor,
+                argv.len(),
+                argv.as_ptr(),
+                &mut result,
+            )
+        };
+        if status != sys::Status::napi_ok {
+            let mut exception = ptr::null_mut();
+            let exception_status =
+                unsafe { sys::napi_get_and_clear_last_exception(self.env, &mut exception) };
+            if exception_status == sys::Status::napi_ok && !exception.is_null() {
+                return Err(VmErr::Throw(from_napi(self.env, exception)?));
+            }
+            return Err(VmErr::Msg(format!(
+                "host constructor failed (status {})",
+                status
+            )));
+        }
+        from_napi(self.env, result)
+    }
+
     fn is_async_fn(&self, id: usize) -> bool {
         self.async_funcs.borrow().contains(&id)
     }

@@ -1,17 +1,23 @@
 use crate::error::VmErr;
 use crate::value::Value;
 
-/// Bridge that lets the VM call back into host (Node.js) functions.
+/// Bridge that lets the VM call functions owned by its host runtime.
 ///
 /// The interpreter is single-threaded (`Rc`/`RefCell`, not `Send`/`Sync`), so
 /// the bridge is stored as a plain `Rc<dyn HostBridge>` and invoked on the same
-/// thread that drives the VM. The concrete implementation lives in
-/// `bindings.rs`: it marshals `Value`s across the N-API boundary and calls the
-/// persisted JavaScript function synchronously.
+/// thread that drives the VM. Implementations marshal `Value`s into their
+/// host representation and invoke the registered function synchronously.
 pub trait HostBridge {
     /// Invoke the host function registered under `id` with `args`, returning
     /// the marshalled result back into the VM.
     fn call_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr>;
+
+    /// Construct a host function with `new`. The default preserves legacy
+    /// bridges; runtimes that expose constructors can implement actual host
+    /// construction semantics.
+    fn construct_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
+        self.call_host(id, args)
+    }
 
     /// Whether the function registered under `id` is async (registered via
     /// `exposeAsyncFunction`). Async functions return `HostPending` when

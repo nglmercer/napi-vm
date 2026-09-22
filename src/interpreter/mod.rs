@@ -4,6 +4,8 @@ pub mod commonjs;
 mod env;
 mod eval;
 pub mod jobs;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod node_addon;
 mod ops;
 mod promise;
 mod resolve;
@@ -15,6 +17,8 @@ pub use commonjs::{
     ResolvedCommonJsModule,
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
+#[cfg(not(target_arch = "wasm32"))]
+pub use node_addon::NodeAddonSidecar;
 
 /// The state a generator or async body must share with the interpreter that
 /// started it: the one event loop, and the one module registry.
@@ -238,6 +242,11 @@ impl Interpreter {
         interp.global = global.clone();
         interp.persistent_global = global;
         interp
+    }
+
+    /// Attach a host bridge for values such as native addon exports.
+    pub fn set_host_bridge(&mut self, bridge: Rc<dyn HostBridge>) {
+        self.host = Some(bridge);
     }
 
     /// Install a host-controlled CommonJS loader. The interpreter itself does

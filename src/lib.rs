@@ -27,6 +27,8 @@ pub use bindings::{LanguageService, VM, create_vm, debug_parse, run_code};
 pub use builtins::setup_builtins;
 pub use error::VmErr;
 pub use format::{PrintOptions, Printer};
+#[cfg(not(target_arch = "wasm32"))]
+pub use interpreter::NodeAddonSidecar;
 pub use interpreter::{
     CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
     ResolvedCommonJsModule,

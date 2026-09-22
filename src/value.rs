@@ -355,6 +355,8 @@ pub struct ProxyData {
 pub struct ErrorData {
     pub message: String,
     pub name: String,
+    /// Optional runtime-specific error identifier such as Node's `code`.
+    pub code: Option<String>,
     /// The call stack where the error was raised, rendered the way engines
     /// print it. Empty when there was no frame to record.
     pub stack: String,
@@ -368,6 +370,17 @@ impl ErrorData {
             name: name.to_string(),
             message: message.into(),
             stack: String::new(),
+            code: None,
+        })
+    }
+
+    /// An error carrying a stable runtime or host error identifier.
+    pub fn with_code(name: &str, message: impl Into<String>, code: impl Into<String>) -> Box<Self> {
+        Box::new(Self {
+            message: message.into(),
+            name: name.to_string(),
+            stack: String::new(),
+            code: Some(code.into()),
         })
     }
 }
@@ -914,6 +927,7 @@ impl Value {
                 "message" => Some(Value::String(e.message.clone())),
                 "name" => Some(Value::String(e.name.clone())),
                 "stack" => Some(Value::String(e.stack.clone())),
+                "code" => e.code.as_ref().map(|code| Value::String(code.clone())),
                 _ => None,
             },
             Value::StringIterator { .. } => None,
@@ -978,7 +992,10 @@ impl Value {
                     || cell.named_prop(key).is_some()
             }
             Value::String(_) => key == "length",
-            Value::Error(_) => matches!(key, "message" | "name" | "stack"),
+            Value::Error(error) => {
+                matches!(key, "message" | "name" | "stack")
+                    || (key == "code" && error.code.is_some())
+            }
             Value::StringIterator { .. } => false,
             _ => false,
         }

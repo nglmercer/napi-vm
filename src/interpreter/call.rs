@@ -709,6 +709,12 @@ impl Interpreter {
             };
         }
         match f {
+            Value::HostFunction { id, .. } => {
+                let bridge = self.host.clone().ok_or_else(|| {
+                    VmErr::Msg("cannot construct host function: no bridge attached".to_string())
+                })?;
+                bridge.construct_host(*id, args)
+            }
             Value::Class(c) => {
                 // The instance's prototype is the class prototype (shared Rc, so
                 // `instanceof` can compare identity).

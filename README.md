@@ -61,11 +61,42 @@ fn main() {
 }
 ```
 
-Loading a `.node` binary requires a host `NativeAddonLoader` implementation
-and an explicit `allow_native_addon(path)` entry. This keeps native code under
-the desktop application's trust policy. napi-vm currently provides the
-resolution and permission hook; it does not yet ship a Node-API provider that
-can initialize arbitrary `.node` addons.
+The optional `NodeAddonSidecar` provider runs a Node.js child process for
+allowlisted `.node` addons. Node initializes each addon with a real Node-API
+environment; Rust and the VM exchange bounded values and synchronous calls
+over a private loopback connection.
+
+```rust
+use napi_vm::{FileCommonJsLoader, Interpreter, NodeAddonSidecar};
+use std::{path::PathBuf, rc::Rc};
+
+fn main() {
+    let app_root = PathBuf::from("./app").canonicalize().unwrap();
+    let addon = app_root.join("node_modules/example/build/Release/example.node");
+    let node = Rc::new(NodeAddonSidecar::new("node").unwrap());
+    let loader = FileCommonJsLoader::new([&app_root])
+        .unwrap()
+        .allow_native_addon(&addon)
+        .unwrap()
+        .with_native_addon_loader(node.clone());
+
+    let mut runtime = Interpreter::with_builtins();
+    runtime.set_host_bridge(node);
+    runtime.set_commonjs_entry(app_root.join("main.cjs").to_string_lossy().into_owned());
+    runtime.set_commonjs_loader(Rc::new(loader)).unwrap();
+    let result = runtime.eval_source("require('example').run();").unwrap();
+    println!("{result:?}");
+}
+```
+
+Native addons execute as trusted host code in the Node child process, outside
+the VM sandbox. The root restriction and per-file allowlist decide which addon
+may load; they do not constrain what that trusted addon can do on the host.
+The current bridge supports synchronous calls and plain values, arrays,
+byte buffers, and BigInts. Guest callbacks, Promise-returning exports,
+symbols, cyclic values, and native objects with custom prototypes fail clearly
+until the bridge supports their cross-runtime semantics. This requires a
+compatible Node executable on the desktop host.
 
 ## Useful examples
 

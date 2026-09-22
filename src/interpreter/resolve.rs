@@ -505,6 +505,7 @@ impl Interpreter {
                 "message" => Ok(Value::String(e.message.clone())),
                 "name" => Ok(Value::String(e.name.clone())),
                 "stack" => Ok(Value::String(e.stack.clone())),
+                "code" => Ok(e.code.clone().map_or(Value::Undefined, Value::String)),
                 "toString" => Ok(crate::builtins::error_to_string()),
                 _ => Ok(Value::Undefined),
             },
