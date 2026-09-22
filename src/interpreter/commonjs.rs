@@ -1028,9 +1028,11 @@ mod tests {
             .allow_native_addon(root.join("addon.node"))
             .unwrap()
             .with_native_addon_loader(Rc::new(FakeNativeAddon));
-        let addon = loader.resolve("./addon.node", Some(&parent)).unwrap();
+        let mut interpreter = crate::interpreter::Interpreter::with_builtins();
+        interpreter.set_commonjs_entry(parent);
+        interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
         assert!(matches!(
-            loader.load_native_addon(&addon),
+            interpreter.eval_source("require('./addon.node');"),
             Ok(Value::Number(17.0))
         ));
 
