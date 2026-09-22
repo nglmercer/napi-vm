@@ -1,5 +1,6 @@
 pub(crate) mod async_fn;
 pub(crate) mod call;
+pub mod commonjs;
 mod env;
 mod eval;
 pub mod jobs;
@@ -9,6 +10,10 @@ mod resolve;
 
 #[cfg(stackful_coroutines)]
 pub use async_fn::AsyncTask;
+pub use commonjs::{
+    CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
+    ResolvedCommonJsModule,
+};
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 
 /// The state a generator or async body must share with the interpreter that
@@ -24,6 +29,9 @@ pub struct Realm {
     modules: Rc<RefCell<HashMap<String, Module>>>,
     module_sources: Rc<RefCell<HashMap<String, String>>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
+    commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
+    commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
+    commonjs_entry: Option<String>,
 }
 
 impl Realm {
@@ -33,6 +41,9 @@ impl Realm {
             modules: interp.modules.clone(),
             module_sources: interp.module_sources.clone(),
             evaluating: interp.evaluating.clone(),
+            commonjs_loader: interp.commonjs_loader.clone(),
+            commonjs_cache: interp.commonjs_cache.clone(),
+            commonjs_entry: interp.commonjs_entry.clone(),
         }
     }
 
@@ -41,6 +52,9 @@ impl Realm {
         interp.modules = self.modules;
         interp.module_sources = self.module_sources;
         interp.evaluating = self.evaluating;
+        interp.commonjs_loader = self.commonjs_loader;
+        interp.commonjs_cache = self.commonjs_cache;
+        interp.commonjs_entry = self.commonjs_entry;
     }
 }
 pub use jobs::{Job, JobQueue, Jobs};
@@ -100,6 +114,14 @@ pub struct Interpreter {
     /// the partner runs that one, whose import back is already in flight and
     /// so returns the partially-populated record.
     pub module_sources: Rc<RefCell<HashMap<String, String>>>,
+    /// Host-selected CommonJS source/native module resolver. No filesystem or
+    /// native addon access is enabled unless an embedding host installs one.
+    commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
+    /// CommonJS module cache, including the partially initialized record used
+    /// to make circular `require()` calls observable.
+    commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
+    /// Filename used to resolve a top-level `require()` call.
+    commonjs_entry: Option<String>,
     /// Modules whose bodies are currently running, so a cycle is detected
     /// instead of recursing forever.
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
@@ -181,6 +203,9 @@ impl Interpreter {
             persistent_global: global,
             modules: Rc::new(RefCell::new(HashMap::new())),
             module_sources: Rc::new(RefCell::new(HashMap::new())),
+            commonjs_loader: None,
+            commonjs_cache: Rc::new(RefCell::new(HashMap::new())),
+            commonjs_entry: None,
             evaluating: Rc::new(RefCell::new(std::collections::HashSet::new())),
             host: None,
             cur_mod: None,
@@ -213,6 +238,66 @@ impl Interpreter {
         interp.global = global.clone();
         interp.persistent_global = global;
         interp
+    }
+
+    /// Install a host-controlled CommonJS loader. The interpreter itself does
+    /// not read files or load native code unless the host provides a loader.
+    pub fn set_commonjs_loader(
+        &mut self,
+        loader: Rc<dyn CommonJsModuleLoader>,
+    ) -> Result<(), VmErr> {
+        let require = commonjs::make_require(self, None)?;
+        self.set_global_checked("require", require)?;
+        self.commonjs_loader = Some(loader);
+        self.commonjs_cache.borrow_mut().clear();
+        Ok(())
+    }
+
+    /// Set the filename used to resolve `require()` in top-level source.
+    /// Module-local `require()` calls retain their own filename automatically.
+    pub fn set_commonjs_entry(&mut self, filename: impl Into<String>) {
+        self.commonjs_entry = Some(filename.into());
+    }
+
+    /// Remove all cached CommonJS modules. A subsequent `require()` reloads
+    /// source and reruns its wrapper.
+    pub fn clear_commonjs_cache(&mut self) {
+        self.commonjs_cache.borrow_mut().clear();
+    }
+
+    /// Load a CommonJS module using the configured host resolver.
+    pub fn require_commonjs(
+        &mut self,
+        request: &str,
+        parent: Option<&str>,
+    ) -> Result<Value, VmErr> {
+        commonjs::require_module(self, request, parent)
+    }
+
+    /// Parse and execute a complete JavaScript script, draining the existing
+    /// promise/job queue before returning. This is the Rust embedding entry
+    /// point; `require()` still needs an explicitly configured loader.
+    pub fn eval_source(&mut self, source: &str) -> Result<Value, VmErr> {
+        self.set_source(source);
+        self.begin_execution();
+        let tokens = crate::lexer::Lexer::new(source).tokenize_with_spans();
+        let mut parser = crate::parser::Parser::new_with_spans(tokens);
+        let statements = match parser.parse_program() {
+            Ok(statements) => statements,
+            Err(_) if parser.depth_exceeded => {
+                return Err(VmErr::Msg(
+                    "RangeError: Maximum parse depth exceeded".to_string(),
+                ));
+            }
+            Err(error) => return Err(VmErr::Msg(error.to_string())),
+        };
+        match self.run_program_body(&statements) {
+            Ok(value) => self.drain_jobs().map(|()| value),
+            Err(error) => {
+                let _ = self.drain_jobs();
+                Err(error)
+            }
+        }
     }
 
     /// Insert or replace a binding in the currently active scope. The

@@ -27,6 +27,10 @@ pub use bindings::{LanguageService, VM, create_vm, debug_parse, run_code};
 pub use builtins::setup_builtins;
 pub use error::VmErr;
 pub use format::{PrintOptions, Printer};
+pub use interpreter::{
+    CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
+    ResolvedCommonJsModule,
+};
 pub use interpreter::{Environment, Interpreter, Module};
 pub use lexer::{Lexer, Token};
 pub use parser::{Expr, Parser, Statement};

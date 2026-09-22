@@ -37,6 +37,36 @@ console.log(vm.run("answer;")); // 42
 - [Development](docs/development.md) — quality gate, scripts, benchmarks, and project structure
 - [Roadmap](docs/roadmap.md) — implemented features and known boundaries
 
+## Rust embedding and CommonJS
+
+Rust applications can opt into guest `require()` with a filesystem resolver
+restricted to application roots. The resolver reads JavaScript and JSON as
+guest source; it never executes them through the host's `require()`.
+
+```rust
+use napi_vm::{FileCommonJsLoader, Interpreter};
+use std::{path::PathBuf, rc::Rc};
+
+fn main() {
+    let app_root = PathBuf::from("./app").canonicalize().unwrap();
+    let loader = FileCommonJsLoader::new([&app_root]).unwrap();
+    let mut runtime = Interpreter::with_builtins();
+    runtime.set_commonjs_loader(Rc::new(loader)).unwrap();
+    runtime.set_commonjs_entry(app_root.join("main.cjs").to_string_lossy().into_owned());
+
+    let result = runtime
+        .eval_source("const config = require('./config.json'); config;")
+        .unwrap();
+    println!("{result:?}");
+}
+```
+
+Loading a `.node` binary requires a host `NativeAddonLoader` implementation
+and an explicit `allow_native_addon(path)` entry. This keeps native code under
+the desktop application's trust policy. napi-vm currently provides the
+resolution and permission hook; it does not yet ship a Node-API provider that
+can initialize arbitrary `.node` addons.
+
 ## Useful examples
 
 ```bash
