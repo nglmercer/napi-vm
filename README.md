@@ -92,11 +92,16 @@ fn main() {
 Native addons execute as trusted host code in the Node child process, outside
 the VM sandbox. The root restriction and per-file allowlist decide which addon
 may load; they do not constrain what that trusted addon can do on the host.
-The current bridge supports synchronous calls and plain values, arrays,
-byte buffers, and BigInts. Guest callbacks, Promise-returning exports,
-symbols, cyclic values, and native objects with custom prototypes fail clearly
-until the bridge supports their cross-runtime semantics. This requires a
-compatible Node executable on the desktop host.
+The bridge supports synchronous function calls and constructors, Promise
+settlement, primitive values, arrays, byte buffers, BigInts, and
+identity-preserving native object proxies. Proxy property reads/writes, `in`,
+deletion, enumeration, method calls, object spread, and `Object.assign` reach
+the original Node object. Asynchronous addon callbacks are queued and run at
+VM event-loop checkpoints; use `run_event_loop_once` from the desktop runtime
+to pump external events. Synchronous callbacks into guest JavaScript, symbols,
+cyclic guest values, and guest-created proxies are not supported yet and fail
+clearly. Some reflection behavior still differs across the VM/Node boundary.
+A compatible Node executable must be installed on the desktop host.
 
 ## Useful examples
 

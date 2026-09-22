@@ -1,5 +1,26 @@
 use crate::error::VmErr;
-use crate::value::Value;
+use crate::value::{PromiseInner, PromiseState, Value};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Duration;
+
+/// A guest callback requested by the host runtime, ready for an event-loop
+/// checkpoint on the interpreter thread.
+pub struct HostCallback {
+    pub callback: Value,
+    pub this_value: Value,
+    pub args: Vec<Value>,
+}
+
+/// An event delivered from the host into the VM's shared event loop.
+pub enum HostEvent {
+    Callback(HostCallback),
+    PromiseSettled {
+        promise: Rc<RefCell<PromiseInner>>,
+        state: PromiseState,
+        value: Value,
+    },
+}
 
 /// Bridge that lets the VM call functions owned by its host runtime.
 ///
@@ -11,6 +32,30 @@ pub trait HostBridge {
     /// Invoke the host function registered under `id` with `args`, returning
     /// the marshalled result back into the VM.
     fn call_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr>;
+
+    /// Poll host-originated events. Implementations must enqueue work here
+    /// instead of entering guest code from a host or native thread.
+    fn poll_host_events(&self, _timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
+        Ok(Vec::new())
+    }
+
+    /// Whether an awaited promise still depends on an external host event.
+    /// Synchronous top-level `await` uses this to pump only the work needed
+    /// for that promise chain.
+    fn has_pending_host_work(&self, _promise: &Rc<RefCell<PromiseInner>>) -> bool {
+        false
+    }
+
+    /// Invoke a host function with the guest receiver from a property call.
+    /// Bridges that do not model `this` retain the older `call_host` behavior.
+    fn call_host_with_this(
+        &self,
+        id: usize,
+        _this_value: Value,
+        args: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        self.call_host(id, args)
+    }
 
     /// Construct a host function with `new`. The default preserves legacy
     /// bridges; runtimes that expose constructors can implement actual host
@@ -31,6 +76,16 @@ pub trait HostBridge {
     /// block until the host resolves the operation.
     fn call_host_async(&self, _id: usize, _args: Vec<Value>) -> Result<Value, VmErr> {
         Err(VmErr::Msg("async host calls not supported".to_string()))
+    }
+
+    /// Async counterpart to `call_host_with_this`.
+    fn call_host_async_with_this(
+        &self,
+        id: usize,
+        _this_value: Value,
+        args: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        self.call_host_async(id, args)
     }
 
     /// Block the current (VM) thread until the async host call identified by

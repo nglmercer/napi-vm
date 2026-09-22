@@ -89,16 +89,41 @@ impl Interpreter {
             if promise.borrow().state != PromiseState::Pending {
                 break;
             }
-            // Microtasks are exhausted and it is still pending: only a timer
-            // can settle it now. With no timer left, nothing ever will.
+            // Microtasks are exhausted and it is still pending; run the next
+            // timer before checking whether its own host bridge has work.
             let timer = self.jobs.borrow_mut().take_timer();
-            let Some(timer) = timer else { break };
-            match timer {
-                crate::interpreter::Job::Callback { callback, args } => {
-                    self.call_this(&callback, Value::Undefined, args)?;
+            if let Some(timer) = timer {
+                match timer {
+                    crate::interpreter::Job::Callback { callback, args } => {
+                        self.call_this(&callback, Value::Undefined, args)?;
+                    }
+                    crate::interpreter::Job::HostCallback {
+                        callback,
+                        this_value,
+                        args,
+                    } => {
+                        self.call_this(&callback, this_value, args)?;
+                    }
+                    crate::interpreter::Job::HostPromiseSettled {
+                        promise,
+                        state,
+                        value,
+                    } => self.settle_host_promise(promise, state, value)?,
+                    crate::interpreter::Job::Reaction { .. } => {
+                        unreachable!("timers are callbacks")
+                    }
                 }
-                crate::interpreter::Job::Reaction { .. } => unreachable!("timers are callbacks"),
+                continue;
             }
+            let has_pending_host_work = self
+                .host
+                .as_ref()
+                .is_some_and(|bridge| bridge.has_pending_host_work(&promise));
+            if has_pending_host_work {
+                self.run_event_loop_once(std::time::Duration::from_millis(10))?;
+                continue;
+            }
+            break;
         }
         let inner = promise.borrow();
         match inner.state {
@@ -213,6 +238,12 @@ fn step(
                     Value::Promise(wrapper)
                 }
             };
+            if let Some(awaited_promise) = bridged.as_promise()
+                && awaited_promise.borrow().state == PromiseState::Pending
+                && awaited_promise.borrow().external_pending
+            {
+                result.borrow_mut().external_pending = true;
+            }
             interp.register(&bridged, on_fulfilled, on_rejected, None)?;
             Ok(())
         }

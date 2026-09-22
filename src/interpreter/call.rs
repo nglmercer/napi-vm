@@ -593,9 +593,9 @@ impl Interpreter {
                 if bridge.is_async_fn(*id) {
                     // Async host function: dispatch the call and return a
                     // pending sentinel. The interpreter parks at `await`.
-                    bridge.call_host_async(*id, args)
+                    bridge.call_host_async_with_this(*id, this_val, args)
                 } else {
-                    bridge.call_host(*id, args)
+                    bridge.call_host_with_this(*id, this_val, args)
                 }
             }
             // A proxy over a function: `apply` intercepts the call.

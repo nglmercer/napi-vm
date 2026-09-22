@@ -499,6 +499,10 @@ pub struct Reaction {
 #[derive(Debug)]
 pub struct PromiseInner {
     pub state: PromiseState,
+    /// Set while settlement depends on an external host event. This marker is
+    /// propagated to chained promises so a synchronous await can pump the
+    /// event loop only when its own promise needs host work.
+    pub external_pending: bool,
     /// The fulfilment value or the rejection reason; `undefined` while pending.
     pub value: Value,
     /// Registrations made before the promise settled. Once it settles these
@@ -514,6 +518,7 @@ impl Default for PromiseInner {
     fn default() -> Self {
         Self {
             state: PromiseState::Pending,
+            external_pending: false,
             value: Value::Undefined,
             reactions: Vec::new(),
             handled: false,
@@ -807,6 +812,7 @@ impl Value {
     pub fn settled_promise(state: PromiseState, value: Value) -> Self {
         Value::Promise(Rc::new(RefCell::new(PromiseInner {
             state,
+            external_pending: false,
             value,
             reactions: Vec::new(),
             handled: state != PromiseState::Rejected,

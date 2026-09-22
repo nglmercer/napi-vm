@@ -32,6 +32,7 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         // The global aliases all denote the one global scope.
         (Value::GlobalObject, Value::GlobalObject) => true,
         (Value::Object { props: x }, Value::Object { props: y }) => Rc::ptr_eq(x, y),
+        (Value::Proxy(x), Value::Proxy(y)) => Rc::ptr_eq(x, y),
         (Value::Array(x), Value::Array(y)) => Rc::ptr_eq(x, y),
         (Value::Promise(x), Value::Promise(y)) => Rc::ptr_eq(x, y),
         (Value::Generator { inner: x }, Value::Generator { inner: y }) => Rc::ptr_eq(x, y),

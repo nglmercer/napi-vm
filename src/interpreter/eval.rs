@@ -573,7 +573,7 @@ impl Interpreter {
             }
             Statement::ForIn { name, obj, body } => {
                 let o = self.eval_expr(obj)?;
-                let ks = self.keys(&o);
+                let ks = self.keys_with_proxy_trap(&o)?;
                 let mut r = Value::Undefined;
                 let label = self.active_label.take();
                 for k in ks {
@@ -1192,8 +1192,8 @@ impl Interpreter {
                 }
                 ObjectProp::Spread(expression) => {
                     let value = self.eval_expr(expression)?;
-                    if matches!(&value, Value::Object { .. }) {
-                        for key in self.keys(&value) {
+                    if matches!(&value, Value::Object { .. } | Value::Proxy(_)) {
+                        for key in self.keys_with_proxy_trap(&value)? {
                             let property_value = self.member(&value, &key)?;
                             insert_object_property(
                                 &mut object,
@@ -1498,7 +1498,7 @@ impl Interpreter {
                         } => {
                             let obj = self.eval_expr(object)?;
                             let prop = self.eval_expr(property)?;
-                            let cur = self.prop(&obj, &prop)?;
+                            let cur = self.get_prop_value(&obj, &prop)?;
                             let new_val = if *op == UnOp::Inc {
                                 Value::Number(self.tn(&cur) + 1.0)
                             } else {
@@ -1584,7 +1584,7 @@ impl Interpreter {
                     } => {
                         let obj = self.eval_expr(object)?;
                         let prop = self.eval_expr(property)?;
-                        let f = self.prop(&obj, &prop)?;
+                        let f = self.get_prop_value(&obj, &prop)?;
                         self.call_this(&f, obj, a)
                     }
                     Expr::OptionalChain {
@@ -1601,7 +1601,7 @@ impl Interpreter {
                             obj.clone()
                         } else {
                             let prop = self.eval_expr(property)?;
-                            self.prop(&obj, &prop)?
+                            self.get_prop_value(&obj, &prop)?
                         };
                         self.call_this(&f, obj, a)
                     }
@@ -1766,7 +1766,7 @@ impl Interpreter {
                         let obj = self.eval_expr(object)?;
                         let prop = self.eval_expr(property)?;
                         let fv = if let Some(bin) = op.bin_op() {
-                            let c = self.prop(&obj, &prop)?;
+                            let c = self.get_prop_value(&obj, &prop)?;
                             self.bin_op(bin, &c, &v)?
                         } else {
                             v

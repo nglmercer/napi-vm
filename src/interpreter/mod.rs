@@ -901,6 +901,38 @@ impl Interpreter {
     pub fn global_keys(&self) -> Vec<String> {
         self.persistent_global.borrow().all_keys()
     }
+
+    /// Enumerate a proxy through its `ownKeys` trap when one is installed.
+    pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
+        let Some(proxy) = value.as_proxy() else {
+            return Ok(self.keys(value));
+        };
+        let target = proxy.target.clone();
+        let Some(trap) = self.proxy_trap(&proxy, "ownKeys") else {
+            return Ok(self.keys(&target));
+        };
+        let handler = proxy.handler.clone();
+        let keys = self.call_this(&trap, handler, vec![target])?;
+        let Value::Array(keys) = &keys else {
+            return Err(VmErr::Msg(
+                "TypeError: Proxy ownKeys trap must return an array".into(),
+            ));
+        };
+        let keys = keys.borrow().clone();
+        let mut names = Vec::with_capacity(keys.len());
+        for key in &keys {
+            match key {
+                Value::String(name) => names.push(name.clone()),
+                Value::Symbol(_) => {}
+                _ => {
+                    return Err(VmErr::Msg(
+                        "TypeError: Proxy ownKeys trap returned a non-key".into(),
+                    ));
+                }
+            }
+        }
+        Ok(names)
+    }
 }
 
 #[cfg(test)]

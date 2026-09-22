@@ -98,6 +98,19 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
     }
 }
 
+fn own_names_for(
+    interp: &mut Interpreter,
+    value: &Value,
+    enumerable_only: bool,
+) -> Result<Vec<String>, VmErr> {
+    if matches!(value, Value::Proxy(_)) {
+        // The current Proxy model exposes ownKeys as a string array. Native
+        // addon proxies return the host object's enumerable own keys here.
+        return interp.keys_with_proxy_trap(value);
+    }
+    Ok(own_names(value, enumerable_only))
+}
+
 /// Read an own property slot without walking the prototype chain and without
 /// invoking a getter.
 fn own_slot(v: &Value, key: &str) -> Option<Value> {
@@ -135,37 +148,18 @@ fn desc_bool(desc: &Value, key: &str, default: bool) -> bool {
 
 fn object_keys(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if let Some(names) = proxy_own_keys(interp, &v)? {
-        return Ok(names);
-    }
-    Value::checked_array(own_names(&v, true).into_iter().map(Value::String).collect())
-}
-
-/// A proxy's `ownKeys` trap, if it has one. Without a trap the caller falls
-/// through to the target's own names.
-fn proxy_own_keys(interp: &mut Interpreter, value: &Value) -> Result<Option<Value>, VmErr> {
-    let Some(proxy) = value.as_proxy() else {
-        return Ok(None);
-    };
-    let target = proxy.target.clone();
-    match interp.proxy_trap(&proxy, "ownKeys") {
-        Some(trap) => {
-            let handler = proxy.handler.clone();
-            Ok(Some(interp.call_this(&trap, handler, vec![target])?))
-        }
-        None => Ok(Some(Value::checked_array(
-            own_names(&target, true)
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-        )?)),
-    }
+    Value::checked_array(
+        own_names_for(interp, &v, true)?
+            .into_iter()
+            .map(Value::String)
+            .collect(),
+    )
 }
 
 fn object_values(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
     let mut out = Vec::new();
-    for key in own_names(&v, true) {
+    for key in own_names_for(interp, &v, true)? {
         out.push(interp.member(&v, &key)?);
     }
     Value::checked_array(out)
@@ -174,7 +168,7 @@ fn object_values(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
 fn object_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
     let mut out = Vec::new();
-    for key in own_names(&v, true) {
+    for key in own_names_for(interp, &v, true)? {
         let value = interp.member(&v, &key)?;
         out.push(Value::array(vec![Value::String(key), value]));
     }
@@ -186,9 +180,9 @@ fn object_assign(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
     for src in a.iter().skip(1) {
         // Snapshot the keys first so `Object.assign(o, o)` does not hold a
         // borrow on the object it is about to write to.
-        for key in own_names(src, true) {
+        for key in own_names_for(interp, src, true)? {
             let value = interp.member(src, &key)?;
-            target.set_prop(key, value)?;
+            interp.assign_member(&target, &Value::String(key), value)?;
         }
     }
     Ok(target)
@@ -200,12 +194,9 @@ fn object_get_own_property_names(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if let Some(names) = proxy_own_keys(interp, &v)? {
-        return Ok(names);
-    }
     let names = match v {
         Value::GlobalObject => interp.global_keys(),
-        ref other => own_names(other, false),
+        ref other => own_names_for(interp, other, false)?,
     };
     Value::checked_array(names.into_iter().map(Value::String).collect())
 }

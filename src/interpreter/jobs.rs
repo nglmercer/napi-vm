@@ -31,11 +31,25 @@ pub enum Job {
     },
     /// A plain callback: `queueMicrotask(fn)`, or a timer callback.
     Callback { callback: Value, args: Vec<Value> },
+    /// Callback queued by a host runtime after an external event. Unlike
+    /// synchronous host calls, this runs at an event-loop checkpoint.
+    HostCallback {
+        callback: Value,
+        this_value: Value,
+        args: Vec<Value>,
+    },
+    /// Settlement of a host promise received from the external event queue.
+    HostPromiseSettled {
+        promise: Rc<RefCell<PromiseInner>>,
+        state: PromiseState,
+        value: Value,
+    },
 }
 
 #[derive(Default)]
 pub struct JobQueue {
     microtasks: VecDeque<Job>,
+    external_events: VecDeque<Job>,
     /// Timer callbacks, ordered by delay then by insertion. There is no real
     /// clock here: a timer runs after every microtask has, which preserves the
     /// ordering guarantees guest code depends on without a wall clock.
@@ -51,6 +65,14 @@ impl JobQueue {
 
     pub fn take_microtask(&mut self) -> Option<Job> {
         self.microtasks.pop_front()
+    }
+
+    pub fn push_external_event(&mut self, job: Job) {
+        self.external_events.push_back(job);
+    }
+
+    pub fn take_external_event(&mut self) -> Option<Job> {
+        self.external_events.pop_front()
     }
 
     /// Schedule a timer callback, returning the id `clearTimeout` cancels.
@@ -89,7 +111,7 @@ impl JobQueue {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.microtasks.is_empty() && self.timers.is_empty()
+        self.microtasks.is_empty() && self.external_events.is_empty() && self.timers.is_empty()
     }
 }
 
@@ -107,6 +129,7 @@ pub fn settle(jobs: &Jobs, promise: &Rc<RefCell<PromiseInner>>, state: PromiseSt
             return;
         }
         inner.state = state;
+        inner.external_pending = false;
         inner.value = value.clone();
         std::mem::take(&mut inner.reactions)
     };

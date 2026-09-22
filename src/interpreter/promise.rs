@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use super::Interpreter;
 use super::jobs::{Job, MAX_JOBS_PER_DRAIN, settle};
@@ -167,6 +168,10 @@ impl Interpreter {
         };
         let inner = &inner;
 
+        if inner.borrow().state == PromiseState::Pending && inner.borrow().external_pending {
+            derived.borrow_mut().external_pending = true;
+        }
+
         let reaction = Reaction {
             on_fulfilled,
             on_rejected,
@@ -242,12 +247,17 @@ impl Interpreter {
     pub fn drain_jobs(&mut self) -> Result<(), VmErr> {
         let mut executed = 0usize;
         loop {
+            self.enqueue_host_events(Duration::ZERO)?;
             let job = {
                 let mut queue = self.jobs.borrow_mut();
                 match queue.take_microtask() {
                     Some(job) => Some(job),
-                    // Timers only run once the microtask queue is empty.
-                    None => queue.take_timer(),
+                    // External events and timers are macrotasks. Run one
+                    // between microtask checkpoints.
+                    None => match queue.take_external_event() {
+                        Some(job) => Some(job),
+                        None => queue.take_timer(),
+                    },
                 }
             };
             let Some(job) = job else { return Ok(()) };
@@ -270,7 +280,93 @@ impl Interpreter {
                         Err(error) => return Err(error),
                     }
                 }
+                Job::HostCallback {
+                    callback,
+                    this_value,
+                    args,
+                } => {
+                    self.call_this(&callback, this_value, args)?;
+                }
+                Job::HostPromiseSettled {
+                    promise,
+                    state,
+                    value,
+                } => self.settle_host_promise(promise, state, value)?,
             }
+        }
+    }
+
+    /// Wait for one host-originated event, then run it on the interpreter
+    /// thread and drain its microtasks. Desktop runtimes can call this from
+    /// their own event loop; guest callbacks are never invoked by the
+    /// sidecar/network thread.
+    pub fn run_event_loop_once(&mut self, timeout: Duration) -> Result<bool, VmErr> {
+        let ready = self.enqueue_host_events(Duration::ZERO)?;
+        self.drain_jobs()?;
+        if ready > 0 {
+            return Ok(true);
+        }
+        let Some(bridge) = self.host.clone() else {
+            return Ok(false);
+        };
+        let events = bridge.poll_host_events(timeout)?;
+        if events.is_empty() {
+            return Ok(false);
+        }
+        self.push_host_events(events);
+        self.drain_jobs()?;
+        Ok(true)
+    }
+
+    fn enqueue_host_events(&mut self, timeout: Duration) -> Result<usize, VmErr> {
+        let Some(bridge) = self.host.clone() else {
+            return Ok(0);
+        };
+        let events = bridge.poll_host_events(timeout)?;
+        let count = events.len();
+        self.push_host_events(events);
+        Ok(count)
+    }
+
+    fn push_host_events(&mut self, events: Vec<crate::host::HostEvent>) {
+        let mut queue = self.jobs.borrow_mut();
+        for event in events {
+            match event {
+                crate::host::HostEvent::Callback(callback) => {
+                    queue.push_external_event(Job::HostCallback {
+                        callback: callback.callback,
+                        this_value: callback.this_value,
+                        args: callback.args,
+                    });
+                }
+                crate::host::HostEvent::PromiseSettled {
+                    promise,
+                    state,
+                    value,
+                } => queue.push_external_event(Job::HostPromiseSettled {
+                    promise,
+                    state,
+                    value,
+                }),
+            }
+        }
+    }
+
+    pub(crate) fn settle_host_promise(
+        &mut self,
+        promise: Rc<RefCell<PromiseInner>>,
+        state: PromiseState,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        match state {
+            PromiseState::Fulfilled => self.resolve_promise(&promise, value),
+            PromiseState::Rejected => {
+                self.reject_promise(&promise, value);
+                Ok(())
+            }
+            PromiseState::Pending => Err(VmErr::Msg(
+                "host promise event cannot settle to pending".into(),
+            )),
         }
     }
 
@@ -296,6 +392,18 @@ impl Interpreter {
                 Job::Callback { callback, args } => {
                     self.call_this(&callback, Value::Undefined, args)?;
                 }
+                Job::HostCallback {
+                    callback,
+                    this_value,
+                    args,
+                } => {
+                    self.call_this(&callback, this_value, args)?;
+                }
+                Job::HostPromiseSettled {
+                    promise,
+                    state,
+                    value,
+                } => self.settle_host_promise(promise, state, value)?,
             }
         }
     }
