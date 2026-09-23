@@ -1254,6 +1254,14 @@ struct NapiVmApiTable {
     fatal_error: unsafe extern "C" fn(*const c_char, usize, *const c_char, usize) -> !,
     fatal_exception: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
     set_prototype: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue) -> i32,
+    create_object_with_properties: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        *const NapiValue,
+        *const NapiValue,
+        usize,
+        *mut NapiValue,
+    ) -> i32,
 }
 
 #[repr(C)]
@@ -1426,6 +1434,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     fatal_error: api_fatal_error,
     fatal_exception: api_fatal_exception,
     set_prototype: api_set_prototype,
+    create_object_with_properties: api_create_object_with_properties,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -3833,6 +3842,84 @@ unsafe extern "C" fn api_set_prototype(
         }
 
         target_cell.set_proto(prototype);
+        Ok(())
+    })
+}
+
+/// Experimental fast object creation with a supplied prototype and ordered
+/// data properties. Only prototype types represented by the VM's ordinary
+/// object-chain lookup are accepted; specialized prototypes fail explicitly.
+unsafe extern "C" fn api_create_object_with_properties(
+    env: NapiEnv,
+    prototype_or_null: NapiValue,
+    property_names: *const NapiValue,
+    property_values: *const NapiValue,
+    property_count: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if property_count > crate::value::MAX_OBJECT_PROPS {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        if property_count > 0 && (property_names.is_null() || property_values.is_null()) {
+            return Err(NAPI_INVALID_ARG);
+        }
+
+        let environment = environment(env)?;
+        let handles = environment.handles.borrow();
+        let prototype_value = if prototype_or_null.is_null() {
+            Value::Null
+        } else {
+            handles.get(prototype_or_null)?
+        };
+        let prototype = match &prototype_value {
+            Value::Null => None,
+            Value::Object { .. } | Value::Class(_) => Some(Rc::new(prototype_value)),
+            other if !is_napi_property_object(other) => return Err(NAPI_OBJECT_EXPECTED),
+            _ => return Err(NAPI_GENERIC_FAILURE),
+        };
+
+        let mut properties: Vec<(String, Value)> = Vec::with_capacity(property_count);
+        let mut symbol_keys = Vec::new();
+        for index in 0..property_count {
+            let name_handle = unsafe { *property_names.add(index) };
+            let value_handle = unsafe { *property_values.add(index) };
+            let name = handles.get(name_handle)?;
+            let symbol = match &name {
+                Value::Symbol(symbol) => Some(symbol.clone()),
+                _ => None,
+            };
+            let key = napi_property_key(&name)?;
+            let value = handles.get(value_handle)?;
+            match properties.iter_mut().find(|(existing, _)| existing == &key) {
+                Some((_, existing_value)) => *existing_value = value,
+                None => properties.push((key.clone(), value)),
+            }
+            if let Some(symbol) = symbol {
+                if let Some((_, existing_symbol)) = symbol_keys
+                    .iter_mut()
+                    .find(|(existing, _)| existing == &key)
+                {
+                    *existing_symbol = symbol;
+                } else {
+                    symbol_keys.push((key, symbol));
+                }
+            }
+        }
+        drop(handles);
+
+        let object = Value::object_with_proto(properties, prototype);
+        if let Value::Object { props } = &object {
+            let mut metadata = props.meta.borrow_mut();
+            for (key, symbol) in symbol_keys {
+                metadata.set_symbol_key(&key, symbol);
+            }
+        }
+        let handle = environment.handles.borrow_mut().create(object)?;
+        unsafe { result.write(handle) };
         Ok(())
     })
 }
@@ -14441,7 +14528,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
     }
 
     #[test]
-    fn experimental_node_api_set_prototype_matches_reference_runtimes() {
+    fn experimental_node_api_object_prototype_apis_match_reference_runtimes() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-node-api-set-prototype-{}-{}",
@@ -14466,6 +14553,19 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             return;
         };
         assert!(compiler.status.success(), "cc --version failed");
+        let experimental_headers = ["node_api.h", "js_native_api.h"]
+            .iter()
+            .filter_map(|name| fs::read_to_string(node_include.join(name)).ok())
+            .collect::<String>();
+        if !experimental_headers.contains("node_api_set_prototype")
+            || !experimental_headers.contains("node_api_create_object_with_properties")
+        {
+            eprintln!(
+                "skipping experimental Node-API fixture: installed Node headers lack the experimental object APIs"
+            );
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
 
         let source = root.join("fixture.c");
         let addon = root.join("fixture.node");
@@ -14497,14 +14597,38 @@ static napi_value default_cycle_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value create_object_with_properties_probe(
+    napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1], names[3], values[3], object, result;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc > 1 ||
+      napi_create_string_utf8(env, "label", NAPI_AUTO_LENGTH, &names[0]) != napi_ok ||
+      napi_create_string_utf8(env, "value", NAPI_AUTO_LENGTH, &names[1]) != napi_ok ||
+      napi_create_symbol(env, NULL, &names[2]) != napi_ok ||
+      napi_create_string_utf8(env, "native", NAPI_AUTO_LENGTH, &values[0]) != napi_ok ||
+      napi_create_int32(env, 17, &values[1]) != napi_ok ||
+      napi_create_string_utf8(env, "symbol-value", NAPI_AUTO_LENGTH, &values[2]) != napi_ok ||
+      node_api_create_object_with_properties(
+          env, argc == 0 ? NULL : args[0], names, values, 3, &object) != napi_ok ||
+      napi_create_array(env, &result) != napi_ok ||
+      napi_set_element(env, result, 0, object) != napi_ok ||
+      napi_set_element(env, result, 1, names[2]) != napi_ok)
+    return NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
-  napi_value function, cycle_function;
+  napi_value function, cycle_function, create_function;
   if (napi_create_function(env, "setPrototype", NAPI_AUTO_LENGTH,
                            set_prototype_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "setPrototype", function) != napi_ok ||
       napi_create_function(env, "defaultCycle", NAPI_AUTO_LENGTH,
                            default_cycle_probe, NULL, &cycle_function) != napi_ok ||
-      napi_set_named_property(env, exports, "defaultCycle", cycle_function) != napi_ok)
+      napi_set_named_property(env, exports, "defaultCycle", cycle_function) != napi_ok ||
+      napi_create_function(env, "createObject", NAPI_AUTO_LENGTH,
+                           create_object_with_properties_probe, NULL,
+                           &create_function) != napi_ok ||
+      napi_set_named_property(env, exports, "createObject", create_function) != napi_ok)
     return NULL;
   return exports;
 }
@@ -14536,7 +14660,7 @@ NAPI_MODULE_INIT() {
         let main = root.join("main.cjs");
         fs::write(
             &main,
-            "const addon = require('./fixture.node');\nconst prototype = { marker: 'inherited', twice() { return this.value * 2; } };\nconst target = { value: 21 };\nconst status = addon.setPrototype(target, prototype);\nconst cycleStatus = addon.setPrototype(target, target);\nconst defaultCycleStatus = addon.defaultCycle({});\nconst nullTarget = {};\nconst nullStatus = addon.setPrototype(nullTarget, null);\nObject.freeze(target);\nconst frozenSameStatus = addon.setPrototype(target, prototype);\nconst frozenChangeStatus = addon.setPrototype(target, null);\nmodule.exports = JSON.stringify({ status, cycleStatus, defaultCycleStatus, nullStatus, nullPrototype: Object.getPrototypeOf(nullTarget) === null, frozenSameStatus, frozenChangeStatus, samePrototype: Object.getPrototypeOf(target) === prototype, marker: target.marker, twice: target.twice() });\n",
+            "const addon = require('./fixture.node');\nconst prototype = { marker: 'inherited', twice() { return this.value * 2; } };\nconst target = { value: 21 };\nconst status = addon.setPrototype(target, prototype);\nconst cycleStatus = addon.setPrototype(target, target);\nconst defaultCycleStatus = addon.defaultCycle({});\nconst nullTarget = {};\nconst nullStatus = addon.setPrototype(nullTarget, null);\nObject.freeze(target);\nconst frozenSameStatus = addon.setPrototype(target, prototype);\nconst frozenChangeStatus = addon.setPrototype(target, null);\nconst [created, symbolKey] = addon.createObject(prototype);\nconst [nullCreated] = addon.createObject(null);\nconst [implicitlyNullCreated] = addon.createObject();\nmodule.exports = JSON.stringify({ status, cycleStatus, defaultCycleStatus, nullStatus, nullPrototype: Object.getPrototypeOf(nullTarget) === null, frozenSameStatus, frozenChangeStatus, samePrototype: Object.getPrototypeOf(target) === prototype, marker: target.marker, twice: target.twice(), createdPrototype: Object.getPrototypeOf(created) === prototype, createdLabel: created.label, createdValue: created.value, createdSymbol: created[symbolKey], inherited: created.marker, nullCreatedPrototype: Object.getPrototypeOf(nullCreated) === null, implicitlyNullCreatedPrototype: Object.getPrototypeOf(implicitlyNullCreated) === null });\n",
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
@@ -14566,7 +14690,14 @@ NAPI_MODULE_INIT() {
                 "frozenChangeStatus": 9,
                 "samePrototype": true,
                 "marker": "inherited",
-                "twice": 42
+                "twice": 42,
+                "createdPrototype": true,
+                "createdLabel": "native",
+                "createdValue": 17,
+                "createdSymbol": "symbol-value",
+                "inherited": "inherited",
+                "nullCreatedPrototype": true,
+                "implicitlyNullCreatedPrototype": true
             })
         );
 
@@ -14579,13 +14710,21 @@ NAPI_MODULE_INIT() {
                 .args(["-e", runner])
                 .output()
                 .unwrap();
-            assert!(
-                reference.status.success(),
-                "Node experimental Node-API fixture failed: {}",
-                String::from_utf8_lossy(&reference.stderr)
-            );
-            let node_result: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
-            assert_eq!(vm_result, node_result, "Node and napi-vm results differ");
+            if reference.status.success() {
+                let node_result: serde_json::Value =
+                    serde_json::from_slice(&reference.stdout).unwrap();
+                assert_eq!(vm_result, node_result, "Node and napi-vm results differ");
+            } else {
+                let stderr = String::from_utf8_lossy(&reference.stderr);
+                assert!(
+                    stderr.contains("node_api_set_prototype")
+                        || stderr.contains("node_api_create_object_with_properties"),
+                    "Node experimental Node-API fixture failed for an unexpected reason: {stderr}"
+                );
+                eprintln!(
+                    "Node runtime lacks the experimental object APIs; skipped this reference comparison"
+                );
+            }
         }
         if let Ok(bun_version) = Command::new("bun").arg("--version").output()
             && bun_version.status.success()
@@ -14602,11 +14741,12 @@ NAPI_MODULE_INIT() {
             } else {
                 let stderr = String::from_utf8_lossy(&reference.stderr);
                 assert!(
-                    stderr.contains("node_api_set_prototype"),
+                    stderr.contains("node_api_set_prototype")
+                        || stderr.contains("node_api_create_object_with_properties"),
                     "Bun experimental Node-API fixture failed for an unexpected reason: {stderr}"
                 );
                 eprintln!(
-                    "Bun does not export experimental node_api_set_prototype; skipped this reference comparison"
+                    "Bun does not export the experimental object APIs; skipped this reference comparison"
                 );
             }
         }

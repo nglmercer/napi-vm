@@ -271,6 +271,9 @@ typedef struct napi_vm_node_api_table {
   void (*fatal_error)(const char*, size_t, const char*, size_t);
   napi_status (*fatal_exception)(napi_env, napi_value);
   napi_status (*set_prototype)(napi_env, napi_value, napi_value);
+  napi_status (*create_object_with_properties)(napi_env, napi_value,
+                                                napi_value*, napi_value*,
+                                                size_t, napi_value*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1404,4 +1407,14 @@ NAPI_VM_EXPORT napi_status node_api_set_prototype(napi_env env,
                                                    napi_value value) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->set_prototype(env, object, value) : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_object_with_properties(
+    napi_env env, napi_value prototype_or_null, napi_value* property_names,
+    napi_value* property_values, size_t property_count, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_object_with_properties(
+                     env, prototype_or_null, property_names, property_values,
+                     property_count, result)
+               : 9;
 }

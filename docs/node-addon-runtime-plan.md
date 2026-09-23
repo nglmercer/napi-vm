@@ -176,14 +176,17 @@ creation with eager copy/finalizer handling, string property-key creation, and
 zero-copy `Buffer` views over `ArrayBuffer` storage. Node and Bun fixtures check
 the external-string copy/finalizer contract, Unicode keys, buffer aliasing, and
 out-of-range errors.
-The experimental `node_api_set_prototype` entry point is also available to
-addons compiled with `NAPI_EXPERIMENTAL`; it updates prototype metadata for
-ordinary VM objects and class constructors and rejects specialized object
-representations whose prototype model is not implemented. This does not raise
-the stable Node-API version reported by the host. Its fixture compares
-prototype identity and inherited method behavior with Node. Bun 1.4 does not
-export this experimental symbol, so the fixture records that comparison as
-unsupported there.
+The experimental `node_api_set_prototype` and
+`node_api_create_object_with_properties` entry points are available to addons
+compiled with `NAPI_EXPERIMENTAL`; they update prototype metadata or create an
+ordinary object with ordered data properties. Prototype mutation is supported
+for ordinary VM objects and class constructors, and object creation accepts
+ordinary object/class prototypes or null. Specialized object representations
+whose prototype model is not implemented fail explicitly. These functions do
+not raise the stable Node-API version reported by the host. Their fixture
+compares prototype identity, inherited behavior, and property values with
+Node. Bun 1.4 does not export these experimental symbols, so that comparison is
+recorded as unsupported there.
 The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
@@ -356,7 +359,8 @@ not return success with a partial or fabricated result.
 
 - [Node-API](https://nodejs.org/api/n-api.html) describes the opaque `napi_value`
   interface, the ABI stability boundary, and experimental
-  [`node_api_set_prototype`](https://nodejs.org/api/n-api.html#node_api_set_prototype).
+  [`node_api_set_prototype`](https://nodejs.org/api/n-api.html#node_api_set_prototype) and
+  [`node_api_create_object_with_properties`](https://nodejs.org/api/n-api.html#node_api_create_object_with_properties).
 - [Node.js C++ addons](https://nodejs.org/api/addons.html) distinguishes
   Node-API, NAN, and direct V8/Node/libuv addon styles.
 - [Node.js CommonJS modules](https://nodejs.org/api/modules.html) documents
