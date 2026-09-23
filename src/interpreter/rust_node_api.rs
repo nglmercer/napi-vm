@@ -20,7 +20,7 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{Env, FileCommonJsLoader, Interpreter};
-use crate::value::{Buffer, ErrorData, TypedArrayData, TypedKind, Value};
+use crate::value::{Buffer, ClassData, ErrorData, PropAttrs, TypedArrayData, TypedKind, Value};
 
 const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
@@ -33,6 +33,7 @@ const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
+const NAPI_PROPERTY_STATIC: i32 = 1 << 3;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -474,6 +475,16 @@ struct NapiVmApiTable {
     create_object: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     define_properties:
         unsafe extern "C" fn(NapiEnv, NapiValue, usize, *const NapiPropertyDescriptor) -> i32,
+    define_class: unsafe extern "C" fn(
+        NapiEnv,
+        *const c_char,
+        usize,
+        Option<NapiCallback>,
+        *mut c_void,
+        usize,
+        *const NapiPropertyDescriptor,
+        *mut NapiValue,
+    ) -> i32,
     create_function: unsafe extern "C" fn(
         NapiEnv,
         *const c_char,
@@ -515,6 +526,7 @@ struct NapiVmApiTable {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct NapiPropertyDescriptor {
     utf8name: *const c_char,
     name: NapiValue,
@@ -584,6 +596,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     remove_wrap: api_remove_wrap,
     create_object: api_create_object,
     define_properties: api_define_properties,
+    define_class: api_define_class,
     create_function: api_create_function,
     set_named_property: api_set_named_property,
     get_named_property: api_get_named_property,
@@ -2646,6 +2659,92 @@ unsafe extern "C" fn api_define_properties(
     })
 }
 
+unsafe extern "C" fn api_define_class(
+    env: NapiEnv,
+    name: *const c_char,
+    name_length: usize,
+    constructor: Option<NapiCallback>,
+    data: *mut c_void,
+    property_count: usize,
+    properties: *const NapiPropertyDescriptor,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if property_count > crate::value::MAX_OBJECT_PROPS {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        if property_count > 0 && properties.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let constructor = constructor.ok_or(NAPI_FUNCTION_EXPECTED)?;
+        let environment = environment(env)?;
+        let class_name = if name_length == usize::MAX {
+            unsafe { read_c_string(name)? }
+        } else if name_length == 0 {
+            String::new()
+        } else {
+            if name.is_null() {
+                return Err(NAPI_INVALID_ARG);
+            }
+            let bytes = unsafe { std::slice::from_raw_parts(name.cast::<u8>(), name_length) };
+            std::str::from_utf8(bytes)
+                .map_err(|_| NAPI_INVALID_ARG)?
+                .to_owned()
+        };
+        let descriptors = if property_count == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(properties, property_count) }
+        };
+        // The VM stores class statics separately from ordinary object
+        // properties, so it cannot currently preserve descriptor attributes
+        // or accessors on the constructor itself. Refuse those descriptors
+        // instead of exposing values with different JavaScript semantics.
+        if descriptors
+            .iter()
+            .any(|descriptor| descriptor.attributes & NAPI_PROPERTY_STATIC != 0)
+        {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+
+        let native_constructor =
+            create_native_callback_value(&environment, &class_name, constructor, data)?;
+        let prototype = Value::object(Vec::new());
+        let class = Value::Class(Box::new(ClassData {
+            name: class_name,
+            constructor: Box::new(native_constructor),
+            prototype: Rc::new(prototype.clone()),
+            statics: Rc::new(RefCell::new(Vec::new())),
+        }));
+        prototype
+            .set_prop("constructor".to_owned(), class.clone())
+            .map_err(|_| NAPI_GENERIC_FAILURE)?;
+        if let Value::Object { props } = &prototype {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        let prototype_handle = environment.handles.borrow_mut().create(prototype)?;
+        for descriptor in descriptors {
+            let status = unsafe { api_define_properties(env, prototype_handle, 1, descriptor) };
+            if status != NAPI_OK {
+                return Err(status);
+            }
+        }
+        let class_handle = environment.handles.borrow_mut().create(class)?;
+        unsafe { result.write(class_handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_function(
     env: NapiEnv,
     name: *const c_char,
@@ -3741,6 +3840,7 @@ static int wrapped_finalizer_calls;
 static int removed_finalizer_calls;
 static int finalizer_create_function_status = -1;
 static int descriptor_setter_value = 5;
+static int class_constructor_offset = 1;
 static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 
@@ -3965,6 +4065,31 @@ static napi_value defined_setter(napi_env env, napi_callback_info info) {
   if (napi_get_cb_info(env, info, &argc, &value, NULL, NULL) != napi_ok || argc < 1 ||
       napi_get_value_int32(env, value, &descriptor_setter_value) != napi_ok) return NULL;
   return NULL;
+}
+
+static napi_value counter_constructor(napi_env env, napi_callback_info info) {
+  napi_value argument, this_arg, initial_value;
+  size_t argc = 1;
+  void* data = NULL;
+  int32_t value = 0;
+  if (napi_get_cb_info(env, info, &argc, &argument, &this_arg, &data) != napi_ok ||
+      this_arg == NULL || data != &class_constructor_offset) return NULL;
+  if (argc > 0 && napi_get_value_int32(env, argument, &value) != napi_ok) return NULL;
+  if (napi_create_int32(env, value + *(int*)data, &initial_value) != napi_ok ||
+      napi_set_named_property(env, this_arg, "value", initial_value) != napi_ok) return NULL;
+  return NULL;
+}
+
+static napi_value counter_increment(napi_env env, napi_callback_info info) {
+  napi_value this_arg, value, result;
+  size_t argc = 0;
+  int32_t current;
+  if (napi_get_cb_info(env, info, &argc, NULL, &this_arg, NULL) != napi_ok ||
+      napi_get_named_property(env, this_arg, "value", &value) != napi_ok ||
+      napi_get_value_int32(env, value, &current) != napi_ok ||
+      napi_create_int32(env, current + 1, &result) != napi_ok ||
+      napi_set_named_property(env, this_arg, "value", result) != napi_ok) return NULL;
+  return result;
 }
 
 static napi_value symbol_probe(napi_env env, napi_callback_info info) {
@@ -4215,6 +4340,11 @@ NAPI_MODULE_INIT() {
       { .name = NULL, .value = NULL,
         .attributes = napi_writable | napi_enumerable | napi_configurable },
   };
+  napi_property_descriptor counter_methods[] = {
+      { .utf8name = "increment", .method = counter_increment,
+        .attributes = napi_default },
+  };
+  napi_value counter_class;
   int32_t checked_version = 0;
   if (napi_create_int32(env, 7, &descriptor_value) != napi_ok ||
       napi_create_string_utf8(env, "descriptor", NAPI_AUTO_LENGTH,
@@ -4237,6 +4367,10 @@ NAPI_MODULE_INIT() {
       napi_close_handle_scope(env, scope) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "descriptorSymbol", descriptor_symbol) != napi_ok ||
       napi_define_properties(env, exports, 4, defined_properties) != napi_ok) return NULL;
+  if (napi_define_class(env, "Counter", NAPI_AUTO_LENGTH, counter_constructor,
+                        &class_constructor_offset, 1, counter_methods,
+                        &counter_class) != napi_ok ||
+      napi_set_named_property(env, exports, "Counter", counter_class) != napi_ok) return NULL;
   if (napi_create_function(env, "add", NAPI_AUTO_LENGTH, add, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "add", function) != napi_ok ||
       napi_create_object(env, &metadata) != napi_ok ||
@@ -4348,6 +4482,8 @@ const definedValueAfter = addon.definedValue;
 const definedMethodDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedMethod');
 const definedValueDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedValue');
 const definedConstantDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedConstant');
+const counter = new addon.Counter(40);
+const counterIncremented = counter.increment();
 const errors = addon.createErrors();
 let typeError;
 let rangeError;
@@ -4430,6 +4566,10 @@ module.exports = {
   definedMethodEnumerable: definedMethodDescriptor.enumerable,
   definedValueEnumerable: definedValueDescriptor.enumerable,
   definedConstantWritable: definedConstantDescriptor.writable,
+  counterValue: counter.value,
+  counterIncremented,
+  counterInstance: counter instanceof addon.Counter,
+  counterConstructor: counter.constructor === addon.Counter,
   symbols: addon.symbolProbe(),
   sum: addon.add(19, 23),
   version: addon.metadata.version,
@@ -4574,6 +4714,22 @@ module.exports = {
         ));
         assert!(matches!(
             result.get_prop("definedConstantWritable"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("counterValue"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterIncremented"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterInstance"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("counterConstructor"),
             Some(Value::Bool(true))
         ));
         let symbols = result.get_prop("symbols").unwrap();

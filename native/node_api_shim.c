@@ -92,6 +92,10 @@ typedef struct napi_vm_node_api_table {
   napi_status (*create_object)(napi_env, napi_value*);
   napi_status (*define_properties)(napi_env, napi_value, size_t,
                                    const napi_vm_property_descriptor*);
+  napi_status (*define_class)(napi_env, const char*, size_t, napi_callback,
+                              void*, size_t,
+                              const napi_vm_property_descriptor*,
+                              napi_value*);
   napi_status (*create_function)(napi_env, const char*, size_t, napi_callback,
                                  void*, napi_value*);
   napi_status (*set_named_property)(napi_env, napi_value, const char*, napi_value);
@@ -520,6 +524,16 @@ NAPI_VM_EXPORT napi_status napi_define_properties(
     const napi_vm_property_descriptor* properties) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->define_properties(env, object, property_count, properties)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_define_class(
+    napi_env env, const char* utf8name, size_t name_length,
+    napi_callback constructor, void* data, size_t property_count,
+    const napi_vm_property_descriptor* properties, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->define_class(env, utf8name, name_length, constructor,
+                                     data, property_count, properties, result)
                : 9;
 }
 
