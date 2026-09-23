@@ -72,6 +72,8 @@ targets (data values, symbol keys, native methods, and accessors),
 prototype descriptors, `napi_typeof`, and array creation/index/length
 operations. Class static properties share object descriptor metadata and
 accessor behavior.
+`napi_get_value_int64` truncates finite Numbers toward zero, clamps values
+outside the signed 64-bit range, and converts NaN and infinities to zero.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.

@@ -2158,7 +2158,10 @@ unsafe extern "C" fn api_get_value_int64(env: NapiEnv, value: NapiValue, result:
         let Value::Number(number) = value else {
             return Err(NAPI_NUMBER_EXPECTED);
         };
-        unsafe { result.write(number as i64) };
+        // napi_get_value_int64 converts finite Numbers by truncating toward
+        // zero, but maps NaN and infinities to zero. Rust's float-to-int cast
+        // saturates infinities, so handle non-finite values explicitly.
+        unsafe { result.write(if number.is_finite() { number as i64 } else { 0 }) };
         Ok(())
     })
 }
@@ -5985,6 +5988,16 @@ static napi_value round_trip(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value int64_conversion_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  int64_t value = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_value_int64(env, argv[0], &value) != napi_ok ||
+      napi_create_double(env, (double)value, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value string_encoding_probe(napi_env env, napi_callback_info info) {
   size_t argc = 1, required = 0, copied = 0, truncated_copied = 0;
   size_t wrong_type_length = 0;
@@ -7005,6 +7018,9 @@ NAPI_MODULE_INIT() {
       napi_create_reference(env, field, 1, &removable_object) != napi_ok ||
       napi_create_function(env, "roundTrip", NAPI_AUTO_LENGTH, round_trip, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "roundTrip", function) != napi_ok ||
+      napi_create_function(env, "int64ConversionProbe", NAPI_AUTO_LENGTH,
+                           int64_conversion_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "int64ConversionProbe", function) != napi_ok ||
       napi_create_function(env, "arrayProbe", NAPI_AUTO_LENGTH, array_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "arrayProbe", function) != napi_ok ||
       napi_create_function(env, "returnsUndefined", NAPI_AUTO_LENGTH, returns_undefined, NULL, &function) != napi_ok ||
@@ -7263,6 +7279,8 @@ module.exports = {
   maxUint32: values.maxUint32,
   int64: values.int64,
   roundTrip: addon.roundTrip(true, 4.25, 'native ✓', 4294967295, -2.5),
+  int64Conversions: [NaN, Infinity, -Infinity, -0, 3.9, -3.9, 1e20, -1e20]
+    .map(value => addon.int64ConversionProbe(value)),
   array: addon.arrayProbe(),
   wrapped,
   removedWrap,
@@ -7906,6 +7924,31 @@ module.exports = {
             result.get_prop("int64"),
             Some(Value::Number(value)) if value == 2_147_483_648.0
         ));
+        let int64_conversions = result.get_prop("int64Conversions").unwrap();
+        let Value::Array(int64_conversions) = &int64_conversions else {
+            panic!("Node-API int64 conversion fixture did not return an array");
+        };
+        let int64_conversion_values = int64_conversions
+            .borrow()
+            .iter()
+            .map(|value| match value {
+                Value::Number(value) => *value,
+                _ => panic!("Node-API int64 conversion fixture returned a non-number"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            int64_conversion_values,
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                3.0,
+                -3.0,
+                i64::MAX as f64,
+                i64::MIN as f64
+            ]
+        );
         let round_trip = result.get_prop("roundTrip").unwrap();
         assert!(matches!(
             round_trip.get_prop("flag"),
