@@ -10,6 +10,8 @@ typedef void* napi_handle_scope;
 typedef void* napi_escapable_handle_scope;
 typedef void* napi_deferred;
 typedef void* napi_async_work;
+typedef void* napi_async_context;
+typedef void* napi_callback_scope;
 typedef void* napi_threadsafe_function;
 typedef int32_t napi_status;
 typedef int32_t napi_typedarray_type;
@@ -195,6 +197,15 @@ typedef struct napi_vm_node_api_table {
                                              napi_finalize, void*, napi_value*);
   napi_status (*create_external_buffer)(napi_env, size_t, void*, napi_finalize,
                                         void*, napi_value*);
+  napi_status (*async_init)(napi_env, napi_value, napi_value,
+                            napi_async_context*);
+  napi_status (*async_destroy)(napi_env, napi_async_context);
+  napi_status (*make_callback)(napi_env, napi_async_context, napi_value,
+                               napi_value, size_t, const napi_value*,
+                               napi_value*);
+  napi_status (*open_callback_scope)(napi_env, napi_value, napi_async_context,
+                                     napi_callback_scope*);
+  napi_status (*close_callback_scope)(napi_env, napi_callback_scope);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -515,6 +526,46 @@ NAPI_VM_EXPORT napi_status napi_create_external_buffer(
   return table ? table->create_external_buffer(env, length, data, finalize_cb,
                                                 finalize_hint, result)
                : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_async_init(napi_env env,
+                                            napi_value async_resource,
+                                            napi_value async_resource_name,
+                                            napi_async_context* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->async_init(env, async_resource, async_resource_name,
+                                    result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_async_destroy(napi_env env,
+                                              napi_async_context async_context) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->async_destroy(env, async_context) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_make_callback(
+    napi_env env, napi_async_context async_context, napi_value recv,
+    napi_value func, size_t argc, const napi_value* argv, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->make_callback(env, async_context, recv, func, argc,
+                                       argv, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_open_callback_scope(
+    napi_env env, napi_value resource_object, napi_async_context async_context,
+    napi_callback_scope* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->open_callback_scope(env, resource_object, async_context,
+                                             result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_close_callback_scope(
+    napi_env env, napi_callback_scope scope) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->close_callback_scope(env, scope) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_arraybuffer_info(napi_env env,

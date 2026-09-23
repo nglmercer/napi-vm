@@ -76,7 +76,7 @@ pub use ops::{
     SYMBOL_ITERATOR_SLOT, is_internal_key, strict_equals, symbol_id_from_slot, symbol_slot_key,
 };
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -188,6 +188,17 @@ pub struct Interpreter {
     /// `begin_execution()` at each NAPI entry point; decremented by
     /// `consume_loop()` on every loop iteration.
     loops_remaining: u64,
+    /// Active synchronous guest statement bodies. Node-API `make_callback`
+    /// drains microtasks only when it is not nested inside guest JavaScript.
+    guest_execution_depth: Rc<Cell<usize>>,
+}
+
+struct GuestExecutionGuard(Rc<Cell<usize>>);
+
+impl Drop for GuestExecutionGuard {
+    fn drop(&mut self) {
+        self.0.set(self.0.get().saturating_sub(1));
+    }
 }
 
 /// Does this statement contribute to the enclosing script's completion value?
@@ -244,6 +255,7 @@ impl Interpreter {
             gen_depth: 0,
             loop_budget: DEFAULT_LOOP_BUDGET,
             loops_remaining: DEFAULT_LOOP_BUDGET,
+            guest_execution_depth: Rc::new(Cell::new(0)),
         }
     }
 
@@ -617,6 +629,9 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
+        let depth = self.guest_execution_depth.clone();
+        depth.set(depth.get().saturating_add(1));
+        let _execution_guard = GuestExecutionGuard(depth);
         self.hoist_vars(stmts)?;
         self.hoist_lexical(stmts)?;
         self.run(stmts)

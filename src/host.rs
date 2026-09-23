@@ -11,6 +11,9 @@ pub enum HostCallbackKind {
     /// Invoke the callback with `this_value` and `args`.
     #[default]
     Call,
+    /// Invoke via Node-API `napi_make_callback`, then drain the VM's
+    /// microtasks before returning to native code.
+    MakeCallback,
     /// Construct the callback using `args`, ignoring `this_value`.
     Construct,
 }

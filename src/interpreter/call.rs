@@ -736,6 +736,29 @@ impl Interpreter {
             crate::host::HostCallbackKind::Call => {
                 self.call_this(&callback.callback, callback.this_value, callback.args)
             }
+            crate::host::HostCallbackKind::MakeCallback => {
+                // Node-API uses napi_make_callback both from native async
+                // completions and from synchronous native calls. A callback
+                // made while guest JavaScript is already on the stack must
+                // leave its microtasks for the enclosing stack checkpoint.
+                let should_checkpoint = self.guest_execution_depth.get() == 0;
+                let result = self.call_this(&callback.callback, callback.this_value, callback.args);
+                if should_checkpoint {
+                    let checkpoint = self.drain_microtasks();
+                    match result {
+                        Err(error) => {
+                            let _ = checkpoint;
+                            Err(error)
+                        }
+                        Ok(value) => {
+                            checkpoint?;
+                            Ok(value)
+                        }
+                    }
+                } else {
+                    result
+                }
+            }
             crate::host::HostCallbackKind::Construct => {
                 self.ctor(&callback.callback, callback.args)
             }

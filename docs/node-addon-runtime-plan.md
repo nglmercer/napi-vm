@@ -99,7 +99,12 @@ prototype or callback semantics are not represented by the Rust host yet.
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path. `napi_run_script`
 uses the same dispatcher to execute source in the VM and leaves queued jobs for
-the normal event-loop checkpoint.
+the normal event-loop checkpoint. `napi_async_init` and `napi_async_destroy`
+track native async-context lifetimes, `napi_open_callback_scope` and
+`napi_close_callback_scope` validate nested scope lifetimes, and
+`napi_make_callback` uses the same controlled guest-callback dispatcher.
+Async-context resource metadata is retained until destroy, but Node's
+`async_hooks` and `AsyncLocalStorage` propagation are not implemented.
 It also creates Node-style errors, tracks pending exceptions, and transfers
 native callback throws into guest `try`/`catch`. `napi_get_last_error_info`
 reports the most recent Node-API status and a VM-neutral message. Its returned

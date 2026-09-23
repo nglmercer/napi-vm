@@ -41,6 +41,7 @@ const NAPI_PENDING_EXCEPTION: i32 = 10;
 const NAPI_CANCELLED: i32 = 11;
 const NAPI_ESCAPE_CALLED_TWICE: i32 = 12;
 const NAPI_HANDLE_SCOPE_MISMATCH: i32 = 13;
+const NAPI_CALLBACK_SCOPE_MISMATCH: i32 = 14;
 const NAPI_QUEUE_FULL: i32 = 15;
 const NAPI_CLOSING: i32 = 16;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
@@ -67,6 +68,8 @@ type NapiEnv = *mut c_void;
 type NapiValue = *mut c_void;
 type NapiCallbackInfo = *mut c_void;
 type NapiHandleScope = *mut c_void;
+type NapiAsyncContext = *mut c_void;
+type NapiCallbackScope = *mut c_void;
 type NapiRef = *mut c_void;
 type NapiDeferred = *mut c_void;
 type NapiAsyncWork = *mut c_void;
@@ -292,6 +295,8 @@ struct NapiEnvironment {
     deferreds: RefCell<HashMap<usize, NapiDeferredState>>,
     async_works: RefCell<HashMap<usize, NapiAsyncWorkState>>,
     threadsafe_functions: RefCell<HashMap<usize, NapiThreadsafeFunctionState>>,
+    async_contexts: RefCell<HashMap<usize, NapiAsyncContextState>>,
+    callback_scopes: RefCell<Vec<NapiCallbackScopeState>>,
     cleanup_hooks: RefCell<Vec<NapiCleanupHookRecord>>,
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
@@ -361,6 +366,17 @@ struct NapiReference {
 struct NapiDeferredState {
     promise: Rc<RefCell<PromiseInner>>,
     settling: bool,
+}
+
+struct NapiAsyncContextState {
+    _resource: Value,
+    _resource_name: Value,
+}
+
+#[derive(Clone, Copy)]
+struct NapiCallbackScopeState {
+    token: usize,
+    async_context: usize,
 }
 
 #[derive(Clone)]
@@ -947,6 +963,20 @@ struct NapiVmApiTable {
         *mut c_void,
         *mut NapiValue,
     ) -> i32,
+    async_init: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiAsyncContext) -> i32,
+    async_destroy: unsafe extern "C" fn(NapiEnv, NapiAsyncContext) -> i32,
+    make_callback: unsafe extern "C" fn(
+        NapiEnv,
+        NapiAsyncContext,
+        NapiValue,
+        NapiValue,
+        usize,
+        *const NapiValue,
+        *mut NapiValue,
+    ) -> i32,
+    open_callback_scope:
+        unsafe extern "C" fn(NapiEnv, NapiValue, NapiAsyncContext, *mut NapiCallbackScope) -> i32,
+    close_callback_scope: unsafe extern "C" fn(NapiEnv, NapiCallbackScope) -> i32,
 }
 
 #[repr(C)]
@@ -1077,6 +1107,11 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     coerce_to_object: api_coerce_to_object,
     create_external_arraybuffer: api_create_external_arraybuffer,
     create_external_buffer: api_create_external_buffer,
+    async_init: api_async_init,
+    async_destroy: api_async_destroy,
+    make_callback: api_make_callback,
+    open_callback_scope: api_open_callback_scope,
+    close_callback_scope: api_close_callback_scope,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1093,6 +1128,7 @@ fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
         NAPI_CANCELLED => b"cancelled\0",
         NAPI_ESCAPE_CALLED_TWICE => b"escape called twice\0",
         NAPI_HANDLE_SCOPE_MISMATCH => b"handle scope mismatch\0",
+        NAPI_CALLBACK_SCOPE_MISMATCH => b"callback scope mismatch\0",
         NAPI_QUEUE_FULL => b"thread-safe function queue is full\0",
         NAPI_CLOSING => b"thread-safe function is closing\0",
         NAPI_ARRAYBUFFER_EXPECTED => b"ArrayBuffer expected\0",
@@ -5057,6 +5093,180 @@ unsafe extern "C" fn api_get_property_names(
     })
 }
 
+unsafe extern "C" fn api_async_init(
+    env: NapiEnv,
+    async_resource: NapiValue,
+    async_resource_name: NapiValue,
+    result: *mut NapiAsyncContext,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let resource = if async_resource.is_null() {
+            Value::Null
+        } else {
+            environment.handles.borrow().get(async_resource)?
+        };
+        if !matches!(resource, Value::Null) && !is_napi_property_object(&resource) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let resource_name = environment.handles.borrow().get(async_resource_name)?;
+        if !matches!(resource_name, Value::String(_)) {
+            return Err(NAPI_STRING_EXPECTED);
+        }
+        let context = new_opaque_handle()?;
+        environment.async_contexts.borrow_mut().insert(
+            context as usize,
+            NapiAsyncContextState {
+                _resource: resource,
+                _resource_name: resource_name,
+            },
+        );
+        unsafe { result.write(context) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_async_destroy(env: NapiEnv, context: NapiAsyncContext) -> i32 {
+    with_ffi_status(env, || {
+        if context.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let context_id = context as usize;
+        if environment
+            .callback_scopes
+            .borrow()
+            .iter()
+            .any(|scope| scope.async_context == context_id)
+        {
+            return Err(NAPI_INVALID_ARG);
+        }
+        environment
+            .async_contexts
+            .borrow_mut()
+            .remove(&context_id)
+            .map(|_| ())
+            .ok_or(NAPI_INVALID_ARG)
+    })
+}
+
+fn call_napi_guest_function(
+    environment: &NapiEnvironment,
+    receiver: NapiValue,
+    function: NapiValue,
+    argc: usize,
+    argv: *const NapiValue,
+    kind: HostCallbackKind,
+) -> Result<Value, i32> {
+    let receiver = environment.handles.borrow().get(receiver)?;
+    let function = environment.handles.borrow().get(function)?;
+    if !is_napi_function(&function) {
+        return Err(NAPI_FUNCTION_EXPECTED);
+    }
+    let args = callback_arguments(environment, argc, argv)?;
+    call_guest_callback(
+        environment,
+        HostCallback {
+            callback: function,
+            this_value: receiver,
+            args,
+            kind,
+        },
+    )
+}
+
+unsafe extern "C" fn api_make_callback(
+    env: NapiEnv,
+    context: NapiAsyncContext,
+    recv: NapiValue,
+    function: NapiValue,
+    argc: usize,
+    argv: *const NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        if !context.is_null()
+            && !environment
+                .async_contexts
+                .borrow()
+                .contains_key(&(context as usize))
+        {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let value = call_napi_guest_function(
+            &environment,
+            recv,
+            function,
+            argc,
+            argv,
+            HostCallbackKind::MakeCallback,
+        )?;
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_open_callback_scope(
+    env: NapiEnv,
+    resource_object: NapiValue,
+    context: NapiAsyncContext,
+    result: *mut NapiCallbackScope,
+) -> i32 {
+    with_ffi_status(env, || {
+        if context.is_null() || result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        if !resource_object.is_null() {
+            let resource = environment.handles.borrow().get(resource_object)?;
+            if !matches!(resource, Value::Null) && !is_napi_property_object(&resource) {
+                return Err(NAPI_OBJECT_EXPECTED);
+            }
+        }
+        let context_id = context as usize;
+        if !environment
+            .async_contexts
+            .borrow()
+            .contains_key(&context_id)
+        {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let token = new_opaque_handle()?;
+        environment
+            .callback_scopes
+            .borrow_mut()
+            .push(NapiCallbackScopeState {
+                token: token as usize,
+                async_context: context_id,
+            });
+        unsafe { result.write(token) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_close_callback_scope(env: NapiEnv, scope: NapiCallbackScope) -> i32 {
+    with_ffi_status(env, || {
+        if scope.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let mut scopes = environment.callback_scopes.borrow_mut();
+        if scopes.last().map(|active| active.token) != Some(scope as usize) {
+            return Err(NAPI_CALLBACK_SCOPE_MISMATCH);
+        }
+        scopes.pop();
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_call_function(
     env: NapiEnv,
     recv: NapiValue,
@@ -5070,20 +5280,13 @@ unsafe extern "C" fn api_call_function(
             return Err(NAPI_INVALID_ARG);
         }
         let environment = environment(env)?;
-        let receiver = environment.handles.borrow().get(recv)?;
-        let function = environment.handles.borrow().get(function)?;
-        if !is_napi_function(&function) {
-            return Err(NAPI_FUNCTION_EXPECTED);
-        }
-        let args = callback_arguments(&environment, argc, argv)?;
-        let value = call_guest_callback(
+        let value = call_napi_guest_function(
             &environment,
-            HostCallback {
-                callback: function,
-                this_value: receiver,
-                args,
-                kind: HostCallbackKind::Call,
-            },
+            recv,
+            function,
+            argc,
+            argv,
+            HostCallbackKind::Call,
         )?;
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
@@ -6065,6 +6268,8 @@ impl NativeAddonLoader for RustNodeApiHost {
             deferreds: RefCell::new(HashMap::new()),
             async_works: RefCell::new(HashMap::new()),
             threadsafe_functions: RefCell::new(HashMap::new()),
+            async_contexts: RefCell::new(HashMap::new()),
+            callback_scopes: RefCell::new(Vec::new()),
             cleanup_hooks: RefCell::new(Vec::new()),
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
@@ -6829,6 +7034,47 @@ static napi_value check_external_buffer(napi_env env, napi_callback_info info) {
       ((uint8_t*)data)[0] == 5 && ((uint8_t*)data)[1] == 88 &&
       ((uint8_t*)data)[2] == 7 && ((uint8_t*)data)[3] == 8;
   if (napi_get_boolean(env, matches, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value async_context_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], resource, resource_name, label, argument, callback_result;
+  napi_value result, field, global, microtask_flag;
+  napi_async_context context;
+  napi_callback_scope scope, nested_scope;
+  napi_status nested_close_status, close_status, destroy_status;
+  bool microtask_ran_before_return = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_create_object(env, &resource) != napi_ok ||
+      napi_create_string_utf8(env, "native-resource", NAPI_AUTO_LENGTH, &label) != napi_ok ||
+      napi_set_named_property(env, resource, "label", label) != napi_ok ||
+      napi_create_string_utf8(env, "napi-vm/async-context-probe",
+                              NAPI_AUTO_LENGTH, &resource_name) != napi_ok ||
+      napi_async_init(env, resource, resource_name, &context) != napi_ok ||
+      napi_open_callback_scope(env, resource, context, &scope) != napi_ok ||
+      napi_open_callback_scope(env, resource, context, &nested_scope) != napi_ok ||
+      (nested_close_status = napi_close_callback_scope(env, nested_scope)) != napi_ok ||
+      (close_status = napi_close_callback_scope(env, scope)) != napi_ok ||
+      napi_create_string_utf8(env, "callback-value", NAPI_AUTO_LENGTH, &argument) != napi_ok ||
+      napi_make_callback(env, context, resource, argv[0], 1, &argument,
+                         &callback_result) != napi_ok ||
+      napi_get_global(env, &global) != napi_ok ||
+      napi_get_named_property(env, global, "asyncContextMicrotaskRan", &microtask_flag) != napi_ok ||
+      napi_get_value_bool(env, microtask_flag, &microtask_ran_before_return) != napi_ok)
+    return NULL;
+  destroy_status = napi_async_destroy(env, context);
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "callbackResult", callback_result) != napi_ok ||
+      napi_create_int32(env, nested_close_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "nestedCloseStatus", field) != napi_ok ||
+      napi_create_int32(env, close_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "closeStatus", field) != napi_ok ||
+      napi_create_int32(env, destroy_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "destroyStatus", field) != napi_ok ||
+      napi_get_boolean(env, microtask_ran_before_return, &field) != napi_ok ||
+      napi_set_named_property(env, result, "microtaskRanBeforeReturn", field) != napi_ok)
+    return NULL;
   return result;
 }
 
@@ -8038,6 +8284,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "checkExternalBuffer", NAPI_AUTO_LENGTH,
                            check_external_buffer, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "checkExternalBuffer", function) != napi_ok ||
+      napi_create_function(env, "asyncContextProbe", NAPI_AUTO_LENGTH,
+                           async_context_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "asyncContextProbe", function) != napi_ok ||
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
@@ -8226,6 +8475,17 @@ const externalArrayBufferAlias = addon.checkExternalArrayBuffer(externalArrayBuf
 const externalBuffer = addon.makeExternalBuffer();
 externalBuffer[1] = 88;
 const externalBufferAlias = addon.checkExternalBuffer(externalBuffer);
+const asyncContextEvents = [];
+globalThis.asyncContextMicrotaskRan = false;
+const asyncContextResult = addon.asyncContextProbe(function(value) {
+  asyncContextEvents.push('callback');
+  queueMicrotask(() => {
+    asyncContextEvents.push('microtask');
+    globalThis.asyncContextMicrotaskRan = true;
+  });
+  return `${this.label}:${value}`;
+});
+const asyncContextEventsAtReturn = asyncContextEvents.slice();
 const externalType = typeof external;
 const externalKeys = Object.keys(external);
 const externalJson = JSON.stringify(external);
@@ -8440,6 +8700,8 @@ module.exports = {
   externalProbe,
   externalArrayBufferAlias,
   externalBufferAlias,
+  asyncContextResult,
+  asyncContextEventsAtReturn,
   externalType,
   externalKeys,
   externalJson,
@@ -8944,6 +9206,37 @@ module.exports = {
         assert!(matches!(
             result.get_prop("externalBufferAlias"),
             Some(Value::Bool(true))
+        ));
+        let async_context_result = result.get_prop("asyncContextResult").unwrap();
+        assert!(matches!(
+            async_context_result.get_prop("callbackResult"),
+            Some(Value::String(ref value)) if value == "native-resource:callback-value"
+        ));
+        assert!(matches!(
+            async_context_result.get_prop("nestedCloseStatus"),
+            Some(Value::Number(value)) if value == NAPI_OK as f64
+        ));
+        assert!(matches!(
+            async_context_result.get_prop("closeStatus"),
+            Some(Value::Number(value)) if value == NAPI_OK as f64
+        ));
+        assert!(matches!(
+            async_context_result.get_prop("destroyStatus"),
+            Some(Value::Number(value)) if value == NAPI_OK as f64
+        ));
+        assert!(matches!(
+            async_context_result.get_prop("microtaskRanBeforeReturn"),
+            Some(Value::Bool(false))
+        ));
+        let async_context_events = result
+            .get_prop("asyncContextEventsAtReturn")
+            .expect("async-context event snapshot exists");
+        assert!(matches!(
+            async_context_events,
+            Value::Array(ref events) if matches!(
+                events.borrow().as_slice(),
+                [Value::String(callback)] if callback == "callback"
+            )
         ));
         assert!(matches!(
             result.get_prop("externalType"),
