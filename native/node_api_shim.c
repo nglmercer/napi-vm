@@ -270,6 +270,7 @@ typedef struct napi_vm_node_api_table {
   void (*module_register)(void*);
   void (*fatal_error)(const char*, size_t, const char*, size_t);
   napi_status (*fatal_exception)(napi_env, napi_value);
+  napi_status (*set_prototype)(napi_env, napi_value, napi_value);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1396,4 +1397,11 @@ NAPI_VM_EXPORT napi_status node_api_create_buffer_from_arraybuffer(
   return table ? table->create_buffer_from_arraybuffer(
                      env, arraybuffer, byte_offset, byte_length, result)
                : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_set_prototype(napi_env env,
+                                                   napi_value object,
+                                                   napi_value value) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->set_prototype(env, object, value) : 9;
 }

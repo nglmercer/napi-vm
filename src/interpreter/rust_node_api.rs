@@ -1253,6 +1253,7 @@ struct NapiVmApiTable {
     module_register: unsafe extern "C" fn(*mut c_void),
     fatal_error: unsafe extern "C" fn(*const c_char, usize, *const c_char, usize) -> !,
     fatal_exception: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
+    set_prototype: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue) -> i32,
 }
 
 #[repr(C)]
@@ -1424,6 +1425,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     module_register: api_module_register,
     fatal_error: api_fatal_error,
     fatal_exception: api_fatal_exception,
+    set_prototype: api_set_prototype,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -3723,6 +3725,114 @@ unsafe extern "C" fn api_get_prototype(
         };
         let handle = environment.handles.borrow_mut().create(prototype)?;
         unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+/// The experimental Node-API prototype setter currently supports objects
+/// whose prototype chain is represented by `ObjectCell` metadata. Arrays,
+/// proxies, and other specialized VM values have separate property models and
+/// fail explicitly instead of reporting a successful no-op.
+unsafe extern "C" fn api_set_prototype(
+    env: NapiEnv,
+    object: NapiValue,
+    prototype: NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        let handles = environment.handles.borrow();
+        let object = handles.get(object)?;
+        let prototype = handles.get(prototype)?;
+
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let prototype = match &prototype {
+            Value::Null => None,
+            Value::Object { .. } | Value::Class(_) => Some(Rc::new(prototype)),
+            other if !is_napi_property_object(other) => return Err(NAPI_OBJECT_EXPECTED),
+            // This VM does not yet represent [[Prototype]] on arrays, proxies,
+            // or specialized built-in values.
+            _ => return Err(NAPI_GENERIC_FAILURE),
+        };
+        let target_cell = match &object {
+            Value::Object { props } => props.clone(),
+            Value::Class(class) => class.statics.clone(),
+            // Be explicit when the input is a genuine JS object that the
+            // current VM data model cannot mutate as an ordinary object.
+            _ => return Err(NAPI_GENERIC_FAILURE),
+        };
+
+        let (old_prototype, uses_default_prototype, non_extensible) = {
+            let meta = target_cell.meta.borrow();
+            (
+                meta.proto.clone(),
+                meta.uses_default_prototype,
+                meta.non_extensible,
+            )
+        };
+        if non_extensible {
+            let old_prototype = match (old_prototype, uses_default_prototype) {
+                (Some(prototype), _) => prototype.as_ref().clone(),
+                (None, true) => {
+                    let default_prototype = napi_default_object_prototype(&environment)?;
+                    if super::strict_equals(&object, &default_prototype) {
+                        Value::Null
+                    } else {
+                        default_prototype
+                    }
+                }
+                (None, false) => Value::Null,
+            };
+            let same_prototype = prototype.as_ref().map_or_else(
+                || matches!(old_prototype, Value::Null),
+                |prototype| super::strict_equals(&old_prototype, prototype.as_ref()),
+            );
+            if !same_prototype {
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            return Ok(());
+        }
+
+        if let Some(candidate) = prototype.as_ref() {
+            let target_identity = napi_object_identity(&object)?;
+            let mut current = Some(candidate.clone());
+            let mut seen = HashSet::new();
+            let mut depth = 0;
+            while let Some(value) = current {
+                if depth > crate::value::MAX_PROTOTYPE_DEPTH {
+                    return Err(NAPI_GENERIC_FAILURE);
+                }
+                let value = value.as_ref();
+                let identity = napi_object_identity(value)?;
+                if identity == target_identity || !seen.insert(identity) {
+                    return Err(NAPI_GENERIC_FAILURE);
+                }
+                current = match value {
+                    Value::Object { props } => {
+                        let (prototype, uses_default_prototype) = {
+                            let meta = props.meta.borrow();
+                            (meta.proto.clone(), meta.uses_default_prototype)
+                        };
+                        match (prototype, uses_default_prototype) {
+                            (Some(prototype), _) => Some(prototype),
+                            (None, true) => {
+                                let default_prototype =
+                                    napi_default_object_prototype(&environment)?;
+                                (!super::strict_equals(value, &default_prototype))
+                                    .then(|| Rc::new(default_prototype))
+                            }
+                            (None, false) => None,
+                        }
+                    }
+                    Value::Class(class) => class.statics.proto(),
+                    _ => None,
+                };
+                depth += 1;
+            }
+        }
+
+        target_cell.set_proto(prototype);
         Ok(())
     })
 }
@@ -14325,6 +14435,180 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             );
             let bun_result: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
             assert_eq!(vm_result, bun_result, "Bun and napi-vm C++ results differ");
+        }
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn experimental_node_api_set_prototype_matches_reference_runtimes() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-api-set-prototype-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let node_include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let node_include = node_include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(node_include)) = (compiler, node_include) else {
+            eprintln!("skipping experimental Node-API fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        fs::write(
+            &source,
+            r#"
+#define NAPI_EXPERIMENTAL
+#define NAPI_VERSION 10
+#include <node_api.h>
+
+static napi_value set_prototype_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2], result;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 2)
+    return NULL;
+  napi_status status = node_api_set_prototype(env, args[0], args[1]);
+  if (napi_create_int32(env, status, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value default_cycle_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1], prototype, result;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_prototype(env, args[0], &prototype) != napi_ok)
+    return NULL;
+  napi_status status = node_api_set_prototype(env, prototype, args[0]);
+  if (napi_create_int32(env, status, &result) != napi_ok) return NULL;
+  return result;
+}
+
+NAPI_MODULE_INIT() {
+  napi_value function, cycle_function;
+  if (napi_create_function(env, "setPrototype", NAPI_AUTO_LENGTH,
+                           set_prototype_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "setPrototype", function) != napi_ok ||
+      napi_create_function(env, "defaultCycle", NAPI_AUTO_LENGTH,
+                           default_cycle_probe, NULL, &cycle_function) != napi_ok ||
+      napi_set_named_property(env, exports, "defaultCycle", cycle_function) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#,
+        )
+        .unwrap();
+        let built = Command::new("cc")
+            .args([
+                "-std=c11",
+                "-O2",
+                "-fPIC",
+                "-shared",
+                "-DNAPI_EXPERIMENTAL",
+                "-DNAPI_VERSION=10",
+                "-I",
+            ])
+            .arg(&node_include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "experimental Node-API fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let main = root.join("main.cjs");
+        fs::write(
+            &main,
+            "const addon = require('./fixture.node');\nconst prototype = { marker: 'inherited', twice() { return this.value * 2; } };\nconst target = { value: 21 };\nconst status = addon.setPrototype(target, prototype);\nconst cycleStatus = addon.setPrototype(target, target);\nconst defaultCycleStatus = addon.defaultCycle({});\nconst nullTarget = {};\nconst nullStatus = addon.setPrototype(nullTarget, null);\nObject.freeze(target);\nconst frozenSameStatus = addon.setPrototype(target, prototype);\nconst frozenChangeStatus = addon.setPrototype(target, null);\nmodule.exports = JSON.stringify({ status, cycleStatus, defaultCycleStatus, nullStatus, nullPrototype: Object.getPrototypeOf(nullTarget) === null, frozenSameStatus, frozenChangeStatus, samePrototype: Object.getPrototypeOf(target) === prototype, marker: target.marker, twice: target.twice() });\n",
+        )
+        .unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(&main),
+            )
+            .unwrap();
+        let result = interpreter.eval_source("require('./main.cjs');").unwrap();
+        let Value::String(vm_json) = &result else {
+            panic!("experimental Node-API fixture did not return JSON text: {result:?}");
+        };
+        let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
+        assert_eq!(
+            vm_result,
+            serde_json::json!({
+                "status": 0,
+                "cycleStatus": 9,
+                "defaultCycleStatus": 9,
+                "nullStatus": 0,
+                "nullPrototype": true,
+                "frozenSameStatus": 0,
+                "frozenChangeStatus": 9,
+                "samePrototype": true,
+                "marker": "inherited",
+                "twice": 42
+            })
+        );
+
+        let runner = "process.stdout.write(require('./main.cjs'))";
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node experimental Node-API fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_result: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(vm_result, node_result, "Node and napi-vm results differ");
+        }
+        if let Ok(bun_version) = Command::new("bun").arg("--version").output()
+            && bun_version.status.success()
+        {
+            let reference = Command::new("bun")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            if reference.status.success() {
+                let bun_result: serde_json::Value =
+                    serde_json::from_slice(&reference.stdout).unwrap();
+                assert_eq!(vm_result, bun_result, "Bun and napi-vm results differ");
+            } else {
+                let stderr = String::from_utf8_lossy(&reference.stderr);
+                assert!(
+                    stderr.contains("node_api_set_prototype"),
+                    "Bun experimental Node-API fixture failed for an unexpected reason: {stderr}"
+                );
+                eprintln!(
+                    "Bun does not export experimental node_api_set_prototype; skipped this reference comparison"
+                );
+            }
         }
         drop(interpreter);
         fs::remove_dir_all(root).unwrap();
