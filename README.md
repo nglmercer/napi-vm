@@ -170,13 +170,16 @@ This is an early compatibility slice, not a general Node replacement. It
 currently supports a synchronous Node-API version 1 subset: C callbacks and
 callback info, local handle scopes, object creation and named properties,
 undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8
-strings, `napi_typeof`, and array creation, length, element, and hole
-operations. Imports outside that subset fail when the library is loaded. Async
-work, references/finalizers, buffers and typed arrays, exceptions, and
-thread-safe functions are not implemented. Direct V8/NAN/Node C++/libuv addons
-must use the Node sidecar. The feature requires a C compiler at build time,
-and native addons have the desktop process's full privileges in either
-backend.
+strings, `napi_typeof`, array creation/index/length operations, and core error
+creation and pending-exception propagation. Returning a null callback value
+without a pending exception produces guest `undefined`. Imports outside that
+subset fail when the library is loaded. Strong `napi_ref` creation, lookup,
+count changes, and deletion are supported; because the VM has no tracing GC,
+zero-count references stay live until explicitly deleted. Finalizers, async
+work, buffers and typed arrays, and thread-safe functions are not implemented.
+Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
+requires a C compiler at build time, and native addons have the desktop
+process's full privileges in either backend.
 
 ## Useful examples
 

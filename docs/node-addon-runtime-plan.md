@@ -65,10 +65,15 @@ existing CommonJS resolver and allowlist. Its Linux prototype loads real
 Node-API v1 shared libraries and currently covers scoped handles, callback
 info, synchronous C callbacks, object properties, primitive values, numbers,
 UTF-8 strings, `napi_typeof`, and array creation/index/length operations.
-Handle entries are reclaimed when local scopes close; opaque handles do not
-retain one heap allocation apiece. It is still an incomplete compatibility
-backend; unimplemented imported symbols fail at load time, and
-async/thread-safe APIs are not available.
+It also creates Node-style errors, tracks pending exceptions, and transfers
+native callback throws into guest `try`/`catch`. A null callback result with no
+pending exception maps to guest `undefined`. Handle entries are reclaimed
+when local scopes close; opaque handles do not retain one heap allocation
+apiece. Strong N-API references support creation, lookup, count changes, and
+deletion. The VM has no tracing garbage collector, so a zero-count reference
+does not clear until it is deleted; wrap/finalizer and async/thread-safe APIs
+remain unavailable. It is still an incomplete compatibility backend, and
+unimplemented imported symbols fail at load time.
 
 ## Implementation phases
 

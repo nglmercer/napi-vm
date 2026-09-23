@@ -34,6 +34,23 @@ typedef struct napi_vm_node_api_table {
   napi_status (*get_element)(napi_env, napi_value, uint32_t, napi_value*);
   napi_status (*set_element)(napi_env, napi_value, uint32_t, napi_value);
   napi_status (*has_element)(napi_env, napi_value, uint32_t, bool*);
+  napi_status (*create_error)(napi_env, napi_value, napi_value, napi_value*);
+  napi_status (*create_type_error)(napi_env, napi_value, napi_value,
+                                   napi_value*);
+  napi_status (*create_range_error)(napi_env, napi_value, napi_value,
+                                    napi_value*);
+  napi_status (*throw_value)(napi_env, napi_value);
+  napi_status (*throw_error)(napi_env, const char*, const char*);
+  napi_status (*throw_type_error)(napi_env, const char*, const char*);
+  napi_status (*throw_range_error)(napi_env, const char*, const char*);
+  napi_status (*is_exception_pending)(napi_env, bool*);
+  napi_status (*get_and_clear_last_exception)(napi_env, napi_value*);
+  napi_status (*is_error)(napi_env, napi_value, bool*);
+  napi_status (*create_reference)(napi_env, napi_value, uint32_t, void**);
+  napi_status (*delete_reference)(napi_env, void*);
+  napi_status (*reference_ref)(napi_env, void*, uint32_t*);
+  napi_status (*reference_unref)(napi_env, void*, uint32_t*);
+  napi_status (*get_reference_value)(napi_env, void*, napi_value*);
   napi_status (*create_object)(napi_env, napi_value*);
   napi_status (*create_function)(napi_env, const char*, size_t, napi_callback,
                                  void*, napi_value*);
@@ -204,6 +221,105 @@ NAPI_VM_EXPORT napi_status napi_has_element(napi_env env, napi_value value,
                                              uint32_t index, bool* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->has_element(env, value, index, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_error(napi_env env, napi_value code,
+                                              napi_value message,
+                                              napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_error(env, code, message, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_type_error(napi_env env,
+                                                   napi_value code,
+                                                   napi_value message,
+                                                   napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_type_error(env, code, message, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_range_error(napi_env env,
+                                                    napi_value code,
+                                                    napi_value message,
+                                                    napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_range_error(env, code, message, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_throw(napi_env env, napi_value error) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->throw_value(env, error) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_throw_error(napi_env env, const char* code,
+                                             const char* message) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->throw_error(env, code, message) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_throw_type_error(napi_env env,
+                                                  const char* code,
+                                                  const char* message) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->throw_type_error(env, code, message) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_throw_range_error(napi_env env,
+                                                   const char* code,
+                                                   const char* message) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->throw_range_error(env, code, message) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_is_exception_pending(napi_env env,
+                                                      bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_exception_pending(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_and_clear_last_exception(
+    napi_env env, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_and_clear_last_exception(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_is_error(napi_env env, napi_value value,
+                                          bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_error(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_reference(napi_env env,
+                                                  napi_value value,
+                                                  uint32_t initial_ref_count,
+                                                  void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_reference(env, value, initial_ref_count, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_delete_reference(napi_env env, void* reference) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->delete_reference(env, reference) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_reference_ref(napi_env env, void* reference,
+                                               uint32_t* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->reference_ref(env, reference, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_reference_unref(napi_env env, void* reference,
+                                                 uint32_t* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->reference_unref(env, reference, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_reference_value(napi_env env,
+                                                     void* reference,
+                                                     napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_reference_value(env, reference, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_create_object(napi_env env, napi_value* result) {

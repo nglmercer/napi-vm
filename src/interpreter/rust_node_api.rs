@@ -20,7 +20,7 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{FileCommonJsLoader, Interpreter};
-use crate::value::Value;
+use crate::value::{ErrorData, Value};
 
 const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
@@ -31,6 +31,7 @@ const NAPI_NUMBER_EXPECTED: i32 = 6;
 const NAPI_BOOLEAN_EXPECTED: i32 = 7;
 const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
+const NAPI_PENDING_EXCEPTION: i32 = 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
 
@@ -38,6 +39,7 @@ type NapiEnv = *mut c_void;
 type NapiValue = *mut c_void;
 type NapiCallbackInfo = *mut c_void;
 type NapiHandleScope = *mut c_void;
+type NapiRef = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
 
 /// Filesystem and integrity policy for the experimental in-process backend.
@@ -107,7 +109,6 @@ struct NativeCallbackRecord {
     env: Rc<NapiEnvironment>,
     callback: NapiCallback,
     data: *mut c_void,
-    name: Rc<str>,
 }
 
 struct NapiEnvironment {
@@ -115,7 +116,14 @@ struct NapiEnvironment {
     owner: Weak<RefCell<HostState>>,
     self_weak: Weak<NapiEnvironment>,
     handles: RefCell<NapiHandleArena>,
+    references: RefCell<HashMap<usize, NapiReference>>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
+    pending_exception: RefCell<Option<Value>>,
+}
+
+struct NapiReference {
+    value: Value,
+    ref_count: u32,
 }
 
 thread_local! {
@@ -315,6 +323,21 @@ struct NapiVmApiTable {
     get_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut NapiValue) -> i32,
     set_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, NapiValue) -> i32,
     has_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut bool) -> i32,
+    create_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
+    create_type_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
+    create_range_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
+    throw: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
+    throw_error: unsafe extern "C" fn(NapiEnv, *const c_char, *const c_char) -> i32,
+    throw_type_error: unsafe extern "C" fn(NapiEnv, *const c_char, *const c_char) -> i32,
+    throw_range_error: unsafe extern "C" fn(NapiEnv, *const c_char, *const c_char) -> i32,
+    is_exception_pending: unsafe extern "C" fn(NapiEnv, *mut bool) -> i32,
+    get_and_clear_last_exception: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
+    is_error: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    create_reference: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut NapiRef) -> i32,
+    delete_reference: unsafe extern "C" fn(NapiEnv, NapiRef) -> i32,
+    reference_ref: unsafe extern "C" fn(NapiEnv, NapiRef, *mut u32) -> i32,
+    reference_unref: unsafe extern "C" fn(NapiEnv, NapiRef, *mut u32) -> i32,
+    get_reference_value: unsafe extern "C" fn(NapiEnv, NapiRef, *mut NapiValue) -> i32,
     create_object: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     create_function: unsafe extern "C" fn(
         NapiEnv,
@@ -362,6 +385,21 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_element: api_get_element,
     set_element: api_set_element,
     has_element: api_has_element,
+    create_error: api_create_error,
+    create_type_error: api_create_type_error,
+    create_range_error: api_create_range_error,
+    throw: api_throw,
+    throw_error: api_throw_error,
+    throw_type_error: api_throw_type_error,
+    throw_range_error: api_throw_range_error,
+    is_exception_pending: api_is_exception_pending,
+    get_and_clear_last_exception: api_get_and_clear_last_exception,
+    is_error: api_is_error,
+    create_reference: api_create_reference,
+    delete_reference: api_delete_reference,
+    reference_ref: api_reference_ref,
+    reference_unref: api_reference_unref,
+    get_reference_value: api_get_reference_value,
     create_object: api_create_object,
     create_function: api_create_function,
     set_named_property: api_set_named_property,
@@ -843,6 +881,267 @@ unsafe extern "C" fn api_has_element(
     })
 }
 
+unsafe fn api_create_error_with_name(
+    env: NapiEnv,
+    code: NapiValue,
+    message: NapiValue,
+    result: *mut NapiValue,
+    name: &'static str,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let message = environment.handles.borrow().get(message)?;
+        let Value::String(message) = &message else {
+            return Err(NAPI_STRING_EXPECTED);
+        };
+        let code = if code.is_null() {
+            None
+        } else {
+            let code_value = environment.handles.borrow().get(code)?;
+            match &code_value {
+                Value::String(code) => Some(code.clone()),
+                Value::Undefined | Value::Null => None,
+                _ => return Err(NAPI_STRING_EXPECTED),
+            }
+        };
+        let mut error = ErrorData::new(name, message.clone());
+        error.code = code;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Error(error))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_error(
+    env: NapiEnv,
+    code: NapiValue,
+    message: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_error_with_name(env, code, message, result, "Error") }
+}
+
+unsafe extern "C" fn api_create_type_error(
+    env: NapiEnv,
+    code: NapiValue,
+    message: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_error_with_name(env, code, message, result, "TypeError") }
+}
+
+unsafe extern "C" fn api_create_range_error(
+    env: NapiEnv,
+    code: NapiValue,
+    message: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_error_with_name(env, code, message, result, "RangeError") }
+}
+
+fn set_pending_exception(environment: &NapiEnvironment, exception: Value) -> Result<(), i32> {
+    let mut pending = environment.pending_exception.borrow_mut();
+    if pending.is_some() {
+        return Err(NAPI_PENDING_EXCEPTION);
+    }
+    *pending = Some(exception);
+    Ok(())
+}
+
+unsafe extern "C" fn api_throw(env: NapiEnv, error: NapiValue) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let error = environment.handles.borrow().get(error)?;
+        set_pending_exception(&environment, error)
+    })
+}
+
+unsafe fn api_throw_error_with_name(
+    env: NapiEnv,
+    code: *const c_char,
+    message: *const c_char,
+    name: &'static str,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let message = unsafe { read_c_string(message)? };
+        let code = if code.is_null() {
+            None
+        } else {
+            Some(unsafe { read_c_string(code)? })
+        };
+        let mut error = ErrorData::new(name, message);
+        error.code = code;
+        set_pending_exception(&environment, Value::Error(error))
+    })
+}
+
+unsafe extern "C" fn api_throw_error(
+    env: NapiEnv,
+    code: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    unsafe { api_throw_error_with_name(env, code, message, "Error") }
+}
+
+unsafe extern "C" fn api_throw_type_error(
+    env: NapiEnv,
+    code: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    unsafe { api_throw_error_with_name(env, code, message, "TypeError") }
+}
+
+unsafe extern "C" fn api_throw_range_error(
+    env: NapiEnv,
+    code: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    unsafe { api_throw_error_with_name(env, code, message, "RangeError") }
+}
+
+unsafe extern "C" fn api_is_exception_pending(env: NapiEnv, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        unsafe { result.write(environment.pending_exception.borrow().is_some()) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_and_clear_last_exception(env: NapiEnv, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let exception = environment
+            .pending_exception
+            .borrow_mut()
+            .take()
+            .unwrap_or(Value::Undefined);
+        let handle = environment.handles.borrow_mut().create(exception)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_error(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::Error(_))) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_reference(
+    env: NapiEnv,
+    value: NapiValue,
+    initial_ref_count: u32,
+    result: *mut NapiRef,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let reference = new_opaque_handle()?;
+        environment.references.borrow_mut().insert(
+            reference as usize,
+            NapiReference {
+                value,
+                ref_count: initial_ref_count,
+            },
+        );
+        unsafe { result.write(reference) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_delete_reference(env: NapiEnv, reference: NapiRef) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        environment
+            .references
+            .borrow_mut()
+            .remove(&(reference as usize))
+            .map(|_| ())
+            .ok_or(NAPI_INVALID_ARG)
+    })
+}
+
+unsafe extern "C" fn api_reference_ref(env: NapiEnv, reference: NapiRef, result: *mut u32) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let mut references = environment.references.borrow_mut();
+        let reference = references
+            .get_mut(&(reference as usize))
+            .ok_or(NAPI_INVALID_ARG)?;
+        reference.ref_count = reference
+            .ref_count
+            .checked_add(1)
+            .ok_or(NAPI_GENERIC_FAILURE)?;
+        if !result.is_null() {
+            unsafe { result.write(reference.ref_count) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_reference_unref(
+    env: NapiEnv,
+    reference: NapiRef,
+    result: *mut u32,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let mut references = environment.references.borrow_mut();
+        let reference = references
+            .get_mut(&(reference as usize))
+            .ok_or(NAPI_INVALID_ARG)?;
+        reference.ref_count = reference.ref_count.saturating_sub(1);
+        if !result.is_null() {
+            unsafe { result.write(reference.ref_count) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_reference_value(
+    env: NapiEnv,
+    reference: NapiRef,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment
+            .references
+            .borrow()
+            .get(&(reference as usize))
+            .map(|reference| reference.value.clone())
+            .ok_or(NAPI_INVALID_ARG)?;
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_object(env: NapiEnv, result: *mut NapiValue) -> i32 {
     with_ffi_status(|| {
         if result.is_null() {
@@ -900,7 +1199,6 @@ unsafe extern "C" fn api_create_function(
                     env: environment_rc,
                     callback,
                     data,
-                    name: Rc::from(function_name.as_str()),
                 },
             );
             id
@@ -1188,11 +1486,10 @@ impl RustNodeApiHost {
                 .active_callbacks
                 .borrow_mut()
                 .remove(&frame_key);
-            if returned.is_null() {
-                Err(VmErr::Msg(format!(
-                    "native addon callback '{}' returned a null napi_value",
-                    callback.name
-                )))
+            if let Some(exception) = callback.env.pending_exception.borrow_mut().take() {
+                Err(VmErr::Throw(exception))
+            } else if returned.is_null() {
+                Ok(Value::Undefined)
             } else {
                 callback
                     .env
@@ -1256,7 +1553,9 @@ impl NativeAddonLoader for RustNodeApiHost {
             owner: Rc::downgrade(&self.state),
             self_weak: weak.clone(),
             handles: RefCell::new(NapiHandleArena::default()),
+            references: RefCell::new(HashMap::new()),
             active_callbacks: RefCell::new(HashMap::new()),
+            pending_exception: RefCell::new(None),
         });
         register_environment(&environment);
         self.state
@@ -1275,7 +1574,10 @@ impl NativeAddonLoader for RustNodeApiHost {
             .create(exports)
             .map_err(|status| napi_error("creating addon exports handle", status))?;
         let returned = unsafe { initialize(environment.raw(), exports_handle) };
-        let result = if returned.is_null() {
+        let pending_exception = environment.pending_exception.borrow_mut().take();
+        let result = if let Some(exception) = pending_exception {
+            Err(VmErr::Throw(exception))
+        } else if returned.is_null() {
             Err(VmErr::Msg(format!(
                 "Node-API initializer returned a null napi_value: {filename}"
             )))
@@ -1357,6 +1659,7 @@ fn napi_error(action: &str, status: i32) -> VmErr {
         NAPI_ARRAY_EXPECTED => "array expected",
         NAPI_STRING_EXPECTED => "string expected",
         NAPI_BOOLEAN_EXPECTED => "boolean expected",
+        NAPI_PENDING_EXCEPTION => "a JavaScript exception is already pending",
         _ => "generic Node-API failure",
     };
     VmErr::Msg(format!(
@@ -1433,6 +1736,27 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    fn assert_error_fields(value: &Value, name: &str, message: &str, code: Option<&str>) {
+        assert!(matches!(
+            value.get_prop("name"),
+            Some(Value::String(ref actual)) if actual == name
+        ));
+        assert!(matches!(
+            value.get_prop("message"),
+            Some(Value::String(ref actual)) if actual == message
+        ));
+        match code {
+            Some(code) => assert!(matches!(
+                value.get_prop("code"),
+                Some(Value::String(ref actual)) if actual == code
+            )),
+            None => assert!(matches!(
+                value.get_prop("code"),
+                None | Some(Value::Undefined)
+            )),
+        }
+    }
 
     #[test]
     fn integer_conversion_matches_ecmascript_int32_wraparound() {
@@ -1541,6 +1865,8 @@ mod tests {
 #include <node_api.h>
 #include <stdint.h>
 
+static napi_ref persistent_values;
+
 static napi_value add(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2], result;
@@ -1638,6 +1964,84 @@ static napi_value array_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value returns_undefined(napi_env env, napi_callback_info info) {
+  (void)env;
+  (void)info;
+  return NULL;
+}
+
+static napi_value create_errors(napi_env env, napi_callback_info info) {
+  napi_value result, message, code, error, type_error, range_error;
+  (void)info;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_create_string_utf8(env, "created", NAPI_AUTO_LENGTH, &message) != napi_ok ||
+      napi_create_string_utf8(env, "E_CREATED", NAPI_AUTO_LENGTH, &code) != napi_ok ||
+      napi_create_error(env, code, message, &error) != napi_ok ||
+      napi_set_named_property(env, result, "error", error) != napi_ok ||
+      napi_create_type_error(env, code, message, &type_error) != napi_ok ||
+      napi_set_named_property(env, result, "typeError", type_error) != napi_ok ||
+      napi_create_range_error(env, code, message, &range_error) != napi_ok ||
+      napi_set_named_property(env, result, "rangeError", range_error) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value throw_type_error(napi_env env, napi_callback_info info) {
+  (void)info;
+  napi_throw_type_error(env, "E_TYPE", "type failure");
+  return NULL;
+}
+
+static napi_value throw_range_error(napi_env env, napi_callback_info info) {
+  (void)info;
+  napi_throw_range_error(env, NULL, "range failure");
+  return NULL;
+}
+
+static napi_value throw_created_error(napi_env env, napi_callback_info info) {
+  napi_value message, error;
+  (void)info;
+  if (napi_create_string_utf8(env, "thrown", NAPI_AUTO_LENGTH, &message) != napi_ok ||
+      napi_create_type_error(env, NULL, message, &error) != napi_ok ||
+      napi_throw(env, error) != napi_ok) return NULL;
+  return NULL;
+}
+
+static napi_value throw_and_clear(napi_env env, napi_callback_info info) {
+  napi_value error;
+  bool pending = false, is_error = false;
+  (void)info;
+  if (napi_throw_error(env, "E_CLEARED", "cleared failure") != napi_ok ||
+      napi_is_exception_pending(env, &pending) != napi_ok || !pending ||
+      napi_get_and_clear_last_exception(env, &error) != napi_ok ||
+      napi_is_exception_pending(env, &pending) != napi_ok || pending ||
+      napi_is_error(env, error, &is_error) != napi_ok || !is_error) return NULL;
+  return error;
+}
+
+static napi_value reference_probe(napi_env env, napi_callback_info info) {
+  napi_value value, result, field;
+  uint32_t count_after_unref = 0, count_after_ref = 0;
+  (void)info;
+  if (napi_reference_unref(env, persistent_values, &count_after_unref) != napi_ok ||
+      napi_get_reference_value(env, persistent_values, &value) != napi_ok || value == NULL ||
+      napi_reference_ref(env, persistent_values, &count_after_ref) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "value", value) != napi_ok ||
+      napi_create_uint32(env, count_after_unref, &field) != napi_ok ||
+      napi_set_named_property(env, result, "countAfterUnref", field) != napi_ok ||
+      napi_create_uint32(env, count_after_ref, &field) != napi_ok ||
+      napi_set_named_property(env, result, "countAfterRef", field) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value release_reference(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (napi_delete_reference(env, persistent_values) != napi_ok ||
+      napi_get_boolean(env, true, &result) != napi_ok) return NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
   napi_value scratch, function, metadata, version, values, field;
@@ -1670,10 +2074,27 @@ NAPI_MODULE_INIT() {
       napi_create_int64(env, INT64_C(2147483648), &field) != napi_ok ||
       napi_set_named_property(env, values, "int64", field) != napi_ok ||
       napi_set_named_property(env, exports, "values", values) != napi_ok ||
+      napi_create_reference(env, values, 1, &persistent_values) != napi_ok ||
       napi_create_function(env, "roundTrip", NAPI_AUTO_LENGTH, round_trip, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "roundTrip", function) != napi_ok ||
       napi_create_function(env, "arrayProbe", NAPI_AUTO_LENGTH, array_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "arrayProbe", function) != napi_ok ||
+      napi_create_function(env, "returnsUndefined", NAPI_AUTO_LENGTH, returns_undefined, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "returnsUndefined", function) != napi_ok ||
+      napi_create_function(env, "createErrors", NAPI_AUTO_LENGTH, create_errors, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "createErrors", function) != napi_ok ||
+      napi_create_function(env, "throwTypeError", NAPI_AUTO_LENGTH, throw_type_error, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "throwTypeError", function) != napi_ok ||
+      napi_create_function(env, "throwRangeError", NAPI_AUTO_LENGTH, throw_range_error, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "throwRangeError", function) != napi_ok ||
+      napi_create_function(env, "throwCreatedError", NAPI_AUTO_LENGTH, throw_created_error, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "throwCreatedError", function) != napi_ok ||
+      napi_create_function(env, "throwAndClear", NAPI_AUTO_LENGTH, throw_and_clear, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "throwAndClear", function) != napi_ok ||
+      napi_create_function(env, "referenceProbe", NAPI_AUTO_LENGTH, reference_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "referenceProbe", function) != napi_ok ||
+      napi_create_function(env, "releaseReference", NAPI_AUTO_LENGTH, release_reference, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "releaseReference", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -1703,7 +2124,64 @@ NAPI_MODULE_INIT() {
         );
         fs::write(
             root.join("main.cjs"),
-            "const addon = require('./fixture.node'); const values = addon.values; module.exports = {same: addon === require('./fixture.node'), sum: addon.add(19, 23), version: addon.metadata.version, truth: values.truth, nothing: values.nothing === null, missing: values.missing === undefined, greeting: values.greeting, fraction: values.fraction, maxUint32: values.maxUint32, int64: values.int64, roundTrip: addon.roundTrip(true, 4.25, 'native ✓', 4294967295, -2.5), array: addon.arrayProbe()};",
+            r#"
+const addon = require('./fixture.node');
+const values = addon.values;
+const errors = addon.createErrors();
+let typeError;
+let rangeError;
+let createdThrow;
+try { addon.throwTypeError(); } catch (error) {
+  typeError = {name: error.name, message: error.message, code: error.code,
+    isTypeError: error instanceof TypeError, isError: error instanceof Error};
+}
+try { addon.throwRangeError(); } catch (error) {
+  rangeError = {name: error.name, message: error.message,
+    isRangeError: error instanceof RangeError, isError: error instanceof Error};
+}
+try { addon.throwCreatedError(); } catch (error) {
+  createdThrow = {name: error.name, message: error.message,
+    isTypeError: error instanceof TypeError, isError: error instanceof Error};
+}
+const cleared = addon.throwAndClear();
+const reference = addon.referenceProbe();
+const referenceReleased = addon.releaseReference();
+module.exports = {
+  same: addon === require('./fixture.node'),
+  sum: addon.add(19, 23),
+  version: addon.metadata.version,
+  truth: values.truth,
+  nothing: values.nothing === null,
+  missing: values.missing === undefined,
+  greeting: values.greeting,
+  fraction: values.fraction,
+  maxUint32: values.maxUint32,
+  int64: values.int64,
+  roundTrip: addon.roundTrip(true, 4.25, 'native ✓', 4294967295, -2.5),
+  array: addon.arrayProbe(),
+  undefinedResult: addon.returnsUndefined() === undefined,
+  errors: {
+    error: {name: errors.error.name, message: errors.error.message,
+      code: errors.error.code, isError: errors.error instanceof Error},
+    typeError: {name: errors.typeError.name, message: errors.typeError.message,
+      code: errors.typeError.code, isTypeError: errors.typeError instanceof TypeError,
+      isError: errors.typeError instanceof Error},
+    rangeError: {name: errors.rangeError.name, message: errors.rangeError.message,
+      code: errors.rangeError.code, isRangeError: errors.rangeError instanceof RangeError,
+      isError: errors.rangeError instanceof Error},
+  },
+  typeError,
+  rangeError,
+  createdThrow,
+  cleared: {name: cleared.name, message: cleared.message, code: cleared.code},
+  reference: {
+    sameValue: reference.value === values,
+    countAfterUnref: reference.countAfterUnref,
+    countAfterRef: reference.countAfterRef,
+    released: referenceReleased,
+  },
+};
+"#,
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
@@ -1804,6 +2282,136 @@ NAPI_MODULE_INIT() {
             Some(Value::Bool(false))
         ));
         assert!(matches!(array.get_prop("value"), Some(Value::Bool(true))));
+        assert!(matches!(
+            result.get_prop("undefinedResult"),
+            Some(Value::Bool(true))
+        ));
+        let reference = result.get_prop("reference").unwrap();
+        assert!(matches!(
+            reference.get_prop("sameValue"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            reference.get_prop("countAfterUnref"),
+            Some(Value::Number(0.0))
+        ));
+        assert!(matches!(
+            reference.get_prop("countAfterRef"),
+            Some(Value::Number(1.0))
+        ));
+        assert!(matches!(
+            reference.get_prop("released"),
+            Some(Value::Bool(true))
+        ));
+        let errors = result.get_prop("errors").unwrap();
+        assert_error_fields(
+            &errors.get_prop("error").unwrap(),
+            "Error",
+            "created",
+            Some("E_CREATED"),
+        );
+        assert!(matches!(
+            errors.get_prop("error").unwrap().get_prop("isError"),
+            Some(Value::Bool(true))
+        ));
+        assert_error_fields(
+            &errors.get_prop("typeError").unwrap(),
+            "TypeError",
+            "created",
+            Some("E_CREATED"),
+        );
+        assert!(matches!(
+            errors
+                .get_prop("typeError")
+                .unwrap()
+                .get_prop("isTypeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            errors.get_prop("typeError").unwrap().get_prop("isError"),
+            Some(Value::Bool(true))
+        ));
+        assert_error_fields(
+            &errors.get_prop("rangeError").unwrap(),
+            "RangeError",
+            "created",
+            Some("E_CREATED"),
+        );
+        assert!(matches!(
+            errors
+                .get_prop("rangeError")
+                .unwrap()
+                .get_prop("isRangeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            errors.get_prop("rangeError").unwrap().get_prop("isError"),
+            Some(Value::Bool(true))
+        ));
+        assert_error_fields(
+            &result.get_prop("typeError").unwrap(),
+            "TypeError",
+            "type failure",
+            Some("E_TYPE"),
+        );
+        assert!(matches!(
+            result
+                .get_prop("typeError")
+                .unwrap()
+                .get_prop("isTypeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("typeError").unwrap().get_prop("isError"),
+            Some(Value::Bool(true))
+        ));
+        assert_error_fields(
+            &result.get_prop("rangeError").unwrap(),
+            "RangeError",
+            "range failure",
+            None,
+        );
+        assert!(matches!(
+            result
+                .get_prop("rangeError")
+                .unwrap()
+                .get_prop("isRangeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("rangeError").unwrap().get_prop("isError"),
+            Some(Value::Bool(true))
+        ));
+        assert_error_fields(
+            &result.get_prop("createdThrow").unwrap(),
+            "TypeError",
+            "thrown",
+            None,
+        );
+        assert!(matches!(
+            result
+                .get_prop("createdThrow")
+                .unwrap()
+                .get_prop("isTypeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("createdThrow").unwrap().get_prop("isError"),
+            Some(Value::Bool(true))
+        ));
+        assert_error_fields(
+            &result.get_prop("cleared").unwrap(),
+            "Error",
+            "cleared failure",
+            Some("E_CLEARED"),
+        );
+
+        let guest_json = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .unwrap();
+        let Value::String(ref guest_json) = guest_json else {
+            panic!("JSON.stringify did not return a string");
+        };
 
         if let Ok(node_version) = Command::new("node").arg("--version").output()
             && node_version.status.success()
@@ -1823,7 +2431,7 @@ NAPI_MODULE_INIT() {
             );
             assert_eq!(
                 String::from_utf8_lossy(&reference.stdout),
-                r#"{"same":true,"sum":42,"version":1,"truth":true,"nothing":true,"missing":true,"greeting":"Node-API ✓","fraction":1.25,"maxUint32":4294967295,"int64":2147483648,"roundTrip":{"flag":true,"number":4.75,"text":"native ✓","uint32":4294967295,"int64":-2,"boolType":2,"numberType":3,"stringType":4},"array":{"isArray":true,"length":5,"emptyLength":0,"firstPresent":false,"secondPresent":true,"holePresent":false,"value":true}}"#
+                guest_json.as_str()
             );
         }
 

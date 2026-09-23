@@ -225,6 +225,16 @@ impl Interpreter {
             }
             BinOp::Comma => r.clone(),
             BinOp::Instanceof => {
+                // Internal and host-created errors carry their standard error
+                // class in `ErrorData::name` rather than a guest prototype
+                // object. Preserve the built-in Error inheritance chain for
+                // those values, then use prototype identity for ordinary
+                // objects.
+                if let (Value::Error(error), Value::Class(class)) = (l, r) {
+                    return Ok(Value::Bool(
+                        class.name == "Error" || class.name == error.name,
+                    ));
+                }
                 // `l instanceof r`: walk l's prototype chain looking for r's
                 // prototype object (compared by shared Rc identity).
                 let target_proto = match r {
