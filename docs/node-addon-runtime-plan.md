@@ -92,7 +92,9 @@ and VM error classes. Ordinary function objects, callable proxies, and custom
 prototype or callback semantics are not represented by the Rust host yet.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
-pending guest exceptions stay on that controlled call path.
+pending guest exceptions stay on that controlled call path. `napi_run_script`
+uses the same dispatcher to execute source in the VM and leaves queued jobs for
+the normal event-loop checkpoint.
 It also creates Node-style errors, tracks pending exceptions, and transfers
 native callback throws into guest `try`/`catch`. `napi_get_last_error_info`
 reports the most recent Node-API status and a VM-neutral message. Its returned

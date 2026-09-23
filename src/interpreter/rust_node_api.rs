@@ -899,6 +899,7 @@ struct NapiVmApiTable {
     get_new_target: unsafe extern "C" fn(NapiEnv, NapiCallbackInfo, *mut NapiValue) -> i32,
     get_version: unsafe extern "C" fn(NapiEnv, *mut u32) -> i32,
     strict_equals: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
+    run_script: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
 }
 
 #[repr(C)]
@@ -1022,6 +1023,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_new_target: api_get_new_target,
     get_version: api_get_version,
     strict_equals: api_strict_equals,
+    run_script: api_run_script,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -4975,6 +4977,44 @@ unsafe extern "C" fn api_strict_equals(
     })
 }
 
+fn napi_guest_run_script(
+    interpreter: &mut Interpreter,
+    _receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Some(Value::String(source)) = args.first() else {
+        return Err(VmErr::Msg("TypeError: script must be a string".into()));
+    };
+    interpreter.run_script_source(source)
+}
+
+unsafe extern "C" fn api_run_script(
+    env: NapiEnv,
+    script: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let script = environment.handles.borrow().get(script)?;
+        let Value::String(ref script) = script else {
+            return Err(NAPI_STRING_EXPECTED);
+        };
+        let value = run_napi_guest_operation(
+            &environment,
+            "napi_run_script",
+            napi_guest_run_script,
+            Value::Undefined,
+            vec![Value::String(script.clone())],
+        )?;
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandleScope) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -6022,6 +6062,24 @@ mod tests {
     }
 
     #[test]
+    fn napi_run_script_preserves_the_outer_loop_budget_and_source_context() {
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter.set_source("outer script");
+        interpreter.set_loop_budget(1);
+        interpreter.consume_loop().unwrap();
+
+        let error = interpreter
+            .run_script_source("while (true) {}")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Maximum loop iterations exceeded")
+        );
+        assert_eq!(interpreter.get_source_line(1), Some("outer script"));
+    }
+
+    #[test]
     fn integer_conversion_matches_ecmascript_int32_wraparound() {
         assert_eq!(to_int32(4_294_967_297.0), 1);
         assert_eq!(to_int32(-1.0), -1);
@@ -6585,6 +6643,29 @@ static napi_value escapable_scope_probe(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "escaped", escaped_value) != napi_ok ||
       napi_create_int32(env, (int32_t)second_escape_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "secondEscapeStatus", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value run_script_probe(napi_env env, napi_callback_info info) {
+  const char source[] =
+      "globalThis.napiRunScriptCount = (globalThis.napiRunScriptCount || 0) + 1; "
+      "globalThis.napiRunScriptMicrotask = false; "
+      "Promise.resolve().then(() => { globalThis.napiRunScriptMicrotask = true; }); "
+      "6 * 7";
+  napi_value script, value, global, microtask_value, result, field;
+  bool microtask_ran_during_call = true;
+  (void)info;
+  if (napi_create_string_utf8(env, source, sizeof(source) - 1, &script) != napi_ok ||
+      napi_run_script(env, script, &value) != napi_ok ||
+      napi_get_global(env, &global) != napi_ok ||
+      napi_get_named_property(env, global, "napiRunScriptMicrotask",
+                              &microtask_value) != napi_ok ||
+      napi_get_value_bool(env, microtask_value, &microtask_ran_during_call) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "value", value) != napi_ok ||
+      napi_get_boolean(env, microtask_ran_during_call, &field) != napi_ok ||
+      napi_set_named_property(env, result, "microtaskRanDuringCall", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -7459,6 +7540,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "escapableScopeProbe", NAPI_AUTO_LENGTH,
                            escapable_scope_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "escapableScopeProbe", function) != napi_ok ||
+      napi_create_function(env, "runScriptProbe", NAPI_AUTO_LENGTH,
+                           run_script_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "runScriptProbe", function) != napi_ok ||
       napi_create_function(env, "stringEncodingProbe", NAPI_AUTO_LENGTH,
                            string_encoding_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "stringEncodingProbe", function) != napi_ok ||
@@ -7693,6 +7777,8 @@ const utf16 = addon.utf16Probe('Aé😀\0Z');
 const elementDeleteTarget = [10, 20, 30];
 const elementDelete = addon.deleteElementProbe(elementDeleteTarget, 1);
 const escapableScope = addon.escapableScopeProbe();
+const runScriptObservation = addon.runScriptProbe();
+const runScriptResult = runScriptObservation.value;
 const booleanCoercions = [undefined, null, false, 0, -0, NaN, '', 0n, [], {}]
   .map(value => addon.coerceToBoolean(value));
 const numberCoercions = [undefined, null, false, true, '',
@@ -7821,6 +7907,9 @@ module.exports = {
   utf16,
   elementDelete,
   escapableScope,
+  runScriptResult,
+  runScriptMicrotaskRanDuringCall: runScriptObservation.microtaskRanDuringCall,
+  runScriptSideEffect: globalThis.napiRunScriptCount,
   elementDeleteLength: elementDeleteTarget.length,
   elementDeleteRemaining: [elementDeleteTarget[0], elementDeleteTarget[2]],
   elementDeleteHole: !(1 in elementDeleteTarget),
@@ -8508,6 +8597,18 @@ module.exports = {
         assert!(matches!(
             escapable_scope.get_prop("secondEscapeStatus"),
             Some(Value::Number(value)) if value == NAPI_ESCAPE_CALLED_TWICE as f64
+        ));
+        assert!(matches!(
+            result.get_prop("runScriptResult"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            result.get_prop("runScriptSideEffect"),
+            Some(Value::Number(1.0))
+        ));
+        assert!(matches!(
+            result.get_prop("runScriptMicrotaskRanDuringCall"),
+            Some(Value::Bool(false))
         ));
         let boolean_coercions = result.get_prop("booleanCoercions").unwrap();
         let Value::Array(boolean_coercions) = &boolean_coercions else {

@@ -381,8 +381,30 @@ impl Interpreter {
     /// promise/job queue before returning. This is the Rust embedding entry
     /// point; `require()` still needs an explicitly configured loader.
     pub fn eval_source(&mut self, source: &str) -> Result<Value, VmErr> {
-        self.set_source(source);
         self.begin_execution();
+        match self.eval_script_body(source) {
+            Ok(value) => self.drain_jobs().map(|()| value),
+            Err(error) => {
+                let _ = self.drain_jobs();
+                Err(error)
+            }
+        }
+    }
+
+    /// Execute one synchronous script body without a microtask checkpoint.
+    /// Node-API's `napi_run_script` uses this when called from a native callback:
+    /// its Promise jobs must wait until the host returns to the VM event loop.
+    /// It also preserves the active source context and loop budget so a nested
+    /// native call cannot reset execution limits or replace outer diagnostics.
+    pub(crate) fn run_script_source(&mut self, source: &str) -> Result<Value, VmErr> {
+        let previous_source = self.source_lines.clone();
+        let result = self.eval_script_body(source);
+        self.source_lines = previous_source;
+        result
+    }
+
+    fn eval_script_body(&mut self, source: &str) -> Result<Value, VmErr> {
+        self.set_source(source);
         let tokens = crate::lexer::Lexer::new(source).tokenize_with_spans();
         let mut parser = crate::parser::Parser::new_with_spans(tokens);
         let statements = match parser.parse_program() {
@@ -394,13 +416,7 @@ impl Interpreter {
             }
             Err(error) => return Err(VmErr::Msg(error.to_string())),
         };
-        match self.run_program_body(&statements) {
-            Ok(value) => self.drain_jobs().map(|()| value),
-            Err(error) => {
-                let _ = self.drain_jobs();
-                Err(error)
-            }
-        }
+        self.run_program_body(&statements)
     }
 
     /// Insert or replace a binding in the currently active scope. The
