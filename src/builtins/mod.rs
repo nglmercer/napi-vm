@@ -40,8 +40,8 @@ pub use typedarray::{
 };
 
 use crate::error::VmErr;
-use crate::interpreter::{Env, Interpreter};
-use crate::value::{BoxedPrimitive, Value};
+use crate::interpreter::{Env, Environment, Interpreter};
+use crate::value::{BoxedPrimitive, PropAttrs, Value};
 
 pub fn setup_builtins(env: &Env) {
     let mut e = env.borrow_mut();
@@ -464,6 +464,35 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
             .expect("built-in console property");
         c.set_prop("dir".to_string(), nf("dir", console_dir))
             .expect("built-in console property");
+    }
+}
+
+/// Give a callable built-in its own prototype object and the standard
+/// `Function.prototype` parent. The prototype object itself is prepared by
+/// the builtin installer so each constructor can define its own methods.
+pub(crate) fn set_builtin_constructor_prototype(
+    e: &Environment,
+    constructor: &Value,
+    prototype: Value,
+) {
+    constructor
+        .set_prop("prototype".into(), prototype)
+        .expect("built-in constructor prototype");
+    if let Value::Object { props } = constructor {
+        props.meta.borrow_mut().set_attrs(
+            "prototype",
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+        if let Some(function_prototype) = e
+            .get("Function")
+            .and_then(|function| function.get_prop("prototype"))
+        {
+            props.set_proto(Some(std::rc::Rc::new(function_prototype)));
+        }
     }
 }
 

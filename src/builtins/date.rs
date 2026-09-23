@@ -10,7 +10,34 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{BuiltinConstructor, Value};
+use crate::value::{BuiltinConstructor, PropAttrs, Value};
+
+const DATE_PROTOTYPE_METHODS: &[&str] = &[
+    "getTime",
+    "valueOf",
+    "getFullYear",
+    "getUTCFullYear",
+    "getMonth",
+    "getUTCMonth",
+    "getDate",
+    "getUTCDate",
+    "getDay",
+    "getUTCDay",
+    "getHours",
+    "getUTCHours",
+    "getMinutes",
+    "getUTCMinutes",
+    "getSeconds",
+    "getUTCSeconds",
+    "getMilliseconds",
+    "getUTCMilliseconds",
+    "getTimezoneOffset",
+    "setTime",
+    "toISOString",
+    "toJSON",
+    "toString",
+    "toUTCString",
+];
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(d) = e.get("Date") {
@@ -24,6 +51,36 @@ pub(super) fn install(e: &mut Environment) {
         d.set_prop("UTC".to_string(), super::nf("UTC", date_utc))
             .expect("built-in Date property");
         super::make_callable(&d, date_call, Some(date_construct));
+
+        let object_prototype = e
+            .get("Object")
+            .and_then(|object| object.get_prop("prototype"));
+        let prototype =
+            Value::object_with_proto(Vec::new(), object_prototype.map(std::rc::Rc::new));
+        prototype
+            .set_prop("constructor".into(), d.clone())
+            .expect("Date.prototype constructor");
+        for name in DATE_PROTOTYPE_METHODS {
+            prototype
+                .set_prop(
+                    (*name).into(),
+                    date_member(name).expect("listed Date.prototype method"),
+                )
+                .expect("Date.prototype method");
+        }
+        if let Value::Object { props } = &prototype {
+            for name in std::iter::once("constructor").chain(DATE_PROTOTYPE_METHODS.iter().copied())
+            {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    PropAttrs {
+                        enumerable: false,
+                        ..PropAttrs::default()
+                    },
+                );
+            }
+        }
+        super::set_builtin_constructor_prototype(e, &d, prototype);
     }
 }
 

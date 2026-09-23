@@ -2404,14 +2404,36 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
     Ok(keys)
 }
 
-fn napi_direct_prototype(object: &Value) -> Option<Rc<Value>> {
-    match object {
+fn napi_direct_prototype(
+    environment: &NapiEnvironment,
+    object: &Value,
+) -> Result<Option<Rc<Value>>, i32> {
+    let direct = match object {
         Value::Proxy(proxy) => proxy.target.proto_of(),
         _ => object.proto_of(),
+    };
+    if direct.is_some() || matches!(object, Value::Proxy(_)) {
+        return Ok(direct);
     }
+    if !matches!(
+        object,
+        Value::Object { .. }
+            | Value::Array(_)
+            | Value::Function(_)
+            | Value::Class(_)
+            | Value::GlobalObject
+            | Value::NativeFunction { .. }
+            | Value::HostFunction { .. }
+            | Value::Promise(_)
+            | Value::Date(_)
+    ) {
+        return Ok(None);
+    }
+    let prototype = napi_effective_prototype(environment, object)?;
+    Ok((!matches!(prototype, Value::Null)).then(|| Rc::new(prototype)))
 }
 
-fn napi_direct_property_names(object: &Value) -> Result<Value, i32> {
+fn napi_direct_property_names(environment: &NapiEnvironment, object: &Value) -> Result<Value, i32> {
     let mut current = object.clone();
     let mut seen = HashSet::new();
     let mut names = Vec::new();
@@ -2427,7 +2449,7 @@ fn napi_direct_property_names(object: &Value) -> Result<Value, i32> {
                 names.push(Value::String(key));
             }
         }
-        let Some(prototype) = napi_direct_prototype(&current) else {
+        let Some(prototype) = napi_direct_prototype(environment, &current)? else {
             return Value::checked_array(names).map_err(|_| NAPI_GENERIC_FAILURE);
         };
         current = (*prototype).clone();
@@ -2555,8 +2577,8 @@ fn napi_guest_get_property_names(
         // up the prototype chain.
         seen.extend(napi_direct_own_property_names(&current));
         let prototype = match &current {
-            Value::Proxy(proxy) => proxy.target.proto_of(),
-            _ => current.proto_of(),
+            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target),
+            _ => interpreter.prototype_of(&current),
         };
         let Some(prototype) = prototype else {
             return Value::checked_array(names);
@@ -3964,6 +3986,8 @@ fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Re
             let meta = array.meta.borrow();
             (meta.proto.clone(), meta.uses_default_prototype, "Array")
         }
+        Value::Promise(_) => return napi_default_builtin_prototype(environment, "Promise"),
+        Value::Date(_) => return napi_default_builtin_prototype(environment, "Date"),
         Value::GlobalObject => return napi_default_object_prototype(environment),
         Value::NativeFunction { .. } | Value::HostFunction { .. } => {
             return napi_default_function_prototype(environment);
@@ -6980,7 +7004,7 @@ unsafe extern "C" fn api_get_property_names(
                 )
                 .map_err(|_| NAPI_GENERIC_FAILURE)?
             } else {
-                napi_direct_property_names(&object)?
+                napi_direct_property_names(&environment, &object)?
             }
         };
         let handle = environment.handles.borrow_mut().create(names)?;
@@ -7045,7 +7069,7 @@ unsafe extern "C" fn api_get_all_property_names(
             if key_mode == 1 {
                 break;
             }
-            let Some(prototype) = napi_direct_prototype(&current) else {
+            let Some(prototype) = napi_direct_prototype(&environment, &current)? else {
                 break;
             };
             current = (*prototype).clone();
@@ -10940,10 +10964,11 @@ static napi_value error_info_probe(napi_env env, napi_callback_info info) {
 
 static napi_value date_probe(napi_env env, napi_callback_info info) {
   napi_value date, result, field, number, reference_value, global, date_constructor;
+  napi_value date_prototype, observed_prototype;
   napi_ref weak_reference;
   double date_value = 0;
   bool is_date = false, number_is_date = true, reference_matches = false;
-  bool napi_instance = false;
+  bool napi_instance = false, prototype_matches = false;
   napi_status invalid_date_status;
   (void)info;
   if (napi_create_date(env, 1700000000123.0, &date) != napi_ok ||
@@ -10958,6 +10983,10 @@ static napi_value date_probe(napi_env env, napi_callback_info info) {
       napi_is_date(env, number, &number_is_date) != napi_ok || number_is_date ||
       napi_get_global(env, &global) != napi_ok ||
       napi_get_named_property(env, global, "Date", &date_constructor) != napi_ok ||
+      napi_get_named_property(env, date_constructor, "prototype", &date_prototype) != napi_ok ||
+      napi_get_prototype(env, date, &observed_prototype) != napi_ok ||
+      napi_strict_equals(env, observed_prototype, date_prototype, &prototype_matches) != napi_ok ||
+      !prototype_matches ||
       napi_instanceof(env, date, date_constructor, &napi_instance) != napi_ok ||
       !napi_instance)
     return NULL;
@@ -10975,6 +11004,8 @@ static napi_value date_probe(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "napiInstance", field) != napi_ok ||
       napi_get_boolean(env, number_is_date, &field) != napi_ok ||
       napi_set_named_property(env, result, "numberIsDate", field) != napi_ok ||
+      napi_get_boolean(env, prototype_matches, &field) != napi_ok ||
+      napi_set_named_property(env, result, "prototypeMatches", field) != napi_ok ||
       napi_create_int32(env, invalid_date_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "invalidDateStatus", field) != napi_ok)
     return NULL;
@@ -11057,20 +11088,39 @@ static napi_value instance_data_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static bool property_name_array_has(napi_env env, napi_value names, const char* expected_name) {
+  uint32_t length = 0;
+  napi_value expected;
+  if (napi_get_array_length(env, names, &length) != napi_ok ||
+      napi_create_string_utf8(env, expected_name, NAPI_AUTO_LENGTH, &expected) != napi_ok)
+    return false;
+  for (uint32_t index = 0; index < length; index++) {
+    napi_value name;
+    bool equal = false;
+    if (napi_get_element(env, names, index, &name) != napi_ok ||
+        napi_strict_equals(env, name, expected, &equal) != napi_ok)
+      return false;
+    if (equal) return true;
+  }
+  return false;
+}
+
 static napi_value property_names_probe(napi_env env, napi_callback_info info) {
-  napi_value args[3], target, class_target, function_target, result, all_own, enumerable, skip_strings;
+  napi_value args[4], target, class_target, function_target, promise_target, result, all_own, enumerable, skip_strings;
   napi_value with_prototype, keep_numbers, writable, configurable, class_names;
   napi_value probe_array, array_element, array_names, function_names, function_property;
+  napi_value promise_names, promise_has_then, promise_has_catch, promise_has_finally;
   napi_property_descriptor function_descriptor = {
       .utf8name = "definedByNapi",
       .attributes = napi_writable | napi_configurable,
   };
-  size_t argc = 3;
-  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 3)
+  size_t argc = 4;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 4)
     return NULL;
   target = args[0];
   class_target = args[1];
   function_target = args[2];
+  promise_target = args[3];
   if (napi_create_int32(env, 23, &function_property) != napi_ok ||
       napi_set_named_property(env, function_target, "nativeProperty", function_property) != napi_ok ||
       napi_create_int32(env, 42, &function_property) != napi_ok)
@@ -11106,12 +11156,21 @@ static napi_value property_names_probe(napi_env env, napi_callback_info info) {
       napi_get_all_property_names(env, function_target, napi_key_own_only,
                                   napi_key_all_properties,
                                   napi_key_numbers_to_strings, &function_names) != napi_ok ||
+      napi_get_all_property_names(env, promise_target, napi_key_include_prototypes,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &promise_names) != napi_ok ||
       napi_create_array_with_length(env, 2, &probe_array) != napi_ok ||
       napi_create_int32(env, 7, &array_element) != napi_ok ||
       napi_set_element(env, probe_array, 0, array_element) != napi_ok ||
       napi_get_all_property_names(env, probe_array, napi_key_own_only,
                                   napi_key_all_properties,
                                   napi_key_numbers_to_strings, &array_names) != napi_ok ||
+      napi_get_boolean(env, property_name_array_has(env, promise_names, "then"),
+                       &promise_has_then) != napi_ok ||
+      napi_get_boolean(env, property_name_array_has(env, promise_names, "catch"),
+                       &promise_has_catch) != napi_ok ||
+      napi_get_boolean(env, property_name_array_has(env, promise_names, "finally"),
+                       &promise_has_finally) != napi_ok ||
       napi_create_object(env, &result) != napi_ok ||
       napi_set_named_property(env, result, "allOwn", all_own) != napi_ok ||
       napi_set_named_property(env, result, "enumerable", enumerable) != napi_ok ||
@@ -11122,7 +11181,10 @@ static napi_value property_names_probe(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "configurable", configurable) != napi_ok ||
       napi_set_named_property(env, result, "classNames", class_names) != napi_ok ||
       napi_set_named_property(env, result, "functionNames", function_names) != napi_ok ||
-      napi_set_named_property(env, result, "arrayNames", array_names) != napi_ok)
+      napi_set_named_property(env, result, "arrayNames", array_names) != napi_ok ||
+      napi_set_named_property(env, result, "promiseHasThen", promise_has_then) != napi_ok ||
+      napi_set_named_property(env, result, "promiseHasCatch", promise_has_catch) != napi_ok ||
+      napi_set_named_property(env, result, "promiseHasFinally", promise_has_finally) != napi_ok)
     return NULL;
   return result;
 }
@@ -13022,7 +13084,7 @@ propertyNamesTarget['01'] = 'named';
 propertyNamesTarget[Symbol('own')] = 'symbol';
 function reflectedFunction(argument) {}
 const rawPropertyNames = addon.propertyNamesProbe(
-  propertyNamesTarget, addon.Counter, reflectedFunction);
+  propertyNamesTarget, addon.Counter, reflectedFunction, Promise.resolve(1));
 const describePropertyKey = key => typeof key === 'symbol'
   ? key.toString()
   : `${typeof key}:${key}`;
@@ -13041,6 +13103,9 @@ const propertyNames = {
     ['string:length', 'string:name', 'string:prototype', 'string:nativeProperty',
       'string:definedByNapi'].includes(name)),
   array: rawPropertyNames.arrayNames.map(describePropertyKey),
+  promiseHasThen: rawPropertyNames.promiseHasThen,
+  promiseHasCatch: rawPropertyNames.promiseHasCatch,
+  promiseHasFinally: rawPropertyNames.promiseHasFinally,
 };
 const backingBytes = new Uint8Array(typedArrays.buffer);
 const customPrototype = {marker: 'prototype'};
@@ -13069,6 +13134,12 @@ module.exports = {
     value: dates.value,
     guestValue: dates.date.getTime(),
     isDate: dates.isDate,
+    guestPrototypeMatches: Object.getPrototypeOf(dates.date) === Date.prototype,
+    nativeApiPrototypeMatches: dates.prototypeMatches,
+    methodIsShared: dates.date.getTime === Date.prototype.getTime,
+    prototypeParentMatches: Object.getPrototypeOf(Date.prototype) === Object.prototype,
+    constructorMatches: Date.prototype.constructor === Date,
+    methodsAreHidden: Object.keys(Date.prototype).length === 0,
     guestInstance: dates.date instanceof Date,
     guestConstructedInstance: guestDate instanceof Date,
     aliasedDateInstance,
@@ -13173,6 +13244,15 @@ module.exports = {
       return Object.getPrototypeOf(array) === prototype && array.marker &&
         array[0] === 1 && array.map === undefined;
     })(),
+  },
+  promisePrototypes: {
+    defaultMatches: Object.getPrototypeOf(Promise.resolve(1)) === Promise.prototype,
+    nativeApiMatches: addon.getPrototype(Promise.resolve(1)) === Promise.prototype,
+    instanceofMatches: Promise.resolve(1) instanceof Promise,
+    parentMatches: Object.getPrototypeOf(Promise.prototype) === Object.prototype,
+    constructorMatches: Promise.prototype.constructor === Promise,
+    methodIsShared: Promise.resolve(1).then === Promise.prototype.then,
+    methodsAreHidden: Object.keys(Promise.prototype).length === 0,
   },
   array: addon.arrayProbe(),
   wrapped,
@@ -14120,9 +14200,15 @@ module.exports = {
             ]
         );
         assert_eq!(get_names("array"), ["string:0", "string:length"]);
+        for property in ["promiseHasThen", "promiseHasCatch", "promiseHasFinally"] {
+            assert!(
+                matches!(property_names.get_prop(property), Some(Value::Bool(true))),
+                "Node-API prototype key collection missed Promise.prototype.{property}"
+            );
+        }
         let class_name_value = interpreter
             .eval_source(
-                "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter, function Reflected(argument) {}).classNames;",
+                "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter, function Reflected(argument) {}, Promise.resolve(1)).classNames;",
             )
             .unwrap();
         let Value::Array(class_names) = &class_name_value else {
@@ -14161,6 +14247,19 @@ module.exports = {
             date_api.get_prop("isDate"),
             Some(Value::Bool(true))
         ));
+        for property in [
+            "guestPrototypeMatches",
+            "nativeApiPrototypeMatches",
+            "methodIsShared",
+            "prototypeParentMatches",
+            "constructorMatches",
+            "methodsAreHidden",
+        ] {
+            assert!(
+                matches!(date_api.get_prop(property), Some(Value::Bool(true))),
+                "Date prototype result {property} did not match Node/Bun"
+            );
+        }
         assert!(matches!(
             date_api.get_prop("guestInstance"),
             Some(Value::Bool(true))
@@ -14717,6 +14816,24 @@ module.exports = {
             assert!(
                 matches!(array_prototypes.get_prop(property), Some(Value::Bool(true))),
                 "Array prototype result {property} did not match Node/Bun"
+            );
+        }
+        let promise_prototypes = result.get_prop("promisePrototypes").unwrap();
+        for property in [
+            "defaultMatches",
+            "nativeApiMatches",
+            "instanceofMatches",
+            "parentMatches",
+            "constructorMatches",
+            "methodIsShared",
+            "methodsAreHidden",
+        ] {
+            assert!(
+                matches!(
+                    promise_prototypes.get_prop(property),
+                    Some(Value::Bool(true))
+                ),
+                "Promise prototype result {property} did not match Node/Bun"
             );
         }
         let round_trip = result.get_prop("roundTrip").unwrap();

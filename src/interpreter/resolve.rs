@@ -26,6 +26,8 @@ impl Interpreter {
                 "Function",
                 function.properties.meta.borrow().uses_default_prototype,
             ),
+            Value::Promise(_) => ("Promise", true),
+            Value::Date(_) => ("Date", true),
             Value::GlobalObject => ("Object", true),
             Value::NativeFunction { .. } | Value::HostFunction { .. } => ("Function", true),
             _ => return None,
@@ -526,6 +528,9 @@ impl Interpreter {
                 }
             }
             (Value::Promise { .. }, Value::String(k)) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
                 Ok(crate::builtins::promise_method(k).unwrap_or(Value::Undefined))
             }
             (Value::String(s), Value::Number(i)) => {
@@ -683,6 +688,9 @@ impl Interpreter {
                 Ok(crate::builtins::data_view_member(view, k).unwrap_or(Value::Undefined))
             }
             (Value::Date(_), Value::String(k)) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
                 Ok(crate::builtins::date_member(k).unwrap_or(Value::Undefined))
             }
             (Value::BigInt(_), Value::String(k)) => {

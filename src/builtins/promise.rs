@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{PromiseInner, PromiseState, Value};
+use crate::value::{PromiseInner, PromiseState, PropAttrs, Value};
 
 pub(crate) fn promise_method(name: &str) -> Option<Value> {
     let callable: super::NativeFn = match name {
@@ -35,6 +35,35 @@ pub(super) fn install(e: &mut Environment) {
                 .expect("built-in Promise property");
         }
         super::make_callable(&p, promise_construct, None);
+
+        let object_prototype = e
+            .get("Object")
+            .and_then(|object| object.get_prop("prototype"));
+        let prototype =
+            Value::object_with_proto(Vec::new(), object_prototype.map(std::rc::Rc::new));
+        prototype
+            .set_prop("constructor".into(), p.clone())
+            .expect("Promise.prototype constructor");
+        for name in ["then", "catch", "finally"] {
+            prototype
+                .set_prop(
+                    name.into(),
+                    promise_method(name).expect("listed Promise.prototype method"),
+                )
+                .expect("Promise.prototype method");
+        }
+        if let Value::Object { props } = &prototype {
+            for name in ["constructor", "then", "catch", "finally"] {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    PropAttrs {
+                        enumerable: false,
+                        ..PropAttrs::default()
+                    },
+                );
+            }
+        }
+        super::set_builtin_constructor_prototype(e, &p, prototype);
     }
     e.set(
         "queueMicrotask",
