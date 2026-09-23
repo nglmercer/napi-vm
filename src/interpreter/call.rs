@@ -53,6 +53,48 @@ pub(crate) fn is_callable_value(value: &Value) -> bool {
     }
 }
 
+fn is_setter_value(value: &Value) -> bool {
+    match value {
+        Value::Function(function) => function
+            .name
+            .as_ref()
+            .is_some_and(|name| name.starts_with("set ")),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            name.starts_with("set ")
+        }
+        _ => false,
+    }
+}
+
+fn is_getter_value(value: &Value) -> bool {
+    match value {
+        Value::Function(function) => function
+            .name
+            .as_ref()
+            .is_some_and(|name| name.starts_with("get ")),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            name.starts_with("get ")
+        }
+        _ => false,
+    }
+}
+
+fn array_property_setter(
+    array: &crate::value::ArrayCell,
+    key: &str,
+    current: Option<&Value>,
+) -> Option<Value> {
+    if let Some(current) = current.filter(|value| is_setter_value(value)) {
+        return Some(current.clone());
+    }
+    if current.is_some_and(is_getter_value) {
+        return array
+            .named_prop(&format!("__setter:{}__", key))
+            .filter(is_setter_value);
+    }
+    None
+}
+
 fn is_js_object(value: &Value) -> bool {
     if matches!(
         value,
@@ -393,6 +435,11 @@ impl Interpreter {
                         }
                         items.borrow_mut()[index] = Value::Undefined;
                         items.set_index_presence(index, false);
+                        let companion = format!("__setter:{}__", property);
+                        items
+                            .named
+                            .borrow_mut()
+                            .retain(|(name, _)| name != &companion);
                     }
                 } else {
                     if items.named_prop(&property).is_some()
@@ -400,10 +447,9 @@ impl Interpreter {
                     {
                         return Ok(Value::Bool(false));
                     }
-                    items
-                        .named
-                        .borrow_mut()
-                        .retain(|(name, _)| name != &property);
+                    items.named.borrow_mut().retain(|(name, _)| {
+                        name != &property && name != &format!("__setter:{}__", property)
+                    });
                     items.forget_symbol_key(&property);
                 }
                 Ok(Value::Bool(true))
@@ -681,6 +727,13 @@ impl Interpreter {
                 if k != "length" && crate::value::array_index(k).is_none() =>
             {
                 let exists = cell.named_prop(k).is_some();
+                if cell.meta.borrow().has_accessors {
+                    let current = cell.named_prop(k);
+                    if let Some(setter) = array_property_setter(cell, k, current.as_ref()) {
+                        self.call_this(&setter, obj.clone(), vec![val])?;
+                        return Ok(());
+                    }
+                }
                 if (exists && !cell.meta.borrow().attrs_of(k).writable)
                     || (!exists && cell.meta.borrow().non_extensible)
                 {
@@ -692,6 +745,13 @@ impl Interpreter {
             (Value::Array(cell), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
                 let exists = cell.named_prop(&slot).is_some();
+                if cell.meta.borrow().has_accessors {
+                    let current = cell.named_prop(&slot);
+                    if let Some(setter) = array_property_setter(cell, &slot, current.as_ref()) {
+                        self.call_this(&setter, obj.clone(), vec![val])?;
+                        return Ok(());
+                    }
+                }
                 if (exists && !cell.meta.borrow().attrs_of(&slot).writable)
                     || (!exists && cell.meta.borrow().non_extensible)
                 {
@@ -727,7 +787,15 @@ impl Interpreter {
                 let idx = *i as usize;
                 let old_length = items.borrow().len();
                 let exists = idx < old_length && items.has_index(idx);
-                let attributes = items.meta.borrow().attrs_of(&idx.to_string());
+                let key = idx.to_string();
+                if exists && items.meta.borrow().has_accessors {
+                    let current = items.borrow().get(idx).cloned();
+                    if let Some(setter) = array_property_setter(items, &key, current.as_ref()) {
+                        self.call_this(&setter, obj.clone(), vec![val])?;
+                        return Ok(());
+                    }
+                }
+                let attributes = items.meta.borrow().attrs_of(&key);
                 if (exists && !attributes.writable)
                     || (!exists && items.meta.borrow().non_extensible)
                     || (idx >= old_length && !items.meta.borrow().attrs_of("length").writable)

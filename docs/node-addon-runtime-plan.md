@@ -76,8 +76,9 @@ info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
 number, string, and object coercion, symbol creation, and `napi_define_properties`
-for ordinary object, class, and ordinary function targets (data values, symbol
-keys, native methods, and accessors),
+for ordinary object, array, class, and ordinary function targets (indexed and
+named array properties, data values, symbol keys, native methods, and
+accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
 operations including `napi_delete_element`. Escapable handle scopes can

@@ -4304,11 +4304,21 @@ unsafe extern "C" fn api_get_element(
         let Value::Array(array) = &value else {
             return Err(NAPI_ARRAY_EXPECTED);
         };
-        let value = array
-            .borrow()
-            .get(index as usize)
-            .cloned()
-            .unwrap_or(Value::Undefined);
+        let value = if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_get_element",
+                napi_guest_get_property,
+                value.clone(),
+                vec![Value::Number(index as f64)],
+            )?
+        } else {
+            array
+                .borrow()
+                .get(index as usize)
+                .cloned()
+                .unwrap_or(Value::Undefined)
+        };
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
         Ok(())
@@ -4332,7 +4342,18 @@ unsafe extern "C" fn api_set_element(
         if index >= crate::value::MAX_ARRAY_LEN {
             return Err(NAPI_GENERIC_FAILURE);
         }
-        napi_array_set_property(array, &index.to_string(), element)
+        if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_set_element",
+                napi_guest_set_property,
+                value.clone(),
+                vec![Value::Number(index as f64), element],
+            )?;
+            Ok(())
+        } else {
+            napi_array_set_property(array, &index.to_string(), element)
+        }
     })
 }
 
@@ -6399,10 +6420,11 @@ unsafe extern "C" fn api_define_properties(
             function.ensure_name_length_properties();
             function.prototype_value(&object);
         }
-        let props = match &object {
-            Value::Object { props } => props,
-            Value::Class(class) => &class.statics,
-            Value::Function(function) => &function.properties,
+        let props_meta = match &object {
+            Value::Object { props } => &props.meta,
+            Value::Class(class) => &class.statics.meta,
+            Value::Function(function) => &function.properties.meta,
+            Value::Array(array) => &array.meta,
             _ => return Err(NAPI_OBJECT_EXPECTED),
         };
         let descriptors = if property_count == 0 {
@@ -6482,7 +6504,10 @@ unsafe extern "C" fn api_define_properties(
             crate::builtins::object::define_property(&object, &key, &descriptor_value)
                 .map_err(|_| NAPI_GENERIC_FAILURE)?;
             if let Some(symbol) = symbol {
-                props.meta.borrow_mut().set_symbol_key(&key, symbol);
+                match &object {
+                    Value::Array(array) => array.set_symbol_key(&key, symbol),
+                    _ => props_meta.borrow_mut().set_symbol_key(&key, symbol),
+                }
             }
         }
         Ok(())
@@ -10555,6 +10580,14 @@ module.exports = {
 static const napi_type_tag fixture_tag = { UINT64_C(0x123456789abcdef0), UINT64_C(0xfedcba9876543210) };
 static const napi_type_tag other_tag = { UINT64_C(0x1111111111111111), UINT64_C(0x2222222222222222) };
 
+static napi_value get_array_accessor(napi_env env, napi_callback_info info) {
+  napi_value value;
+  (void)info;
+  if (napi_create_string_utf8(env, "native-accessor", NAPI_AUTO_LENGTH, &value) != napi_ok)
+    return NULL;
+  return value;
+}
+
 static void append_cleanup_event(const char* event) {
   FILE* file = fopen("__MARKER_PATH__", "a");
   if (file != NULL) { fputs(event, file); fclose(file); }
@@ -10585,12 +10618,16 @@ static void async_cleanup(napi_async_cleanup_hook_handle handle, void* data) {
 }
 
 static napi_value probe(napi_env env, napi_callback_info info) {
-  napi_value args[4], result, field;
+  napi_value args[5], result, field, array_index_value, array_tag_value;
+  napi_value accessor_before_value, accessor_after_value;
   bool matches = false, wrong_matches = true;
   napi_status duplicate_tag_status, freeze_status, seal_status, function_freeze_status;
-  napi_status array_freeze_status, frozen_array_set_status;
-  size_t argc = 4;
-  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 4 ||
+  napi_status array_define_status, array_freeze_status, frozen_array_set_status;
+  napi_status array_accessor_read_status, array_accessor_write_status;
+  napi_property_descriptor array_properties[3] = {0};
+  size_t argc = 5;
+  int32_t accessor_before, accessor_after;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 5 ||
       napi_type_tag_object(env, args[0], &fixture_tag) != napi_ok ||
       napi_check_object_type_tag(env, args[0], &fixture_tag, &matches) != napi_ok ||
       napi_check_object_type_tag(env, args[0], &other_tag, &wrong_matches) != napi_ok)
@@ -10599,9 +10636,33 @@ static napi_value probe(napi_env env, napi_callback_info info) {
   freeze_status = napi_object_freeze(env, args[0]);
   seal_status = napi_object_seal(env, args[1]);
   function_freeze_status = napi_object_freeze(env, args[2]);
+  if (napi_create_int32(env, 23, &array_index_value) != napi_ok ||
+      napi_create_string_utf8(env, "native-tag", NAPI_AUTO_LENGTH, &array_tag_value) != napi_ok)
+    return NULL;
+  array_properties[0].utf8name = "1";
+  array_properties[0].value = array_index_value;
+  array_properties[0].attributes = napi_default;
+  array_properties[1].utf8name = "tag";
+  array_properties[1].value = array_tag_value;
+  array_properties[1].attributes = napi_default;
+  array_properties[2].utf8name = "nativeAccessor";
+  array_properties[2].getter = get_array_accessor;
+  array_properties[2].attributes = napi_enumerable;
+  array_define_status = napi_define_properties(env, args[3], 3, array_properties);
+  if (array_define_status != napi_ok) return NULL;
   array_freeze_status = napi_object_freeze(env, args[3]);
   if (napi_create_int32(env, 77, &field) != napi_ok) return NULL;
   frozen_array_set_status = napi_set_element(env, args[3], 0, field);
+  array_accessor_read_status = napi_get_element(env, args[4], 0, &accessor_before_value);
+  if (array_accessor_read_status != napi_ok ||
+      napi_get_value_int32(env, accessor_before_value, &accessor_before) != napi_ok ||
+      napi_create_int32(env, 41, &field) != napi_ok)
+    return NULL;
+  array_accessor_write_status = napi_set_element(env, args[4], 0, field);
+  if (array_accessor_write_status != napi_ok ||
+      napi_get_element(env, args[4], 0, &accessor_after_value) != napi_ok ||
+      napi_get_value_int32(env, accessor_after_value, &accessor_after) != napi_ok)
+    return NULL;
   if (napi_create_object(env, &result) != napi_ok ||
       napi_get_boolean(env, matches, &field) != napi_ok ||
       napi_set_named_property(env, result, "tagMatches", field) != napi_ok ||
@@ -10615,10 +10676,20 @@ static napi_value probe(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "sealStatus", field) != napi_ok ||
       napi_create_int32(env, function_freeze_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "functionFreezeStatus", field) != napi_ok ||
+      napi_create_int32(env, array_define_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayDefineStatus", field) != napi_ok ||
       napi_create_int32(env, array_freeze_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "arrayFreezeStatus", field) != napi_ok ||
       napi_create_int32(env, frozen_array_set_status, &field) != napi_ok ||
-      napi_set_named_property(env, result, "frozenArraySetStatus", field) != napi_ok)
+      napi_set_named_property(env, result, "frozenArraySetStatus", field) != napi_ok ||
+      napi_create_int32(env, array_accessor_read_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayAccessorReadStatus", field) != napi_ok ||
+      napi_create_int32(env, array_accessor_write_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayAccessorWriteStatus", field) != napi_ok ||
+      napi_create_int32(env, accessor_before, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayAccessorBefore", field) != napi_ok ||
+      napi_create_int32(env, accessor_after, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayAccessorAfter", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -10663,8 +10734,15 @@ const addon = require('./fixture.node');
 const target = {value: 41};
 const sealedTarget = {value: 9};
 const frozenArray = [13];
+let napiAccessorValue = 5;
+const napiAccessorArray = [];
+Object.defineProperty(napiAccessorArray, '0', {
+  get() { return napiAccessorValue; },
+  set(value) { napiAccessorValue = value + 1; },
+  configurable: true,
+});
 function FrozenFunction() {}
-const native = addon.probe(target, sealedTarget, FrozenFunction, frozenArray);
+const native = addon.probe(target, sealedTarget, FrozenFunction, frozenArray, napiAccessorArray);
 frozenArray[0] = 88;
 frozenArray[1] = 99;
 delete frozenArray[0];
@@ -10673,15 +10751,51 @@ let frozenArrayPushThrows = false;
 let frozenArraySpliceThrows = false;
 try { frozenArray.push(101); } catch (error) { frozenArrayPushThrows = error.name === 'TypeError'; }
 try { frozenArray.splice(1, 0); } catch (error) { frozenArraySpliceThrows = error.name === 'TypeError'; }
+const accessorArray = [];
+let accessorValue = 0;
+Object.defineProperty(accessorArray, '0', {
+  get() { return accessorValue; },
+  set(value) { accessorValue = value + 1; },
+  enumerable: true,
+  configurable: true,
+});
+accessorArray[0] = 40;
+const indexedAccessorValue = accessorArray[0];
+const indexedAccessorDescriptor = Object.getOwnPropertyDescriptor(accessorArray, '0');
+Object.defineProperty(accessorArray, 'named', {
+  get() { return accessorValue; },
+  set(value) { accessorValue = value + 2; },
+  enumerable: false,
+  configurable: true,
+});
+accessorArray.named = 50;
+const namedAccessorValue = accessorArray.named;
 const sealedArray = [17];
 Object.seal(sealedArray);
 sealedArray[0] = 19;
 sealedArray[1] = 21;
 delete sealedArray[0];
 sealedArray.length = 0;
+const guestDefined = [5];
+Object.defineProperty(guestDefined, '2', {
+  value: 7, writable: false, enumerable: true, configurable: false,
+});
+Object.defineProperty(guestDefined, 'label', {
+  value: 'guest', writable: true, enumerable: false, configurable: true,
+});
+Object.defineProperty(guestDefined, 'length', {writable: false});
+let guestIndexRedefinitionThrows = false;
+let guestLengthRedefinitionThrows = false;
+try { Object.defineProperty(guestDefined, '2', {value: 8}); }
+catch (error) { guestIndexRedefinitionThrows = error.name === 'TypeError'; }
+try { Object.defineProperty(guestDefined, 'length', {value: 4}); }
+catch (error) { guestLengthRedefinitionThrows = error.name === 'TypeError'; }
 const frozenArrayIndexDescriptor = Object.getOwnPropertyDescriptor(frozenArray, '0');
+const frozenArraySecondDescriptor = Object.getOwnPropertyDescriptor(frozenArray, '1');
+const frozenArrayTagDescriptor = Object.getOwnPropertyDescriptor(frozenArray, 'tag');
 const frozenArrayLengthDescriptor = Object.getOwnPropertyDescriptor(frozenArray, 'length');
 const sealedArrayIndexDescriptor = Object.getOwnPropertyDescriptor(sealedArray, '0');
+const guestDefinedIndexDescriptor = Object.getOwnPropertyDescriptor(guestDefined, '2');
 module.exports = {
   ...native,
   frozen: Object.isFrozen(target),
@@ -10690,10 +10804,20 @@ module.exports = {
   arrayFrozen: Object.isFrozen(frozenArray),
   frozenArrayLength: frozenArray.length,
   frozenArrayValue: frozenArray[0],
+  frozenArraySecondValue: frozenArray[1],
+  frozenArrayTag: frozenArray.tag,
+  frozenArrayNativeAccessor: frozenArray.nativeAccessor,
   frozenArrayPushThrows,
   frozenArraySpliceThrows,
   frozenIndexWritable: frozenArrayIndexDescriptor.writable,
   frozenIndexConfigurable: frozenArrayIndexDescriptor.configurable,
+  frozenSecondWritable: frozenArraySecondDescriptor.writable,
+  frozenSecondEnumerable: frozenArraySecondDescriptor.enumerable,
+  frozenSecondConfigurable: frozenArraySecondDescriptor.configurable,
+  frozenTagWritable: frozenArrayTagDescriptor.writable,
+  indexedAccessorValue,
+  indexedAccessorDescriptorKeys: Object.keys(indexedAccessorDescriptor),
+  namedAccessorValue,
   frozenLengthWritable: frozenArrayLengthDescriptor.writable,
   frozenLengthConfigurable: frozenArrayLengthDescriptor.configurable,
   sealedArraySealed: Object.isSealed(sealedArray),
@@ -10702,6 +10826,15 @@ module.exports = {
   sealedArrayValue: sealedArray[0],
   sealedIndexWritable: sealedArrayIndexDescriptor.writable,
   sealedIndexConfigurable: sealedArrayIndexDescriptor.configurable,
+  guestDefinedLength: guestDefined.length,
+  guestDefinedIndex: guestDefined[2],
+  guestDefinedLabel: guestDefined.label,
+  guestDefinedKeys: Object.keys(guestDefined),
+  guestDefinedIndexWritable: guestDefinedIndexDescriptor.writable,
+  guestDefinedIndexEnumerable: guestDefinedIndexDescriptor.enumerable,
+  guestDefinedIndexConfigurable: guestDefinedIndexDescriptor.configurable,
+  guestIndexRedefinitionThrows,
+  guestLengthRedefinitionThrows,
   targetValue: target.value,
   sealedValue: sealedTarget.value,
 };
@@ -10789,18 +10922,36 @@ module.exports = {
         assert_eq!(vm_report["freezeStatus"], NAPI_OK);
         assert_eq!(vm_report["sealStatus"], NAPI_OK);
         assert_eq!(vm_report["functionFreezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["arrayDefineStatus"], NAPI_OK);
         assert_eq!(vm_report["arrayFreezeStatus"], NAPI_OK);
         assert_eq!(vm_report["frozenArraySetStatus"], NAPI_OK);
+        assert_eq!(vm_report["arrayAccessorReadStatus"], NAPI_OK);
+        assert_eq!(vm_report["arrayAccessorWriteStatus"], NAPI_OK);
+        assert_eq!(vm_report["arrayAccessorBefore"], 5);
+        assert_eq!(vm_report["arrayAccessorAfter"], 42);
         assert_eq!(vm_report["frozen"], true);
         assert_eq!(vm_report["sealed"], true);
         assert_eq!(vm_report["functionFrozen"], true);
         assert_eq!(vm_report["arrayFrozen"], true);
-        assert_eq!(vm_report["frozenArrayLength"], 1);
+        assert_eq!(vm_report["frozenArrayLength"], 2);
         assert_eq!(vm_report["frozenArrayValue"], 13);
+        assert_eq!(vm_report["frozenArraySecondValue"], 23);
+        assert_eq!(vm_report["frozenArrayTag"], "native-tag");
+        assert_eq!(vm_report["frozenArrayNativeAccessor"], "native-accessor");
         assert_eq!(vm_report["frozenArrayPushThrows"], true);
         assert_eq!(vm_report["frozenArraySpliceThrows"], true);
         assert_eq!(vm_report["frozenIndexWritable"], false);
         assert_eq!(vm_report["frozenIndexConfigurable"], false);
+        assert_eq!(vm_report["frozenSecondWritable"], false);
+        assert_eq!(vm_report["frozenSecondEnumerable"], false);
+        assert_eq!(vm_report["frozenSecondConfigurable"], false);
+        assert_eq!(vm_report["frozenTagWritable"], false);
+        assert_eq!(vm_report["indexedAccessorValue"], 41);
+        assert_eq!(
+            vm_report["indexedAccessorDescriptorKeys"],
+            serde_json::json!(["get", "set", "enumerable", "configurable"])
+        );
+        assert_eq!(vm_report["namedAccessorValue"], 52);
         assert_eq!(vm_report["frozenLengthWritable"], false);
         assert_eq!(vm_report["frozenLengthConfigurable"], false);
         assert_eq!(vm_report["sealedArraySealed"], true);
@@ -10809,6 +10960,15 @@ module.exports = {
         assert_eq!(vm_report["sealedArrayValue"], 19);
         assert_eq!(vm_report["sealedIndexWritable"], true);
         assert_eq!(vm_report["sealedIndexConfigurable"], false);
+        assert_eq!(vm_report["guestDefinedLength"], 3);
+        assert_eq!(vm_report["guestDefinedIndex"], 7);
+        assert_eq!(vm_report["guestDefinedLabel"], "guest");
+        assert_eq!(vm_report["guestDefinedKeys"], serde_json::json!(["0", "2"]));
+        assert_eq!(vm_report["guestDefinedIndexWritable"], false);
+        assert_eq!(vm_report["guestDefinedIndexEnumerable"], true);
+        assert_eq!(vm_report["guestDefinedIndexConfigurable"], false);
+        assert_eq!(vm_report["guestIndexRedefinitionThrows"], true);
+        assert_eq!(vm_report["guestLengthRedefinitionThrows"], true);
         assert_eq!(vm_report["targetValue"], 41);
         assert_eq!(vm_report["sealedValue"], 9);
         drop(observer);

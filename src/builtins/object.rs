@@ -155,6 +155,18 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
             function.prototype_value(v);
         }
     }
+    if let Value::Array(array) = v {
+        if key == "length" {
+            return Some(Value::Number(array.borrow().len() as f64));
+        }
+        if let Some(index) = crate::value::array_index(key) {
+            return array
+                .has_index(index)
+                .then(|| array.borrow().get(index).cloned())
+                .flatten();
+        }
+        return array.named_prop(key);
+    }
     cell(v)?
         .borrow()
         .iter()
@@ -408,7 +420,7 @@ fn object_define_property(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    if cell(&target).is_none() {
+    if cell(&target).is_none() && !matches!(target, Value::Array(_)) {
         return Err(type_err("Object.defineProperty called on non-object"));
     }
     let raw_key = a.get(1).cloned().unwrap_or(Value::Undefined);
@@ -419,8 +431,15 @@ fn object_define_property(
     let key = interp.property_key(&raw_key)?;
     let descriptor = a.get(2).cloned().unwrap_or(Value::Undefined);
     define_property(&target, &key, &descriptor)?;
-    if let (Some(object), Some(symbol)) = (cell(&target), symbol) {
-        object.meta.borrow_mut().set_symbol_key(&key, symbol);
+    if let Some(symbol) = symbol {
+        match &target {
+            Value::Array(array) => array.set_symbol_key(&key, symbol),
+            _ => {
+                if let Some(object) = cell(&target) {
+                    object.meta.borrow_mut().set_symbol_key(&key, symbol);
+                }
+            }
+        }
     }
     Ok(target)
 }
@@ -431,7 +450,7 @@ fn object_define_properties(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    if cell(&target).is_none() {
+    if cell(&target).is_none() && !matches!(target, Value::Array(_)) {
         return Err(type_err("Object.defineProperties called on non-object"));
     }
     let descriptors = a.get(1).cloned().unwrap_or(Value::Undefined);
@@ -459,6 +478,9 @@ fn apply_descriptor_map(
 /// which is why `defineProperty` produces a non-enumerable property by
 /// default while plain assignment produces an enumerable one.
 pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> Result<(), VmErr> {
+    if let Value::Array(array) = target {
+        return define_array_property(array, key, descriptor);
+    }
     if let Value::Function(function) = target {
         function.ensure_name_length_properties();
         function.prototype_value(target);
@@ -550,6 +572,254 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     Ok(())
 }
 
+fn array_property_value(array: &crate::value::ArrayCell, key: &str) -> Option<Value> {
+    if key == "length" {
+        return Some(Value::Number(array.borrow().len() as f64));
+    }
+    if let Some(index) = crate::value::array_index(key) {
+        return array
+            .has_index(index)
+            .then(|| array.borrow().get(index).cloned())
+            .flatten();
+    }
+    array.named_prop(key)
+}
+
+fn array_store_property(
+    array: &crate::value::ArrayCell,
+    key: &str,
+    value: Value,
+) -> Result<(), VmErr> {
+    if key == "length" {
+        return Err(type_err("Invalid array length property definition"));
+    }
+    if let Some(index) = crate::value::array_index(key) {
+        if index >= crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        }
+        let old_length = array.borrow().len();
+        if index >= old_length {
+            let new_length = index + 1;
+            array.borrow_mut().resize(new_length, Value::Undefined);
+            array.resize_presence(old_length, new_length, false);
+        }
+        array.borrow_mut()[index] = value;
+        array.set_index_presence(index, true);
+    } else {
+        array.set_named(key.to_owned(), value);
+    }
+    Ok(())
+}
+
+fn array_set_accessor_setter(array: &crate::value::ArrayCell, key: &str, setter: Option<Value>) {
+    let companion = format!("__setter:{}__", key);
+    match setter {
+        Some(setter) => array.set_named(companion, setter),
+        None => array
+            .named
+            .borrow_mut()
+            .retain(|(name, _)| name != &companion),
+    }
+}
+
+fn define_array_property(
+    array: &crate::value::ArrayCell,
+    key: &str,
+    descriptor: &Value,
+) -> Result<(), VmErr> {
+    if cell(descriptor).is_none() && !matches!(descriptor, Value::Array(_)) {
+        return Err(type_err("Property description must be an object"));
+    }
+
+    let old_value = array_property_value(array, key);
+    let existing = old_value.is_some();
+    let old_attributes = array.meta.borrow().attrs_of(key);
+    let getter = own_slot(descriptor, "get");
+    let setter = own_slot(descriptor, "set");
+    let value = own_slot(descriptor, "value");
+    let writable = own_slot(descriptor, "writable");
+    let enumerable = own_slot(descriptor, "enumerable");
+    let configurable = own_slot(descriptor, "configurable");
+    let accessor_fields = getter.is_some() || setter.is_some();
+    if accessor_fields && (value.is_some() || writable.is_some()) {
+        return Err(type_err("Invalid property descriptor"));
+    }
+
+    if key == "length" {
+        if accessor_fields {
+            return Err(type_err("Cannot redefine array length as an accessor"));
+        }
+        if enumerable.is_some_and(|value| value.is_truthy())
+            || configurable.is_some_and(|value| value.is_truthy())
+        {
+            return Err(type_err("Cannot redefine array length attributes"));
+        }
+        let old_length = array.borrow().len();
+        let requested_length = match value {
+            Some(Value::Number(length)) => {
+                if !length.is_finite()
+                    || length < 0.0
+                    || length.fract() != 0.0
+                    || length > crate::value::MAX_ARRAY_LEN as f64
+                {
+                    return Err(type_err("Invalid array length"));
+                }
+                Some(length as usize)
+            }
+            Some(_) => return Err(type_err("Invalid array length")),
+            None => None,
+        };
+        let requested_writable = writable
+            .as_ref()
+            .map(Value::is_truthy)
+            .unwrap_or(old_attributes.writable);
+        if !old_attributes.writable
+            && (requested_writable || requested_length.is_some_and(|length| length != old_length))
+        {
+            return Err(type_err("Cannot redefine non-writable array length"));
+        }
+        if let Some(length) = requested_length {
+            array.set_length(length);
+            if array.borrow().len() != length {
+                return Err(type_err("Cannot remove a non-configurable array element"));
+            }
+        }
+        let mut attributes = array.meta.borrow().attrs_of("length");
+        attributes.enumerable = false;
+        attributes.configurable = false;
+        attributes.writable = requested_writable;
+        array.meta.borrow_mut().set_attrs("length", attributes);
+        return Ok(());
+    }
+
+    let index = crate::value::array_index(key);
+    if index.is_some_and(|index| index >= crate::value::MAX_ARRAY_LEN) {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    let old_accessor_kind = old_value
+        .as_ref()
+        .and_then(|value| accessor_kind(key, value));
+    let old_is_accessor = old_accessor_kind.is_some();
+    let old_is_data = existing && !old_is_accessor;
+    let new_is_accessor =
+        accessor_fields || (!value.is_some() && !writable.is_some() && old_is_accessor);
+
+    let attributes = PropAttrs {
+        writable: if new_is_accessor {
+            false
+        } else {
+            writable
+                .as_ref()
+                .map(Value::is_truthy)
+                .unwrap_or_else(|| existing && old_is_data && old_attributes.writable)
+        },
+        enumerable: enumerable
+            .as_ref()
+            .map(Value::is_truthy)
+            .unwrap_or(existing && old_attributes.enumerable),
+        configurable: configurable
+            .as_ref()
+            .map(Value::is_truthy)
+            .unwrap_or(existing && old_attributes.configurable),
+    };
+
+    if existing && !old_attributes.configurable {
+        if attributes.configurable
+            || attributes.enumerable != old_attributes.enumerable
+            || old_is_accessor != new_is_accessor
+        {
+            return Err(type_err(&format!("Cannot redefine property: {key}")));
+        }
+        if old_is_data
+            && !old_attributes.writable
+            && (attributes.writable
+                || value.as_ref().is_some_and(|new_value| {
+                    old_value.as_ref().is_some_and(|old_value| {
+                        !crate::interpreter::strict_equals(old_value, new_value)
+                    })
+                }))
+        {
+            return Err(type_err(&format!("Cannot redefine property: {key}")));
+        }
+        if old_is_accessor {
+            let old_getter = (old_accessor_kind == Some("get"))
+                .then(|| old_value.as_ref().cloned())
+                .flatten()
+                .unwrap_or(Value::Undefined);
+            let old_setter = if old_accessor_kind == Some("set") {
+                old_value.clone()
+            } else {
+                array.named_prop(&format!("__setter:{}__", key))
+            };
+            if getter
+                .as_ref()
+                .is_some_and(|new| !crate::interpreter::strict_equals(&old_getter, new))
+                || setter.as_ref().is_some_and(|new| {
+                    old_setter
+                        .as_ref()
+                        .is_none_or(|old| !crate::interpreter::strict_equals(old, new))
+                })
+            {
+                return Err(type_err(&format!("Cannot redefine property: {key}")));
+            }
+        }
+    }
+    if !existing && array.meta.borrow().non_extensible {
+        return Err(type_err(&format!(
+            "Cannot define property {key}, object is not extensible"
+        )));
+    }
+    if let Some(index) = index {
+        let length = array.borrow().len();
+        if index >= length && !array.meta.borrow().attrs_of("length").writable {
+            return Err(type_err("Cannot extend array with non-writable length"));
+        }
+    }
+
+    if new_is_accessor {
+        for accessor in [getter.as_ref(), setter.as_ref()].into_iter().flatten() {
+            if !matches!(accessor, Value::Undefined) && !is_callable(accessor) {
+                return Err(type_err("Getter and setter must be callable"));
+            }
+        }
+        let old_getter = (old_accessor_kind == Some("get"))
+            .then(|| old_value.clone())
+            .flatten();
+        let old_setter = if old_accessor_kind == Some("set") {
+            old_value.clone()
+        } else if old_is_accessor {
+            array.named_prop(&format!("__setter:{}__", key))
+        } else {
+            None
+        };
+        let getter = getter.or(old_getter).unwrap_or(Value::Undefined);
+        let setter = setter.or(old_setter).unwrap_or(Value::Undefined);
+        let getter = getter
+            .is_truthy()
+            .then(|| name_callable(&getter, &format!("get {key}")))
+            .flatten();
+        let setter = setter
+            .is_truthy()
+            .then(|| name_callable(&setter, &format!("set {key}")))
+            .flatten();
+        let primary = getter
+            .clone()
+            .or_else(|| setter.clone())
+            .unwrap_or(Value::Undefined);
+        array_store_property(array, key, primary)?;
+        array_set_accessor_setter(array, key, getter.and(setter));
+        array.meta.borrow_mut().has_accessors = true;
+    } else {
+        let property_value = value
+            .or_else(|| old_is_data.then(|| old_value.clone()).flatten())
+            .unwrap_or(Value::Undefined);
+        array_store_property(array, key, property_value)?;
+        array_set_accessor_setter(array, key, None);
+    }
+    array.meta.borrow_mut().set_attrs(key, attributes);
+    Ok(())
+}
+
 fn object_get_own_descriptor(
     interp: &mut Interpreter,
     _: Value,
@@ -586,13 +856,9 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
             && index < items.len()
             && array.has_index(index)
         {
+            let value = items[index].clone();
             let attrs = array.meta.borrow().attrs_of(key);
-            return Value::object(vec![
-                ("value".to_string(), items[index].clone()),
-                ("writable".to_string(), Value::Bool(attrs.writable)),
-                ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
-                ("configurable".to_string(), Value::Bool(attrs.configurable)),
-            ]);
+            return descriptor_for_array_value(array, key, value, attrs);
         }
         if key == "length" {
             let attrs = array.meta.borrow().attrs_of("length");
@@ -605,12 +871,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
         }
         if let Some(value) = array.named_prop(key) {
             let attrs = array.meta.borrow().attrs_of(key);
-            return Value::object(vec![
-                ("value".to_string(), value),
-                ("writable".to_string(), Value::Bool(attrs.writable)),
-                ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
-                ("configurable".to_string(), Value::Bool(attrs.configurable)),
-            ]);
+            return descriptor_for_array_value(array, key, value, attrs);
         }
         return Value::Undefined;
     }
@@ -642,6 +903,39 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     fields.push(("enumerable".to_string(), Value::Bool(attrs.enumerable)));
     fields.push(("configurable".to_string(), Value::Bool(attrs.configurable)));
     Value::object(fields)
+}
+
+fn descriptor_for_array_value(
+    array: &crate::value::ArrayCell,
+    key: &str,
+    value: Value,
+    attrs: PropAttrs,
+) -> Value {
+    match accessor_kind(key, &value) {
+        Some("get") => Value::object(vec![
+            ("get".to_string(), value),
+            (
+                "set".to_string(),
+                array
+                    .named_prop(&format!("__setter:{}__", key))
+                    .unwrap_or(Value::Undefined),
+            ),
+            ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
+            ("configurable".to_string(), Value::Bool(attrs.configurable)),
+        ]),
+        Some("set") => Value::object(vec![
+            ("get".to_string(), Value::Undefined),
+            ("set".to_string(), value),
+            ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
+            ("configurable".to_string(), Value::Bool(attrs.configurable)),
+        ]),
+        _ => Value::object(vec![
+            ("value".to_string(), value),
+            ("writable".to_string(), Value::Bool(attrs.writable)),
+            ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
+            ("configurable".to_string(), Value::Bool(attrs.configurable)),
+        ]),
+    }
 }
 
 // --- Integrity levels -------------------------------------------------------
