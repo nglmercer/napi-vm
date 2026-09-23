@@ -65,8 +65,8 @@ existing CommonJS resolver and allowlist. Its Linux prototype loads real
 Node-API v1 shared libraries and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
-numbers, UTF-8 strings, `napi_typeof`, and array creation/index/length
-operations.
+numbers, UTF-8 strings, symbol creation, `napi_typeof`, and array
+creation/index/length operations.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.

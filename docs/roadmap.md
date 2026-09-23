@@ -169,9 +169,9 @@ Every claim below was checked against the current build.
   a real Node-API v1 ELF fixture in process and supports a first synchronous
   API slice: opaque scoped handles, callback info, native functions, object
   and global-object access, general property operations, inherited
-  property-name enumeration, references, buffers, typed arrays, DataViews, and
-  controlled synchronous guest callbacks. Async work, thread-safe functions,
-  and the complete Node-API surface remain unsupported
+  property-name enumeration, symbol creation, references, buffers, typed arrays,
+  DataViews, and controlled synchronous guest callbacks. Async work,
+  thread-safe functions, and the complete Node-API surface remain unsupported
   (`src/interpreter/rust_node_api.rs`).
 
 - **Generators on `wasm32`** — the browser target has no stack switching, so a

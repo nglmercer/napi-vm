@@ -394,6 +394,7 @@ struct NapiVmApiTable {
     create_uint32: unsafe extern "C" fn(NapiEnv, u32, *mut NapiValue) -> i32,
     create_int64: unsafe extern "C" fn(NapiEnv, i64, *mut NapiValue) -> i32,
     create_string_utf8: unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
+    create_symbol: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     typeof_value: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
     get_value_double: unsafe extern "C" fn(NapiEnv, NapiValue, *mut f64) -> i32,
     get_value_int32: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
@@ -522,6 +523,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_uint32: api_create_uint32,
     create_int64: api_create_int64,
     create_string_utf8: api_create_string_utf8,
+    create_symbol: api_create_symbol,
     typeof_value: api_typeof,
     get_value_double: api_get_value_double,
     get_value_int32: api_get_value_int32,
@@ -1321,6 +1323,34 @@ unsafe extern "C" fn api_create_string_utf8(
             .handles
             .borrow_mut()
             .create(Value::String(value))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_symbol(
+    env: NapiEnv,
+    description: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let description = if description.is_null() {
+            None
+        } else {
+            let description = environment.handles.borrow().get(description)?;
+            let Value::String(description) = &description else {
+                return Err(NAPI_STRING_EXPECTED);
+            };
+            Some(description.clone())
+        };
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(crate::builtins::new_symbol(description))?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -3794,6 +3824,39 @@ static napi_value global_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value symbol_probe(napi_env env, napi_callback_info info) {
+  napi_value description, key, other_key, no_description, object;
+  napi_value value, actual, names, result, field;
+  napi_valuetype no_description_type;
+  uint32_t string_key_count = 0;
+  bool has_key = false, has_other_key = true;
+  (void)info;
+  if (napi_create_string_utf8(env, "native-symbol", NAPI_AUTO_LENGTH, &description) != napi_ok ||
+      napi_create_symbol(env, description, &key) != napi_ok ||
+      napi_create_symbol(env, description, &other_key) != napi_ok ||
+      napi_create_symbol(env, NULL, &no_description) != napi_ok ||
+      napi_typeof(env, no_description, &no_description_type) != napi_ok ||
+      napi_create_object(env, &object) != napi_ok ||
+      napi_create_int32(env, 42, &value) != napi_ok ||
+      napi_set_property(env, object, key, value) != napi_ok ||
+      napi_get_property(env, object, key, &actual) != napi_ok ||
+      napi_has_own_property(env, object, key, &has_key) != napi_ok ||
+      napi_has_own_property(env, object, other_key, &has_other_key) != napi_ok ||
+      napi_get_property_names(env, object, &names) != napi_ok ||
+      napi_get_array_length(env, names, &string_key_count) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "value", actual) != napi_ok ||
+      napi_get_boolean(env, has_key, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasKey", field) != napi_ok ||
+      napi_get_boolean(env, has_other_key, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasOtherKey", field) != napi_ok ||
+      napi_get_boolean(env, no_description_type == napi_symbol, &field) != napi_ok ||
+      napi_set_named_property(env, result, "noDescriptionIsSymbol", field) != napi_ok ||
+      napi_create_uint32(env, string_key_count, &field) != napi_ok ||
+      napi_set_named_property(env, result, "stringKeyCount", field) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value typedarray_probe(napi_env env, napi_callback_info info) {
   napi_value buffer, typed, typed_buffer, view, view_buffer, result, field;
   void* bytes = NULL;
@@ -4078,6 +4141,8 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "propertyProbe", function) != napi_ok ||
       napi_create_function(env, "globalProbe", NAPI_AUTO_LENGTH, global_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "globalProbe", function) != napi_ok ||
+      napi_create_function(env, "symbolProbe", NAPI_AUTO_LENGTH, symbol_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "symbolProbe", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -4184,6 +4249,7 @@ module.exports = {
   same: addon === require('./fixture.node'),
   global: addon.globalProbe(),
   globalHasObject: Object.hasOwn(globalThis, 'Object'),
+  symbols: addon.symbolProbe(),
   sum: addon.add(19, 23),
   version: addon.metadata.version,
   truth: values.truth,
@@ -4296,6 +4362,27 @@ module.exports = {
         assert!(matches!(
             result.get_prop("globalHasObject"),
             Some(Value::Bool(true))
+        ));
+        let symbols = result.get_prop("symbols").unwrap();
+        assert!(matches!(
+            symbols.get_prop("value"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            symbols.get_prop("hasKey"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            symbols.get_prop("hasOtherKey"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            symbols.get_prop("noDescriptionIsSymbol"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            symbols.get_prop("stringKeyCount"),
+            Some(Value::Number(0.0))
         ));
         assert!(matches!(
             result.get_prop("sum"),
