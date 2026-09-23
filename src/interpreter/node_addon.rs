@@ -303,13 +303,19 @@ function addonWorkerMain() {
         const before=new Map();for(const [graphId,node] of decodeGraph)if(typeof graphId==='string'&&graphId.startsWith('g:'))before.set(graphId,descriptorState(node));
         const mutableState=captureMutableState(decodeGraph);
         const guestRefs=new WeakMap();for(const [graphId,node] of decodeGraph)if(typeof graphId==='string'&&graphId.startsWith('g:'))guestRefs.set(node,graphId);
-        if(r.op==='construct')result=Reflect.construct(entry.value,args);
-        else result=Reflect.apply(entry.value,guestReceiver,args);
+        let didThrow=false,thrownValue;
+        try{
+          if(r.op==='construct')result=Reflect.construct(entry.value,args);
+          else result=Reflect.apply(entry.value,guestReceiver,args);
+        }catch(error){didThrow=true;thrownValue=error;}
         assertMutableStateUnchanged(mutableState);
         const graph=newGraph();
-        const encodedResult=encode(result,receiver,0,graph,guestRefs,guestCallbackIds,true);
+        const encodedResult=didThrow?{t:'undefined'}:encode(result,receiver,0,graph,guestRefs,guestCallbackIds,true);
+        const encodedThrow=didThrow?encode(thrownValue,receiver,0,graph,guestRefs,guestCallbackIds,true):undefined;
         const mutations=collectGuestMutations(decodeGraph,before,guestRefs,guestCallbackIds,graph);
-        return {requestId:r.requestId,ok:true,value:{t:'guestCallResult',result:encodedResult,mutations}};
+        const value={t:'guestCallResult',result:encodedResult,mutations};
+        if(didThrow)value.thrown=encodedThrow;
+        return {requestId:r.requestId,ok:true,value};
       }
       return {requestId:r.requestId,ok:true,value:encode(result,receiver,0,newGraph())};
     }catch(e){return {requestId:r.requestId,ok:false,error:{name:typeof e?.name==='string'?e.name:'Error',message:typeof e?.message==='string'?e.message:String(e),code:typeof e?.code==='string'?e.code:undefined}};}
@@ -1373,6 +1379,10 @@ fn guest_call_result_to_value(
         .get("result")
         .ok_or_else(|| VmErr::Msg("Node call response has no result".into()))?;
     let result = wire_to_guest_with_context(sidecar, result, 0, &mut graph)?;
+    let thrown = envelope
+        .get("thrown")
+        .map(|thrown| wire_to_guest_with_context(sidecar, thrown, 0, &mut graph))
+        .transpose()?;
     let mutations = envelope
         .get("mutations")
         .and_then(JsonValue::as_array)
@@ -1380,7 +1390,11 @@ fn guest_call_result_to_value(
     for mutation in mutations {
         apply_guest_mutation(sidecar, mutation, &mut graph)?;
     }
-    Ok(result)
+    if let Some(reason) = thrown {
+        Err(VmErr::Throw(reason))
+    } else {
+        Ok(result)
+    }
 }
 
 fn mutation_property(
@@ -2260,6 +2274,16 @@ static napi_value fail(napi_env env, napi_callback_info info) {
   return NULL;
 }
 
+static napi_value mutate_then_throw(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], value;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_create_int32(env, 88, &value) != napi_ok ||
+      napi_set_named_property(env, argv[0], "afterThrow", value) != napi_ok ||
+      napi_throw_type_error(env, "E_AFTER_MUTATION", "mutation happened") != napi_ok) return NULL;
+  return NULL;
+}
+
 static napi_value promise_result(napi_env env, napi_callback_info info) {
   napi_deferred deferred;
   napi_value promise, result;
@@ -2437,6 +2461,8 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "dataViewByte", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "fail", NAPI_AUTO_LENGTH, fail, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "fail", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "mutateThenThrow", NAPI_AUTO_LENGTH, mutate_then_throw, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "mutateThenThrow", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "promiseResult", NAPI_AUTO_LENGTH, promise_result, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "promiseResult", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "promiseReject", NAPI_AUTO_LENGTH, promise_reject, NULL, &fn) != napi_ok) return NULL;
@@ -2733,6 +2759,27 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(
             matches!(error.get_prop("code"), Some(Value::String(ref code)) if code == "E_FIXTURE")
         );
+        let error_after_mutation = interpreter
+            .eval_source(
+                "const object = {}; let observed; try { require('./fixture.node').mutateThenThrow(object); } catch (error) { observed = {name:error.name, code:error.code, message:error.message, value:object.afterThrow}; } observed;",
+            )
+            .unwrap();
+        assert!(matches!(
+            error_after_mutation.get_prop("name"),
+            Some(Value::String(ref name)) if name == "TypeError"
+        ));
+        assert!(matches!(
+            error_after_mutation.get_prop("code"),
+            Some(Value::String(ref code)) if code == "E_AFTER_MUTATION"
+        ));
+        assert!(matches!(
+            error_after_mutation.get_prop("message"),
+            Some(Value::String(ref message)) if message == "mutation happened"
+        ));
+        assert!(matches!(
+            error_after_mutation.get_prop("value"),
+            Some(Value::Number(value)) if value == 88.0
+        ));
         let async_result = interpreter
             .eval_source(
                 "await require('./fixture.node').promiseResult().then(value => value + '-chained');",
