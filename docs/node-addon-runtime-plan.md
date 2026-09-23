@@ -109,10 +109,14 @@ run once on the owning thread during Rust host shutdown, before addon libraries
 unload; removing a wrap skips its finalizer. Without guest-object collection,
 these finalizers do not run at normal object collection time. `napi_create_buffer`,
 `napi_create_buffer_copy`, `napi_get_buffer_info`, and `napi_is_buffer` are also
-supported. N-API buffers are surfaced as guest `Uint8Array` views; external
-buffers are not implemented. ArrayBuffer, typed-array, and DataView creation,
-type checks, and info APIs share storage with guest views and preserve byte
-offsets. `napi_create_promise`, deferred resolution/rejection, and
+supported. `napi_create_external` and `napi_get_value_external` preserve an
+external's native pointer and distinct `napi_typeof` tag. In guest JavaScript,
+an external behaves like a non-extensible, null-prototype object with no own
+properties. Its finalizer runs during host shutdown because this VM does not
+collect guest objects. N-API buffers are surfaced as guest `Uint8Array` views;
+external buffers are not implemented. ArrayBuffer, typed-array, and DataView
+creation, type checks, and info APIs share storage with guest views and preserve
+byte offsets. `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive
 resolutions or any rejection. Object and promise resolutions require an active

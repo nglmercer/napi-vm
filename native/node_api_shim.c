@@ -59,7 +59,10 @@ typedef struct napi_vm_node_api_table {
   napi_status (*create_string_utf16)(napi_env, const uint16_t*, size_t,
                                      napi_value*);
   napi_status (*create_symbol)(napi_env, napi_value, napi_value*);
+  napi_status (*create_external)(napi_env, void*, napi_finalize, void*,
+                                 napi_value*);
   napi_status (*typeof_value)(napi_env, napi_value, int32_t*);
+  napi_status (*get_value_external)(napi_env, napi_value, void**);
   napi_status (*get_value_double)(napi_env, napi_value, double*);
   napi_status (*get_value_int32)(napi_env, napi_value, int32_t*);
   napi_status (*get_value_uint32)(napi_env, napi_value, uint32_t*);
@@ -299,10 +302,26 @@ NAPI_VM_EXPORT napi_status napi_create_symbol(napi_env env,
   return table ? table->create_symbol(env, description, result) : 9;
 }
 
+NAPI_VM_EXPORT napi_status napi_create_external(
+    napi_env env, void* data, napi_finalize finalize_cb, void* finalize_hint,
+    napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_external(env, data, finalize_cb, finalize_hint,
+                                         result)
+               : 9;
+}
+
 NAPI_VM_EXPORT napi_status napi_typeof(napi_env env, napi_value value,
                                         int32_t* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->typeof_value(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_value_external(napi_env env,
+                                                    napi_value value,
+                                                    void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_value_external(env, value, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_value_double(napi_env env,

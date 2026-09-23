@@ -295,6 +295,7 @@ struct NapiEnvironment {
     cleanup_hooks: RefCell<Vec<NapiCleanupHookRecord>>,
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
+    externals: RefCell<HashMap<NapiObjectIdentity, NapiExternal>>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
@@ -434,6 +435,15 @@ type AsyncWorkPool = (SyncSender<AsyncWorkTaskMessage>, Vec<JoinHandle<()>>);
 struct NapiWrap {
     // Keeping the guest value alive prevents its identity pointer from being
     // reused while native data is still attached to it.
+    _value: Value,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+}
+
+struct NapiExternal {
+    // The Node-API external has no own properties or prototype, but it must
+    // stay alive until its finalizer runs during environment shutdown.
     _value: Value,
     data: *mut c_void,
     finalize: Option<NapiFinalize>,
@@ -717,7 +727,15 @@ struct NapiVmApiTable {
     create_string_utf8: unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
     create_string_utf16: unsafe extern "C" fn(NapiEnv, *const u16, usize, *mut NapiValue) -> i32,
     create_symbol: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
+    create_external: unsafe extern "C" fn(
+        NapiEnv,
+        *mut c_void,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiValue,
+    ) -> i32,
     typeof_value: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
+    get_value_external: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void) -> i32,
     get_value_double: unsafe extern "C" fn(NapiEnv, NapiValue, *mut f64) -> i32,
     get_value_int32: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
     get_value_uint32: unsafe extern "C" fn(NapiEnv, NapiValue, *mut u32) -> i32,
@@ -931,7 +949,9 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_string_utf8: api_create_string_utf8,
     create_string_utf16: api_create_string_utf16,
     create_symbol: api_create_symbol,
+    create_external: api_create_external,
     typeof_value: api_typeof,
+    get_value_external: api_get_value_external,
     get_value_double: api_get_value_double,
     get_value_int32: api_get_value_int32,
     get_value_uint32: api_get_value_uint32,
@@ -1796,6 +1816,12 @@ fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
     }
 }
 
+fn napi_is_external_value(environment: &NapiEnvironment, value: &Value) -> bool {
+    napi_object_identity(value)
+        .ok()
+        .is_some_and(|identity| environment.externals.borrow().contains_key(&identity))
+}
+
 fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
     let wraps = std::mem::take(&mut *environment.wraps.borrow_mut());
     for wrap in wraps.into_values() {
@@ -1804,6 +1830,19 @@ fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
         };
         let scope = environment.handles.borrow_mut().open_scope().ok();
         unsafe { finalize(environment.raw(), wrap.data, wrap.hint) };
+        environment.pending_exception.borrow_mut().take();
+        if let Some(scope) = scope {
+            let _ = environment.handles.borrow_mut().close_scope(scope);
+        }
+    }
+
+    let externals = std::mem::take(&mut *environment.externals.borrow_mut());
+    for external in externals.into_values() {
+        let Some(finalize) = external.finalize else {
+            continue;
+        };
+        let scope = environment.handles.borrow_mut().open_scope().ok();
+        unsafe { finalize(environment.raw(), external.data, external.hint) };
         environment.pending_exception.borrow_mut().take();
         if let Some(scope) = scope {
             let _ = environment.handles.borrow_mut().close_scope(scope);
@@ -2226,6 +2265,46 @@ unsafe extern "C" fn api_create_symbol(
     })
 }
 
+unsafe extern "C" fn api_create_external(
+    env: NapiEnv,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    finalize_hint: *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        if environment.finalizing.get() {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+
+        // Node-API externals are opaque JS values: they behave like
+        // non-extensible, null-prototype objects in JS, while napi_typeof
+        // reports the distinct napi_external tag.
+        let value = Value::object_with_proto(Vec::new(), None);
+        let Value::Object { props } = &value else {
+            unreachable!("object_with_proto creates an object")
+        };
+        props.meta.borrow_mut().non_extensible = true;
+        let identity = napi_object_identity(&value)?;
+        let handle = environment.handles.borrow_mut().create(value.clone())?;
+        environment.externals.borrow_mut().insert(
+            identity,
+            NapiExternal {
+                _value: value,
+                data,
+                finalize,
+                hint: finalize_hint,
+            },
+        );
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_typeof(env: NapiEnv, value: NapiValue, result: *mut i32) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -2235,7 +2314,35 @@ unsafe extern "C" fn api_typeof(env: NapiEnv, value: NapiValue, result: *mut i32
         let value = environment.handles.borrow().get(value)?;
         // Values are the Node-API `napi_valuetype` discriminants from
         // js_native_api_types.h. Proxy `typeof` follows its target.
-        unsafe { result.write(napi_value_type(&value)) };
+        let value_type = if napi_is_external_value(&environment, &value) {
+            8 // napi_external
+        } else {
+            napi_value_type(&value)
+        };
+        unsafe { result.write(value_type) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_external(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut *mut c_void,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let identity = napi_object_identity(&value)?;
+        let data = environment
+            .externals
+            .borrow()
+            .get(&identity)
+            .map(|external| external.data)
+            .ok_or(NAPI_INVALID_ARG)?;
+        unsafe { result.write(data) };
         Ok(())
     })
 }
@@ -3413,6 +3520,9 @@ unsafe extern "C" fn api_wrap(
             return Err(NAPI_GENERIC_FAILURE);
         }
         let value = environment.handles.borrow().get(object)?;
+        if napi_is_external_value(&environment, &value) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
         let identity = napi_object_identity(&value)?;
         if environment.wraps.borrow().contains_key(&identity) {
             return Err(NAPI_INVALID_ARG);
@@ -3454,6 +3564,9 @@ unsafe extern "C" fn api_unwrap(env: NapiEnv, object: NapiValue, result: *mut *m
         }
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(object)?;
+        if napi_is_external_value(&environment, &value) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
         let identity = napi_object_identity(&value)?;
         let data = environment
             .wraps
@@ -3477,6 +3590,9 @@ unsafe extern "C" fn api_remove_wrap(
         }
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(object)?;
+        if napi_is_external_value(&environment, &value) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
         let identity = napi_object_identity(&value)?;
         let wrap = environment
             .wraps
@@ -4135,6 +4251,9 @@ unsafe extern "C" fn api_define_properties(
         }
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
+        if napi_is_external_value(&environment, &object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
         let props = match &object {
             Value::Object { props } => props,
             Value::Class(class) => &class.statics,
@@ -4381,6 +4500,10 @@ unsafe extern "C" fn api_set_named_property(
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
         let value = environment.handles.borrow().get(value)?;
+        if napi_is_external_value(&environment, &object) {
+            // Node accepts these writes but an external has no property slots.
+            return Ok(());
+        }
         if !matches!(
             object,
             Value::Object { .. } | Value::Array(_) | Value::GlobalObject
@@ -4496,6 +4619,11 @@ unsafe extern "C" fn api_set_property(
         }
         let key = environment.handles.borrow().get(key)?;
         let value = environment.handles.borrow().get(value)?;
+        if napi_is_external_value(&environment, &object) {
+            // Match napi_set_named_property: native writes to an external are
+            // successful but cannot add JavaScript properties.
+            return Ok(());
+        }
         if has_guest_callback_dispatcher(&environment) {
             run_napi_guest_operation(
                 &environment,
@@ -5744,6 +5872,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             cleanup_hooks: RefCell::new(Vec::new()),
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
+            externals: RefCell::new(HashMap::new()),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
             active_callbacks: RefCell::new(HashMap::new()),
@@ -6254,8 +6383,10 @@ mod tests {
 static napi_ref persistent_values;
 static napi_ref removable_object;
 static napi_ref wrapped_object_reference;
+static napi_ref external_value_reference;
 static int wrapped_finalizer_calls;
 static int removed_finalizer_calls;
+static int external_finalizer_calls;
 static int finalizer_create_function_status = -1;
 static int cleanup_hook_order[4];
 static int cleanup_hook_count;
@@ -6292,6 +6423,8 @@ typedef struct async_work_context {
 } async_work_context;
 static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
+static char external_native_data[] = "external-native-data";
+static char external_finalize_hint;
 
 static napi_value finalizer_noop(napi_env env, napi_callback_info info) {
   (void)env;
@@ -6309,6 +6442,12 @@ static void finalize_probe(napi_env env, void* data, void* hint) {
         env, "fromFinalizer", NAPI_AUTO_LENGTH, finalizer_noop, NULL, &ignored);
   }
   if (data == removable_native_data) removed_finalizer_calls++;
+}
+
+static void finalize_external_probe(napi_env env, void* data, void* hint) {
+  (void)env;
+  if (data == external_native_data && hint == &external_finalize_hint)
+    external_finalizer_calls++;
 }
 
 static void cleanup_probe(void* arg) {
@@ -6388,6 +6527,10 @@ int napi_vm_test_wrapped_finalizer_calls(void) {
 
 int napi_vm_test_removed_finalizer_calls(void) {
   return removed_finalizer_calls;
+}
+
+int napi_vm_test_external_finalizer_calls(void) {
+  return external_finalizer_calls;
 }
 
 int napi_vm_test_finalizer_create_function_status(void) {
@@ -7435,9 +7578,40 @@ static napi_value duplicate_wrap_status(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value external_probe(napi_env env, napi_callback_info info) {
+  napi_value external, ordinary, result;
+  napi_valuetype type;
+  void* data = NULL;
+  void* invalid_data = NULL;
+  (void)info;
+  if (napi_get_reference_value(env, external_value_reference, &external) != napi_ok ||
+      napi_get_value_external(env, external, &data) != napi_ok ||
+      data != external_native_data ||
+      napi_typeof(env, external, &type) != napi_ok || type != napi_external ||
+      napi_create_object(env, &ordinary) != napi_ok ||
+      napi_get_value_external(env, ordinary, &invalid_data) != napi_invalid_arg ||
+      napi_get_boolean(env, true, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value external_property_probe(napi_env env, napi_callback_info info) {
+  napi_value external, ignored, property, result;
+  napi_valuetype type;
+  (void)info;
+  if (napi_get_reference_value(env, external_value_reference, &external) != napi_ok ||
+      napi_create_object(env, &property) != napi_ok ||
+      napi_set_named_property(env, external, "ignored", property) != napi_ok ||
+      napi_get_named_property(env, external, "ignored", &ignored) != napi_ok ||
+      napi_typeof(env, ignored, &type) != napi_ok || type != napi_undefined ||
+      napi_get_boolean(env, true, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
-  napi_value scratch, function, metadata, version, values, field;
+  napi_value scratch, function, metadata, version, values, field, external;
   uint32_t supported_api_version = 0;
   napi_deferred initialized_deferred;
   napi_value initialized_promise, initialized_promise_value;
@@ -7477,6 +7651,11 @@ NAPI_MODULE_INIT() {
       napi_get_version(env, NULL) != napi_invalid_arg ||
       napi_get_boolean(env, supported_api_version >= NAPI_VERSION, &field) != napi_ok ||
       napi_set_named_property(env, exports, "supportsNapiV4", field) != napi_ok)
+    return NULL;
+  if (napi_create_external(env, external_native_data, finalize_external_probe,
+                           &external_finalize_hint, &external) != napi_ok ||
+      napi_create_reference(env, external, 1, &external_value_reference) != napi_ok ||
+      napi_set_named_property(env, exports, "external", external) != napi_ok)
     return NULL;
   cleanup_env = env;
   if (napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)1) != napi_ok ||
@@ -7525,6 +7704,12 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "Counter", counter_class) != napi_ok) return NULL;
   if (napi_create_function(env, "add", NAPI_AUTO_LENGTH, add, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "add", function) != napi_ok ||
+      napi_create_function(env, "externalProbe", NAPI_AUTO_LENGTH,
+                           external_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "externalProbe", function) != napi_ok ||
+      napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
+                           external_property_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
       napi_create_function(env, "coerceToBoolean", NAPI_AUTO_LENGTH,
                            coerce_to_bool_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "coerceToBoolean", function) != napi_ok ||
@@ -7695,6 +7880,11 @@ NAPI_MODULE_INIT() {
             r#"
 const addon = require('./fixture.node');
 const values = addon.values;
+const external = addon.external;
+const externalProbe = addon.externalProbe();
+const externalType = typeof external;
+const externalKeys = Object.keys(external);
+const externalJson = JSON.stringify(external);
 const definedMethod = addon.definedMethod();
 const definedValueBefore = addon.definedValue;
 addon.definedValue = 23;
@@ -7892,6 +8082,10 @@ module.exports = {
   counterHasInheritedStatic,
   counterInheritedBaseValue,
   counterInheritedStaticMethod,
+  externalProbe,
+  externalType,
+  externalKeys,
+  externalJson,
   counterStaticEnumerable: counterStaticDescriptor.enumerable,
   counterStaticMethodEnumerable: counterStaticMethodDescriptor.enumerable,
   counterStaticBaseWritable: counterStaticBaseDescriptor.writable,
@@ -8022,6 +8216,11 @@ module.exports = {
                 .get(b"napi_vm_test_removed_finalizer_calls\0")
                 .unwrap()
         };
+        let external_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_external_finalizer_calls\0")
+                .unwrap()
+        };
         let finalizer_create_function_status: unsafe extern "C" fn() -> i32 = unsafe {
             *observer
                 .get(b"napi_vm_test_finalizer_create_function_status\0")
@@ -8058,6 +8257,7 @@ module.exports = {
         };
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
+        assert_eq!(unsafe { external_finalizer_calls() }, 0);
         assert_eq!(unsafe { cleanup_hook_count() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
         let invalid_utf16 = interpreter
@@ -8360,6 +8560,22 @@ module.exports = {
         assert!(matches!(
             result.get_prop("supportsNapiV4"),
             Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("externalProbe"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("externalType"),
+            Some(Value::String(ref value)) if value == "object"
+        ));
+        assert!(matches!(
+            result.get_prop("externalKeys"),
+            Some(Value::Array(ref values)) if values.borrow().is_empty()
+        ));
+        assert!(matches!(
+            result.get_prop("externalJson"),
+            Some(Value::String(ref value)) if value == "{}"
         ));
         assert!(matches!(
             result.get_prop("definedConstant"),
@@ -9135,6 +9351,25 @@ module.exports = {
             Some("E_CLEARED"),
         );
 
+        assert!(matches!(
+            interpreter
+                .eval_source("require('./fixture.node').externalProbe();")
+                .unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source("require('./fixture.node').externalPropertyProbe();")
+                .unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source("(() => { const e = require('./fixture.node').external; return Object.getPrototypeOf(e) === null && !Object.isExtensible(e) && e.missing === undefined && Object.keys(e).length === 0; })();")
+                .unwrap(),
+            Value::Bool(true)
+        ));
+
         let guest_json = interpreter
             .eval_source("JSON.stringify(require('./main.cjs'));")
             .unwrap();
@@ -9273,6 +9508,7 @@ module.exports = {
         drop(interpreter);
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 1);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
+        assert_eq!(unsafe { external_finalizer_calls() }, 1);
         assert_eq!(unsafe { finalizer_create_function_status() }, NAPI_OK);
         assert_eq!(unsafe { cleanup_hook_count() }, 2);
         assert_eq!(unsafe { cleanup_hook_value(0) }, 4);
