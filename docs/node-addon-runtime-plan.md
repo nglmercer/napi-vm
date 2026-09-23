@@ -218,6 +218,11 @@ those code units.
 
 - Audit the existing CommonJS resolver, `.node` allowlist, integrity checks,
   package `exports`, and cache behavior.
+- The filesystem resolver treats `node-addons` as an active package condition
+  only when a native addon provider is configured. Without a provider, it skips
+  that branch and may resolve the JavaScript fallback, matching Node's
+  `--no-addons` mode. A chosen `.node` file still requires its own allowlist
+  entry and integrity check.
 - Specify resolution for exact `.node` paths, extension omission, package
   `node-addons` conditions, platform/architecture prebuild directories, and
   missing or incompatible binaries.

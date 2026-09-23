@@ -90,6 +90,10 @@ fn main() {
 Native addons execute as trusted host code in the Node child process, outside
 the VM sandbox. The root restriction and per-file allowlist decide which addon
 may load; they do not constrain what that trusted addon can do on the host.
+Package `node-addons` export and import conditions are enabled when an addon
+provider is configured. Without one, the resolver skips that condition and can
+use a package's JavaScript fallback, matching Node's `--no-addons` mode. A
+selected `.node` file still has to pass the root and per-file integrity policy.
 `allow_native_addon()` pins the binary's SHA-256 digest when configured and
 checks it again before each load. For build-time integrity, use
 `allow_native_addon_with_sha256(path, expected_digest)` with the digest from a

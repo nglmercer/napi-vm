@@ -76,7 +76,10 @@ pub trait NativeAddonLoader {
 /// Resolution is limited to configured roots. Symlinks are canonicalized and
 /// rejected when their targets leave those roots. Built-in modules are not
 /// loaded implicitly. Package `exports` supports exact and wildcard subpaths
-/// and the `require`, `node`, and `default` conditions.
+/// and the `require`, `node`, `node-addons`, and `default` conditions. The
+/// `node-addons` condition is active only when a native addon provider is
+/// configured, matching Node's `--no-addons` behavior for runtimes that omit
+/// native addon support.
 pub struct FileCommonJsLoader {
     roots: Vec<PathBuf>,
     native_addons: Option<Rc<dyn NativeAddonLoader>>,
@@ -237,12 +240,14 @@ impl FileCommonJsLoader {
             if package_json.is_file() {
                 let package = read_package_json(&package_json)?;
                 let entry = if let Some(exports) = package.get("exports") {
-                    exports_target(exports, ".")?.ok_or_else(|| {
-                        VmErr::Msg(format!(
-                            "package does not export its root entry: {}",
-                            path.display()
-                        ))
-                    })?
+                    exports_target(exports, ".", self.native_addons.is_some())?.ok_or_else(
+                        || {
+                            VmErr::Msg(format!(
+                                "package does not export its root entry: {}",
+                                path.display()
+                            ))
+                        },
+                    )?
                 } else {
                     package
                         .get("main")
@@ -310,11 +315,12 @@ impl FileCommonJsLoader {
         } else {
             format!("./{subpath}")
         };
-        let target = exports_target(exports, &export_key)?.ok_or_else(|| {
-            VmErr::Msg(format!(
-                "package {package_name} does not export subpath {export_key}"
-            ))
-        })?;
+        let target = exports_target(exports, &export_key, self.native_addons.is_some())?
+            .ok_or_else(|| {
+                VmErr::Msg(format!(
+                    "package {package_name} does not export subpath {export_key}"
+                ))
+            })?;
         let target_path = package_root.join(target);
         let found = self
             .resolve_path(&target_path, 0)?
@@ -349,7 +355,7 @@ impl FileCommonJsLoader {
         let imports = package
             .get("imports")
             .ok_or_else(|| VmErr::Msg(format!("package does not define import '{request}'")))?;
-        match imports_target(imports, request)? {
+        match imports_target(imports, request, self.native_addons.is_some())? {
             ImportTarget::Relative(target) => {
                 let found = self
                     .resolve_path(&package_root.join(target), 0)?
@@ -617,14 +623,18 @@ fn split_package_request(request: &str) -> Result<(String, String), VmErr> {
     Ok((name, subpath))
 }
 
-fn exports_target(exports: &JsonValue, key: &str) -> Result<Option<String>, VmErr> {
+fn exports_target(
+    exports: &JsonValue,
+    key: &str,
+    node_addons: bool,
+) -> Result<Option<String>, VmErr> {
     let selection = match exports {
         JsonValue::String(_) | JsonValue::Array(_) | JsonValue::Null if key == "." => {
-            select_export_target(exports, None)
+            select_export_target(exports, None, node_addons)
         }
         JsonValue::Object(entries) if entries.keys().any(|entry| entry.starts_with('.')) => {
             if let Some(target) = entries.get(key) {
-                return finish_export_selection(select_export_target(target, None));
+                return finish_export_selection(select_export_target(target, None, node_addons));
             }
 
             let mut best: Option<(usize, usize, String, &JsonValue)> = None;
@@ -645,10 +655,10 @@ fn exports_target(exports: &JsonValue, key: &str) -> Result<Option<String>, VmEr
             }
             best.map_or(
                 ExportTargetSelection::NoTarget,
-                |(_, _, capture, target)| select_export_target(target, Some(&capture)),
+                |(_, _, capture, target)| select_export_target(target, Some(&capture), node_addons),
             )
         }
-        JsonValue::Object(_) if key == "." => select_export_target(exports, None),
+        JsonValue::Object(_) if key == "." => select_export_target(exports, None, node_addons),
         _ => ExportTargetSelection::NoTarget,
     };
     finish_export_selection(selection)
@@ -665,12 +675,16 @@ enum ImportTargetSelection {
     Invalid(String),
 }
 
-fn imports_target(imports: &JsonValue, key: &str) -> Result<ImportTarget, VmErr> {
+fn imports_target(
+    imports: &JsonValue,
+    key: &str,
+    node_addons: bool,
+) -> Result<ImportTarget, VmErr> {
     let entries = imports
         .as_object()
         .ok_or_else(|| VmErr::Msg("package imports must be an object of specifiers".to_string()))?;
     let selection = if let Some(target) = entries.get(key) {
-        select_import_target(target, None)
+        select_import_target(target, None, node_addons)
     } else {
         let mut best: Option<(usize, usize, String, &JsonValue)> = None;
         for (pattern, target) in entries {
@@ -690,7 +704,7 @@ fn imports_target(imports: &JsonValue, key: &str) -> Result<ImportTarget, VmErr>
         }
         best.map_or(
             ImportTargetSelection::NoTarget,
-            |(_, _, capture, target)| select_import_target(target, Some(&capture)),
+            |(_, _, capture, target)| select_import_target(target, Some(&capture), node_addons),
         )
     };
     match selection {
@@ -702,7 +716,11 @@ fn imports_target(imports: &JsonValue, key: &str) -> Result<ImportTarget, VmErr>
     }
 }
 
-fn select_import_target(value: &JsonValue, capture: Option<&str>) -> ImportTargetSelection {
+fn select_import_target(
+    value: &JsonValue,
+    capture: Option<&str>,
+    node_addons: bool,
+) -> ImportTargetSelection {
     match value {
         JsonValue::String(target) => {
             let target = match (target.contains('*'), capture) {
@@ -737,7 +755,7 @@ fn select_import_target(value: &JsonValue, capture: Option<&str>) -> ImportTarge
             // entries, but do not skip a valid target whose file is missing.
             let mut last_invalid = None;
             for entry in entries {
-                match select_import_target(entry, capture) {
+                match select_import_target(entry, capture, node_addons) {
                     selection @ ImportTargetSelection::Target(_) => return selection,
                     ImportTargetSelection::NoTarget => {}
                     ImportTargetSelection::Invalid(message) => last_invalid = Some(message),
@@ -750,11 +768,10 @@ fn select_import_target(value: &JsonValue, capture: Option<&str>) -> ImportTarge
         }
         JsonValue::Object(entries) => {
             for (condition, value) in entries {
-                if matches!(
-                    condition.as_str(),
-                    "node-addons" | "node" | "require" | "default"
-                ) {
-                    return select_import_target(value, capture);
+                if (condition == "node-addons" && node_addons)
+                    || matches!(condition.as_str(), "node" | "require" | "default")
+                {
+                    return select_import_target(value, capture, node_addons);
                 }
             }
             ImportTargetSelection::NoTarget
@@ -813,7 +830,11 @@ fn finish_export_selection(selection: ExportTargetSelection) -> Result<Option<St
     }
 }
 
-fn select_export_target(value: &JsonValue, capture: Option<&str>) -> ExportTargetSelection {
+fn select_export_target(
+    value: &JsonValue,
+    capture: Option<&str>,
+    node_addons: bool,
+) -> ExportTargetSelection {
     match value {
         JsonValue::String(path) => {
             let target = match (path.contains('*'), capture) {
@@ -838,7 +859,7 @@ fn select_export_target(value: &JsonValue, capture: Option<&str>) -> ExportTarge
             // export target fall through to the next array entry.
             let mut last_invalid = None;
             for entry in entries {
-                match select_export_target(entry, capture) {
+                match select_export_target(entry, capture, node_addons) {
                     selection @ ExportTargetSelection::Target(_) => return selection,
                     ExportTargetSelection::NoTarget => {}
                     ExportTargetSelection::Invalid(message) => last_invalid = Some(message),
@@ -851,11 +872,10 @@ fn select_export_target(value: &JsonValue, capture: Option<&str>) -> ExportTarge
         }
         JsonValue::Object(entries) => {
             for (condition, value) in entries {
-                if matches!(
-                    condition.as_str(),
-                    "node-addons" | "node" | "require" | "default"
-                ) {
-                    return select_export_target(value, capture);
+                if (condition == "node-addons" && node_addons)
+                    || matches!(condition.as_str(), "node" | "require" | "default")
+                {
+                    return select_export_target(value, capture, node_addons);
                 }
             }
             ExportTargetSelection::NoTarget
@@ -1471,10 +1491,11 @@ mod tests {
         ));
         let package = root.join("node_modules/fixture");
         let release = package.join("build/Release");
+        let fallback = package.join("fallback");
         let generic = package.join("dist/generic");
         let modern = package.join("dist/modern");
         let extension = package.join("dist/extensions");
-        for directory in [&release, &generic, &modern, &extension] {
+        for directory in [&release, &fallback, &generic, &modern, &extension] {
             fs::create_dir_all(directory).unwrap();
         }
         let entry = root.join("main.cjs");
@@ -1488,13 +1509,16 @@ mod tests {
         fs::write(package.join("dist/require.cjs"), "").unwrap();
         fs::write(package.join("dist/default.cjs"), "").unwrap();
         fs::write(release.join("fixture.node"), "").unwrap();
+        fs::write(fallback.join("fixture.js"), "").unwrap();
         fs::write(generic.join("modern-item.js"), "").unwrap();
         fs::write(modern.join("item.js"), "").unwrap();
         fs::write(generic.join("read.js.js"), "").unwrap();
         fs::write(extension.join("read.js"), "").unwrap();
 
         let entry_name = entry.to_string_lossy().into_owned();
-        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let loader = FileCommonJsLoader::new([&root])
+            .unwrap()
+            .with_native_addon_loader(Rc::new(FakeNativeAddon));
         let resolved = [
             ("fixture", "dist/node.cjs"),
             ("fixture/native/fixture", "build/Release/fixture.node"),
@@ -1535,6 +1559,36 @@ mod tests {
                     "Node and napi-vm resolved {specifier} differently"
                 );
             }
+        }
+
+        let addon_free_loader = FileCommonJsLoader::new([&root]).unwrap();
+        let fallback_module = addon_free_loader
+            .resolve("fixture/native/fixture", Some(&entry_name))
+            .unwrap();
+        assert!(fallback_module.filename.ends_with("fallback/fixture.js"));
+        assert_eq!(fallback_module.format, CommonJsModuleFormat::JavaScript);
+        if Command::new("node")
+            .arg("--no-addons")
+            .arg("-e")
+            .arg("process.stdout.write(require.resolve(process.argv[1], { paths: [process.argv[2]] }))")
+            .arg("fixture/native/fixture")
+            .arg(&root)
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            let output = Command::new("node")
+                .arg("--no-addons")
+                .arg("-e")
+                .arg("process.stdout.write(require.resolve(process.argv[1], { paths: [process.argv[2]] }))")
+                .arg("fixture/native/fixture")
+                .arg(&root)
+                .output()
+                .unwrap();
+            assert_eq!(
+                fallback_module.filename,
+                String::from_utf8_lossy(&output.stdout),
+                "Node --no-addons and addon-free napi-vm resolved different exports"
+            );
         }
 
         assert!(
@@ -1652,8 +1706,15 @@ mod tests {
         let source_dir = package.join("src");
         let features_dir = source_dir.join("features");
         let release_dir = package.join("build/Release");
+        let fallback_dir = package.join("fallback");
         let dependency = package.join("node_modules/fixture-dep");
-        for directory in [&source_dir, &features_dir, &release_dir, &dependency] {
+        for directory in [
+            &source_dir,
+            &features_dir,
+            &release_dir,
+            &fallback_dir,
+            &dependency,
+        ] {
             fs::create_dir_all(directory).unwrap();
         }
         let parent = source_dir.join("main.cjs");
@@ -1669,11 +1730,14 @@ mod tests {
         fs::write(source_dir.join("require-condition.cjs"), "").unwrap();
         fs::write(source_dir.join("default.cjs"), "").unwrap();
         fs::write(release_dir.join("fixture.node"), "").unwrap();
+        fs::write(fallback_dir.join("fixture.js"), "").unwrap();
         fs::write(dependency.join("package.json"), r#"{"main":"./index.cjs"}"#).unwrap();
         fs::write(dependency.join("index.cjs"), "").unwrap();
 
         let parent_name = parent.to_string_lossy().into_owned();
-        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let loader = FileCommonJsLoader::new([&root])
+            .unwrap()
+            .with_native_addon_loader(Rc::new(FakeNativeAddon));
         let resolved = [
             ("#internal", "src/internal.cjs"),
             ("#features/alpha", "src/features/alpha.cjs"),
@@ -1716,6 +1780,29 @@ mod tests {
                     "Node and napi-vm resolved {specifier} differently"
                 );
             }
+        }
+
+        let addon_free_loader = FileCommonJsLoader::new([&root]).unwrap();
+        let fallback_module = addon_free_loader
+            .resolve("#native/fixture", Some(&parent_name))
+            .unwrap();
+        assert!(fallback_module.filename.ends_with("fallback/fixture.js"));
+        assert_eq!(fallback_module.format, CommonJsModuleFormat::JavaScript);
+        let node_without_addons = Command::new("node")
+            .arg("--no-addons")
+            .arg("-e")
+            .arg("const {createRequire}=require('node:module');process.stdout.write(createRequire(process.argv[1]).resolve(process.argv[2]))")
+            .arg(&parent)
+            .arg("#native/fixture")
+            .output();
+        if let Ok(output) = node_without_addons
+            && output.status.success()
+        {
+            assert_eq!(
+                fallback_module.filename,
+                String::from_utf8_lossy(&output.stdout),
+                "Node --no-addons and addon-free napi-vm resolved different imports"
+            );
         }
 
         assert!(loader.resolve("#unmapped", Some(&parent_name)).is_err());
