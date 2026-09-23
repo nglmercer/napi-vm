@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -115,6 +115,8 @@ function addonWorkerMain() {
   const symbols=new Map(), symbolIds=new Map();
   const wellKnownSymbols=[undefined,Symbol.iterator,Symbol.asyncIterator,Symbol.toStringTag,Symbol.hasInstance,Symbol.toPrimitive,Symbol.species,Symbol.unscopables,Symbol.isConcatSpreadable,Symbol.match,Symbol.matchAll,Symbol.replace,Symbol.search,Symbol.split];
   function symbolId(value){let id=symbolIds.get(value);if(id===undefined){if(symbols.size>=262144)throw new RangeError('symbol handle limit exceeded');id='n:'+nextNativeSymbolId++;symbols.set(id,value);symbolIds.set(value,id);}return id;}
+  function newGraph(){return {seen:new Map(),active:new Set(),nextId:1};}
+  function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');graph.set(id,value);}}
   function hold(value,receiver){
     const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
     if(existing!==undefined)return existing;
@@ -125,7 +127,7 @@ function addonWorkerMain() {
     if(message.event==='syncGuestCallback')parentPort.postMessage({kind:'syncGuestCallback',callId:message.callId,shared:message.shared,message});
     else parentPort.postMessage({kind:'event',message});
   }
-  function encode(value,receiver,depth,active){
+  function encode(value,receiver,depth,graph){
     if(depth>128)throw new RangeError('bridge depth exceeded');
     if(value===undefined)return {t:'undefined'};if(value===null)return {t:'null'};
     if(typeof value==='boolean')return {t:'boolean',v:value};
@@ -137,8 +139,8 @@ function addonWorkerMain() {
     if(value&&typeof value.then==='function'){
       let id=promiseIds.get(value);
       if(id===undefined){id=hold(value,undefined);promiseIds.set(value,id);Promise.resolve(value).then(
-        result=>event({event:'hostPromiseSettled',promiseId:id,state:'fulfilled',value:encode(result,undefined,0,new Set())}),
-        reason=>event({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:encode(reason,undefined,0,new Set())})
+        result=>event({event:'hostPromiseSettled',promiseId:id,state:'fulfilled',value:encode(result,undefined,0,newGraph())}),
+        reason=>event({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:encode(reason,undefined,0,newGraph())})
       ).catch(error=>event({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:{t:'error',name:'TypeError',message:'native promise result could not be marshalled: '+String(error)}}));}
       return {t:'hostPromise',v:id};
     }
@@ -149,13 +151,22 @@ function addonWorkerMain() {
     if(value instanceof DataView)return {t:'dataView',length:value.byteLength,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
     if(ArrayBuffer.isView(value))return {t:'typedArray',kind:value.constructor.name,length:value.length,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
     if(value instanceof ArrayBuffer)return {t:'arrayBuffer',v:Array.from(new Uint8Array(value))};
-    if(active.has(value))throw new TypeError('cyclic native values are unsupported');
-    if(Array.isArray(value)){if(value.length>262144)throw new RangeError('native array exceeds the VM limit');active.add(value);const result={t:'array',v:Array.from(value,v=>encode(v,value,depth+1,active))};active.delete(value);return result;}
+    if(Array.isArray(value)){
+      if(graph.active.has(value))throw new TypeError('cyclic native values are unsupported');
+      const existing=graph.seen.get(value);if(existing!==undefined)return {t:'ref',v:existing};
+      if(graph.seen.size>=262144)throw new RangeError('native graph node limit exceeded');
+      if(value.length>262144)throw new RangeError('native array exceeds the VM limit');
+      const id=graph.nextId++;graph.seen.set(value,id);graph.active.add(value);
+      const items=Array.from(value,v=>encode(v,value,depth+1,graph));graph.active.delete(value);
+      return {t:'array',id,v:items};
+    }
+    if(graph.active.has(value))throw new TypeError('cyclic native values are unsupported');
     return {t:'hostObject',v:hold(value,undefined)};
   }
-  function decode(value,depth){
+  function decode(value,depth,graph){
     if(depth>128)throw new RangeError('guest argument depth exceeded');
     switch(value.t){
+      case 'ref':{const result=graph.get(value.v);if(result===undefined)throw new TypeError('invalid guest object reference');return result;}
       case 'undefined':return undefined;case 'null':return null;case 'boolean':return value.v;
       case 'number':if(value.v==='-0')return -0;if(value.v==='NaN')return NaN;if(value.v==='Infinity')return Infinity;if(value.v==='-Infinity')return -Infinity;return Number(value.v);
       case 'string':return value.v;case 'bigint':return BigInt(value.v);
@@ -169,41 +180,42 @@ function addonWorkerMain() {
       case 'error':{const error=new Error(value.message||'guest callback threw');error.name=value.name||'Error';if(value.code)error.code=value.code;return error;}
       case 'hostObject':{const entry=refs.get(value.v);if(!entry||!entry.value||typeof entry.value!=='object')throw new TypeError('native object handle is invalid');return entry.value;}
       case 'guestCallback':return function(...args){
-        const payload={callbackId:value.v,thisValue:encode(this,undefined,0,new Set()),args:args.map(v=>encode(v,undefined,0,new Set()))};
+        const graph=newGraph();
+        const payload={callbackId:value.v,thisValue:encode(this,undefined,0,graph),args:args.map(v=>encode(v,undefined,0,graph))};
         if(dispatchDepth===0){event({event:'guestCallback',...payload});return undefined;}
         const callId=nextCallbackCall++,shared=new SharedArrayBuffer(MAX_SYNC_CALLBACK_RESULT_BYTES+8),words=new Int32Array(shared,0,2);
         event({event:'syncGuestCallback',callId,shared,...payload});
         const status=Atomics.wait(words,0,0,60000);if(status==='timed-out')throw new Error('timed out waiting for synchronous guest callback');
         const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
         const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
-        if(!response.ok)throw decode(response.value,0);return decode(response.value,0);
+        if(!response.ok)throw decode(response.value,0,new Map());return decode(response.value,0,new Map());
       };
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
-      case 'array':return value.v.map(v=>decode(v,depth+1));
-      case 'object':{const o={};for(const [k,v]of value.v)Object.defineProperty(o,k,{value:decode(v,depth+1),enumerable:true,writable:true,configurable:true});return o;}
+      case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));return a;}
+      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const [k,v]of value.v)Object.defineProperty(o,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});return o;}
       default:throw new TypeError('unsupported napi-vm argument');
     }
   }
   async function dispatch(r){
     dispatchDepth++;
     try{
-      let result,receiver;
+      let result,receiver;const decodeGraph=new Map();
       if(r.op==='load')result=require(r.filename);
       else if(['get','set','has','delete','ownKeys'].includes(r.op)){
         const entry=refs.get(r.id);if(!entry||!entry.value||typeof entry.value!=='object')throw new Error('native object handle is invalid');
         const object=entry.value;
         if(r.op==='get'){result=Reflect.get(object,r.key,object);receiver=object;}
-        else if(r.op==='set')result=Reflect.set(object,r.key,decode(r.value,0),object);
+        else if(r.op==='set')result=Reflect.set(object,r.key,decode(r.value,0,decodeGraph),object);
         else if(r.op==='has')result=Reflect.has(object,r.key);
         else if(r.op==='delete')result=Reflect.deleteProperty(object,r.key);
         else result=Object.keys(object);
       }else{
         const entry=refs.get(r.id);if(!entry||typeof entry.value!=='function')throw new Error('native function handle is invalid');
-        const args=r.args.map(v=>decode(v,0));
+        const args=r.args.map(v=>decode(v,0,decodeGraph));
         if(r.op==='construct')result=Reflect.construct(entry.value,args);
-        else result=Reflect.apply(entry.value,Object.hasOwn(r,'receiver')?decode(r.receiver,0):entry.receiver,args);
+        else result=Reflect.apply(entry.value,Object.hasOwn(r,'receiver')?decode(r.receiver,0,decodeGraph):entry.receiver,args);
       }
-      return {requestId:r.requestId,ok:true,value:encode(result,receiver,0,new Set())};
+      return {requestId:r.requestId,ok:true,value:encode(result,receiver,0,newGraph())};
     }catch(e){return {requestId:r.requestId,ok:false,error:{name:typeof e?.name==='string'?e.name:'Error',message:typeof e?.message==='string'?e.message:String(e),code:typeof e?.code==='string'?e.code:undefined}};}
     finally{dispatchDepth--;}
   }
@@ -247,6 +259,46 @@ struct State {
     next_guest_callback_id: u64,
     native_promises: HashMap<u64, Rc<RefCell<PromiseInner>>>,
 }
+
+#[derive(Default)]
+struct WireEncodeContext {
+    seen: HashMap<usize, u64>,
+    active: HashSet<usize>,
+    next_id: u64,
+}
+
+impl WireEncodeContext {
+    fn register(&mut self, identity: usize) -> Result<u64, VmErr> {
+        if self.seen.len() >= MAX_NATIVE_HANDLES {
+            return Err(VmErr::Msg("guest graph node limit exceeded".into()));
+        }
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or_else(|| VmErr::Msg("native graph id exhausted".into()))?;
+        self.seen.insert(identity, self.next_id);
+        Ok(self.next_id)
+    }
+}
+
+#[derive(Default)]
+struct WireDecodeContext {
+    nodes: HashMap<u64, Value>,
+}
+
+impl WireDecodeContext {
+    fn register(&mut self, id: u64, value: Value) -> Result<(), VmErr> {
+        if self.nodes.contains_key(&id) {
+            return Err(VmErr::Msg("duplicate Node graph node id".into()));
+        }
+        if self.nodes.len() >= MAX_NATIVE_HANDLES {
+            return Err(VmErr::Msg("Node graph node limit exceeded".into()));
+        }
+        self.nodes.insert(id, value);
+        Ok(())
+    }
+}
+
 impl Drop for State {
     fn drop(&mut self) {
         let _ = self.stream.shutdown(Shutdown::Both);
@@ -595,13 +647,14 @@ impl NodeAddonSidecar {
             .get("thisValue")
             .cloned()
             .unwrap_or_else(|| json!({"t":"undefined"}));
-        let this_value = self.wire_to_guest(&this_wire, 0)?;
+        let mut graph = WireDecodeContext::default();
+        let this_value = wire_to_guest_with_context(self, &this_wire, 0, &mut graph)?;
         let args = event
             .get("args")
             .and_then(JsonValue::as_array)
             .ok_or_else(|| VmErr::Msg("Node callback event has invalid arguments".into()))?
             .iter()
-            .map(|arg| self.wire_to_guest(arg, 0))
+            .map(|arg| wire_to_guest_with_context(self, arg, 0, &mut graph))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(HostCallback {
             callback,
@@ -616,7 +669,13 @@ impl NodeAddonSidecar {
 
     fn guest_to_wire(&self, value: &Value, depth: usize) -> Result<JsonValue, VmErr> {
         let proxy_ids = self.state.borrow().proxy_ids.clone();
-        guest_to_wire(self, value, depth, &mut Vec::new(), &proxy_ids)
+        guest_to_wire(
+            self,
+            value,
+            depth,
+            &mut WireEncodeContext::default(),
+            &proxy_ids,
+        )
     }
 
     fn register_guest_callback(&self, callback: Value) -> Result<u64, VmErr> {
@@ -869,11 +928,13 @@ impl HostBridge for NodeAddonSidecar {
         if let Some(trap) = trap {
             return self.dispatch_object_trap_with_callback_handler(trap, args, callback_handler);
         }
+        let proxy_ids = self.state.borrow().proxy_ids.clone();
+        let mut graph = WireEncodeContext::default();
         let args = args
             .iter()
-            .map(|v| self.guest_to_wire(v, 0))
+            .map(|v| guest_to_wire(self, v, 0, &mut graph, &proxy_ids))
             .collect::<Result<Vec<_>, _>>()?;
-        let receiver = self.guest_to_wire(&this_value, 0)?;
+        let receiver = guest_to_wire(self, &this_value, 0, &mut graph, &proxy_ids)?;
         self.wire_to_guest(
             &self.request_with_callback_handler(
                 json!({"op":"call","id":id,"args":args,"receiver":receiver}),
@@ -895,9 +956,11 @@ impl HostBridge for NodeAddonSidecar {
         args: Vec<Value>,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        let proxy_ids = self.state.borrow().proxy_ids.clone();
+        let mut graph = WireEncodeContext::default();
         let args = args
             .iter()
-            .map(|v| self.guest_to_wire(v, 0))
+            .map(|v| guest_to_wire(self, v, 0, &mut graph, &proxy_ids))
             .collect::<Result<Vec<_>, _>>()?;
         self.wire_to_guest(
             &self.request_with_callback_handler(
@@ -992,7 +1055,7 @@ fn guest_to_wire(
     sidecar: &NodeAddonSidecar,
     v: &Value,
     depth: usize,
-    active: &mut Vec<usize>,
+    graph: &mut WireEncodeContext,
     proxy_ids: &HashMap<usize, u64>,
 ) -> Result<JsonValue, VmErr> {
     if depth > MAX_WIRE_DEPTH {
@@ -1013,43 +1076,51 @@ fn guest_to_wire(
         }
         Value::Array(a) => {
             let id = Rc::as_ptr(a) as usize;
-            if active.contains(&id) {
+            if graph.active.contains(&id) {
                 return Err(VmErr::Msg("cyclic guest arguments are unsupported".into()));
+            }
+            if let Some(node_id) = graph.seen.get(&id) {
+                return Ok(json!({"t":"ref","v":node_id}));
             }
             let items = a.borrow().clone();
             if items.len() > MAX_ARRAY_LEN {
                 return Err(VmErr::Msg("guest array exceeds limit".into()));
             }
-            active.push(id);
+            let node_id = graph.register(id)?;
+            graph.active.insert(id);
             let wire = items
                 .iter()
-                .map(|x| guest_to_wire(sidecar, x, depth + 1, active, proxy_ids))
+                .map(|x| guest_to_wire(sidecar, x, depth + 1, graph, proxy_ids))
                 .collect::<Result<Vec<_>, _>>()?;
-            active.pop();
-            json!({"t":"array","v":wire})
+            graph.active.remove(&id);
+            json!({"t":"array","id":node_id,"v":wire})
         }
         Value::Object { props } => {
             let id = Rc::as_ptr(props) as usize;
-            if active.contains(&id) {
+            if graph.active.contains(&id) {
                 return Err(VmErr::Msg("cyclic guest arguments are unsupported".into()));
+            }
+            if let Some(node_id) = graph.seen.get(&id) {
+                return Ok(json!({"t":"ref","v":node_id}));
             }
             let entries = props.borrow().clone();
             if entries.len() > MAX_OBJECT_PROPS {
                 return Err(VmErr::Msg("guest object exceeds limit".into()));
             }
-            active.push(id);
+            let node_id = graph.register(id)?;
+            graph.active.insert(id);
             let wire = entries
                 .iter()
                 .filter(|(k, _)| !crate::interpreter::is_internal_key(k))
                 .map(|(k, x)| {
                     Ok(json!([
                         k,
-                        guest_to_wire(sidecar, x, depth + 1, active, proxy_ids)?
+                        guest_to_wire(sidecar, x, depth + 1, graph, proxy_ids)?
                     ]))
                 })
                 .collect::<Result<Vec<_>, VmErr>>()?;
-            active.pop();
-            json!({"t":"object","v":wire})
+            graph.active.remove(&id);
+            json!({"t":"object","id":node_id,"v":wire})
         }
         Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":bytes.borrow().as_slice()}),
         Value::TypedArray(view) => {
@@ -1150,6 +1221,15 @@ fn guest_to_wire(
 }
 
 fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Result<Value, VmErr> {
+    wire_to_guest_with_context(sidecar, v, depth, &mut WireDecodeContext::default())
+}
+
+fn wire_to_guest_with_context(
+    sidecar: &NodeAddonSidecar,
+    v: &JsonValue,
+    depth: usize,
+    graph: &mut WireDecodeContext,
+) -> Result<Value, VmErr> {
     if depth > MAX_WIRE_DEPTH {
         return Err(VmErr::Msg(
             "native result exceeds bridge depth limit".into(),
@@ -1160,6 +1240,17 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
         .and_then(JsonValue::as_str)
         .ok_or_else(|| VmErr::Msg("invalid Node value tag".into()))?;
     match t {
+        "ref" => {
+            let id = v
+                .get("v")
+                .and_then(JsonValue::as_u64)
+                .ok_or_else(|| VmErr::Msg("invalid Node reference id".into()))?;
+            graph
+                .nodes
+                .get(&id)
+                .cloned()
+                .ok_or_else(|| VmErr::Msg("Node value references an unknown graph node".into()))
+        }
         "undefined" => Ok(Value::Undefined),
         "null" => Ok(Value::Null),
         "boolean" => v
@@ -1383,11 +1474,15 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
             if a.len() > MAX_ARRAY_LEN {
                 return Err(VmErr::Msg("Node array exceeds VM limit".into()));
             }
-            Value::checked_array(
+            let array = Value::checked_array(
                 a.iter()
-                    .map(|x| wire_to_guest(sidecar, x, depth + 1))
+                    .map(|x| wire_to_guest_with_context(sidecar, x, depth + 1, graph))
                     .collect::<Result<Vec<_>, _>>()?,
-            )
+            )?;
+            if let Some(id) = v.get("id").and_then(JsonValue::as_u64) {
+                graph.register(id, array.clone())?;
+            }
+            Ok(array)
         }
         "object" => {
             let a = v
@@ -1408,10 +1503,14 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
                     .ok_or_else(|| VmErr::Msg("invalid Node property key".into()))?;
                 props.push((
                     key.to_string(),
-                    wire_to_guest(sidecar, &pair[1], depth + 1)?,
+                    wire_to_guest_with_context(sidecar, &pair[1], depth + 1, graph)?,
                 ));
             }
-            Value::checked_object(props)
+            let object = Value::checked_object(props)?;
+            if let Some(id) = v.get("id").and_then(JsonValue::as_u64) {
+                graph.register(id, object.clone())?;
+            }
+            Ok(object)
         }
         _ => Err(VmErr::Msg(format!("unknown Node value tag '{t}'"))),
     }
@@ -1581,6 +1680,27 @@ static napi_value is_node_iterator(napi_env env, napi_callback_info info) {
       napi_strict_equals(env, argv[0], iterator, &equal) != napi_ok ||
       napi_create_int32(env, equal ? 1 : 0, &result) != napi_ok) return NULL;
   return result;
+}
+
+static napi_value same_object(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  bool equal = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_strict_equals(env, argv[0], argv[1], &equal) != napi_ok ||
+      napi_create_int32(env, equal ? 1 : 0, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_shared_array(napi_env env, napi_callback_info info) {
+  napi_value outer, inner, value;
+  if (napi_create_array_with_length(env, 2, &outer) != napi_ok ||
+      napi_create_array_with_length(env, 1, &inner) != napi_ok ||
+      napi_create_int32(env, 7, &value) != napi_ok ||
+      napi_set_element(env, inner, 0, value) != napi_ok ||
+      napi_set_element(env, outer, 0, inner) != napi_ok ||
+      napi_set_element(env, outer, 1, inner) != napi_ok) return NULL;
+  return outer;
 }
 
 static napi_value make_buffer(napi_env env, napi_callback_info info) {
@@ -1806,6 +1926,10 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "isSymbol", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "isNodeIterator", NAPI_AUTO_LENGTH, is_node_iterator, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "isNodeIterator", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "sameObject", NAPI_AUTO_LENGTH, same_object, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "sameObject", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeSharedArray", NAPI_AUTO_LENGTH, make_shared_array, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeSharedArray", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "makeBuffer", NAPI_AUTO_LENGTH, make_buffer, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "makeBuffer", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "isBuffer", NAPI_AUTO_LENGTH, is_buffer, NULL, &fn) != napi_ok) return NULL;
@@ -1940,6 +2064,27 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         ));
         assert!(matches!(
             builtins.get_prop("guestSymbolIdentity"),
+            Some(Value::Bool(true))
+        ));
+        let identities = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); const child = {value:1}; const parent = {left:child, right:child}; const nativeArray = addon.makeSharedArray(); ({nested:addon.sameObject(parent.left, parent.right), topLevel:addon.sameObject(child, child), distinct:addon.sameObject({}, {}), nativeArray:nativeArray[0] === nativeArray[1]});",
+            )
+            .unwrap();
+        assert!(matches!(
+            identities.get_prop("nested"),
+            Some(Value::Number(value)) if value == 1.0
+        ));
+        assert!(matches!(
+            identities.get_prop("topLevel"),
+            Some(Value::Number(value)) if value == 1.0
+        ));
+        assert!(matches!(
+            identities.get_prop("distinct"),
+            Some(Value::Number(value)) if value == 0.0
+        ));
+        assert!(matches!(
+            identities.get_prop("nativeArray"),
             Some(Value::Bool(true))
         ));
         let buffers = interpreter

@@ -106,8 +106,10 @@ the interpreter thread and return values and thrown errors to the addon. Native
 addon calls made from inside such a synchronous callback fail with
 `ERR_NAPI_VM_REENTRANT_ADDON_CALL` to avoid re-entering the worker while it is
 blocked on the callback. Cyclic guest values and guest-created proxies are not
-supported yet and fail clearly. Some reflection behavior still differs across
-the VM/Node boundary.
+supported yet and fail clearly. Repeated references to a guest object or array
+preserve identity within one call, but the sidecar still copies guest objects:
+mutations made by an addon do not flow back into the VM. Some reflection
+behavior still differs across the VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 
