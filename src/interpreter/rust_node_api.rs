@@ -7209,19 +7209,91 @@ unsafe extern "C" fn api_instanceof(
             // Function values or implement callable-proxy [[HasInstance]].
             return Err(NAPI_GENERIC_FAILURE);
         };
-        let has_instance = Value::Object {
-            props: class.statics.clone(),
-        }
-        .get_prop("__symbol:4__");
-        if has_instance.is_some_and(|value| !matches!(value, Value::Undefined | Value::Null)) {
-            // Honor custom @@hasInstance code only after this API has a safe
-            // guest callback path for that call from addon code.
-            return Err(NAPI_GENERIC_FAILURE);
+        if napi_class_has_custom_has_instance(&constructor)? {
+            if !has_guest_callback_dispatcher(&environment) {
+                // A custom @@hasInstance method can run guest code. Keep it
+                // on the interpreter's paused callback path; addon
+                // initialization and shutdown do not have that dispatcher.
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            let value = run_napi_guest_operation(
+                &environment,
+                "napi_instanceof",
+                napi_guest_instanceof,
+                constructor,
+                vec![object],
+            )?;
+            let Value::Bool(is_instance) = value else {
+                return Err(NAPI_GENERIC_FAILURE);
+            };
+            unsafe { result.write(is_instance) };
+            return Ok(());
         }
         let is_instance = napi_class_instanceof(&object, class)?;
         unsafe { result.write(is_instance) };
         Ok(())
     })
+}
+
+fn napi_class_has_custom_has_instance(constructor: &Value) -> Result<bool, i32> {
+    let mut current = constructor.clone();
+    let mut visited = HashSet::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let properties = match &current {
+            Value::Class(class) => class.statics.clone(),
+            Value::Object { props } => props.clone(),
+            Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
+            _ => return Ok(false),
+        };
+        let identity = Rc::as_ptr(&properties) as usize;
+        if !visited.insert(identity) {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        if let Some((_, value)) = properties
+            .borrow()
+            .iter()
+            .find(|(key, _)| key == "__symbol:4__")
+        {
+            // An explicit nullish value shadows any inherited method and
+            // restores ordinary class prototype checking.
+            return Ok(!matches!(
+                value.deref_binding(),
+                Value::Undefined | Value::Null
+            ));
+        }
+        let Some(prototype) = properties.proto() else {
+            return Ok(false);
+        };
+        current = prototype.as_ref().clone();
+    }
+    Err(NAPI_GENERIC_FAILURE)
+}
+
+fn napi_guest_instanceof(
+    interpreter: &mut Interpreter,
+    constructor: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Value::Class(class) = &constructor else {
+        return Err(VmErr::Msg("TypeError: constructor is not a class".into()));
+    };
+    let symbol = crate::builtins::well_known("hasInstance")
+        .expect("Symbol.hasInstance is a well-known symbol");
+    let method = interpreter.get_prop_value(&constructor, &symbol)?;
+    if matches!(method, Value::Undefined | Value::Null) {
+        let value = args.first().cloned().unwrap_or(Value::Undefined);
+        return napi_class_instanceof(&value, class)
+            .map(Value::Bool)
+            .map_err(|_| VmErr::Msg("Node-API instanceof is unsupported for this value".into()));
+    }
+    if !is_napi_function(&method) {
+        return Err(VmErr::Msg(
+            "TypeError: Symbol.hasInstance is not callable".into(),
+        ));
+    }
+    let value = args.first().cloned().unwrap_or(Value::Undefined);
+    let result = interpreter.call_this(&method, constructor, vec![value])?;
+    Ok(Value::Bool(interpreter.truthy(&result)))
 }
 
 fn napi_class_instanceof(object: &Value, class: &ClassData) -> Result<bool, i32> {
@@ -12946,6 +13018,30 @@ module.exports = {
 "#,
         )
         .unwrap();
+        fs::write(
+            root.join("instanceof.cjs"),
+            r#"
+const addon = require('./fixture.node');
+const calls = [];
+class Marked {}
+Object.defineProperty(Marked, Symbol.hasInstance, {
+  configurable: true,
+  value(value) {
+    calls.push(this);
+    return value && value.marked ? 'yes' : '';
+  },
+});
+class MarkedChild extends Marked {}
+module.exports = {
+  matched: addon.instanceofProbe({marked: true}, Marked),
+  rejected: addon.instanceofProbe({marked: false}, Marked),
+  inherited: addon.instanceofProbe({marked: true}, MarkedChild),
+  receiverWasConstructor: calls.length === 3 && calls[0] === Marked &&
+    calls[1] === Marked && calls[2] === MarkedChild,
+};
+"#,
+        )
+        .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
 
         let mut interpreter = Interpreter::with_builtins();
@@ -13340,6 +13436,45 @@ module.exports = {
                 instance_checks.get_prop(name),
                 Some(Value::Bool(value)) if value == expected
             ));
+        }
+        let custom_instance_result = interpreter
+            .eval_source("JSON.stringify(require('./instanceof.cjs'));")
+            .unwrap();
+        let Value::String(ref custom_instance_json) = custom_instance_result else {
+            panic!("custom instanceof fixture did not return JSON");
+        };
+        let vm_result: serde_json::Value = serde_json::from_str(custom_instance_json).unwrap();
+        assert_eq!(
+            vm_result,
+            serde_json::json!({
+                "matched": true,
+                "rejected": false,
+                "inherited": true,
+                "receiverWasConstructor": true
+            })
+        );
+        let custom_instance_runner =
+            "process.stdout.write(JSON.stringify(require('./instanceof.cjs')));";
+        for runtime in ["node", "bun"] {
+            if Command::new(runtime)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                let reference = Command::new(runtime)
+                    .current_dir(&root)
+                    .args(["-e", custom_instance_runner])
+                    .output()
+                    .unwrap();
+                assert!(
+                    reference.status.success(),
+                    "{runtime} custom Symbol.hasInstance reference failed: {}",
+                    String::from_utf8_lossy(&reference.stderr)
+                );
+                let reference_result: serde_json::Value =
+                    serde_json::from_slice(&reference.stdout).unwrap();
+                assert_eq!(vm_result, reference_result, "{runtime} results differ");
+            }
         }
         assert!(matches!(
             result.get_prop("supportsNapiV7"),
