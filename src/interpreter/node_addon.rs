@@ -2380,6 +2380,18 @@ mod tests {
             r#"{"exports":{".":{"node-addons":"./build/Release/fixture.node","require":"./build/Release/fixture.node","default":"./build/Release/fixture.node"}}}"#,
         )
         .unwrap();
+        let wrapper_root = root.join("node_modules/fixture-wrapper");
+        fs::create_dir_all(&wrapper_root).unwrap();
+        fs::write(
+            wrapper_root.join("package.json"),
+            r#"{"main":"./index.cjs"}"#,
+        )
+        .unwrap();
+        fs::write(
+            wrapper_root.join("index.cjs"),
+            "module.exports = require('fixture');",
+        )
+        .unwrap();
         let addon = package_build.join("fixture.node");
         let direct_addon = root.join("fixture.node");
         std::os::unix::fs::symlink(&addon, &direct_addon).unwrap();
@@ -3022,7 +3034,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
 
         let node_reference = ProcessCommand::new("node")
             .arg("-e")
-            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b}));")
+            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d}));")
             .arg(root.join("main.cjs"))
             .output()
             .unwrap();
@@ -3033,7 +3045,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         );
         assert_eq!(
             String::from_utf8_lossy(&node_reference.stdout),
-            r#"{"sum":42,"same":true,"importSame":true}"#
+            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true}"#
         );
 
         let mut interpreter = Interpreter::with_builtins();
@@ -3047,7 +3059,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             .unwrap();
         let package_result = interpreter
             .eval_source(
-                "const packageAddon = require('fixture'); const importAddon = require('#native'); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon});",
+                "const packageAddon = require('fixture'); const importAddon = require('#native'); const wrapperAddon = require('fixture-wrapper'); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon, wrapperSame: packageAddon === wrapperAddon});",
             )
             .unwrap();
         assert!(matches!(
@@ -3060,6 +3072,10 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         ));
         assert!(matches!(
             package_result.get_prop("importSame"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            package_result.get_prop("wrapperSame"),
             Some(Value::Bool(true))
         ));
         let result = interpreter
