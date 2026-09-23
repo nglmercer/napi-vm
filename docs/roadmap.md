@@ -159,10 +159,11 @@ Every claim below was checked against the current build.
   reads and calls, plus construction of guest classes and proxies over those
   classes (`src/interpreter/node_addon.rs`). Sparse arrays now preserve holes
   across guest/native calls. The bridge reports the selected Node and Node-API
-  versions and can enforce a minimum Node-API version at startup. It still
-  requires a Node executable and rejects some reflection, prototype mutation,
-  and reentrant-call behavior. It is not an in-process Rust implementation of
-  Node-API.
+  versions and can enforce a minimum Node-API version at startup. Synchronous
+  guest callbacks can make nested addon calls, including further synchronous
+  callbacks. The bridge still requires a Node executable and rejects some
+  reflection and prototype mutation behavior. It is not an in-process Rust
+  implementation of Node-API.
 
 - **Generators on `wasm32`** — the browser target has no stack switching, so a
   body cannot be suspended. It runs once to completion on the first `next()`

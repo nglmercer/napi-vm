@@ -109,10 +109,12 @@ preserving their view type. Asynchronous addon callbacks are queued and run at
 VM event-loop checkpoints; use `run_event_loop_once` from the desktop runtime
 to pump external events. Synchronous callbacks into guest JavaScript run on
 the interpreter thread and return values and thrown errors to the addon. Native
-addon calls made from inside such a synchronous callback fail with
-`ERR_NAPI_VM_REENTRANT_ADDON_CALL` to avoid re-entering the worker while it is
-blocked on the callback. Shared and cyclic plain object/array graphs preserve
-identity within each native call, including Node-created return graphs.
+addon calls made inside a synchronous guest callback are serviced while the
+Node worker waits for that callback. Nested addon calls and nested synchronous
+guest callbacks therefore preserve their nested call order without entering
+the interpreter from a native thread. Shared and cyclic plain object/array
+graphs preserve identity within each native call, including Node-created
+return graphs.
 Guest classes cross into addons as constructable functions; native addons can
 construct instances, call inherited guest methods, and read or update static
 data. Guest-created proxies with object, array, function, or class targets

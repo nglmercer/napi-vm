@@ -62,7 +62,6 @@ const socket = net.connect({host:'127.0.0.1',port:Number(process.env.NAPI_VM_BRI
 let input = Buffer.alloc(0);
 let connected = false;
 let workerReady = false;
-let syncCallbackActive = false;
 const pendingSyncCallbacks = new Map();
 function send(message) {
   const body = Buffer.from(JSON.stringify(message));
@@ -80,7 +79,6 @@ function finishSyncCallback(message) {
     return;
   }
   pendingSyncCallbacks.delete(message.callId);
-  syncCallbackActive = pendingSyncCallbacks.size > 0;
   let response = {ok:message.ok===true,value:message.value,snapshots:message.snapshots||[]};
   let bytes = Buffer.from(JSON.stringify(response));
   if (bytes.length > pending.shared.byteLength - 8) {
@@ -101,9 +99,7 @@ function consume() {
     let message;try{message=JSON.parse(body.toString('utf8'));}catch(e){socket.destroy(e);return;}
     if(message.event==='syncGuestCallbackResult') finishSyncCallback(message);
     else if(message.requestId!==undefined){
-      if(syncCallbackActive){
-        send({requestId:message.requestId,ok:false,error:{name:'TypeError',message:'native addon calls from a synchronous guest callback are not supported',code:'ERR_NAPI_VM_REENTRANT_ADDON_CALL'}});
-      } else if(!workerReady){
+      if(!workerReady){
         send({requestId:message.requestId,ok:false,error:{name:'Error',message:'native addon worker is not ready'}});
       } else worker.postMessage({kind:'request',request:message});
     } else {socket.destroy(new Error('invalid napi-vm bridge frame'));return;}
@@ -111,7 +107,7 @@ function consume() {
 }
 function addonWorkerMain() {
   'use strict';
-  const { parentPort } = require('node:worker_threads');
+  const { parentPort, receiveMessageOnPort } = require('node:worker_threads');
   const { types } = require('node:util');
   const MAX_SYNC_CALLBACK_RESULT_BYTES = 1024 * 1024;
   let nextHandle=1, nextCallbackCall=1, nextNativeSymbolId=1, dispatchDepth=0;
@@ -122,6 +118,23 @@ function addonWorkerMain() {
   function newGraph(){return {seen:new Map(),nextId:1};}
   function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');if(!guestGraphNodes.has(id)&&guestGraphNodes.size>=262144)throw new RangeError('persistent guest graph node limit exceeded');graph.set(id,value);guestGraphNodes.set(id,value);if(graph.guestRefs)graph.guestRefs.set(value,id);}}
   function newDecodeGraph(){const graph=new Map();graph.guestRefs=new WeakMap();graph.guestCallbacks=new WeakMap();return graph;}
+  // Atomics.wait blocks the Node worker while Rust runs the guest callback.
+  // Pump nested addon requests here so that callback can call the addon again.
+  function waitForSyncGuestCallback(words){
+    const deadline=Date.now()+60000;
+    while(Atomics.load(words,0)===0){
+      const pending=receiveMessageOnPort(parentPort);
+      if(pending){
+        const message=pending.message;
+        if(message.kind!=='request')throw new TypeError('unexpected Node bridge message while waiting for a guest callback');
+        parentPort.postMessage({kind:'response',message:dispatch(message.request)});
+        continue;
+      }
+      const remaining=deadline-Date.now();
+      if(remaining<=0)throw new Error('timed out waiting for synchronous guest callback');
+      Atomics.wait(words,0,0,Math.min(remaining,10));
+    }
+  }
   function hold(value,receiver){
     const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
     if(existing!==undefined)return existing;
@@ -203,7 +216,7 @@ function addonWorkerMain() {
       if(dispatchDepth===0){event({event:'guestCallback',...payload});return undefined;}
       const callId=nextCallbackCall++,shared=new SharedArrayBuffer(MAX_SYNC_CALLBACK_RESULT_BYTES+8),words=new Int32Array(shared,0,2);
       event({event:'syncGuestCallback',callId,shared,...payload});
-      const status=Atomics.wait(words,0,0,60000);if(status==='timed-out')throw new Error('timed out waiting for synchronous guest callback');
+      waitForSyncGuestCallback(words);
       const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
       const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
       applyGuestSnapshots(response.snapshots||[],callbackGraph);
@@ -358,7 +371,7 @@ function addonWorkerMain() {
     }
     return mutations;
   }
-  async function dispatch(r){
+  function dispatch(r){
     dispatchDepth++;
     try{
       let result,receiver;const decodeGraph=newDecodeGraph();
@@ -399,7 +412,10 @@ function addonWorkerMain() {
     finally{dispatchDepth--;}
   }
   parentPort.on('message',message=>{
-    if(message.kind==='request')dispatch(message.request).then(response=>parentPort.postMessage({kind:'response',message:response}),error=>parentPort.postMessage({kind:'response',message:{requestId:message.request.requestId,ok:false,error:{name:'Error',message:String(error)}}}));
+    if(message.kind==='request'){
+      try{parentPort.postMessage({kind:'response',message:dispatch(message.request)});}
+      catch(error){parentPort.postMessage({kind:'response',message:{requestId:message.request.requestId,ok:false,error:{name:'Error',message:String(error)}}});}
+    }
   });
   parentPort.postMessage({kind:'ready'});
 }
@@ -409,7 +425,7 @@ worker.on('message',message=>{
   else if(message.kind==='response')send(message.message);
   else if(message.kind==='event')send(message.message);
   else if(message.kind==='syncGuestCallback'){
-    syncCallbackActive=true;pendingSyncCallbacks.set(message.callId,message);send(message.message);
+    pendingSyncCallbacks.set(message.callId,message);send(message.message);
   }
 });
 worker.on('error',error=>socket.destroy(error));
@@ -3806,7 +3822,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
 
         let node_reference = ProcessCommand::new("node")
             .arg("-e")
-            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');const target={value:40};let ownKeysCalls=0;const proxy=new Proxy(target,{get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}});const proxyBefore=a.readProperty(proxy);a.writeProperty(proxy,9);const simpleTarget={value:1};const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}});const proxyWriteRead=a.writeThenRead(setOnlyProxy,17);const inheritedValue=a.readProperty(Object.create({value:29}));const inheritedObject=Object.create({read(){return this.value+3}});inheritedObject.value=40;const inheritedCall=a.callInherited(inheritedObject);const guestErrorText=a.callToString(new TypeError('bridge'));process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d,proxyBefore,proxyAfter:a.readProperty(proxy),targetValue:target.value,ownKeysCalls,proxyWriteRead,inheritedValue,inheritedCall,guestErrorText}));")
+            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');const target={value:40};let ownKeysCalls=0;const proxy=new Proxy(target,{get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}});const proxyBefore=a.readProperty(proxy);a.writeProperty(proxy,9);const simpleTarget={value:1};const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}});const proxyWriteRead=a.writeThenRead(setOnlyProxy,17);const inheritedValue=a.readProperty(Object.create({value:29}));const inheritedObject=Object.create({read(){return this.value+3}});inheritedObject.value=40;const inheritedCall=a.callInherited(inheritedObject);const guestErrorText=a.callToString(new TypeError('bridge'));const nested=a.onSync(value=>a.onSync(inner=>a.add(19,23)));process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d,proxyBefore,proxyAfter:a.readProperty(proxy),targetValue:target.value,ownKeysCalls,proxyWriteRead,inheritedValue,inheritedCall,guestErrorText,nested}));")
             .arg(root.join("main.cjs"))
             .output()
             .unwrap();
@@ -3817,7 +3833,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         );
         assert_eq!(
             String::from_utf8_lossy(&node_reference.stdout),
-            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true,"proxyBefore":42,"proxyAfter":11,"targetValue":9,"ownKeysCalls":0,"proxyWriteRead":17,"inheritedValue":29,"inheritedCall":43,"guestErrorText":"TypeError: bridge"}"#
+            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true,"proxyBefore":42,"proxyAfter":11,"targetValue":9,"ownKeysCalls":0,"proxyWriteRead":17,"inheritedValue":29,"inheritedCall":43,"guestErrorText":"TypeError: bridge","nested":42}"#
         );
 
         let class_reference = ProcessCommand::new("node")
@@ -4343,15 +4359,14 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             matches!(sync_throw.get_prop("message"), Some(Value::String(ref message)) if message == "guest callback failure"),
             "unexpected sync callback throw: {sync_throw:?}"
         );
-        let reentrant_addon_call = interpreter
+        let nested_addon_call = interpreter
             .eval_source(
-                "require('./fixture.node').onSync(() => { try { require('./fixture.node').add(1, 2); return 'unexpected'; } catch (error) { return error.name + ':' + error.code; } });",
+                "require('./fixture.node').onSync(value => require('./fixture.node').onSync(inner => require('./fixture.node').add(19, 23)));",
             )
             .unwrap();
         assert!(matches!(
-            reentrant_addon_call,
-            Value::String(ref value)
-                if value == "TypeError:ERR_NAPI_VM_REENTRANT_ADDON_CALL"
+            nested_addon_call,
+            Value::Number(value) if value == 42.0
         ));
         interpreter
             .eval_source(
