@@ -2338,6 +2338,7 @@ mod tests {
             &source,
             r#"
 #include <node_api.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -2785,6 +2786,61 @@ static napi_value on_later(napi_env env, napi_callback_info info) {
   return result;
 }
 
+typedef struct {
+  napi_threadsafe_function function;
+} threadsafe_work;
+
+static void call_threadsafe_js(napi_env env, napi_value callback,
+                               void *context, void *data) {
+  (void)context;
+  char *message = (char *)data;
+  if (env != NULL && callback != NULL && message != NULL) {
+    napi_value receiver, argument;
+    if (napi_get_global(env, &receiver) == napi_ok &&
+        napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &argument) == napi_ok) {
+      napi_call_function(env, receiver, callback, 1, &argument, NULL);
+    }
+  }
+  free(message);
+}
+
+static void *threadsafe_thread_main(void *data) {
+  threadsafe_work *work = (threadsafe_work *)data;
+  char *message = strdup("threadsafe-value");
+  if (message == NULL ||
+      napi_call_threadsafe_function(work->function, message, napi_tsfn_nonblocking) != napi_ok) {
+    free(message);
+  }
+  napi_release_threadsafe_function(work->function, napi_tsfn_release);
+  free(work);
+  return NULL;
+}
+
+static napi_value on_threadsafe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], resource_name, result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_create_string_utf8(env, "fixture threadsafe callback", NAPI_AUTO_LENGTH,
+                              &resource_name) != napi_ok ||
+      napi_get_undefined(env, &result) != napi_ok) return NULL;
+  threadsafe_work *work = (threadsafe_work *)calloc(1, sizeof(threadsafe_work));
+  if (work == NULL) return NULL;
+  if (napi_create_threadsafe_function(env, argv[0], NULL, resource_name,
+                                      1, 1, NULL, NULL, NULL,
+                                      call_threadsafe_js, &work->function) != napi_ok) {
+    free(work);
+    return NULL;
+  }
+  pthread_t thread;
+  if (pthread_create(&thread, NULL, threadsafe_thread_main, work) != 0) {
+    napi_release_threadsafe_function(work->function, napi_tsfn_abort);
+    free(work);
+    return NULL;
+  }
+  pthread_detach(thread);
+  return result;
+}
+
 static napi_value on_sync(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value argv[1], receiver, value, result;
@@ -2879,6 +2935,8 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "promisePending", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "onLater", NAPI_AUTO_LENGTH, on_later, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "onLater", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "onThreadsafe", NAPI_AUTO_LENGTH, on_threadsafe, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "onThreadsafe", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "onSync", NAPI_AUTO_LENGTH, on_sync, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "onSync", fn) != napi_ok) return NULL;
   napi_property_descriptor counter_methods[] = {
@@ -2899,6 +2957,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         let compile = ProcessCommand::new("cc")
             .arg("-shared")
             .arg("-fPIC")
+            .arg("-pthread")
             .arg("-DNODE_GYP_MODULE_NAME=fixture")
             .arg(format!("-I{}", include.display()))
             .arg(&source)
@@ -3363,6 +3422,35 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(callback_value, Value::String(ref value) if value == "async-value"));
         let callback_this = interpreter.eval_source("callbackThisType;").unwrap();
         assert!(matches!(callback_this, Value::String(ref value) if value == "object"));
+        interpreter
+            .eval_source(
+                "globalThis.threadsafeValues = []; require('./fixture.node').onThreadsafe(value => { threadsafeValues.push(value); queueMicrotask(() => threadsafeValues.push('microtask')); });",
+            )
+            .unwrap();
+        assert!(matches!(
+            interpreter.eval_source("threadsafeValues.length;").unwrap(),
+            Value::Number(0.0)
+        ));
+        let mut threadsafe_callback_received = false;
+        for _ in 0..10 {
+            if interpreter
+                .run_event_loop_once(Duration::from_millis(250))
+                .unwrap()
+            {
+                let values = interpreter
+                    .eval_source("threadsafeValues.join(',');")
+                    .unwrap();
+                if matches!(values, Value::String(ref values) if values == "threadsafe-value,microtask")
+                {
+                    threadsafe_callback_received = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            threadsafe_callback_received,
+            "Node-API threadsafe callback did not reach the guest event loop"
+        );
         let counter = interpreter
             .eval_source(
                 "const addon = require('./fixture.node'); const counter = new addon.Counter(19); counter.increment(); counter.count = 41; counter.increment(); const other = new addon.Counter(5); counter.increment.call(other); const spread = {...counter}; const assigned = Object.assign({}, counter); let iterated = ''; for (const key in counter) iterated += key; ({count:counter.count, receiver:other.count, same:counter === counter.self(), keys:Object.keys(counter).join(','), values:Object.values(counter).join(','), entries:Object.entries(counter)[0][0] + ':' + Object.entries(counter)[0][1], spread:spread.count, assigned:assigned.count, iterated, has:'count' in counter});",
