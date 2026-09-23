@@ -240,6 +240,11 @@ typedef struct napi_vm_node_api_table {
   napi_status (*add_async_cleanup_hook)(napi_env, napi_async_cleanup_hook,
                                         void*, napi_async_cleanup_hook_handle*);
   void (*remove_async_cleanup_hook)(napi_async_cleanup_hook_handle);
+  napi_status (*node_api_symbol_for)(napi_env, const char*, size_t, napi_value*);
+  napi_status (*create_syntax_error)(napi_env, napi_value, napi_value,
+                                     napi_value*);
+  napi_status (*throw_syntax_error)(napi_env, const char*, const char*);
+  napi_status (*get_module_file_name)(napi_env, const char**);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1258,4 +1263,29 @@ NAPI_VM_EXPORT void napi_remove_async_cleanup_hook(
     napi_async_cleanup_hook_handle remove_handle) {
   const napi_vm_node_api_table* table = get_api_table();
   if (table) table->remove_async_cleanup_hook(remove_handle);
+}
+
+NAPI_VM_EXPORT napi_status node_api_symbol_for(
+    napi_env env, const char* description, size_t length, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->node_api_symbol_for(env, description, length, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_syntax_error(
+    napi_env env, napi_value code, napi_value message, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_syntax_error(env, code, message, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_throw_syntax_error(
+    napi_env env, const char* code, const char* message) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->throw_syntax_error(env, code, message) : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_get_module_file_name(
+    napi_env env, const char** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_module_file_name(env, result) : 9;
 }

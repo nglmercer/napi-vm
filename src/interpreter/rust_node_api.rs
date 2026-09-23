@@ -6,7 +6,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -63,7 +63,7 @@ const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
 const MAX_BIGINT_WORDS: usize = 2048;
-const MAX_NODE_API_VERSION: i32 = 8;
+const MAX_NODE_API_VERSION: i32 = 9;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -300,6 +300,7 @@ enum NativeCallback {
 
 struct NapiEnvironment {
     module_path: String,
+    module_file_url: CString,
     owner: Weak<RefCell<HostState>>,
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
@@ -1109,6 +1110,10 @@ struct NapiVmApiTable {
         *mut NapiAsyncCleanupHookHandle,
     ) -> i32,
     remove_async_cleanup_hook: unsafe extern "C" fn(NapiAsyncCleanupHookHandle),
+    node_api_symbol_for: unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
+    create_syntax_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
+    throw_syntax_error: unsafe extern "C" fn(NapiEnv, *const c_char, *const c_char) -> i32,
+    get_module_file_name: unsafe extern "C" fn(NapiEnv, *mut *const c_char) -> i32,
 }
 
 #[repr(C)]
@@ -1265,6 +1270,10 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     object_seal: api_object_seal,
     add_async_cleanup_hook: api_add_async_cleanup_hook,
     remove_async_cleanup_hook: api_remove_async_cleanup_hook,
+    node_api_symbol_for: api_node_symbol_for,
+    create_syntax_error: api_create_syntax_error,
+    throw_syntax_error: api_throw_syntax_error,
+    get_module_file_name: api_get_module_file_name,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -2907,6 +2916,34 @@ unsafe extern "C" fn api_create_symbol(
     })
 }
 
+unsafe extern "C" fn api_node_symbol_for(
+    env: NapiEnv,
+    description: *const c_char,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if length != usize::MAX && length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let description = unsafe { read_utf8(description, length)? };
+        if description.len() > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        let symbol = crate::builtins::symbol_for_key(&description);
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Symbol(symbol))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_external(
     env: NapiEnv,
     data: *mut c_void,
@@ -4371,6 +4408,15 @@ unsafe extern "C" fn api_create_range_error(
     unsafe { api_create_error_with_name(env, code, message, result, "RangeError") }
 }
 
+unsafe extern "C" fn api_create_syntax_error(
+    env: NapiEnv,
+    code: NapiValue,
+    message: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_error_with_name(env, code, message, result, "SyntaxError") }
+}
+
 fn set_pending_exception(environment: &NapiEnvironment, exception: Value) -> Result<(), i32> {
     let mut pending = environment.pending_exception.borrow_mut();
     if pending.is_some() {
@@ -4430,6 +4476,25 @@ unsafe extern "C" fn api_throw_range_error(
     message: *const c_char,
 ) -> i32 {
     unsafe { api_throw_error_with_name(env, code, message, "RangeError") }
+}
+
+unsafe extern "C" fn api_throw_syntax_error(
+    env: NapiEnv,
+    code: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    unsafe { api_throw_error_with_name(env, code, message, "SyntaxError") }
+}
+
+unsafe extern "C" fn api_get_module_file_name(env: NapiEnv, result: *mut *const c_char) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        unsafe { result.write(environment.module_file_url.as_ptr()) };
+        Ok(())
+    })
 }
 
 unsafe extern "C" fn api_is_exception_pending(env: NapiEnv, result: *mut bool) -> i32 {
@@ -7274,9 +7339,13 @@ impl NativeAddonLoader for RustNodeApiHost {
                 ))
             })?
         };
+        let module_file_url = url::Url::from_file_path(filename)
+            .map(|url| CString::new(url.as_str()).expect("file URLs cannot contain NUL bytes"))
+            .unwrap_or_default();
 
         let environment = Rc::new(NapiEnvironment {
             module_path: filename.to_string(),
+            module_file_url,
             owner: Rc::downgrade(&self.state),
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
@@ -7762,6 +7831,217 @@ mod tests {
         let promise = promise.borrow();
         assert_eq!(promise.state, PromiseState::Fulfilled);
         assert!(matches!(promise.value, Value::Undefined));
+    }
+
+    #[test]
+    fn loads_napi_v9_symbols_syntax_errors_and_module_file_url() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-v9-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping Node-API v9 fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        let c_source = r#"
+#define NAPI_VERSION 9
+#include <node_api.h>
+
+static napi_value global_symbol(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (node_api_symbol_for(env, "napi-vm-v9-global", NAPI_AUTO_LENGTH,
+                          &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value module_file_name(napi_env env, napi_callback_info info) {
+  const char* file_name = NULL;
+  napi_value result;
+  (void)info;
+  if (node_api_get_module_file_name(env, &file_name) != napi_ok ||
+      file_name == NULL ||
+      napi_create_string_utf8(env, file_name, NAPI_AUTO_LENGTH, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value create_syntax_error(napi_env env, napi_callback_info info) {
+  napi_value code, message, result;
+  (void)info;
+  if (napi_create_string_utf8(env, "E_CREATED_SYNTAX", NAPI_AUTO_LENGTH,
+                              &code) != napi_ok ||
+      napi_create_string_utf8(env, "created syntax failure", NAPI_AUTO_LENGTH,
+                              &message) != napi_ok ||
+      node_api_create_syntax_error(env, code, message, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value throw_syntax_error(napi_env env, napi_callback_info info) {
+  (void)info;
+  if (node_api_throw_syntax_error(env, "E_THROWN_SYNTAX",
+                                  "thrown syntax failure") != napi_ok)
+    return NULL;
+  return NULL;
+}
+
+NAPI_MODULE_INIT() {
+  napi_value function;
+  if (napi_create_function(env, "globalSymbol", NAPI_AUTO_LENGTH,
+                           global_symbol, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "globalSymbol", function) != napi_ok ||
+      napi_create_function(env, "moduleFileName", NAPI_AUTO_LENGTH,
+                           module_file_name, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "moduleFileName", function) != napi_ok ||
+      napi_create_function(env, "createSyntaxError", NAPI_AUTO_LENGTH,
+                           create_syntax_error, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "createSyntaxError", function) != napi_ok ||
+      napi_create_function(env, "throwSyntaxError", NAPI_AUTO_LENGTH,
+                           throw_syntax_error, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "throwSyntaxError", function) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#;
+        fs::write(&source, c_source).unwrap();
+        let built = Command::new("cc")
+            .args([
+                "-std=c11",
+                "-O2",
+                "-fPIC",
+                "-shared",
+                "-DNAPI_VERSION=9",
+                "-I",
+            ])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "Node-API v9 fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        fs::write(
+            root.join("main.cjs"),
+            r#"
+const addon = require('./fixture.node');
+const firstSymbol = addon.globalSymbol();
+const secondSymbol = addon.globalSymbol();
+const created = addon.createSyntaxError();
+let thrown;
+try {
+  addon.throwSyntaxError();
+} catch (error) {
+  thrown = {name: error.name, message: error.message, code: error.code};
+}
+const moduleFileName = addon.moduleFileName();
+module.exports = {
+  symbolIdentity: firstSymbol === secondSymbol,
+  symbolMatchesGuestRegistry: firstSymbol === Symbol.for('napi-vm-v9-global'),
+  symbolKey: Symbol.keyFor(firstSymbol),
+  moduleFileName,
+  moduleFileNameIsUrl: moduleFileName.startsWith('file://'),
+  created: {name: created.name, message: created.message, code: created.code},
+  thrown,
+};
+"#,
+        )
+        .unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
+        let observer = unsafe { Library::open(Some(addon.as_os_str()), RTLD_NOW) }.unwrap();
+        let vm_report = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .unwrap();
+        let Value::String(ref vm_report) = vm_report else {
+            panic!("Node-API v9 VM fixture did not return JSON");
+        };
+        let vm_report: serde_json::Value = serde_json::from_str(vm_report).unwrap();
+
+        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        let mut reference_reports = Vec::new();
+        for runtime in ["node", "bun"] {
+            if !Command::new(runtime)
+                .arg("--version")
+                .output()
+                .is_ok_and(|out| out.status.success())
+            {
+                continue;
+            }
+            let reference = Command::new(runtime)
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "{runtime} Node-API v9 fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let report: serde_json::Value = serde_json::from_slice(&reference.stdout)
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "{runtime} v9 result was not JSON: {}",
+                        String::from_utf8_lossy(&reference.stdout)
+                    )
+                });
+            reference_reports.push((runtime, report));
+        }
+        assert!(
+            !reference_reports.is_empty(),
+            "Node or Bun is required for the Node-API v9 differential fixture"
+        );
+        for (runtime, report) in reference_reports {
+            assert_eq!(
+                vm_report, report,
+                "Node-API v9 result differs from {runtime}"
+            );
+        }
+        assert_eq!(vm_report["symbolIdentity"], true);
+        assert_eq!(vm_report["symbolMatchesGuestRegistry"], true);
+        assert_eq!(vm_report["symbolKey"], "napi-vm-v9-global");
+        assert_eq!(vm_report["moduleFileNameIsUrl"], true);
+        assert_eq!(vm_report["created"]["name"], "SyntaxError");
+        assert_eq!(vm_report["created"]["message"], "created syntax failure");
+        assert_eq!(vm_report["created"]["code"], "E_CREATED_SYNTAX");
+        assert_eq!(vm_report["thrown"]["name"], "SyntaxError");
+        assert_eq!(vm_report["thrown"]["message"], "thrown syntax failure");
+        assert_eq!(vm_report["thrown"]["code"], "E_THROWN_SYNTAX");
+        drop(interpreter);
+        drop(observer);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

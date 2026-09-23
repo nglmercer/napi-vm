@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | Selected Node-API v1-v8 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v9 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -51,7 +51,7 @@ Vm::builder()
     .native_addons(NativeAddonOptions::rust_node_api()
         .allowed_roots(roots)
         .allow_sha256(addon_path, digest)
-        .max_napi_version(8));
+        .max_napi_version(9));
 ```
 
 The exact Rust names can follow the existing `NodeAddonOptions`; the important
@@ -62,7 +62,7 @@ still goes through the VM's CommonJS resolver and module cache.
 The current implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
 existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
-Node-API versions 1 through 7 and currently covers scoped handles, callback
+Node-API versions 1 through 9 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
@@ -162,6 +162,10 @@ object representations do not yet expose the property metadata needed by
 freeze/seal and return a generic failure. The v8 fixture compares tag and
 integrity results with Node and Bun; async shutdown is compared with Node
 because Bun 1.4.0 exits without awaiting async cleanup hooks.
+The selected Node-API v9 functions provide the global symbol registry,
+SyntaxError creation and throwing, and the addon's `file://` URL.
+`node_api_symbol_for` shares identity with guest `Symbol.for`; module URL
+storage remains valid for the lifetime of its addon environment.
 `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive

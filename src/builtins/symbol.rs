@@ -89,16 +89,22 @@ pub(crate) fn symbol_for(
         Some(Value::Undefined) | None => "undefined".to_string(),
         Some(v) => interp.vs(v)?,
     };
-    if let Some(existing) = SYMBOL_REGISTRY.with(|reg| reg.borrow().get(&key).cloned()) {
-        return Ok(Value::Symbol(existing));
+    Ok(Value::Symbol(symbol_for_key(&key)))
+}
+
+/// Return the shared symbol registry entry for a key. Node-API's
+/// `node_api_symbol_for` must use this same registry as guest `Symbol.for`.
+pub(crate) fn symbol_for_key(key: &str) -> Rc<SymbolData> {
+    if let Some(existing) = SYMBOL_REGISTRY.with(|reg| reg.borrow().get(key).cloned()) {
+        return existing;
     }
-    let fresh = new_symbol(Some(key.clone()));
+    let fresh = new_symbol(Some(key.to_owned()));
     let Value::Symbol(data) = &fresh else {
         unreachable!("new_symbol returns a symbol");
     };
     let data = data.clone();
-    SYMBOL_REGISTRY.with(|reg| reg.borrow_mut().insert(key, data.clone()));
-    Ok(Value::Symbol(data))
+    SYMBOL_REGISTRY.with(|reg| reg.borrow_mut().insert(key.to_owned(), data.clone()));
+    data
 }
 
 /// `Symbol.keyFor(sym)`: the registry key of a shared symbol, or `undefined`
