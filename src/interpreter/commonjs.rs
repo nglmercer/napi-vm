@@ -274,8 +274,108 @@ impl FileCommonJsLoader {
         Ok(None)
     }
 
+    fn package_scope(&self, parent: &str) -> Result<Option<(PathBuf, JsonValue)>, VmErr> {
+        let parent_path = Path::new(parent);
+        if !parent_path.is_absolute() {
+            return Ok(None);
+        }
+        let canonical_parent = fs::canonicalize(parent_path)
+            .map_err(|error| VmErr::Msg(format!("invalid requiring module {parent}: {error}")))?;
+        let mut directory = canonical_parent.parent();
+        while let Some(current) = directory {
+            if !self.in_roots(current) {
+                break;
+            }
+            let package_json = current.join("package.json");
+            if package_json.is_file() {
+                return Ok(Some((
+                    current.to_path_buf(),
+                    read_package_json(&package_json)?,
+                )));
+            }
+            directory = current.parent();
+        }
+        Ok(None)
+    }
+
+    fn resolve_package_export(
+        &self,
+        package_root: &Path,
+        package_name: &str,
+        subpath: &str,
+        exports: &JsonValue,
+    ) -> Result<PathBuf, VmErr> {
+        let export_key = if subpath.is_empty() {
+            ".".to_string()
+        } else {
+            format!("./{subpath}")
+        };
+        let target = exports_target(exports, &export_key)?.ok_or_else(|| {
+            VmErr::Msg(format!(
+                "package {package_name} does not export subpath {export_key}"
+            ))
+        })?;
+        let target_path = package_root.join(target);
+        let found = self
+            .resolve_path(&target_path, 0)?
+            .ok_or_else(|| VmErr::Msg(format!("Cannot find module '{package_name}'")))?;
+        if !found.starts_with(package_root) {
+            return Err(VmErr::Msg(format!(
+                "package exports target escapes package root: {}",
+                found.display()
+            )));
+        }
+        Ok(found)
+    }
+
+    fn resolve_package_import(
+        &self,
+        request: &str,
+        parent: Option<&str>,
+    ) -> Result<PathBuf, VmErr> {
+        if request == "#" || request.starts_with("#/") {
+            return Err(VmErr::Msg(format!(
+                "invalid package import specifier '{request}'"
+            )));
+        }
+        let parent = parent.ok_or_else(|| {
+            VmErr::Msg(format!(
+                "package import '{request}' requires a CommonJS parent module"
+            ))
+        })?;
+        let (package_root, package) = self
+            .package_scope(parent)?
+            .ok_or_else(|| VmErr::Msg(format!("Cannot find package import '{request}'")))?;
+        let imports = package
+            .get("imports")
+            .ok_or_else(|| VmErr::Msg(format!("package does not define import '{request}'")))?;
+        match imports_target(imports, request)? {
+            ImportTarget::Relative(target) => {
+                let found = self
+                    .resolve_path(&package_root.join(target), 0)?
+                    .ok_or_else(|| VmErr::Msg(format!("Cannot find package import '{request}'")))?;
+                if !found.starts_with(&package_root) {
+                    return Err(VmErr::Msg(format!(
+                        "package import target escapes package root: {}",
+                        found.display()
+                    )));
+                }
+                Ok(found)
+            }
+            ImportTarget::External(specifier) => self.resolve_request(&specifier, Some(parent)),
+        }
+    }
+
     fn package_request(&self, request: &str, parent: Option<&str>) -> Result<PathBuf, VmErr> {
         let (package_name, subpath) = split_package_request(request)?;
+        if let Some(parent) = parent
+            && let Some((package_root, package)) = self.package_scope(parent)?
+            && package.get("name").and_then(JsonValue::as_str) == Some(package_name.as_str())
+            && let Some(exports) = package.get("exports")
+        {
+            return self.resolve_package_export(&package_root, &package_name, &subpath, exports);
+        }
+
         let mut search_dirs = Vec::new();
         if let Some(parent) = parent {
             let parent_path = Path::new(parent);
@@ -319,20 +419,13 @@ impl FileCommonJsLoader {
                 JsonValue::Null
             };
 
-            let mut uses_exports = false;
             let target = if let Some(exports) = package.get("exports") {
-                uses_exports = true;
-                let export_key = if subpath.is_empty() {
-                    ".".to_string()
-                } else {
-                    format!("./{subpath}")
-                };
-                let target = exports_target(exports, &export_key)?.ok_or_else(|| {
-                    VmErr::Msg(format!(
-                        "package {package_name} does not export subpath {export_key}"
-                    ))
-                })?;
-                package_root.join(target)
+                return self.resolve_package_export(
+                    &package_root,
+                    &package_name,
+                    &subpath,
+                    exports,
+                );
             } else if subpath.is_empty() {
                 package_root.join(
                     package
@@ -344,12 +437,6 @@ impl FileCommonJsLoader {
                 package_root.join(&subpath)
             };
             if let Some(found) = self.resolve_path(&target, 0)? {
-                if uses_exports && !found.starts_with(&package_root) {
-                    return Err(VmErr::Msg(format!(
-                        "package exports target escapes package root: {}",
-                        found.display()
-                    )));
-                }
                 return Ok(found);
             }
         }
@@ -361,6 +448,9 @@ impl FileCommonJsLoader {
             return Err(VmErr::Msg(format!(
                 "Cannot find module '{request}' (host built-ins are not enabled)"
             )));
+        }
+        if request.starts_with('#') {
+            return self.resolve_package_import(request, parent);
         }
         let request_path = Path::new(request);
         let candidate = if request_path.is_absolute() {
@@ -562,6 +652,136 @@ fn exports_target(exports: &JsonValue, key: &str) -> Result<Option<String>, VmEr
         _ => ExportTargetSelection::NoTarget,
     };
     finish_export_selection(selection)
+}
+
+enum ImportTarget {
+    Relative(String),
+    External(String),
+}
+
+enum ImportTargetSelection {
+    Target(ImportTarget),
+    NoTarget,
+    Invalid(String),
+}
+
+fn imports_target(imports: &JsonValue, key: &str) -> Result<ImportTarget, VmErr> {
+    let entries = imports
+        .as_object()
+        .ok_or_else(|| VmErr::Msg("package imports must be an object of specifiers".to_string()))?;
+    let selection = if let Some(target) = entries.get(key) {
+        select_import_target(target, None)
+    } else {
+        let mut best: Option<(usize, usize, String, &JsonValue)> = None;
+        for (pattern, target) in entries {
+            let Some(capture) = match_export_pattern(pattern, key) else {
+                continue;
+            };
+            let Some(star) = pattern.find('*') else {
+                continue;
+            };
+            let specificity = (star, pattern.len());
+            if best
+                .as_ref()
+                .is_none_or(|(prefix, length, _, _)| specificity > (*prefix, *length))
+            {
+                best = Some((star, pattern.len(), capture, target));
+            }
+        }
+        best.map_or(
+            ImportTargetSelection::NoTarget,
+            |(_, _, capture, target)| select_import_target(target, Some(&capture)),
+        )
+    };
+    match selection {
+        ImportTargetSelection::Target(target) => Ok(target),
+        ImportTargetSelection::NoTarget => Err(VmErr::Msg(format!(
+            "package does not define import '{key}'"
+        ))),
+        ImportTargetSelection::Invalid(message) => Err(VmErr::Msg(message)),
+    }
+}
+
+fn select_import_target(value: &JsonValue, capture: Option<&str>) -> ImportTargetSelection {
+    match value {
+        JsonValue::String(target) => {
+            let target = match (target.contains('*'), capture) {
+                (true, Some(capture)) => target.replace('*', capture),
+                (true, None) => {
+                    return ImportTargetSelection::Invalid(format!(
+                        "unsupported package import target '{target}'"
+                    ));
+                }
+                (false, _) => target.clone(),
+            };
+            if target.starts_with("./") {
+                return normalize_exports_target(&target).map_or_else(
+                    || {
+                        ImportTargetSelection::Invalid(format!(
+                            "unsupported package import target '{target}'"
+                        ))
+                    },
+                    |path| ImportTargetSelection::Target(ImportTarget::Relative(path)),
+                );
+            }
+            if target.starts_with("node:") || is_bare_import_target(&target) {
+                ImportTargetSelection::Target(ImportTarget::External(target))
+            } else {
+                ImportTargetSelection::Invalid(format!(
+                    "unsupported package import target '{target}'"
+                ))
+            }
+        }
+        JsonValue::Array(entries) => {
+            // Like exports arrays, imports arrays skip invalid or unmatched
+            // entries, but do not skip a valid target whose file is missing.
+            let mut last_invalid = None;
+            for entry in entries {
+                match select_import_target(entry, capture) {
+                    selection @ ImportTargetSelection::Target(_) => return selection,
+                    ImportTargetSelection::NoTarget => {}
+                    ImportTargetSelection::Invalid(message) => last_invalid = Some(message),
+                }
+            }
+            last_invalid.map_or(
+                ImportTargetSelection::NoTarget,
+                ImportTargetSelection::Invalid,
+            )
+        }
+        JsonValue::Object(entries) => {
+            for (condition, value) in entries {
+                if matches!(
+                    condition.as_str(),
+                    "node-addons" | "node" | "require" | "default"
+                ) {
+                    return select_import_target(value, capture);
+                }
+            }
+            ImportTargetSelection::NoTarget
+        }
+        JsonValue::Null => ImportTargetSelection::NoTarget,
+        _ => ImportTargetSelection::Invalid(
+            "invalid package imports entry; expected a path, package specifier, conditions, array, or null"
+                .into(),
+        ),
+    }
+}
+
+fn is_bare_import_target(target: &str) -> bool {
+    if target.is_empty()
+        || target.starts_with('.')
+        || target.starts_with('/')
+        || target.starts_with('#')
+        || target.contains('\\')
+        || target.contains(':')
+        || target.chars().any(char::is_whitespace)
+        || split_package_request(target).is_err()
+    {
+        return false;
+    }
+    target
+        .split('/')
+        .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
 
 fn match_export_pattern(pattern: &str, key: &str) -> Option<String> {
@@ -1322,6 +1542,191 @@ mod tests {
                 .resolve("fixture/private/missing", Some(&entry_name))
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn filesystem_loader_resolves_package_self_references_only_when_exported() {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-commonjs-self-reference-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package = root.join("workspace/fixture");
+        let source_dir = package.join("src");
+        let dist_dir = package.join("dist");
+        fs::create_dir_all(&source_dir).unwrap();
+        fs::create_dir_all(&dist_dir).unwrap();
+        let parent = source_dir.join("main.cjs");
+        fs::write(&parent, "").unwrap();
+        fs::write(
+            package.join("package.json"),
+            r#"{"name":"fixture","exports":{".":"./dist/index.cjs","./feature":"./dist/feature.cjs"}}"#,
+        )
+        .unwrap();
+        fs::write(dist_dir.join("index.cjs"), "").unwrap();
+        fs::write(dist_dir.join("feature.cjs"), "").unwrap();
+        fs::write(dist_dir.join("private.cjs"), "").unwrap();
+
+        let legacy_package = root.join("workspace/legacy");
+        fs::create_dir_all(&legacy_package).unwrap();
+        let legacy_parent = legacy_package.join("main.cjs");
+        fs::write(&legacy_parent, "").unwrap();
+        fs::write(
+            legacy_package.join("package.json"),
+            r#"{"name":"legacy","main":"./index.cjs"}"#,
+        )
+        .unwrap();
+        fs::write(legacy_package.join("index.cjs"), "").unwrap();
+
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let parent_name = parent.to_string_lossy().into_owned();
+        let root_module = loader.resolve("fixture", Some(&parent_name)).unwrap();
+        assert!(root_module.filename.ends_with("dist/index.cjs"));
+        let subpath = loader
+            .resolve("fixture/feature", Some(&parent_name))
+            .unwrap();
+        assert!(subpath.filename.ends_with("dist/feature.cjs"));
+        assert!(
+            loader
+                .resolve("fixture/private", Some(&parent_name))
+                .is_err()
+        );
+
+        let legacy_parent_name = legacy_parent.to_string_lossy().into_owned();
+        assert!(loader.resolve("legacy", Some(&legacy_parent_name)).is_err());
+
+        if Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            for (specifier, resolved) in [
+                ("fixture", Some(root_module.filename.as_str())),
+                ("fixture/feature", Some(subpath.filename.as_str())),
+                ("fixture/private", None),
+                ("legacy", None),
+            ] {
+                let output = Command::new("node")
+                    .arg("-e")
+                    .arg("const {createRequire}=require('node:module');process.stdout.write(createRequire(process.argv[1]).resolve(process.argv[2]))")
+                    .arg(if specifier == "legacy" {
+                        legacy_parent.as_path()
+                    } else {
+                        parent.as_path()
+                    })
+                    .arg(specifier)
+                    .output()
+                    .unwrap();
+                assert_eq!(
+                    output.status.success(),
+                    resolved.is_some(),
+                    "Node self-reference result differed for {specifier}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if let Some(resolved) = resolved {
+                    assert_eq!(String::from_utf8_lossy(&output.stdout), resolved);
+                }
+            }
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn filesystem_loader_resolves_package_import_maps() {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-commonjs-import-map-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package = root.join("workspace/fixture");
+        let source_dir = package.join("src");
+        let features_dir = source_dir.join("features");
+        let release_dir = package.join("build/Release");
+        let dependency = package.join("node_modules/fixture-dep");
+        for directory in [&source_dir, &features_dir, &release_dir, &dependency] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        let parent = source_dir.join("main.cjs");
+        fs::write(&parent, "").unwrap();
+        fs::write(
+            package.join("package.json"),
+            r##"{"name":"fixture","imports":{"#internal":"./src/internal.cjs","#features/*":"./src/features/*.cjs","#external":"fixture-dep","#condition":{"node":"./src/node-condition.cjs","require":"./src/require-condition.cjs","default":"./src/default.cjs"},"#native/*":{"node-addons":"./build/Release/*.node","default":"./fallback/*.js"}}}"##,
+        )
+        .unwrap();
+        fs::write(source_dir.join("internal.cjs"), "").unwrap();
+        fs::write(features_dir.join("alpha.cjs"), "").unwrap();
+        fs::write(source_dir.join("node-condition.cjs"), "").unwrap();
+        fs::write(source_dir.join("require-condition.cjs"), "").unwrap();
+        fs::write(source_dir.join("default.cjs"), "").unwrap();
+        fs::write(release_dir.join("fixture.node"), "").unwrap();
+        fs::write(dependency.join("package.json"), r#"{"main":"./index.cjs"}"#).unwrap();
+        fs::write(dependency.join("index.cjs"), "").unwrap();
+
+        let parent_name = parent.to_string_lossy().into_owned();
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let resolved = [
+            ("#internal", "src/internal.cjs"),
+            ("#features/alpha", "src/features/alpha.cjs"),
+            ("#external", "node_modules/fixture-dep/index.cjs"),
+            ("#condition", "src/node-condition.cjs"),
+            ("#native/fixture", "build/Release/fixture.node"),
+        ];
+        for (specifier, expected_suffix) in resolved {
+            let module = loader.resolve(specifier, Some(&parent_name)).unwrap();
+            assert!(
+                module.filename.ends_with(expected_suffix),
+                "{specifier} resolved to {}",
+                module.filename
+            );
+            if specifier.starts_with("#native/") {
+                assert_eq!(module.format, CommonJsModuleFormat::NativeAddon);
+                assert!(module.source.is_none());
+            }
+
+            if Command::new("node")
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                let output = Command::new("node")
+                    .arg("-e")
+                    .arg("const {createRequire}=require('node:module');process.stdout.write(createRequire(process.argv[1]).resolve(process.argv[2]))")
+                    .arg(&parent)
+                    .arg(specifier)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "Node could not resolve {specifier}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert_eq!(
+                    module.filename,
+                    String::from_utf8_lossy(&output.stdout),
+                    "Node and napi-vm resolved {specifier} differently"
+                );
+            }
+        }
+
+        assert!(loader.resolve("#unmapped", Some(&parent_name)).is_err());
+        fs::write(root.join("outside.cjs"), "").unwrap();
+        fs::write(
+            package.join("package.json"),
+            r##"{"name":"fixture","imports":{"#escape":"./../outside.cjs"}}"##,
+        )
+        .unwrap();
+        assert!(loader.resolve("#escape", Some(&parent_name)).is_err());
+
         fs::remove_dir_all(root).unwrap();
     }
 
