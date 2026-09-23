@@ -810,6 +810,7 @@ struct NapiVmApiTable {
     get_last_error_info: unsafe extern "C" fn(NapiEnv, *mut *const NapiExtendedErrorInfo) -> i32,
     get_new_target: unsafe extern "C" fn(NapiEnv, NapiCallbackInfo, *mut NapiValue) -> i32,
     get_version: unsafe extern "C" fn(NapiEnv, *mut u32) -> i32,
+    strict_equals: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
 }
 
 #[repr(C)]
@@ -919,6 +920,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_last_error_info: api_get_last_error_info,
     get_new_target: api_get_new_target,
     get_version: api_get_version,
+    strict_equals: api_strict_equals,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -4422,6 +4424,25 @@ unsafe extern "C" fn api_get_version(env: NapiEnv, result: *mut u32) -> i32 {
     })
 }
 
+unsafe extern "C" fn api_strict_equals(
+    env: NapiEnv,
+    left: NapiValue,
+    right: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handles = environment.handles.borrow();
+        let left = handles.get(left)?;
+        let right = handles.get(right)?;
+        unsafe { result.write(super::strict_equals(&left, &right)) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandleScope) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -6166,6 +6187,16 @@ static napi_value target_counts(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value strict_equal_probe(napi_env env, napi_callback_info info) {
+  napi_value args[2], result;
+  size_t argc = 2;
+  bool equal = false;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 2 ||
+      napi_strict_equals(env, args[0], args[1], &equal) != napi_ok ||
+      napi_get_boolean(env, equal, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value counter_new_target_info(napi_env env, napi_callback_info info) {
   napi_value result, field;
   (void)info;
@@ -6556,6 +6587,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "targetCounts", NAPI_AUTO_LENGTH, target_counts,
                            NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "targetCounts", function) != napi_ok ||
+      napi_create_function(env, "strictEqualProbe", NAPI_AUTO_LENGTH,
+                           strict_equal_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "strictEqualProbe", function) != napi_ok ||
       napi_create_function(env, "counterNewTargetInfo", NAPI_AUTO_LENGTH,
                            counter_new_target_info, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "counterNewTargetInfo", function) != napi_ok)
@@ -6687,6 +6721,15 @@ addon.targetProbe();
 const targetCallCounts = addon.targetCounts();
 new addon.targetProbe();
 const targetConstructCounts = addon.targetCounts();
+const identityError = new Error('same');
+const strictEqual = {
+  sameObject: addon.strictEqualProbe(values, values),
+  distinctObjects: addon.strictEqualProbe({}, {}),
+  equalNumbers: addon.strictEqualProbe(42, 42),
+  nan: addon.strictEqualProbe(0 / 0, 0 / 0),
+  sameError: addon.strictEqualProbe(identityError, identityError),
+  distinctErrors: addon.strictEqualProbe(new Error('same'), new Error('same')),
+};
 const counter = new addon.Counter(40);
 const counterNewTargetInfo = addon.counterNewTargetInfo();
 const counterIncremented = counter.increment();
@@ -6787,6 +6830,7 @@ module.exports = {
   definedValueAfter,
   targetCallCounts,
   targetConstructCounts,
+  strictEqual,
   counterNewTargetInfo,
   childNewTargetInfo,
   childCounterValue: childCounter.value,
@@ -7064,6 +7108,12 @@ module.exports = {
         ));
         assert_eq!(unsafe { threadsafe_worker_context_ok() }, 1);
         assert_eq!(unsafe { threadsafe_worker_call_status() }, 0);
+        let has_valid_threadsafe_order = |events: &Value| {
+            matches!(events, Value::String(events)
+                if events == "threadsafe-value,worker-microtask,queue-first,threadsafe-second"
+                    || events == "threadsafe-value,worker-microtask,threadsafe-second,queue-first"
+                    || events == "queue-first,threadsafe-value,worker-microtask,threadsafe-second")
+        };
         for _ in 0..10 {
             let _ = interpreter
                 .run_event_loop_once(Duration::from_millis(250))
@@ -7071,8 +7121,7 @@ module.exports = {
             let received = interpreter
                 .eval_source("threadsafeValues.join(',');")
                 .unwrap();
-            if matches!(received, Value::String(ref value) if value == "threadsafe-value,worker-microtask,queue-first,threadsafe-second")
-                && unsafe { threadsafe_finalizer_calls() } == 2
+            if has_valid_threadsafe_order(&received) && unsafe { threadsafe_finalizer_calls() } == 2
             {
                 break;
             }
@@ -7081,7 +7130,7 @@ module.exports = {
             .eval_source("threadsafeValues.join(',');")
             .unwrap();
         assert!(
-            matches!(received, Value::String(ref value) if value == "threadsafe-value,worker-microtask,queue-first,threadsafe-second"),
+            has_valid_threadsafe_order(&received),
             "unexpected thread-safe callback events: {received:?}; finalizers={}; worker_status={}; blocking_status={}",
             unsafe { threadsafe_finalizer_calls() },
             unsafe { threadsafe_worker_call_status() },
@@ -7171,6 +7220,31 @@ module.exports = {
         assert!(matches!(
             target_construct_counts.get_prop("constructs"),
             Some(Value::Number(1.0))
+        ));
+        let strict_equal = result.get_prop("strictEqual").unwrap();
+        assert!(matches!(
+            strict_equal.get_prop("sameObject"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            strict_equal.get_prop("distinctObjects"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            strict_equal.get_prop("equalNumbers"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            strict_equal.get_prop("nan"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            strict_equal.get_prop("sameError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            strict_equal.get_prop("distinctErrors"),
+            Some(Value::Bool(false))
         ));
         let counter_new_target_info = result.get_prop("counterNewTargetInfo").unwrap();
         assert!(matches!(

@@ -163,6 +163,7 @@ typedef struct napi_vm_node_api_table {
       napi_env, const napi_extended_error_info**);
   napi_status (*get_new_target)(napi_env, napi_callback_info, napi_value*);
   napi_status (*get_version)(napi_env, uint32_t*);
+  napi_status (*strict_equals)(napi_env, napi_value, napi_value, bool*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -833,4 +834,10 @@ NAPI_VM_EXPORT napi_status napi_get_new_target(napi_env env,
 NAPI_VM_EXPORT napi_status napi_get_version(napi_env env, uint32_t* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_version(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_strict_equals(napi_env env, napi_value lhs,
+                                               napi_value rhs, bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->strict_equals(env, lhs, rhs, result) : 9;
 }

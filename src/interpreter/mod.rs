@@ -1206,6 +1206,14 @@ mod tests {
         assert_eq!(eval_str("5 !== 3;"), "true");
         assert_eq!(eval_str("5 == 5;"), "true");
         assert_eq!(eval_str("'5' === 5;"), "false");
+        assert_eq!(
+            eval_str("const error = new Error('same'); error === error;"),
+            "true"
+        );
+        assert_eq!(
+            eval_str("new Error('same') === new Error('same');"),
+            "false"
+        );
     }
 
     #[test]

@@ -545,6 +545,9 @@ pub struct ProxyData {
 /// Payload of `Value::Error`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct ErrorData {
+    /// Clones of a guest error value must retain object identity, while two
+    /// separately-created errors with the same fields remain distinct.
+    pub identity: Rc<()>,
     pub message: String,
     pub name: String,
     /// Optional runtime-specific error identifier such as Node's `code`.
@@ -559,6 +562,7 @@ impl ErrorData {
     /// combinator-produced error takes, where there was no guest frame.
     pub fn new(name: &str, message: impl Into<String>) -> Box<Self> {
         Box::new(Self {
+            identity: Rc::new(()),
             name: name.to_string(),
             message: message.into(),
             stack: String::new(),
@@ -569,6 +573,7 @@ impl ErrorData {
     /// An error carrying a stable runtime or host error identifier.
     pub fn with_code(name: &str, message: impl Into<String>, code: impl Into<String>) -> Box<Self> {
         Box::new(Self {
+            identity: Rc::new(()),
             message: message.into(),
             name: name.to_string(),
             stack: String::new(),

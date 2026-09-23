@@ -49,7 +49,7 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         (Value::Symbol(x), Value::Symbol(y)) => x.id == y.id,
         (Value::BigInt(x), Value::BigInt(y)) => x.compare(y).is_eq(),
         (Value::Date(x), Value::Date(y)) => Rc::ptr_eq(x, y),
-        (Value::Error(x), Value::Error(y)) => x.name == y.name && x.message == y.message,
+        (Value::Error(x), Value::Error(y)) => Rc::ptr_eq(&x.identity, &y.identity),
         _ => false,
     }
 }
