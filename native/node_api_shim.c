@@ -9,6 +9,7 @@ typedef void* napi_callback_info;
 typedef void* napi_handle_scope;
 typedef void* napi_deferred;
 typedef void* napi_async_work;
+typedef void* napi_threadsafe_function;
 typedef int32_t napi_status;
 typedef int32_t napi_typedarray_type;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
@@ -17,6 +18,9 @@ typedef void (*napi_finalize)(napi_env env, void* finalize_data,
 typedef void (*napi_async_execute_callback)(napi_env env, void* data);
 typedef void (*napi_async_complete_callback)(napi_env env, napi_status status,
                                              void* data);
+typedef void (*napi_threadsafe_function_call_js)(napi_env env,
+                                                  napi_value js_callback,
+                                                  void* context, void* data);
 
 typedef struct napi_vm_property_descriptor {
   const char* utf8name;
@@ -131,6 +135,21 @@ typedef struct napi_vm_node_api_table {
   napi_status (*delete_async_work)(napi_env, napi_async_work);
   napi_status (*queue_async_work)(napi_env, napi_async_work);
   napi_status (*cancel_async_work)(napi_env, napi_async_work);
+  napi_status (*create_threadsafe_function)(
+      napi_env, napi_value, napi_value, napi_value, size_t, size_t, void*,
+      napi_finalize, void*, napi_threadsafe_function_call_js,
+      napi_threadsafe_function*);
+  napi_status (*get_threadsafe_function_context)(napi_threadsafe_function,
+                                                 void**);
+  napi_status (*call_threadsafe_function)(napi_threadsafe_function, void*,
+                                          int32_t);
+  napi_status (*acquire_threadsafe_function)(napi_threadsafe_function);
+  napi_status (*release_threadsafe_function)(napi_threadsafe_function,
+                                             int32_t);
+  napi_status (*ref_threadsafe_function)(napi_env,
+                                         napi_threadsafe_function);
+  napi_status (*unref_threadsafe_function)(napi_env,
+                                           napi_threadsafe_function);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -719,4 +738,56 @@ NAPI_VM_EXPORT napi_status napi_cancel_async_work(napi_env env,
                                                    napi_async_work work) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->cancel_async_work(env, work) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_threadsafe_function(
+    napi_env env, napi_value func, napi_value async_resource,
+    napi_value async_resource_name, size_t max_queue_size,
+    size_t initial_thread_count, void* thread_finalize_data,
+    napi_finalize thread_finalize_cb, void* context,
+    napi_threadsafe_function_call_js call_js_cb,
+    napi_threadsafe_function* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_threadsafe_function(
+                     env, func, async_resource, async_resource_name,
+                     max_queue_size, initial_thread_count,
+                     thread_finalize_data, thread_finalize_cb, context,
+                     call_js_cb, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_threadsafe_function_context(
+    napi_threadsafe_function function, void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_threadsafe_function_context(function, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_call_threadsafe_function(
+    napi_threadsafe_function function, void* data, int32_t call_mode) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->call_threadsafe_function(function, data, call_mode) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_acquire_threadsafe_function(
+    napi_threadsafe_function function) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->acquire_threadsafe_function(function) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_release_threadsafe_function(
+    napi_threadsafe_function function, int32_t release_mode) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->release_threadsafe_function(function, release_mode) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_ref_threadsafe_function(
+    napi_env env, napi_threadsafe_function function) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->ref_threadsafe_function(env, function) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_unref_threadsafe_function(
+    napi_env env, napi_threadsafe_function function) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->unref_threadsafe_function(env, function) : 9;
 }

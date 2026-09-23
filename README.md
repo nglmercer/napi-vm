@@ -167,7 +167,9 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-currently supports a synchronous Node-API version 1 subset: C callbacks and
+accepts addons requesting Node-API versions 1 through 4, but only implements a
+selected API subset rather than every function in those versions. The v1
+surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
 `napi_call_function` and `napi_new_instance`, local handle scopes, object
 creation and named properties, `napi_get_global`, general property reads and
@@ -201,7 +203,17 @@ code. `napi_create_async_work`, `napi_queue_async_work`,
 `napi_cancel_async_work`, and `napi_delete_async_work` use a bounded pool of
 four worker threads with a 128-item queue. Execute callbacks run off-thread;
 completion callbacks enter the VM through its event queue. Execute callbacks
-must not call Node-API. Thread-safe functions remain unavailable.
+must not call Node-API. The Node-API v4 thread-safe function calls for create,
+call, context lookup, acquire/release, and ref/unref are supported. Queue size,
+queue-full, blocking producer backpressure, abort, and finalization follow the
+Node-API contract; calls from the owner thread return `napi_queue_full` rather
+than blocking that thread when the queue is full. Thread-safe callbacks run on
+the VM owner thread through the existing host-event queue. If the host shuts
+down while native producers still hold a thread-safe function, queued custom
+callback data is offered to the addon with a null environment for cleanup, and
+the addon libraries and ABI shim remain mapped to keep later closing/release
+calls safe. Such outstanding functions do not run their finalizers during that
+shutdown path.
 Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
 requires a C compiler at build time, and native addons have the desktop
 process's full privileges in either backend.

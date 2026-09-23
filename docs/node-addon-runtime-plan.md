@@ -172,13 +172,17 @@ not return success with a partial or fabricated result.
 - [x] Implement `napi_async_work` using a bounded host worker pool. Run execute
   work off the interpreter thread and completion callbacks as queued VM
   external events.
-- Implement `napi_threadsafe_function` with bounded queues, acquire/release
+- [x] Implement `napi_threadsafe_function` with queue limits, acquire/release
   accounting, abort/close behavior, and delivery on the VM owner thread.
 - [x] Deliver async-work completion and deferred Promise settlement through the
   existing job/event infrastructure; do not create a second guest event loop.
 - [x] Specify shutdown behavior for async work: cancel queued work, join
   running workers, invoke completion callbacks for finished work, then unload
   addon libraries.
+- [x] For thread-safe functions, close new calls at host shutdown and offer
+  queued custom-callback data with a null environment for cleanup. If native
+  producers still hold a function, keep addon libraries and the ABI shim mapped
+  because this backend cannot join arbitrary addon-owned threads safely.
 
 ### 6. Add package and native binary support
 

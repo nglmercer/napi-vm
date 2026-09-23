@@ -5,15 +5,15 @@
 //! backend does not emulate Node, V8, NAN, or libuv.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, c_char, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -39,6 +39,8 @@ const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
 const NAPI_CANCELLED: i32 = 11;
+const NAPI_QUEUE_FULL: i32 = 15;
+const NAPI_CLOSING: i32 = 16;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
 const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
@@ -50,6 +52,11 @@ const ASYNC_WORK_QUEUED: u8 = 1;
 const ASYNC_WORK_RUNNING: u8 = 2;
 const ASYNC_WORK_FINISHED: u8 = 3;
 const ASYNC_WORK_CANCELLED: u8 = 4;
+const TSFN_RELEASE: i32 = 0;
+const TSFN_ABORT: i32 = 1;
+const TSFN_NONBLOCKING: i32 = 0;
+const TSFN_BLOCKING: i32 = 1;
+const MAX_NODE_API_VERSION: i32 = 4;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
 
 type NapiEnv = *mut c_void;
@@ -63,6 +70,9 @@ type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue
 type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
 type NapiAsyncExecuteCallback = unsafe extern "C" fn(NapiEnv, *mut c_void);
 type NapiAsyncCompleteCallback = unsafe extern "C" fn(NapiEnv, i32, *mut c_void);
+type NapiThreadsafeFunction = *mut c_void;
+type NapiThreadsafeFunctionCallJs =
+    unsafe extern "C" fn(NapiEnv, NapiValue, *mut c_void, *mut c_void);
 type NapiGuestOperation = fn(&mut Interpreter, Value, Vec<Value>) -> Result<Value, VmErr>;
 
 /// Filesystem and integrity policy for the experimental in-process backend.
@@ -124,6 +134,12 @@ impl Drop for RustNodeApiHost {
             let mut state = self.state.borrow_mut();
             let environments = state.environments.clone();
             for environment in &environments {
+                for function in environment.threadsafe_functions.borrow().values() {
+                    if let Ok(mut queue) = function.shared.state.lock() {
+                        queue.closing = true;
+                        function.shared.queue_space.notify_all();
+                    }
+                }
                 for work in environment.async_works.borrow().values() {
                     let _ = work.state.compare_exchange(
                         ASYNC_WORK_QUEUED,
@@ -167,11 +183,11 @@ impl Drop for RustNodeApiHost {
             for (work_id, work, status) in pending {
                 self.state.borrow_mut().callbacks.retain(|_, callback| {
                     !matches!(
-                        callback.callback,
+                        &callback.callback,
                         NativeCallback::AsyncComplete {
                             work_id: callback_work_id,
                             ..
-                        } if callback_work_id == work_id
+                        } if *callback_work_id == work_id
                     )
                 });
                 let Ok(Value::HostFunction { id, .. }) = create_native_async_complete_value(
@@ -190,6 +206,16 @@ impl Drop for RustNodeApiHost {
                     &mut reject_guest_callback,
                 );
             }
+        }
+
+        // Queue callbacks are reclaimed with a null env at shutdown. If a
+        // native producer has not released its TSFN yet, keep the addon and
+        // ABI shim mapped so its eventual closing/release calls stay valid.
+        let active_threadsafe_workers = shutdown_threadsafe_functions(&self.state, &environments);
+        if active_threadsafe_workers {
+            let libraries = std::mem::take(&mut self.state.borrow_mut().libraries);
+            std::mem::forget(libraries);
+            std::mem::forget(self._shim.clone());
         }
 
         // Keep HostState strongly reachable while finalizers run so ordinary
@@ -212,7 +238,8 @@ struct HostState {
     environments: Vec<Rc<NapiEnvironment>>,
     libraries: Vec<Library>,
     async_work_sender: SyncSender<AsyncWorkTaskMessage>,
-    async_work_completions: Receiver<AsyncWorkCompletion>,
+    runtime_notifications: Receiver<HostRuntimeNotification>,
+    runtime_notification_sender: Sender<HostRuntimeNotification>,
     async_workers: Vec<JoinHandle<()>>,
     // Keep the process-global ABI shim loaded until every addon library closes.
     _shim: Rc<NodeApiShim>,
@@ -226,13 +253,19 @@ struct NativeCallbackRecord {
     one_shot: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum NativeCallback {
     Function(NapiCallback),
     AsyncComplete {
         callback: NapiAsyncCompleteCallback,
         status: i32,
         work_id: usize,
+    },
+    ThreadsafeFunctionCall {
+        callback: Option<Value>,
+        call_js: Option<NapiThreadsafeFunctionCallJs>,
+        context: *mut c_void,
+        shared: Arc<NapiThreadsafeFunctionShared>,
     },
 }
 
@@ -243,6 +276,7 @@ struct NapiEnvironment {
     references: RefCell<HashMap<usize, NapiReference>>,
     deferreds: RefCell<HashMap<usize, NapiDeferredState>>,
     async_works: RefCell<HashMap<usize, NapiAsyncWorkState>>,
+    threadsafe_functions: RefCell<HashMap<usize, NapiThreadsafeFunctionState>>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
@@ -304,6 +338,44 @@ struct NapiAsyncWorkState {
     callback_run: bool,
 }
 
+struct NapiThreadsafeFunctionState {
+    shared: Arc<NapiThreadsafeFunctionShared>,
+    callback: Option<Value>,
+    call_js: Option<NapiThreadsafeFunctionCallJs>,
+    context: *mut c_void,
+    finalize_data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    referenced: bool,
+}
+
+struct NapiThreadsafeFunctionShared {
+    id: usize,
+    environment: usize,
+    context: usize,
+    max_queue_size: usize,
+    owner_thread: thread::ThreadId,
+    notifications: Sender<HostRuntimeNotification>,
+    state: Mutex<NapiThreadsafeFunctionQueue>,
+    queue_space: Condvar,
+}
+
+struct NapiThreadsafeFunctionQueue {
+    values: VecDeque<usize>,
+    thread_count: usize,
+    in_flight: usize,
+    closing: bool,
+    orphaned: bool,
+    finalized: bool,
+}
+
+static THREADSAFE_FUNCTIONS: OnceLock<Mutex<HashMap<usize, Arc<NapiThreadsafeFunctionShared>>>> =
+    OnceLock::new();
+
+enum HostRuntimeNotification {
+    AsyncWorkCompletion(AsyncWorkCompletion),
+    ThreadsafeFunction(usize),
+}
+
 struct AsyncWorkTask {
     work_id: usize,
     environment: usize,
@@ -324,11 +396,7 @@ struct AsyncWorkCompletion {
     status: i32,
 }
 
-type AsyncWorkPool = (
-    SyncSender<AsyncWorkTaskMessage>,
-    Receiver<AsyncWorkCompletion>,
-    Vec<JoinHandle<()>>,
-);
+type AsyncWorkPool = (SyncSender<AsyncWorkTaskMessage>, Vec<JoinHandle<()>>);
 
 struct NapiWrap {
     // Keeping the guest value alive prevents its identity pointer from being
@@ -687,6 +755,26 @@ struct NapiVmApiTable {
     delete_async_work: unsafe extern "C" fn(NapiEnv, NapiAsyncWork) -> i32,
     queue_async_work: unsafe extern "C" fn(NapiEnv, NapiAsyncWork) -> i32,
     cancel_async_work: unsafe extern "C" fn(NapiEnv, NapiAsyncWork) -> i32,
+    create_threadsafe_function: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        NapiValue,
+        NapiValue,
+        usize,
+        usize,
+        *mut c_void,
+        Option<NapiFinalize>,
+        *mut c_void,
+        Option<NapiThreadsafeFunctionCallJs>,
+        *mut NapiThreadsafeFunction,
+    ) -> i32,
+    get_threadsafe_function_context:
+        unsafe extern "C" fn(NapiThreadsafeFunction, *mut *mut c_void) -> i32,
+    call_threadsafe_function: unsafe extern "C" fn(NapiThreadsafeFunction, *mut c_void, i32) -> i32,
+    acquire_threadsafe_function: unsafe extern "C" fn(NapiThreadsafeFunction) -> i32,
+    release_threadsafe_function: unsafe extern "C" fn(NapiThreadsafeFunction, i32) -> i32,
+    ref_threadsafe_function: unsafe extern "C" fn(NapiEnv, NapiThreadsafeFunction) -> i32,
+    unref_threadsafe_function: unsafe extern "C" fn(NapiEnv, NapiThreadsafeFunction) -> i32,
 }
 
 #[repr(C)]
@@ -784,6 +872,13 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     delete_async_work: api_delete_async_work,
     queue_async_work: api_queue_async_work,
     cancel_async_work: api_cancel_async_work,
+    create_threadsafe_function: api_create_threadsafe_function,
+    get_threadsafe_function_context: api_get_threadsafe_function_context,
+    call_threadsafe_function: api_call_threadsafe_function,
+    acquire_threadsafe_function: api_acquire_threadsafe_function,
+    release_threadsafe_function: api_release_threadsafe_function,
+    ref_threadsafe_function: api_ref_threadsafe_function,
+    unref_threadsafe_function: api_unref_threadsafe_function,
 };
 
 fn with_ffi_status(callback: impl FnOnce() -> Result<(), i32>) -> i32 {
@@ -3067,6 +3162,256 @@ unsafe extern "C" fn api_cancel_async_work(env: NapiEnv, work: NapiAsyncWork) ->
     })
 }
 
+fn threadsafe_function_registry()
+-> &'static Mutex<HashMap<usize, Arc<NapiThreadsafeFunctionShared>>> {
+    THREADSAFE_FUNCTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn get_threadsafe_function(
+    function: NapiThreadsafeFunction,
+) -> Result<Arc<NapiThreadsafeFunctionShared>, i32> {
+    if function.is_null() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    threadsafe_function_registry()
+        .lock()
+        .map_err(|_| NAPI_GENERIC_FAILURE)?
+        .get(&(function as usize))
+        .cloned()
+        .ok_or(NAPI_CLOSING)
+}
+
+unsafe extern "C" fn api_create_threadsafe_function(
+    env: NapiEnv,
+    function: NapiValue,
+    async_resource: NapiValue,
+    async_resource_name: NapiValue,
+    max_queue_size: usize,
+    initial_thread_count: usize,
+    thread_finalize_data: *mut c_void,
+    thread_finalize_callback: Option<NapiFinalize>,
+    context: *mut c_void,
+    call_js: Option<NapiThreadsafeFunctionCallJs>,
+    result: *mut NapiThreadsafeFunction,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() || initial_thread_count == 0 {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        if !async_resource.is_null() {
+            let resource = environment.handles.borrow().get(async_resource)?;
+            if !is_napi_property_object(&resource) {
+                return Err(NAPI_OBJECT_EXPECTED);
+            }
+        }
+        let resource_name = environment.handles.borrow().get(async_resource_name)?;
+        if !matches!(resource_name, Value::String(_)) {
+            return Err(NAPI_STRING_EXPECTED);
+        }
+        let callback = if function.is_null() {
+            None
+        } else {
+            let callback = environment.handles.borrow().get(function)?;
+            if !is_napi_function(&callback) {
+                return Err(NAPI_FUNCTION_EXPECTED);
+            }
+            Some(callback)
+        };
+        if callback.is_none() && call_js.is_none() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let mut functions = environment.threadsafe_functions.borrow_mut();
+        if functions.len() >= MAX_LOCAL_HANDLES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let owner = environment.owner.upgrade().ok_or(NAPI_GENERIC_FAILURE)?;
+        let notifications = owner.borrow().runtime_notification_sender.clone();
+        let id = new_opaque_handle()? as usize;
+        let shared = Arc::new(NapiThreadsafeFunctionShared {
+            id,
+            environment: env as usize,
+            context: context as usize,
+            max_queue_size,
+            owner_thread: thread::current().id(),
+            notifications,
+            state: Mutex::new(NapiThreadsafeFunctionQueue {
+                values: VecDeque::new(),
+                thread_count: initial_thread_count,
+                in_flight: 0,
+                closing: false,
+                orphaned: false,
+                finalized: false,
+            }),
+            queue_space: Condvar::new(),
+        });
+        threadsafe_function_registry()
+            .lock()
+            .map_err(|_| NAPI_GENERIC_FAILURE)?
+            .insert(id, shared.clone());
+        functions.insert(
+            id,
+            NapiThreadsafeFunctionState {
+                shared: shared.clone(),
+                callback,
+                call_js,
+                context,
+                finalize_data: thread_finalize_data,
+                finalize: thread_finalize_callback,
+                referenced: true,
+            },
+        );
+        unsafe { result.write(id as NapiThreadsafeFunction) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_threadsafe_function_context(
+    function: NapiThreadsafeFunction,
+    result: *mut *mut c_void,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let shared = get_threadsafe_function(function)?;
+        let state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
+        if state.closing || state.finalized {
+            return Err(NAPI_CLOSING);
+        }
+        unsafe { result.write(shared.context as *mut c_void) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_call_threadsafe_function(
+    function: NapiThreadsafeFunction,
+    data: *mut c_void,
+    call_mode: i32,
+) -> i32 {
+    with_ffi_status(|| {
+        if !matches!(call_mode, TSFN_BLOCKING | TSFN_NONBLOCKING) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let shared = get_threadsafe_function(function)?;
+        let mut state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
+        loop {
+            if state.closing || state.thread_count == 0 || state.finalized {
+                return Err(NAPI_CLOSING);
+            }
+            if shared.max_queue_size == 0 || state.values.len() < shared.max_queue_size {
+                break;
+            }
+            if call_mode == TSFN_NONBLOCKING {
+                return Err(NAPI_QUEUE_FULL);
+            }
+            // A blocking call from the VM owner thread would prevent the
+            // event loop from draining the queue that this call is waiting on.
+            if thread::current().id() == shared.owner_thread {
+                return Err(NAPI_QUEUE_FULL);
+            }
+            state = shared
+                .queue_space
+                .wait(state)
+                .map_err(|_| NAPI_GENERIC_FAILURE)?;
+        }
+        state.values.push_back(data as usize);
+        if shared
+            .notifications
+            .send(HostRuntimeNotification::ThreadsafeFunction(shared.id))
+            .is_err()
+        {
+            state.values.pop_back();
+            shared.queue_space.notify_all();
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_acquire_threadsafe_function(function: NapiThreadsafeFunction) -> i32 {
+    with_ffi_status(|| {
+        let shared = get_threadsafe_function(function)?;
+        let mut state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
+        if state.closing || state.thread_count == 0 || state.finalized {
+            return Err(NAPI_CLOSING);
+        }
+        state.thread_count = state
+            .thread_count
+            .checked_add(1)
+            .ok_or(NAPI_GENERIC_FAILURE)?;
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_release_threadsafe_function(
+    function: NapiThreadsafeFunction,
+    release_mode: i32,
+) -> i32 {
+    with_ffi_status(|| {
+        if !matches!(release_mode, TSFN_RELEASE | TSFN_ABORT) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let shared = get_threadsafe_function(function)?;
+        let mut state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
+        if state.thread_count == 0 || state.finalized {
+            return Err(NAPI_CLOSING);
+        }
+        if release_mode == TSFN_ABORT {
+            state.closing = true;
+        }
+        state.thread_count -= 1;
+        if state.thread_count == 0 {
+            state.closing = true;
+        }
+        let remove_orphaned = state.orphaned && state.thread_count == 0;
+        shared.queue_space.notify_all();
+        let _ = shared
+            .notifications
+            .send(HostRuntimeNotification::ThreadsafeFunction(shared.id));
+        drop(state);
+        if remove_orphaned && let Ok(mut registry) = threadsafe_function_registry().lock() {
+            registry.remove(&shared.id);
+        }
+        Ok(())
+    })
+}
+
+fn set_threadsafe_function_referenced(
+    env: NapiEnv,
+    function: NapiThreadsafeFunction,
+    referenced: bool,
+) -> Result<(), i32> {
+    let environment = environment(env)?;
+    let shared = get_threadsafe_function(function)?;
+    if shared.environment != env as usize {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
+    if state.closing || state.finalized {
+        return Err(NAPI_CLOSING);
+    }
+    drop(state);
+    let mut functions = environment.threadsafe_functions.borrow_mut();
+    let function = functions.get_mut(&shared.id).ok_or(NAPI_CLOSING)?;
+    function.referenced = referenced;
+    Ok(())
+}
+
+unsafe extern "C" fn api_ref_threadsafe_function(
+    env: NapiEnv,
+    function: NapiThreadsafeFunction,
+) -> i32 {
+    with_ffi_status(|| set_threadsafe_function_referenced(env, function, true))
+}
+
+unsafe extern "C" fn api_unref_threadsafe_function(
+    env: NapiEnv,
+    function: NapiThreadsafeFunction,
+) -> i32 {
+    with_ffi_status(|| set_threadsafe_function_referenced(env, function, false))
+}
+
 fn settle_deferred(
     env: NapiEnv,
     deferred: NapiDeferred,
@@ -3986,15 +4331,16 @@ impl Drop for NodeApiShim {
     }
 }
 
-fn create_async_work_pool() -> Result<AsyncWorkPool, VmErr> {
+fn create_async_work_pool(
+    runtime_notification_sender: Sender<HostRuntimeNotification>,
+) -> Result<AsyncWorkPool, VmErr> {
     let (task_sender, task_receiver) = mpsc::sync_channel(ASYNC_WORK_QUEUE_CAPACITY);
     let task_receiver = Arc::new(Mutex::new(task_receiver));
-    let (completion_sender, completion_receiver) = mpsc::channel();
     let mut workers: Vec<JoinHandle<()>> = Vec::with_capacity(ASYNC_WORKER_COUNT);
 
     for worker_id in 0..ASYNC_WORKER_COUNT {
         let task_receiver = task_receiver.clone();
-        let completion_sender = completion_sender.clone();
+        let runtime_notification_sender = runtime_notification_sender.clone();
         let worker = thread::Builder::new()
             .name(format!("napi-vm-addon-{worker_id}"))
             .spawn(move || {
@@ -4032,10 +4378,12 @@ fn create_async_work_pool() -> Result<AsyncWorkPool, VmErr> {
                             task.state.store(ASYNC_WORK_FINISHED, Ordering::Release);
                             task.completion_status
                                 .store(status as u8, Ordering::Release);
-                            let _ = completion_sender.send(AsyncWorkCompletion {
-                                work_id: task.work_id,
-                                status,
-                            });
+                            let _ = runtime_notification_sender.send(
+                                HostRuntimeNotification::AsyncWorkCompletion(AsyncWorkCompletion {
+                                    work_id: task.work_id,
+                                    status,
+                                }),
+                            );
                         }
                         Ok(AsyncWorkTaskMessage::Stop) | Err(_) => return,
                     }
@@ -4053,13 +4401,15 @@ fn create_async_work_pool() -> Result<AsyncWorkPool, VmErr> {
         workers.push(worker);
     }
 
-    Ok((task_sender, completion_receiver, workers))
+    Ok((task_sender, workers))
 }
 
 impl RustNodeApiHost {
     fn new(global: Env) -> Result<Self, VmErr> {
         let shim = Rc::new(NodeApiShim::load()?);
-        let (async_work_sender, async_work_completions, async_workers) = create_async_work_pool()?;
+        let (runtime_notification_sender, runtime_notifications) = mpsc::channel();
+        let (async_work_sender, async_workers) =
+            create_async_work_pool(runtime_notification_sender.clone())?;
         Ok(Self {
             state: Rc::new(RefCell::new(HostState {
                 global,
@@ -4068,7 +4418,8 @@ impl RustNodeApiHost {
                 environments: Vec::new(),
                 libraries: Vec::new(),
                 async_work_sender,
-                async_work_completions,
+                runtime_notifications,
+                runtime_notification_sender,
                 async_workers,
                 _shim: shim.clone(),
             })),
@@ -4100,6 +4451,7 @@ impl RustNodeApiHost {
             .borrow_mut()
             .open_scope()
             .map_err(|status| napi_error("opening callback handle scope", status))?;
+        let mut threadsafe_call = None;
         let result = (|| {
             let callback_handler_pointer: *mut &mut (
                      dyn FnMut(HostCallback) -> Result<Value, VmErr> + '_
@@ -4168,6 +4520,41 @@ impl RustNodeApiHost {
                     }
                     (std::ptr::null_mut(), Some(work_id))
                 }
+                NativeCallback::ThreadsafeFunctionCall {
+                    callback: js_callback,
+                    call_js,
+                    context,
+                    shared,
+                } => {
+                    threadsafe_call = Some(shared);
+                    if let Some(call_js) = call_js {
+                        let callback_handle = match js_callback {
+                            Some(js_callback) => callback
+                                .env
+                                .handles
+                                .borrow_mut()
+                                .create(js_callback)
+                                .map_err(|status| {
+                                    napi_error("creating thread-safe callback handle", status)
+                                })?,
+                            None => std::ptr::null_mut(),
+                        };
+                        unsafe {
+                            call_js(callback.env.raw(), callback_handle, context, callback.data);
+                        }
+                    } else if let Some(js_callback) = js_callback {
+                        let _ = call_guest_callback(
+                            &callback.env,
+                            HostCallback {
+                                callback: js_callback,
+                                this_value: Value::Undefined,
+                                args: Vec::new(),
+                                kind: HostCallbackKind::Call,
+                            },
+                        );
+                    }
+                    (std::ptr::null_mut(), None)
+                }
             };
             drop(dispatcher_scope);
             if let Some(work_id) = completion_work_id
@@ -4194,11 +4581,246 @@ impl RustNodeApiHost {
             .borrow_mut()
             .close_scope(scope)
             .map_err(|status| napi_error("closing callback handle scope", status));
-        match (result, close_result) {
-            (Ok(value), Ok(())) => Ok(value),
-            (Err(error), _) | (_, Err(error)) => Err(error),
+        let threadsafe_result = if let Some(shared) = threadsafe_call {
+            finish_threadsafe_call(&callback.env, &shared)
+        } else {
+            Ok(())
+        };
+        match (result, close_result, threadsafe_result) {
+            (Ok(value), Ok(()), Ok(())) => Ok(value),
+            (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => Err(error),
         }
     }
+}
+
+fn finish_threadsafe_call(
+    environment: &Rc<NapiEnvironment>,
+    shared: &Arc<NapiThreadsafeFunctionShared>,
+) -> Result<(), VmErr> {
+    {
+        let mut state = shared
+            .state
+            .lock()
+            .map_err(|_| VmErr::Msg("Node-API thread-safe function state is poisoned".into()))?;
+        state.in_flight = state.in_flight.saturating_sub(1);
+        shared.queue_space.notify_all();
+    }
+    finalize_threadsafe_function(environment, shared)
+}
+
+fn finalize_threadsafe_function(
+    environment: &Rc<NapiEnvironment>,
+    shared: &Arc<NapiThreadsafeFunctionShared>,
+) -> Result<(), VmErr> {
+    let ready = {
+        let mut state = shared
+            .state
+            .lock()
+            .map_err(|_| VmErr::Msg("Node-API thread-safe function state is poisoned".into()))?;
+        if state.finalized
+            || state.thread_count != 0
+            || !state.values.is_empty()
+            || state.in_flight != 0
+        {
+            false
+        } else {
+            state.finalized = true;
+            true
+        }
+    };
+    if !ready {
+        return Ok(());
+    }
+
+    let function = environment
+        .threadsafe_functions
+        .borrow_mut()
+        .remove(&shared.id);
+    if let Ok(mut registry) = threadsafe_function_registry().lock() {
+        registry.remove(&shared.id);
+    }
+    if let Some(function) = function
+        && let Some(finalize) = function.finalize
+    {
+        let scope = environment
+            .handles
+            .borrow_mut()
+            .open_scope()
+            .map_err(|status| napi_error("opening thread-safe finalizer scope", status))?;
+        unsafe {
+            finalize(environment.raw(), function.finalize_data, function.context);
+        }
+        environment.pending_exception.borrow_mut().take();
+        environment
+            .handles
+            .borrow_mut()
+            .close_scope(scope)
+            .map_err(|status| napi_error("closing thread-safe finalizer scope", status))?;
+    }
+    Ok(())
+}
+
+fn shutdown_threadsafe_functions(
+    host_state: &Rc<RefCell<HostState>>,
+    environments: &[Rc<NapiEnvironment>],
+) -> bool {
+    let mut has_active_native_threads = false;
+    for environment in environments {
+        let functions = environment
+            .threadsafe_functions
+            .borrow()
+            .iter()
+            .map(|(id, function)| {
+                (
+                    *id,
+                    function.shared.clone(),
+                    function.call_js,
+                    function.context,
+                )
+            })
+            .collect::<Vec<_>>();
+        for (_, shared, call_js, context) in functions {
+            let (queued, active) = match shared.state.lock() {
+                Ok(mut queue) => {
+                    queue.closing = true;
+                    queue.orphaned = true;
+                    let queued = queue.values.drain(..).collect::<Vec<_>>();
+                    let active = queue.thread_count != 0;
+                    queue.in_flight = 0;
+                    shared.queue_space.notify_all();
+                    (queued, active)
+                }
+                Err(_) => (Vec::new(), true),
+            };
+
+            let callbacks = {
+                let mut state = host_state.borrow_mut();
+                let ids = state
+                    .callbacks
+                    .iter()
+                    .filter_map(|(callback_id, record)| {
+                        matches!(
+                            &record.callback,
+                            NativeCallback::ThreadsafeFunctionCall {
+                                shared: record_shared,
+                                ..
+                            } if Arc::ptr_eq(record_shared, &shared)
+                        )
+                        .then_some(*callback_id)
+                    })
+                    .collect::<Vec<_>>();
+                ids.into_iter()
+                    .filter_map(|callback_id| state.callbacks.remove(&callback_id))
+                    .collect::<Vec<_>>()
+            };
+
+            if let Some(call_js) = call_js {
+                for data in queued {
+                    unsafe {
+                        call_js(
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                            context,
+                            data as *mut c_void,
+                        );
+                    }
+                }
+                for callback in &callbacks {
+                    unsafe {
+                        call_js(
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                            context,
+                            callback.data,
+                        );
+                    }
+                }
+            }
+            if active {
+                has_active_native_threads = true;
+            } else if let Err(error) = finalize_threadsafe_function(environment, &shared) {
+                eprintln!("failed to finalize Node-API thread-safe function: {error}");
+            }
+        }
+        environment.threadsafe_functions.borrow_mut().clear();
+    }
+    has_active_native_threads
+}
+
+fn take_threadsafe_function_queue(
+    shared: &Arc<NapiThreadsafeFunctionShared>,
+) -> Result<Vec<usize>, i32> {
+    let mut state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
+    let values = state.values.drain(..).collect::<Vec<_>>();
+    state.in_flight = state
+        .in_flight
+        .checked_add(values.len())
+        .ok_or(NAPI_GENERIC_FAILURE)?;
+    shared.queue_space.notify_all();
+    Ok(values)
+}
+
+fn thread_safe_function_events(function_id: usize) -> Result<Vec<HostEvent>, VmErr> {
+    let Some(shared) = threadsafe_function_registry()
+        .lock()
+        .map_err(|_| VmErr::Msg("Node-API thread-safe function registry is poisoned".into()))?
+        .get(&function_id)
+        .cloned()
+    else {
+        return Ok(Vec::new());
+    };
+    let environment = environment(shared.environment as NapiEnv)
+        .map_err(|status| napi_error("reading thread-safe function environment", status))?;
+    let values = take_threadsafe_function_queue(&shared)
+        .map_err(|status| napi_error("draining thread-safe function queue", status))?;
+    let (js_callback, call_js, context) = environment
+        .threadsafe_functions
+        .borrow()
+        .get(&function_id)
+        .map(|function| {
+            (
+                function.callback.clone(),
+                function.call_js,
+                function.context,
+            )
+        })
+        .ok_or_else(|| VmErr::Msg("Node-API thread-safe function was finalized early".into()))?;
+
+    let mut events = Vec::with_capacity(values.len());
+    let value_count = values.len();
+    for data in values {
+        let callback = match create_native_callback_value_with_kind(
+            &environment,
+            "napi_threadsafe_function_call",
+            NativeCallback::ThreadsafeFunctionCall {
+                callback: js_callback.clone(),
+                call_js,
+                context,
+                shared: shared.clone(),
+            },
+            data as *mut c_void,
+            true,
+        ) {
+            Ok(callback) => callback,
+            Err(status) => {
+                let mut state = shared.state.lock().map_err(|_| {
+                    VmErr::Msg("Node-API thread-safe function state is poisoned".into())
+                })?;
+                state.in_flight = state.in_flight.saturating_sub(value_count - events.len());
+                return Err(napi_error("creating thread-safe callback", status));
+            }
+        };
+        events.push(HostEvent::Callback(HostCallback {
+            callback,
+            this_value: Value::Undefined,
+            args: Vec::new(),
+            kind: HostCallbackKind::Call,
+        }));
+    }
+    if events.is_empty() {
+        finalize_threadsafe_function(&environment, &shared)?;
+    }
+    Ok(events)
 }
 
 impl NativeAddonLoader for RustNodeApiHost {
@@ -4223,9 +4845,9 @@ impl NativeAddonLoader for RustNodeApiHost {
                 })?
         };
         let version = unsafe { api_version() };
-        if version != 1 {
+        if !(1..=MAX_NODE_API_VERSION).contains(&version) {
             return Err(VmErr::Msg(format!(
-                "Node-API addon {filename} requests version {version}; this host currently supports Node-API version 1 only"
+                "Node-API addon {filename} requests version {version}; this host supports Node-API versions 1 through {MAX_NODE_API_VERSION}"
             )));
         }
         let initialize: unsafe extern "C" fn(NapiEnv, NapiValue) -> NapiValue = unsafe {
@@ -4244,6 +4866,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             references: RefCell::new(HashMap::new()),
             deferreds: RefCell::new(HashMap::new()),
             async_works: RefCell::new(HashMap::new()),
+            threadsafe_functions: RefCell::new(HashMap::new()),
             wraps: RefCell::new(HashMap::new()),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
@@ -4351,20 +4974,27 @@ impl HostBridge for RustNodeApiHost {
     }
 
     fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
-        let completions = {
+        let notifications = {
             let state = self.state.borrow();
             let first = if timeout.is_zero() {
-                state.async_work_completions.try_recv().ok()
+                state.runtime_notifications.try_recv().ok()
             } else {
-                state.async_work_completions.recv_timeout(timeout).ok()
+                state.runtime_notifications.recv_timeout(timeout).ok()
             };
             first
                 .into_iter()
-                .chain(state.async_work_completions.try_iter())
+                .chain(state.runtime_notifications.try_iter())
                 .collect::<Vec<_>>()
         };
-        let mut events = Vec::with_capacity(completions.len());
-        for completion in completions {
+        let mut events = Vec::with_capacity(notifications.len());
+        for notification in notifications {
+            let HostRuntimeNotification::AsyncWorkCompletion(completion) = notification else {
+                let HostRuntimeNotification::ThreadsafeFunction(function_id) = notification else {
+                    unreachable!();
+                };
+                events.extend(thread_safe_function_events(function_id)?);
+                continue;
+            };
             let work = {
                 let state = self.state.borrow();
                 state.environments.iter().find_map(|environment| {
@@ -4418,6 +5048,8 @@ fn napi_error(action: &str, status: i32) -> VmErr {
         NAPI_ARRAYBUFFER_EXPECTED => "ArrayBuffer expected",
         NAPI_STRING_EXPECTED => "string expected",
         NAPI_BOOLEAN_EXPECTED => "boolean expected",
+        NAPI_QUEUE_FULL => "thread-safe function queue is full",
+        NAPI_CLOSING => "thread-safe function is closing",
         NAPI_PENDING_EXCEPTION => "a JavaScript exception is already pending",
         _ => "generic Node-API failure",
     };
@@ -4636,10 +5268,14 @@ mod tests {
         fs::write(
             &source,
             r#"
-#define NAPI_VERSION 1
+#define _POSIX_C_SOURCE 200809L
+#define NAPI_VERSION 4
 #include <node_api.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 static napi_ref persistent_values;
 static napi_ref removable_object;
@@ -4650,7 +5286,23 @@ static int finalizer_create_function_status = -1;
 static int descriptor_setter_value = 5;
 static int class_constructor_offset = 1;
 static int counter_static_offset = 8;
+static int threadsafe_finalizer_calls;
+static int threadsafe_worker_context_ok;
+static int threadsafe_worker_call_status = -1;
+static int threadsafe_worker_blocking_status = -1;
+static int threadsafe_queue_first_status = -1;
+static int threadsafe_queue_full_status = -1;
+static int threadsafe_abort_call_status = -1;
+static atomic_int threadsafe_abort_ready;
+static char threadsafe_context_marker;
+static char threadsafe_finalize_marker;
 static napi_deferred pending_promise_deferred;
+static char* copy_text(const char* text) {
+  size_t length = strlen(text) + 1;
+  char* copy = (char*)malloc(length);
+  if (copy != NULL) memcpy(copy, text, length);
+  return copy;
+}
 typedef struct async_work_context {
   napi_deferred deferred;
   napi_async_work work;
@@ -4867,6 +5519,179 @@ static napi_value run_async_work(napi_env env, napi_callback_info info) {
     return NULL;
   }
   return promise;
+}
+
+typedef struct threadsafe_work {
+  napi_threadsafe_function function;
+} threadsafe_work;
+
+static void threadsafe_finalize(napi_env env, void* data, void* hint) {
+  (void)env;
+  if (data == &threadsafe_finalize_marker && hint == &threadsafe_context_marker) {
+    threadsafe_finalizer_calls++;
+  }
+}
+
+static void threadsafe_call_js(napi_env env, napi_value callback,
+                               void* context, void* data) {
+  if (env != NULL && callback != NULL &&
+      context == &threadsafe_context_marker && data != NULL) {
+    napi_value receiver, argument, ignored;
+    if (napi_get_undefined(env, &receiver) == napi_ok &&
+        napi_create_string_utf8(env, (const char*)data, NAPI_AUTO_LENGTH,
+                                &argument) == napi_ok) {
+      (void)napi_call_function(env, receiver, callback, 1, &argument, &ignored);
+    }
+  }
+  free(data);
+}
+
+static void* threadsafe_worker(void* data) {
+  threadsafe_work* work = (threadsafe_work*)data;
+  void* context = NULL;
+  threadsafe_worker_context_ok =
+      napi_get_threadsafe_function_context(work->function, &context) == napi_ok &&
+      context == &threadsafe_context_marker;
+  char* message = copy_text("threadsafe-value");
+  threadsafe_worker_call_status = message != NULL
+      ? napi_call_threadsafe_function(work->function, message,
+                                      napi_tsfn_nonblocking)
+      : napi_generic_failure;
+  if (threadsafe_worker_call_status != napi_ok) free(message);
+  char* second = copy_text("threadsafe-second");
+  threadsafe_worker_blocking_status = second != NULL
+      ? napi_call_threadsafe_function(work->function, second,
+                                      napi_tsfn_blocking)
+      : napi_generic_failure;
+  if (threadsafe_worker_blocking_status != napi_ok) free(second);
+  (void)napi_release_threadsafe_function(work->function, napi_tsfn_release);
+  free(work);
+  return NULL;
+}
+
+static void* threadsafe_aborted_worker(void* data) {
+  threadsafe_work* work = (threadsafe_work*)data;
+  while (!atomic_load_explicit(&threadsafe_abort_ready, memory_order_acquire)) { }
+  threadsafe_abort_call_status =
+      napi_call_threadsafe_function(work->function, NULL, napi_tsfn_nonblocking);
+  (void)napi_release_threadsafe_function(work->function, napi_tsfn_release);
+  return NULL;
+}
+
+static napi_value run_threadsafe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value callback, resource_name, result;
+  napi_threadsafe_function function;
+  threadsafe_work* work = (threadsafe_work*)calloc(1, sizeof(threadsafe_work));
+  pthread_t thread;
+  if (work == NULL ||
+      napi_get_cb_info(env, info, &argc, &callback, NULL, NULL) != napi_ok ||
+      argc != 1 ||
+      napi_create_string_utf8(env, "napi-vm-threadsafe-worker", NAPI_AUTO_LENGTH,
+                              &resource_name) != napi_ok ||
+      napi_get_undefined(env, &result) != napi_ok ||
+      napi_create_threadsafe_function(env, callback, NULL, resource_name, 1, 1,
+                                      &threadsafe_finalize_marker,
+                                      threadsafe_finalize,
+                                      &threadsafe_context_marker,
+                                      threadsafe_call_js,
+                                      &work->function) != napi_ok ||
+      napi_unref_threadsafe_function(env, work->function) != napi_ok ||
+      napi_ref_threadsafe_function(env, work->function) != napi_ok ||
+                                      napi_acquire_threadsafe_function(work->function) != napi_ok) {
+    free(work);
+    return NULL;
+  }
+  function = work->function;
+  if (pthread_create(&thread, NULL, threadsafe_worker, work) != 0) {
+    (void)napi_release_threadsafe_function(work->function, napi_tsfn_abort);
+    (void)napi_release_threadsafe_function(work->function, napi_tsfn_release);
+    free(work);
+    return NULL;
+  }
+  (void)pthread_detach(thread);
+  (void)napi_release_threadsafe_function(function, napi_tsfn_release);
+  return result;
+}
+
+static napi_value probe_threadsafe_queue(napi_env env,
+                                         napi_callback_info info) {
+  size_t argc = 1;
+  napi_value callback, resource_name, result;
+  napi_threadsafe_function function;
+  char* first = copy_text("queue-first");
+  char* second = copy_text("queue-second");
+  if (napi_get_cb_info(env, info, &argc, &callback, NULL, NULL) != napi_ok ||
+      argc != 1 || first == NULL || second == NULL ||
+      napi_create_string_utf8(env, "napi-vm-threadsafe-queue", NAPI_AUTO_LENGTH,
+                              &resource_name) != napi_ok ||
+      napi_create_threadsafe_function(env, callback, NULL, resource_name, 1, 1,
+                                      NULL, NULL, &threadsafe_context_marker,
+                                      threadsafe_call_js, &function) != napi_ok) {
+    free(first);
+    free(second);
+    return NULL;
+  }
+  threadsafe_queue_first_status =
+      napi_call_threadsafe_function(function, first, napi_tsfn_nonblocking);
+  if (threadsafe_queue_first_status != napi_ok) free(first);
+  threadsafe_queue_full_status =
+      napi_call_threadsafe_function(function, second, napi_tsfn_nonblocking);
+  if (threadsafe_queue_full_status != napi_ok) free(second);
+  if (napi_release_threadsafe_function(function, napi_tsfn_release) != napi_ok ||
+      napi_create_int32(env, threadsafe_queue_full_status, &result) != napi_ok) {
+    return NULL;
+  }
+  return result;
+}
+
+static napi_value probe_threadsafe_abort(napi_env env,
+                                         napi_callback_info info) {
+  napi_value resource_name, result;
+  threadsafe_work work = {0};
+  pthread_t thread;
+  (void)info;
+  if (napi_create_string_utf8(env, "napi-vm-threadsafe-abort", NAPI_AUTO_LENGTH,
+                              &resource_name) != napi_ok ||
+      napi_create_threadsafe_function(env, NULL, NULL, resource_name, 1, 2,
+                                      &threadsafe_finalize_marker,
+                                      threadsafe_finalize,
+                                      &threadsafe_context_marker,
+                                      threadsafe_call_js, &work.function) != napi_ok) {
+    return NULL;
+  }
+  atomic_store_explicit(&threadsafe_abort_ready, 0, memory_order_release);
+  if (pthread_create(&thread, NULL, threadsafe_aborted_worker, &work) != 0) {
+    (void)napi_release_threadsafe_function(work.function, napi_tsfn_abort);
+    return NULL;
+  }
+  if (napi_release_threadsafe_function(work.function, napi_tsfn_abort) != napi_ok) {
+    atomic_store_explicit(&threadsafe_abort_ready, 1, memory_order_release);
+    (void)pthread_join(thread, NULL);
+    return NULL;
+  }
+  atomic_store_explicit(&threadsafe_abort_ready, 1, memory_order_release);
+  (void)pthread_join(thread, NULL);
+  if (napi_create_int32(env, threadsafe_abort_call_status, &result) != napi_ok) {
+    return NULL;
+  }
+  return result;
+}
+
+int napi_vm_test_threadsafe_finalizer_calls(void) {
+  return threadsafe_finalizer_calls;
+}
+
+int napi_vm_test_threadsafe_worker_context_ok(void) {
+  return threadsafe_worker_context_ok;
+}
+
+int napi_vm_test_threadsafe_worker_call_status(void) {
+  return threadsafe_worker_call_status;
+}
+
+int napi_vm_test_threadsafe_worker_blocking_status(void) {
+  return threadsafe_worker_blocking_status;
 }
 
 static napi_value rejected_promise(napi_env env, napi_callback_info info) {
@@ -5401,6 +6226,12 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "resolvedPromise", function) != napi_ok ||
       napi_create_function(env, "runAsync", NAPI_AUTO_LENGTH, run_async_work, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "runAsync", function) != napi_ok ||
+      napi_create_function(env, "runThreadsafe", NAPI_AUTO_LENGTH, run_threadsafe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "runThreadsafe", function) != napi_ok ||
+      napi_create_function(env, "probeThreadsafeQueue", NAPI_AUTO_LENGTH, probe_threadsafe_queue, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "probeThreadsafeQueue", function) != napi_ok ||
+      napi_create_function(env, "probeThreadsafeAbort", NAPI_AUTO_LENGTH, probe_threadsafe_abort, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "probeThreadsafeAbort", function) != napi_ok ||
       napi_create_function(env, "rejectedPromise", NAPI_AUTO_LENGTH, rejected_promise, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "rejectedPromise", function) != napi_ok ||
       napi_create_function(env, "pendingPromise", NAPI_AUTO_LENGTH, pending_promise, NULL, &function) != napi_ok ||
@@ -5426,7 +6257,8 @@ NAPI_MODULE_INIT() {
                 "-O2",
                 "-fPIC",
                 "-shared",
-                "-DNAPI_VERSION=1",
+                "-pthread",
+                "-DNAPI_VERSION=4",
                 "-I",
             ])
             .arg(include)
@@ -5676,6 +6508,26 @@ module.exports = {
                 .get(b"napi_vm_test_finalizer_create_function_status\0")
                 .unwrap()
         };
+        let threadsafe_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_threadsafe_finalizer_calls\0")
+                .unwrap()
+        };
+        let threadsafe_worker_context_ok: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_threadsafe_worker_context_ok\0")
+                .unwrap()
+        };
+        let threadsafe_worker_call_status: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_threadsafe_worker_call_status\0")
+                .unwrap()
+        };
+        let threadsafe_worker_blocking_status: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_threadsafe_worker_blocking_status\0")
+                .unwrap()
+        };
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
@@ -5774,6 +6626,94 @@ module.exports = {
                 .unwrap(),
             Value::String(ref value) if value == "thenable failed"
         ));
+        assert_eq!(unsafe { threadsafe_finalizer_calls() }, 0);
+        let threadsafe_statuses = interpreter
+            .eval_source(
+                "globalThis.threadsafeValues = []; const addon = require('./fixture.node'); addon.runThreadsafe(value => { threadsafeValues.push(value); if (value === 'threadsafe-value') queueMicrotask(() => threadsafeValues.push('worker-microtask')); }); const queueFullStatus = addon.probeThreadsafeQueue(value => threadsafeValues.push(value)); const abortStatus = addon.probeThreadsafeAbort(); globalThis.threadsafeStatuses = {queueFullStatus, abortStatus}; threadsafeStatuses;",
+            )
+            .unwrap();
+        assert!(matches!(
+            threadsafe_statuses.get_prop("queueFullStatus"),
+            Some(Value::Number(15.0))
+        ));
+        assert!(matches!(
+            threadsafe_statuses.get_prop("abortStatus"),
+            Some(Value::Number(16.0))
+        ));
+        assert_eq!(unsafe { threadsafe_worker_context_ok() }, 1);
+        assert_eq!(unsafe { threadsafe_worker_call_status() }, 0);
+        for _ in 0..10 {
+            let _ = interpreter
+                .run_event_loop_once(Duration::from_millis(250))
+                .unwrap();
+            let received = interpreter
+                .eval_source("threadsafeValues.join(',');")
+                .unwrap();
+            if matches!(received, Value::String(ref value) if value == "threadsafe-value,worker-microtask,queue-first,threadsafe-second")
+                && unsafe { threadsafe_finalizer_calls() } == 2
+            {
+                break;
+            }
+        }
+        let received = interpreter
+            .eval_source("threadsafeValues.join(',');")
+            .unwrap();
+        assert!(
+            matches!(received, Value::String(ref value) if value == "threadsafe-value,worker-microtask,queue-first,threadsafe-second"),
+            "unexpected thread-safe callback events: {received:?}; finalizers={}; worker_status={}; blocking_status={}",
+            unsafe { threadsafe_finalizer_calls() },
+            unsafe { threadsafe_worker_call_status() },
+            unsafe { threadsafe_worker_blocking_status() }
+        );
+        assert_eq!(unsafe { threadsafe_finalizer_calls() }, 2);
+        assert_eq!(unsafe { threadsafe_worker_blocking_status() }, 0);
+        let vm_threadsafe_json = interpreter
+            .eval_source(
+                "JSON.stringify({events: threadsafeValues.slice().sort(), queueStatus: threadsafeStatuses.queueFullStatus, abortStatus: threadsafeStatuses.abortStatus});",
+            )
+            .unwrap();
+        let Value::String(ref vm_threadsafe_json) = vm_threadsafe_json else {
+            panic!("thread-safe Node-API fixture did not return JSON");
+        };
+        let vm_threadsafe_result: serde_json::Value =
+            serde_json::from_str(vm_threadsafe_json).expect("VM thread-safe result is valid JSON");
+        let threadsafe_runner = "(async function() { const addon = require('./fixture.node'); const events = []; let finish; const done = new Promise(resolve => { finish = resolve; }); const callback = value => { events.push(value); if (value === 'threadsafe-value') queueMicrotask(() => events.push('worker-microtask')); if (events.includes('threadsafe-value') && events.includes('threadsafe-second') && events.includes('queue-first')) finish(); }; addon.runThreadsafe(callback); const queueStatus = addon.probeThreadsafeQueue(callback); const abortStatus = addon.probeThreadsafeAbort(); const timeout = setTimeout(() => { console.error('thread-safe function timed out'); process.exitCode = 1; }, 3000); timeout.unref?.(); await done; clearTimeout(timeout); process.stdout.write(JSON.stringify({events: events.sort(), queueStatus, abortStatus})); })().catch(error => { console.error(error); process.exitCode = 1; });";
+
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args(["-e", threadsafe_runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node thread-safe reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_result: serde_json::Value = serde_json::from_slice(&reference.stdout)
+                .expect("Node thread-safe result is valid JSON");
+            assert_eq!(vm_threadsafe_result, node_result);
+        }
+
+        if let Ok(bun_version) = Command::new("bun").arg("--version").output()
+            && bun_version.status.success()
+        {
+            let reference = Command::new("bun")
+                .current_dir(&root)
+                .args(["-e", threadsafe_runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Bun thread-safe reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let bun_result: serde_json::Value = serde_json::from_slice(&reference.stdout)
+                .expect("Bun thread-safe result is valid JSON");
+            assert_eq!(vm_threadsafe_result, bun_result);
+        }
         assert!(matches!(result.get_prop("same"), Some(Value::Bool(true))));
         assert!(matches!(result.get_prop("global"), Some(Value::Bool(true))));
         assert!(matches!(
