@@ -608,7 +608,7 @@ impl Interpreter {
                     bridge.call_host_async_with_this(*id, this_val, args)
                 } else {
                     bridge.call_host_with_callback_handler(*id, this_val, args, &mut |callback| {
-                        self.call_this(&callback.callback, callback.this_value, callback.args)
+                        self.run_host_callback(callback)
                     })
                 }
             }
@@ -654,6 +654,20 @@ impl Interpreter {
                     _ => "unknown",
                 };
                 vm_err(format!("TypeError: {} is not a function", type_name))
+            }
+        }
+    }
+
+    pub(crate) fn run_host_callback(
+        &mut self,
+        callback: crate::host::HostCallback,
+    ) -> Result<Value, VmErr> {
+        match callback.kind {
+            crate::host::HostCallbackKind::Call => {
+                self.call_this(&callback.callback, callback.this_value, callback.args)
+            }
+            crate::host::HostCallbackKind::Construct => {
+                self.ctor(&callback.callback, callback.args)
             }
         }
     }
@@ -728,7 +742,7 @@ impl Interpreter {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;
                 bridge.construct_host_with_callback_handler(*id, args, &mut |callback| {
-                    self.call_this(&callback.callback, callback.this_value, callback.args)
+                    self.run_host_callback(callback)
                 })
             }
             Value::Class(c) => {

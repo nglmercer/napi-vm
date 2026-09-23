@@ -6,10 +6,20 @@ use std::time::Duration;
 
 /// A guest callback requested by the host runtime, ready for an event-loop
 /// checkpoint on the interpreter thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HostCallbackKind {
+    /// Invoke the callback with `this_value` and `args`.
+    #[default]
+    Call,
+    /// Construct the callback using `args`, ignoring `this_value`.
+    Construct,
+}
+
 pub struct HostCallback {
     pub callback: Value,
     pub this_value: Value,
     pub args: Vec<Value>,
+    pub kind: HostCallbackKind,
 }
 
 /// An event delivered from the host into the VM's shared event loop.

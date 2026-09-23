@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value as JsonValue, json};
 
 use crate::error::VmErr;
-use crate::host::{HostBridge, HostCallback, HostEvent};
+use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::NativeAddonLoader;
 use crate::value::{
     MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, PropAttrs,
@@ -191,6 +191,39 @@ function addonWorkerMain() {
     if(value&&(guestCallbacks&&guestCallbacks.has(value)))return {t:'guestCallbackRef',v:guestCallbacks.get(value)};
     return encode(value,receiver,depth,graph,guestRefs,guestCallbacks,true);
   }
+  function makeGuestCallback(value,graph,isClass=false){
+    const callbackGraph=graph,callbackId=isClass?value.callbackId:value.v;
+    const callback=function(...args){
+      const construct=new.target!==undefined;
+      if(isClass&&!construct)throw new TypeError('Class constructor cannot be invoked without new');
+      if(!isClass&&construct&&value.constructable!==true)throw new TypeError('guest callback is not a constructor');
+      if(construct&&dispatchDepth===0)throw new TypeError('guest constructors must be invoked during a native addon call');
+      const kind=construct?'construct':'call',graph=newGraph();
+      const guestMutations=callbackGraph.mutationBefore?collectGuestMutations(callbackGraph,callbackGraph.mutationBefore,callbackGraph.guestRefs,callbackGraph.guestCallbacks,graph):[];
+      const payload={callbackId,kind,thisValue:construct?{t:'undefined'}:encodeGuestValue(this,undefined,0,graph,callbackGraph.guestRefs,callbackGraph.guestCallbacks),args:args.map(v=>encodeGuestValue(v,undefined,0,graph,callbackGraph.guestRefs,callbackGraph.guestCallbacks)),guestMutations};
+      if(dispatchDepth===0){event({event:'guestCallback',...payload});return undefined;}
+      const callId=nextCallbackCall++,shared=new SharedArrayBuffer(MAX_SYNC_CALLBACK_RESULT_BYTES+8),words=new Int32Array(shared,0,2);
+      event({event:'syncGuestCallback',callId,shared,...payload});
+      const status=Atomics.wait(words,0,0,60000);if(status==='timed-out')throw new Error('timed out waiting for synchronous guest callback');
+      const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
+      const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
+      applyGuestSnapshots(response.snapshots||[],callbackGraph);
+      if(!response.ok)throw decode(response.value,0,callbackGraph);return decode(response.value,0,callbackGraph);
+    };
+    guestCallbackIds.set(callback,callbackId);
+    if(callbackGraph.guestCallbacks)callbackGraph.guestCallbacks.set(callback,callbackId);
+    if(isClass){
+      setGraphNode(callbackGraph,value.id,callback);
+      Object.defineProperty(callback,'name',{value:String(value.name||''),configurable:true});
+      const prototype=decode(value.prototype,0,callbackGraph);
+      if(!prototype||typeof prototype!=='object')throw new TypeError('guest class prototype is invalid');
+      Object.defineProperty(callback,'prototype',{value:prototype,writable:false,enumerable:false,configurable:false});
+      const constructorDescriptor=Object.getOwnPropertyDescriptor(prototype,'constructor');
+      if(constructorDescriptor&&constructorDescriptor.configurable)Object.defineProperty(prototype,'constructor',{value:callback,writable:true,enumerable:false,configurable:true});
+      for(const [key,item]of(value.statics||[]))if(key!=='name')Object.defineProperty(callback,key,{value:decode(item,0,callbackGraph),enumerable:true,writable:true,configurable:true});
+    }
+    return callback;
+  }
   function decode(value,depth,graph){
     if(depth>128)throw new RangeError('guest argument depth exceeded');
     switch(value.t){
@@ -207,19 +240,8 @@ function addonWorkerMain() {
       case 'bytes':return Buffer.from(value.v);
       case 'error':{const error=new Error(value.message||'guest callback threw');error.name=value.name||'Error';if(value.code)error.code=value.code;return error;}
       case 'hostObject':{const entry=refs.get(value.v);if(!entry||!entry.value||typeof entry.value!=='object')throw new TypeError('native object handle is invalid');return entry.value;}
-      case 'guestCallback':{const callbackGraph=graph;const callback=function(...args){
-        const graph=newGraph();
-        const guestMutations=callbackGraph.mutationBefore?collectGuestMutations(callbackGraph,callbackGraph.mutationBefore,callbackGraph.guestRefs,callbackGraph.guestCallbacks,graph):[];
-        const payload={callbackId:value.v,thisValue:encodeGuestValue(this,undefined,0,graph,callbackGraph.guestRefs,callbackGraph.guestCallbacks),args:args.map(v=>encodeGuestValue(v,undefined,0,graph,callbackGraph.guestRefs,callbackGraph.guestCallbacks)),guestMutations};
-        if(dispatchDepth===0){event({event:'guestCallback',...payload});return undefined;}
-        const callId=nextCallbackCall++,shared=new SharedArrayBuffer(MAX_SYNC_CALLBACK_RESULT_BYTES+8),words=new Int32Array(shared,0,2);
-        event({event:'syncGuestCallback',callId,shared,...payload});
-        const status=Atomics.wait(words,0,0,60000);if(status==='timed-out')throw new Error('timed out waiting for synchronous guest callback');
-        const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
-        const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
-        applyGuestSnapshots(response.snapshots||[],callbackGraph);
-        if(!response.ok)throw decode(response.value,0,callbackGraph);return decode(response.value,0,callbackGraph);
-      };guestCallbackIds.set(callback,value.v);if(callbackGraph.guestCallbacks)callbackGraph.guestCallbacks.set(callback,value.v);return callback;}
+      case 'guestCallback':return makeGuestCallback(value,graph);
+      case 'guestClass':return makeGuestCallback(value,graph,true);
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
       case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(a));return a;}
       case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.prototype&&value.prototype.t!=='defaultPrototype'){const prototype=value.prototype.t==='null'?null:decode(value.prototype,depth+1,graph);if(prototype!==null&&typeof prototype!=='object'&&typeof prototype!=='function')throw new TypeError('invalid guest object prototype');Object.setPrototypeOf(o,prototype);}if(value.extensible===false)Object.preventExtensions(o);if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(o));return o;}
@@ -264,6 +286,17 @@ function addonWorkerMain() {
           Object.setPrototypeOf(object,prototype);
         }
         if(snapshot.extensible===false)Object.preventExtensions(object);
+      }else if(snapshot.t==='guestClass'&&typeof object==='function'){
+        const desired=new Set(['arguments','caller','length','name','prototype']);
+        for(const [key,value] of(snapshot.statics||[])){
+          if(key==='name')continue;
+          desired.add(key);
+          Object.defineProperty(object,key,{value:decode(value,0,graph),enumerable:true,writable:true,configurable:true});
+        }
+        for(const key of Reflect.ownKeys(object))if(typeof key==='string'&&!desired.has(key)){
+          const descriptor=Object.getOwnPropertyDescriptor(object,key);
+          if(descriptor&&descriptor.configurable)Reflect.deleteProperty(object,key);
+        }
       }
       if(graph.mutationBefore)graph.mutationBefore.set(snapshot.id,descriptorState(object));
     }
@@ -505,6 +538,7 @@ fn guest_graph_identity(value: &Value) -> Option<usize> {
         Value::Array(array) => Some(Rc::as_ptr(array) as usize),
         Value::Object { props } => Some(Rc::as_ptr(props) as usize),
         Value::Proxy(proxy) => Some(Rc::as_ptr(proxy) as usize),
+        Value::Class(class) => Some(Rc::as_ptr(&class.statics) as usize),
         _ => None,
     }
 }
@@ -521,6 +555,10 @@ fn guest_callback_identity(value: &Value) -> Option<(usize, usize)> {
         Value::NativeFunction { name, callable } => {
             Some((*callable as *const () as usize, name.as_ptr() as usize))
         }
+        Value::Class(class) => Some((
+            Rc::as_ptr(&class.statics) as usize,
+            Rc::as_ptr(&class.prototype) as usize,
+        )),
         _ => None,
     }
 }
@@ -1080,10 +1118,16 @@ impl NodeAddonSidecar {
             .iter()
             .map(|arg| wire_to_guest_with_context(self, arg, 0, &mut graph))
             .collect::<Result<Vec<_>, _>>()?;
+        let kind = match event.get("kind").and_then(JsonValue::as_str) {
+            None | Some("call") => HostCallbackKind::Call,
+            Some("construct") => HostCallbackKind::Construct,
+            Some(_) => return Err(VmErr::Msg("Node callback event has an invalid kind".into())),
+        };
         Ok(HostCallback {
             callback,
             this_value,
             args,
+            kind,
         })
     }
 
@@ -1743,10 +1787,60 @@ fn guest_to_wire(
                 }
             }
         }
-        Value::Function(_) | Value::NativeFunction { .. } => {
+        Value::Class(class) => {
+            let identity = Rc::as_ptr(&class.statics) as usize;
+            if let Some(node_id) = graph.seen.get(&identity) {
+                return Ok(json!({"t":"ref","v":format!("g:{node_id}")}));
+            }
+            if class.statics.borrow().len() > MAX_OBJECT_PROPS {
+                return Err(VmErr::Msg(
+                    "guest class exceeds bridge property limit".into(),
+                ));
+            }
+            let node_id = graph.register(identity, v.clone())?;
             let callback_id = sidecar.register_guest_callback(v.clone())?;
             graph.callbacks.insert(callback_id, v.clone());
-            json!({"t":"guestCallback","v":callback_id})
+            let prototype = guest_to_wire(
+                sidecar,
+                class.prototype.as_ref(),
+                depth + 1,
+                graph,
+                proxy_ids,
+            )?;
+            let statics = class
+                .statics
+                .borrow()
+                .iter()
+                .filter(|(key, _)| key != "name" && !crate::interpreter::is_internal_key(key))
+                .map(|(key, value)| {
+                    Ok(json!([
+                        key,
+                        guest_to_wire(sidecar, value, depth + 1, graph, proxy_ids)?
+                    ]))
+                })
+                .collect::<Result<Vec<_>, VmErr>>()?;
+            json!({
+                "t":"guestClass",
+                "id":format!("g:{node_id}"),
+                "callbackId":callback_id,
+                "name":class.name,
+                "prototype":prototype,
+                "statics":statics,
+            })
+        }
+        Value::Function(function) => {
+            let callback_id = sidecar.register_guest_callback(v.clone())?;
+            graph.callbacks.insert(callback_id, v.clone());
+            json!({
+                "t":"guestCallback",
+                "v":callback_id,
+                "constructable":!function.is_arrow,
+            })
+        }
+        Value::NativeFunction { .. } => {
+            let callback_id = sidecar.register_guest_callback(v.clone())?;
+            graph.callbacks.insert(callback_id, v.clone());
+            json!({"t":"guestCallback","v":callback_id,"constructable":false})
         }
         Value::HostFunction { id, .. } => {
             if sidecar.state.borrow().local_handles.contains_key(id) {
@@ -1872,6 +1966,25 @@ fn guest_graph_node_snapshot(
                 "prototype":prototype,
                 "extensible":!meta.non_extensible,
             })
+        }
+        Value::Class(class) => {
+            let statics = class.statics.borrow();
+            if statics.len() > MAX_OBJECT_PROPS {
+                return Err(VmErr::Msg(
+                    "guest class exceeds limit during callback sync".into(),
+                ));
+            }
+            let statics = statics
+                .iter()
+                .filter(|(key, _)| key != "name" && !crate::interpreter::is_internal_key(key))
+                .map(|(key, item)| {
+                    Ok(json!([
+                        key,
+                        sidecar.guest_to_wire_with_context(item, 0, graph)?
+                    ]))
+                })
+                .collect::<Result<Vec<_>, VmErr>>()?;
+            json!({"t":"guestClass","id":format!("g:{node_id}"),"statics":statics})
         }
         _ => return Ok(None),
     };
@@ -2183,6 +2296,76 @@ fn apply_guest_mutation(
             meta.has_accessors |= has_accessor_updates;
             if let Some(extensible) = mutation.get("extensible").and_then(JsonValue::as_bool) {
                 meta.non_extensible = !extensible;
+            }
+        }
+        ("object", Value::Class(class)) => {
+            if entries.len() > MAX_OBJECT_PROPS {
+                return Err(VmErr::Msg("Node class mutation exceeds VM limit".into()));
+            }
+            let mut updates = Vec::with_capacity(entries.len());
+            let mut keys = HashSet::with_capacity(entries.len());
+            for item in entries {
+                let property = mutation_property(sidecar, item, graph)?;
+                if property.symbol.is_some()
+                    || property.getter.is_some()
+                    || property.setter.is_some()
+                    || property.attrs != PropAttrs::default()
+                {
+                    return Err(VmErr::Msg(
+                        "Node class accessor, symbol, or descriptor mutation is not supported"
+                            .into(),
+                    ));
+                }
+                if property.key == "name"
+                    || property.key == "prototype"
+                    || property.key == "length"
+                    || property.key == "arguments"
+                    || property.key == "caller"
+                    || is_reserved_guest_property_key(&property.key, false)
+                {
+                    return Err(VmErr::Msg(
+                        "Node class mutation targets a reserved constructor property".into(),
+                    ));
+                }
+                if !keys.insert(property.key.clone()) {
+                    return Err(VmErr::Msg(
+                        "Node class mutation has duplicate properties".into(),
+                    ));
+                }
+                updates.push((property.key, property.value));
+            }
+            let deleted_entries = mutation
+                .get("deleted")
+                .and_then(JsonValue::as_array)
+                .ok_or_else(|| VmErr::Msg("Node class mutation has invalid deletions".into()))?;
+            let mut deleted = Vec::with_capacity(deleted_entries.len());
+            for key in deleted_entries {
+                let (key, symbol) = wire_property_slot(sidecar, key, 0, graph)?;
+                if symbol.is_some()
+                    || key == "name"
+                    || key == "prototype"
+                    || key == "length"
+                    || key == "arguments"
+                    || key == "caller"
+                    || is_reserved_guest_property_key(&key, false)
+                {
+                    return Err(VmErr::Msg(
+                        "Node class deletion targets a reserved constructor property".into(),
+                    ));
+                }
+                deleted.push(key);
+            }
+            let mut statics = class.statics.borrow_mut();
+            statics.retain(|(key, _)| !deleted.iter().any(|deleted| deleted == key));
+            for (key, value) in updates {
+                if let Some((_, existing)) = statics.iter_mut().find(|(name, _)| name == &key) {
+                    *existing = value;
+                } else {
+                    if statics.len() >= MAX_OBJECT_PROPS {
+                        return Err(VmErr::Msg("Node class mutation exceeds VM limit".into()));
+                    }
+                    statics.push((key, value));
+                }
             }
         }
         ("array", Value::Array(array)) => {
@@ -2946,6 +3129,16 @@ static napi_value call_to_string(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value construct_and_read(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], instance, method, result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_new_instance(env, argv[0], 1, &argv[1], &instance) != napi_ok ||
+      napi_get_named_property(env, instance, "read", &method) != napi_ok ||
+      napi_call_function(env, instance, method, 0, NULL, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value write_property(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2];
@@ -3385,6 +3578,8 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "callInherited", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "callToString", NAPI_AUTO_LENGTH, call_to_string, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "callToString", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "constructAndRead", NAPI_AUTO_LENGTH, construct_and_read, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "constructAndRead", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeProperty", NAPI_AUTO_LENGTH, write_property, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "writeProperty", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeThenRead", NAPI_AUTO_LENGTH, write_then_read_property, NULL, &fn) != napi_ok) return NULL;
@@ -3493,6 +3688,22 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true,"proxyBefore":42,"proxyAfter":11,"targetValue":9,"ownKeysCalls":0,"proxyWriteRead":17,"inheritedValue":29,"inheritedCall":43,"guestErrorText":"TypeError: bridge"}"#
         );
 
+        let class_reference = ProcessCommand::new("node")
+            .arg("-e")
+            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const addon=req('./fixture.node');class Box{static value=2;constructor(value){this.value=value}read(){return this.value+Box.value}}const direct=addon.constructAndRead(Box,40);const proxiedBox=new Proxy(Box,{construct:(target,args)=>Reflect.construct(target,args)});const proxied=addon.constructAndRead(proxiedBox,40);const classStatic=addon.readProperty(Box);const classWriteRead=addon.writeThenRead(Box,23);process.stdout.write(JSON.stringify({direct,proxied,classStatic,classWriteRead,classValue:Box.value}));")
+            .arg(root.join("main.cjs"))
+            .output()
+            .unwrap();
+        assert!(
+            class_reference.status.success(),
+            "Node reference could not construct the guest class fixture: {}",
+            String::from_utf8_lossy(&class_reference.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&class_reference.stdout),
+            r#"{"direct":42,"proxied":42,"classStatic":2,"classWriteRead":23,"classValue":23}"#
+        );
+
         let mut interpreter = Interpreter::with_builtins();
         let expected_sha256: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
         let _bridge = interpreter
@@ -3554,6 +3765,31 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(
             package_result.get_prop("guestErrorText"),
             Some(Value::String(ref value)) if value == "TypeError: bridge"
+        ));
+        let class_result = interpreter
+            .eval_source(
+                "class Box { static value = 2; constructor(value) { this.value = value; } read() { return this.value + Box.value; } } const direct = packageAddon.constructAndRead(Box, 40); const proxiedBox = new Proxy(Box, {construct:(target,args) => Reflect.construct(target,args)}); const proxied = packageAddon.constructAndRead(proxiedBox, 40); const classStatic = packageAddon.readProperty(Box); const classWriteRead = packageAddon.writeThenRead(Box, 23); ({direct, proxied, classStatic, classWriteRead, classValue: Box.value});",
+            )
+            .unwrap();
+        assert!(matches!(
+            class_result.get_prop("direct"),
+            Some(Value::Number(value)) if value == 42.0
+        ));
+        assert!(matches!(
+            class_result.get_prop("proxied"),
+            Some(Value::Number(value)) if value == 42.0
+        ));
+        assert!(matches!(
+            class_result.get_prop("classStatic"),
+            Some(Value::Number(value)) if value == 2.0
+        ));
+        assert!(matches!(
+            class_result.get_prop("classWriteRead"),
+            Some(Value::Number(value)) if value == 23.0
+        ));
+        assert!(matches!(
+            class_result.get_prop("classValue"),
+            Some(Value::Number(value)) if value == 23.0
         ));
         let result = interpreter
             .eval_source("require('./fixture.node').add(19, 23);")

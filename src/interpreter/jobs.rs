@@ -33,11 +33,7 @@ pub enum Job {
     Callback { callback: Value, args: Vec<Value> },
     /// Callback queued by a host runtime after an external event. Unlike
     /// synchronous host calls, this runs at an event-loop checkpoint.
-    HostCallback {
-        callback: Value,
-        this_value: Value,
-        args: Vec<Value>,
-    },
+    HostCallback { callback: crate::host::HostCallback },
     /// Settlement of a host promise received from the external event queue.
     HostPromiseSettled {
         promise: Rc<RefCell<PromiseInner>>,

@@ -27,7 +27,7 @@ pub use bindings::{LanguageService, VM, create_vm, debug_parse, run_code};
 pub use builtins::setup_builtins;
 pub use error::VmErr;
 pub use format::{PrintOptions, Printer};
-pub use host::{HostBridge, HostCallback, HostEvent};
+pub use host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 pub use interpreter::{
     CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
     ResolvedCommonJsModule,

@@ -109,17 +109,20 @@ addon calls made from inside such a synchronous callback fail with
 `ERR_NAPI_VM_REENTRANT_ADDON_CALL` to avoid re-entering the worker while it is
 blocked on the callback. Shared and cyclic plain object/array graphs preserve
 identity within each native call, including Node-created return graphs.
-Guest-created proxies with object, array, or function targets also cross into
-addons. Their supported `get`, `set`, `has`, `deleteProperty`, `ownKeys`,
-`apply`, and `construct` traps run back on the interpreter thread. Guest-side
-and native-side object changes are synchronized at synchronous callback
-checkpoints, so a native call can observe a target change made by a guest trap.
-Unsupported proxy traps are ignored to match napi-vm's proxy model, and cyclic
-graphs that pass through a guest proxy fail clearly. Mutations to plain guest
-objects and arrays are written back to the original VM values after native
-calls, including calls that throw. Writeback includes nested objects, named
-array properties, and property attributes on objects. Guest `Date`, `RegExp`,
-and binary values are copied; in-place changes to those values fail clearly.
+Guest classes cross into addons as constructable functions; native addons can
+construct instances, call inherited guest methods, and read or update static
+data. Guest-created proxies with object, array, function, or class targets
+also cross into addons. Their supported `get`, `set`, `has`, `deleteProperty`,
+`ownKeys`, `apply`, and `construct` traps run back on the interpreter thread.
+Guest-side and native-side object changes are synchronized at synchronous
+callback checkpoints, so a native call can observe a target change made by a
+guest trap. Unsupported proxy traps are ignored to match napi-vm's proxy
+model, and cyclic graphs that pass through a guest proxy fail clearly.
+Mutations to plain guest objects and arrays are written back to the original
+VM values after native calls, including calls that throw. Writeback includes
+nested objects, named array properties, and property attributes on objects.
+Guest `Date`, `RegExp`, and binary values are copied; in-place changes to
+those values fail clearly.
 Accessor and symbol-keyed properties on plain objects cross the native addon
 bridge. Accessors invoke guest getter and setter callbacks, and symbol keys
 retain identity in both directions. Explicit guest object prototypes preserve

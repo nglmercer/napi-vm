@@ -280,12 +280,8 @@ impl Interpreter {
                         Err(error) => return Err(error),
                     }
                 }
-                Job::HostCallback {
-                    callback,
-                    this_value,
-                    args,
-                } => {
-                    self.call_this(&callback, this_value, args)?;
+                Job::HostCallback { callback } => {
+                    self.run_host_callback(callback)?;
                 }
                 Job::HostPromiseSettled {
                     promise,
@@ -333,11 +329,7 @@ impl Interpreter {
         for event in events {
             match event {
                 crate::host::HostEvent::Callback(callback) => {
-                    queue.push_external_event(Job::HostCallback {
-                        callback: callback.callback,
-                        this_value: callback.this_value,
-                        args: callback.args,
-                    });
+                    queue.push_external_event(Job::HostCallback { callback });
                 }
                 crate::host::HostEvent::PromiseSettled {
                     promise,
@@ -392,12 +384,8 @@ impl Interpreter {
                 Job::Callback { callback, args } => {
                     self.call_this(&callback, Value::Undefined, args)?;
                 }
-                Job::HostCallback {
-                    callback,
-                    this_value,
-                    args,
-                } => {
-                    self.call_this(&callback, this_value, args)?;
+                Job::HostCallback { callback } => {
+                    self.run_host_callback(callback)?;
                 }
                 Job::HostPromiseSettled {
                     promise,

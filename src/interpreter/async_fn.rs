@@ -97,12 +97,8 @@ impl Interpreter {
                     crate::interpreter::Job::Callback { callback, args } => {
                         self.call_this(&callback, Value::Undefined, args)?;
                     }
-                    crate::interpreter::Job::HostCallback {
-                        callback,
-                        this_value,
-                        args,
-                    } => {
-                        self.call_this(&callback, this_value, args)?;
+                    crate::interpreter::Job::HostCallback { callback } => {
+                        self.run_host_callback(callback)?;
                     }
                     crate::interpreter::Job::HostPromiseSettled {
                         promise,
