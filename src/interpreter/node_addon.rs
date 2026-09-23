@@ -466,22 +466,25 @@ pub struct NodeAddonSidecar {
 /// addons in a Rust-embedded interpreter.
 ///
 /// JavaScript modules still execute inside napi-vm. Each native addon must be
-/// explicitly listed with [`Self::allow_native_addon`]; its current SHA-256 is
-/// pinned when the runtime is configured and checked again when it is loaded.
+/// explicitly listed with [`Self::allow_native_addon`] or
+/// [`Self::allow_native_addon_with_sha256`]. Its SHA-256 is pinned when the
+/// runtime is configured and checked again when it is loaded. A trusted digest
+/// can also be supplied by the host to validate the binary before Node starts.
 /// The configured Node executable hosts the Node-API environment in a child
 /// process, so it must be compatible with the addon's Node-API requirements.
 #[derive(Clone, Debug)]
 pub struct NodeAddonOptions {
     pub(crate) node_executable: OsString,
     pub(crate) roots: Vec<PathBuf>,
-    pub(crate) allowed_addons: Vec<PathBuf>,
+    pub(crate) allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
     pub(crate) entry: Option<PathBuf>,
 }
 
 impl NodeAddonOptions {
     /// Configure the Node executable and filesystem roots visible to
     /// `require()`. Native addon loading stays disabled until at least one
-    /// path is added with [`Self::allow_native_addon`].
+    /// path is added with [`Self::allow_native_addon`] or
+    /// [`Self::allow_native_addon_with_sha256`].
     pub fn new<I, P>(node_executable: impl AsRef<OsStr>, roots: I) -> Self
     where
         I: IntoIterator<Item = P>,
@@ -497,8 +500,23 @@ impl NodeAddonOptions {
 
     /// Trust one specific native addon binary. Its bytes are pinned when the
     /// interpreter is configured. The path must be inside one of `roots`.
+    /// Use [`Self::allow_native_addon_with_sha256`] when the host has an
+    /// expected digest from a trusted build manifest.
     pub fn allow_native_addon(mut self, path: impl Into<PathBuf>) -> Self {
-        self.allowed_addons.push(path.into());
+        self.allowed_addons.push((path.into(), None));
+        self
+    }
+
+    /// Allow a native addon only when its bytes match `expected_sha256` from
+    /// trusted host metadata. The loader checks the digest during setup and
+    /// again immediately before loading the addon.
+    pub fn allow_native_addon_with_sha256(
+        mut self,
+        path: impl Into<PathBuf>,
+        expected_sha256: [u8; 32],
+    ) -> Self {
+        self.allowed_addons
+            .push((path.into(), Some(expected_sha256)));
         self
     }
 
@@ -2248,6 +2266,7 @@ fn parse_wire_number(value: &str) -> Result<f64, VmErr> {
 mod tests {
     use super::*;
     use crate::interpreter::{Interpreter, NodeAddonOptions};
+    use sha2::{Digest, Sha256};
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command as ProcessCommand;
@@ -2271,13 +2290,38 @@ mod tests {
         let mut interpreter = Interpreter::with_builtins();
         let error = interpreter
             .enable_node_addons(
-                NodeAddonOptions::new("node-executable-must-not-start", [root]).entry(entry),
+                NodeAddonOptions::new("node-executable-must-not-start", [root.clone()])
+                    .entry(entry),
             )
             .unwrap_err();
         assert!(
             error
                 .to_string()
                 .contains("CommonJS entry escapes configured roots")
+        );
+        assert!(
+            interpreter
+                .require_commonjs("./main.cjs", None)
+                .unwrap_err()
+                .to_string()
+                .contains("configure a host CommonJS module loader")
+        );
+
+        let addon = root.join("fixture.node");
+        let valid_entry = root.join("main.cjs");
+        fs::write(&addon, "untrusted addon bytes").unwrap();
+        fs::write(&valid_entry, "").unwrap();
+        let error = interpreter
+            .enable_node_addons(
+                NodeAddonOptions::new("node-executable-must-not-start", [root.clone()])
+                    .allow_native_addon_with_sha256(addon, [0; 32])
+                    .entry(valid_entry),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("integrity check failed while configuring")
         );
         assert!(
             interpreter
@@ -2972,10 +3016,11 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         );
 
         let mut interpreter = Interpreter::with_builtins();
+        let expected_sha256: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
         let _bridge = interpreter
             .enable_node_addons(
                 NodeAddonOptions::new("node", [root.clone()])
-                    .allow_native_addon(addon.clone())
+                    .allow_native_addon_with_sha256(addon.clone(), expected_sha256)
                     .entry(root.join("main.cjs")),
             )
             .unwrap();

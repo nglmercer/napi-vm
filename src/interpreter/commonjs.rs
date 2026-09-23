@@ -142,6 +142,27 @@ impl FileCommonJsLoader {
     /// addons are never enabled for every package under a root by default;
     /// each binary must be opted in and remain byte-for-byte unchanged.
     pub fn allow_native_addon(mut self, path: impl AsRef<Path>) -> Result<Self, VmErr> {
+        self.register_native_addon(path, None)?;
+        Ok(self)
+    }
+
+    /// Allow one `.node` binary only when its contents match a SHA-256 digest
+    /// supplied by trusted host metadata, such as a signed build manifest.
+    /// The digest is checked now and again immediately before loading.
+    pub fn allow_native_addon_with_sha256(
+        mut self,
+        path: impl AsRef<Path>,
+        expected_sha256: [u8; 32],
+    ) -> Result<Self, VmErr> {
+        self.register_native_addon(path, Some(expected_sha256))?;
+        Ok(self)
+    }
+
+    fn register_native_addon(
+        &mut self,
+        path: impl AsRef<Path>,
+        expected_sha256: Option<[u8; 32]>,
+    ) -> Result<(), VmErr> {
         let canonical = fs::canonicalize(path.as_ref()).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot allow native addon {}: {error}",
@@ -160,14 +181,21 @@ impl FileCommonJsLoader {
                 canonical.display()
             )));
         }
-        let digest = sha256_file(&canonical).map_err(|error| {
+        let actual_sha256 = sha256_file(&canonical).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot pin native addon {}: {error}",
                 canonical.display()
             ))
         })?;
+        let digest = expected_sha256.unwrap_or(actual_sha256);
+        if actual_sha256 != digest {
+            return Err(VmErr::Msg(format!(
+                "native addon integrity check failed while configuring: {}",
+                canonical.display()
+            )));
+        }
         self.allowed_native_addons.insert(canonical, digest);
-        Ok(self)
+        Ok(())
     }
 
     /// The canonical roots this loader may read from.
@@ -1170,10 +1198,25 @@ mod tests {
         let denied = loader.load_native_addon(&addon).unwrap_err();
         assert!(denied.to_string().contains("not allowlisted"));
 
+        let bad_digest = FileCommonJsLoader::new([&root])
+            .unwrap()
+            .allow_native_addon_with_sha256(root.join("addon.node"), [0; 32])
+            .unwrap_err();
+        assert!(
+            bad_digest
+                .to_string()
+                .contains("integrity check failed while configuring")
+        );
+
+        const TEST_FIXTURE_SHA256: [u8; 32] = [
+            0x68, 0xe8, 0x9f, 0x8b, 0x20, 0x74, 0xe2, 0x62, 0x7d, 0x62, 0xbe, 0xe3, 0xa2, 0xb6,
+            0x94, 0xe2, 0x81, 0x43, 0x2e, 0xf9, 0x09, 0xeb, 0x7a, 0x55, 0x05, 0xf0, 0x7b, 0xbf,
+            0xfd, 0x91, 0x7c, 0xbf,
+        ];
         let loader = Rc::new(
             FileCommonJsLoader::new([&root])
                 .unwrap()
-                .allow_native_addon(root.join("addon.node"))
+                .allow_native_addon_with_sha256(root.join("addon.node"), TEST_FIXTURE_SHA256)
                 .unwrap()
                 .with_native_addon_loader(Rc::new(FakeNativeAddon)),
         );

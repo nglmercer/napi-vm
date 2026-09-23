@@ -283,8 +283,13 @@ impl Interpreter {
         options: NodeAddonOptions,
     ) -> Result<Rc<NodeAddonSidecar>, VmErr> {
         let mut loader = FileCommonJsLoader::new(options.roots.iter())?;
-        for addon in &options.allowed_addons {
-            loader = loader.allow_native_addon(addon)?;
+        for (addon, expected_sha256) in &options.allowed_addons {
+            loader = match expected_sha256 {
+                Some(expected_sha256) => {
+                    loader.allow_native_addon_with_sha256(addon, *expected_sha256)?
+                }
+                None => loader.allow_native_addon(addon)?,
+            };
         }
 
         let entry = options
