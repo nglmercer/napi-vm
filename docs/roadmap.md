@@ -152,6 +152,15 @@ Every claim below was checked against the current build.
   imports are not supported yet; compiler mode defaults to `none`
   (`tests/npm-loader.test.js`, `tests/compat/valibot.test.js`)
 
+- **Node-API addons** — `Interpreter::enable_node_addons()` resolves CommonJS
+  packages and loads explicitly allowlisted `.node` files through a Node.js
+  sidecar. A compiled C fixture checks real Node-API calls, guest callbacks,
+  value identity, Promise settlement, package exports, and prototype-based
+  reads and calls (`src/interpreter/node_addon.rs`). The bridge still requires
+  a Node executable and rejects some reflection, sparse-array, prototype
+  mutation, and reentrant-call behavior. It is not an in-process Rust
+  implementation of Node-API.
+
 - **Generators on `wasm32`** — the browser target has no stack switching, so a
   body cannot be suspended. It runs once to completion on the first `next()`
   and its yields are buffered for the remaining calls to drain. Values,

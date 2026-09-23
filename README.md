@@ -122,10 +122,12 @@ array properties, and property attributes on objects. Guest `Date`, `RegExp`,
 and binary values are copied; in-place changes to those values fail clearly.
 Accessor and symbol-keyed properties on plain objects cross the native addon
 bridge. Accessors invoke guest getter and setter callbacks, and symbol keys
-retain identity in both directions. Accessors or symbol keys on arrays, sparse
-arrays, custom prototype behavior, and array descriptor changes are not fully
-compatible yet. Some reflection behavior still differs across the VM/Node
-boundary.
+retain identity in both directions. Explicit guest object prototypes preserve
+inherited property reads and method calls through the bridge. Prototype
+mutation and built-in prototype fidelity remain incomplete. Accessors or
+symbol keys on arrays, sparse arrays, and array descriptor changes are not
+fully compatible yet. Some reflection behavior still differs across the
+VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 

@@ -222,7 +222,7 @@ function addonWorkerMain() {
       };guestCallbackIds.set(callback,value.v);if(callbackGraph.guestCallbacks)callbackGraph.guestCallbacks.set(callback,value.v);return callback;}
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
       case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(a));return a;}
-      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.extensible===false)Object.preventExtensions(o);if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(o));return o;}
+      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.prototype&&value.prototype.t!=='defaultPrototype'){const prototype=value.prototype.t==='null'?null:decode(value.prototype,depth+1,graph);if(prototype!==null&&typeof prototype!=='object'&&typeof prototype!=='function')throw new TypeError('invalid guest object prototype');Object.setPrototypeOf(o,prototype);}if(value.extensible===false)Object.preventExtensions(o);if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(o));return o;}
       case 'proxy':{const target=decode(value.target,depth+1,graph);const handler=decode(value.handler,depth+1,graph);if((!target||typeof target!=='object')&&typeof target!=='function')throw new TypeError('invalid guest Proxy target');if(!handler||typeof handler!=='object')throw new TypeError('invalid guest Proxy handler');const supported=new Set(['get','set','has','deleteProperty','ownKeys','apply','construct']);const filteredHandler=new Proxy(Object.create(null),{get(_target,key){return supported.has(key)?Reflect.get(handler,key,handler):undefined;}});const proxy=new Proxy(target,filteredHandler);setGraphNode(graph,value.id,proxy);return proxy;}
       default:throw new TypeError('unsupported napi-vm argument');
     }
@@ -258,6 +258,11 @@ function addonWorkerMain() {
           Object.defineProperty(object,key,descriptor);
         }
         for(const key of Reflect.ownKeys(object))if(!desired.has(key))Reflect.deleteProperty(object,key);
+        if(snapshot.prototype&&snapshot.prototype.t!=='defaultPrototype'){
+          const prototype=snapshot.prototype.t==='null'?null:decode(snapshot.prototype,0,graph);
+          if(prototype!==null&&typeof prototype!=='object'&&typeof prototype!=='function')throw new TypeError('invalid guest object prototype snapshot');
+          Object.setPrototypeOf(object,prototype);
+        }
         if(snapshot.extensible===false)Object.preventExtensions(object);
       }
       if(graph.mutationBefore)graph.mutationBefore.set(snapshot.id,descriptorState(object));
@@ -513,6 +518,9 @@ fn guest_callback_identity(value: &Value) -> Option<(usize, usize)> {
                 .as_ref()
                 .map_or(0, |closure| Rc::as_ptr(closure) as usize),
         )),
+        Value::NativeFunction { name, callable } => {
+            Some((*callable as *const () as usize, name.as_ptr() as usize))
+        }
         _ => None,
     }
 }
@@ -1631,7 +1639,11 @@ fn guest_to_wire(
                     ]));
                 }
             }
-            json!({"t":"object","id":format!("g:{node_id}"),"v":wire,"extensible":extensible})
+            let prototype = match meta.proto.as_deref() {
+                Some(prototype) => guest_to_wire(sidecar, prototype, depth + 1, graph, proxy_ids)?,
+                None => json!({"t":"defaultPrototype"}),
+            };
+            json!({"t":"object","id":format!("g:{node_id}"),"v":wire,"prototype":prototype,"extensible":extensible})
         }
         Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":bytes.borrow().as_slice()}),
         Value::TypedArray(view) => {
@@ -1731,7 +1743,7 @@ fn guest_to_wire(
                 }
             }
         }
-        Value::Function(_) => {
+        Value::Function(_) | Value::NativeFunction { .. } => {
             let callback_id = sidecar.register_guest_callback(v.clone())?;
             graph.callbacks.insert(callback_id, v.clone());
             json!({"t":"guestCallback","v":callback_id})
@@ -1792,6 +1804,10 @@ fn guest_graph_node_snapshot(
                 ));
             }
             let meta = props.meta.borrow();
+            let prototype = match meta.proto.as_deref() {
+                Some(prototype) => sidecar.guest_to_wire_with_context(prototype, 0, graph)?,
+                None => json!({"t":"defaultPrototype"}),
+            };
             let mut wire = Vec::with_capacity(entries.len());
             for (key, item) in &entries {
                 let wire_key = if let Some(symbol) = meta.symbol_key(key) {
@@ -1853,6 +1869,7 @@ fn guest_graph_node_snapshot(
                 "t":"object",
                 "id":format!("g:{node_id}"),
                 "v":wire,
+                "prototype":prototype,
                 "extensible":!meta.non_extensible,
             })
         }
@@ -2911,6 +2928,24 @@ static napi_value read_property(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value call_inherited(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], method, result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_named_property(env, argv[0], "read", &method) != napi_ok ||
+      napi_call_function(env, argv[0], method, 0, NULL, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value call_to_string(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], method, result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_named_property(env, argv[0], "toString", &method) != napi_ok ||
+      napi_call_function(env, argv[0], method, 0, NULL, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value write_property(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2];
@@ -3346,6 +3381,10 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "sameObject", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "readProperty", NAPI_AUTO_LENGTH, read_property, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "readProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "callInherited", NAPI_AUTO_LENGTH, call_inherited, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "callInherited", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "callToString", NAPI_AUTO_LENGTH, call_to_string, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "callToString", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeProperty", NAPI_AUTO_LENGTH, write_property, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "writeProperty", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeThenRead", NAPI_AUTO_LENGTH, write_then_read_property, NULL, &fn) != napi_ok) return NULL;
@@ -3440,7 +3479,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
 
         let node_reference = ProcessCommand::new("node")
             .arg("-e")
-            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');const target={value:40};let ownKeysCalls=0;const proxy=new Proxy(target,{get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}});const proxyBefore=a.readProperty(proxy);a.writeProperty(proxy,9);const simpleTarget={value:1};const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}});const proxyWriteRead=a.writeThenRead(setOnlyProxy,17);process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d,proxyBefore,proxyAfter:a.readProperty(proxy),targetValue:target.value,ownKeysCalls,proxyWriteRead}));")
+            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');const target={value:40};let ownKeysCalls=0;const proxy=new Proxy(target,{get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}});const proxyBefore=a.readProperty(proxy);a.writeProperty(proxy,9);const simpleTarget={value:1};const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}});const proxyWriteRead=a.writeThenRead(setOnlyProxy,17);const inheritedValue=a.readProperty(Object.create({value:29}));const inheritedObject=Object.create({read(){return this.value+3}});inheritedObject.value=40;const inheritedCall=a.callInherited(inheritedObject);const guestErrorText=a.callToString(new TypeError('bridge'));process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d,proxyBefore,proxyAfter:a.readProperty(proxy),targetValue:target.value,ownKeysCalls,proxyWriteRead,inheritedValue,inheritedCall,guestErrorText}));")
             .arg(root.join("main.cjs"))
             .output()
             .unwrap();
@@ -3451,7 +3490,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         );
         assert_eq!(
             String::from_utf8_lossy(&node_reference.stdout),
-            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true,"proxyBefore":42,"proxyAfter":11,"targetValue":9,"ownKeysCalls":0,"proxyWriteRead":17}"#
+            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true,"proxyBefore":42,"proxyAfter":11,"targetValue":9,"ownKeysCalls":0,"proxyWriteRead":17,"inheritedValue":29,"inheritedCall":43,"guestErrorText":"TypeError: bridge"}"#
         );
 
         let mut interpreter = Interpreter::with_builtins();
@@ -3465,7 +3504,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             .unwrap();
         let package_result = interpreter
             .eval_source(
-                "const packageAddon = require('fixture'); const importAddon = require('#native'); const wrapperAddon = require('fixture-wrapper'); const target = {value:40}; let ownKeysCalls=0; const proxy = new Proxy(target, {get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}}); const proxyBefore = packageAddon.readProperty(proxy); packageAddon.writeProperty(proxy,9); const simpleTarget={value:1}; const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}}); const proxyWriteRead=packageAddon.writeThenRead(setOnlyProxy,17); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon, wrapperSame: packageAddon === wrapperAddon, proxyBefore, proxyAfter: packageAddon.readProperty(proxy), targetValue: target.value, ownKeysCalls, proxyWriteRead});",
+                "const packageAddon = require('fixture'); const importAddon = require('#native'); const wrapperAddon = require('fixture-wrapper'); const target = {value:40}; let ownKeysCalls=0; const proxy = new Proxy(target, {get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}}); const proxyBefore = packageAddon.readProperty(proxy); packageAddon.writeProperty(proxy,9); const simpleTarget={value:1}; const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}}); const proxyWriteRead=packageAddon.writeThenRead(setOnlyProxy,17); const inheritedValue=packageAddon.readProperty(Object.create({value:29})); const inheritedObject=Object.create({read:function(){return this.value+3}}); inheritedObject.value=40; const inheritedCall=packageAddon.callInherited(inheritedObject); const guestErrorText=packageAddon.callToString(new TypeError('bridge')); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon, wrapperSame: packageAddon === wrapperAddon, proxyBefore, proxyAfter: packageAddon.readProperty(proxy), targetValue: target.value, ownKeysCalls, proxyWriteRead, inheritedValue, inheritedCall, guestErrorText});",
             )
             .unwrap();
         assert!(matches!(
@@ -3503,6 +3542,18 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(
             package_result.get_prop("proxyWriteRead"),
             Some(Value::Number(value)) if value == 17.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("inheritedValue"),
+            Some(Value::Number(value)) if value == 29.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("inheritedCall"),
+            Some(Value::Number(value)) if value == 43.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("guestErrorText"),
+            Some(Value::String(ref value)) if value == "TypeError: bridge"
         ));
         let result = interpreter
             .eval_source("require('./fixture.node').add(19, 23);")
