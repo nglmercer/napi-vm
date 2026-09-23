@@ -99,6 +99,34 @@ pub struct RustNodeApiOptions {
     roots: Vec<PathBuf>,
     allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
     entry: Option<PathBuf>,
+    reported_node_version: ReportedNodeVersion,
+}
+
+/// Version numbers returned by `napi_get_node_version` in the Rust Node-API
+/// host. The release name remains `napi-vm` so addons can distinguish this
+/// runtime from Node.js.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReportedNodeVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl ReportedNodeVersion {
+    /// The default profile clearly identifies the runtime as napi-vm.
+    pub const NAPI_VM: Self = Self {
+        major: 0,
+        minor: 0,
+        patch: 0,
+    };
+
+    pub const fn new(major: u32, minor: u32, patch: u32) -> Self {
+        Self {
+            major,
+            minor,
+            patch,
+        }
+    }
 }
 
 impl RustNodeApiOptions {
@@ -111,6 +139,7 @@ impl RustNodeApiOptions {
             roots: roots.into_iter().map(Into::into).collect(),
             allowed_addons: Vec::new(),
             entry: None,
+            reported_node_version: ReportedNodeVersion::NAPI_VM,
         }
     }
 
@@ -131,6 +160,13 @@ impl RustNodeApiOptions {
 
     pub fn entry(mut self, path: impl Into<PathBuf>) -> Self {
         self.entry = Some(path.into());
+        self
+    }
+
+    /// Configure the numeric Node compatibility version reported to native
+    /// addons. The release name returned by Node-API remains `napi-vm`.
+    pub fn reported_node_version(mut self, version: ReportedNodeVersion) -> Self {
+        self.reported_node_version = version;
         self
     }
 }
@@ -257,6 +293,7 @@ impl Drop for RustNodeApiHost {
 struct HostState {
     global: Env,
     object_prototype: Option<Value>,
+    reported_node_version: ReportedNodeVersion,
     next_callback_id: usize,
     callbacks: HashMap<usize, NativeCallbackRecord>,
     environments: Vec<Rc<NapiEnvironment>>,
@@ -301,6 +338,7 @@ enum NativeCallback {
 struct NapiEnvironment {
     module_path: String,
     module_file_url: CString,
+    node_version: NapiNodeVersion,
     owner: Weak<RefCell<HostState>>,
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
@@ -325,6 +363,16 @@ struct NapiEnvironment {
     guest_callback_dispatchers: RefCell<Vec<GuestCallbackDispatcher>>,
     pending_exception: RefCell<Option<Value>>,
 }
+
+#[repr(C)]
+struct NapiNodeVersion {
+    major: u32,
+    minor: u32,
+    patch: u32,
+    release: *const c_char,
+}
+
+const NAPI_VM_RELEASE: &[u8] = b"napi-vm\0";
 
 #[derive(Clone, Copy)]
 struct NapiCleanupHookRecord {
@@ -1140,6 +1188,7 @@ struct NapiVmApiTable {
         unsafe extern "C" fn(NapiEnv, *const u16, usize, *mut NapiValue) -> i32,
     create_buffer_from_arraybuffer:
         unsafe extern "C" fn(NapiEnv, NapiValue, usize, usize, *mut NapiValue) -> i32,
+    get_node_version: unsafe extern "C" fn(NapiEnv, *mut *const NapiNodeVersion) -> i32,
 }
 
 #[repr(C)]
@@ -1306,6 +1355,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_property_key_utf8: api_create_property_key_utf8,
     create_property_key_utf16: api_create_property_key_utf16,
     create_buffer_from_arraybuffer: api_create_buffer_from_arraybuffer,
+    get_node_version: api_get_node_version,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -6755,6 +6805,20 @@ unsafe extern "C" fn api_get_version(env: NapiEnv, result: *mut u32) -> i32 {
     })
 }
 
+unsafe extern "C" fn api_get_node_version(
+    env: NapiEnv,
+    result: *mut *const NapiNodeVersion,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        unsafe { result.write(&environment.node_version) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_strict_equals(
     env: NapiEnv,
     left: NapiValue,
@@ -7060,7 +7124,7 @@ fn create_async_work_pool(
 }
 
 impl RustNodeApiHost {
-    fn new(global: Env) -> Result<Self, VmErr> {
+    fn new(global: Env, reported_node_version: ReportedNodeVersion) -> Result<Self, VmErr> {
         let object_prototype = global
             .borrow()
             .get("Object")
@@ -7073,6 +7137,7 @@ impl RustNodeApiHost {
             state: Rc::new(RefCell::new(HostState {
                 global,
                 object_prototype,
+                reported_node_version,
                 next_callback_id: 1,
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
@@ -7534,9 +7599,16 @@ impl NativeAddonLoader for RustNodeApiHost {
             .map(|url| CString::new(url.as_str()).expect("file URLs cannot contain NUL bytes"))
             .unwrap_or_default();
 
+        let reported_node_version = self.state.borrow().reported_node_version;
         let environment = Rc::new(NapiEnvironment {
             module_path: filename.to_string(),
             module_file_url,
+            node_version: NapiNodeVersion {
+                major: reported_node_version.major,
+                minor: reported_node_version.minor,
+                patch: reported_node_version.patch,
+                release: NAPI_VM_RELEASE.as_ptr().cast(),
+            },
             owner: Rc::downgrade(&self.state),
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
@@ -7788,7 +7860,10 @@ impl Interpreter {
             };
         }
         let entry = validate_entry(&loader, options.entry)?;
-        let host = Rc::new(RustNodeApiHost::new(self.persistent_global.clone())?);
+        let host = Rc::new(RustNodeApiHost::new(
+            self.persistent_global.clone(),
+            options.reported_node_version,
+        )?);
         let loader = loader.with_native_addon_loader(host.clone());
         self.set_commonjs_loader(Rc::new(loader))?;
         self.set_host_bridge(host.clone());
@@ -8165,6 +8240,25 @@ static napi_value buffer_range_error(napi_env env, napi_callback_info info) {
   return NULL;
 }
 
+static napi_value node_version_probe(napi_env env, napi_callback_info info) {
+  const napi_node_version* version = NULL;
+  napi_value result, field;
+  (void)info;
+  if (napi_get_node_version(env, &version) != napi_ok || version == NULL ||
+      napi_get_node_version(env, NULL) != napi_invalid_arg ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_create_uint32(env, version->major, &field) != napi_ok ||
+      napi_set_named_property(env, result, "major", field) != napi_ok ||
+      napi_create_uint32(env, version->minor, &field) != napi_ok ||
+      napi_set_named_property(env, result, "minor", field) != napi_ok ||
+      napi_create_uint32(env, version->patch, &field) != napi_ok ||
+      napi_set_named_property(env, result, "patch", field) != napi_ok ||
+      napi_create_string_utf8(env, version->release, NAPI_AUTO_LENGTH, &field) != napi_ok ||
+      napi_set_named_property(env, result, "release", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_value function;
   if (napi_create_function(env, "externalStrings", NAPI_AUTO_LENGTH,
@@ -8178,7 +8272,10 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "bufferFromArrayBuffer", function) != napi_ok ||
       napi_create_function(env, "bufferRangeError", NAPI_AUTO_LENGTH,
                            buffer_range_error, NULL, &function) != napi_ok ||
-      napi_set_named_property(env, exports, "bufferRangeError", function) != napi_ok)
+      napi_set_named_property(env, exports, "bufferRangeError", function) != napi_ok ||
+      napi_create_function(env, "nodeVersion", NAPI_AUTO_LENGTH,
+                           node_version_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "nodeVersion", function) != napi_ok)
     return NULL;
   return exports;
 }
@@ -8209,6 +8306,7 @@ NAPI_MODULE_INIT() {
             r#"
 const addon = require('./fixture.node');
 const external = addon.externalStrings();
+const nodeVersion = addon.nodeVersion();
 const properties = addon.propertyKeys();
 const buffer = addon.bufferFromArrayBuffer();
 const backing = buffer.backing;
@@ -8219,6 +8317,7 @@ let rangeErrorName = 'none';
 try { addon.bufferRangeError(); } catch (error) { rangeErrorName = error.name; }
 module.exports = {
   external,
+  nodeVersion,
   propertyKeys: Object.keys(properties),
   propertyValues: [properties['keyé'], properties['utf8-雪'], properties['u16Ω']],
   buffer: {
@@ -8240,6 +8339,7 @@ module.exports = {
             .enable_rust_node_api_addons(
                 RustNodeApiOptions::new([root.clone()])
                     .allow_native_addon_with_sha256(&addon, digest)
+                    .reported_node_version(ReportedNodeVersion::new(22, 17, 3))
                     .entry(root.join("main.cjs")),
             )
             .unwrap();
@@ -8256,6 +8356,10 @@ module.exports = {
         assert_eq!(vm_report["external"]["latin1Copied"], true);
         assert_eq!(vm_report["external"]["utf16Copied"], true);
         assert_eq!(vm_report["external"]["finalizersAtReturn"], 2);
+        assert_eq!(
+            vm_report["nodeVersion"],
+            serde_json::json!({"major": 22, "minor": 17, "patch": 3, "release": "napi-vm"})
+        );
         assert_eq!(vm_report["propertyKeys"].as_array().unwrap().len(), 3);
         assert_eq!(
             vm_report["propertyValues"],
@@ -8281,11 +8385,13 @@ module.exports = {
         external.remove("latin1Copied");
         external.remove("utf16Copied");
         external.remove("finalizersAtReturn");
+        vm_report.as_object_mut().unwrap().remove("nodeVersion");
         let runner = r#"const value = require('./main.cjs');
 const e = value.external;
 const copied = Number(e.latin1Copied) + Number(e.utf16Copied);
 if (e.finalizersAtReturn !== copied) throw new Error('external string finalizer contract violated');
 delete e.latin1Copied; delete e.utf16Copied; delete e.finalizersAtReturn;
+delete value.nodeVersion;
 process.stdout.write(JSON.stringify(value));"#;
         let mut reference_reports = Vec::new();
         for runtime in ["node", "bun"] {

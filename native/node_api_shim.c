@@ -39,6 +39,13 @@ typedef struct napi_extended_error_info {
   napi_status error_code;
 } napi_extended_error_info;
 
+typedef struct napi_vm_node_version {
+  uint32_t major;
+  uint32_t minor;
+  uint32_t patch;
+  const char* release;
+} napi_vm_node_version;
+
 typedef struct napi_vm_property_descriptor {
   const char* utf8name;
   napi_value name;
@@ -257,6 +264,7 @@ typedef struct napi_vm_node_api_table {
                                             napi_value*);
   napi_status (*create_buffer_from_arraybuffer)(napi_env, napi_value, size_t,
                                                   size_t, napi_value*);
+  napi_status (*get_node_version)(napi_env, const napi_vm_node_version**);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1220,6 +1228,12 @@ NAPI_VM_EXPORT napi_status napi_get_new_target(napi_env env,
 NAPI_VM_EXPORT napi_status napi_get_version(napi_env env, uint32_t* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_version(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_node_version(
+    napi_env env, const napi_vm_node_version** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_node_version(env, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_strict_equals(napi_env env, napi_value lhs,

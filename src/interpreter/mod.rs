@@ -28,7 +28,7 @@ pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos")
 ))]
-pub use rust_node_api::{RustNodeApiHost, RustNodeApiOptions};
+pub use rust_node_api::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions};
 
 /// The state a generator or async body must share with the interpreter that
 /// started it: the one event loop, and the one module registry.

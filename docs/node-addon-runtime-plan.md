@@ -171,6 +171,10 @@ creation with eager copy/finalizer handling, string property-key creation, and
 zero-copy `Buffer` views over `ArrayBuffer` storage. Node and Bun fixtures check
 the external-string copy/finalizer contract, Unicode keys, buffer aliasing, and
 out-of-range errors.
+The stable v1 `napi_get_node_version` function returns a numeric compatibility
+profile from `RustNodeApiOptions::reported_node_version`; the default is
+`0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
+not claim that every API available in the configured Node version is supported.
 `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive

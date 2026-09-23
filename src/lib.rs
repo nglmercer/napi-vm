@@ -39,7 +39,7 @@ pub use interpreter::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos")
 ))]
-pub use interpreter::{RustNodeApiHost, RustNodeApiOptions};
+pub use interpreter::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions};
 pub use lexer::{Lexer, Token};
 pub use parser::{Expr, Parser, Statement};
 pub use value::Value;

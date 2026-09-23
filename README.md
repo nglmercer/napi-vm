@@ -149,7 +149,7 @@ executable. It uses the same guest `require()` resolver, root restrictions,
 and hash allowlist:
 
 ```rust
-use napi_vm::{Interpreter, RustNodeApiOptions};
+use napi_vm::{Interpreter, ReportedNodeVersion, RustNodeApiOptions};
 use std::path::PathBuf;
 
 let app_root = PathBuf::from("./app").canonicalize().unwrap();
@@ -160,6 +160,7 @@ runtime
     .enable_rust_node_api_addons(
         RustNodeApiOptions::new([app_root.clone()])
             .allow_native_addon_with_sha256(addon, digest)
+            .reported_node_version(ReportedNodeVersion::new(22, 17, 3))
             .entry(app_root.join("main.cjs")),
     )
     .unwrap();
@@ -221,6 +222,11 @@ creation with eager copy/finalizer handling, string property-key creation, and
 zero-copy `Buffer` views over `ArrayBuffer` storage. The Node and Bun fixture
 checks the documented external-string copy/finalizer contract, Unicode keys,
 buffer aliasing, and out-of-range errors.
+The stable v1 `napi_get_node_version` function returns the numeric compatibility
+version configured with `reported_node_version`; its release name is always
+`napi-vm`. The default version is `0.0.0`, so the Rust host does not identify
+itself as Node.js unless the desktop application deliberately supplies a
+numeric profile. This metadata does not add APIs to the compatibility surface.
 `napi_add_finalizer` supports its optional zero-count reference and runs the
 finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
 no guest-object garbage collector, so this does not provide collection-time
