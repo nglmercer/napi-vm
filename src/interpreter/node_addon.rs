@@ -16,8 +16,8 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostEvent};
 use crate::interpreter::NativeAddonLoader;
 use crate::value::{
-    MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, TypedArrayData,
-    TypedKind, Value,
+    MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, SymbolData,
+    TypedArrayData, TypedKind, Value,
 };
 
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -110,8 +110,11 @@ function addonWorkerMain() {
   'use strict';
   const { parentPort } = require('node:worker_threads');
   const MAX_SYNC_CALLBACK_RESULT_BYTES = 1024 * 1024;
-  let nextHandle=1, nextCallbackCall=1, dispatchDepth=0;
+  let nextHandle=1, nextCallbackCall=1, nextNativeSymbolId=1, dispatchDepth=0;
   const refs=new Map(), objectIds=new WeakMap(), functionIds=new WeakMap(), promiseIds=new WeakMap();
+  const symbols=new Map(), symbolIds=new Map();
+  const wellKnownSymbols=[undefined,Symbol.iterator,Symbol.asyncIterator,Symbol.toStringTag,Symbol.hasInstance,Symbol.toPrimitive,Symbol.species,Symbol.unscopables,Symbol.isConcatSpreadable,Symbol.match,Symbol.matchAll,Symbol.replace,Symbol.search,Symbol.split];
+  function symbolId(value){let id=symbolIds.get(value);if(id===undefined){if(symbols.size>=262144)throw new RangeError('symbol handle limit exceeded');id='n:'+nextNativeSymbolId++;symbols.set(id,value);symbolIds.set(value,id);}return id;}
   function hold(value,receiver){
     const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
     if(existing!==undefined)return existing;
@@ -129,7 +132,7 @@ function addonWorkerMain() {
     if(typeof value==='number')return {t:'number',v:Object.is(value,-0)?'-0':String(value)};
     if(typeof value==='string')return {t:'string',v:value};
     if(typeof value==='bigint')return {t:'bigint',v:value.toString()};
-    if(typeof value==='symbol')throw new TypeError('symbols are unsupported');
+    if(typeof value==='symbol')return {t:'symbol',v:symbolId(value),description:value.description};
     if(typeof value==='function')return {t:'function',v:hold(value,receiver),n:value.name};
     if(value&&typeof value.then==='function'){
       let id=promiseIds.get(value);
@@ -139,6 +142,9 @@ function addonWorkerMain() {
       ).catch(error=>event({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:{t:'error',name:'TypeError',message:'native promise result could not be marshalled: '+String(error)}}));}
       return {t:'hostPromise',v:id};
     }
+    if(value instanceof Error)return {t:'error',name:value.name,message:value.message,code:typeof value.code==='string'?value.code:undefined};
+    if(value instanceof Date)return {t:'date',v:Number.isNaN(value.getTime())?'NaN':String(value.getTime())};
+    if(value instanceof RegExp)return {t:'regexp',source:value.source,flags:value.flags,lastIndex:String(value.lastIndex)};
     if(Buffer.isBuffer(value))return {t:'hostObject',v:hold(value,undefined)};
     if(value instanceof DataView)return {t:'dataView',length:value.byteLength,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
     if(ArrayBuffer.isView(value))return {t:'typedArray',kind:value.constructor.name,length:value.length,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
@@ -153,6 +159,9 @@ function addonWorkerMain() {
       case 'undefined':return undefined;case 'null':return null;case 'boolean':return value.v;
       case 'number':if(value.v==='-0')return -0;if(value.v==='NaN')return NaN;if(value.v==='Infinity')return Infinity;if(value.v==='-Infinity')return -Infinity;return Number(value.v);
       case 'string':return value.v;case 'bigint':return BigInt(value.v);
+      case 'symbol':{let symbol=symbols.get(value.v);if(symbol===undefined){const guestId=value.v.startsWith('g:')?Number(value.v.slice(2)):0;symbol=wellKnownSymbols[guestId];if(symbol===undefined){if(symbols.size>=262144)throw new RangeError('symbol handle limit exceeded');symbol=Symbol(value.description);}symbols.set(value.v,symbol);symbolIds.set(symbol,value.v);}return symbol;}
+      case 'date':return new Date(value.v==='NaN'?NaN:Number(value.v));
+      case 'regexp':{const regex=new RegExp(value.source,value.flags);regex.lastIndex=Number(value.lastIndex||0);return regex;}
       case 'arrayBuffer':return Uint8Array.from(value.v).buffer;
       case 'typedArray':{const Constructor=globalThis[value.kind];if(typeof Constructor!=='function')throw new TypeError('unsupported guest typed array kind');const bytes=Uint8Array.from(value.bytes);return new Constructor(bytes.buffer,0,value.length);}
       case 'dataView':{const bytes=Uint8Array.from(value.bytes);return new DataView(bytes.buffer,0,value.length);}
@@ -233,6 +242,8 @@ struct State {
     object_proxies: HashMap<u64, Value>,
     proxy_ids: HashMap<usize, u64>,
     guest_callbacks: HashMap<u64, Value>,
+    host_symbols: HashMap<String, Value>,
+    symbol_remote_ids: HashMap<u64, String>,
     next_guest_callback_id: u64,
     native_promises: HashMap<u64, Rc<RefCell<PromiseInner>>>,
 }
@@ -381,6 +392,8 @@ impl NodeAddonSidecar {
                 object_proxies: HashMap::new(),
                 proxy_ids: HashMap::new(),
                 guest_callbacks: HashMap::new(),
+                host_symbols: HashMap::new(),
+                symbol_remote_ids: HashMap::new(),
                 next_guest_callback_id: 1,
                 native_promises: HashMap::new(),
             })),
@@ -1066,6 +1079,39 @@ fn guest_to_wire(
             json!({"t":"dataView","length":view.length,"bytes":slice})
         }
         Value::BigInt(x) => json!({"t":"bigint","v":x.to_string()}),
+        Value::Date(milliseconds) => {
+            let value = milliseconds.get();
+            let wire = if value.is_nan() {
+                "NaN".to_string()
+            } else if value == f64::INFINITY {
+                "Infinity".to_string()
+            } else if value == f64::NEG_INFINITY {
+                "-Infinity".to_string()
+            } else {
+                value.to_string()
+            };
+            json!({"t":"date","v":wire})
+        }
+        Value::RegExp(data) => json!({
+            "t":"regexp",
+            "source":data.regex.source,
+            "flags":data.regex.flags,
+            "lastIndex":data.last_index.get().to_string(),
+        }),
+        Value::Symbol(symbol) => {
+            let remote_id = sidecar
+                .state
+                .borrow()
+                .symbol_remote_ids
+                .get(&symbol.id)
+                .cloned()
+                .unwrap_or_else(|| format!("g:{}", symbol.id));
+            json!({
+                "t":"symbol",
+                "v":remote_id,
+                "description":symbol.description,
+            })
+        }
         Value::Error(error) => json!({
             "t":"error",
             "name":error.name,
@@ -1150,6 +1196,87 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
             let n = crate::bigint::BigInt::parse(s).map_err(VmErr::Msg)?;
             Ok(Value::BigInt(Rc::new(n)))
         }
+        "date" => {
+            let value = v
+                .get("v")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| VmErr::Msg("invalid Node date".into()))?;
+            let milliseconds = parse_wire_number(value)?;
+            Ok(Value::Date(Rc::new(std::cell::Cell::new(milliseconds))))
+        }
+        "regexp" => {
+            let source = v
+                .get("source")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| VmErr::Msg("invalid Node regular expression source".into()))?;
+            let flags = v
+                .get("flags")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| VmErr::Msg("invalid Node regular expression flags".into()))?;
+            if source.len() > MAX_STRING_LEN || flags.len() > MAX_STRING_LEN {
+                return Err(VmErr::Msg(
+                    "Node regular expression exceeds the VM string limit".into(),
+                ));
+            }
+            let last_index = v
+                .get("lastIndex")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("0")
+                .parse::<f64>()
+                .unwrap_or(0.0);
+            let regex = crate::builtins::compile_regex(source, flags)?;
+            let Value::RegExp(data) = &regex else {
+                unreachable!("regex compiler returns a RegExp")
+            };
+            if last_index.is_finite() && last_index >= 0.0 {
+                data.last_index.set(last_index as usize);
+            }
+            Ok(regex)
+        }
+        "symbol" => {
+            let id = v
+                .get("v")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| VmErr::Msg("invalid Node symbol id".into()))?;
+            let description = v
+                .get("description")
+                .and_then(JsonValue::as_str)
+                .map(str::to_string);
+            if description
+                .as_ref()
+                .is_some_and(|description| description.len() > MAX_STRING_LEN)
+            {
+                return Err(VmErr::Msg(
+                    "Node symbol description exceeds VM limit".into(),
+                ));
+            }
+            if let Some(guest_id) = id.strip_prefix("g:") {
+                let guest_id = guest_id
+                    .parse::<u64>()
+                    .map_err(|_| VmErr::Msg("invalid guest symbol id".into()))?;
+                return Ok(Value::Symbol(Rc::new(SymbolData {
+                    id: guest_id,
+                    description,
+                })));
+            }
+            if let Some(symbol) = sidecar.state.borrow().host_symbols.get(id).cloned() {
+                return Ok(symbol);
+            }
+            if !id.starts_with("n:") {
+                return Err(VmErr::Msg("invalid native symbol id".into()));
+            }
+            if sidecar.state.borrow().host_symbols.len() >= MAX_NATIVE_HANDLES {
+                return Err(VmErr::Msg("native symbol handle limit exceeded".into()));
+            }
+            let symbol = crate::builtins::new_symbol(description);
+            let Value::Symbol(data) = &symbol else {
+                unreachable!("new_symbol returns a Symbol")
+            };
+            let mut state = sidecar.state.borrow_mut();
+            state.symbol_remote_ids.insert(data.id, id.to_string());
+            state.host_symbols.insert(id.to_string(), symbol.clone());
+            Ok(symbol)
+        }
         "hostObject" => {
             let id = v
                 .get("v")
@@ -1170,7 +1297,11 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
                 .get("message")
                 .and_then(JsonValue::as_str)
                 .unwrap_or("native promise result could not be marshalled");
-            Ok(Value::Error(crate::value::ErrorData::new(name, message)))
+            let error = match v.get("code").and_then(JsonValue::as_str) {
+                Some(code) => crate::value::ErrorData::with_code(name, message, code),
+                None => crate::value::ErrorData::new(name, message),
+            };
+            Ok(Value::Error(error))
         }
         "arrayBuffer" | "bytes" => {
             let bytes = wire_bytes(
@@ -1286,6 +1417,18 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
     }
 }
 
+fn parse_wire_number(value: &str) -> Result<f64, VmErr> {
+    match value {
+        "NaN" => Ok(f64::NAN),
+        "Infinity" => Ok(f64::INFINITY),
+        "-Infinity" => Ok(f64::NEG_INFINITY),
+        "-0" => Ok(-0.0),
+        _ => value
+            .parse()
+            .map_err(|error| VmErr::Msg(format!("invalid Node number: {error}"))),
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
@@ -1358,6 +1501,85 @@ static napi_value echo(napi_env env, napi_callback_info info) {
 static napi_value big(napi_env env, napi_callback_info info) {
   napi_value result;
   if (napi_create_bigint_int64(env, 9007199254740993LL, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value date_value(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  double milliseconds;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_date_value(env, argv[0], &milliseconds) != napi_ok ||
+      napi_create_double(env, milliseconds, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_date(napi_env env, napi_callback_info info) {
+  napi_value result;
+  if (napi_create_date(env, 123456.5, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value regex_source(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_named_property(env, argv[0], "source", &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value regex_flags(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_named_property(env, argv[0], "flags", &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_regex(napi_env env, napi_callback_info info) {
+  napi_value global, constructor, args[2], result;
+  if (napi_get_global(env, &global) != napi_ok ||
+      napi_get_named_property(env, global, "RegExp", &constructor) != napi_ok ||
+      napi_create_string_utf8(env, "a+", NAPI_AUTO_LENGTH, &args[0]) != napi_ok ||
+      napi_create_string_utf8(env, "gi", NAPI_AUTO_LENGTH, &args[1]) != napi_ok ||
+      napi_new_instance(env, constructor, 2, args, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_symbol(napi_env env, napi_callback_info info) {
+  napi_value description, result;
+  if (napi_create_string_utf8(env, "native", NAPI_AUTO_LENGTH, &description) != napi_ok ||
+      napi_create_symbol(env, description, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value identity(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1];
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1) return NULL;
+  return argv[0];
+}
+
+static napi_value is_symbol(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  napi_valuetype type;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_typeof(env, argv[0], &type) != napi_ok ||
+      napi_create_int32(env, type == napi_symbol ? 1 : 0, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value is_node_iterator(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], global, symbol_constructor, iterator, result;
+  bool equal = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_global(env, &global) != napi_ok ||
+      napi_get_named_property(env, global, "Symbol", &symbol_constructor) != napi_ok ||
+      napi_get_named_property(env, symbol_constructor, "iterator", &iterator) != napi_ok ||
+      napi_strict_equals(env, argv[0], iterator, &equal) != napi_ok ||
+      napi_create_int32(env, equal ? 1 : 0, &result) != napi_ok) return NULL;
   return result;
 }
 
@@ -1459,6 +1681,18 @@ static napi_value promise_reject(napi_env env, napi_callback_info info) {
   return promise;
 }
 
+static napi_value promise_reject_error(napi_env env, napi_callback_info info) {
+  napi_deferred deferred;
+  napi_value promise, message, reason, code;
+  if (napi_create_promise(env, &deferred, &promise) != napi_ok ||
+      napi_create_string_utf8(env, "native error rejection", NAPI_AUTO_LENGTH, &message) != napi_ok ||
+      napi_create_error(env, NULL, message, &reason) != napi_ok ||
+      napi_create_string_utf8(env, "E_NATIVE_REJECTION", NAPI_AUTO_LENGTH, &code) != napi_ok ||
+      napi_set_named_property(env, reason, "code", code) != napi_ok ||
+      napi_reject_deferred(env, deferred, reason) != napi_ok) return NULL;
+  return promise;
+}
+
 static napi_value promise_pending(napi_env env, napi_callback_info info) {
   napi_deferred deferred;
   napi_value promise;
@@ -1554,6 +1788,24 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "echo", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "big", NAPI_AUTO_LENGTH, big, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "big", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "dateValue", NAPI_AUTO_LENGTH, date_value, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "dateValue", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeDate", NAPI_AUTO_LENGTH, make_date, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeDate", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "regexSource", NAPI_AUTO_LENGTH, regex_source, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "regexSource", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "regexFlags", NAPI_AUTO_LENGTH, regex_flags, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "regexFlags", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeRegex", NAPI_AUTO_LENGTH, make_regex, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeRegex", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeSymbol", NAPI_AUTO_LENGTH, make_symbol, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeSymbol", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "identity", NAPI_AUTO_LENGTH, identity, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "identity", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "isSymbol", NAPI_AUTO_LENGTH, is_symbol, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "isSymbol", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "isNodeIterator", NAPI_AUTO_LENGTH, is_node_iterator, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "isNodeIterator", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "makeBuffer", NAPI_AUTO_LENGTH, make_buffer, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "makeBuffer", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "isBuffer", NAPI_AUTO_LENGTH, is_buffer, NULL, &fn) != napi_ok) return NULL;
@@ -1576,6 +1828,8 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "promiseResult", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "promiseReject", NAPI_AUTO_LENGTH, promise_reject, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "promiseReject", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "promiseRejectError", NAPI_AUTO_LENGTH, promise_reject_error, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "promiseRejectError", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "promisePending", NAPI_AUTO_LENGTH, promise_pending, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "promisePending", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "onLater", NAPI_AUTO_LENGTH, on_later, NULL, &fn) != napi_ok) return NULL;
@@ -1631,6 +1885,63 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             .eval_source("String(require('./fixture.node').big());")
             .unwrap();
         assert!(matches!(bigint, Value::String(ref value) if value == "9007199254740993"));
+        let builtins = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); const nativeDate = addon.makeDate(); const nativeRegex = addon.makeRegex(); const nativeSymbol = addon.makeSymbol(); const guestSymbol = Symbol('guest'); const nativeRegexMatched = nativeRegex.test('AAA'); ({inputDate:addon.dateValue(new Date(1700000000123)), nativeDate:nativeDate.getTime(), inputRegex:addon.regexSource(/a+/gi) + '/' + addon.regexFlags(/a+/gi), nativeRegex:nativeRegex.source + '/' + nativeRegex.flags, nativeRegexMatched, nativeRegexLastIndex:nativeRegex.lastIndex, nativeSymbolType:typeof nativeSymbol, nativeSymbolDescription:nativeSymbol.description, nativeSymbolNapiType:addon.isSymbol(nativeSymbol), guestSymbolNapiType:addon.isSymbol(guestSymbol), iteratorSymbolNapiType:addon.isNodeIterator(Symbol.iterator), nativeSymbolIdentity:addon.identity(nativeSymbol) === nativeSymbol, guestSymbolIdentity:addon.identity(guestSymbol) === guestSymbol});",
+            )
+            .unwrap();
+        assert!(matches!(
+            builtins.get_prop("inputDate"),
+            Some(Value::Number(value)) if value == 1_700_000_000_123.0
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeDate"),
+            Some(Value::Number(value)) if value == 123_456.0
+        ));
+        assert!(matches!(
+            builtins.get_prop("inputRegex"),
+            Some(Value::String(ref value)) if value == "a+/gi"
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeRegex"),
+            Some(Value::String(ref value)) if value == "a+/gi"
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeRegexMatched"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeRegexLastIndex"),
+            Some(Value::Number(value)) if value == 3.0
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeSymbolType"),
+            Some(Value::String(ref value)) if value == "symbol"
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeSymbolDescription"),
+            Some(Value::String(ref value)) if value == "native"
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeSymbolNapiType"),
+            Some(Value::Number(value)) if value == 1.0
+        ));
+        assert!(matches!(
+            builtins.get_prop("guestSymbolNapiType"),
+            Some(Value::Number(value)) if value == 1.0
+        ));
+        assert!(matches!(
+            builtins.get_prop("iteratorSymbolNapiType"),
+            Some(Value::Number(value)) if value == 1.0
+        ));
+        assert!(matches!(
+            builtins.get_prop("nativeSymbolIdentity"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            builtins.get_prop("guestSymbolIdentity"),
+            Some(Value::Bool(true))
+        ));
         let buffers = interpreter
             .eval_source(
                 "const addon = require('./fixture.node'); const buffer = addon.makeBuffer(); const view = addon.makeDataView(); ({text:buffer.toString('utf8'), first:buffer[0], roundTrip:addon.isBuffer(buffer), inputLength:addon.typedArrayLength(new Uint16Array([300, 400])), typed:addon.makeTypedArray(), arrayBufferLength:addon.arrayBufferLength(new Uint8Array([1, 2, 3]).buffer), arrayBufferByte:new Uint8Array(addon.makeArrayBuffer())[1], dataViewLength:view.byteLength, dataViewByte:view.getUint8(1), dataViewRoundTrip:addon.dataViewByte(new DataView(new Uint8Array([4, 5]).buffer))});",
@@ -1717,6 +2028,23 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(
             matches!(async_rejection, Value::String(ref reason) if reason == "native-rejection")
         );
+        let async_error_rejection = interpreter
+            .eval_source(
+                "try { await require('./fixture.node').promiseRejectError(); } catch (error) { ({name:error.name, message:error.message, code:error.code}); }",
+            )
+            .unwrap();
+        assert!(matches!(
+            async_error_rejection.get_prop("name"),
+            Some(Value::String(ref name)) if name == "Error"
+        ));
+        assert!(matches!(
+            async_error_rejection.get_prop("message"),
+            Some(Value::String(ref message)) if message == "native error rejection"
+        ));
+        assert!(matches!(
+            async_error_rejection.get_prop("code"),
+            Some(Value::String(ref code)) if code == "E_NATIVE_REJECTION"
+        ));
         let sync_result = interpreter
             .eval_source(
                 "globalThis.syncCallbackThisType = ''; const syncCallbackResult = require('./fixture.node').onSync(function(value) { syncCallbackThisType = typeof this; return value + '-reply'; }); ({value:syncCallbackResult, thisType:syncCallbackThisType});",
