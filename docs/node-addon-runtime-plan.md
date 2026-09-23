@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | Selected Node-API v1-v6 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v7 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -62,7 +62,7 @@ still goes through the VM's CommonJS resolver and module cache.
 The current implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
 existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
-Node-API versions 1 through 6 and currently covers scoped handles, callback
+Node-API versions 1 through 7 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
@@ -146,6 +146,11 @@ models remain incomplete. BigInt word arrays are limited to 2,048 words by the
 VM's BigInt allocation cap. Replacing environment instance data overwrites the
 previous slot without calling its finalizer; the active finalizer runs on the
 owner thread during shutdown after cleanup hooks.
+The selected Node-API v7 surface supports idempotent ArrayBuffer detachment,
+updates existing typed-array views, and exposes detached-state checks. The VM
+matches Node when `napi_is_detached_arraybuffer` receives a non-ArrayBuffer
+value (`napi_ok`, false); Bun 1.4.0 returns `napi_arraybuffer_expected` for
+that input, which the differential fixture records as a runtime difference.
 `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive

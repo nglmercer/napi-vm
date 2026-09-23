@@ -1770,9 +1770,9 @@ fn guest_to_wire(
         }
         Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":&*bytes.borrow()}),
         Value::TypedArray(view) => {
-            let start = view.byte_offset;
+            let start = view.effective_byte_offset();
             let byte_len = view
-                .length
+                .effective_length()
                 .checked_mul(view.kind.size())
                 .ok_or_else(|| VmErr::Msg("guest typed array exceeds the bridge limit".into()))?;
             let end = start
@@ -1782,18 +1782,18 @@ fn guest_to_wire(
             let slice = bytes
                 .get(start..end)
                 .ok_or_else(|| VmErr::Msg("guest typed array has an invalid byte range".into()))?;
-            json!({"t":"typedArray","kind":view.kind.name(),"length":view.length,"bytes":slice})
+            json!({"t":"typedArray","kind":view.kind.name(),"length":view.effective_length(),"bytes":slice})
         }
         Value::DataView(view) => {
-            let start = view.byte_offset;
+            let start = view.effective_byte_offset();
             let end = start
-                .checked_add(view.length)
+                .checked_add(view.effective_length())
                 .ok_or_else(|| VmErr::Msg("guest DataView exceeds the bridge limit".into()))?;
             let bytes = view.buffer.borrow();
             let slice = bytes
                 .get(start..end)
                 .ok_or_else(|| VmErr::Msg("guest DataView has an invalid byte range".into()))?;
-            json!({"t":"dataView","length":view.length,"bytes":slice})
+            json!({"t":"dataView","length":view.effective_length(),"bytes":slice})
         }
         Value::BigInt(x) => json!({"t":"bigint","v":x.to_string()}),
         Value::Date(milliseconds) => {

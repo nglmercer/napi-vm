@@ -352,13 +352,14 @@ fn make_typed_array(
     view: &std::rc::Rc<crate::value::TypedArrayData>,
 ) -> Result<sys::napi_value, VmErr> {
     let element_bytes = view.kind.size();
+    let byte_offset = view.effective_byte_offset();
     let byte_length = if matches!(value, Value::DataView(_)) {
-        view.length
+        view.effective_length()
     } else {
-        view.length * element_bytes
+        view.effective_length() * element_bytes
     };
     let source = view.buffer.borrow();
-    let from = view.byte_offset.min(source.len());
+    let from = byte_offset.min(source.len());
     let to = (from + byte_length).min(source.len());
     let buffer = make_array_buffer(env, &source[from..to])?;
     drop(source);

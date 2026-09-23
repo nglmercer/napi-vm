@@ -605,6 +605,12 @@ impl Interpreter {
                 Ok(crate::builtins::array_buffer_member(bytes, k).unwrap_or(Value::Undefined))
             }
             (Value::DataView(view), Value::String(k)) => {
+                if view.buffer.is_detached() && matches!(k.as_str(), "byteLength" | "byteOffset") {
+                    return Err(VmErr::Msg(
+                        "TypeError: Cannot access a DataView backed by a detached ArrayBuffer"
+                            .to_string(),
+                    ));
+                }
                 crate::builtins::note_method(k);
                 Ok(crate::builtins::data_view_member(view, k).unwrap_or(Value::Undefined))
             }

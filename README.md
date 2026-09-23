@@ -167,7 +167,7 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-accepts addons requesting Node-API versions 1 through 6, but only implements a
+accepts addons requesting Node-API versions 1 through 7, but only implements a
 selected API subset rather than every function in those versions. The v1
 surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
@@ -192,6 +192,12 @@ arrays are capped at 2,048 64-bit words by the VM's integer-size limit.
 Replacing instance data overwrites the old slot without calling its finalizer;
 the current finalizer runs on the owner thread during host shutdown, after
 cleanup hooks.
+The selected Node-API v7 surface supports ArrayBuffer detachment and detached
+state checks. Detachment is idempotent, invalidates existing typed-array views,
+and follows Node's `napi_is_detached_arraybuffer` result for non-ArrayBuffer
+values (`napi_ok` with `false`). Bun 1.4.0 returns
+`napi_arraybuffer_expected` for that same input; the differential fixture keeps
+this runtime difference explicit while checking all shared behavior.
 `napi_add_finalizer` supports its optional zero-count reference and runs the
 finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
 no guest-object garbage collector, so this does not provide collection-time

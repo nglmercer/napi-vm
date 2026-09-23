@@ -223,6 +223,8 @@ typedef struct napi_vm_node_api_table {
                                         int32_t, napi_value*);
   napi_status (*set_instance_data)(napi_env, void*, napi_finalize, void*);
   napi_status (*get_instance_data)(napi_env, void**);
+  napi_status (*detach_arraybuffer)(napi_env, napi_value);
+  napi_status (*is_detached_arraybuffer)(napi_env, napi_value, bool*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -686,6 +688,19 @@ NAPI_VM_EXPORT napi_status napi_set_instance_data(napi_env env, void* data,
 NAPI_VM_EXPORT napi_status napi_get_instance_data(napi_env env, void** data) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_instance_data(env, data) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_detach_arraybuffer(napi_env env,
+                                                     napi_value arraybuffer) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->detach_arraybuffer(env, arraybuffer) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_is_detached_arraybuffer(napi_env env,
+                                                          napi_value arraybuffer,
+                                                          bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_detached_arraybuffer(env, arraybuffer, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_arraybuffer_info(napi_env env,

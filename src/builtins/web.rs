@@ -91,8 +91,8 @@ fn decode(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> 
         Some(Value::ArrayBuffer(buffer)) => buffer.borrow().to_vec(),
         Some(Value::TypedArray(view)) | Some(Value::DataView(view)) => {
             let source = view.buffer.borrow();
-            let from = view.byte_offset.min(source.len());
-            let to = (from + view.length * view.kind.size()).min(source.len());
+            let from = view.effective_byte_offset().min(source.len());
+            let to = (from + view.effective_length() * view.kind.size()).min(source.len());
             source[from..to].to_vec()
         }
         _ => Vec::new(),
@@ -433,8 +433,8 @@ fn clone_value(
             let cloned = Rc::new(TypedArrayData {
                 kind: view.kind,
                 buffer: copy,
-                byte_offset: view.byte_offset,
-                length: view.length,
+                byte_offset: view.effective_byte_offset(),
+                length: view.effective_length(),
             });
             match value {
                 Value::DataView(_) => Value::DataView(cloned),

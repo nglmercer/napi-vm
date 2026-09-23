@@ -585,7 +585,7 @@ impl Interpreter {
             Value::BigInt(value) => output.push_str(&value.to_decimal()),
             // A typed array stringifies as its elements, like an array.
             Value::TypedArray(view) => {
-                for index in 0..view.length {
+                for index in 0..view.effective_length() {
                     if index > 0 {
                         output.push_char(',')?;
                     }

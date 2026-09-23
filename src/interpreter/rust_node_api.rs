@@ -47,6 +47,7 @@ const NAPI_QUEUE_FULL: i32 = 15;
 const NAPI_CLOSING: i32 = 16;
 const NAPI_BIGINT_EXPECTED: i32 = 17;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
+const NAPI_DETACHABLE_ARRAYBUFFER_EXPECTED: i32 = 20;
 const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
@@ -62,7 +63,7 @@ const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
 const MAX_BIGINT_WORDS: usize = 2048;
-const MAX_NODE_API_VERSION: i32 = 6;
+const MAX_NODE_API_VERSION: i32 = 7;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -133,7 +134,7 @@ impl RustNodeApiOptions {
 }
 
 /// In-process Node-API addon host. This is opt-in and implements Linux ELF and
-/// macOS Mach-O loading for the selected Node-API v1-v6 calls below. Linux is runtime
+/// macOS Mach-O loading for the selected Node-API v1-v7 calls below. Linux is runtime
 /// tested; macOS still needs native CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
@@ -1023,6 +1024,8 @@ struct NapiVmApiTable {
     set_instance_data:
         unsafe extern "C" fn(NapiEnv, *mut c_void, Option<NapiFinalize>, *mut c_void) -> i32,
     get_instance_data: unsafe extern "C" fn(NapiEnv, *mut *mut c_void) -> i32,
+    detach_arraybuffer: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
+    is_detached_arraybuffer: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
 }
 
 #[repr(C)]
@@ -1171,6 +1174,8 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_all_property_names: api_get_all_property_names,
     set_instance_data: api_set_instance_data,
     get_instance_data: api_get_instance_data,
+    detach_arraybuffer: api_detach_arraybuffer,
+    is_detached_arraybuffer: api_is_detached_arraybuffer,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1193,6 +1198,7 @@ fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
         NAPI_QUEUE_FULL => b"thread-safe function queue is full\0",
         NAPI_CLOSING => b"thread-safe function is closing\0",
         NAPI_ARRAYBUFFER_EXPECTED => b"ArrayBuffer expected\0",
+        NAPI_DETACHABLE_ARRAYBUFFER_EXPECTED => b"detachable ArrayBuffer expected\0",
         _ => b"generic Node-API failure\0",
     };
     NapiExtendedErrorInfo {
@@ -1897,7 +1903,7 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
             },
         ),
         Value::TypedArray(view) => {
-            for index in 0..view.length {
+            for index in 0..view.effective_length() {
                 napi_push_direct_property_key(
                     &mut keys,
                     &index.to_string(),
@@ -3366,16 +3372,11 @@ fn napi_buffer_data(value: &Value) -> Result<(*mut c_void, usize), i32> {
     if view.kind != TypedKind::Uint8 {
         return Err(NAPI_INVALID_ARG);
     }
-    let end = view
-        .byte_offset
-        .checked_add(view.length)
-        .ok_or(NAPI_INVALID_ARG)?;
-    let mut bytes = view.buffer.borrow_mut();
-    if end > bytes.len() {
-        return Err(NAPI_INVALID_ARG);
+    let (data, length) = napi_typedarray_data(view)?;
+    if length > MAX_NAPI_BUFFER_BYTES {
+        return Err(NAPI_GENERIC_FAILURE);
     }
-    let data = unsafe { bytes.as_mut_ptr().add(view.byte_offset).cast::<c_void>() };
-    Ok((data, view.length))
+    Ok((data, length))
 }
 
 fn remember_napi_buffer(environment: &NapiEnvironment, value: &Value) -> Result<(), i32> {
@@ -3558,11 +3559,17 @@ unsafe extern "C" fn api_is_buffer(env: NapiEnv, value: NapiValue, result: *mut 
 }
 
 fn napi_arraybuffer_data(buffer: &Buffer) -> (*mut c_void, usize) {
+    if buffer.is_detached() {
+        return (std::ptr::null_mut(), 0);
+    }
     let mut bytes = buffer.borrow_mut();
     (bytes.as_mut_ptr().cast::<c_void>(), bytes.len())
 }
 
 fn napi_typedarray_data(view: &TypedArrayData) -> Result<(*mut c_void, usize), i32> {
+    if view.buffer.is_detached() {
+        return Ok((std::ptr::null_mut(), 0));
+    }
     let byte_length = view
         .length
         .checked_mul(view.kind.size())
@@ -3731,6 +3738,40 @@ unsafe extern "C" fn api_get_arraybuffer_info(
     })
 }
 
+unsafe extern "C" fn api_detach_arraybuffer(env: NapiEnv, value: NapiValue) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::ArrayBuffer(buffer) = &value else {
+            return Err(NAPI_ARRAYBUFFER_EXPECTED);
+        };
+        buffer.detach();
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_detached_arraybuffer(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let detached = match &value {
+            Value::ArrayBuffer(buffer) => buffer.is_detached(),
+            // Node reports false for non-ArrayBuffer values rather than
+            // returning napi_arraybuffer_expected from this predicate.
+            _ => false,
+        };
+        unsafe { result.write(detached) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_is_typedarray(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -3765,6 +3806,9 @@ unsafe extern "C" fn api_create_typedarray(
         let Value::ArrayBuffer(buffer) = &arraybuffer else {
             return Err(NAPI_ARRAYBUFFER_EXPECTED);
         };
+        if buffer.is_detached() {
+            return Err(NAPI_INVALID_ARG);
+        }
         if kind.size() > 1 && !byte_offset.is_multiple_of(kind.size()) {
             let message = format!(
                 "start offset of {} should be a multiple of {}",
@@ -3837,7 +3881,7 @@ unsafe extern "C" fn api_get_typedarray_info(
             unsafe { kind.write(napi_typed_kind_id(view.kind)) };
         }
         if !length.is_null() {
-            unsafe { length.write(view.length) };
+            unsafe { length.write(view.effective_length()) };
         }
         if !data.is_null() {
             unsafe { data.write(data_pointer) };
@@ -3846,7 +3890,7 @@ unsafe extern "C" fn api_get_typedarray_info(
             unsafe { arraybuffer.write(handle) };
         }
         if !byte_offset.is_null() {
-            unsafe { byte_offset.write(view.byte_offset) };
+            unsafe { byte_offset.write(view.effective_byte_offset()) };
         }
         Ok(())
     })
@@ -3868,6 +3912,9 @@ unsafe extern "C" fn api_create_dataview(
         let Value::ArrayBuffer(buffer) = &arraybuffer else {
             return Err(NAPI_ARRAYBUFFER_EXPECTED);
         };
+        if buffer.is_detached() {
+            return Err(NAPI_INVALID_ARG);
+        }
         validate_arraybuffer_window(buffer, byte_offset, byte_length, 1)?;
         let value = Value::DataView(Rc::new(TypedArrayData {
             kind: TypedKind::Uint8,
@@ -3919,7 +3966,7 @@ unsafe extern "C" fn api_get_dataview_info(
             )
         };
         if !byte_length.is_null() {
-            unsafe { byte_length.write(view.length) };
+            unsafe { byte_length.write(view.effective_length()) };
         }
         if !data.is_null() {
             unsafe { data.write(data_pointer) };
@@ -3928,7 +3975,7 @@ unsafe extern "C" fn api_get_dataview_info(
             unsafe { arraybuffer.write(handle) };
         }
         if !byte_offset.is_null() {
-            unsafe { byte_offset.write(view.byte_offset) };
+            unsafe { byte_offset.write(view.effective_byte_offset()) };
         }
         Ok(())
     })
@@ -7118,6 +7165,7 @@ fn napi_error(action: &str, status: i32) -> VmErr {
         NAPI_NUMBER_EXPECTED => "number expected",
         NAPI_ARRAY_EXPECTED => "array expected",
         NAPI_ARRAYBUFFER_EXPECTED => "ArrayBuffer expected",
+        NAPI_DETACHABLE_ARRAYBUFFER_EXPECTED => "detachable ArrayBuffer expected",
         NAPI_STRING_EXPECTED => "string expected",
         NAPI_BOOLEAN_EXPECTED => "boolean expected",
         NAPI_QUEUE_FULL => "thread-safe function queue is full",
@@ -7385,7 +7433,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_and_calls_a_real_napi_v6_addon_without_a_node_sidecar() {
+    fn loads_and_calls_a_real_napi_v7_addon_without_a_node_sidecar() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-rust-node-api-{}-{}",
@@ -7417,7 +7465,7 @@ mod tests {
             &source,
             r#"
 #define _POSIX_C_SOURCE 200809L
-#define NAPI_VERSION 6
+#define NAPI_VERSION 7
 #include <node_api.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -7436,6 +7484,7 @@ static int external_finalizer_calls;
 static int external_arraybuffer_finalizer_calls;
 static int external_buffer_finalizer_calls;
 static uint8_t* external_arraybuffer_data;
+static uint8_t detachable_arraybuffer_data[8] = {9, 8, 7, 6, 5, 4, 3, 2};
 static uint8_t* external_buffer_data;
 static int finalizer_create_function_status = -1;
 static int cleanup_hook_order[4];
@@ -7858,6 +7907,73 @@ static napi_value check_external_arraybuffer(napi_env env, napi_callback_info in
       ((uint8_t*)data)[0] == 11 && ((uint8_t*)data)[1] == 22 &&
       ((uint8_t*)data)[2] == 77 && ((uint8_t*)data)[3] == 44;
   if (napi_get_boolean(env, matches, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value arraybuffer_detachment_probe(napi_env env, napi_callback_info info) {
+  napi_value result, owned, external, view, data_view, field;
+  napi_status owned_detach_status, detach_status, second_detach_status;
+  napi_status non_arraybuffer_status;
+  bool detached_before = true, detached_after = false;
+  bool detached_non_arraybuffer = false;
+  size_t arraybuffer_length = 99, view_length = 99, byte_offset = 99;
+  size_t data_view_length = 99, data_view_offset = 99;
+  napi_typedarray_type view_type = napi_uint8_array;
+  void* arraybuffer_data = detachable_arraybuffer_data;
+  void* view_data = detachable_arraybuffer_data;
+  void* data_view_data = detachable_arraybuffer_data;
+  (void)info;
+  if (napi_create_arraybuffer(env, 4, NULL, &owned) != napi_ok)
+    return NULL;
+  owned_detach_status = napi_detach_arraybuffer(env, owned);
+  if (napi_create_external_arraybuffer(env, detachable_arraybuffer_data,
+                                       sizeof(detachable_arraybuffer_data),
+                                       NULL, NULL, &external) != napi_ok ||
+      napi_create_typedarray(env, napi_uint8_array, 4, external, 2, &view) != napi_ok ||
+      napi_create_dataview(env, 4, external, 1, &data_view) != napi_ok ||
+      napi_is_detached_arraybuffer(env, external, &detached_before) != napi_ok)
+    return NULL;
+  detach_status = napi_detach_arraybuffer(env, external);
+  if (napi_is_detached_arraybuffer(env, external, &detached_after) != napi_ok ||
+      napi_get_arraybuffer_info(env, external, &arraybuffer_data,
+                                &arraybuffer_length) != napi_ok ||
+      napi_get_typedarray_info(env, view, &view_type, &view_length, &view_data,
+                               NULL, &byte_offset) != napi_ok ||
+      napi_get_dataview_info(env, data_view, &data_view_length, &data_view_data,
+                             NULL, &data_view_offset) != napi_ok)
+    return NULL;
+  second_detach_status = napi_detach_arraybuffer(env, external);
+  non_arraybuffer_status = napi_is_detached_arraybuffer(env, view,
+                                                         &detached_non_arraybuffer);
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_create_int32(env, owned_detach_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "ownedDetachStatus", field) != napi_ok ||
+      napi_create_int32(env, detach_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "detachStatus", field) != napi_ok ||
+      napi_create_int32(env, second_detach_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "secondDetachStatus", field) != napi_ok ||
+      napi_create_int32(env, non_arraybuffer_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "nonArrayBufferStatus", field) != napi_ok ||
+      napi_create_int32(env, (int32_t)arraybuffer_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arraybufferLength", field) != napi_ok ||
+      napi_create_int32(env, (int32_t)view_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "viewLength", field) != napi_ok ||
+      napi_create_int32(env, (int32_t)byte_offset, &field) != napi_ok ||
+      napi_set_named_property(env, result, "byteOffset", field) != napi_ok ||
+      napi_create_int32(env, (int32_t)data_view_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "dataViewLength", field) != napi_ok ||
+      napi_create_int32(env, (int32_t)data_view_offset, &field) != napi_ok ||
+      napi_set_named_property(env, result, "dataViewOffset", field) != napi_ok ||
+      napi_get_boolean(env, detached_before, &field) != napi_ok ||
+      napi_set_named_property(env, result, "detachedBefore", field) != napi_ok ||
+      napi_get_boolean(env, detached_after, &field) != napi_ok ||
+      napi_set_named_property(env, result, "detachedAfter", field) != napi_ok ||
+      napi_get_boolean(env, detached_non_arraybuffer, &field) != napi_ok ||
+      napi_set_named_property(env, result, "detachedNonArrayBuffer", field) != napi_ok ||
+      napi_set_named_property(env, result, "buffer", external) != napi_ok ||
+      napi_set_named_property(env, result, "view", view) != napi_ok ||
+      napi_set_named_property(env, result, "dataView", data_view) != napi_ok)
+    return NULL;
   return result;
 }
 
@@ -9075,7 +9191,7 @@ NAPI_MODULE_INIT() {
       supported_api_version < NAPI_VERSION ||
       napi_get_version(env, NULL) != napi_invalid_arg ||
       napi_get_boolean(env, supported_api_version >= NAPI_VERSION, &field) != napi_ok ||
-      napi_set_named_property(env, exports, "supportsNapiV6", field) != napi_ok)
+      napi_set_named_property(env, exports, "supportsNapiV7", field) != napi_ok)
     return NULL;
   if (napi_get_instance_data(env, &current_instance_data) != napi_ok ||
       current_instance_data != NULL ||
@@ -9148,6 +9264,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "checkExternalArrayBuffer", NAPI_AUTO_LENGTH,
                            check_external_arraybuffer, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "checkExternalArrayBuffer", function) != napi_ok ||
+      napi_create_function(env, "arraybufferDetachmentProbe", NAPI_AUTO_LENGTH,
+                           arraybuffer_detachment_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "arraybufferDetachmentProbe", function) != napi_ok ||
       napi_create_function(env, "makeExternalBuffer", NAPI_AUTO_LENGTH,
                            make_external_buffer, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "makeExternalBuffer", function) != napi_ok ||
@@ -9331,7 +9450,7 @@ NAPI_MODULE_INIT() {
         #[cfg(target_os = "macos")]
         build.args(["-dynamiclib", "-undefined", "dynamic_lookup"]);
         let built = build
-            .args(["-pthread", "-DNAPI_VERSION=6", "-I"])
+            .args(["-pthread", "-DNAPI_VERSION=7", "-I"])
             .arg(include)
             .arg(&source)
             .arg("-o")
@@ -9354,6 +9473,34 @@ const externalArrayBuffer = addon.makeExternalArrayBuffer();
 const externalArrayBufferView = new Uint8Array(externalArrayBuffer);
 externalArrayBufferView[2] = 77;
 const externalArrayBufferAlias = addon.checkExternalArrayBuffer(externalArrayBuffer);
+const detachedProbe = addon.arraybufferDetachmentProbe();
+const errorName = callback => {
+  try { callback(); return null; } catch (error) { return error.name; }
+};
+const arrayBufferDetachment = {
+  ownedDetachStatus: detachedProbe.ownedDetachStatus,
+  detachStatus: detachedProbe.detachStatus,
+  secondDetachStatus: detachedProbe.secondDetachStatus,
+  nonArrayBufferStatus: detachedProbe.nonArrayBufferStatus,
+  detachedBefore: detachedProbe.detachedBefore,
+  detachedAfter: detachedProbe.detachedAfter,
+  detachedNonArrayBuffer: detachedProbe.detachedNonArrayBuffer,
+  arraybufferLength: detachedProbe.arraybufferLength,
+  viewLength: detachedProbe.viewLength,
+  byteOffset: detachedProbe.byteOffset,
+  dataViewLength: detachedProbe.dataViewLength,
+  dataViewOffset: detachedProbe.dataViewOffset,
+  guestArrayBufferLength: detachedProbe.buffer.byteLength,
+  guestViewLength: detachedProbe.view.length,
+  guestViewByteLength: detachedProbe.view.byteLength,
+  guestViewByteOffset: detachedProbe.view.byteOffset,
+  guestDataViewByteLength: errorName(() => detachedProbe.dataView.byteLength),
+  guestDataViewByteOffset: errorName(() => detachedProbe.dataView.byteOffset),
+  guestDataViewRead: errorName(() => detachedProbe.dataView.getUint8(0)),
+  typedArrayConstruction: errorName(() => new Uint8Array(detachedProbe.buffer)),
+  dataViewConstruction: errorName(() => new DataView(detachedProbe.buffer)),
+  arrayBufferSlice: errorName(() => detachedProbe.buffer.slice(0)),
+};
 const externalBuffer = addon.makeExternalBuffer();
 externalBuffer[1] = 88;
 const externalBufferAlias = addon.checkExternalBuffer(externalBuffer);
@@ -9609,8 +9756,9 @@ module.exports = {
   childNewTargetInfo,
   childCounterValue: childCounter.value,
   instanceChecks,
-  supportsNapiV6: addon.supportsNapiV6,
+  supportsNapiV7: addon.supportsNapiV7,
   bigintApi,
+  arrayBufferDetachment,
   instanceDataMatches,
   propertyNames,
   dateApi: {
@@ -10161,9 +10309,63 @@ module.exports = {
             ));
         }
         assert!(matches!(
-            result.get_prop("supportsNapiV6"),
+            result.get_prop("supportsNapiV7"),
             Some(Value::Bool(true))
         ));
+        let detachment = result.get_prop("arrayBufferDetachment").unwrap();
+        for (name, expected) in [
+            ("ownedDetachStatus", NAPI_OK),
+            ("detachStatus", NAPI_OK),
+            ("secondDetachStatus", NAPI_OK),
+            ("nonArrayBufferStatus", NAPI_OK),
+            ("arraybufferLength", 0),
+            ("viewLength", 0),
+            ("byteOffset", 0),
+            ("dataViewLength", 0),
+            ("dataViewOffset", 0),
+            ("guestArrayBufferLength", 0),
+            ("guestViewLength", 0),
+            ("guestViewByteLength", 0),
+            ("guestViewByteOffset", 0),
+        ] {
+            assert!(
+                matches!(
+                    detachment.get_prop(name),
+                    Some(Value::Number(value)) if value == expected as f64
+                ),
+                "unexpected Node-API v7 detachment field {name}: {:?}",
+                detachment.get_prop(name)
+            );
+        }
+        assert!(matches!(
+            detachment.get_prop("detachedBefore"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            detachment.get_prop("detachedAfter"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            detachment.get_prop("detachedNonArrayBuffer"),
+            Some(Value::Bool(false))
+        ));
+        for name in [
+            "guestDataViewByteLength",
+            "guestDataViewByteOffset",
+            "guestDataViewRead",
+            "typedArrayConstruction",
+            "dataViewConstruction",
+            "arrayBufferSlice",
+        ] {
+            assert!(
+                matches!(
+                    detachment.get_prop(name),
+                    Some(Value::String(ref value)) if value == "TypeError"
+                ),
+                "expected detached-buffer TypeError for {name}: {:?}",
+                detachment.get_prop(name)
+            );
+        }
         let bigint_api = result.get_prop("bigintApi").unwrap();
         for (name, expected) in [
             ("signed", "-9223372036854775808"),
@@ -11294,6 +11496,11 @@ module.exports = {
             );
             let node_result: serde_json::Value =
                 serde_json::from_slice(&reference.stdout).expect("Node result is valid JSON");
+            assert_eq!(
+                node_result.get("arrayBufferDetachment"),
+                guest_result.get("arrayBufferDetachment"),
+                "Node-API v7 detachment mismatch"
+            );
             assert_eq!(node_result, guest_result);
         }
 
@@ -11316,6 +11523,24 @@ module.exports = {
             let mut bun_result: serde_json::Value =
                 serde_json::from_slice(&reference.stdout).expect("Bun result is valid JSON");
             let mut normalized_guest_result = guest_result.clone();
+            let bun_non_arraybuffer_status = bun_result
+                .pointer("/arrayBufferDetachment/nonArrayBufferStatus")
+                .and_then(serde_json::Value::as_i64);
+            let vm_non_arraybuffer_status = normalized_guest_result
+                .pointer("/arrayBufferDetachment/nonArrayBufferStatus")
+                .and_then(serde_json::Value::as_i64);
+            assert_eq!(vm_non_arraybuffer_status, Some(NAPI_OK as i64));
+            assert_eq!(
+                bun_non_arraybuffer_status,
+                Some(NAPI_ARRAYBUFFER_EXPECTED as i64),
+                "Bun's napi_is_detached_arraybuffer type check changed; review the known Node/Bun semantic difference"
+            );
+            for output in [&mut bun_result, &mut normalized_guest_result] {
+                output["arrayBufferDetachment"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("nonArrayBufferStatus");
+            }
             for output in [&mut bun_result, &mut normalized_guest_result] {
                 if let Some(error) = output
                     .get_mut("typedArrayError")

@@ -212,10 +212,14 @@ fn render_plain_value(
         Value::ArrayBuffer(bytes) => {
             output.push_str(&format!("[object ArrayBuffer({})]", bytes.borrow().len()))
         }
-        Value::TypedArray(view) => {
-            output.push_str(&format!("{}({})", view.kind.name(), view.length))
+        Value::TypedArray(view) => output.push_str(&format!(
+            "{}({})",
+            view.kind.name(),
+            view.effective_length()
+        )),
+        Value::DataView(view) => {
+            output.push_str(&format!("[object DataView({})]", view.effective_length()))
         }
-        Value::DataView(view) => output.push_str(&format!("[object DataView({})]", view.length)),
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => output.push_str("[object AsyncTask]"),
         Value::Undefined => output.push_str("undefined"),
@@ -437,12 +441,12 @@ fn render_inspect_value(
         Value::TypedArray(view) => painter.write_wrapped(
             context.output,
             "2;37",
-            &format!("{}({})", view.kind.name(), view.length),
+            &format!("{}({})", view.kind.name(), view.effective_length()),
         ),
         Value::DataView(view) => painter.write_wrapped(
             context.output,
             "2;37",
-            &format!("DataView({})", view.length),
+            &format!("DataView({})", view.effective_length()),
         ),
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => painter.write_wrapped(context.output, "2;37", "[object AsyncTask]"),

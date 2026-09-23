@@ -117,6 +117,12 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
             Ok(typed(kind, new_buffer(length * size)?, 0, length))
         }
         Some(Value::ArrayBuffer(buffer)) => {
+            if buffer.is_detached() {
+                return Err(VmErr::Msg(
+                    "TypeError: Cannot construct a typed array from a detached ArrayBuffer"
+                        .to_string(),
+                ));
+            }
             let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0);
             if !byte_offset.is_finite() || byte_offset < 0.0 {
                 return Err(range_err("Invalid typed array offset"));
@@ -207,11 +213,11 @@ fn typed_from(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 
 /// Read element `index`, or `undefined` when it is out of range.
 pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
-    if index >= view.length {
+    if index >= view.effective_length() {
         return None;
     }
     let buffer = view.buffer.borrow();
-    let at = view.byte_offset + index * view.kind.size();
+    let at = view.effective_byte_offset() + index * view.kind.size();
     let bytes = buffer.get(at..at + view.kind.size())?;
     Some(match view.kind {
         TypedKind::Int8 => Value::Number(bytes[0] as i8 as f64),
@@ -237,11 +243,11 @@ pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
 /// Write element `index`, converting and wrapping as the element type
 /// requires. Out-of-range indices are ignored, as they are on a typed array.
 pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) -> Result<(), VmErr> {
-    if index >= view.length {
+    if index >= view.effective_length() {
         return Ok(());
     }
     let size = view.kind.size();
-    let at = view.byte_offset + index * size;
+    let at = view.effective_byte_offset() + index * size;
     let bytes: Vec<u8> = match view.kind {
         TypedKind::BigInt64 | TypedKind::BigUint64 => {
             let Some(big) = value.as_bigint() else {
@@ -302,7 +308,7 @@ fn to_int(value: f64) -> i32 {
 }
 
 fn read_all(view: &Rc<TypedArrayData>) -> Vec<Value> {
-    (0..view.length)
+    (0..view.effective_length())
         .map(|index| read_element(view, index).unwrap_or(Value::Undefined))
         .collect()
 }
@@ -311,10 +317,11 @@ fn read_all(view: &Rc<TypedArrayData>) -> Vec<Value> {
 
 /// Properties and methods on a typed array.
 pub fn typed_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
+    let length = view.effective_length();
     Some(match key {
-        "length" => Value::Number(view.length as f64),
-        "byteLength" => Value::Number((view.length * view.kind.size()) as f64),
-        "byteOffset" => Value::Number(view.byte_offset as f64),
+        "length" => Value::Number(length as f64),
+        "byteLength" => Value::Number((length * view.kind.size()) as f64),
+        "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
         "BYTES_PER_ELEMENT" => Value::Number(view.kind.size() as f64),
         "buffer" => Value::ArrayBuffer(view.buffer.clone()),
         "set" => super::nf("set", typed_set),
@@ -372,13 +379,14 @@ fn current_method(_: &Interpreter) -> Result<String, VmErr> {
 
 fn typed_at(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
+    let length = view.effective_length();
     let index = a.first().map(|v| v.to_number()).unwrap_or(0.0);
     let index = if index < 0.0 {
-        view.length as f64 + index
+        length as f64 + index
     } else {
         index
     };
-    if index < 0.0 || index >= view.length as f64 {
+    if index < 0.0 || index >= length as f64 {
         return Ok(Value::Undefined);
     }
     Ok(read_element(&view, index as usize).unwrap_or(Value::Undefined))
@@ -411,7 +419,7 @@ fn typed_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
         Some(other) => interp.iterate(other)?,
         None => Vec::new(),
     };
-    if offset + items.len() > view.length {
+    if offset + items.len() > view.effective_length() {
         return Err(range_err("Source is too large"));
     }
     for (index, item) in items.iter().enumerate() {
@@ -447,11 +455,11 @@ fn window(length: usize, a: &[Value]) -> (usize, usize) {
 /// `subarray`: a *view* over the same buffer, so writes are shared.
 fn typed_subarray(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
-    let (start, end) = window(view.length, &a);
+    let (start, end) = window(view.effective_length(), &a);
     Ok(typed(
         view.kind,
         view.buffer.clone(),
-        view.byte_offset + start * view.kind.size(),
+        view.effective_byte_offset() + start * view.kind.size(),
         end - start,
     ))
 }
@@ -459,13 +467,13 @@ fn typed_subarray(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
 /// `slice`: a *copy*, so writes are not shared.
 fn typed_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
-    let (start, end) = window(view.length, &a);
+    let (start, end) = window(view.effective_length(), &a);
     let size = view.kind.size();
     let copy = new_buffer((end - start) * size)?;
     {
         let source = view.buffer.borrow();
-        let from = view.byte_offset + start * size;
-        let to = view.byte_offset + end * size;
+        let from = view.effective_byte_offset() + start * size;
+        let to = view.effective_byte_offset() + end * size;
         if to <= source.len() {
             copy.borrow_mut().copy_from_slice(&source[from..to]);
         }
@@ -476,7 +484,7 @@ fn typed_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value,
 fn typed_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
     let value = a.first().cloned().unwrap_or(Value::Undefined);
-    let (start, end) = window(view.length, &a[1.min(a.len())..]);
+    let (start, end) = window(view.effective_length(), &a[1.min(a.len())..]);
     for index in start..end {
         write_element(&view, index, &value)?;
     }
@@ -507,6 +515,11 @@ fn array_buffer_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     let Value::ArrayBuffer(buffer) = &this else {
         return Err(VmErr::Msg("TypeError: not an ArrayBuffer".to_string()));
     };
+    if buffer.is_detached() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot slice a detached ArrayBuffer".to_string(),
+        ));
+    }
     let length = buffer.borrow().len();
     let (start, end) = window(length, &a);
     let copy = new_buffer(end - start)?;
@@ -523,6 +536,11 @@ fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
             "TypeError: First argument to DataView constructor must be an ArrayBuffer".to_string(),
         ));
     };
+    if buffer.is_detached() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot construct a DataView from a detached ArrayBuffer".to_string(),
+        ));
+    }
     let available = buffer.borrow().len();
     let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0).max(0.0) as usize;
     if byte_offset > available {
@@ -548,8 +566,8 @@ fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
 /// typed arrays, which is what the specification says.
 pub fn data_view_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
     Some(match key {
-        "byteLength" => Value::Number(view.length as f64),
-        "byteOffset" => Value::Number(view.byte_offset as f64),
+        "byteLength" => Value::Number(view.effective_length() as f64),
+        "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
         "buffer" => Value::ArrayBuffer(view.buffer.clone()),
         _ if key.starts_with("get") && element_kind(&key[3..]).is_some() => {
             super::nf(key, data_view_get)
@@ -583,18 +601,23 @@ fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<Typed
     let Value::DataView(view) = this else {
         return Err(VmErr::Msg("TypeError: not a DataView".to_string()));
     };
+    if view.buffer.is_detached() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot access a DataView backed by a detached ArrayBuffer".to_string(),
+        ));
+    }
     let offset = a.first().map(|v| v.to_number()).unwrap_or(0.0);
     if !offset.is_finite() || offset < 0.0 {
         return Err(range_err("Offset is outside the DataView"));
     }
     let offset = offset as usize;
-    if offset + kind.size() > view.length {
+    if offset + kind.size() > view.effective_length() {
         return Err(range_err("Offset is outside the DataView"));
     }
     Ok(Rc::new(TypedArrayData {
         kind,
         buffer: view.buffer.clone(),
-        byte_offset: view.byte_offset + offset,
+        byte_offset: view.effective_byte_offset() + offset,
         length: 1,
     }))
 }

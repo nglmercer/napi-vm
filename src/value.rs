@@ -534,6 +534,7 @@ pub struct RegExpData {
 enum BufferStorage {
     Owned(Vec<u8>),
     External { data: NonNull<u8>, length: usize },
+    Detached,
 }
 
 impl BufferStorage {
@@ -543,6 +544,7 @@ impl BufferStorage {
             Self::External { data, length } => unsafe {
                 std::slice::from_raw_parts(data.as_ptr(), *length)
             },
+            Self::Detached => &[],
         }
     }
 
@@ -552,6 +554,7 @@ impl BufferStorage {
             Self::External { data, length } => unsafe {
                 std::slice::from_raw_parts_mut(data.as_ptr(), *length)
             },
+            Self::Detached => &mut [],
         }
     }
 }
@@ -600,6 +603,20 @@ impl Buffer {
 
     pub fn identity(&self) -> usize {
         Rc::as_ptr(&self.0) as usize
+    }
+
+    pub fn is_detached(&self) -> bool {
+        matches!(*self.0.borrow(), BufferStorage::Detached)
+    }
+
+    /// Detach a buffer, invalidating the backing store shared by all views.
+    /// Repeated detachment is idempotent, matching Node's current Node-API
+    /// behavior for both VM-owned and externally backed ArrayBuffers.
+    pub fn detach(&self) {
+        let mut storage = self.0.borrow_mut();
+        if !matches!(*storage, BufferStorage::Detached) {
+            *storage = BufferStorage::Detached;
+        }
     }
 }
 
@@ -657,6 +674,24 @@ pub struct TypedArrayData {
     pub byte_offset: usize,
     /// Element count for a typed array; *byte* count for a `DataView`.
     pub length: usize,
+}
+
+impl TypedArrayData {
+    pub fn effective_length(&self) -> usize {
+        if self.buffer.is_detached() {
+            0
+        } else {
+            self.length
+        }
+    }
+
+    pub fn effective_byte_offset(&self) -> usize {
+        if self.buffer.is_detached() {
+            0
+        } else {
+            self.byte_offset
+        }
+    }
 }
 
 /// Payload of `Value::Proxy`.
