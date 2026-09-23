@@ -11,7 +11,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
@@ -25,10 +25,14 @@ use crate::value::Value;
 const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
 const NAPI_OBJECT_EXPECTED: i32 = 2;
+const NAPI_STRING_EXPECTED: i32 = 3;
 const NAPI_FUNCTION_EXPECTED: i32 = 5;
 const NAPI_NUMBER_EXPECTED: i32 = 6;
+const NAPI_BOOLEAN_EXPECTED: i32 = 7;
+const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
+static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
 
 type NapiEnv = *mut c_void;
 type NapiValue = *mut c_void;
@@ -114,6 +118,15 @@ struct NapiEnvironment {
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
 }
 
+thread_local! {
+    /// Only environments created on this thread may enter the synchronous
+    /// Node-API surface. Looking up the opaque pointer before dereferencing it
+    /// makes invalid `napi_env` values fail with `napi_invalid_arg` instead of
+    /// causing undefined behavior in the host.
+    static NAPI_ENVIRONMENTS: RefCell<HashMap<usize, Weak<NapiEnvironment>>> =
+        RefCell::new(HashMap::new());
+}
+
 #[derive(Clone)]
 struct CallbackFrame {
     args: Vec<NapiValue>,
@@ -137,27 +150,11 @@ struct HandleScope {
     slots: Vec<usize>,
 }
 
-/// Opaque allocation used as a stable C handle address. The addon sees only
-/// the pointer; Rust resolves it through the environment's handle registry.
-struct HandleToken {
-    _nonce: u64,
-}
-
-struct HandleScopeToken {
-    _nonce: u64,
-}
-
 struct NapiHandleArena {
     slots: Vec<HandleSlot>,
     free_slots: Vec<usize>,
     scopes: Vec<HandleScope>,
     next_scope_id: u64,
-    next_token_id: u64,
-    // Stable pointee addresses are exposed as opaque handles to native C.
-    #[allow(clippy::vec_box)]
-    tokens: Vec<Box<HandleToken>>,
-    #[allow(clippy::vec_box)]
-    scope_tokens: Vec<Box<HandleScopeToken>>,
     handles: HashMap<usize, HandleRef>,
     scope_handles: HashMap<usize, u64>,
 }
@@ -172,9 +169,6 @@ impl Default for NapiHandleArena {
                 slots: Vec::new(),
             }],
             next_scope_id: 1,
-            next_token_id: 1,
-            tokens: Vec::new(),
-            scope_tokens: Vec::new(),
             handles: HashMap::new(),
             scope_handles: HashMap::new(),
         }
@@ -205,14 +199,7 @@ impl NapiHandleArena {
             .slots
             .push(slot_index);
 
-        let token_id = self.next_token_id;
-        self.next_token_id = self
-            .next_token_id
-            .checked_add(1)
-            .ok_or(NAPI_GENERIC_FAILURE)?;
-        let token = Box::new(HandleToken { _nonce: token_id });
-        let pointer = (&*token as *const HandleToken).cast_mut().cast::<c_void>();
-        self.tokens.push(token);
+        let pointer = new_opaque_handle()?;
         self.handles.insert(
             pointer as usize,
             HandleRef {
@@ -252,11 +239,7 @@ impl NapiHandleArena {
         if self.scope_handles.len() >= MAX_LOCAL_HANDLES {
             return Err(NAPI_GENERIC_FAILURE);
         }
-        let token = Box::new(HandleScopeToken { _nonce: id });
-        let pointer = (&*token as *const HandleScopeToken)
-            .cast_mut()
-            .cast::<c_void>();
-        self.scope_tokens.push(token);
+        let pointer = new_opaque_handle()?;
         self.scope_handles.insert(pointer as usize, id);
         Ok(pointer)
     }
@@ -277,6 +260,9 @@ impl NapiHandleArena {
         }
         let scope = self.scopes.pop().expect("validated handle scope");
         for slot_index in scope.slots {
+            let generation = self.slots[slot_index].generation;
+            self.handles
+                .retain(|_, handle| handle.slot != slot_index || handle.generation != generation);
             let slot = &mut self.slots[slot_index];
             slot.value = None;
             if let Some(next_generation) = slot.generation.checked_add(1) {
@@ -288,6 +274,16 @@ impl NapiHandleArena {
     }
 }
 
+/// Node-API values and scope tokens are opaque. Integer-backed, process-wide
+/// tokens avoid retaining a heap allocation for every short-lived callback
+/// handle while remaining unique across environments and after scope closure.
+fn new_opaque_handle() -> Result<*mut c_void, i32> {
+    NEXT_OPAQUE_HANDLE_ID
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .map(|id| id as *mut c_void)
+        .map_err(|_| NAPI_GENERIC_FAILURE)
+}
+
 impl NapiEnvironment {
     fn raw(&self) -> NapiEnv {
         (self as *const Self).cast_mut().cast()
@@ -296,8 +292,29 @@ impl NapiEnvironment {
 
 #[repr(C)]
 struct NapiVmApiTable {
+    get_undefined: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
+    get_null: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
+    get_boolean: unsafe extern "C" fn(NapiEnv, bool, *mut NapiValue) -> i32,
+    create_double: unsafe extern "C" fn(NapiEnv, f64, *mut NapiValue) -> i32,
     create_int32: unsafe extern "C" fn(NapiEnv, i32, *mut NapiValue) -> i32,
+    create_uint32: unsafe extern "C" fn(NapiEnv, u32, *mut NapiValue) -> i32,
+    create_int64: unsafe extern "C" fn(NapiEnv, i64, *mut NapiValue) -> i32,
+    create_string_utf8: unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
+    typeof_value: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
+    get_value_double: unsafe extern "C" fn(NapiEnv, NapiValue, *mut f64) -> i32,
     get_value_int32: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
+    get_value_uint32: unsafe extern "C" fn(NapiEnv, NapiValue, *mut u32) -> i32,
+    get_value_int64: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i64) -> i32,
+    get_value_bool: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    get_value_string_utf8:
+        unsafe extern "C" fn(NapiEnv, NapiValue, *mut c_char, usize, *mut usize) -> i32,
+    create_array: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
+    create_array_with_length: unsafe extern "C" fn(NapiEnv, usize, *mut NapiValue) -> i32,
+    is_array: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    get_array_length: unsafe extern "C" fn(NapiEnv, NapiValue, *mut u32) -> i32,
+    get_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut NapiValue) -> i32,
+    set_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, NapiValue) -> i32,
+    has_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut bool) -> i32,
     create_object: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     create_function: unsafe extern "C" fn(
         NapiEnv,
@@ -323,8 +340,28 @@ struct NapiVmApiTable {
 }
 
 static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
+    get_undefined: api_get_undefined,
+    get_null: api_get_null,
+    get_boolean: api_get_boolean,
+    create_double: api_create_double,
     create_int32: api_create_int32,
+    create_uint32: api_create_uint32,
+    create_int64: api_create_int64,
+    create_string_utf8: api_create_string_utf8,
+    typeof_value: api_typeof,
+    get_value_double: api_get_value_double,
     get_value_int32: api_get_value_int32,
+    get_value_uint32: api_get_value_uint32,
+    get_value_int64: api_get_value_int64,
+    get_value_bool: api_get_value_bool,
+    get_value_string_utf8: api_get_value_string_utf8,
+    create_array: api_create_array,
+    create_array_with_length: api_create_array_with_length,
+    is_array: api_is_array,
+    get_array_length: api_get_array_length,
+    get_element: api_get_element,
+    set_element: api_set_element,
+    has_element: api_has_element,
     create_object: api_create_object,
     create_function: api_create_function,
     set_named_property: api_set_named_property,
@@ -340,12 +377,41 @@ fn with_ffi_status(callback: impl FnOnce() -> Result<(), i32>) -> i32 {
         .map_or_else(|status| status, |_| NAPI_OK)
 }
 
-unsafe fn environment<'a>(env: NapiEnv) -> Result<&'a NapiEnvironment, i32> {
+fn environment(env: NapiEnv) -> Result<Rc<NapiEnvironment>, i32> {
     if env.is_null() {
         return Err(NAPI_INVALID_ARG);
     }
-    // The handle is created by this host and retained for the addon lifetime.
-    Ok(unsafe { &*env.cast::<NapiEnvironment>() })
+    let key = env as usize;
+    NAPI_ENVIRONMENTS
+        .try_with(|environments| {
+            let mut environments = environments.borrow_mut();
+            match environments.get(&key).and_then(Weak::upgrade) {
+                Some(environment) => Ok(environment),
+                None => {
+                    environments.remove(&key);
+                    Err(NAPI_INVALID_ARG)
+                }
+            }
+        })
+        .unwrap_or(Err(NAPI_INVALID_ARG))
+}
+
+fn register_environment(environment: &Rc<NapiEnvironment>) {
+    let _ = NAPI_ENVIRONMENTS.try_with(|environments| {
+        environments
+            .borrow_mut()
+            .insert(environment.raw() as usize, Rc::downgrade(environment));
+    });
+}
+
+impl Drop for NapiEnvironment {
+    fn drop(&mut self) {
+        let _ = NAPI_ENVIRONMENTS.try_with(|environments| {
+            environments
+                .borrow_mut()
+                .remove(&(self as *const Self as usize));
+        });
+    }
 }
 
 unsafe fn read_c_string(pointer: *const c_char) -> Result<String, i32> {
@@ -359,12 +425,78 @@ unsafe fn read_c_string(pointer: *const c_char) -> Result<String, i32> {
         .map_err(|_| NAPI_INVALID_ARG)
 }
 
+unsafe fn read_utf8(pointer: *const c_char, length: usize) -> Result<String, i32> {
+    if pointer.is_null() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let bytes = if length == usize::MAX {
+        unsafe { CStr::from_ptr(pointer) }.to_bytes()
+    } else {
+        unsafe { std::slice::from_raw_parts(pointer.cast::<u8>(), length) }
+    };
+    Ok(String::from_utf8_lossy(bytes).into_owned())
+}
+
+unsafe extern "C" fn api_get_undefined(env: NapiEnv, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment.handles.borrow_mut().create(Value::Undefined)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_null(env: NapiEnv, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment.handles.borrow_mut().create(Value::Null)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_boolean(env: NapiEnv, value: bool, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Bool(value))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_double(env: NapiEnv, value: f64, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Number(value))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_int32(env: NapiEnv, value: i32, result: *mut NapiValue) -> i32 {
     with_ffi_status(|| {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let handle = environment
             .handles
             .borrow_mut()
@@ -374,12 +506,111 @@ unsafe extern "C" fn api_create_int32(env: NapiEnv, value: i32, result: *mut Nap
     })
 }
 
+unsafe extern "C" fn api_create_uint32(env: NapiEnv, value: u32, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Number(value as f64))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_int64(env: NapiEnv, value: i64, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Number(value as f64))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_string_utf8(
+    env: NapiEnv,
+    value: *const c_char,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let value = unsafe { read_utf8(value, length)? };
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::String(value))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_typeof(env: NapiEnv, value: NapiValue, result: *mut i32) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        // Values are the Node-API `napi_valuetype` discriminants from
+        // js_native_api_types.h. Proxy `typeof` follows its target.
+        unsafe { result.write(napi_value_type(&value)) };
+        Ok(())
+    })
+}
+
+fn napi_value_type(value: &Value) -> i32 {
+    let resolved = value.deref_binding();
+    match &resolved {
+        Value::Undefined => 0, // napi_undefined
+        Value::Null => 1,      // napi_null
+        Value::Bool(_) => 2,   // napi_boolean
+        Value::Number(_) => 3, // napi_number
+        Value::String(_) => 4, // napi_string
+        Value::Symbol(_) => 5, // napi_symbol
+        Value::BigInt(_) => 9, // napi_bigint
+        Value::HostFunction { .. }
+        | Value::NativeFunction { .. }
+        | Value::Function(_)
+        | Value::Class(_) => 7, // napi_function
+        Value::Proxy(proxy) => napi_value_type(&proxy.target),
+        _ => 6, // napi_object
+    }
+}
+
+unsafe extern "C" fn api_get_value_double(env: NapiEnv, value: NapiValue, result: *mut f64) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Number(number) = value else {
+            return Err(NAPI_NUMBER_EXPECTED);
+        };
+        unsafe { result.write(number) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_get_value_int32(env: NapiEnv, value: NapiValue, result: *mut i32) -> i32 {
     with_ffi_status(|| {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let value = environment.handles.borrow().get(value)?;
         let Value::Number(number) = value else {
             return Err(NAPI_NUMBER_EXPECTED);
@@ -389,12 +620,235 @@ unsafe extern "C" fn api_get_value_int32(env: NapiEnv, value: NapiValue, result:
     })
 }
 
+unsafe extern "C" fn api_get_value_uint32(env: NapiEnv, value: NapiValue, result: *mut u32) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Number(number) = value else {
+            return Err(NAPI_NUMBER_EXPECTED);
+        };
+        unsafe { result.write(to_int32(number) as u32) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_int64(env: NapiEnv, value: NapiValue, result: *mut i64) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Number(number) = value else {
+            return Err(NAPI_NUMBER_EXPECTED);
+        };
+        unsafe { result.write(number as i64) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_bool(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Bool(value) = value else {
+            return Err(NAPI_BOOLEAN_EXPECTED);
+        };
+        unsafe { result.write(value) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_string_utf8(
+    env: NapiEnv,
+    value: NapiValue,
+    buffer: *mut c_char,
+    buffer_size: usize,
+    result: *mut usize,
+) -> i32 {
+    with_ffi_status(|| {
+        if buffer.is_null() && buffer_size != 0 || buffer.is_null() && result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::String(value) = &value else {
+            return Err(NAPI_STRING_EXPECTED);
+        };
+        let bytes = value.as_bytes();
+        let copied = if buffer.is_null() || buffer_size == 0 {
+            0
+        } else {
+            let copied = bytes.len().min(buffer_size - 1);
+            unsafe {
+                std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer.cast::<u8>(), copied);
+                buffer.add(copied).write(0);
+            }
+            copied
+        };
+        if !result.is_null() {
+            unsafe {
+                result.write(if buffer.is_null() {
+                    bytes.len()
+                } else {
+                    copied
+                })
+            };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_array(env: NapiEnv, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::array(Vec::new()))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_array_with_length(
+    env: NapiEnv,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if length > crate::value::MAX_ARRAY_LEN {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        let array = Value::array_with_presence(vec![Value::Undefined; length], vec![false; length]);
+        let handle = environment.handles.borrow_mut().create(array)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_array(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::Array(_))) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_array_length(env: NapiEnv, value: NapiValue, result: *mut u32) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Array(array) = &value else {
+            return Err(NAPI_ARRAY_EXPECTED);
+        };
+        let length = array.borrow().len();
+        unsafe { result.write(length as u32) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_element(
+    env: NapiEnv,
+    value: NapiValue,
+    index: u32,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Array(array) = &value else {
+            return Err(NAPI_ARRAY_EXPECTED);
+        };
+        let value = array
+            .borrow()
+            .get(index as usize)
+            .cloned()
+            .unwrap_or(Value::Undefined);
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_set_element(
+    env: NapiEnv,
+    value: NapiValue,
+    index: u32,
+    element: NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let element = environment.handles.borrow().get(element)?;
+        let Value::Array(array) = &value else {
+            return Err(NAPI_ARRAY_EXPECTED);
+        };
+        let index = index as usize;
+        if index >= crate::value::MAX_ARRAY_LEN {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let old_length = array.borrow().len();
+        if index >= old_length {
+            let new_length = index + 1;
+            array.borrow_mut().resize(new_length, Value::Undefined);
+            array.resize_presence(old_length, new_length, false);
+        }
+        array.borrow_mut()[index] = element;
+        array.set_index_presence(index, true);
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_has_element(
+    env: NapiEnv,
+    value: NapiValue,
+    index: u32,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Array(array) = &value else {
+            return Err(NAPI_ARRAY_EXPECTED);
+        };
+        unsafe { result.write(array.has_index(index as usize)) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_object(env: NapiEnv, result: *mut NapiValue) -> i32 {
     with_ffi_status(|| {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let handle = environment
             .handles
             .borrow_mut()
@@ -417,7 +871,7 @@ unsafe extern "C" fn api_create_function(
             return Err(NAPI_INVALID_ARG);
         }
         let callback = callback.ok_or(NAPI_FUNCTION_EXPECTED)?;
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let environment_rc = environment
             .self_weak
             .upgrade()
@@ -469,7 +923,7 @@ unsafe extern "C" fn api_set_named_property(
 ) -> i32 {
     with_ffi_status(|| {
         let key = unsafe { read_c_string(name)? };
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
         let value = environment.handles.borrow().get(value)?;
         if !matches!(object, Value::Object { .. } | Value::Array(_)) {
@@ -492,7 +946,7 @@ unsafe extern "C" fn api_get_named_property(
             return Err(NAPI_INVALID_ARG);
         }
         let key = unsafe { read_c_string(name)? };
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
         if !matches!(
             object,
@@ -519,7 +973,7 @@ unsafe extern "C" fn api_get_cb_info(
         if argc.is_null() || info.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let frame = environment
             .active_callbacks
             .borrow()
@@ -551,7 +1005,7 @@ unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandle
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         let mut handles = environment.handles.borrow_mut();
         let scope = handles.open_scope()?;
         let handle = match handles.create_scope_handle(scope) {
@@ -568,7 +1022,7 @@ unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandle
 
 unsafe extern "C" fn api_close_handle_scope(env: NapiEnv, scope: NapiHandleScope) -> i32 {
     with_ffi_status(|| {
-        let environment = unsafe { environment(env)? };
+        let environment = environment(env)?;
         environment.handles.borrow_mut().close_scope_handle(scope)
     })
 }
@@ -804,6 +1258,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             handles: RefCell::new(NapiHandleArena::default()),
             active_callbacks: RefCell::new(HashMap::new()),
         });
+        register_environment(&environment);
         self.state
             .borrow_mut()
             .environments
@@ -899,6 +1354,9 @@ fn napi_error(action: &str, status: i32) -> VmErr {
         NAPI_OBJECT_EXPECTED => "object expected",
         NAPI_FUNCTION_EXPECTED => "function expected",
         NAPI_NUMBER_EXPECTED => "number expected",
+        NAPI_ARRAY_EXPECTED => "array expected",
+        NAPI_STRING_EXPECTED => "string expected",
+        NAPI_BOOLEAN_EXPECTED => "boolean expected",
         _ => "generic Node-API failure",
     };
     VmErr::Msg(format!(
@@ -1000,6 +1458,22 @@ mod tests {
     }
 
     #[test]
+    fn repeated_local_scopes_release_handle_table_entries_and_reuse_slots() {
+        let mut arena = NapiHandleArena::default();
+        let outer = arena.create(Value::Number(0.0)).unwrap();
+        for index in 0..64 {
+            let scope = arena.open_scope().unwrap();
+            let local = arena.create(Value::Number(index as f64)).unwrap();
+            assert_eq!(arena.handles.len(), 2);
+            arena.close_scope(scope).unwrap();
+            assert_eq!(arena.handles.len(), 1);
+            assert_eq!(arena.get(local).unwrap_err(), NAPI_INVALID_ARG);
+            assert!(matches!(arena.get(outer), Ok(Value::Number(0.0))));
+        }
+        assert_eq!(arena.slots.len(), 2);
+    }
+
+    #[test]
     fn handle_scopes_must_close_in_lifo_order() {
         let mut arena = NapiHandleArena::default();
         let outer = arena.open_scope().unwrap();
@@ -1078,9 +1552,96 @@ static napi_value add(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value round_trip(napi_env env, napi_callback_info info) {
+  size_t argc = 5, length = 0, copied = 0;
+  napi_value argv[5], result, field;
+  napi_valuetype bool_type, number_type, string_type;
+  bool flag = false;
+  double number = 0;
+  uint32_t uint32_value = 0;
+  int64_t int64_value = 0;
+  char text[128];
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 5 ||
+      napi_get_value_bool(env, argv[0], &flag) != napi_ok ||
+      napi_get_value_double(env, argv[1], &number) != napi_ok ||
+      napi_get_value_string_utf8(env, argv[2], NULL, 0, &length) != napi_ok ||
+      length >= sizeof(text) ||
+      napi_get_value_string_utf8(env, argv[2], text, sizeof(text), &copied) != napi_ok ||
+      copied != length ||
+      napi_get_value_uint32(env, argv[3], &uint32_value) != napi_ok ||
+      napi_get_value_int64(env, argv[4], &int64_value) != napi_ok ||
+      napi_typeof(env, argv[0], &bool_type) != napi_ok ||
+      napi_typeof(env, argv[1], &number_type) != napi_ok ||
+      napi_typeof(env, argv[2], &string_type) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_get_boolean(env, flag, &field) != napi_ok ||
+      napi_set_named_property(env, result, "flag", field) != napi_ok ||
+      napi_create_double(env, number + 0.5, &field) != napi_ok ||
+      napi_set_named_property(env, result, "number", field) != napi_ok ||
+      napi_create_string_utf8(env, text, copied, &field) != napi_ok ||
+      napi_set_named_property(env, result, "text", field) != napi_ok ||
+      napi_create_uint32(env, uint32_value, &field) != napi_ok ||
+      napi_set_named_property(env, result, "uint32", field) != napi_ok ||
+      napi_create_int64(env, int64_value, &field) != napi_ok ||
+      napi_set_named_property(env, result, "int64", field) != napi_ok ||
+      napi_create_int32(env, bool_type, &field) != napi_ok ||
+      napi_set_named_property(env, result, "boolType", field) != napi_ok ||
+      napi_create_int32(env, number_type, &field) != napi_ok ||
+      napi_set_named_property(env, result, "numberType", field) != napi_ok ||
+      napi_create_int32(env, string_type, &field) != napi_ok ||
+      napi_set_named_property(env, result, "stringType", field) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value invalid_environment(napi_env env, napi_callback_info info) {
+  napi_value ignored, result;
+  napi_status status = napi_get_null((napi_env)(uintptr_t)1, &ignored);
+  (void)info;
+  if (napi_create_int32(env, status, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value array_probe(napi_env env, napi_callback_info info) {
+  napi_value array, empty, result, value, field;
+  uint32_t length = 0, empty_length = 0;
+  bool is_array = false, first_present = true, second_present = false;
+  bool hole_present = true, read_value = false;
+  (void)info;
+  if (napi_create_array_with_length(env, 3, &array) != napi_ok ||
+      napi_create_array(env, &empty) != napi_ok ||
+      napi_get_boolean(env, true, &value) != napi_ok ||
+      napi_set_element(env, array, 1, value) != napi_ok ||
+      napi_set_element(env, array, 4, value) != napi_ok ||
+      napi_get_array_length(env, array, &length) != napi_ok ||
+      napi_get_array_length(env, empty, &empty_length) != napi_ok ||
+      napi_is_array(env, array, &is_array) != napi_ok ||
+      napi_has_element(env, array, 0, &first_present) != napi_ok ||
+      napi_has_element(env, array, 1, &second_present) != napi_ok ||
+      napi_has_element(env, array, 2, &hole_present) != napi_ok ||
+      napi_get_element(env, array, 1, &value) != napi_ok ||
+      napi_get_value_bool(env, value, &read_value) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_get_boolean(env, is_array, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isArray", field) != napi_ok ||
+      napi_create_uint32(env, length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "length", field) != napi_ok ||
+      napi_create_uint32(env, empty_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "emptyLength", field) != napi_ok ||
+      napi_get_boolean(env, first_present, &field) != napi_ok ||
+      napi_set_named_property(env, result, "firstPresent", field) != napi_ok ||
+      napi_get_boolean(env, second_present, &field) != napi_ok ||
+      napi_set_named_property(env, result, "secondPresent", field) != napi_ok ||
+      napi_get_boolean(env, hole_present, &field) != napi_ok ||
+      napi_set_named_property(env, result, "holePresent", field) != napi_ok ||
+      napi_get_boolean(env, read_value, &field) != napi_ok ||
+      napi_set_named_property(env, result, "value", field) != napi_ok) return NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
-  napi_value scratch, function, metadata, version;
+  napi_value scratch, function, metadata, version, values, field;
+  int32_t checked_version = 0;
   if (napi_open_handle_scope(env, &scope) != napi_ok ||
       napi_create_object(env, &scratch) != napi_ok ||
       napi_close_handle_scope(env, scope) != napi_ok) return NULL;
@@ -1089,7 +1650,32 @@ NAPI_MODULE_INIT() {
       napi_create_object(env, &metadata) != napi_ok ||
       napi_create_int32(env, 1, &version) != napi_ok ||
       napi_set_named_property(env, metadata, "version", version) != napi_ok ||
+      napi_get_named_property(env, metadata, "version", &field) != napi_ok ||
+      napi_get_value_int32(env, field, &checked_version) != napi_ok ||
+      checked_version != 1 ||
       napi_set_named_property(env, exports, "metadata", metadata) != napi_ok) return NULL;
+  if (napi_create_object(env, &values) != napi_ok ||
+      napi_get_boolean(env, true, &field) != napi_ok ||
+      napi_set_named_property(env, values, "truth", field) != napi_ok ||
+      napi_get_null(env, &field) != napi_ok ||
+      napi_set_named_property(env, values, "nothing", field) != napi_ok ||
+      napi_get_undefined(env, &field) != napi_ok ||
+      napi_set_named_property(env, values, "missing", field) != napi_ok ||
+      napi_create_string_utf8(env, "Node-API ✓", NAPI_AUTO_LENGTH, &field) != napi_ok ||
+      napi_set_named_property(env, values, "greeting", field) != napi_ok ||
+      napi_create_double(env, 1.25, &field) != napi_ok ||
+      napi_set_named_property(env, values, "fraction", field) != napi_ok ||
+      napi_create_uint32(env, UINT32_MAX, &field) != napi_ok ||
+      napi_set_named_property(env, values, "maxUint32", field) != napi_ok ||
+      napi_create_int64(env, INT64_C(2147483648), &field) != napi_ok ||
+      napi_set_named_property(env, values, "int64", field) != napi_ok ||
+      napi_set_named_property(env, exports, "values", values) != napi_ok ||
+      napi_create_function(env, "roundTrip", NAPI_AUTO_LENGTH, round_trip, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "roundTrip", function) != napi_ok ||
+      napi_create_function(env, "arrayProbe", NAPI_AUTO_LENGTH, array_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "arrayProbe", function) != napi_ok ||
+      napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
 }
 "#,
@@ -1117,7 +1703,7 @@ NAPI_MODULE_INIT() {
         );
         fs::write(
             root.join("main.cjs"),
-            "const addon = require('./fixture.node'); module.exports = {same: addon === require('./fixture.node'), sum: addon.add(19, 23), version: addon.metadata.version};",
+            "const addon = require('./fixture.node'); const values = addon.values; module.exports = {same: addon === require('./fixture.node'), sum: addon.add(19, 23), version: addon.metadata.version, truth: values.truth, nothing: values.nothing === null, missing: values.missing === undefined, greeting: values.greeting, fraction: values.fraction, maxUint32: values.maxUint32, int64: values.int64, roundTrip: addon.roundTrip(true, 4.25, 'native ✓', 4294967295, -2.5), array: addon.arrayProbe()};",
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
@@ -1140,6 +1726,84 @@ NAPI_MODULE_INIT() {
             result.get_prop("version"),
             Some(Value::Number(value)) if value == 1.0
         ));
+        assert!(matches!(result.get_prop("truth"), Some(Value::Bool(true))));
+        assert!(matches!(
+            result.get_prop("nothing"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("missing"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("greeting"),
+            Some(Value::String(ref value)) if value == "Node-API ✓"
+        ));
+        assert!(matches!(
+            result.get_prop("fraction"),
+            Some(Value::Number(value)) if value == 1.25
+        ));
+        assert!(matches!(
+            result.get_prop("maxUint32"),
+            Some(Value::Number(value)) if value == u32::MAX as f64
+        ));
+        assert!(matches!(
+            result.get_prop("int64"),
+            Some(Value::Number(value)) if value == 2_147_483_648.0
+        ));
+        let round_trip = result.get_prop("roundTrip").unwrap();
+        assert!(matches!(
+            round_trip.get_prop("flag"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            round_trip.get_prop("number"),
+            Some(Value::Number(value)) if value == 4.75
+        ));
+        assert!(matches!(
+            round_trip.get_prop("text"),
+            Some(Value::String(ref value)) if value == "native ✓"
+        ));
+        assert!(matches!(
+            round_trip.get_prop("uint32"),
+            Some(Value::Number(value)) if value == u32::MAX as f64
+        ));
+        assert!(matches!(
+            round_trip.get_prop("int64"),
+            Some(Value::Number(value)) if value == -2.0
+        ));
+        assert!(matches!(
+            round_trip.get_prop("boolType"),
+            Some(Value::Number(2.0))
+        ));
+        assert!(matches!(
+            round_trip.get_prop("numberType"),
+            Some(Value::Number(3.0))
+        ));
+        assert!(matches!(
+            round_trip.get_prop("stringType"),
+            Some(Value::Number(4.0))
+        ));
+        let array = result.get_prop("array").unwrap();
+        assert!(matches!(array.get_prop("isArray"), Some(Value::Bool(true))));
+        assert!(matches!(array.get_prop("length"), Some(Value::Number(5.0))));
+        assert!(matches!(
+            array.get_prop("emptyLength"),
+            Some(Value::Number(0.0))
+        ));
+        assert!(matches!(
+            array.get_prop("firstPresent"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            array.get_prop("secondPresent"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            array.get_prop("holePresent"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(array.get_prop("value"), Some(Value::Bool(true))));
 
         if let Ok(node_version) = Command::new("node").arg("--version").output()
             && node_version.status.success()
@@ -1159,9 +1823,17 @@ NAPI_MODULE_INIT() {
             );
             assert_eq!(
                 String::from_utf8_lossy(&reference.stdout),
-                r#"{"same":true,"sum":42,"version":1}"#
+                r#"{"same":true,"sum":42,"version":1,"truth":true,"nothing":true,"missing":true,"greeting":"Node-API ✓","fraction":1.25,"maxUint32":4294967295,"int64":2147483648,"roundTrip":{"flag":true,"number":4.75,"text":"native ✓","uint32":4294967295,"int64":-2,"boolType":2,"numberType":3,"stringType":4},"array":{"isArray":true,"length":5,"emptyLength":0,"firstPresent":false,"secondPresent":true,"holePresent":false,"value":true}}"#
             );
         }
+
+        let invalid_env = interpreter
+            .eval_source("require('./fixture.node').invalidEnvironment();")
+            .unwrap();
+        assert!(matches!(
+            invalid_env,
+            Value::Number(value) if value == NAPI_INVALID_ARG as f64
+        ));
 
         fs::remove_dir_all(root).unwrap();
     }

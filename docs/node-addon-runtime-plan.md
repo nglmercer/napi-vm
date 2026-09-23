@@ -63,9 +63,12 @@ The first implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
 existing CommonJS resolver and allowlist. Its Linux prototype loads real
 Node-API v1 shared libraries and currently covers scoped handles, callback
-info, C callbacks, int32 values, and basic object properties. Treat this as an
-incomplete compatibility backend; unimplemented imported symbols fail at
-load time.
+info, synchronous C callbacks, object properties, primitive values, numbers,
+UTF-8 strings, `napi_typeof`, and array creation/index/length operations.
+Handle entries are reclaimed when local scopes close; opaque handles do not
+retain one heap allocation apiece. It is still an incomplete compatibility
+backend; unimplemented imported symbols fail at load time, and
+async/thread-safe APIs are not available.
 
 ## Implementation phases
 

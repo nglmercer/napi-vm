@@ -167,12 +167,16 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-currently supports Node-API version 1 modules using `napi_create_function`,
-`napi_get_cb_info`, `napi_create_object`, named property access, int32 values,
-and handle scopes. Unimplemented imports fail when the library is loaded.
-Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
-requires a C compiler at build time, and native addons have the desktop
-process's full privileges in either backend.
+currently supports a synchronous Node-API version 1 subset: C callbacks and
+callback info, local handle scopes, object creation and named properties,
+undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8
+strings, `napi_typeof`, and array creation, length, element, and hole
+operations. Imports outside that subset fail when the library is loaded. Async
+work, references/finalizers, buffers and typed arrays, exceptions, and
+thread-safe functions are not implemented. Direct V8/NAN/Node C++/libuv addons
+must use the Node sidecar. The feature requires a C compiler at build time,
+and native addons have the desktop process's full privileges in either
+backend.
 
 ## Useful examples
 
