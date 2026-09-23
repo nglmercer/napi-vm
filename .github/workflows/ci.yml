@@ -625,7 +625,7 @@ jobs:
             throw 'The Node-API host did not produce node.lib.'
           }
 
-          $fixture = Join-Path $env:RUNNER_TEMP 'windows-smoke.node'
+          $fixture = Join-Path $env:RUNNER_TEMP 'fixture.node'
           $object = Join-Path $env:RUNNER_TEMP 'windows-smoke.obj'
           & cl.exe /nologo /O2 /LD tests/fixtures/node-api/windows-smoke.c "/Fo$object" /link "/LIBPATH:$($importLibrary.DirectoryName)" node.lib "/OUT:$fixture"
           if ($LASTEXITCODE -ne 0) {

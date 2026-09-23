@@ -15883,8 +15883,15 @@ mod windows_tests {
             )
             .unwrap();
         let result = interpreter
-            .run_script_source("require('./fixture.node').answer")
+            .run_script_source(
+                "const explicit = require('./fixture.node'); const omitted = require('./fixture'); [explicit === omitted, omitted.answer]",
+            )
             .unwrap();
-        assert!(matches!(result, Value::Number(42.0)));
+        let Value::Array(ref result) = result else {
+            panic!("expected extension resolution and cache results");
+        };
+        let result = result.borrow();
+        assert!(matches!(result.first(), Some(Value::Bool(true))));
+        assert!(matches!(result.get(1), Some(Value::Number(42.0))));
     }
 }
