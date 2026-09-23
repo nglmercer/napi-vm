@@ -66,7 +66,7 @@ Node-API versions 1 through 4 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
-number, and string coercion, symbol creation, and `napi_define_properties`
+number, string, and object coercion, symbol creation, and `napi_define_properties`
 for ordinary object targets (data values, symbol keys, native methods, and accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
@@ -81,6 +81,11 @@ conversion through the existing callback dispatcher. They honor
 Symbol/BigInt-to-number conversions raise guest `TypeError`s. These APIs do
 not call guest code directly from an arbitrary native context and require an
 active interpreter callback dispatcher.
+`napi_coerce_to_object` preserves existing object identity, rejects `null` and
+`undefined` with a pending guest `TypeError`, and returns boxed primitive
+objects with working `valueOf()` and basic `toString()` behavior. This
+conversion does not re-enter the interpreter because it does not invoke guest
+code. The guest `Object(value)` constructor shares the wrapper representation.
 `napi_get_prototype` preserves explicit prototypes and the realm's
 `Object.prototype` identity for ordinary objects. Prototype queries for VM
 values whose built-in prototype is not materialized (such as arrays and

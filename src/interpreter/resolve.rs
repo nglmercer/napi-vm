@@ -5,7 +5,7 @@ use super::Interpreter;
 use crate::error::VmErr;
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use crate::lang::CompletionKind;
-use crate::value::Value;
+use crate::value::{BoxedPrimitive, Value};
 
 impl Interpreter {
     /// Enumerate properties visible on a simple runtime receiver such as
@@ -412,7 +412,25 @@ impl Interpreter {
                 .borrow()
                 .get(k)
                 .unwrap_or(Value::Undefined)),
-            (Value::Object { .. }, Value::String(k)) => lookup_chain(o, k),
+            (Value::Object { props }, Value::String(k)) => {
+                if let Some(value) = lookup_chain_found(o, k)? {
+                    return Ok(value);
+                }
+                let boxed = props.meta.borrow().boxed_primitive.clone();
+                Ok(boxed
+                    .map(|primitive| boxed_primitive_property(&primitive, k))
+                    .unwrap_or(Value::Undefined))
+            }
+            (Value::Object { props }, Value::Number(index)) => {
+                let key = crate::format::number_string(*index);
+                if let Some(value) = lookup_chain_found(o, &key)? {
+                    return Ok(value);
+                }
+                let boxed = props.meta.borrow().boxed_primitive.clone();
+                Ok(boxed
+                    .map(|primitive| boxed_primitive_property(&primitive, &key))
+                    .unwrap_or(Value::Undefined))
+            }
             (Value::Array(items), Value::Number(i)) => {
                 let items = items.borrow();
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
@@ -646,8 +664,23 @@ impl Interpreter {
             }
             // Object symbol-keyed lookup: `obj[Symbol.iterator]` resolves the
             // internal `__symbol_iterator__` property.
-            (Value::Object { .. }, Value::Symbol(symbol)) => {
-                lookup_chain(o, &super::symbol_slot_key(symbol))
+            (Value::Object { props }, Value::Symbol(symbol)) => {
+                if let Some(value) = lookup_chain_found(o, &super::symbol_slot_key(symbol))? {
+                    return Ok(value);
+                }
+                if crate::builtins::is_iterator_symbol(p)
+                    && matches!(
+                        props.meta.borrow().boxed_primitive.as_ref(),
+                        Some(BoxedPrimitive::String(_))
+                    )
+                {
+                    Ok(Value::NativeFunction {
+                        name: "[Symbol.iterator]".into(),
+                        callable: string_iter,
+                    })
+                } else {
+                    Ok(Value::Undefined)
+                }
             }
             // Internal errors surface to guest `catch` blocks as error objects
             // with readable `name`/`message` properties.
@@ -668,24 +701,154 @@ impl Interpreter {
 /// [`MAX_PROTOTYPE_DEPTH`](crate::value::MAX_PROTOTYPE_DEPTH) so a guest-built
 /// cycle spends bounded time instead of hanging.
 fn lookup_chain(o: &Value, key: &str) -> Result<Value, VmErr> {
+    Ok(lookup_chain_found(o, key)?.unwrap_or(Value::Undefined))
+}
+
+/// Look up an object property without conflating a missing property with an
+/// own or inherited property whose value is `undefined`.
+fn lookup_chain_found(o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
     let mut current = o.clone();
     for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
         let props = match &current {
             Value::Object { props } => props,
             Value::Class(class) => &class.statics,
-            _ => return Ok(Value::Undefined),
+            _ => return Ok(None),
         };
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {
-            return Ok(value.clone());
+            return Ok(Some(value.clone()));
         }
         let Some(next) = props.proto() else {
-            return Ok(Value::Undefined);
+            return Ok(None);
         };
         current = next.as_ref().clone();
     }
     Err(crate::value::limit_err(
         "Maximum prototype chain depth exceeded",
     ))
+}
+
+fn boxed_primitive_value(primitive: &BoxedPrimitive) -> Value {
+    match primitive {
+        BoxedPrimitive::Bool(value) => Value::Bool(*value),
+        BoxedPrimitive::Number(value) => Value::Number(*value),
+        BoxedPrimitive::String(value) => Value::String(value.clone()),
+        BoxedPrimitive::Symbol(value) => Value::Symbol(value.clone()),
+        BoxedPrimitive::BigInt(value) => Value::BigInt(value.clone()),
+    }
+}
+
+fn boxed_primitive_property(primitive: &BoxedPrimitive, key: &str) -> Value {
+    match primitive {
+        BoxedPrimitive::String(value) => {
+            if key == "length" {
+                return Value::Number(value.chars().count() as f64);
+            }
+            if let Some(index) = crate::value::array_index(key) {
+                return value
+                    .chars()
+                    .nth(index)
+                    .map(|character| Value::String(character.to_string()))
+                    .unwrap_or(Value::Undefined);
+            }
+            if key == "toString" || key == "valueOf" {
+                return Value::NativeFunction {
+                    name: key.into(),
+                    callable: boxed_primitive_value_of,
+                };
+            }
+            crate::builtins::string_method(key).unwrap_or(Value::Undefined)
+        }
+        BoxedPrimitive::Number(_) => {
+            if key == "valueOf" {
+                Value::NativeFunction {
+                    name: "valueOf".into(),
+                    callable: boxed_primitive_value_of,
+                }
+            } else {
+                crate::builtins::number_method(key).unwrap_or(Value::Undefined)
+            }
+        }
+        BoxedPrimitive::Bool(_) => match key {
+            "toString" | "valueOf" => Value::NativeFunction {
+                name: key.into(),
+                callable: if key == "toString" {
+                    boxed_primitive_to_string
+                } else {
+                    boxed_primitive_value_of
+                },
+            },
+            _ => Value::Undefined,
+        },
+        BoxedPrimitive::Symbol(_) => {
+            if key == "description"
+                && let BoxedPrimitive::Symbol(symbol) = primitive
+            {
+                return symbol
+                    .description
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Undefined);
+            }
+            if key == "valueOf" {
+                Value::NativeFunction {
+                    name: "valueOf".into(),
+                    callable: boxed_primitive_value_of,
+                }
+            } else if key == "toString" {
+                Value::NativeFunction {
+                    name: "toString".into(),
+                    callable: boxed_primitive_to_string,
+                }
+            } else {
+                Value::Undefined
+            }
+        }
+        BoxedPrimitive::BigInt(_) => match key {
+            "toString" => Value::NativeFunction {
+                name: "toString".into(),
+                callable: boxed_primitive_to_string,
+            },
+            "valueOf" => Value::NativeFunction {
+                name: "valueOf".into(),
+                callable: boxed_primitive_value_of,
+            },
+            _ => Value::Undefined,
+        },
+    }
+}
+
+fn boxed_primitive_receiver(this: &Value) -> Result<BoxedPrimitive, VmErr> {
+    if let Value::Object { props } = this
+        && let Some(primitive) = props.meta.borrow().boxed_primitive.clone()
+    {
+        return Ok(primitive);
+    }
+    Err(VmErr::Msg(
+        "TypeError: method called on an incompatible object".into(),
+    ))
+}
+
+fn boxed_primitive_value_of(
+    _interpreter: &mut Interpreter,
+    this: Value,
+    _args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    Ok(boxed_primitive_value(&boxed_primitive_receiver(&this)?))
+}
+
+fn boxed_primitive_to_string(
+    _interpreter: &mut Interpreter,
+    this: Value,
+    _args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let text = match boxed_primitive_receiver(&this)? {
+        BoxedPrimitive::Bool(value) => value.to_string(),
+        BoxedPrimitive::Number(value) => crate::format::number_string(value),
+        BoxedPrimitive::String(value) => value,
+        BoxedPrimitive::Symbol(value) => value.to_display(),
+        BoxedPrimitive::BigInt(value) => value.to_decimal(),
+    };
+    Value::checked_string(text)
 }
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]

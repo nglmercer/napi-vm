@@ -57,6 +57,17 @@ pub struct PropAttrs {
     pub configurable: bool,
 }
 
+/// Primitive payload retained by an ECMAScript wrapper object created through
+/// `Object(value)` or Node-API's `napi_coerce_to_object`.
+#[derive(Debug, Clone)]
+pub enum BoxedPrimitive {
+    Bool(bool),
+    Number(f64),
+    String(String),
+    Symbol(Rc<SymbolData>),
+    BigInt(Rc<crate::bigint::BigInt>),
+}
+
 impl Default for PropAttrs {
     fn default() -> Self {
         Self {
@@ -100,6 +111,9 @@ pub struct ObjectMeta {
     /// is the difference between allocating a slot name on every write and
     /// never allocating one.
     pub has_accessors: bool,
+    /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
+    /// BigInt object. Ordinary objects leave this empty.
+    pub boxed_primitive: Option<BoxedPrimitive>,
 }
 
 impl ObjectMeta {
@@ -1003,6 +1017,24 @@ impl Value {
         }
     }
 
+    /// Create the object wrapper returned by ECMAScript `ToObject` for a
+    /// primitive value.
+    pub fn boxed_primitive(value: Value) -> Option<Self> {
+        let boxed = match &value {
+            Value::Bool(value) => BoxedPrimitive::Bool(*value),
+            Value::Number(value) => BoxedPrimitive::Number(*value),
+            Value::String(value) => BoxedPrimitive::String(value.clone()),
+            Value::Symbol(value) => BoxedPrimitive::Symbol(value.clone()),
+            Value::BigInt(value) => BoxedPrimitive::BigInt(value.clone()),
+            _ => return None,
+        };
+        let object = Self::object(Vec::new());
+        if let Value::Object { props } = &object {
+            props.meta.borrow_mut().boxed_primitive = Some(boxed);
+        }
+        Some(object)
+    }
+
     /// The object's prototype link, or `None` for a null prototype / a
     /// non-object receiver.
     pub fn proto_of(&self) -> Option<Rc<Value>> {
@@ -1297,7 +1329,27 @@ impl Value {
             Value::StringIterator { .. } => 0.0,
             Value::Null => 0.0,
             // An object has no numeric value: `{} * 3` is NaN, not 0.
-            Value::Undefined | Value::Object { .. } | Value::Error(_) => f64::NAN,
+            Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
+                Some(BoxedPrimitive::Number(value)) => *value,
+                Some(BoxedPrimitive::Bool(value)) => {
+                    if *value {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                Some(BoxedPrimitive::String(value)) => {
+                    let trimmed = value.trim();
+                    if trimmed.is_empty() {
+                        0.0
+                    } else {
+                        trimmed.parse().unwrap_or(f64::NAN)
+                    }
+                }
+                Some(BoxedPrimitive::BigInt(value)) => value.to_f64(),
+                Some(BoxedPrimitive::Symbol(_)) | None => f64::NAN,
+            },
+            Value::Undefined | Value::Error(_) => f64::NAN,
             _ => 0.0,
         }
     }

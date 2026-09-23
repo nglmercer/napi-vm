@@ -1382,6 +1382,7 @@ impl Interpreter {
         let result = Value::checked_object(object.into_iter().flatten().collect())?;
         if let Value::Object { props } = &result {
             let mut meta = props.meta.borrow_mut();
+            meta.has_accessors = !accessors.is_empty();
             for (key, symbol) in symbol_keys {
                 meta.set_symbol_key(&key, symbol);
             }

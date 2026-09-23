@@ -920,6 +920,7 @@ struct NapiVmApiTable {
     strict_equals: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
     run_script: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     adjust_external_memory: unsafe extern "C" fn(NapiEnv, i64, *mut i64) -> i32,
+    coerce_to_object: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
 }
 
 #[repr(C)]
@@ -1047,6 +1048,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     strict_equals: api_strict_equals,
     run_script: api_run_script,
     adjust_external_memory: api_adjust_external_memory,
+    coerce_to_object: api_coerce_to_object,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -2095,6 +2097,43 @@ unsafe extern "C" fn api_coerce_to_string(
             vec![value],
         )?;
         let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_coerce_to_object(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let object = match value {
+            Value::Undefined | Value::Null => {
+                set_pending_exception(
+                    &environment,
+                    Value::Error(ErrorData::new(
+                        "TypeError",
+                        "Cannot convert undefined or null to object",
+                    )),
+                )?;
+                return Err(NAPI_PENDING_EXCEPTION);
+            }
+            value @ (Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Symbol(_)
+            | Value::BigInt(_)) => {
+                Value::boxed_primitive(value).expect("primitive values have wrapper objects")
+            }
+            value => value,
+        };
+        let handle = environment.handles.borrow_mut().create(object)?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -6770,6 +6809,15 @@ static napi_value coerce_to_string_probe(napi_env env, napi_callback_info info) 
   return result;
 }
 
+static napi_value coerce_to_object_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_coerce_to_object(env, argv[0], &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
 static napi_value delete_element_probe(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2], result, field;
@@ -7758,6 +7806,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "coerceToString", NAPI_AUTO_LENGTH,
                            coerce_to_string_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "coerceToString", function) != napi_ok ||
+      napi_create_function(env, "coerceToObject", NAPI_AUTO_LENGTH,
+                           coerce_to_object_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "coerceToObject", function) != napi_ok ||
       napi_create_function(env, "deleteElementProbe", NAPI_AUTO_LENGTH,
                            delete_element_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "deleteElementProbe", function) != napi_ok ||
@@ -8040,6 +8091,17 @@ const coercionErrors = {
   symbolString: captureCoercionError(() => addon.coerceToString(Symbol('value'))),
   bigintNumber: captureCoercionError(() => addon.coerceToNumber(1n)),
 };
+const objectCoercions = [false, 12, 'abc', Symbol('value'), 13n].map(value => {
+  const boxed = addon.coerceToObject(value);
+  return {type: typeof boxed, same: boxed === value,
+    primitiveType: typeof boxed.valueOf(), string: boxed.toString(), length: boxed.length};
+});
+const objectCoercionErrors = [null, undefined].map(value =>
+  captureCoercionError(() => addon.coerceToObject(value)));
+const objectCoercionPreservesIdentity = (() => {
+  const object = {};
+  return addon.coerceToObject(object) === object;
+})();
 let typedArrayError;
 try { addon.invalidTypedArray(); } catch (error) {
   typedArrayError = {name: error.name, message: error.message, code: error.code,
@@ -8154,6 +8216,9 @@ module.exports = {
   exoticNumberCoercion,
   exoticStringCoercion,
   coercionErrors,
+  objectCoercions,
+  objectCoercionErrors,
+  objectCoercionPreservesIdentity,
   coercionEvents,
   fraction: values.fraction,
   maxUint32: values.maxUint32,
@@ -8953,6 +9018,53 @@ module.exports = {
                 Some(Value::Bool(true))
             ));
         }
+        let object_coercions = result.get_prop("objectCoercions").unwrap();
+        let Value::Array(object_coercions) = &object_coercions else {
+            panic!("Node-API object coercion fixture did not return an array");
+        };
+        let object_coercions = object_coercions.borrow();
+        let object_strings = object_coercions
+            .iter()
+            .map(|value| match value.get_prop("string") {
+                Some(Value::String(ref value)) => value.clone(),
+                _ => panic!("boxed primitive string conversion did not return a string"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            object_strings,
+            ["false", "12", "abc", "Symbol(value)", "13"]
+        );
+        let primitive_types = object_coercions
+            .iter()
+            .map(|value| match value.get_prop("primitiveType") {
+                Some(Value::String(ref value)) => value.clone(),
+                _ => panic!("boxed primitive valueOf returned an unexpected type"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            primitive_types,
+            ["boolean", "number", "string", "symbol", "bigint"]
+        );
+        assert!(object_coercions.iter().all(|value| {
+            matches!(value.get_prop("type"), Some(Value::String(ref t)) if t == "object")
+                && matches!(value.get_prop("same"), Some(Value::Bool(false)))
+        }));
+        assert!(matches!(
+            object_coercions[2].get_prop("length"),
+            Some(Value::Number(3.0))
+        ));
+        assert!(matches!(
+            result.get_prop("objectCoercionPreservesIdentity"),
+            Some(Value::Bool(true))
+        ));
+        let object_coercion_errors = result.get_prop("objectCoercionErrors").unwrap();
+        let Value::Array(object_coercion_errors) = &object_coercion_errors else {
+            panic!("Node-API nullish object coercion fixture did not return an array");
+        };
+        assert!(object_coercion_errors.borrow().iter().all(|error| {
+            matches!(error.get_prop("name"), Some(Value::String(ref name)) if name == "TypeError")
+                && matches!(error.get_prop("isTypeError"), Some(Value::Bool(true)))
+        }));
         let coercion_events = result.get_prop("coercionEvents").unwrap();
         let Value::Array(coercion_events) = &coercion_events else {
             panic!("Node-API coercion event fixture did not return an array");

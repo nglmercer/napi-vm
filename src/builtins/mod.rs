@@ -38,7 +38,7 @@ pub use typedarray::{
 
 use crate::error::VmErr;
 use crate::interpreter::{Env, Interpreter};
-use crate::value::Value;
+use crate::value::{BoxedPrimitive, Value};
 
 pub fn setup_builtins(env: &Env) {
     let mut e = env.borrow_mut();
@@ -513,6 +513,10 @@ fn arr_items(this: &Value) -> Vec<Value> {
 fn str_this(interp: &Interpreter, this: &Value) -> Result<String, VmErr> {
     match this {
         Value::String(s) => Ok(s.clone()),
+        Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
+            Some(BoxedPrimitive::String(value)) => Ok(value.clone()),
+            _ => interp.vs(this),
+        },
         _ => interp.vs(this),
     }
 }

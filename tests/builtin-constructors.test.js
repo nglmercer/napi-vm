@@ -43,6 +43,14 @@ test("Object() wraps a nullish value", () => {
   expect(runCode("const o = { a: 1 }; Object(o) === o;")).toBe("true");
 });
 
+test("Object() boxes primitives and preserves their value", () => {
+  expect(runCode("typeof Object(42) + ':' + Object(42).valueOf();")).toBe("object:42");
+  expect(runCode("Object('abc').length + ':' + Object('abc')[1];")).toBe("3:b");
+  expect(runCode("Object('abc').toUpperCase();")).toBe("ABC");
+  expect(runCode("Object(true).toString();")).toBe("true");
+  expect(runCode("Object(13n).toString();")).toBe("13");
+});
+
 // --- Array ------------------------------------------------------------------
 
 test("Array.of collects its arguments", () => {

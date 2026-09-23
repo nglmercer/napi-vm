@@ -62,10 +62,17 @@ fn boolean_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, V
 }
 
 /// `Object(v)`: `v` itself when it is already an object, a fresh object when
-/// it is nullish. Primitives have no wrapper type here, so they pass through.
+/// it is nullish, and a boxed primitive otherwise.
 fn object_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     Ok(match a.first() {
         None | Some(Value::Undefined) | Some(Value::Null) => Value::object(vec![]),
+        Some(
+            v @ (Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Symbol(_)
+            | Value::BigInt(_)),
+        ) => Value::boxed_primitive(v.clone()).expect("primitive values have wrapper objects"),
         Some(v) => v.clone(),
     })
 }

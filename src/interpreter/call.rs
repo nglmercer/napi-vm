@@ -325,7 +325,7 @@ impl Interpreter {
             let setter = props
                 .borrow()
                 .iter()
-                .find(|(name, value)| name == &companion && is_setter(value))
+                .find(|(name, value)| (name == key || name == &companion) && is_setter(value))
                 .map(|(_, value)| value.clone());
             if let Some(setter) = setter {
                 self.call_this(&setter, receiver.clone(), vec![value])?;
