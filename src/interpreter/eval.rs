@@ -321,6 +321,7 @@ impl Interpreter {
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(mb, "arguments"),
+                        bound: None,
                     }));
                     if *st {
                         statics.push((mname.clone(), fn_val));
@@ -381,6 +382,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(gb, "arguments"),
+                        bound: None,
                     }));
                     if *st {
                         insert_class_accessor(&mut statics, gname, getter_fn);
@@ -418,6 +420,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(sb, "arguments"),
+                        bound: None,
                     }));
                     if *st {
                         insert_class_accessor(&mut statics, sname, setter_fn);
@@ -500,6 +503,7 @@ impl Interpreter {
             is_constructor: false,
             is_async: false,
             is_generator: false,
+            bound: None,
         }));
 
         let prototype = Value::object_with_proto(proto_props, super_proto);
@@ -666,6 +670,7 @@ impl Interpreter {
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bound: None,
                     })),
                 )?;
                 Ok(Value::Undefined)
@@ -1331,6 +1336,7 @@ impl Interpreter {
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bound: None,
                     }));
                     insert_object_property(
                         &mut object,
@@ -1357,6 +1363,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bound: None,
                     }));
                     insert_object_property(
                         &mut object,
@@ -1383,6 +1390,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bound: None,
                     }));
                     insert_object_property(
                         &mut object,
@@ -2051,6 +2059,7 @@ impl Interpreter {
                 is_constructor: false,
                 is_async: *is_async,
                 is_generator: false,
+                bound: None,
             }))),
             Expr::FnExpr {
                 name,
@@ -2073,6 +2082,7 @@ impl Interpreter {
                 is_async: *is_async,
                 is_generator: *is_generator,
                 uses_arguments: stmts_reference(body, "arguments"),
+                bound: None,
             }))),
             Expr::New { callee, args } => {
                 let mut a = Vec::new();

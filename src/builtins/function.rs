@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{FunctionData, ObjectCell, Value};
+use crate::value::{BoundFunctionData, FunctionData, ObjectCell, Value};
 
 pub(super) fn install(e: &mut Environment) {
     let Some(namespace) = e.get("Function") else {
@@ -34,6 +34,7 @@ pub(super) fn install(e: &mut Environment) {
         is_async: false,
         is_generator: false,
         uses_arguments: false,
+        bound: None,
     }));
 
     prototype
@@ -55,6 +56,9 @@ pub(super) fn install(e: &mut Environment) {
     prototype
         .set_prop("apply".to_string(), super::nf("apply", function_apply))
         .expect("Function.prototype.apply");
+    prototype
+        .set_prop("bind".to_string(), super::nf("bind", function_bind))
+        .expect("Function.prototype.bind");
     if let Value::Function(function) = &prototype {
         function.properties.meta.borrow_mut().set_attrs(
             "call",
@@ -65,6 +69,13 @@ pub(super) fn install(e: &mut Environment) {
         );
         function.properties.meta.borrow_mut().set_attrs(
             "apply",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..crate::value::PropAttrs::default()
+            },
+        );
+        function.properties.meta.borrow_mut().set_attrs(
+            "bind",
             crate::value::PropAttrs {
                 enumerable: false,
                 ..crate::value::PropAttrs::default()
@@ -93,8 +104,137 @@ pub(crate) fn function_method(name: &str) -> Option<Value> {
     Some(match name {
         "call" => super::nf("call", function_call),
         "apply" => super::nf("apply", function_apply),
+        "bind" => super::nf("bind", function_bind),
         _ => return None,
     })
+}
+
+fn function_bind(
+    interp: &mut Interpreter,
+    target: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if !is_callable(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Function.prototype.bind called on a non-callable value".into(),
+        ));
+    }
+
+    let bound_this = args.first().cloned().unwrap_or(Value::Undefined);
+    let new_arguments: Vec<Value> = args.into_iter().skip(1).collect();
+    let target_name = interp.get_prop_value(&target, &Value::String("name".into()))?;
+    let target_name = match &target_name {
+        Value::String(name) => name.clone(),
+        _ => match &target {
+            Value::Class(class) => class.name.clone(),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.to_string()
+            }
+            _ => String::new(),
+        },
+    };
+    let target_length = interp
+        .get_prop_value(&target, &Value::String("length".into()))
+        .and_then(|length| interp.ecmascript_to_number(&length))?;
+    let target_length = if target_length.is_nan() {
+        0.0
+    } else {
+        target_length.trunc()
+    };
+    let bound_length = (target_length - new_arguments.len() as f64).max(0.0);
+
+    let (bound_target, bound_this, mut bound_arguments) = match &target {
+        Value::Function(function) => match &function.bound {
+            Some(bound) => (
+                bound.target.clone(),
+                bound.this_value.clone(),
+                bound.arguments.as_ref().clone(),
+            ),
+            None => (target.clone(), bound_this, Vec::new()),
+        },
+        _ => (target.clone(), bound_this, Vec::new()),
+    };
+    if bound_arguments.len().saturating_add(new_arguments.len()) > crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err("Maximum argument count exceeded"));
+    }
+    bound_arguments.extend(new_arguments);
+
+    let properties = FunctionData::properties_with_default_prototype(&interp.persistent_global);
+    properties
+        .borrow_mut()
+        .push(("name".into(), Value::String(format!("bound {target_name}"))));
+    properties.meta.borrow_mut().set_attrs(
+        "name",
+        crate::value::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    properties
+        .borrow_mut()
+        .push(("length".into(), Value::Number(bound_length)));
+    properties.meta.borrow_mut().set_attrs(
+        "length",
+        crate::value::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+
+    Ok(Value::Function(Box::new(FunctionData {
+        identity: Rc::new(0),
+        name: Some(format!("bound {target_name}").into()),
+        properties,
+        standard_properties_initialized: Rc::new(std::cell::Cell::new(true)),
+        params: Rc::new(Vec::new()),
+        body: Rc::new(Vec::new()),
+        closure: None,
+        is_arrow: false,
+        is_constructor: is_constructor(&bound_target),
+        is_async: false,
+        is_generator: false,
+        uses_arguments: false,
+        bound: Some(Rc::new(BoundFunctionData {
+            target: bound_target,
+            this_value: bound_this,
+            arguments: Rc::new(bound_arguments),
+        })),
+    })))
+}
+
+fn is_callable(value: &Value) -> bool {
+    match value {
+        Value::Function(_)
+        | Value::NativeFunction { .. }
+        | Value::HostFunction { .. }
+        | Value::Class(_) => true,
+        Value::Proxy(proxy) => is_callable(&proxy.target),
+        Value::Object { .. } => {
+            crate::interpreter::call::callable_slot(value, crate::interpreter::call::CALL_SLOT)
+                .is_some()
+        }
+        _ => false,
+    }
+}
+
+fn is_constructor(value: &Value) -> bool {
+    match value {
+        Value::Function(function) => function.is_constructor,
+        Value::HostFunction { .. } | Value::Class(_) => true,
+        Value::Proxy(proxy) => is_constructor(&proxy.target),
+        Value::Object { .. } => {
+            crate::interpreter::call::callable_slot(value, crate::interpreter::call::CONSTRUCT_SLOT)
+                .is_some()
+                || crate::interpreter::call::callable_slot(
+                    value,
+                    crate::interpreter::call::CALL_SLOT,
+                )
+                .is_some()
+        }
+        _ => false,
+    }
 }
 
 fn function_call(
@@ -178,5 +318,6 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         is_async: false,
         is_generator: false,
         uses_arguments,
+        bound: None,
     })))
 }

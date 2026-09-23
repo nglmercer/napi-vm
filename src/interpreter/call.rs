@@ -102,6 +102,12 @@ impl Interpreter {
             ));
         }
 
+        if let Value::Function(function) = constructor
+            && let Some(bound) = &function.bound
+        {
+            return self.instance_of(object, &bound.target);
+        }
+
         if matches!(object, Value::Date(_))
             && matches!(constructor, Value::Object { props }
                 if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
@@ -718,6 +724,17 @@ impl Interpreter {
         }
         match f {
             Value::Function(fd) => {
+                if let Some(bound) = &fd.bound {
+                    let bound = bound.clone();
+                    if bound.arguments.len().saturating_add(args.len())
+                        > crate::value::MAX_ARRAY_LEN
+                    {
+                        return Err(crate::value::limit_err("Maximum argument count exceeded"));
+                    }
+                    let mut call_args = bound.arguments.as_ref().clone();
+                    call_args.extend(args);
+                    return self.call_this(&bound.target, bound.this_value.clone(), call_args);
+                }
                 // Calling a generator function does not run its body; it returns
                 // a generator object whose `next()` method drives execution.
                 if fd.is_generator {
@@ -1018,7 +1035,29 @@ impl Interpreter {
                 args,
                 new_target,
             ),
-            Value::Function(_) => self.call_this(f, this_val, args),
+            Value::Function(function) => {
+                if let Some(bound) = &function.bound {
+                    if !function.is_constructor {
+                        return vm_err("TypeError: function is not a constructor");
+                    }
+                    let bound = bound.clone();
+                    if bound.arguments.len().saturating_add(args.len())
+                        > crate::value::MAX_ARRAY_LEN
+                    {
+                        return Err(crate::value::limit_err("Maximum argument count exceeded"));
+                    }
+                    let mut call_args = bound.arguments.as_ref().clone();
+                    call_args.extend(args);
+                    self.invoke_constructor_with_new_target(
+                        &bound.target,
+                        this_val,
+                        call_args,
+                        new_target,
+                    )
+                } else {
+                    self.call_this(f, this_val, args)
+                }
+            }
             // The built-in error types have native constructors, so
             // `class E extends Error {}` reaches `super(…)` here.
             Value::NativeFunction { .. } => self.call_this(f, this_val, args),
@@ -1119,6 +1158,25 @@ impl Interpreter {
                 if is_js_object(&r) { Ok(r) } else { Ok(inst) }
             }
             Value::Function(fd) => {
+                if let Some(bound) = &fd.bound {
+                    if !fd.is_constructor {
+                        return vm_err("TypeError: function is not a constructor");
+                    }
+                    let bound = bound.clone();
+                    if bound.arguments.len().saturating_add(args.len())
+                        > crate::value::MAX_ARRAY_LEN
+                    {
+                        return Err(crate::value::limit_err("Maximum argument count exceeded"));
+                    }
+                    let mut call_args = bound.arguments.as_ref().clone();
+                    call_args.extend(args);
+                    let new_target = if crate::interpreter::strict_equals(&new_target, f) {
+                        bound.target.clone()
+                    } else {
+                        new_target
+                    };
+                    return self.ctor_with_new_target(&bound.target, call_args, new_target);
+                }
                 if !fd.is_constructor {
                     return vm_err("TypeError: function is not a constructor");
                 }

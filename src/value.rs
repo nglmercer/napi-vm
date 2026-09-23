@@ -507,6 +507,14 @@ impl SymbolData {
     }
 }
 
+/// Internal state for a bound callable.
+#[derive(Debug, Clone)]
+pub struct BoundFunctionData {
+    pub target: Value,
+    pub this_value: Value,
+    pub arguments: Rc<Vec<Value>>,
+}
+
 /// Payload of `Value::Function`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct FunctionData {
@@ -539,6 +547,9 @@ pub struct FunctionData {
     /// Whether the body references `arguments`. Frames for functions that
     /// never read it skip building the (detached) arguments object.
     pub uses_arguments: bool,
+    /// The bound target and arguments for functions created by
+    /// `Function.prototype.bind`.
+    pub bound: Option<Rc<BoundFunctionData>>,
 }
 
 impl FunctionData {
@@ -613,6 +624,9 @@ impl FunctionData {
             .map(|(_, value)| value.deref_binding())
         {
             return value;
+        }
+        if self.bound.is_some() {
+            return Value::Undefined;
         }
         if !self.is_constructor {
             return Value::Undefined;
@@ -2149,6 +2163,15 @@ impl Value {
             Value::Function(fd) => {
                 if let Some(env) = fd.closure.take() {
                     crate::interpreter::Environment::drain_chain(env, work);
+                }
+                if let Some(bound) = fd.bound.take()
+                    && let Ok(mut bound) = Rc::try_unwrap(bound)
+                {
+                    work.push(std::mem::replace(&mut bound.target, Value::Undefined));
+                    work.push(std::mem::replace(&mut bound.this_value, Value::Undefined));
+                    if let Ok(mut arguments) = Rc::try_unwrap(bound.arguments) {
+                        work.append(&mut arguments);
+                    }
                 }
             }
             Value::Class(cd) => {

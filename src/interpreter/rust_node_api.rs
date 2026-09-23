@@ -7389,6 +7389,12 @@ fn napi_constructor_has_custom_has_instance(constructor: &Value) -> Result<bool,
                 Value::Undefined | Value::Null
             ));
         }
+        if let Value::Function(function) = &current
+            && let Some(bound) = &function.bound
+        {
+            current = bound.target.clone();
+            continue;
+        }
         let Some(prototype) = properties.proto() else {
             return Ok(false);
         };
@@ -7407,6 +7413,11 @@ fn napi_guest_instanceof(
     let method = interpreter.get_prop_value(&constructor, &symbol)?;
     if matches!(method, Value::Undefined | Value::Null) {
         let value = args.first().cloned().unwrap_or(Value::Undefined);
+        if let Value::Function(function) = &constructor
+            && let Some(bound) = &function.bound
+        {
+            return napi_guest_instanceof(interpreter, bound.target.clone(), vec![value]);
+        }
         let result = match &constructor {
             Value::Class(class) => napi_class_instanceof(&value, class),
             Value::Function(function) => napi_function_instanceof(&value, &constructor, function),
@@ -7436,6 +7447,13 @@ fn napi_function_instanceof(
     }
     if !is_napi_property_object(object) {
         return Ok(false);
+    }
+    if let Some(bound) = &function.bound {
+        return match &bound.target {
+            Value::Class(class) => napi_class_instanceof(object, class),
+            Value::Function(target) => napi_function_instanceof(object, &bound.target, target),
+            _ => Err(NAPI_GENERIC_FAILURE),
+        };
     }
     let prototype = function.prototype_value(constructor);
     if !is_napi_property_object(&prototype) {
@@ -13240,8 +13258,29 @@ Object.defineProperty(MarkedFunction, Symbol.hasInstance, {
 });
 function InheritedMarkedFunction() {}
 Object.setPrototypeOf(InheritedMarkedFunction, MarkedFunction);
+const BoundMarkedFunction = MarkedFunction.bind(null);
+const BoundOwnMarkedFunction = MarkedFunction.bind(null);
+let boundOwnReceiverWasBound = false;
+Object.defineProperty(BoundOwnMarkedFunction, Symbol.hasInstance, {
+  configurable: true,
+  value(value) {
+    boundOwnReceiverWasBound = this === BoundOwnMarkedFunction;
+    return value && value.own;
+  },
+});
 function Ordinary(value) { this.value = value; }
 const ordinary = new Ordinary(17);
+const BoundOrdinary = Ordinary.bind({value: -1}, 23);
+const boundOrdinary = new BoundOrdinary();
+class ClassConstructor { constructor(value) { this.value = value; } }
+const BoundClassConstructor = ClassConstructor.bind(null, 31);
+const boundClassInstance = new BoundClassConstructor();
+function BoundAdd(left, right) { return this.base + left + right; }
+const boundAdd = BoundAdd.bind({base: 10}, 4);
+const reboundAdd = boundAdd.bind({base: 0}, 5);
+const BoundArrow = (() => 1).bind(null);
+let boundArrowConstructThrows = false;
+try { new BoundArrow(); } catch (error) { boundArrowConstructThrows = error.name === 'TypeError'; }
 function DeletedName() {}
 const nameDeleted = delete DeletedName.name &&
   DeletedName.name === '' && !Object.hasOwn(DeletedName, 'name');
@@ -13268,8 +13307,31 @@ module.exports = {
     functionCalls[2] === InheritedMarkedFunction &&
     functionCalls[3] === MarkedFunction &&
     functionCalls[4] === InheritedMarkedFunction,
+  boundFunctionMatched: addon.instanceofProbe({marked: true}, BoundMarkedFunction),
+  boundGuestFunctionMatched: ({marked: true}) instanceof BoundMarkedFunction,
+  boundFunctionReceiverWasTarget: functionCalls.length === 7 &&
+    functionCalls[5] === MarkedFunction && functionCalls[6] === MarkedFunction,
+  boundOwnSymbolHasInstance: addon.instanceofProbe({own: true}, BoundOwnMarkedFunction),
+  boundOwnGuestSymbolHasInstance: ({own: true}) instanceof BoundOwnMarkedFunction,
+  boundOwnSymbolReceiverWasBound: boundOwnReceiverWasBound,
   ordinaryIsInstance: addon.instanceofProbe(ordinary, Ordinary),
   ordinaryGuestInstanceof: ordinary instanceof Ordinary,
+  boundOrdinaryGuestInstanceof: boundOrdinary instanceof BoundOrdinary,
+  boundOrdinaryTargetInstanceof: boundOrdinary instanceof Ordinary,
+  boundOrdinaryNapiInstanceof: addon.instanceofProbe(boundOrdinary, BoundOrdinary),
+  boundOrdinaryValue: boundOrdinary.value,
+  boundOrdinaryHasNoOwnPrototype: !Object.hasOwn(BoundOrdinary, 'prototype'),
+  boundClassGuestInstanceof: boundClassInstance instanceof BoundClassConstructor,
+  boundClassTargetInstanceof: boundClassInstance instanceof ClassConstructor,
+  boundClassNapiInstanceof: addon.instanceofProbe(boundClassInstance, BoundClassConstructor),
+  boundClassValue: boundClassInstance.value,
+  boundCallResult: boundAdd(2),
+  reboundCallResult: reboundAdd(),
+  boundName: boundAdd.name,
+  boundLength: boundAdd.length,
+  reboundName: reboundAdd.name,
+  reboundLength: reboundAdd.length,
+  boundArrowConstructThrows,
   ordinaryIsObject: ordinary instanceof Object,
   ordinaryIsFunction: Ordinary instanceof Function,
   ordinaryPrototypeIsObject: Ordinary.prototype instanceof Object,
@@ -13709,8 +13771,67 @@ module.exports = {
             panic!("custom instanceof fixture did not return JSON");
         };
         let vm_result: serde_json::Value = serde_json::from_str(custom_instance_json).unwrap();
+        let mut expected_vm_result = vm_result.clone();
+        let bound_result_keys = [
+            "boundFunctionMatched",
+            "boundGuestFunctionMatched",
+            "boundFunctionReceiverWasTarget",
+            "boundOwnSymbolHasInstance",
+            "boundOwnGuestSymbolHasInstance",
+            "boundOwnSymbolReceiverWasBound",
+            "boundOrdinaryGuestInstanceof",
+            "boundOrdinaryTargetInstanceof",
+            "boundOrdinaryNapiInstanceof",
+            "boundOrdinaryValue",
+            "boundOrdinaryHasNoOwnPrototype",
+            "boundClassGuestInstanceof",
+            "boundClassTargetInstanceof",
+            "boundClassNapiInstanceof",
+            "boundClassValue",
+            "boundCallResult",
+            "reboundCallResult",
+            "boundName",
+            "boundLength",
+            "reboundName",
+            "reboundLength",
+            "boundArrowConstructThrows",
+        ];
+        let bound_results = bound_result_keys
+            .iter()
+            .map(|key| ((*key).to_string(), vm_result[*key].clone()))
+            .collect::<serde_json::Map<_, _>>();
+        for key in bound_result_keys {
+            expected_vm_result.as_object_mut().unwrap().remove(key);
+        }
         assert_eq!(
-            vm_result,
+            serde_json::Value::Object(bound_results),
+            serde_json::json!({
+                "boundFunctionMatched": true,
+                "boundGuestFunctionMatched": true,
+                "boundFunctionReceiverWasTarget": true,
+                "boundOwnSymbolHasInstance": true,
+                "boundOwnGuestSymbolHasInstance": true,
+                "boundOwnSymbolReceiverWasBound": true,
+                "boundOrdinaryGuestInstanceof": true,
+                "boundOrdinaryTargetInstanceof": true,
+                "boundOrdinaryNapiInstanceof": true,
+                "boundOrdinaryValue": 23,
+                "boundOrdinaryHasNoOwnPrototype": true,
+                "boundClassGuestInstanceof": true,
+                "boundClassTargetInstanceof": true,
+                "boundClassNapiInstanceof": true,
+                "boundClassValue": 31,
+                "boundCallResult": 16,
+                "reboundCallResult": 19,
+                "boundName": "bound BoundAdd",
+                "boundLength": 1,
+                "reboundName": "bound bound BoundAdd",
+                "reboundLength": 0,
+                "boundArrowConstructThrows": true
+            })
+        );
+        assert_eq!(
+            expected_vm_result,
             serde_json::json!({
                 "matched": true,
                 "rejected": false,
