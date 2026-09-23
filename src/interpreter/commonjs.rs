@@ -5,12 +5,14 @@
 //! host supplied provider because a `.node` library needs a Node-API runtime
 //! and cannot be made executable by filesystem resolution alone.
 
-use std::collections::HashSet;
-use std::fs;
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 
 use crate::error::VmErr;
 use crate::value::Value;
@@ -79,7 +81,7 @@ pub trait NativeAddonLoader {
 pub struct FileCommonJsLoader {
     roots: Vec<PathBuf>,
     native_addons: Option<Rc<dyn NativeAddonLoader>>,
-    allowed_native_addons: HashSet<PathBuf>,
+    allowed_native_addons: HashMap<PathBuf, [u8; 32]>,
 }
 
 impl std::fmt::Debug for FileCommonJsLoader {
@@ -126,7 +128,7 @@ impl FileCommonJsLoader {
         Ok(Self {
             roots: canonical_roots,
             native_addons: None,
-            allowed_native_addons: HashSet::new(),
+            allowed_native_addons: HashMap::new(),
         })
     }
 
@@ -137,8 +139,9 @@ impl FileCommonJsLoader {
         self
     }
 
-    /// Allow one specific `.node` binary. Native addons are never enabled for
-    /// every package under a root by default; each binary must be opted in.
+    /// Allow one specific `.node` binary and pin its SHA-256 digest. Native
+    /// addons are never enabled for every package under a root by default;
+    /// each binary must be opted in and remain byte-for-byte unchanged.
     pub fn allow_native_addon(mut self, path: impl AsRef<Path>) -> Result<Self, VmErr> {
         let canonical = fs::canonicalize(path.as_ref()).map_err(|error| {
             VmErr::Msg(format!(
@@ -158,7 +161,13 @@ impl FileCommonJsLoader {
                 canonical.display()
             )));
         }
-        self.allowed_native_addons.insert(canonical);
+        let digest = sha256_file(&canonical).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot pin native addon {}: {error}",
+                canonical.display()
+            ))
+        })?;
+        self.allowed_native_addons.insert(canonical, digest);
         Ok(self)
     }
 
@@ -424,9 +433,21 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
                 module.filename
             ))
         })?;
-        if !self.allowed_native_addons.contains(&path) {
-            return Err(VmErr::Msg(format!(
+        let expected_digest = self.allowed_native_addons.get(&path).ok_or_else(|| {
+            VmErr::Msg(format!(
                 "native addon is not allowlisted: {}",
+                path.display()
+            ))
+        })?;
+        let actual_digest = sha256_file(&path).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot verify native addon {}: {error}",
+                path.display()
+            ))
+        })?;
+        if &actual_digest != expected_digest {
+            return Err(VmErr::Msg(format!(
+                "native addon integrity check failed: {}",
                 path.display()
             )));
         }
@@ -438,6 +459,20 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
         })?;
         loader.load(&path)
     }
+}
+
+fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    let mut file = File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(digest.finalize().into())
 }
 
 fn read_package_json(path: &Path) -> Result<JsonValue, VmErr> {
@@ -1023,18 +1058,27 @@ mod tests {
         let denied = loader.load_native_addon(&addon).unwrap_err();
         assert!(denied.to_string().contains("not allowlisted"));
 
-        let loader = FileCommonJsLoader::new([&root])
-            .unwrap()
-            .allow_native_addon(root.join("addon.node"))
-            .unwrap()
-            .with_native_addon_loader(Rc::new(FakeNativeAddon));
+        let loader = Rc::new(
+            FileCommonJsLoader::new([&root])
+                .unwrap()
+                .allow_native_addon(root.join("addon.node"))
+                .unwrap()
+                .with_native_addon_loader(Rc::new(FakeNativeAddon)),
+        );
         let mut interpreter = crate::interpreter::Interpreter::with_builtins();
         interpreter.set_commonjs_entry(parent);
-        interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
+        interpreter.set_commonjs_loader(loader.clone()).unwrap();
         assert!(matches!(
             interpreter.eval_source("require('./addon.node');"),
             Ok(Value::Number(17.0))
         ));
+        fs::write(root.join("addon.node"), "tampered fixture").unwrap();
+        let integrity_error = loader.load_native_addon(&addon).unwrap_err();
+        assert!(
+            integrity_error
+                .to_string()
+                .contains("integrity check failed")
+        );
 
         fs::remove_dir_all(root).unwrap();
     }

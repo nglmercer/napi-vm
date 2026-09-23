@@ -92,6 +92,8 @@ fn main() {
 Native addons execute as trusted host code in the Node child process, outside
 the VM sandbox. The root restriction and per-file allowlist decide which addon
 may load; they do not constrain what that trusted addon can do on the host.
+`allow_native_addon()` pins the binary's SHA-256 digest when configured and
+checks it again before each load.
 The bridge supports synchronous function calls and constructors, Promise
 settlement, primitive values, arrays, byte buffers, BigInts, Dates, regular
 expressions, symbol identity, and identity-preserving native object proxies.
