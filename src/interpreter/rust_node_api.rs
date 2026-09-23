@@ -203,9 +203,10 @@ impl RustNodeApiOptions {
     }
 }
 
-/// In-process Node-API addon host. This is opt-in and implements Linux ELF and
-/// macOS Mach-O loading for the selected Node-API v1-v10 calls below. Linux is runtime
-/// tested; macOS still needs native CI verification.
+/// In-process Node-API addon host. This is opt-in and loads Linux ELF, macOS
+/// Mach-O, and Windows PE addons for the selected Node-API v1-v10 calls below.
+/// Linux is runtime-tested; Windows GNU was cross-compiled and tested under
+/// Wine. Native Windows and macOS still need runtime CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
     _shim: Rc<NodeApiShim>,

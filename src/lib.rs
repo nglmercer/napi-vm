@@ -37,7 +37,7 @@ pub use interpreter::{Environment, Interpreter, Module};
 pub use interpreter::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 #[cfg(all(
     feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos")
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 pub use interpreter::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions};
 pub use lexer::{Lexer, Token};

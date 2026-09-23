@@ -147,10 +147,12 @@ application.
 
 ### Experimental Rust Node-API host
 
-Linux desktop builds can enable the `node-api-host` Cargo feature to load a
-Node-API addon directly into the Rust process, without a Node
-executable. It uses the same guest `require()` resolver, root restrictions,
-and hash allowlist:
+Linux, macOS, and Windows desktop builds can enable the `node-api-host` Cargo
+feature to load a Node-API addon directly into the Rust process, without a Node
+executable. Linux is runtime-tested; the Windows GNU backend was cross-compiled
+and tested under Wine. Native Windows/MSVC and macOS runtime verification
+remain pending. The host uses the same guest `require()` resolver, root
+restrictions, and hash allowlist:
 
 ```rust
 use napi_vm::{Interpreter, ReportedNodeVersion, RustNodeApiOptions};
@@ -177,12 +179,12 @@ accepts addons requesting Node-API versions 1 through the configured maximum
 (10 by default), but only implements a selected API subset rather than every
 function in those versions. `max_napi_version()` also controls the value
 returned by `napi_get_version`; addon registrations above that ceiling fail
-before their initializer runs. Before `dlopen`, the host checks that the file is
-an ELF shared object or Mach-O bundle/dylib for the current architecture and
-reports format, class, and architecture mismatches directly. The v1
-surface includes C callbacks and
-callback info, controlled synchronous guest callback entry through
-`napi_call_function` and `napi_new_instance`, local handle scopes, object
+before their initializer runs. Before loading, the host checks that the file is
+an ELF shared object, Mach-O bundle/dylib, or PE DLL for the current
+architecture and reports format, class, and architecture mismatches directly.
+The v1 surface includes C callbacks and callback info, controlled synchronous
+guest callback entry through `napi_call_function` and `napi_new_instance`,
+local handle scopes, object
 creation and named properties, `napi_get_global`, general property reads and
 writes, membership, deletion and own-property checks, and
 `napi_get_property_names` (including inherited enumerable names). It supports
