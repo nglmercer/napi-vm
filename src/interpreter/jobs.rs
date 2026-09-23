@@ -48,6 +48,9 @@ pub enum Job {
         state: PromiseState,
         value: Value,
     },
+    /// An exception reported asynchronously by a host runtime. It is offered
+    /// to the guest process `uncaughtException` event before escaping to Rust.
+    HostUncaughtException { exception: Value },
 }
 
 #[derive(Default)]

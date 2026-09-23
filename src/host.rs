@@ -28,6 +28,9 @@ pub struct HostCallback {
 /// An event delivered from the host into the VM's shared event loop.
 pub enum HostEvent {
     Callback(HostCallback),
+    /// An exception raised by a host runtime with no synchronous caller to
+    /// receive it. The interpreter delivers it as an uncaught event.
+    UncaughtException(Value),
     PromiseSettled {
         promise: Rc<RefCell<PromiseInner>>,
         state: PromiseState,

@@ -385,6 +385,9 @@ impl Interpreter {
                     state,
                     value,
                 } => self.settle_host_promise(promise, state, value)?,
+                Job::HostUncaughtException { exception } => {
+                    self.run_host_uncaught_exception(exception)?;
+                }
             }
         }
     }
@@ -437,7 +440,44 @@ impl Interpreter {
                     state,
                     value,
                 }),
+                crate::host::HostEvent::UncaughtException(exception) => {
+                    queue.push_external_event(Job::HostUncaughtException { exception });
+                }
             }
+        }
+    }
+
+    pub(crate) fn run_host_uncaught_exception(&mut self, exception: Value) -> Result<(), VmErr> {
+        let process = self.persistent_global.borrow().get("process");
+        let Some(process) = process else {
+            return Err(VmErr::Throw(exception));
+        };
+        let Some(emit) = process.get_prop("emit") else {
+            return Err(VmErr::Throw(exception));
+        };
+        let callable = matches!(
+            emit,
+            Value::Function(_)
+                | Value::NativeFunction { .. }
+                | Value::HostFunction { .. }
+                | Value::Class(_)
+        ) || crate::interpreter::call::callable_slot(
+            &emit,
+            crate::interpreter::call::CALL_SLOT,
+        )
+        .is_some();
+        if !callable {
+            return Err(VmErr::Throw(exception));
+        }
+        let handled = self.call_this(
+            &emit,
+            process,
+            vec![Value::String("uncaughtException".into()), exception.clone()],
+        )?;
+        if handled.is_truthy() {
+            Ok(())
+        } else {
+            Err(VmErr::Throw(exception))
         }
     }
 
@@ -495,6 +535,9 @@ impl Interpreter {
                     state,
                     value,
                 } => self.settle_host_promise(promise, state, value)?,
+                Job::HostUncaughtException { exception } => {
+                    self.run_host_uncaught_exception(exception)?;
+                }
             }
         }
     }

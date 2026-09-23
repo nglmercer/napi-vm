@@ -175,6 +175,16 @@ The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
 not claim that every API available in the configured Node version is supported.
+Both symbol-based `NAPI_MODULE` registration and the deprecated
+`napi_module_register` static-constructor path load through the same allowlisted
+CommonJS route. `napi_get_uv_event_loop` resolves at link time but returns
+`napi_generic_failure` and a null output because this host does not embed libuv.
+The deprecated registration descriptor has no Node-API version field, so its
+single-module registration path is conservatively treated as v1. The stable
+`napi_fatal_exception` path uses the VM's existing external-event queue, offers
+the error to `process.emit('uncaughtException', error)`, and otherwise returns
+the uncaught throw to the Rust embedder. `napi_fatal_error` reports its message
+and terminates the process.
 `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive

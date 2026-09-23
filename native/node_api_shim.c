@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 typedef void* napi_env;
 typedef void* napi_value;
@@ -265,12 +266,18 @@ typedef struct napi_vm_node_api_table {
   napi_status (*create_buffer_from_arraybuffer)(napi_env, napi_value, size_t,
                                                   size_t, napi_value*);
   napi_status (*get_node_version)(napi_env, const napi_vm_node_version**);
+  napi_status (*get_uv_event_loop)(napi_env, void**);
+  void (*module_register)(void*);
+  void (*fatal_error)(const char*, size_t, const char*, size_t);
+  napi_status (*fatal_exception)(napi_env, napi_value);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
 #define NAPI_VM_EXPORT __declspec(dllexport)
+#define NAPI_VM_NO_RETURN __declspec(noreturn)
 #else
 #define NAPI_VM_EXPORT __attribute__((visibility("default")))
+#define NAPI_VM_NO_RETURN __attribute__((noreturn))
 #endif
 
 static _Atomic(const napi_vm_node_api_table*) api_table;
@@ -1234,6 +1241,31 @@ NAPI_VM_EXPORT napi_status napi_get_node_version(
     napi_env env, const napi_vm_node_version** result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_node_version(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_uv_event_loop(napi_env env, void** loop) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_uv_event_loop(env, loop) : 9;
+}
+
+NAPI_VM_EXPORT void napi_module_register(void* module) {
+  const napi_vm_node_api_table* table = get_api_table();
+  if (table) table->module_register(module);
+}
+
+NAPI_VM_EXPORT NAPI_VM_NO_RETURN void napi_fatal_error(
+    const char* location, size_t location_length, const char* message,
+    size_t message_length) {
+  const napi_vm_node_api_table* table = get_api_table();
+  if (table) {
+    table->fatal_error(location, location_length, message, message_length);
+  }
+  abort();
+}
+
+NAPI_VM_EXPORT napi_status napi_fatal_exception(napi_env env, napi_value error) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->fatal_exception(env, error) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_strict_equals(napi_env env, napi_value lhs,

@@ -227,6 +227,15 @@ version configured with `reported_node_version`; its release name is always
 `napi-vm`. The default version is `0.0.0`, so the Rust host does not identify
 itself as Node.js unless the desktop application deliberately supplies a
 numeric profile. This metadata does not add APIs to the compatibility surface.
+`napi_get_uv_event_loop` is link-compatible but returns
+`napi_generic_failure` with a null output because the Rust host does not embed a
+libuv loop. The deprecated `napi_module_register` constructor path also works
+for a single registered module in a shared library. Since its descriptor has
+no Node-API version field, the loader treats it as a v1 registration request.
+`napi_fatal_exception` enters the existing external-event queue and delivers
+`process.emit('uncaughtException', error)` at the next VM checkpoint when that
+handler is available; otherwise the error propagates to the Rust embedder.
+`napi_fatal_error` writes its diagnostic and aborts the process as specified.
 `napi_add_finalizer` supports its optional zero-count reference and runs the
 finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
 no guest-object garbage collector, so this does not provide collection-time

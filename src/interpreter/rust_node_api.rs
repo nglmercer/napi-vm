@@ -63,6 +63,7 @@ const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
 const MAX_BIGINT_WORDS: usize = 2048;
+const MAX_PENDING_FATAL_EXCEPTIONS: usize = 1024;
 const MAX_NODE_API_VERSION: i32 = 10;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
@@ -362,6 +363,7 @@ struct NapiEnvironment {
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
     guest_callback_dispatchers: RefCell<Vec<GuestCallbackDispatcher>>,
     pending_exception: RefCell<Option<Value>>,
+    fatal_exceptions: RefCell<VecDeque<Value>>,
 }
 
 #[repr(C)]
@@ -373,6 +375,19 @@ struct NapiNodeVersion {
 }
 
 const NAPI_VM_RELEASE: &[u8] = b"napi-vm\0";
+
+type NapiAddonRegister = unsafe extern "C" fn(NapiEnv, NapiValue) -> NapiValue;
+
+#[repr(C)]
+struct NapiModule {
+    version: i32,
+    flags: u32,
+    filename: *const c_char,
+    register: Option<NapiAddonRegister>,
+    module_name: *const c_char,
+    private_data: *mut c_void,
+    reserved: [*mut c_void; 4],
+}
 
 #[derive(Clone, Copy)]
 struct NapiCleanupHookRecord {
@@ -647,6 +662,39 @@ thread_local! {
     /// causing undefined behavior in the host.
     static NAPI_ENVIRONMENTS: RefCell<HashMap<usize, Weak<NapiEnvironment>>> =
         RefCell::new(HashMap::new());
+    /// Deprecated `napi_module_register` modules register from a static
+    /// constructor while `dlopen` is in progress. Keep registrations scoped
+    /// to that load so nested addon loads cannot steal each other's entries.
+    static NAPI_MODULE_REGISTRATIONS: RefCell<Vec<Vec<usize>>> = const { RefCell::new(Vec::new()) };
+}
+
+struct NapiModuleRegistrationScope {
+    active: bool,
+}
+
+impl NapiModuleRegistrationScope {
+    fn new() -> Self {
+        NAPI_MODULE_REGISTRATIONS.with(|registrations| {
+            registrations.borrow_mut().push(Vec::new());
+        });
+        Self { active: true }
+    }
+
+    fn finish(mut self) -> Vec<usize> {
+        self.active = false;
+        NAPI_MODULE_REGISTRATIONS
+            .with(|registrations| registrations.borrow_mut().pop().unwrap_or_default())
+    }
+}
+
+impl Drop for NapiModuleRegistrationScope {
+    fn drop(&mut self) {
+        if self.active {
+            NAPI_MODULE_REGISTRATIONS.with(|registrations| {
+                registrations.borrow_mut().pop();
+            });
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1189,6 +1237,10 @@ struct NapiVmApiTable {
     create_buffer_from_arraybuffer:
         unsafe extern "C" fn(NapiEnv, NapiValue, usize, usize, *mut NapiValue) -> i32,
     get_node_version: unsafe extern "C" fn(NapiEnv, *mut *const NapiNodeVersion) -> i32,
+    get_uv_event_loop: unsafe extern "C" fn(NapiEnv, *mut *mut c_void) -> i32,
+    module_register: unsafe extern "C" fn(*mut c_void),
+    fatal_error: unsafe extern "C" fn(*const c_char, usize, *const c_char, usize) -> !,
+    fatal_exception: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
 }
 
 #[repr(C)]
@@ -1356,6 +1408,10 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_property_key_utf16: api_create_property_key_utf16,
     create_buffer_from_arraybuffer: api_create_buffer_from_arraybuffer,
     get_node_version: api_get_node_version,
+    get_uv_event_loop: api_get_uv_event_loop,
+    module_register: api_module_register,
+    fatal_error: api_fatal_error,
+    fatal_exception: api_fatal_exception,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -6819,6 +6875,80 @@ unsafe extern "C" fn api_get_node_version(
     })
 }
 
+unsafe extern "C" fn api_get_uv_event_loop(env: NapiEnv, loop_result: *mut *mut c_void) -> i32 {
+    with_ffi_status(env, || {
+        if loop_result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let _environment = environment(env)?;
+        // This backend has no libuv loop. Return an explicit failure and a
+        // null output instead of fabricating an ABI-compatible-looking ptr.
+        unsafe { loop_result.write(std::ptr::null_mut()) };
+        Err(NAPI_GENERIC_FAILURE)
+    })
+}
+
+unsafe extern "C" fn api_module_register(module: *mut c_void) {
+    if module.is_null() {
+        return;
+    }
+    let _ = NAPI_MODULE_REGISTRATIONS.try_with(|registrations| {
+        if let Ok(mut registrations) = registrations.try_borrow_mut()
+            && let Some(active) = registrations.last_mut()
+            && active.len() < 1024
+        {
+            active.push(module as usize);
+        }
+    });
+}
+
+unsafe fn fatal_error_message(pointer: *const c_char, length: usize) -> String {
+    if pointer.is_null() {
+        return String::new();
+    }
+    let bytes = if length == usize::MAX {
+        // SAFETY: NAPI_AUTO_LENGTH requires a NUL-terminated input string.
+        unsafe { CStr::from_ptr(pointer) }.to_bytes()
+    } else {
+        // Fatal diagnostics should remain bounded even if an addon reports an
+        // unreasonable explicit length. The API contract requires valid data.
+        let length = length.min(64 * 1024);
+        // SAFETY: Node-API callers must provide `length` readable bytes.
+        unsafe { std::slice::from_raw_parts(pointer.cast::<u8>(), length) }
+    };
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+unsafe extern "C" fn api_fatal_error(
+    location: *const c_char,
+    location_length: usize,
+    message: *const c_char,
+    message_length: usize,
+) -> ! {
+    let location = unsafe { fatal_error_message(location, location_length) };
+    let message = unsafe { fatal_error_message(message, message_length) };
+    let mut stderr = std::io::stderr().lock();
+    if location.is_empty() {
+        let _ = writeln!(stderr, "FATAL ERROR: {message}");
+    } else {
+        let _ = writeln!(stderr, "FATAL ERROR: {location}: {message}");
+    }
+    std::process::abort()
+}
+
+unsafe extern "C" fn api_fatal_exception(env: NapiEnv, exception: NapiValue) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        let exception = environment.handles.borrow().get(exception)?;
+        let mut exceptions = environment.fatal_exceptions.borrow_mut();
+        if exceptions.len() >= MAX_PENDING_FATAL_EXCEPTIONS {
+            return Err(NAPI_QUEUE_FULL);
+        }
+        exceptions.push_back(exception);
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_strict_equals(
     env: NapiEnv,
     left: NapiValue,
@@ -7565,36 +7695,69 @@ impl NativeAddonLoader for RustNodeApiHost {
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
-        let library = unsafe { Library::open(Some(Path::new(filename).as_os_str()), RTLD_NOW) }
-            .map_err(|error| {
-                VmErr::Msg(format!(
-                    "cannot load Node-API addon {filename}: {error}; the binary may require an unavailable symbol or dependency"
-                ))
-            })?;
-        let api_version: unsafe extern "C" fn() -> i32 = unsafe {
-            *library
-                .get(b"node_api_module_get_api_version_v1\0")
-                .map_err(|error| {
+        let registration_scope = NapiModuleRegistrationScope::new();
+        let library_result =
+            unsafe { Library::open(Some(Path::new(filename).as_os_str()), RTLD_NOW) };
+        let registered_modules = registration_scope.finish();
+        let library = library_result.map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot load Node-API addon {filename}: {error}; the binary may require an unavailable symbol or dependency"
+            ))
+        })?;
+        let symbol_api_version = unsafe {
+            library
+                .get::<unsafe extern "C" fn() -> i32>(b"node_api_module_get_api_version_v1\0")
+                .map(|symbol| *symbol)
+        };
+        let (version, initialize) = if let Ok(api_version) = symbol_api_version {
+            let initialize = unsafe {
+                *library.get(b"napi_register_module_v1\0").map_err(|error| {
                     VmErr::Msg(format!(
-                        "{} is not a symbol-registered Node-API addon: {error}",
+                        "{} has no Node-API v1 module initializer: {error}",
                         filename
                     ))
                 })?
+            };
+            (unsafe { api_version() }, initialize)
+        } else {
+            match registered_modules.as_slice() {
+                [module] => {
+                    // SAFETY: napi_module_register receives a static module
+                    // descriptor from this library's constructor; the library
+                    // remains mapped for the entire registration and init.
+                    let module = unsafe { &*(*module as *const NapiModule) };
+                    if module.version != 1 {
+                        return Err(VmErr::Msg(format!(
+                            "Node-API addon {filename} uses unsupported legacy module descriptor version {}",
+                            module.version
+                        )));
+                    }
+                    let initialize = module.register.ok_or_else(|| {
+                        VmErr::Msg(format!(
+                            "Node-API addon {filename} registered a module without an initializer"
+                        ))
+                    })?;
+                    // The legacy descriptor carries no Node-API version
+                    // request, so use the conservative minimum for validation.
+                    (1, initialize)
+                }
+                [] => {
+                    return Err(VmErr::Msg(format!(
+                        "{filename} is not a symbol-registered or legacy-registered Node-API addon"
+                    )));
+                }
+                _ => {
+                    return Err(VmErr::Msg(format!(
+                        "{filename} registered multiple legacy Node-API modules; one .node file must select a single module"
+                    )));
+                }
+            }
         };
-        let version = unsafe { api_version() };
         if !(1..=MAX_NODE_API_VERSION).contains(&version) {
             return Err(VmErr::Msg(format!(
                 "Node-API addon {filename} requests version {version}; this host supports Node-API versions 1 through {MAX_NODE_API_VERSION}"
             )));
         }
-        let initialize: unsafe extern "C" fn(NapiEnv, NapiValue) -> NapiValue = unsafe {
-            *library.get(b"napi_register_module_v1\0").map_err(|error| {
-                VmErr::Msg(format!(
-                    "{} has no Node-API v1 module initializer: {error}",
-                    filename
-                ))
-            })?
-        };
         let module_file_url = url::Url::from_file_path(filename)
             .map(|url| CString::new(url.as_str()).expect("file URLs cannot contain NUL bytes"))
             .unwrap_or_default();
@@ -7632,6 +7795,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             active_callbacks: RefCell::new(HashMap::new()),
             guest_callback_dispatchers: RefCell::new(Vec::new()),
             pending_exception: RefCell::new(None),
+            fatal_exceptions: RefCell::new(VecDeque::new()),
         });
         register_environment(&environment);
         self.state
@@ -7756,9 +7920,24 @@ impl HostBridge for RustNodeApiHost {
     }
 
     fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
+        let mut events = {
+            let state = self.state.borrow();
+            state
+                .environments
+                .iter()
+                .flat_map(|environment| {
+                    environment
+                        .fatal_exceptions
+                        .borrow_mut()
+                        .drain(..)
+                        .map(HostEvent::UncaughtException)
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
         let notifications = {
             let state = self.state.borrow();
-            let first = if timeout.is_zero() {
+            let first = if timeout.is_zero() || !events.is_empty() {
                 state.runtime_notifications.try_recv().ok()
             } else {
                 state.runtime_notifications.recv_timeout(timeout).ok()
@@ -7768,7 +7947,7 @@ impl HostBridge for RustNodeApiHost {
                 .chain(state.runtime_notifications.try_iter())
                 .collect::<Vec<_>>()
         };
-        let mut events = Vec::with_capacity(notifications.len());
+        events.reserve(notifications.len());
         for notification in notifications {
             let HostRuntimeNotification::AsyncWorkCompletion(completion) = notification else {
                 let HostRuntimeNotification::ThreadsafeFunction(function_id) = notification else {
@@ -8100,6 +8279,203 @@ mod tests {
     }
 
     #[test]
+    fn napi_fatal_error_terminates_only_its_child_process() {
+        const CHILD_ROOT_ENV: &str = "NAPI_VM_FATAL_ERROR_FIXTURE_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT_ENV).map(PathBuf::from) {
+            let addon = root.join("fixture.node");
+            let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+            let mut interpreter = Interpreter::with_builtins();
+            interpreter
+                .enable_rust_node_api_addons(
+                    RustNodeApiOptions::new([root]).allow_native_addon_with_sha256(&addon, digest),
+                )
+                .unwrap();
+            let _ = interpreter.eval_source("require('./fixture.node').fatal();");
+            panic!("napi_fatal_error unexpectedly returned");
+        }
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-fatal-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping fatal Node-API fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        let c_source = r#"
+#define NAPI_VERSION 1
+#include <node_api.h>
+
+static napi_value fatal_probe(napi_env env, napi_callback_info info) {
+  (void)env;
+  (void)info;
+  napi_fatal_error("fixture", NAPI_AUTO_LENGTH, "fatal message", NAPI_AUTO_LENGTH);
+}
+
+NAPI_MODULE_INIT() {
+  napi_value function;
+  if (napi_create_function(env, "fatal", NAPI_AUTO_LENGTH, fatal_probe,
+                           NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "fatal", function) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#;
+        fs::write(&source, c_source).unwrap();
+        let built = Command::new("cc")
+            .args(["-std=c11", "-O2", "-fPIC", "-shared", "-I"])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "fatal Node-API fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let current_exe = std::env::current_exe().unwrap();
+        let child = Command::new("sh")
+            .args(["-c", "ulimit -c 0; exec \"$@\"", "napi-vm-fatal-child"])
+            .arg(current_exe)
+            .args([
+                "--exact",
+                "interpreter::rust_node_api::tests::napi_fatal_error_terminates_only_its_child_process",
+                "--nocapture",
+            ])
+            .env(CHILD_ROOT_ENV, &root)
+            .output()
+            .unwrap();
+        assert!(
+            !child.status.success(),
+            "fatal error child unexpectedly passed"
+        );
+        let stderr = String::from_utf8_lossy(&child.stderr);
+        assert!(
+            stderr.contains("FATAL ERROR: fixture: fatal message"),
+            "fatal diagnostic was missing: {stderr}"
+        );
+        drop(child);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn loads_a_legacy_napi_module_registered_during_library_initialization() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-legacy-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping legacy Node-API fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        let c_source = r#"
+#define NAPI_VERSION 1
+#include <node_api.h>
+
+static napi_value initialize(napi_env env, napi_value exports) {
+  napi_value value;
+  if (napi_create_string_utf8(env, "legacy registration", NAPI_AUTO_LENGTH,
+                              &value) != napi_ok ||
+      napi_set_named_property(env, exports, "kind", value) != napi_ok)
+    return NULL;
+  return exports;
+}
+
+static napi_module module = {
+  NAPI_MODULE_VERSION, 0, __FILE__, initialize, "legacy_fixture", NULL,
+  {NULL, NULL, NULL, NULL}
+};
+
+__attribute__((constructor)) static void register_module(void) {
+  napi_module_register(&module);
+}
+"#;
+        fs::write(&source, c_source).unwrap();
+        let built = Command::new("cc")
+            .args(["-std=c11", "-O2", "-fPIC", "-shared", "-I"])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "legacy Node-API fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let main = root.join("main.cjs");
+        fs::write(&main, "module.exports = require('./fixture.node').kind;").unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(&main),
+            )
+            .unwrap();
+        let value = interpreter.eval_source("require('./main.cjs')").unwrap();
+        assert!(matches!(value, Value::String(ref value) if value == "legacy registration"));
+
+        let node = Command::new("node")
+            .current_dir(&root)
+            .args(["-e", "process.stdout.write(require('./fixture.node').kind)"])
+            .output()
+            .unwrap();
+        assert!(
+            node.status.success(),
+            "Node legacy-registration fixture failed: {}",
+            String::from_utf8_lossy(&node.stderr)
+        );
+        assert_eq!(node.stdout, b"legacy registration");
+
+        drop(interpreter);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn loads_napi_v10_external_strings_property_keys_and_arraybuffer_buffers() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
@@ -8259,6 +8635,32 @@ static napi_value node_version_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value uv_loop_probe(napi_env env, napi_callback_info info) {
+  struct uv_loop_s* loop = NULL;
+  napi_status status;
+  napi_value result, field;
+  (void)info;
+  status = napi_get_uv_event_loop(env, &loop);
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_create_int32(env, status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "status", field) != napi_ok ||
+      napi_get_boolean(env, loop == NULL, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isNull", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value fatal_exception_probe(napi_env env, napi_callback_info info) {
+  napi_value message, error;
+  (void)info;
+  if (napi_create_string_utf8(env, "fatal exception", NAPI_AUTO_LENGTH,
+                              &message) != napi_ok ||
+      napi_create_error(env, NULL, message, &error) != napi_ok ||
+      napi_fatal_exception(env, error) != napi_ok)
+    return NULL;
+  return NULL;
+}
+
 NAPI_MODULE_INIT() {
   napi_value function;
   if (napi_create_function(env, "externalStrings", NAPI_AUTO_LENGTH,
@@ -8275,7 +8677,13 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "bufferRangeError", function) != napi_ok ||
       napi_create_function(env, "nodeVersion", NAPI_AUTO_LENGTH,
                            node_version_probe, NULL, &function) != napi_ok ||
-      napi_set_named_property(env, exports, "nodeVersion", function) != napi_ok)
+      napi_set_named_property(env, exports, "nodeVersion", function) != napi_ok ||
+      napi_create_function(env, "uvLoop", NAPI_AUTO_LENGTH,
+                           uv_loop_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "uvLoop", function) != napi_ok ||
+      napi_create_function(env, "fatalException", NAPI_AUTO_LENGTH,
+                           fatal_exception_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "fatalException", function) != napi_ok)
     return NULL;
   return exports;
 }
@@ -8307,6 +8715,7 @@ NAPI_MODULE_INIT() {
 const addon = require('./fixture.node');
 const external = addon.externalStrings();
 const nodeVersion = addon.nodeVersion();
+const uvLoop = addon.uvLoop();
 const properties = addon.propertyKeys();
 const buffer = addon.bufferFromArrayBuffer();
 const backing = buffer.backing;
@@ -8318,6 +8727,7 @@ try { addon.bufferRangeError(); } catch (error) { rangeErrorName = error.name; }
 module.exports = {
   external,
   nodeVersion,
+  uvLoop,
   propertyKeys: Object.keys(properties),
   propertyValues: [properties['keyé'], properties['utf8-雪'], properties['u16Ω']],
   buffer: {
@@ -8360,6 +8770,10 @@ module.exports = {
             vm_report["nodeVersion"],
             serde_json::json!({"major": 22, "minor": 17, "patch": 3, "release": "napi-vm"})
         );
+        assert_eq!(
+            vm_report["uvLoop"],
+            serde_json::json!({"status": NAPI_GENERIC_FAILURE, "isNull": true})
+        );
         assert_eq!(vm_report["propertyKeys"].as_array().unwrap().len(), 3);
         assert_eq!(
             vm_report["propertyValues"],
@@ -8378,6 +8792,56 @@ module.exports = {
         );
         assert_eq!(vm_report["rangeErrorName"], "RangeError");
 
+        interpreter
+            .eval_source(
+                "globalThis.process = { emit: function(name, error) { globalThis.fatalEvent = name + ':' + error.message; return true; } }; require('./fixture.node').fatalException();",
+            )
+            .unwrap();
+        let Value::String(ref fatal_report) = interpreter.eval_source("fatalEvent").unwrap() else {
+            panic!("fatal exception event did not reach the guest process handler");
+        };
+        let unhandled = interpreter
+            .eval_source(
+                "globalThis.process.emit = function() { return false; }; require('./fixture.node').fatalException();",
+            )
+            .unwrap_err();
+        assert!(matches!(
+            unhandled,
+            VmErr::Throw(Value::Error(ref error)) if error.message == "fatal exception"
+        ));
+        let fatal_runner = r#"const addon = require('./fixture.node');
+let event = '';
+process.once('uncaughtException', error => { event = `uncaughtException:${error.message}`; });
+addon.fatalException();
+setImmediate(() => {
+  if (!event) { process.stderr.write('fatal exception event was not delivered'); process.exitCode = 1; }
+  else process.stdout.write(event);
+});"#;
+        for runtime in ["node", "bun"] {
+            if !Command::new(runtime)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                continue;
+            }
+            let reference = Command::new(runtime)
+                .current_dir(&root)
+                .args(["-e", fatal_runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "{runtime} fatal exception fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&reference.stdout),
+                fatal_report.as_str(),
+                "fatal exception behavior differs from {runtime}"
+            );
+        }
+
         // Whether a runtime can retain an external string is an engine choice.
         // Compare the actual JavaScript strings and byte-view behavior while
         // checking each engine's copied/finalizer contract separately.
@@ -8386,12 +8850,14 @@ module.exports = {
         external.remove("utf16Copied");
         external.remove("finalizersAtReturn");
         vm_report.as_object_mut().unwrap().remove("nodeVersion");
+        vm_report.as_object_mut().unwrap().remove("uvLoop");
         let runner = r#"const value = require('./main.cjs');
 const e = value.external;
 const copied = Number(e.latin1Copied) + Number(e.utf16Copied);
 if (e.finalizersAtReturn !== copied) throw new Error('external string finalizer contract violated');
 delete e.latin1Copied; delete e.utf16Copied; delete e.finalizersAtReturn;
 delete value.nodeVersion;
+delete value.uvLoop;
 process.stdout.write(JSON.stringify(value));"#;
         let mut reference_reports = Vec::new();
         for runtime in ["node", "bun"] {
