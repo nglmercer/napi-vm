@@ -61,8 +61,11 @@ still goes through the VM's CommonJS resolver and module cache.
 
 The current implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
-existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
-Node-API versions 1 through 10 and currently covers scoped handles, callback
+existing CommonJS resolver and allowlist. Its `max_napi_version` option
+defaults to 10, controls `napi_get_version`, and rejects registrations above
+the configured ceiling before calling their initializer. This is a version
+ceiling rather than a claim that every function in that Node-API version is
+implemented. On Linux it currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,

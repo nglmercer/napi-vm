@@ -164,6 +164,7 @@ runtime
     .enable_rust_node_api_addons(
         RustNodeApiOptions::new([app_root.clone()])
             .allow_native_addon_with_sha256(addon, digest)
+            .max_napi_version(10)
             .reported_node_version(ReportedNodeVersion::new(22, 17, 3))
             .entry(app_root.join("main.cjs")),
     )
@@ -172,8 +173,11 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-accepts addons requesting Node-API versions 1 through 10, but only implements a
-selected API subset rather than every function in those versions. The v1
+accepts addons requesting Node-API versions 1 through the configured maximum
+(10 by default), but only implements a selected API subset rather than every
+function in those versions. `max_napi_version()` also controls the value
+returned by `napi_get_version`; addon registrations above that ceiling fail
+before their initializer runs. The v1
 surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
 `napi_call_function` and `napi_new_instance`, local handle scopes, object

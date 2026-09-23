@@ -101,6 +101,7 @@ pub struct RustNodeApiOptions {
     allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
     entry: Option<PathBuf>,
     reported_node_version: ReportedNodeVersion,
+    max_napi_version: u32,
 }
 
 /// Version numbers returned by `napi_get_node_version` in the Rust Node-API
@@ -141,6 +142,7 @@ impl RustNodeApiOptions {
             allowed_addons: Vec::new(),
             entry: None,
             reported_node_version: ReportedNodeVersion::NAPI_VM,
+            max_napi_version: MAX_NODE_API_VERSION as u32,
         }
     }
 
@@ -168,6 +170,15 @@ impl RustNodeApiOptions {
     /// addons. The release name returned by Node-API remains `napi-vm`.
     pub fn reported_node_version(mut self, version: ReportedNodeVersion) -> Self {
         self.reported_node_version = version;
+        self
+    }
+
+    /// Set the highest Node-API version this host will report and accept from
+    /// addon registration. The value must be in the supported range 1 through
+    /// 10; addon functions outside the implemented compatibility surface can
+    /// still fail when called.
+    pub fn max_napi_version(mut self, version: u32) -> Self {
+        self.max_napi_version = version;
         self
     }
 }
@@ -295,6 +306,7 @@ struct HostState {
     global: Env,
     object_prototype: Option<Value>,
     reported_node_version: ReportedNodeVersion,
+    max_napi_version: u32,
     next_callback_id: usize,
     callbacks: HashMap<usize, NativeCallbackRecord>,
     environments: Vec<Rc<NapiEnvironment>>,
@@ -6855,8 +6867,10 @@ unsafe extern "C" fn api_get_version(env: NapiEnv, result: *mut u32) -> i32 {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
-        let _environment = environment(env)?;
-        unsafe { result.write(MAX_NODE_API_VERSION as u32) };
+        let environment = environment(env)?;
+        let owner = environment.owner.upgrade().ok_or(NAPI_INVALID_ARG)?;
+        let max_napi_version = owner.borrow().max_napi_version;
+        unsafe { result.write(max_napi_version) };
         Ok(())
     })
 }
@@ -7254,7 +7268,11 @@ fn create_async_work_pool(
 }
 
 impl RustNodeApiHost {
-    fn new(global: Env, reported_node_version: ReportedNodeVersion) -> Result<Self, VmErr> {
+    fn new(
+        global: Env,
+        reported_node_version: ReportedNodeVersion,
+        max_napi_version: u32,
+    ) -> Result<Self, VmErr> {
         let object_prototype = global
             .borrow()
             .get("Object")
@@ -7268,6 +7286,7 @@ impl RustNodeApiHost {
                 global,
                 object_prototype,
                 reported_node_version,
+                max_napi_version,
                 next_callback_id: 1,
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
@@ -7753,9 +7772,10 @@ impl NativeAddonLoader for RustNodeApiHost {
                 }
             }
         };
-        if !(1..=MAX_NODE_API_VERSION).contains(&version) {
+        let max_napi_version = self.state.borrow().max_napi_version as i32;
+        if !(1..=max_napi_version).contains(&version) {
             return Err(VmErr::Msg(format!(
-                "Node-API addon {filename} requests version {version}; this host supports Node-API versions 1 through {MAX_NODE_API_VERSION}"
+                "Node-API addon {filename} requests version {version}; this host is configured for Node-API versions 1 through {max_napi_version}"
             )));
         }
         let module_file_url = url::Url::from_file_path(filename)
@@ -8029,6 +8049,12 @@ impl Interpreter {
         &mut self,
         options: RustNodeApiOptions,
     ) -> Result<Rc<RustNodeApiHost>, VmErr> {
+        if !(1..=MAX_NODE_API_VERSION as u32).contains(&options.max_napi_version) {
+            return Err(VmErr::Msg(format!(
+                "configured maximum Node-API version {} is outside the supported range 1 through {MAX_NODE_API_VERSION}",
+                options.max_napi_version
+            )));
+        }
         let mut loader = FileCommonJsLoader::new(options.roots.iter())?;
         for (addon, expected_sha256) in &options.allowed_addons {
             loader = match expected_sha256 {
@@ -8042,6 +8068,7 @@ impl Interpreter {
         let host = Rc::new(RustNodeApiHost::new(
             self.persistent_global.clone(),
             options.reported_node_version,
+            options.max_napi_version,
         )?);
         let loader = loader.with_native_addon_loader(host.clone());
         self.set_commonjs_loader(Rc::new(loader))?;
@@ -13562,6 +13589,118 @@ module.exports = {
         assert_eq!(unsafe { cleanup_hook_value(1) }, 3);
         assert_eq!(unsafe { cleanup_before_wrap_finalizer() }, 1);
         drop(observer);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn configured_node_api_ceiling_is_reported_and_enforced() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-version-limit-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping Node-API version fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        fs::write(
+            &source,
+            r#"
+#define NAPI_VERSION 7
+#include <node_api.h>
+
+NAPI_MODULE_INIT() {
+  uint32_t supported_version = 0;
+  napi_value version;
+  if (napi_get_version(env, &supported_version) != napi_ok ||
+      napi_create_uint32(env, supported_version, &version) != napi_ok ||
+      napi_set_named_property(env, exports, "supportedVersion", version) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#,
+        )
+        .unwrap();
+        let built = Command::new("cc")
+            .args(["-std=c11", "-O2", "-fPIC", "-shared", "-I"])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "Node-API version fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut compatible = Interpreter::with_builtins();
+        compatible
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .max_napi_version(7),
+            )
+            .unwrap();
+        assert!(matches!(
+            compatible
+                .eval_source("require('./fixture.node').supportedVersion;")
+                .unwrap(),
+            Value::Number(7.0)
+        ));
+        drop(compatible);
+
+        let mut incompatible = Interpreter::with_builtins();
+        incompatible
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .max_napi_version(6),
+            )
+            .unwrap();
+        let error = incompatible
+            .eval_source("require('./fixture.node');")
+            .unwrap_err();
+        assert!(error.to_string().contains("requests version 7"));
+        assert!(
+            error
+                .to_string()
+                .contains("configured for Node-API versions 1 through 6")
+        );
+        drop(incompatible);
+
+        let mut invalid = Interpreter::with_builtins();
+        let error = match invalid.enable_rust_node_api_addons(
+            RustNodeApiOptions::new(std::iter::empty::<PathBuf>()).max_napi_version(0),
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid Node-API ceiling was accepted"),
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("outside the supported range 1 through 10")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
