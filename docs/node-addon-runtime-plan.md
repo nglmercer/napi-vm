@@ -249,10 +249,10 @@ macOS host before it is claimed as verified. Windows addons that import
 `node.exe` use the generated PE DLL provider and Windows DLL search flags; the
 GNU target was cross-compiled and exercised under Wine, while native Windows
 and MSVC execution still need CI verification. The checked-in
-`tests/fixtures/node-api/windows-smoke.c` exercises this import path. The Windows
-unit test loads a prebuilt copy when `NAPI_VM_WINDOWS_NODE_API_FIXTURE` points to
-it, so native CI can compile the fixture against the generated `node.exe`
-import library and run the same `require('./fixture.node')` check.
+`tests/fixtures/node-api/node-api-smoke.c` exercises the platform import paths;
+native CI builds it against the generated `node.exe` import library on Windows
+and with dynamic symbol lookup on macOS, then runs the same
+`require('./fixture.node')` check.
 The VM's Rust `String` representation cannot preserve isolated UTF-16 surrogate
 code units, so `napi_create_string_utf16` currently returns
 `napi_generic_failure` for malformed UTF-16 instead of replacing or dropping
