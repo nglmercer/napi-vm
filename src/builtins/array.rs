@@ -265,6 +265,7 @@ fn array_splice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
     let Value::Array(cell) = &this else {
         return Value::checked_array(vec![]);
     };
+    reject_frozen_array_mutation(cell)?;
     let length = cell.borrow().len();
     let start = match a.first() {
         Some(v) => {
@@ -399,6 +400,7 @@ fn array_shift(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
     let Value::Array(cell) = &this else {
         return Ok(Value::Undefined);
     };
+    reject_frozen_array_mutation(cell)?;
     let mut items = cell.borrow_mut();
     if items.is_empty() {
         return Ok(Value::Undefined);
@@ -416,6 +418,7 @@ fn array_unshift(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Valu
     let Value::Array(cell) = &this else {
         return Ok(Value::Number(0.0));
     };
+    reject_frozen_array_mutation(cell)?;
     let added = a.len();
     let mut items = cell.borrow_mut();
     if items.len().saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
@@ -454,6 +457,9 @@ fn array_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
     };
     let start = resolve(a.get(1), 0);
     let end = resolve(a.get(2), length).max(start);
+    if start < end {
+        reject_frozen_array_mutation(cell)?;
+    }
     let value = a.first().cloned().unwrap_or(Value::Undefined);
     {
         let mut items = cell.borrow_mut();
@@ -645,6 +651,7 @@ fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
 
 fn array_push(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
+        reject_frozen_array_mutation(items)?;
         let added = a.len();
         let mut b = items.borrow_mut();
         if b.len().saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
@@ -663,6 +670,7 @@ fn array_push(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
 
 fn array_pop(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
+        reject_frozen_array_mutation(items)?;
         let result = items.borrow_mut().pop().unwrap_or(Value::Undefined);
         let length = items.borrow().len();
         items.truncate_presence(length);
@@ -778,6 +786,9 @@ fn array_concat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
 
 fn array_reverse(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
+        if items.borrow().len() > 1 {
+            reject_frozen_array_mutation(items)?;
+        }
         items.borrow_mut().reverse();
         items.reverse_presence();
         return Ok(this);
@@ -849,6 +860,9 @@ fn array_sort(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
         let original_values = items.borrow().clone();
         let original_presence = items.presence_snapshot();
         let original_len = original_values.len();
+        if original_len > 1 {
+            reject_frozen_array_mutation(items)?;
+        }
         let present_undefined = original_values
             .iter()
             .zip(&original_presence)
@@ -917,6 +931,16 @@ fn array_sort(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
         items.replace_presence(sorted_presence);
     }
     Ok(this)
+}
+
+fn reject_frozen_array_mutation(array: &crate::value::ArrayCell) -> Result<(), VmErr> {
+    if array.is_integrity_locked(true) {
+        Err(VmErr::Msg(
+            "TypeError: Cannot modify a frozen array".to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn array_flat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {

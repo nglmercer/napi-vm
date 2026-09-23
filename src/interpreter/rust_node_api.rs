@@ -10669,6 +10669,10 @@ frozenArray[0] = 88;
 frozenArray[1] = 99;
 delete frozenArray[0];
 frozenArray.length = 0;
+let frozenArrayPushThrows = false;
+let frozenArraySpliceThrows = false;
+try { frozenArray.push(101); } catch (error) { frozenArrayPushThrows = error.name === 'TypeError'; }
+try { frozenArray.splice(1, 0); } catch (error) { frozenArraySpliceThrows = error.name === 'TypeError'; }
 const sealedArray = [17];
 Object.seal(sealedArray);
 sealedArray[0] = 19;
@@ -10683,6 +10687,8 @@ module.exports = {
   arrayFrozen: Object.isFrozen(frozenArray),
   frozenArrayLength: frozenArray.length,
   frozenArrayValue: frozenArray[0],
+  frozenArrayPushThrows,
+  frozenArraySpliceThrows,
   sealedArraySealed: Object.isSealed(sealedArray),
   sealedArrayFrozen: Object.isFrozen(sealedArray),
   sealedArrayLength: sealedArray.length,
@@ -10782,6 +10788,8 @@ module.exports = {
         assert_eq!(vm_report["arrayFrozen"], true);
         assert_eq!(vm_report["frozenArrayLength"], 1);
         assert_eq!(vm_report["frozenArrayValue"], 13);
+        assert_eq!(vm_report["frozenArrayPushThrows"], true);
+        assert_eq!(vm_report["frozenArraySpliceThrows"], true);
         assert_eq!(vm_report["sealedArraySealed"], true);
         assert_eq!(vm_report["sealedArrayFrozen"], false);
         assert_eq!(vm_report["sealedArrayLength"], 1);
