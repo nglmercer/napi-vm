@@ -53,6 +53,8 @@ typedef struct napi_vm_node_api_table {
   napi_status (*create_string_latin1)(napi_env, const char*, size_t,
                                       napi_value*);
   napi_status (*create_string_utf8)(napi_env, const char*, size_t, napi_value*);
+  napi_status (*create_string_utf16)(napi_env, const uint16_t*, size_t,
+                                     napi_value*);
   napi_status (*create_symbol)(napi_env, napi_value, napi_value*);
   napi_status (*typeof_value)(napi_env, napi_value, int32_t*);
   napi_status (*get_value_double)(napi_env, napi_value, double*);
@@ -64,6 +66,8 @@ typedef struct napi_vm_node_api_table {
                                          size_t*);
   napi_status (*get_value_string_utf8)(napi_env, napi_value, char*, size_t,
                                        size_t*);
+  napi_status (*get_value_string_utf16)(napi_env, napi_value, uint16_t*,
+                                        size_t, size_t*);
   napi_status (*create_array)(napi_env, napi_value*);
   napi_status (*create_array_with_length)(napi_env, size_t, napi_value*);
   napi_status (*is_array)(napi_env, napi_value, bool*);
@@ -255,6 +259,14 @@ NAPI_VM_EXPORT napi_status napi_create_string_latin1(napi_env env,
   return table ? table->create_string_latin1(env, value, length, result) : 9;
 }
 
+NAPI_VM_EXPORT napi_status napi_create_string_utf16(napi_env env,
+                                                     const uint16_t* value,
+                                                     size_t length,
+                                                     napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_string_utf16(env, value, length, result) : 9;
+}
+
 NAPI_VM_EXPORT napi_status napi_create_symbol(napi_env env,
                                                napi_value description,
                                                napi_value* result) {
@@ -320,6 +332,17 @@ NAPI_VM_EXPORT napi_status napi_get_value_string_latin1(napi_env env,
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_value_string_latin1(env, value, buffer, buffer_size,
                                                  result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_value_string_utf16(napi_env env,
+                                                        napi_value value,
+                                                        uint16_t* buffer,
+                                                        size_t buffer_size,
+                                                        size_t* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_value_string_utf16(env, value, buffer, buffer_size,
+                                                result)
                : 9;
 }
 

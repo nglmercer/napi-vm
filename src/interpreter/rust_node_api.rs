@@ -57,6 +57,8 @@ const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
 const MAX_NODE_API_VERSION: i32 = 4;
+const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
+    b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
 
 type NapiEnv = *mut c_void;
@@ -642,6 +644,7 @@ struct NapiVmApiTable {
     create_string_latin1:
         unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
     create_string_utf8: unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
+    create_string_utf16: unsafe extern "C" fn(NapiEnv, *const u16, usize, *mut NapiValue) -> i32,
     create_symbol: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     typeof_value: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32) -> i32,
     get_value_double: unsafe extern "C" fn(NapiEnv, NapiValue, *mut f64) -> i32,
@@ -653,6 +656,8 @@ struct NapiVmApiTable {
         unsafe extern "C" fn(NapiEnv, NapiValue, *mut c_char, usize, *mut usize) -> i32,
     get_value_string_utf8:
         unsafe extern "C" fn(NapiEnv, NapiValue, *mut c_char, usize, *mut usize) -> i32,
+    get_value_string_utf16:
+        unsafe extern "C" fn(NapiEnv, NapiValue, *mut u16, usize, *mut usize) -> i32,
     create_array: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     create_array_with_length: unsafe extern "C" fn(NapiEnv, usize, *mut NapiValue) -> i32,
     is_array: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
@@ -844,6 +849,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_int64: api_create_int64,
     create_string_latin1: api_create_string_latin1,
     create_string_utf8: api_create_string_utf8,
+    create_string_utf16: api_create_string_utf16,
     create_symbol: api_create_symbol,
     typeof_value: api_typeof,
     get_value_double: api_get_value_double,
@@ -853,6 +859,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_value_bool: api_get_value_bool,
     get_value_string_latin1: api_get_value_string_latin1,
     get_value_string_utf8: api_get_value_string_utf8,
+    get_value_string_utf16: api_get_value_string_utf16,
     create_array: api_create_array,
     create_array_with_length: api_create_array_with_length,
     is_array: api_is_array,
@@ -955,6 +962,15 @@ fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
         engine_error_code: 0,
         error_code: status,
     }
+}
+
+fn napi_extended_error_info_with_message(
+    status: i32,
+    message: &'static [u8],
+) -> NapiExtendedErrorInfo {
+    let mut info = napi_extended_error_info(status);
+    info.error_message = message.as_ptr().cast();
+    info
 }
 
 fn with_ffi_status(env: NapiEnv, callback: impl FnOnce() -> Result<(), i32>) -> i32 {
@@ -1780,6 +1796,39 @@ unsafe fn read_latin1(pointer: *const c_char, length: usize) -> Result<String, i
     Ok(bytes.iter().copied().map(char::from).collect())
 }
 
+unsafe fn read_utf16(pointer: *const u16, length: usize) -> Result<String, i32> {
+    if pointer.is_null() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let length = if length == usize::MAX {
+        let mut index = 0;
+        loop {
+            if index > MAX_NAPI_BUFFER_BYTES {
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            if unsafe { pointer.add(index).read() } == 0 {
+                break index;
+            }
+            index += 1;
+        }
+    } else {
+        length
+    };
+    if length > MAX_NAPI_BUFFER_BYTES {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    let code_units = unsafe { std::slice::from_raw_parts(pointer, length) };
+    let mut string = String::new();
+    for decoded in std::char::decode_utf16(code_units.iter().copied()) {
+        let character = decoded.map_err(|_| NAPI_GENERIC_FAILURE)?;
+        if string.len().saturating_add(character.len_utf8()) > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        string.push(character);
+    }
+    Ok(string)
+}
+
 unsafe extern "C" fn api_get_undefined(env: NapiEnv, result: *mut NapiValue) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -1954,6 +2003,44 @@ unsafe extern "C" fn api_create_string_latin1(
         unsafe { result.write(handle) };
         Ok(())
     })
+}
+
+unsafe extern "C" fn api_create_string_utf16(
+    env: NapiEnv,
+    value: *const u16,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    let utf16_input_error = Cell::new(false);
+    let status = with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let value = unsafe { read_utf16(value, length) }.inspect_err(|status| {
+            if *status == NAPI_GENERIC_FAILURE {
+                utf16_input_error.set(true);
+            }
+        })?;
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::String(value))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    });
+    if utf16_input_error.get()
+        && status == NAPI_GENERIC_FAILURE
+        && let Ok(environment) = environment(env)
+    {
+        environment
+            .last_error
+            .set(napi_extended_error_info_with_message(
+                status,
+                UTF16_INPUT_ERROR_MESSAGE,
+            ));
+    }
+    status
 }
 
 unsafe extern "C" fn api_create_symbol(
@@ -2158,6 +2245,44 @@ unsafe extern "C" fn api_get_value_string_latin1(
             let copied = length.min(buffer_size - 1);
             for (index, unit) in value.encode_utf16().take(copied).enumerate() {
                 unsafe { buffer.add(index).write(unit as u8 as c_char) };
+            }
+            unsafe { buffer.add(copied).write(0) };
+            copied
+        };
+        if !result.is_null() {
+            unsafe { result.write(copied) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_string_utf16(
+    env: NapiEnv,
+    value: NapiValue,
+    buffer: *mut u16,
+    buffer_size: usize,
+    result: *mut usize,
+) -> i32 {
+    with_ffi_status(env, || {
+        if (buffer.is_null() && buffer_size != 0) || (buffer.is_null() && result.is_null()) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::String(value) = &value else {
+            return Err(NAPI_STRING_EXPECTED);
+        };
+        let length = value.encode_utf16().count();
+        if buffer.is_null() {
+            unsafe { result.write(length) };
+            return Ok(());
+        }
+        let copied = if buffer_size == 0 {
+            0
+        } else {
+            let copied = length.min(buffer_size - 1);
+            for (index, unit) in value.encode_utf16().take(copied).enumerate() {
+                unsafe { buffer.add(index).write(unit) };
             }
             unsafe { buffer.add(copied).write(0) };
             copied
@@ -5523,6 +5648,20 @@ mod tests {
         }
     }
 
+    fn number_array(value: Value) -> Vec<u32> {
+        let Value::Array(values) = &value else {
+            panic!("expected a numeric array");
+        };
+        values
+            .borrow()
+            .iter()
+            .map(|value| match value {
+                Value::Number(number) => *number as u32,
+                _ => panic!("expected a number in array"),
+            })
+            .collect()
+    }
+
     #[test]
     fn integer_conversion_matches_ecmascript_int32_wraparound() {
         assert_eq!(to_int32(4_294_967_297.0), 1);
@@ -5885,6 +6024,82 @@ static napi_value string_encoding_probe(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "truncatedCopied", field) != napi_ok ||
       napi_create_int32(env, wrong_type_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "wrongTypeStatus", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value utf16_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1, required = 0, copied = 0, truncated_copied = 0;
+  size_t wrong_type_length = 0;
+  napi_value argv[1], result, round_trip, units, truncated_units, field, number;
+  napi_value auto_length_value;
+  napi_status wrong_type_status;
+  const char16_t nul_terminated[] = {'T', 'E', 'R', 'M', '\0', 'X', '\0'};
+  char16_t buffer[16] = {0};
+  char16_t truncated[4] = {0};
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_value_string_utf16(env, argv[0], NULL, 0, &required) != napi_ok ||
+      required >= sizeof(buffer) / sizeof(buffer[0]) ||
+      napi_get_value_string_utf16(env, argv[0], buffer,
+                                  sizeof(buffer) / sizeof(buffer[0]), &copied) != napi_ok ||
+      copied != required ||
+      napi_get_value_string_utf16(env, argv[0], truncated,
+                                  sizeof(truncated) / sizeof(truncated[0]),
+                                  &truncated_copied) != napi_ok ||
+      napi_create_string_utf16(env, buffer, copied, &round_trip) != napi_ok ||
+      napi_create_string_utf16(env, nul_terminated, NAPI_AUTO_LENGTH,
+                               &auto_length_value) != napi_ok ||
+      napi_create_array_with_length(env, copied, &units) != napi_ok ||
+      napi_create_array_with_length(env, truncated_copied, &truncated_units) != napi_ok ||
+      napi_create_int32(env, 1, &number) != napi_ok)
+    return NULL;
+  for (size_t index = 0; index < copied; index++) {
+    if (napi_create_uint32(env, buffer[index], &field) != napi_ok ||
+        napi_set_element(env, units, (uint32_t)index, field) != napi_ok)
+      return NULL;
+  }
+  for (size_t index = 0; index < truncated_copied; index++) {
+    if (napi_create_uint32(env, truncated[index], &field) != napi_ok ||
+        napi_set_element(env, truncated_units, (uint32_t)index, field) != napi_ok)
+      return NULL;
+  }
+  wrong_type_status = napi_get_value_string_utf16(
+      env, number, NULL, 0, &wrong_type_length);
+  if (wrong_type_status != napi_string_expected ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "roundTrip", round_trip) != napi_ok ||
+      napi_set_named_property(env, result, "autoLength", auto_length_value) != napi_ok ||
+      napi_set_named_property(env, result, "units", units) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)required, &field) != napi_ok ||
+      napi_set_named_property(env, result, "length", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)copied, &field) != napi_ok ||
+      napi_set_named_property(env, result, "copied", field) != napi_ok ||
+      napi_set_named_property(env, result, "truncatedUnits", truncated_units) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)truncated_copied, &field) != napi_ok ||
+      napi_set_named_property(env, result, "truncatedCopied", field) != napi_ok ||
+      napi_create_int32(env, wrong_type_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "wrongTypeStatus", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value invalid_utf16_status(napi_env env, napi_callback_info info) {
+  const char16_t invalid[] = {0xD800};
+  const napi_extended_error_info* error_info = NULL;
+  napi_value ignored, result, field;
+  napi_status status = napi_create_string_utf16(env, invalid, 1, &ignored);
+  bool message_matches;
+  (void)info;
+  if (status != napi_generic_failure ||
+      napi_get_last_error_info(env, &error_info) != napi_ok || error_info == NULL)
+    return NULL;
+  message_matches = strcmp(error_info->error_message,
+      "UTF-16 input is malformed or exceeds napi-vm string limits") == 0;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_create_int32(env, status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "status", field) != napi_ok ||
+      napi_get_boolean(env, message_matches, &field) != napi_ok ||
+      napi_set_named_property(env, result, "messageMatches", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -6741,6 +6956,12 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "stringEncodingProbe", NAPI_AUTO_LENGTH,
                            string_encoding_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "stringEncodingProbe", function) != napi_ok ||
+      napi_create_function(env, "utf16Probe", NAPI_AUTO_LENGTH,
+                           utf16_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "utf16Probe", function) != napi_ok ||
+      napi_create_function(env, "invalidUtf16Status", NAPI_AUTO_LENGTH,
+                           invalid_utf16_status, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "invalidUtf16Status", function) != napi_ok ||
       napi_create_object(env, &metadata) != napi_ok ||
       napi_create_int32(env, 1, &version) != napi_ok ||
       napi_set_named_property(env, metadata, "version", version) != napi_ok ||
@@ -6944,6 +7165,7 @@ const secondClosure = makeClosure();
 const buffers = addon.bufferProbe();
 const typedArrays = addon.typedArrayProbe();
 const stringEncodings = addon.stringEncodingProbe('Aé€😀');
+const utf16 = addon.utf16Probe('Aé😀\0Z');
 const booleanCoercions = [undefined, null, false, 0, -0, NaN, '', 0n, [], {}]
   .map(value => addon.coerceToBoolean(value));
 let typedArrayError;
@@ -7035,6 +7257,7 @@ module.exports = {
   missing: values.missing === undefined,
   greeting: values.greeting,
   stringEncodings,
+  utf16,
   booleanCoercions,
   fraction: values.fraction,
   maxUint32: values.maxUint32,
@@ -7167,6 +7390,17 @@ module.exports = {
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { cleanup_hook_count() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
+        let invalid_utf16 = interpreter
+            .eval_source("require('./fixture.node').invalidUtf16Status();")
+            .unwrap();
+        assert!(matches!(
+            invalid_utf16.get_prop("status"),
+            Some(Value::Number(status)) if status == NAPI_GENERIC_FAILURE as f64
+        ));
+        assert!(matches!(
+            invalid_utf16.get_prop("messageMatches"),
+            Some(Value::Bool(true))
+        ));
         let initialized_promise_value = interpreter
             .eval_source("await require('./fixture.node').initializedPromise;")
             .unwrap();
@@ -7618,6 +7852,33 @@ module.exports = {
             })
             .collect::<Vec<_>>();
         assert_eq!(extracted_bytes, [b'A', 0xE9, 0xAC, 0x3D, 0x00]);
+        let utf16 = result.get_prop("utf16").unwrap();
+        assert!(matches!(
+            utf16.get_prop("roundTrip"),
+            Some(Value::String(ref value)) if value == "Aé😀\0Z"
+        ));
+        assert!(matches!(
+            utf16.get_prop("autoLength"),
+            Some(Value::String(ref value)) if value == "TERM"
+        ));
+        assert!(matches!(utf16.get_prop("length"), Some(Value::Number(6.0))));
+        assert!(matches!(utf16.get_prop("copied"), Some(Value::Number(6.0))));
+        assert!(matches!(
+            utf16.get_prop("truncatedCopied"),
+            Some(Value::Number(3.0))
+        ));
+        assert!(matches!(
+            utf16.get_prop("wrongTypeStatus"),
+            Some(Value::Number(value)) if value == NAPI_STRING_EXPECTED as f64
+        ));
+        assert_eq!(
+            number_array(utf16.get_prop("units").unwrap()),
+            [65, 233, 0xD83D, 0xDE00, 0, 90]
+        );
+        assert_eq!(
+            number_array(utf16.get_prop("truncatedUnits").unwrap()),
+            [65, 233, 0xD83D]
+        );
         let boolean_coercions = result.get_prop("booleanCoercions").unwrap();
         let Value::Array(boolean_coercions) = &boolean_coercions else {
             panic!("Node-API boolean coercion fixture did not return an array");

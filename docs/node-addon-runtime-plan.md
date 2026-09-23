@@ -65,9 +65,9 @@ existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
 Node-API versions 1 through 4 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
-numbers, UTF-8 and Latin-1 string conversion, boolean coercion, symbol creation,
-`napi_define_properties` for ordinary
-object targets (data values, symbol keys, native methods, and accessors),
+numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean
+coercion, symbol creation, and `napi_define_properties` for ordinary object
+targets (data values, symbol keys, native methods, and accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
 operations. Class static properties share object descriptor metadata and
@@ -114,6 +114,10 @@ backend, and unimplemented imported symbols fail at load time. The macOS Mach-O
 build and loading path uses the same shim and fixture, but needs execution on a
 macOS host before it is claimed as verified. Windows currently uses the sidecar
 backend; its DLL import and symbol-export model needs a separate implementation.
+The VM's Rust `String` representation cannot preserve isolated UTF-16 surrogate
+code units, so `napi_create_string_utf16` currently returns
+`napi_generic_failure` for malformed UTF-16 instead of replacing or dropping
+those code units.
 
 ## Implementation phases
 
