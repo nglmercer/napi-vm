@@ -99,8 +99,10 @@ code. The guest `Object(value)` constructor shares the wrapper representation.
 `napi_get_prototype` preserves explicit prototypes and the realm's
 `Object.prototype` identity for ordinary objects, and returns the shared
 `Function.prototype` for ordinary guest functions, class constructors, and
-native callback functions. Queries for values whose built-in prototype is not
-represented (including arrays and proxies) return a generic Node-API failure.
+native callback functions. Arrays use the realm's shared `Array.prototype`,
+which is itself an array and inherits from `Object.prototype`. Queries for
+values whose built-in prototype is not represented (including proxies) return
+a generic Node-API failure.
 `napi_instanceof` handles VM class constructors and ordinary function
 constructors, inherited prototypes, VM error classes, and the shared
 `Function.prototype[Symbol.hasInstance]` intrinsic. Guest-defined

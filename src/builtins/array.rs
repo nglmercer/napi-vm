@@ -1,6 +1,7 @@
 //! `Array` statics and `Array.prototype` methods.
 
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use super::{NativeFn, arr_items, join_str, nf};
 use crate::error::VmErr;
@@ -26,8 +27,117 @@ pub(super) fn install(e: &mut Environment) {
                 .expect("built-in Array property");
         }
         super::make_callable(&a, array_ctor, None);
+
+        let object_prototype = e
+            .get("Object")
+            .and_then(|object| object.get_prop("prototype"));
+        let function_prototype = e
+            .get("Function")
+            .and_then(|function| function.get_prop("prototype"));
+        let prototype = Value::array(Vec::new());
+        prototype
+            .set_prop("constructor".into(), a.clone())
+            .expect("Array.prototype constructor");
+        for name in ARRAY_PROTOTYPE_METHODS {
+            prototype
+                .set_prop(
+                    (*name).into(),
+                    array_method(name).expect("listed Array.prototype method"),
+                )
+                .expect("Array.prototype method");
+        }
+        if let Value::Array(array_prototype) = &prototype {
+            array_prototype.set_proto(object_prototype.map(Rc::new));
+            let mut metadata = array_prototype.meta.borrow_mut();
+            metadata.set_attrs(
+                "constructor",
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..crate::value::PropAttrs::default()
+                },
+            );
+            for name in ARRAY_PROTOTYPE_METHODS {
+                metadata.set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..crate::value::PropAttrs::default()
+                    },
+                );
+            }
+        }
+        if let Value::Symbol(symbol) =
+            &crate::builtins::well_known("iterator").expect("Symbol.iterator is well-known")
+        {
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            prototype
+                .set_prop(
+                    slot.clone(),
+                    array_method("values").expect("Array.prototype.values"),
+                )
+                .expect("Array.prototype[Symbol.iterator]");
+            if let Value::Array(array_prototype) = &prototype {
+                array_prototype.set_symbol_key(&slot, symbol.clone());
+                array_prototype.meta.borrow_mut().set_attrs(
+                    &slot,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..crate::value::PropAttrs::default()
+                    },
+                );
+            }
+        }
+        a.set_prop("prototype".into(), prototype)
+            .expect("Array.prototype");
+        if let Value::Object { props } = &a {
+            props.meta.borrow_mut().set_attrs(
+                "prototype",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+            if let Some(function_prototype) = function_prototype {
+                props.set_proto(Some(Rc::new(function_prototype)));
+            }
+        }
     }
 }
+
+const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
+    "map",
+    "filter",
+    "reduce",
+    "forEach",
+    "find",
+    "some",
+    "every",
+    "push",
+    "pop",
+    "join",
+    "indexOf",
+    "includes",
+    "slice",
+    "concat",
+    "reverse",
+    "sort",
+    "flat",
+    "flatMap",
+    "reduceRight",
+    "at",
+    "splice",
+    "findIndex",
+    "findLast",
+    "findLastIndex",
+    "lastIndexOf",
+    "shift",
+    "unshift",
+    "fill",
+    "keys",
+    "values",
+    "entries",
+];
 
 // --- Array statics ----------------------------------------------------------
 
@@ -380,7 +490,7 @@ fn array_keys(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Va
 }
 
 fn array_values(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    iterate_projection(interp, &this, |_, value| value.clone())
+    crate::interpreter::array_iter(interp, this, Vec::new())
 }
 
 fn array_entries(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

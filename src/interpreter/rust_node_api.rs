@@ -2190,7 +2190,8 @@ fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
         Value::Array(array) => {
             key != "length"
                 && (crate::value::array_index(key).is_some_and(|index| array.has_index(index))
-                    || array.named_prop(key).is_some())
+                    || array.named_prop(key).is_some()
+                        && array.meta.borrow().attrs_of(key).enumerable)
         }
         Value::Proxy(proxy) => napi_direct_property_is_enumerable(&proxy.target, key),
         Value::GlobalObject => true,
@@ -2335,7 +2336,7 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
                     &mut keys,
                     key,
                     array.symbol_key(key),
-                    PropAttrs::default(),
+                    array.meta.borrow().attrs_of(key),
                 );
             }
         }
@@ -3938,69 +3939,60 @@ unsafe extern "C" fn api_get_prototype(
         }
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
-        let prototype = match &object {
-            Value::Object { props } => {
-                let (prototype, uses_default_prototype) = {
-                    let meta = props.meta.borrow();
-                    (meta.proto.clone(), meta.uses_default_prototype)
-                };
-                match (prototype, uses_default_prototype) {
-                    (Some(prototype), _) => prototype.as_ref().clone(),
-                    (None, true) => {
-                        let default_prototype = napi_default_object_prototype(&environment)?;
-                        if super::strict_equals(&object, &default_prototype) {
-                            Value::Null
-                        } else {
-                            default_prototype
-                        }
-                    }
-                    (None, false) => Value::Null,
-                }
-            }
-            Value::Function(function) => {
-                let (prototype, uses_default_prototype) = {
-                    let meta = function.properties.meta.borrow();
-                    (meta.proto.clone(), meta.uses_default_prototype)
-                };
-                match (prototype, uses_default_prototype) {
-                    (Some(prototype), _) => prototype.as_ref().clone(),
-                    (None, false) => Value::Null,
-                    // This property cell has no explicit realm intrinsic link.
-                    (None, true) => return Err(NAPI_GENERIC_FAILURE),
-                }
-            }
-            Value::Class(class) => {
-                let (prototype, uses_default_prototype) = {
-                    let meta = class.statics.meta.borrow();
-                    (meta.proto.clone(), meta.uses_default_prototype)
-                };
-                match (prototype, uses_default_prototype) {
-                    (Some(prototype), _) => prototype.as_ref().clone(),
-                    (None, false) => Value::Null,
-                    // A base class constructor inherits Function.prototype.
-                    (None, true) => return Err(NAPI_GENERIC_FAILURE),
-                }
-            }
-            Value::GlobalObject => napi_default_object_prototype(&environment)?,
-            Value::NativeFunction { .. } | Value::HostFunction { .. } => {
-                napi_default_function_prototype(&environment)?
-            }
-            value if !is_napi_property_object(value) => return Err(NAPI_OBJECT_EXPECTED),
-            // The VM does not yet materialize several built-in and proxy
-            // prototypes. Failing clearly is safer than returning a plausible
-            // but incorrect prototype object.
-            _ => return Err(NAPI_GENERIC_FAILURE),
-        };
+        let prototype = napi_effective_prototype(&environment, &object)?;
         let handle = environment.handles.borrow_mut().create(prototype)?;
         unsafe { result.write(handle) };
         Ok(())
     })
 }
 
-/// The experimental Node-API prototype setter currently supports objects
-/// whose prototype chain is represented by `ObjectCell` metadata. Arrays,
-/// proxies, and other specialized VM values have separate property models and
-/// fail explicitly instead of reporting a successful no-op.
+fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Result<Value, i32> {
+    let (prototype, uses_default_prototype, default_constructor) = match object {
+        Value::Object { props } => {
+            let meta = props.meta.borrow();
+            (meta.proto.clone(), meta.uses_default_prototype, "Object")
+        }
+        Value::Function(function) => {
+            let meta = function.properties.meta.borrow();
+            (meta.proto.clone(), meta.uses_default_prototype, "Function")
+        }
+        Value::Class(class) => {
+            let meta = class.statics.meta.borrow();
+            (meta.proto.clone(), meta.uses_default_prototype, "Function")
+        }
+        Value::Array(array) => {
+            let meta = array.meta.borrow();
+            (meta.proto.clone(), meta.uses_default_prototype, "Array")
+        }
+        Value::GlobalObject => return napi_default_object_prototype(environment),
+        Value::NativeFunction { .. } | Value::HostFunction { .. } => {
+            return napi_default_function_prototype(environment);
+        }
+        value if !is_napi_property_object(value) => return Err(NAPI_OBJECT_EXPECTED),
+        _ => return Err(NAPI_GENERIC_FAILURE),
+    };
+    if let Some(prototype) = prototype {
+        return Ok(prototype.as_ref().clone());
+    }
+    if !uses_default_prototype {
+        return Ok(Value::Null);
+    }
+    let default_prototype = napi_default_builtin_prototype(environment, default_constructor)?;
+    if super::strict_equals(object, &default_prototype) {
+        if default_constructor == "Object" {
+            return Ok(Value::Null);
+        }
+        if default_constructor == "Array" {
+            return napi_default_object_prototype(environment);
+        }
+    }
+    Ok(default_prototype)
+}
+
+/// The experimental Node-API prototype setter supports ordinary objects,
+/// arrays, functions, and classes whose prototype links are represented by
+/// the VM's shared object metadata. Proxies and specialized built-ins fail
+/// explicitly instead of reporting a successful no-op.
 unsafe extern "C" fn api_set_prototype(
     env: NapiEnv,
     object: NapiValue,
@@ -4017,45 +4009,27 @@ unsafe extern "C" fn api_set_prototype(
         }
         let prototype = match &prototype {
             Value::Null => None,
-            Value::Object { .. } | Value::Function(_) | Value::Class(_) => Some(Rc::new(prototype)),
+            Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_) => {
+                Some(Rc::new(prototype))
+            }
             other if !is_napi_property_object(other) => return Err(NAPI_OBJECT_EXPECTED),
-            // This VM does not yet represent [[Prototype]] on arrays, proxies,
-            // or specialized built-in values.
+            // Proxies and specialized built-ins do not expose a mutable
+            // ordinary [[Prototype]] slot in the current VM model.
             _ => return Err(NAPI_GENERIC_FAILURE),
         };
-        let target_cell = match &object {
-            Value::Object { props } => props.clone(),
-            Value::Function(function) => function.properties.clone(),
-            Value::Class(class) => class.statics.clone(),
+        let target_meta = match &object {
+            Value::Object { props } => &props.meta,
+            Value::Array(array) => &array.meta,
+            Value::Function(function) => &function.properties.meta,
+            Value::Class(class) => &class.statics.meta,
             // Be explicit when the input is a genuine JS object that the
             // current VM data model cannot mutate as an ordinary object.
             _ => return Err(NAPI_GENERIC_FAILURE),
         };
 
-        let (old_prototype, uses_default_prototype, non_extensible) = {
-            let meta = target_cell.meta.borrow();
-            (
-                meta.proto.clone(),
-                meta.uses_default_prototype,
-                meta.non_extensible,
-            )
-        };
+        let non_extensible = target_meta.borrow().non_extensible;
         if non_extensible {
-            let old_prototype = match (old_prototype, uses_default_prototype) {
-                (Some(prototype), _) => prototype.as_ref().clone(),
-                (None, true) => {
-                    if matches!(object, Value::Class(_) | Value::Function(_)) {
-                        return Err(NAPI_GENERIC_FAILURE);
-                    }
-                    let default_prototype = napi_default_object_prototype(&environment)?;
-                    if super::strict_equals(&object, &default_prototype) {
-                        Value::Null
-                    } else {
-                        default_prototype
-                    }
-                }
-                (None, false) => Value::Null,
-            };
+            let old_prototype = napi_effective_prototype(&environment, &object)?;
             let same_prototype = prototype.as_ref().map_or_else(
                 || matches!(old_prototype, Value::Null),
                 |prototype| super::strict_equals(&old_prototype, prototype.as_ref()),
@@ -4080,32 +4054,19 @@ unsafe extern "C" fn api_set_prototype(
                 if identity == target_identity || !seen.insert(identity) {
                     return Err(NAPI_GENERIC_FAILURE);
                 }
-                current = match value {
-                    Value::Object { props } => {
-                        let (prototype, uses_default_prototype) = {
-                            let meta = props.meta.borrow();
-                            (meta.proto.clone(), meta.uses_default_prototype)
-                        };
-                        match (prototype, uses_default_prototype) {
-                            (Some(prototype), _) => Some(prototype),
-                            (None, true) => {
-                                let default_prototype =
-                                    napi_default_object_prototype(&environment)?;
-                                (!super::strict_equals(value, &default_prototype))
-                                    .then(|| Rc::new(default_prototype))
-                            }
-                            (None, false) => None,
-                        }
-                    }
-                    Value::Class(class) => class.statics.proto(),
-                    Value::Function(function) => function.properties.proto(),
-                    _ => None,
-                };
+                let next = napi_effective_prototype(&environment, value)?;
+                current = (!matches!(next, Value::Null)).then(|| Rc::new(next));
                 depth += 1;
             }
         }
 
-        target_cell.set_proto(prototype);
+        match &object {
+            Value::Object { props } => props.set_proto(prototype),
+            Value::Array(array) => array.set_proto(prototype),
+            Value::Function(function) => function.properties.set_proto(prototype),
+            Value::Class(class) => class.statics.set_proto(prototype),
+            _ => unreachable!("target metadata was validated above"),
+        }
         Ok(())
     })
 }
@@ -4228,14 +4189,21 @@ unsafe extern "C" fn api_post_finalizer(
     status
 }
 
-fn napi_default_function_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
+fn napi_default_builtin_prototype(
+    environment: &NapiEnvironment,
+    constructor_name: &str,
+) -> Result<Value, i32> {
     let owner = environment.owner.upgrade().ok_or(NAPI_INVALID_ARG)?;
     let global = owner.borrow().global.clone();
     global
         .borrow()
-        .get("Function")
+        .get(constructor_name)
         .and_then(|constructor| constructor.get_prop("prototype"))
         .ok_or(NAPI_GENERIC_FAILURE)
+}
+
+fn napi_default_function_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
+    napi_default_builtin_prototype(environment, "Function")
 }
 
 fn napi_default_object_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
@@ -13182,6 +13150,30 @@ module.exports = {
     customMatches: addon.getPrototype(customPrototypeTarget) === customPrototype,
     nullMatches: addon.getPrototype(nullPrototypeTarget) === null,
   },
+  arrayPrototypes: {
+    defaultMatches: Object.getPrototypeOf([]) === Array.prototype,
+    prototypeParentMatches: Object.getPrototypeOf(Array.prototype) === Object.prototype,
+    prototypeIsArray: Array.isArray(Array.prototype),
+    constructorMatches: Array.prototype.constructor === Array,
+    mapIsShared: Array.prototype.map === [].map,
+    iteratorIsValues: Array.prototype[Symbol.iterator] === Array.prototype.values,
+    mapDescriptor: (() => {
+      const descriptor = Object.getOwnPropertyDescriptor(Array.prototype, 'map');
+      return descriptor.writable && !descriptor.enumerable && descriptor.configurable;
+    })(),
+    keysAreEmpty: Object.keys(Array.prototype).length === 0,
+    inheritsObjectMethod: typeof [].hasOwnProperty === 'function',
+    nativeApiDefaultMatches: addon.getPrototype([]) === Array.prototype,
+    nativeApiParentMatches: addon.getPrototype(Array.prototype) === Object.prototype,
+    objectCreateInherits: Object.create(Array.prototype).map === Array.prototype.map,
+    customPrototypeMutation: (() => {
+      const prototype = { marker: true };
+      const array = [1];
+      Object.setPrototypeOf(array, prototype);
+      return Object.getPrototypeOf(array) === prototype && array.marker &&
+        array[0] === 1 && array.map === undefined;
+    })(),
+  },
   array: addon.arrayProbe(),
   wrapped,
   removedWrap,
@@ -14706,6 +14698,27 @@ module.exports = {
             prototypes.get_prop("nullMatches"),
             Some(Value::Bool(true))
         ));
+        let array_prototypes = result.get_prop("arrayPrototypes").unwrap();
+        for property in [
+            "defaultMatches",
+            "prototypeParentMatches",
+            "prototypeIsArray",
+            "constructorMatches",
+            "mapIsShared",
+            "iteratorIsValues",
+            "mapDescriptor",
+            "keysAreEmpty",
+            "inheritsObjectMethod",
+            "nativeApiDefaultMatches",
+            "nativeApiParentMatches",
+            "objectCreateInherits",
+            "customPrototypeMutation",
+        ] {
+            assert!(
+                matches!(array_prototypes.get_prop(property), Some(Value::Bool(true))),
+                "Array prototype result {property} did not match Node/Bun"
+            );
+        }
         let round_trip = result.get_prop("roundTrip").unwrap();
         assert!(matches!(
             round_trip.get_prop("flag"),
@@ -16210,6 +16223,8 @@ NAPI_MODULE_INIT() {
 const prototype = { marker: 'inherited', twice() { return this.value * 2; } };
 const target = { value: 21 };
 const status = addon.setPrototype(target, prototype);
+const arrayTarget = [7];
+const arrayStatus = addon.setPrototype(arrayTarget, prototype);
 function FunctionTarget() {}
 function FunctionParent() {}
 FunctionParent.marker = 'function-inherited';
@@ -16230,6 +16245,11 @@ const postedFinalizerCallsImmediately = addon.postedFinalizerCalls();
 module.exports = {
   run: () => JSON.stringify({
   status,
+  arrayStatus,
+  arrayPrototypeSame: addon.getPrototype(arrayTarget) === prototype,
+  arrayInherited: arrayTarget.marker,
+  arrayElementPreserved: arrayTarget[0] === 7,
+  arrayMapRemoved: arrayTarget.map === undefined,
   functionStatus,
   functionPrototypeSame: Object.getPrototypeOf(FunctionTarget) === FunctionParent,
   functionNapiPrototypeSame: addon.getPrototype(FunctionTarget) === FunctionParent,
@@ -16312,6 +16332,11 @@ module.exports = {
             vm_result,
             serde_json::json!({
                 "status": 0,
+                "arrayStatus": 0,
+                "arrayPrototypeSame": true,
+                "arrayInherited": "inherited",
+                "arrayElementPreserved": true,
+                "arrayMapRemoved": true,
                 "functionStatus": 0,
                 "functionPrototypeSame": true,
                 "functionNapiPrototypeSame": true,

@@ -104,7 +104,18 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
             if !enumerable_only {
                 names.push("length".to_string());
             }
-            names.extend(items.named.borrow().iter().map(|(key, _)| key.clone()));
+            let metadata = items.meta.borrow();
+            names.extend(
+                items
+                    .named
+                    .borrow()
+                    .iter()
+                    .filter(|(key, _)| {
+                        !is_internal_key(key)
+                            && (!enumerable_only || metadata.attrs_of(key).enumerable)
+                    })
+                    .map(|(key, _)| key.clone()),
+            );
             names
         }
         _ => Vec::new(),
@@ -357,8 +368,11 @@ fn object_get_prototype_of(
 fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
     let proto = a.get(1).cloned().unwrap_or(Value::Null);
-    if let Some(c) = cell(&v) {
-        c.set_proto(proto_arg(&proto)?);
+    let proto = proto_arg(&proto)?;
+    if let Value::Array(array) = &v {
+        array.set_proto(proto);
+    } else if let Some(c) = cell(&v) {
+        c.set_proto(proto);
     }
     Ok(v)
 }
@@ -368,7 +382,7 @@ fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Resu
 fn proto_arg(proto: &Value) -> Result<Option<Rc<Value>>, VmErr> {
     match proto {
         Value::Null | Value::Undefined => Ok(None),
-        Value::Object { .. } | Value::Function(_) | Value::Class(_) => {
+        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_) => {
             Ok(Some(Rc::new(proto.clone())))
         }
         _ => Err(type_err("Object prototype may only be an Object or null")),
@@ -589,11 +603,15 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
             ]);
         }
         if let Some(value) = target.as_array().and_then(|array| array.named_prop(key)) {
+            let attrs = target
+                .as_array()
+                .map(|array| array.meta.borrow().attrs_of(key))
+                .unwrap_or_default();
             return Value::object(vec![
                 ("value".to_string(), value),
-                ("writable".to_string(), Value::Bool(true)),
-                ("enumerable".to_string(), Value::Bool(true)),
-                ("configurable".to_string(), Value::Bool(true)),
+                ("writable".to_string(), Value::Bool(attrs.writable)),
+                ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
+                ("configurable".to_string(), Value::Bool(attrs.configurable)),
             ]);
         }
         return Value::Undefined;

@@ -24,6 +24,7 @@ pub use commonjs::{
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
+pub(crate) use resolve::array_iter;
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")

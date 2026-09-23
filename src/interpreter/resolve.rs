@@ -17,6 +17,7 @@ impl Interpreter {
         }
         let (builtin, uses_default) = match object {
             Value::Object { props } => ("Object", props.meta.borrow().uses_default_prototype),
+            Value::Array(array) => ("Array", array.meta.borrow().uses_default_prototype),
             Value::Class(class) => (
                 "Function",
                 class.statics.meta.borrow().uses_default_prototype,
@@ -482,11 +483,6 @@ impl Interpreter {
             (Value::Array(items), Value::String(k)) => {
                 if k == "length" {
                     Ok(Value::Number(items.borrow().len() as f64))
-                } else if k == "__symbol_iterator__" {
-                    Ok(Value::NativeFunction {
-                        name: "[Symbol.iterator]".into(),
-                        callable: array_iter,
-                    })
                 } else if let Some(idx) = crate::value::array_index(k) {
                     let items = items.borrow();
                     if idx < items.len() {
@@ -494,12 +490,13 @@ impl Interpreter {
                     } else {
                         Ok(Value::Undefined)
                     }
-                } else if let Some(m) = crate::builtins::array_method(k) {
-                    Ok(m)
+                } else if let Some(value) = items.named_prop(k) {
+                    Ok(value)
                 } else {
-                    // Arrays can also carry named properties — a tagged
-                    // template's `strings.raw` is the built-in example.
-                    Ok(items.named_prop(k).unwrap_or(Value::Undefined))
+                    if let Some(prototype) = self.prototype_of(o) {
+                        return self.prop(&prototype, p);
+                    }
+                    Ok(crate::builtins::array_method(k).unwrap_or(Value::Undefined))
                 }
             }
             (Value::String(s), Value::String(k)) => {
@@ -711,11 +708,22 @@ impl Interpreter {
             }
             // Symbol-keyed property access: `arr[Symbol.iterator]`,
             // `str[Symbol.iterator]`, `gen[Symbol.iterator]`.
-            (Value::Array(_), Value::Symbol(_)) if crate::builtins::is_iterator_symbol(p) => {
-                Ok(Value::NativeFunction {
-                    name: "[Symbol.iterator]".into(),
-                    callable: array_iter,
-                })
+            (Value::Array(items), Value::Symbol(symbol)) => {
+                let key = super::symbol_slot_key(symbol);
+                if let Some(value) = items.named_prop(&key) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                if crate::builtins::is_iterator_symbol(p) {
+                    Ok(Value::NativeFunction {
+                        name: "[Symbol.iterator]".into(),
+                        callable: array_iter,
+                    })
+                } else {
+                    Ok(Value::Undefined)
+                }
             }
             (Value::String(_), Value::Symbol(_)) if crate::builtins::is_iterator_symbol(p) => {
                 Ok(Value::NativeFunction {
@@ -788,6 +796,16 @@ fn lookup_chain_found(o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
     for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
         let props = match &current {
             Value::Object { props } => props,
+            Value::Array(array) => {
+                if let Some(value) = array.named_prop(key) {
+                    return Ok(Some(value));
+                }
+                let Some(next) = array.proto() else {
+                    return Ok(None);
+                };
+                current = next.as_ref().clone();
+                continue;
+            }
             Value::Class(class) => &class.statics,
             Value::Function(function) => &function.properties,
             _ => return Ok(None),
@@ -966,7 +984,7 @@ fn generator_iter_self(
 
 /// `[Symbol.iterator]()` on an array returns a new array iterator object with a
 /// `next()` method that walks the elements.
-fn array_iter(
+pub(crate) fn array_iter(
     _interp: &mut super::Interpreter,
     this: super::Value,
     _args: Vec<super::Value>,

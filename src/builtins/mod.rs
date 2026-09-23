@@ -428,6 +428,7 @@ pub fn setup_builtins(env: &Env) {
 fn install_functions(e: &mut crate::interpreter::Environment) {
     math::install(e);
     object::install(e);
+    function::install(e);
     array::install(e);
     string::install(e);
     number::install(e);
@@ -441,7 +442,6 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     bigint::install(e);
     typedarray::install(e);
     proxy::install(e);
-    function::install(e);
     web::install(e);
     symbol::install(e);
     // Global functions.

@@ -109,10 +109,9 @@ pub struct ObjectMeta {
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
     pub proto: Option<Rc<Value>>,
-    /// Whether `proto == None` represents the default JavaScript object
-    /// prototype. The interpreter does not currently materialize that built-in
-    /// prototype, but bridges need to distinguish it from an explicit null
-    /// prototype.
+    /// Whether `proto == None` represents the runtime's default prototype.
+    /// This distinguishes an implicit built-in link from an explicit null
+    /// prototype for ordinary objects, functions, and arrays.
     pub uses_default_prototype: bool,
     /// Non-default property attributes, keyed by property name.
     pub attrs: Vec<(String, PropAttrs)>,
@@ -199,6 +198,9 @@ pub struct ArrayCell {
     /// bridges.
     present: RefCell<Option<Vec<bool>>>,
     pub named: RefCell<Vec<(String, Value)>>,
+    /// Prototype and property descriptors for named array properties. Array
+    /// indices and `length` have their own storage and descriptor rules.
+    pub meta: RefCell<ObjectMeta>,
     /// Original identities for symbol-keyed entries in `named`.
     pub symbol_keys: RefCell<Vec<(String, Rc<SymbolData>)>>,
 }
@@ -209,6 +211,10 @@ impl ArrayCell {
             elements: RefCell::new(elements),
             present: RefCell::new(None),
             named: RefCell::new(Vec::new()),
+            meta: RefCell::new(ObjectMeta {
+                uses_default_prototype: true,
+                ..ObjectMeta::default()
+            }),
             symbol_keys: RefCell::new(Vec::new()),
         }
     }
@@ -222,6 +228,10 @@ impl ArrayCell {
             elements: RefCell::new(elements),
             present: RefCell::new(normalized),
             named: RefCell::new(Vec::new()),
+            meta: RefCell::new(ObjectMeta {
+                uses_default_prototype: true,
+                ..ObjectMeta::default()
+            }),
             symbol_keys: RefCell::new(Vec::new()),
         }
     }
@@ -354,6 +364,16 @@ impl ArrayCell {
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.clone())
+    }
+
+    pub fn proto(&self) -> Option<Rc<Value>> {
+        self.meta.borrow().proto.clone()
+    }
+
+    pub fn set_proto(&self, proto: Option<Rc<Value>>) {
+        let mut meta = self.meta.borrow_mut();
+        meta.proto = proto;
+        meta.uses_default_prototype = false;
     }
 
     pub fn set_named(&self, key: String, value: Value) {
@@ -1818,6 +1838,7 @@ impl Value {
     pub fn proto_of(&self) -> Option<Rc<Value>> {
         match self {
             Value::Object { props } => props.proto(),
+            Value::Array(array) => array.proto(),
             Value::Class(class) => class.statics.proto(),
             Value::Function(function) => function.properties.proto(),
             _ => None,
