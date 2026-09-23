@@ -20,7 +20,7 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{FileCommonJsLoader, Interpreter};
-use crate::value::{ErrorData, TypedArrayData, TypedKind, Value};
+use crate::value::{Buffer, ErrorData, TypedArrayData, TypedKind, Value};
 
 const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
@@ -32,6 +32,7 @@ const NAPI_BOOLEAN_EXPECTED: i32 = 7;
 const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
+const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -383,6 +384,33 @@ struct NapiVmApiTable {
     ) -> i32,
     get_buffer_info: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void, *mut usize) -> i32,
     is_buffer: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    is_arraybuffer: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    create_arraybuffer:
+        unsafe extern "C" fn(NapiEnv, usize, *mut *mut c_void, *mut NapiValue) -> i32,
+    get_arraybuffer_info:
+        unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void, *mut usize) -> i32,
+    is_typedarray: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    create_typedarray:
+        unsafe extern "C" fn(NapiEnv, i32, usize, NapiValue, usize, *mut NapiValue) -> i32,
+    get_typedarray_info: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        *mut i32,
+        *mut usize,
+        *mut *mut c_void,
+        *mut NapiValue,
+        *mut usize,
+    ) -> i32,
+    create_dataview: unsafe extern "C" fn(NapiEnv, usize, NapiValue, usize, *mut NapiValue) -> i32,
+    is_dataview: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    get_dataview_info: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        *mut usize,
+        *mut *mut c_void,
+        *mut NapiValue,
+        *mut usize,
+    ) -> i32,
     create_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
     create_type_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
     create_range_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
@@ -459,6 +487,15 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_buffer_copy: api_create_buffer_copy,
     get_buffer_info: api_get_buffer_info,
     is_buffer: api_is_buffer,
+    is_arraybuffer: api_is_arraybuffer,
+    create_arraybuffer: api_create_arraybuffer,
+    get_arraybuffer_info: api_get_arraybuffer_info,
+    is_typedarray: api_is_typedarray,
+    create_typedarray: api_create_typedarray,
+    get_typedarray_info: api_get_typedarray_info,
+    create_dataview: api_create_dataview,
+    is_dataview: api_is_dataview,
+    get_dataview_info: api_get_dataview_info,
     create_error: api_create_error,
     create_type_error: api_create_type_error,
     create_range_error: api_create_range_error,
@@ -1168,6 +1205,348 @@ unsafe extern "C" fn api_is_buffer(env: NapiEnv, value: NapiValue, result: *mut 
         let value = environment.handles.borrow().get(value)?;
         let is_buffer = is_napi_buffer(&environment, &value);
         unsafe { result.write(is_buffer) };
+        Ok(())
+    })
+}
+
+fn napi_arraybuffer_data(buffer: &Buffer) -> (*mut c_void, usize) {
+    let mut bytes = buffer.borrow_mut();
+    (bytes.as_mut_ptr().cast::<c_void>(), bytes.len())
+}
+
+fn napi_typedarray_data(view: &TypedArrayData) -> Result<(*mut c_void, usize), i32> {
+    let byte_length = view
+        .length
+        .checked_mul(view.kind.size())
+        .ok_or(NAPI_INVALID_ARG)?;
+    let end = view
+        .byte_offset
+        .checked_add(byte_length)
+        .ok_or(NAPI_INVALID_ARG)?;
+    let mut bytes = view.buffer.borrow_mut();
+    if end > bytes.len() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let data = unsafe { bytes.as_mut_ptr().add(view.byte_offset).cast::<c_void>() };
+    Ok((data, byte_length))
+}
+
+fn napi_typed_kind(kind: i32) -> Option<TypedKind> {
+    match kind {
+        0 => Some(TypedKind::Int8),
+        1 => Some(TypedKind::Uint8),
+        2 => Some(TypedKind::Uint8Clamped),
+        3 => Some(TypedKind::Int16),
+        4 => Some(TypedKind::Uint16),
+        5 => Some(TypedKind::Int32),
+        6 => Some(TypedKind::Uint32),
+        7 => Some(TypedKind::Float32),
+        8 => Some(TypedKind::Float64),
+        9 => Some(TypedKind::BigInt64),
+        10 => Some(TypedKind::BigUint64),
+        _ => None,
+    }
+}
+
+fn napi_typed_kind_id(kind: TypedKind) -> i32 {
+    match kind {
+        TypedKind::Int8 => 0,
+        TypedKind::Uint8 => 1,
+        TypedKind::Uint8Clamped => 2,
+        TypedKind::Int16 => 3,
+        TypedKind::Uint16 => 4,
+        TypedKind::Int32 => 5,
+        TypedKind::Uint32 => 6,
+        TypedKind::Float32 => 7,
+        TypedKind::Float64 => 8,
+        TypedKind::BigInt64 => 9,
+        TypedKind::BigUint64 => 10,
+    }
+}
+
+fn validate_arraybuffer_window(
+    buffer: &Buffer,
+    byte_offset: usize,
+    byte_length: usize,
+    alignment: usize,
+) -> Result<(), i32> {
+    if byte_length > MAX_NAPI_BUFFER_BYTES
+        || alignment == 0
+        || !byte_offset.is_multiple_of(alignment)
+    {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let end = byte_offset
+        .checked_add(byte_length)
+        .ok_or(NAPI_INVALID_ARG)?;
+    if end > buffer.borrow().len() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    Ok(())
+}
+
+unsafe extern "C" fn api_is_arraybuffer(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::ArrayBuffer(_))) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_arraybuffer(
+    env: NapiEnv,
+    byte_length: usize,
+    data: *mut *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if byte_length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        let buffer = Rc::new(RefCell::new(vec![0; byte_length]));
+        let (data_pointer, _) = napi_arraybuffer_data(&buffer);
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::ArrayBuffer(buffer))?;
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_arraybuffer_info(
+    env: NapiEnv,
+    value: NapiValue,
+    data: *mut *mut c_void,
+    byte_length: *mut usize,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::ArrayBuffer(buffer) = &value else {
+            return Err(NAPI_ARRAYBUFFER_EXPECTED);
+        };
+        let (data_pointer, length) = napi_arraybuffer_data(buffer);
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        if !byte_length.is_null() {
+            unsafe { byte_length.write(length) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_typedarray(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::TypedArray(_))) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_typedarray(
+    env: NapiEnv,
+    kind: i32,
+    length: usize,
+    arraybuffer: NapiValue,
+    byte_offset: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let kind = napi_typed_kind(kind).ok_or(NAPI_INVALID_ARG)?;
+        let byte_length = length.checked_mul(kind.size()).ok_or(NAPI_INVALID_ARG)?;
+        if byte_length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let arraybuffer = environment.handles.borrow().get(arraybuffer)?;
+        let Value::ArrayBuffer(buffer) = &arraybuffer else {
+            return Err(NAPI_ARRAYBUFFER_EXPECTED);
+        };
+        if kind.size() > 1 && !byte_offset.is_multiple_of(kind.size()) {
+            let message = format!(
+                "start offset of {} should be a multiple of {}",
+                kind.name(),
+                kind.size()
+            );
+            set_pending_exception(
+                &environment,
+                Value::Error(ErrorData::with_code(
+                    "RangeError",
+                    message,
+                    "ERR_NAPI_INVALID_TYPEDARRAY_ALIGNMENT",
+                )),
+            )?;
+            return Err(NAPI_INVALID_ARG);
+        }
+        let end = byte_offset
+            .checked_add(byte_length)
+            .ok_or(NAPI_INVALID_ARG)?;
+        if end > buffer.borrow().len() {
+            set_pending_exception(
+                &environment,
+                Value::Error(ErrorData::with_code(
+                    "RangeError",
+                    "Invalid typed array length",
+                    "ERR_NAPI_INVALID_TYPEDARRAY_LENGTH",
+                )),
+            )?;
+            return Err(NAPI_INVALID_ARG);
+        }
+        let value = Value::TypedArray(Rc::new(TypedArrayData {
+            kind,
+            buffer: buffer.clone(),
+            byte_offset,
+            length,
+        }));
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_typedarray_info(
+    env: NapiEnv,
+    typedarray: NapiValue,
+    kind: *mut i32,
+    length: *mut usize,
+    data: *mut *mut c_void,
+    arraybuffer: *mut NapiValue,
+    byte_offset: *mut usize,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(typedarray)?;
+        let Value::TypedArray(view) = &value else {
+            return Err(NAPI_INVALID_ARG);
+        };
+        let (data_pointer, _) = napi_typedarray_data(view)?;
+        let arraybuffer_handle = if arraybuffer.is_null() {
+            None
+        } else {
+            Some(
+                environment
+                    .handles
+                    .borrow_mut()
+                    .create(Value::ArrayBuffer(view.buffer.clone()))?,
+            )
+        };
+        if !kind.is_null() {
+            unsafe { kind.write(napi_typed_kind_id(view.kind)) };
+        }
+        if !length.is_null() {
+            unsafe { length.write(view.length) };
+        }
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        if let Some(handle) = arraybuffer_handle {
+            unsafe { arraybuffer.write(handle) };
+        }
+        if !byte_offset.is_null() {
+            unsafe { byte_offset.write(view.byte_offset) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_dataview(
+    env: NapiEnv,
+    byte_length: usize,
+    arraybuffer: NapiValue,
+    byte_offset: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let arraybuffer = environment.handles.borrow().get(arraybuffer)?;
+        let Value::ArrayBuffer(buffer) = &arraybuffer else {
+            return Err(NAPI_ARRAYBUFFER_EXPECTED);
+        };
+        validate_arraybuffer_window(buffer, byte_offset, byte_length, 1)?;
+        let value = Value::DataView(Rc::new(TypedArrayData {
+            kind: TypedKind::Uint8,
+            buffer: buffer.clone(),
+            byte_offset,
+            length: byte_length,
+        }));
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_dataview(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::DataView(_))) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_dataview_info(
+    env: NapiEnv,
+    dataview: NapiValue,
+    byte_length: *mut usize,
+    data: *mut *mut c_void,
+    arraybuffer: *mut NapiValue,
+    byte_offset: *mut usize,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(dataview)?;
+        let Value::DataView(view) = &value else {
+            return Err(NAPI_INVALID_ARG);
+        };
+        let (data_pointer, _) = napi_typedarray_data(view)?;
+        let arraybuffer_handle = if arraybuffer.is_null() {
+            None
+        } else {
+            Some(
+                environment
+                    .handles
+                    .borrow_mut()
+                    .create(Value::ArrayBuffer(view.buffer.clone()))?,
+            )
+        };
+        if !byte_length.is_null() {
+            unsafe { byte_length.write(view.length) };
+        }
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        if let Some(handle) = arraybuffer_handle {
+            unsafe { arraybuffer.write(handle) };
+        }
+        if !byte_offset.is_null() {
+            unsafe { byte_offset.write(view.byte_offset) };
+        }
         Ok(())
     })
 }
@@ -2043,6 +2422,7 @@ fn napi_error(action: &str, status: i32) -> VmErr {
         NAPI_FUNCTION_EXPECTED => "function expected",
         NAPI_NUMBER_EXPECTED => "number expected",
         NAPI_ARRAY_EXPECTED => "array expected",
+        NAPI_ARRAYBUFFER_EXPECTED => "ArrayBuffer expected",
         NAPI_STRING_EXPECTED => "string expected",
         NAPI_BOOLEAN_EXPECTED => "boolean expected",
         NAPI_PENDING_EXCEPTION => "a JavaScript exception is already pending",
@@ -2389,6 +2769,68 @@ static napi_value buffer_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value invalid_typedarray(napi_env env, napi_callback_info info) {
+  napi_value buffer, invalid;
+  napi_value result;
+  void* bytes = NULL;
+  (void)info;
+  if (napi_create_arraybuffer(env, 8, &bytes, &buffer) != napi_ok || bytes == NULL) return NULL;
+  if (napi_create_typedarray(env, napi_uint16_array, 2, buffer, 3, &invalid) != napi_ok) return NULL;
+  if (napi_get_undefined(env, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value typedarray_probe(napi_env env, napi_callback_info info) {
+  napi_value buffer, typed, typed_buffer, view, view_buffer, result, field;
+  void* bytes = NULL;
+  void* typed_bytes = NULL;
+  void* view_bytes = NULL;
+  size_t buffer_length = 0, typed_length = 0, typed_offset = 0;
+  size_t view_length = 0, view_offset = 0;
+  napi_typedarray_type typed_kind = napi_int8_array;
+  bool is_arraybuffer = false, is_typedarray = false, is_dataview = false;
+  (void)info;
+  if (napi_create_arraybuffer(env, 8, &bytes, &buffer) != napi_ok || bytes == NULL ||
+      napi_get_arraybuffer_info(env, buffer, &bytes, &buffer_length) != napi_ok ||
+      buffer_length != 8 ||
+      napi_is_arraybuffer(env, buffer, &is_arraybuffer) != napi_ok || !is_arraybuffer) return NULL;
+  for (size_t i = 0; i < buffer_length; i++) ((uint8_t*)bytes)[i] = (uint8_t)(10 + i);
+  if (napi_create_typedarray(env, napi_uint16_array, 2, buffer, 2, &typed) != napi_ok ||
+      napi_get_typedarray_info(env, typed, &typed_kind, &typed_length, &typed_bytes,
+                               &typed_buffer, &typed_offset) != napi_ok ||
+      typed_kind != napi_uint16_array || typed_length != 2 || typed_offset != 2 ||
+      typed_bytes == NULL ||
+      napi_is_typedarray(env, typed, &is_typedarray) != napi_ok || !is_typedarray ||
+      napi_create_dataview(env, 3, buffer, 4, &view) != napi_ok ||
+      napi_get_dataview_info(env, view, &view_length, &view_bytes, &view_buffer,
+                             &view_offset) != napi_ok ||
+      view_length != 3 || view_offset != 4 || view_bytes == NULL ||
+      napi_is_dataview(env, view, &is_dataview) != napi_ok || !is_dataview) return NULL;
+  ((uint8_t*)typed_bytes)[1] = 55;
+  ((uint8_t*)view_bytes)[0] = 77;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "buffer", buffer) != napi_ok ||
+      napi_set_named_property(env, result, "typed", typed) != napi_ok ||
+      napi_set_named_property(env, result, "view", view) != napi_ok ||
+      napi_get_boolean(env, is_arraybuffer, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isArrayBuffer", field) != napi_ok ||
+      napi_get_boolean(env, is_typedarray, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isTypedArray", field) != napi_ok ||
+      napi_get_boolean(env, is_dataview, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isDataView", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)typed_kind, &field) != napi_ok ||
+      napi_set_named_property(env, result, "typedKind", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)typed_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "typedLength", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)typed_offset, &field) != napi_ok ||
+      napi_set_named_property(env, result, "typedOffset", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)view_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "viewLength", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)view_offset, &field) != napi_ok ||
+      napi_set_named_property(env, result, "viewOffset", field) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value array_probe(napi_env env, napi_callback_info info) {
   napi_value array, empty, result, value, field;
   uint32_t length = 0, empty_length = 0;
@@ -2600,6 +3042,10 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "duplicateWrapStatus", function) != napi_ok ||
       napi_create_function(env, "bufferProbe", NAPI_AUTO_LENGTH, buffer_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "bufferProbe", function) != napi_ok ||
+      napi_create_function(env, "typedArrayProbe", NAPI_AUTO_LENGTH, typedarray_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "typedArrayProbe", function) != napi_ok ||
+      napi_create_function(env, "invalidTypedArray", NAPI_AUTO_LENGTH, invalid_typedarray, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "invalidTypedArray", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -2658,6 +3104,13 @@ const makeClosure = () => () => {};
 const firstClosure = makeClosure();
 const secondClosure = makeClosure();
 const buffers = addon.bufferProbe();
+const typedArrays = addon.typedArrayProbe();
+let typedArrayError;
+try { addon.invalidTypedArray(); } catch (error) {
+  typedArrayError = {name: error.name, message: error.message, code: error.code,
+    isRangeError: error instanceof RangeError, isError: error instanceof Error};
+}
+const backingBytes = new Uint8Array(typedArrays.buffer);
 module.exports = {
   same: addon === require('./fixture.node'),
   sum: addon.add(19, 23),
@@ -2684,6 +3137,19 @@ module.exports = {
     copyLength: buffers.copyLength,
     allocatedLength: buffers.allocatedLength,
   },
+  typedArrays: {
+    bytes: [backingBytes[0], backingBytes[1], backingBytes[2], backingBytes[3],
+      backingBytes[4], backingBytes[5], backingBytes[6], backingBytes[7]],
+    isArrayBuffer: typedArrays.isArrayBuffer,
+    isTypedArray: typedArrays.isTypedArray,
+    isDataView: typedArrays.isDataView,
+    kind: typedArrays.typedKind,
+    typedLength: typedArrays.typedLength,
+    typedOffset: typedArrays.typedOffset,
+    viewLength: typedArrays.viewLength,
+    viewOffset: typedArrays.viewOffset,
+  },
+  typedArrayError,
   undefinedResult: addon.returnsUndefined() === undefined,
   errors: {
     error: {name: errors.error.name, message: errors.error.message,
@@ -2875,6 +3341,68 @@ module.exports = {
         assert!(matches!(
             buffers.get_prop("allocatedLength"),
             Some(Value::Number(3.0))
+        ));
+        let typed_arrays = result.get_prop("typedArrays").unwrap();
+        let bytes = typed_arrays.get_prop("bytes").unwrap();
+        let Value::Array(bytes) = &bytes else {
+            panic!("backing bytes are not an array");
+        };
+        let bytes = bytes.borrow();
+        let expected = [10.0, 11.0, 12.0, 55.0, 77.0, 15.0, 16.0, 17.0];
+        for (byte, expected) in bytes.iter().zip(expected) {
+            assert!(matches!(byte, Value::Number(value) if *value == expected));
+        }
+        assert!(matches!(
+            typed_arrays.get_prop("isArrayBuffer"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("isTypedArray"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("isDataView"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("kind"),
+            Some(Value::Number(4.0))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("typedLength"),
+            Some(Value::Number(2.0))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("typedOffset"),
+            Some(Value::Number(2.0))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("viewLength"),
+            Some(Value::Number(3.0))
+        ));
+        assert!(matches!(
+            typed_arrays.get_prop("viewOffset"),
+            Some(Value::Number(4.0))
+        ));
+        assert_error_fields(
+            &result.get_prop("typedArrayError").unwrap(),
+            "RangeError",
+            "start offset of Uint16Array should be a multiple of 2",
+            Some("ERR_NAPI_INVALID_TYPEDARRAY_ALIGNMENT"),
+        );
+        assert!(matches!(
+            result
+                .get_prop("typedArrayError")
+                .unwrap()
+                .get_prop("isRangeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result
+                .get_prop("typedArrayError")
+                .unwrap()
+                .get_prop("isError"),
+            Some(Value::Bool(true))
         ));
         assert!(matches!(
             result.get_prop("undefinedResult"),

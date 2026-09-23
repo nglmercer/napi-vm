@@ -78,8 +78,9 @@ unload; removing a wrap skips its finalizer. Without guest-object collection,
 these finalizers do not run at normal object collection time. `napi_create_buffer`,
 `napi_create_buffer_copy`, `napi_get_buffer_info`, and `napi_is_buffer` are also
 supported. N-API buffers are surfaced as guest `Uint8Array` views; external
-buffers and the remaining direct typed-array/array-buffer APIs are not
-implemented. Async and thread-safe APIs remain unavailable. It is still an
+buffers are not implemented. ArrayBuffer, typed-array, and DataView creation,
+type checks, and info APIs share storage with guest views and preserve byte
+offsets. Async and thread-safe APIs remain unavailable. It is still an
 incomplete compatibility backend, and unimplemented imported symbols fail at
 load time.
 
