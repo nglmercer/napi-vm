@@ -17,7 +17,7 @@ use std::time::Duration;
 use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
 
 use crate::error::VmErr;
-use crate::host::{HostBridge, HostCallback, HostEvent};
+use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{FileCommonJsLoader, Interpreter};
 use crate::value::{Buffer, ErrorData, TypedArrayData, TypedKind, Value};
@@ -140,7 +140,40 @@ struct NapiEnvironment {
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
+    guest_callback_dispatchers: RefCell<Vec<GuestCallbackDispatcher>>,
     pending_exception: RefCell<Option<Value>>,
+}
+
+#[derive(Clone, Copy)]
+struct GuestCallbackDispatcher {
+    context: *mut c_void,
+    invoke: unsafe fn(*mut c_void, HostCallback) -> Result<Value, VmErr>,
+}
+
+/// The dispatcher is pushed only while a native callback is running. Its
+/// context points at that callback's borrowed interpreter handler and is
+/// removed before the handler's stack frame returns.
+struct GuestCallbackDispatcherScope {
+    environment: Rc<NapiEnvironment>,
+}
+
+impl GuestCallbackDispatcherScope {
+    fn push(environment: Rc<NapiEnvironment>, dispatcher: GuestCallbackDispatcher) -> Self {
+        environment
+            .guest_callback_dispatchers
+            .borrow_mut()
+            .push(dispatcher);
+        Self { environment }
+    }
+}
+
+impl Drop for GuestCallbackDispatcherScope {
+    fn drop(&mut self) {
+        self.environment
+            .guest_callback_dispatchers
+            .borrow_mut()
+            .pop();
+    }
 }
 
 struct NapiReference {
@@ -448,6 +481,16 @@ struct NapiVmApiTable {
     set_named_property: unsafe extern "C" fn(NapiEnv, NapiValue, *const c_char, NapiValue) -> i32,
     get_named_property:
         unsafe extern "C" fn(NapiEnv, NapiValue, *const c_char, *mut NapiValue) -> i32,
+    call_function: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        NapiValue,
+        usize,
+        *const NapiValue,
+        *mut NapiValue,
+    ) -> i32,
+    new_instance:
+        unsafe extern "C" fn(NapiEnv, NapiValue, usize, *const NapiValue, *mut NapiValue) -> i32,
     get_cb_info: unsafe extern "C" fn(
         NapiEnv,
         NapiCallbackInfo,
@@ -518,6 +561,8 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_function: api_create_function,
     set_named_property: api_set_named_property,
     get_named_property: api_get_named_property,
+    call_function: api_call_function,
+    new_instance: api_new_instance,
     get_cb_info: api_get_cb_info,
     open_handle_scope: api_open_handle_scope,
     close_handle_scope: api_close_handle_scope,
@@ -546,6 +591,88 @@ fn environment(env: NapiEnv) -> Result<Rc<NapiEnvironment>, i32> {
             }
         })
         .unwrap_or(Err(NAPI_INVALID_ARG))
+}
+
+unsafe fn dispatch_guest_callback(
+    context: *mut c_void,
+    callback: HostCallback,
+) -> Result<Value, VmErr> {
+    // SAFETY: invoke_native points context at its live callback-handler
+    // reference and keeps the dispatcher on the environment stack only until
+    // the corresponding C callback returns.
+    let handler = unsafe {
+        &mut *context.cast::<&mut (dyn FnMut(HostCallback) -> Result<Value, VmErr> + '_)>()
+    };
+    (*handler)(callback)
+}
+
+fn exception_from_callback_error(error: VmErr) -> Value {
+    let message = match error {
+        VmErr::Throw(value) => return value,
+        VmErr::RuntimeError(error) => error.message.clone(),
+        other => other.to_string(),
+    };
+    for name in ["TypeError", "RangeError", "ReferenceError", "SyntaxError"] {
+        if let Some(message) = message.strip_prefix(&format!("{name}: ")) {
+            return Value::Error(ErrorData::new(name, message));
+        }
+    }
+    Value::Error(ErrorData::new("Error", message))
+}
+
+fn call_guest_callback(
+    environment: &NapiEnvironment,
+    callback: HostCallback,
+) -> Result<Value, i32> {
+    if environment.pending_exception.borrow().is_some() {
+        return Err(NAPI_PENDING_EXCEPTION);
+    }
+    let dispatcher = environment
+        .guest_callback_dispatchers
+        .borrow()
+        .last()
+        .copied()
+        .ok_or(NAPI_GENERIC_FAILURE)?;
+    match unsafe { (dispatcher.invoke)(dispatcher.context, callback) } {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            set_pending_exception(environment, exception_from_callback_error(error))?;
+            Err(NAPI_PENDING_EXCEPTION)
+        }
+    }
+}
+
+fn callback_arguments(
+    environment: &NapiEnvironment,
+    argc: usize,
+    argv: *const NapiValue,
+) -> Result<Vec<Value>, i32> {
+    if argc > 0 && argv.is_null() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    if argc == 0 {
+        return Ok(Vec::new());
+    }
+    let handles = unsafe { std::slice::from_raw_parts(argv, argc) };
+    let arena = environment.handles.borrow();
+    handles.iter().map(|handle| arena.get(*handle)).collect()
+}
+
+fn is_napi_function(value: &Value) -> bool {
+    match value {
+        Value::Function(_)
+        | Value::NativeFunction { .. }
+        | Value::HostFunction { .. }
+        | Value::Class(_) => true,
+        Value::Proxy(proxy) => is_napi_function(&proxy.target),
+        Value::Object { .. } => value.get_prop("__symbol_call__").is_some_and(|target| {
+            matches!(
+                target,
+                Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
+            )
+        }),
+        _ => false,
+    }
 }
 
 fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
@@ -2019,6 +2146,72 @@ unsafe extern "C" fn api_get_named_property(
     })
 }
 
+unsafe extern "C" fn api_call_function(
+    env: NapiEnv,
+    recv: NapiValue,
+    function: NapiValue,
+    argc: usize,
+    argv: *const NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let receiver = environment.handles.borrow().get(recv)?;
+        let function = environment.handles.borrow().get(function)?;
+        if !is_napi_function(&function) {
+            return Err(NAPI_FUNCTION_EXPECTED);
+        }
+        let args = callback_arguments(&environment, argc, argv)?;
+        let value = call_guest_callback(
+            &environment,
+            HostCallback {
+                callback: function,
+                this_value: receiver,
+                args,
+                kind: HostCallbackKind::Call,
+            },
+        )?;
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_new_instance(
+    env: NapiEnv,
+    constructor: NapiValue,
+    argc: usize,
+    argv: *const NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let constructor = environment.handles.borrow().get(constructor)?;
+        if !is_napi_function(&constructor) {
+            return Err(NAPI_FUNCTION_EXPECTED);
+        }
+        let args = callback_arguments(&environment, argc, argv)?;
+        let value = call_guest_callback(
+            &environment,
+            HostCallback {
+                callback: constructor,
+                this_value: Value::Undefined,
+                args,
+                kind: HostCallbackKind::Construct,
+            },
+        )?;
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_get_cb_info(
     env: NapiEnv,
     info: NapiCallbackInfo,
@@ -2196,6 +2389,7 @@ impl RustNodeApiHost {
         id: usize,
         this_value: Value,
         args: Vec<Value>,
+        mut callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
         let callback = self
             .state
@@ -2240,7 +2434,17 @@ impl RustNodeApiHost {
                 .active_callbacks
                 .borrow_mut()
                 .insert(frame_key, frame.clone());
+            let callback_handler_pointer: *mut &mut (
+                     dyn FnMut(HostCallback) -> Result<Value, VmErr> + '_
+                 ) = &mut callback_handler;
+            let dispatcher = GuestCallbackDispatcher {
+                context: callback_handler_pointer.cast(),
+                invoke: dispatch_guest_callback,
+            };
+            let dispatcher_scope =
+                GuestCallbackDispatcherScope::push(callback.env.clone(), dispatcher);
             let returned = unsafe { (callback.callback)(callback.env.raw(), callback_info) };
+            drop(dispatcher_scope);
             callback
                 .env
                 .active_callbacks
@@ -2318,6 +2522,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
             active_callbacks: RefCell::new(HashMap::new()),
+            guest_callback_dispatchers: RefCell::new(Vec::new()),
             pending_exception: RefCell::new(None),
         });
         register_environment(&environment);
@@ -2379,7 +2584,7 @@ impl NativeAddonLoader for RustNodeApiHost {
 
 impl HostBridge for RustNodeApiHost {
     fn call_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
-        self.invoke_native(id, Value::Undefined, args)
+        self.invoke_native(id, Value::Undefined, args, &mut reject_guest_callback)
     }
 
     fn call_host_with_this(
@@ -2388,7 +2593,7 @@ impl HostBridge for RustNodeApiHost {
         this_value: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
-        self.invoke_native(id, this_value, args)
+        self.invoke_native(id, this_value, args, &mut reject_guest_callback)
     }
 
     fn call_host_with_callback_handler(
@@ -2396,23 +2601,29 @@ impl HostBridge for RustNodeApiHost {
         id: usize,
         this_value: Value,
         args: Vec<Value>,
-        _callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
-        self.invoke_native(id, this_value, args)
+        self.invoke_native(id, this_value, args, callback_handler)
     }
 
     fn construct_host_with_callback_handler(
         &self,
         id: usize,
         args: Vec<Value>,
-        _callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
-        self.invoke_native(id, Value::Undefined, args)
+        self.invoke_native(id, Value::Undefined, args, callback_handler)
     }
 
     fn poll_host_events(&self, _timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
         Ok(Vec::new())
     }
+}
+
+fn reject_guest_callback(_: HostCallback) -> Result<Value, VmErr> {
+    Err(VmErr::Msg(
+        "Node-API host callback dispatch is unavailable on this call path".into(),
+    ))
 }
 
 fn napi_error(action: &str, status: i32) -> VmErr {
@@ -2780,6 +2991,22 @@ static napi_value invalid_typedarray(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value call_guest(napi_env env, napi_callback_info info) {
+  napi_value args[3], result;
+  size_t argc = 3;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 3) return NULL;
+  if (napi_call_function(env, args[1], args[0], 1, &args[2], &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value construct_guest(napi_env env, napi_callback_info info) {
+  napi_value args[2], result;
+  size_t argc = 2;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 2) return NULL;
+  if (napi_new_instance(env, args[0], 1, &args[1], &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value typedarray_probe(napi_env env, napi_callback_info info) {
   napi_value buffer, typed, typed_buffer, view, view_buffer, result, field;
   void* bytes = NULL;
@@ -3046,6 +3273,10 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "typedArrayProbe", function) != napi_ok ||
       napi_create_function(env, "invalidTypedArray", NAPI_AUTO_LENGTH, invalid_typedarray, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidTypedArray", function) != napi_ok ||
+      napi_create_function(env, "callGuest", NAPI_AUTO_LENGTH, call_guest, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "callGuest", function) != napi_ok ||
+      napi_create_function(env, "constructGuest", NAPI_AUTO_LENGTH, construct_guest, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "constructGuest", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -3110,6 +3341,28 @@ try { addon.invalidTypedArray(); } catch (error) {
   typedArrayError = {name: error.name, message: error.message, code: error.code,
     isRangeError: error instanceof RangeError, isError: error instanceof Error};
 }
+const callbackReceiver = {base: 40};
+const callbackResult = addon.callGuest(function (amount) {
+  this.base += addon.add(amount, 1);
+  return this.base;
+}, callbackReceiver, 1);
+let callbackError;
+try {
+  addon.callGuest(function () { throw new RangeError('guest callback failure'); }, {}, 0);
+} catch (error) {
+  callbackError = {name: error.name, message: error.message,
+    isRangeError: error instanceof RangeError, isError: error instanceof Error};
+}
+let callbackThrown;
+try {
+  addon.callGuest(function () { throw 'guest primitive failure'; }, {}, 0);
+} catch (error) {
+  callbackThrown = error;
+}
+class GuestBox {
+  constructor(value) { this.value = value; }
+}
+const constructed = addon.constructGuest(GuestBox, 'constructed');
 const backingBytes = new Uint8Array(typedArrays.buffer);
 module.exports = {
   same: addon === require('./fixture.node'),
@@ -3150,6 +3403,11 @@ module.exports = {
     viewOffset: typedArrays.viewOffset,
   },
   typedArrayError,
+  callbackResult,
+  callbackReceiverBase: callbackReceiver.base,
+  callbackError,
+  callbackThrown,
+  constructedValue: constructed.value,
   undefinedResult: addon.returnsUndefined() === undefined,
   errors: {
     error: {name: errors.error.name, message: errors.error.message,
@@ -3405,6 +3663,46 @@ module.exports = {
             Some(Value::Bool(true))
         ));
         assert!(matches!(
+            result.get_prop("callbackResult"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            result.get_prop("callbackReceiverBase"),
+            Some(Value::Number(42.0))
+        ));
+        assert_error_fields(
+            &result.get_prop("callbackError").unwrap(),
+            "RangeError",
+            "guest callback failure",
+            None,
+        );
+        assert!(matches!(
+            result
+                .get_prop("callbackError")
+                .unwrap()
+                .get_prop("isRangeError"),
+            Some(Value::Bool(true))
+        ));
+        assert!(
+            matches!(
+                result
+                    .get_prop("callbackError")
+                    .unwrap()
+                    .get_prop("isError"),
+                Some(Value::Bool(true))
+            ),
+            "callback error: {:?}",
+            result.get_prop("callbackError")
+        );
+        assert!(matches!(
+            result.get_prop("constructedValue"),
+            Some(Value::String(ref value)) if value == "constructed"
+        ));
+        assert!(matches!(
+            result.get_prop("callbackThrown"),
+            Some(Value::String(ref value)) if value == "guest primitive failure"
+        ));
+        assert!(matches!(
             result.get_prop("undefinedResult"),
             Some(Value::Bool(true))
         ));
@@ -3534,6 +3832,8 @@ module.exports = {
         let Value::String(ref guest_json) = guest_json else {
             panic!("JSON.stringify did not return a string");
         };
+        let guest_result: serde_json::Value =
+            serde_json::from_str(guest_json).expect("guest result is valid JSON");
 
         if let Ok(node_version) = Command::new("node").arg("--version").output()
             && node_version.status.success()
@@ -3551,10 +3851,43 @@ module.exports = {
                 "Node reference failed: {}",
                 String::from_utf8_lossy(&reference.stderr)
             );
-            assert_eq!(
-                String::from_utf8_lossy(&reference.stdout),
-                guest_json.as_str()
+            let node_result: serde_json::Value =
+                serde_json::from_slice(&reference.stdout).expect("Node result is valid JSON");
+            assert_eq!(node_result, guest_result);
+        }
+
+        if let Ok(bun_version) = Command::new("bun").arg("--version").output()
+            && bun_version.status.success()
+        {
+            let reference = Command::new("bun")
+                .args([
+                    "-e",
+                    "process.stdout.write(JSON.stringify(require(process.argv[1])))",
+                ])
+                .arg(root.join("main.cjs"))
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Bun reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
             );
+            let mut bun_result: serde_json::Value =
+                serde_json::from_slice(&reference.stdout).expect("Bun result is valid JSON");
+            let mut normalized_guest_result = guest_result.clone();
+            for output in [&mut bun_result, &mut normalized_guest_result] {
+                if let Some(error) = output
+                    .get_mut("typedArrayError")
+                    .and_then(serde_json::Value::as_object_mut)
+                {
+                    // Node and Bun both throw a RangeError for this invalid
+                    // typed-array view, but the message and Node error code
+                    // are runtime-specific details.
+                    error.remove("message");
+                    error.remove("code");
+                }
+            }
+            assert_eq!(bun_result, normalized_guest_result);
         }
 
         let invalid_env = interpreter

@@ -168,7 +168,9 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 
 This is an early compatibility slice, not a general Node replacement. It
 currently supports a synchronous Node-API version 1 subset: C callbacks and
-callback info, local handle scopes, object creation and named properties,
+callback info, controlled synchronous guest callback entry through
+`napi_call_function` and `napi_new_instance`, local handle scopes, object
+creation and named properties,
 undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8
 strings, `napi_typeof`, array creation/index/length operations, and core error
 creation and pending-exception propagation. Returning a null callback value

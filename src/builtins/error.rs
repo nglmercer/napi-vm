@@ -19,22 +19,32 @@ const ERROR_TYPES: &[&str] = &[
 ];
 
 pub(super) fn install(e: &mut Environment) {
-    for name in ERROR_TYPES {
-        e.set(name, make_error_class(name));
+    let error_class = make_error_class("Error", None);
+    let base_prototype = match &error_class {
+        Value::Class(class) => Some(class.prototype.clone()),
+        _ => unreachable!("Error constructor is a class"),
+    };
+    e.set("Error", error_class);
+    for name in &ERROR_TYPES[1..] {
+        e.set(name, make_error_class(name, base_prototype.clone()));
     }
 }
 
-fn make_error_class(name: &str) -> Value {
+fn make_error_class(name: &str, parent_prototype: Option<Rc<Value>>) -> Value {
+    let is_base_error = parent_prototype.is_none();
     let constructor = Value::NativeFunction {
         name: name.into(),
         callable: error_ctor,
     };
-    let prototype = Value::object(vec![
+    let mut properties = vec![
         ("name".to_string(), Value::String(name.to_string())),
         ("message".to_string(), Value::String(String::new())),
         ("stack".to_string(), Value::String(String::new())),
-        ("toString".to_string(), error_to_string()),
-    ]);
+    ];
+    if is_base_error {
+        properties.push(("toString".to_string(), error_to_string()));
+    }
+    let prototype = Value::object_with_proto(properties, parent_prototype);
     prototype
         .set_prop("constructor".to_string(), constructor.clone())
         .expect("built-in Error prototype property");

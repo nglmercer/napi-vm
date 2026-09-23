@@ -1073,6 +1073,26 @@ mod tests {
     }
 
     #[test]
+    fn built_in_error_subclasses_inherit_from_error() {
+        for source in [
+            "new TypeError('x') instanceof Error;",
+            "new RangeError('x') instanceof Error;",
+            "new SyntaxError('x') instanceof Error;",
+            "new ReferenceError('x') instanceof Error;",
+        ] {
+            assert!(matches!(eval(source), Ok(Value::Bool(true))), "{source}");
+        }
+        assert!(matches!(
+            eval("new RangeError('x') instanceof TypeError;"),
+            Ok(Value::Bool(false))
+        ));
+        assert!(matches!(
+            eval("new RangeError('x').toString();"),
+            Ok(Value::String(ref message)) if message == "RangeError: x"
+        ));
+    }
+
+    #[test]
     fn test_closures() {
         assert_eq!(
             eval_str(
