@@ -10,7 +10,8 @@ use std::rc::Rc;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
 use crate::value::{
-    Buffer, BufferBacking, SharedAtomicOp, SharedBuffer, TypedArrayData, TypedKind, Value,
+    Buffer, BufferBacking, PromiseState, SharedAtomicOp, SharedBuffer, TypedArrayData, TypedKind,
+    Value,
 };
 
 /// Every typed-array constructor, in the order the specification lists them.
@@ -70,6 +71,9 @@ pub(super) fn install(e: &mut Environment) {
             ("xor", atomics_xor as _),
             ("exchange", atomics_exchange as _),
             ("compareExchange", atomics_compare_exchange as _),
+            ("wait", atomics_wait as _),
+            ("waitAsync", atomics_wait_async as _),
+            ("notify", atomics_notify as _),
         ] {
             namespace
                 .set_prop(name.to_string(), super::nf(name, method))
@@ -406,6 +410,181 @@ fn atomics_exchange(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 fn atomics_compare_exchange(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     atomics(i, &a, AtomicsMethod::CompareExchange)
+}
+
+/// `Atomics.wait` can only block the current agent. napi-vm does not yet have
+/// guest worker agents, so report the unsupported blocking case clearly while
+/// still handling the specification's immediate `not-equal` and zero-timeout
+/// results. Async waits are backed by the VM's ordinary job/timer queues.
+fn atomics_wait(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
+    let expected = atomics_argument_bits(
+        interp,
+        kind,
+        args.get(2)
+            .ok_or_else(|| VmErr::Msg("TypeError: Atomics expected value is required".into()))?,
+    )?;
+    let timeout = atomics_timeout(interp, &args, 3)?;
+    let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
+        VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
+    })?;
+    if observed != expected {
+        return Ok(Value::String("not-equal".into()));
+    }
+    if timeout == 0.0 {
+        return Ok(Value::String("timed-out".into()));
+    }
+    Err(VmErr::Msg(
+        "TypeError: Atomics.wait requires worker-agent support; use Atomics.waitAsync".into(),
+    ))
+}
+
+fn atomics_wait_async(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
+    let expected = atomics_argument_bits(
+        interp,
+        kind,
+        args.get(2)
+            .ok_or_else(|| VmErr::Msg("TypeError: Atomics expected value is required".into()))?,
+    )?;
+    let timeout = atomics_timeout(interp, &args, 3)?;
+    let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
+        VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
+    })?;
+    if observed != expected {
+        return Ok(atomics_wait_result(
+            false,
+            Value::String("not-equal".into()),
+        ));
+    }
+    if timeout == 0.0 {
+        return Ok(atomics_wait_result(
+            false,
+            Value::String("timed-out".into()),
+        ));
+    }
+
+    let promise = Value::pending_promise();
+    let key = (shared.wait_identity(), offset);
+    let waiter_id = interp
+        .jobs
+        .borrow_mut()
+        .register_atomics_waiter(key, promise.clone());
+    if timeout.is_finite() {
+        interp.jobs.borrow_mut().push_timer_job(
+            timeout,
+            crate::interpreter::Job::AtomicsWaitTimeout { key, waiter_id },
+        );
+    }
+    Ok(atomics_wait_result(true, Value::Promise(promise)))
+}
+
+fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
+    let count = match args.get(2) {
+        None | Some(Value::Undefined) => usize::MAX,
+        Some(Value::BigInt(_) | Value::Symbol(_)) => {
+            return Err(VmErr::Msg(
+                "TypeError: cannot convert value to an Atomics notify count".into(),
+            ));
+        }
+        Some(value) => {
+            let count = interp.tn(value);
+            if count.is_nan() || count <= 0.0 {
+                0
+            } else if count.is_infinite() || count >= usize::MAX as f64 {
+                usize::MAX
+            } else {
+                count.trunc() as usize
+            }
+        }
+    };
+    let _ = kind;
+    let waiters = interp
+        .jobs
+        .borrow_mut()
+        .take_atomics_waiters((shared.wait_identity(), offset), count);
+    let notified = waiters.len();
+    for promise in waiters {
+        crate::interpreter::jobs::settle(
+            &interp.jobs,
+            &promise,
+            PromiseState::Fulfilled,
+            Value::String("ok".into()),
+        );
+    }
+    Ok(Value::Number(notified as f64))
+}
+
+fn atomics_wait_result(async_: bool, value: Value) -> Value {
+    Value::object(vec![
+        ("async".into(), Value::Bool(async_)),
+        ("value".into(), value),
+    ])
+}
+
+fn atomics_wait_location(
+    interp: &mut Interpreter,
+    args: &[Value],
+) -> Result<(TypedKind, SharedBuffer, usize), VmErr> {
+    let Some(Value::TypedArray(view)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics wait requires an Int32Array or BigInt64Array".into(),
+        ));
+    };
+    if !matches!(view.kind, TypedKind::Int32 | TypedKind::BigInt64) {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics wait requires an Int32Array or BigInt64Array".into(),
+        ));
+    }
+    let BufferBacking::Shared(shared) = &view.buffer else {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics wait requires a SharedArrayBuffer".into(),
+        ));
+    };
+    let index_value = args
+        .get(1)
+        .ok_or_else(|| VmErr::Msg("TypeError: Atomics index is required".into()))?;
+    if matches!(index_value, Value::BigInt(_) | Value::Symbol(_)) {
+        return Err(VmErr::Msg(
+            "TypeError: cannot convert value to an Atomics index".into(),
+        ));
+    }
+    let index = interp.tn(index_value).trunc();
+    if !index.is_finite() || index < 0.0 || index >= view.effective_length() as f64 {
+        return Err(range_err("Atomics index is outside the typed array"));
+    }
+    let offset = view
+        .effective_byte_offset()
+        .checked_add(index as usize * view.kind.size())
+        .ok_or_else(|| range_err("Atomics index is outside the typed array"))?;
+    Ok((view.kind, shared.clone(), offset))
+}
+
+fn atomics_timeout(interp: &Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
+    let Some(value) = args.get(index) else {
+        return Ok(f64::INFINITY);
+    };
+    if matches!(value, Value::Undefined) {
+        return Ok(f64::INFINITY);
+    }
+    if matches!(value, Value::BigInt(_) | Value::Symbol(_)) {
+        return Err(VmErr::Msg(
+            "TypeError: cannot convert value to an Atomics timeout".into(),
+        ));
+    }
+    let timeout = interp.tn(value);
+    if timeout.is_nan() {
+        Ok(f64::INFINITY)
+    } else if timeout <= 0.0 {
+        Ok(0.0)
+    } else {
+        Ok(timeout)
+    }
 }
 
 fn atomics(
@@ -1326,7 +1505,7 @@ data_view_accessors!(
 #[cfg(test)]
 mod tests {
     use crate::interpreter::Interpreter;
-    use crate::value::Value;
+    use crate::value::{PromiseState, Value};
     use std::process::Command;
 
     #[test]
@@ -1446,6 +1625,75 @@ mod tests {
             }
             let actual: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
             assert_eq!(expected, actual, "{runtime} Atomics behavior differed");
+        }
+    }
+
+    #[test]
+    fn atomics_wait_async_and_notify_match_node_and_bun() {
+        let fixture = r#"async function runWaiters() {
+  const shared = new SharedArrayBuffer(8);
+  const words = new Int32Array(shared);
+  const first = Atomics.waitAsync(words, 0, 0, 50);
+  const second = Atomics.waitAsync(words, 0, 0, 50);
+  const notEqual = Atomics.waitAsync(words, 1, 1, 50);
+  const timedOut = Atomics.waitAsync(words, 1, 0, 0);
+  let notified = 0;
+  setTimeout(() => { notified = Atomics.notify(words, 0, 1); }, 10);
+  const firstValue = await first.value;
+  const secondValue = await second.value;
+  return JSON.stringify({
+    async: [first.async, second.async, notEqual.async, timedOut.async],
+    immediate: [notEqual.value, timedOut.value],
+    notified,
+    values: [firstValue, secondValue],
+  });
+}
+runWaiters()"#;
+        let mut interpreter = Interpreter::with_builtins();
+        let result = interpreter.eval_source(fixture).unwrap();
+        let Some(promise) = result.as_promise() else {
+            panic!("waitAsync fixture did not return a Promise: {result:?}");
+        };
+        let inner = promise.borrow();
+        assert_eq!(inner.state, PromiseState::Fulfilled);
+        let Value::String(ref result) = inner.value else {
+            panic!("waitAsync fixture returned {:?}", inner.value);
+        };
+        let expected: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(
+            expected,
+            serde_json::json!({
+                "async": [true, true, false, false],
+                "immediate": ["not-equal", "timed-out"],
+                "notified": 1,
+                "values": ["ok", "timed-out"],
+            })
+        );
+
+        for runtime in ["node", "bun"] {
+            let Ok(reference) = Command::new(runtime)
+                .args([
+                    "-e",
+                    &format!(
+                        "setTimeout(() => {{}}, 100); {fixture}.then(value => process.stdout.write(value))"
+                    ),
+                ])
+                .output()
+            else {
+                continue;
+            };
+            if !reference.status.success() {
+                eprintln!(
+                    "skipping {runtime} Atomics.waitAsync comparison: {}",
+                    String::from_utf8_lossy(&reference.stderr)
+                );
+                continue;
+            }
+            let actual: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(
+                expected, actual,
+                "{runtime} Atomics.waitAsync behavior differed"
+            );
         }
     }
 }

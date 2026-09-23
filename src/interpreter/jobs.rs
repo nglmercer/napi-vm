@@ -7,7 +7,7 @@
 //! `Rc` to the same queue is what keeps a single event loop across them.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use crate::value::{PromiseInner, PromiseState, Reaction, Value};
@@ -51,6 +51,15 @@ pub enum Job {
     /// An exception reported asynchronously by a host runtime. It is offered
     /// to the guest process `uncaughtException` event before escaping to Rust.
     HostUncaughtException { exception: Value },
+    /// Timeout for a pending `Atomics.waitAsync` registration. The waiter is
+    /// looked up by its shared-memory address and registration id so an
+    /// earlier `Atomics.notify` makes this timeout a no-op.
+    AtomicsWaitTimeout { key: (usize, usize), waiter_id: u64 },
+}
+
+struct AtomicsWaiter {
+    id: u64,
+    promise: Rc<RefCell<PromiseInner>>,
 }
 
 #[derive(Default)]
@@ -63,6 +72,8 @@ pub struct JobQueue {
     timers: Vec<(f64, u64, Job)>,
     next_timer_id: u64,
     cancelled: Vec<u64>,
+    atomics_waiters: HashMap<(usize, usize), VecDeque<AtomicsWaiter>>,
+    next_atomics_waiter_id: u64,
 }
 
 impl JobQueue {
@@ -84,6 +95,13 @@ impl JobQueue {
 
     /// Schedule a timer callback, returning the id `clearTimeout` cancels.
     pub fn push_timer(&mut self, delay: f64, callback: Value, args: Vec<Value>) -> u64 {
+        self.push_timer_job(delay, Job::Callback { callback, args })
+    }
+
+    /// Schedule an internal event on the same timer queue used by guest
+    /// timers. Returns a timer sequence id, which is deliberately not exposed
+    /// to guest code for runtime-owned jobs.
+    pub fn push_timer_job(&mut self, delay: f64, job: Job) -> u64 {
         let id = self.next_timer_id + 1;
         self.next_timer_id = id;
         let delay = if delay.is_finite() && delay > 0.0 {
@@ -91,9 +109,67 @@ impl JobQueue {
         } else {
             0.0
         };
-        self.timers
-            .push((delay, id, Job::Callback { callback, args }));
+        self.timers.push((delay, id, job));
         id
+    }
+
+    /// Register a promise waiting on the shared memory word at `key`.
+    pub fn register_atomics_waiter(
+        &mut self,
+        key: (usize, usize),
+        promise: Rc<RefCell<PromiseInner>>,
+    ) -> u64 {
+        self.next_atomics_waiter_id = self.next_atomics_waiter_id.wrapping_add(1).max(1);
+        let id = self.next_atomics_waiter_id;
+        self.atomics_waiters
+            .entry(key)
+            .or_default()
+            .push_back(AtomicsWaiter { id, promise });
+        id
+    }
+
+    /// Remove a registered waiter, typically when its timeout fires.
+    pub fn remove_atomics_waiter(
+        &mut self,
+        key: (usize, usize),
+        waiter_id: u64,
+    ) -> Option<Rc<RefCell<PromiseInner>>> {
+        let waiters = self.atomics_waiters.get_mut(&key)?;
+        let index = waiters.iter().position(|waiter| waiter.id == waiter_id)?;
+        let waiter = waiters.remove(index)?;
+        if waiters.is_empty() {
+            self.atomics_waiters.remove(&key);
+        }
+        Some(waiter.promise)
+    }
+
+    /// Take up to `count` pending waiters in FIFO order. Settled entries are
+    /// discarded so a timeout cannot make a later notify report a false hit.
+    pub fn take_atomics_waiters(
+        &mut self,
+        key: (usize, usize),
+        count: usize,
+    ) -> Vec<Rc<RefCell<PromiseInner>>> {
+        let Some(waiters) = self.atomics_waiters.get_mut(&key) else {
+            return Vec::new();
+        };
+        let mut selected = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(waiter) = waiters.pop_front() {
+            if waiter.promise.borrow().state != PromiseState::Pending {
+                continue;
+            }
+            if selected.len() < count {
+                selected.push(waiter.promise);
+            } else {
+                retained.push_back(waiter);
+            }
+        }
+        *waiters = retained;
+        if waiters.is_empty() {
+            self.atomics_waiters.remove(&key);
+        }
+        selected
     }
 
     pub fn cancel_timer(&mut self, id: u64) {
@@ -148,5 +224,19 @@ pub fn settle(jobs: &Jobs, promise: &Rc<RefCell<PromiseInner>>, state: PromiseSt
             value: value.clone(),
             reaction,
         });
+    }
+}
+
+/// Complete a timed `Atomics.waitAsync` registration. If a notify already
+/// removed it, the timeout is stale and does nothing.
+pub fn settle_atomics_wait_timeout(jobs: &Jobs, key: (usize, usize), waiter_id: u64) {
+    let promise = jobs.borrow_mut().remove_atomics_waiter(key, waiter_id);
+    if let Some(promise) = promise {
+        settle(
+            jobs,
+            &promise,
+            PromiseState::Fulfilled,
+            Value::String("timed-out".into()),
+        );
     }
 }

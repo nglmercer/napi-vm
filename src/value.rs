@@ -1005,6 +1005,12 @@ impl SharedBuffer {
         Rc::as_ptr(&self.0) as usize
     }
 
+    /// Identity of the shared data block, which remains the same when a
+    /// SharedArrayBuffer object is structured-cloned into another wrapper.
+    pub fn wait_identity(&self) -> usize {
+        Rc::as_ptr(&self.0.bytes) as usize
+    }
+
     fn atomic_pointer(&self, offset: usize, width: usize) -> Option<*mut u8> {
         if !matches!(width, 1 | 2 | 4 | 8)
             || !offset.is_multiple_of(width)

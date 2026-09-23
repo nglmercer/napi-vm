@@ -388,6 +388,9 @@ impl Interpreter {
                 Job::HostUncaughtException { exception } => {
                     self.run_host_uncaught_exception(exception)?;
                 }
+                Job::AtomicsWaitTimeout { key, waiter_id } => {
+                    super::jobs::settle_atomics_wait_timeout(&self.jobs, key, waiter_id);
+                }
             }
         }
     }
@@ -537,6 +540,9 @@ impl Interpreter {
                 } => self.settle_host_promise(promise, state, value)?,
                 Job::HostUncaughtException { exception } => {
                     self.run_host_uncaught_exception(exception)?;
+                }
+                Job::AtomicsWaitTimeout { key, waiter_id } => {
+                    super::jobs::settle_atomics_wait_timeout(&self.jobs, key, waiter_id);
                 }
             }
         }

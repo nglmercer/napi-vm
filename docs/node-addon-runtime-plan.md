@@ -232,9 +232,15 @@ shared-buffer object over the same data block. External shared buffers preserve
 the `node_api_noenv_finalize` callback signature and run that callback on the
 owner thread during host shutdown. The guest `Atomics` object supports
 `isLockFree`, `load`, `store`, arithmetic and bitwise read-modify-write calls,
-`exchange`, and `compareExchange` for integer typed arrays. `wait`, `waitAsync`,
-and `notify` still need an event-loop-aware wait/notification mechanism and are
-reported as a `MISSING_METHOD` compatibility gap.
+`exchange`, and `compareExchange` for integer typed arrays. `waitAsync` and
+`notify` use the existing shared job queue: notification settles waiting
+promises and timeout jobs resolve them at timer checkpoints. `Atomics.wait`
+handles immediate `not-equal` and zero-timeout results, then reports a clear
+unsupported-operation error when it would block because napi-vm does not yet
+provide guest worker agents. Timeouts follow napi-vm's deterministic timer
+ordering, not a wall clock. Full blocking wait behavior remains a
+`MISSING_METHOD` compatibility gap until worker agents can notify the runtime
+without re-entering a running interpreter.
 The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
