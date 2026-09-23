@@ -43,8 +43,8 @@ use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{Env, FileCommonJsLoader, Interpreter};
 use crate::value::{
-    Buffer, ClassData, ErrorData, PromiseInner, PromiseState, PropAttrs, SharedBuffer,
-    TypedArrayData, TypedKind, Value,
+    BoxedPrimitive, Buffer, ClassData, ErrorData, PromiseInner, PromiseState, PropAttrs,
+    SharedBuffer, TypedArrayData, TypedKind, Value,
 };
 
 const NAPI_OK: i32 = 0;
@@ -3975,7 +3975,19 @@ fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Re
     let (prototype, uses_default_prototype, default_constructor) = match object {
         Value::Object { props } => {
             let meta = props.meta.borrow();
-            (meta.proto.clone(), meta.uses_default_prototype, "Object")
+            let default_constructor = match meta.boxed_primitive.as_ref() {
+                Some(BoxedPrimitive::Bool(_)) => "Boolean",
+                Some(BoxedPrimitive::Number(_)) => "Number",
+                Some(BoxedPrimitive::String(_)) => "String",
+                Some(BoxedPrimitive::Symbol(_)) => "Symbol",
+                Some(BoxedPrimitive::BigInt(_)) => "BigInt",
+                None => "Object",
+            };
+            (
+                meta.proto.clone(),
+                meta.uses_default_prototype,
+                default_constructor,
+            )
         }
         Value::Function(function) => {
             let meta = function.properties.meta.borrow();
@@ -13011,8 +13023,14 @@ const coercionErrors = {
 };
 const objectCoercions = [false, 12, 'abc', Symbol('value'), 13n].map(value => {
   const boxed = addon.coerceToObject(value);
+  const expectedPrototype = typeof value === 'boolean' ? Boolean.prototype :
+    typeof value === 'number' ? Number.prototype :
+    typeof value === 'string' ? String.prototype :
+    typeof value === 'symbol' ? Symbol.prototype : BigInt.prototype;
   return {type: typeof boxed, same: boxed === value,
-    primitiveType: typeof boxed.valueOf(), string: boxed.toString(), length: boxed.length};
+    primitiveType: typeof boxed.valueOf(), string: boxed.toString(), length: boxed.length,
+    guestPrototype: Object.getPrototypeOf(boxed) === expectedPrototype,
+    napiPrototype: addon.getPrototype(boxed) === expectedPrototype};
 });
 const objectCoercionErrors = [null, undefined].map(value =>
   captureCoercionError(() => addon.coerceToObject(value)));
@@ -14737,10 +14755,18 @@ module.exports = {
             primitive_types,
             ["boolean", "number", "string", "symbol", "bigint"]
         );
-        assert!(object_coercions.iter().all(|value| {
-            matches!(value.get_prop("type"), Some(Value::String(ref t)) if t == "object")
-                && matches!(value.get_prop("same"), Some(Value::Bool(false)))
-        }));
+        for (index, value) in object_coercions.iter().enumerate() {
+            assert!(matches!(value.get_prop("type"), Some(Value::String(ref t)) if t == "object"));
+            assert!(matches!(value.get_prop("same"), Some(Value::Bool(false))));
+            assert!(
+                matches!(value.get_prop("guestPrototype"), Some(Value::Bool(true))),
+                "boxed primitive {index} has a different guest prototype: {value:?}"
+            );
+            assert!(
+                matches!(value.get_prop("napiPrototype"), Some(Value::Bool(true))),
+                "boxed primitive {index} has a different Node-API prototype: {value:?}"
+            );
+        }
         assert!(matches!(
             object_coercions[2].get_prop("length"),
             Some(Value::Number(3.0))

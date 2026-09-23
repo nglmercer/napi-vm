@@ -16,7 +16,18 @@ impl Interpreter {
             return Some(prototype);
         }
         let (builtin, uses_default) = match object {
-            Value::Object { props } => ("Object", props.meta.borrow().uses_default_prototype),
+            Value::Object { props } => {
+                let meta = props.meta.borrow();
+                let builtin = match meta.boxed_primitive.as_ref() {
+                    Some(BoxedPrimitive::Bool(_)) => "Boolean",
+                    Some(BoxedPrimitive::Number(_)) => "Number",
+                    Some(BoxedPrimitive::String(_)) => "String",
+                    Some(BoxedPrimitive::Symbol(_)) => "Symbol",
+                    Some(BoxedPrimitive::BigInt(_)) => "BigInt",
+                    None => "Object",
+                };
+                (builtin, meta.uses_default_prototype)
+            }
             Value::Array(array) => ("Array", array.meta.borrow().uses_default_prototype),
             Value::Class(class) => (
                 "Function",
@@ -1292,4 +1303,118 @@ fn parse_radix_number(input: &str, radix: u32) -> Option<f64> {
         value = value * radix as f64 + character.to_digit(radix)? as f64;
     }
     Some(value)
+}
+
+#[cfg(test)]
+mod boxed_primitive_prototype_tests {
+    use std::process::Command;
+
+    use crate::interpreter::Interpreter;
+    use crate::value::Value;
+
+    #[test]
+    fn boxed_primitives_use_their_constructor_prototypes() {
+        let mut interpreter = Interpreter::with_builtins();
+        let result = interpreter
+            .eval_source(
+                "[Object(false), Object(12), Object('abc'), Object(Symbol('x')), Object(13n)].map((value, index) => Object.getPrototypeOf(value) === [Boolean.prototype, Number.prototype, String.prototype, Symbol.prototype, BigInt.prototype][index]).every(Boolean)",
+            )
+            .unwrap();
+        assert!(
+            matches!(result, Value::Bool(true)),
+            "boxed primitive prototype check returned {result:?}"
+        );
+    }
+
+    #[test]
+    fn primitive_constructor_fixture_matches_node_and_bun() {
+        let fixture = r#"(() => {
+  const symbol = Symbol('x');
+  const bigint = 13n;
+  const boolean = new Boolean(false);
+  const number = new Number(12);
+  const string = new String('abc');
+  const boxedSymbol = Object(symbol);
+  const boxedBigInt = Object(bigint);
+  const throws = (callback) => {
+    try { callback(); return false; }
+    catch (error) { return error instanceof TypeError; }
+  };
+  return JSON.stringify({
+    symbolType: typeof Symbol,
+    symbolRegistry: Symbol.keyFor(Symbol.for('registry-key')),
+    wellKnownSymbol: Symbol.iterator === Symbol.iterator,
+    boolean: [typeof boolean, Object.getPrototypeOf(boolean) === Boolean.prototype,
+      boolean.valueOf(), boolean.toString()],
+    number: [typeof number, Object.getPrototypeOf(number) === Number.prototype,
+      number.valueOf(), number.toFixed(1)],
+    string: [typeof string, Object.getPrototypeOf(string) === String.prototype,
+      string.valueOf(), string.toUpperCase(), string.length],
+    symbol: [Object.getPrototypeOf(boxedSymbol) === Symbol.prototype,
+      boxedSymbol.valueOf() === symbol, boxedSymbol.description,
+      Object.getPrototypeOf(Symbol) === Function.prototype],
+    bigint: [Object.getPrototypeOf(boxedBigInt) === BigInt.prototype,
+      boxedBigInt.valueOf() === bigint, boxedBigInt.toString()],
+    json: [JSON.stringify(boolean), JSON.stringify(number), JSON.stringify(string),
+      JSON.stringify(boxedSymbol)],
+    customJson: JSON.stringify(Object.assign(new Number(4), {toJSON() { return 17; }})),
+    bigintJsonThrows: throws(() => JSON.stringify(boxedBigInt)),
+    rejectsConstructors: [throws(() => new Symbol()), throws(() => new BigInt(1))],
+  });
+})()"#;
+        let mut interpreter = Interpreter::with_builtins();
+        let result = interpreter.eval_source(fixture).unwrap();
+        let Value::String(ref result) = result else {
+            panic!("primitive constructor fixture returned {result:?}");
+        };
+        let expected: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(expected["symbolType"], "function");
+        assert_eq!(expected["symbolRegistry"], "registry-key");
+        assert_eq!(expected["wellKnownSymbol"], true);
+        assert_eq!(
+            expected["boolean"],
+            serde_json::json!(["object", true, false, "false"])
+        );
+        assert_eq!(
+            expected["number"],
+            serde_json::json!(["object", true, 12, "12.0"])
+        );
+        assert_eq!(
+            expected["string"],
+            serde_json::json!(["object", true, "abc", "ABC", 3])
+        );
+        assert_eq!(
+            expected["symbol"],
+            serde_json::json!([true, true, "x", true])
+        );
+        assert_eq!(expected["bigint"], serde_json::json!([true, true, "13"]));
+        assert_eq!(
+            expected["json"],
+            serde_json::json!(["false", "12", "\"abc\"", "{}"])
+        );
+        assert_eq!(expected["customJson"], "17");
+        assert_eq!(expected["bigintJsonThrows"], true);
+        assert_eq!(
+            expected["rejectsConstructors"],
+            serde_json::json!([true, true])
+        );
+
+        for runtime in ["node", "bun"] {
+            let Ok(reference) = Command::new(runtime)
+                .args(["-e", &format!("process.stdout.write({fixture})")])
+                .output()
+            else {
+                continue;
+            };
+            if !reference.status.success() {
+                eprintln!(
+                    "skipping {runtime} primitive comparison: {}",
+                    String::from_utf8_lossy(&reference.stderr)
+                );
+                continue;
+            }
+            let actual: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(expected, actual, "{runtime} primitive behavior differed");
+        }
+    }
 }

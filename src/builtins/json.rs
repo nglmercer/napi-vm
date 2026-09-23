@@ -3,7 +3,7 @@
 use super::nf;
 use crate::error::{VmErr, vm_err};
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::Value;
+use crate::value::{BoxedPrimitive, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(j) = e.get("JSON") {
@@ -202,61 +202,87 @@ fn json_serialize(
             return json_serialize(interp, &target, out, visited, depth);
         }
         Value::Object { props, .. } => {
-            let ptr = std::rc::Rc::as_ptr(props) as *const ();
-            if !visited.insert(ptr) {
-                return Err(VmErr::Msg(
-                    "TypeError: Converting circular structure to JSON".to_string(),
-                ));
+            let to_json = interp.member(v, "toJSON")?;
+            if crate::interpreter::call::is_callable_value(&to_json) {
+                let converted = interp.call_this(&to_json, v.clone(), Vec::new())?;
+                return json_serialize(interp, &converted, out, visited, depth + 1);
             }
-            append_json_char(out, '{')?;
-            let meta = props.meta.borrow();
-            // `JSON.stringify` walks own *enumerable* string keys only,
-            // skipping `undefined` values and the VM's internal slots. The
-            // key list is snapshotted first because resolving a getter runs
-            // guest code, which must not happen while the slots are borrowed.
-            // Snapshotted first: resolving a getter runs guest code, which
-            // must not happen while the slots are borrowed. The value is
-            // carried along so an ordinary property needs no second lookup —
-            // only an accessor goes back through `member`.
-            let entries: Vec<(String, Value)> = props
-                .borrow()
-                .iter()
-                .filter(|(k, _)| {
-                    !crate::interpreter::is_internal_key(k) && meta.attrs_of(k).enumerable
-                })
-                .map(|(k, value)| (k.clone(), value.clone()))
-                .collect();
-            drop(meta);
-            let mut first = true;
-            for (key, slot) in entries {
-                // An accessor is stored as a function named `get <key>`; it
-                // contributes the value it returns, not itself.
-                let is_getter = matches!(&slot, Value::Function(f)
-                if f.name.as_ref().is_some_and(|name| {
-                    name.strip_prefix("get ").is_some_and(|rest| rest == key)
-                }));
-                let value = if is_getter {
-                    interp.member(v, &key)?
-                } else {
-                    slot.deref_binding()
-                };
-                if matches!(value, Value::Undefined) {
-                    continue;
+            match props.meta.borrow().boxed_primitive.clone() {
+                Some(BoxedPrimitive::Bool(value)) => {
+                    return json_serialize(interp, &Value::Bool(value), out, visited, depth + 1);
                 }
-                if !first {
-                    append_json_char(out, ',')?;
+                Some(BoxedPrimitive::Number(value)) => {
+                    return json_serialize(interp, &Value::Number(value), out, visited, depth + 1);
                 }
-                first = false;
-                append_json_char(out, '"')?;
-                escape_json(&key, out)?;
-                append_json_str(out, "\":")?;
-                json_serialize(interp, &value, out, visited, depth + 1)?;
+                Some(BoxedPrimitive::String(value)) => {
+                    return json_serialize(interp, &Value::String(value), out, visited, depth + 1);
+                }
+                Some(BoxedPrimitive::BigInt(_)) => {
+                    return Err(VmErr::Msg(
+                        "TypeError: Do not know how to serialize a BigInt".into(),
+                    ));
+                }
+                Some(BoxedPrimitive::Symbol(_)) | None => {}
             }
-            append_json_char(out, '}')?;
-            visited.remove(&ptr);
+            json_serialize_object(interp, v, props, out, visited, depth)?;
         }
         _ => append_json_str(out, "null")?,
     }
+    Ok(())
+}
+
+fn json_serialize_object(
+    interp: &mut Interpreter,
+    value: &Value,
+    props: &std::rc::Rc<crate::value::ObjectCell>,
+    out: &mut String,
+    visited: &mut std::collections::HashSet<*const ()>,
+    depth: usize,
+) -> Result<(), VmErr> {
+    let ptr = std::rc::Rc::as_ptr(props) as *const ();
+    if !visited.insert(ptr) {
+        return Err(VmErr::Msg(
+            "TypeError: Converting circular structure to JSON".to_string(),
+        ));
+    }
+    append_json_char(out, '{')?;
+    let meta = props.meta.borrow();
+    // `JSON.stringify` walks own enumerable string keys only, skipping the
+    // VM's internal slots. Snapshot before getters execute guest code.
+    let entries: Vec<(String, Value)> = props
+        .borrow()
+        .iter()
+        .filter(|(key, _)| {
+            !crate::interpreter::is_internal_key(key) && meta.attrs_of(key).enumerable
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    drop(meta);
+    let mut first = true;
+    for (key, slot) in entries {
+        let is_getter = matches!(&slot, Value::Function(function)
+        if function.name.as_ref().is_some_and(|name| {
+            name.strip_prefix("get ").is_some_and(|rest| rest == key)
+        }));
+        let property = if is_getter {
+            interp.member(value, &key)?
+        } else {
+            slot.deref_binding()
+        };
+        if matches!(property, Value::Undefined) {
+            continue;
+        }
+        if !first {
+            append_json_char(out, ',')?;
+        }
+        first = false;
+        append_json_char(out, '"')?;
+        escape_json(&key, out)?;
+        append_json_str(out, "\":")?;
+        json_serialize(interp, &property, out, visited, depth + 1)?;
+    }
+    append_json_char(out, '}')?;
+    visited.remove(&ptr);
     Ok(())
 }
 

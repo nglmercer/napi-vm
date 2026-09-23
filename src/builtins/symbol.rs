@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{FIRST_USER_SYMBOL, SymbolData, Value};
+use crate::value::{BoxedPrimitive, FIRST_USER_SYMBOL, SymbolData, Value};
 
 /// The well-known symbols, in id order starting at 1.
 const WELL_KNOWN: &[&str] = &[
@@ -41,7 +41,35 @@ thread_local! {
 }
 
 pub(super) fn install(e: &mut Environment) {
-    e.set("Symbol", super::nf("Symbol", symbol_call));
+    let constructor = Value::object(vec![]);
+    e.set("Symbol", constructor.clone());
+    super::make_callable(&constructor, symbol_call, Some(symbol_construct));
+    constructor
+        .set_prop("for".into(), super::nf("for", symbol_for))
+        .expect("Symbol.for");
+    constructor
+        .set_prop("keyFor".into(), super::nf("keyFor", symbol_key_for))
+        .expect("Symbol.keyFor");
+    for name in WELL_KNOWN {
+        if let Some(symbol) = well_known(name) {
+            constructor
+                .set_prop((*name).into(), symbol)
+                .expect("well-known Symbol property");
+        }
+    }
+    let methods = ["toString", "valueOf"]
+        .into_iter()
+        .filter_map(|name| symbol_method(name).map(|method| (name, method)))
+        .collect();
+    let symbol = new_symbol(None);
+    let Value::Symbol(primitive) = &symbol else {
+        unreachable!("new_symbol returns a symbol")
+    };
+    super::install_primitive_prototype(e, &constructor, Value::Symbol(primitive.clone()), methods);
+}
+
+fn symbol_construct(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Err(VmErr::Msg("TypeError: Symbol is not a constructor".into()))
 }
 
 /// Mint a brand-new symbol. Every call produces a distinct identity.
@@ -138,12 +166,24 @@ pub fn symbol_method(key: &str) -> Option<Value> {
 }
 
 fn symbol_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    match &this {
-        Value::Symbol(s) => Ok(Value::String(s.to_display())),
-        _ => Ok(Value::String("Symbol()".to_string())),
-    }
+    Ok(Value::String(symbol_receiver(&this)?.to_display()))
 }
 
 fn symbol_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(this)
+    Ok(Value::Symbol(symbol_receiver(&this)?))
+}
+
+fn symbol_receiver(this: &Value) -> Result<Rc<SymbolData>, VmErr> {
+    match this {
+        Value::Symbol(symbol) => Ok(symbol.clone()),
+        Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
+            Some(BoxedPrimitive::Symbol(symbol)) => Ok(symbol.clone()),
+            _ => Err(VmErr::Msg(
+                "TypeError: Symbol method called on an incompatible receiver".into(),
+            )),
+        },
+        _ => Err(VmErr::Msg(
+            "TypeError: Symbol method called on an incompatible receiver".into(),
+        )),
+    }
 }

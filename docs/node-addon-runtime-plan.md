@@ -96,6 +96,10 @@ active interpreter callback dispatcher.
 objects with working `valueOf()` and basic `toString()` behavior. This
 conversion does not re-enter the interpreter because it does not invoke guest
 code. The guest `Object(value)` constructor shares the wrapper representation.
+Boxed Boolean, Number, String, Symbol, and BigInt values use the same
+materialized constructor prototypes in guest reflection and `napi_get_prototype`.
+`new Boolean`, `new Number`, and `new String` create boxed values; `Symbol` and
+`BigInt` reject construction.
 `napi_get_prototype` preserves explicit prototypes and the realm's
 `Object.prototype` identity for ordinary objects, and returns the shared
 `Function.prototype` for ordinary guest functions, class constructors, and

@@ -4,7 +4,7 @@
 use super::{NativeFn, nf};
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::Value;
+use crate::value::{BoxedPrimitive, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(n) = e.get("Number") {
@@ -37,10 +37,30 @@ pub(super) fn install(e: &mut Environment) {
             nf("isSafeInteger", number_is_safe_integer),
         )
         .expect("built-in Number property");
-        super::make_callable(&n, number_ctor, None);
+        super::make_callable(&n, number_ctor, Some(number_construct));
+        let methods = [
+            "toString",
+            "toLocaleString",
+            "toFixed",
+            "toPrecision",
+            "valueOf",
+        ]
+        .into_iter()
+        .filter_map(|name| number_method(name).map(|method| (name, method)))
+        .collect();
+        super::install_primitive_prototype(e, &n, Value::Number(0.0), methods);
     }
     if let Some(b) = e.get("Boolean") {
-        super::make_callable(&b, boolean_ctor, None);
+        super::make_callable(&b, boolean_ctor, Some(boolean_construct));
+        super::install_primitive_prototype(
+            e,
+            &b,
+            Value::Bool(false),
+            vec![
+                ("toString", nf("toString", boolean_to_string)),
+                ("valueOf", nf("valueOf", boolean_value_of)),
+            ],
+        );
     }
     if let Some(o) = e.get("Object") {
         super::make_callable(&o, object_ctor, None);
@@ -55,10 +75,47 @@ fn number_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
     }))
 }
 
+fn number_construct(
+    interpreter: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let number = number_ctor(interpreter, this, args)?;
+    Ok(Value::boxed_primitive(number).expect("Number constructor produces a number"))
+}
+
 fn boolean_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::Bool(
         a.first().map(|v| v.is_truthy()).unwrap_or(false),
     ))
+}
+
+fn boolean_construct(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let value = Value::Bool(args.first().is_some_and(Value::is_truthy));
+    Ok(Value::boxed_primitive(value).expect("Boolean constructor produces a boolean"))
+}
+
+fn boolean_primitive(this: &Value) -> Result<bool, VmErr> {
+    match this {
+        Value::Bool(value) => Ok(*value),
+        Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
+            Some(BoxedPrimitive::Bool(value)) => Ok(*value),
+            _ => Err(VmErr::Msg(
+                "TypeError: Boolean method called on an incompatible receiver".into(),
+            )),
+        },
+        _ => Err(VmErr::Msg(
+            "TypeError: Boolean method called on an incompatible receiver".into(),
+        )),
+    }
+}
+
+fn boolean_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::String(boolean_primitive(&this)?.to_string()))
+}
+
+fn boolean_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Bool(boolean_primitive(&this)?))
 }
 
 /// `Object(v)`: `v` itself when it is already an object, a fresh object when

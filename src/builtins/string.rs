@@ -18,8 +18,60 @@ pub(super) fn install(e: &mut Environment) {
         .expect("built-in String property");
         s.set_prop("raw".to_string(), nf("raw", string_raw))
             .expect("built-in String property");
-        super::make_callable(&s, string_ctor, None);
+        super::make_callable(&s, string_ctor, Some(string_construct));
+        let mut methods: Vec<(&str, Value)> = [
+            "toUpperCase",
+            "toLowerCase",
+            "trim",
+            "slice",
+            "substring",
+            "split",
+            "match",
+            "matchAll",
+            "search",
+            "includes",
+            "indexOf",
+            "charAt",
+            "startsWith",
+            "endsWith",
+            "repeat",
+            "replace",
+            "replaceAll",
+            "charCodeAt",
+            "at",
+            "padStart",
+            "padEnd",
+            "trimStart",
+            "trimEnd",
+            "lastIndexOf",
+            "codePointAt",
+            "concat",
+            "localeCompare",
+        ]
+        .into_iter()
+        .filter_map(|name| super::string_method(name).map(|method| (name, method)))
+        .collect();
+        methods.push(("toString", nf("toString", string_value_of)));
+        methods.push(("valueOf", nf("valueOf", string_value_of)));
+        super::install_primitive_prototype(e, &s, Value::String(String::new()), methods);
     }
+}
+
+fn string_construct(
+    interpreter: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let primitive = string_ctor(interpreter, this, args)?;
+    Ok(Value::boxed_primitive(primitive).expect("String constructor produces a string"))
+}
+
+fn string_value_of(
+    interpreter: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    bounded_string(str_this(interpreter, &this)?)
 }
 
 /// `String(v)`: the string coercion of `v`.

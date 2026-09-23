@@ -43,6 +43,7 @@ pub use typedarray::{
 use crate::error::VmErr;
 use crate::interpreter::{Env, Environment, Interpreter};
 use crate::value::{BoxedPrimitive, PropAttrs, Value};
+use std::rc::Rc;
 
 pub fn setup_builtins(env: &Env) {
     let mut e = env.borrow_mut();
@@ -498,6 +499,55 @@ pub(crate) fn set_builtin_constructor_prototype(
             props.set_proto(Some(std::rc::Rc::new(function_prototype)));
         }
     }
+}
+
+/// Install the shared prototype used by boxed primitive values. The wrapper
+/// value is also the prototype object for string, number, boolean, bigint,
+/// and symbol, so the VM can preserve primitive identity while exposing the
+/// ordinary `Object.getPrototypeOf` relationship.
+pub(crate) fn install_primitive_prototype(
+    e: &Environment,
+    constructor: &Value,
+    primitive: Value,
+    methods: Vec<(&str, Value)>,
+) {
+    let object_prototype = e
+        .get("Object")
+        .and_then(|object| object.get_prop("prototype"))
+        .map(Rc::new);
+    let prototype = Value::boxed_primitive(primitive)
+        .expect("primitive constructors install primitive prototype values");
+    if let Value::Object { props } = &prototype {
+        props.set_proto(object_prototype);
+    }
+    prototype
+        .set_prop("constructor".into(), constructor.clone())
+        .expect("primitive prototype constructor");
+    for (name, method) in &methods {
+        prototype
+            .set_prop((*name).into(), method.clone())
+            .expect("primitive prototype method");
+    }
+    if let Value::Object { props } = &prototype {
+        let mut meta = props.meta.borrow_mut();
+        meta.set_attrs(
+            "constructor",
+            PropAttrs {
+                enumerable: false,
+                ..PropAttrs::default()
+            },
+        );
+        for (name, _) in &methods {
+            meta.set_attrs(
+                name,
+                PropAttrs {
+                    enumerable: false,
+                    ..PropAttrs::default()
+                },
+            );
+        }
+    }
+    set_builtin_constructor_prototype(e, constructor, prototype);
 }
 
 // ===========================================================================
