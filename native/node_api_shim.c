@@ -274,6 +274,7 @@ typedef struct napi_vm_node_api_table {
   napi_status (*create_object_with_properties)(napi_env, napi_value,
                                                 napi_value*, napi_value*,
                                                 size_t, napi_value*);
+  napi_status (*post_finalizer)(napi_env, napi_finalize, void*, void*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1416,5 +1417,15 @@ NAPI_VM_EXPORT napi_status node_api_create_object_with_properties(
   return table ? table->create_object_with_properties(
                      env, prototype_or_null, property_names, property_values,
                      property_count, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_post_finalizer(napi_env env,
+                                                    napi_finalize finalize_cb,
+                                                    void* finalize_data,
+                                                    void* finalize_hint) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->post_finalizer(env, finalize_cb, finalize_data,
+                                       finalize_hint)
                : 9;
 }

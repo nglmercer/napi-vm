@@ -283,6 +283,41 @@ impl Drop for RustNodeApiHost {
         // native producer has not released its TSFN yet, keep the addon and
         // ABI shim mapped so its eventual closing/release calls stay valid.
         let active_threadsafe_workers = shutdown_threadsafe_functions(&self.state, &environments);
+
+        // Stop accepting new finalizer work, then run everything that was
+        // successfully posted before unloading an addon's library.
+        close_post_finalizer_senders(&environments);
+        let notifications = {
+            let state = self.state.borrow();
+            state.runtime_notifications.try_iter().collect::<Vec<_>>()
+        };
+        for notification in notifications {
+            let HostRuntimeNotification::PostedFinalizer(finalizer) = notification else {
+                continue;
+            };
+            let Some(environment) = environments
+                .iter()
+                .find(|environment| environment.raw() as usize == finalizer.environment)
+            else {
+                continue;
+            };
+            let Ok(Value::HostFunction { id, .. }) = create_posted_finalizer_value(
+                environment,
+                finalizer.finalize,
+                finalizer.data as *mut c_void,
+                finalizer.hint as *mut c_void,
+            ) else {
+                continue;
+            };
+            let _ = self.invoke_native(
+                id,
+                Value::Undefined,
+                Vec::new(),
+                None,
+                &mut reject_guest_callback,
+            );
+        }
+
         if active_threadsafe_workers {
             let libraries = std::mem::take(&mut self.state.borrow_mut().libraries);
             std::mem::forget(libraries);
@@ -335,6 +370,11 @@ struct NativeCallbackRecord {
 #[derive(Clone)]
 enum NativeCallback {
     Function(NapiCallback),
+    PostedFinalizer {
+        finalize: NapiFinalize,
+        data: *mut c_void,
+        hint: *mut c_void,
+    },
     AsyncComplete {
         callback: NapiAsyncCompleteCallback,
         status: i32,
@@ -578,6 +618,22 @@ static THREADSAFE_FUNCTIONS: OnceLock<Mutex<HashMap<usize, Arc<NapiThreadsafeFun
 enum HostRuntimeNotification {
     AsyncWorkCompletion(AsyncWorkCompletion),
     ThreadsafeFunction(usize),
+    PostedFinalizer(PostedFinalizer),
+}
+
+#[derive(Clone, Copy)]
+struct PostedFinalizer {
+    environment: usize,
+    finalize: NapiFinalize,
+    data: usize,
+    hint: usize,
+}
+
+static POST_FINALIZER_SENDERS: OnceLock<Mutex<HashMap<usize, Sender<HostRuntimeNotification>>>> =
+    OnceLock::new();
+
+fn post_finalizer_senders() -> &'static Mutex<HashMap<usize, Sender<HostRuntimeNotification>>> {
+    POST_FINALIZER_SENDERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 struct AsyncWorkTask {
@@ -1262,6 +1318,8 @@ struct NapiVmApiTable {
         usize,
         *mut NapiValue,
     ) -> i32,
+    post_finalizer:
+        unsafe extern "C" fn(NapiEnv, Option<NapiFinalize>, *mut c_void, *mut c_void) -> i32,
 }
 
 #[repr(C)]
@@ -1435,6 +1493,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     fatal_exception: api_fatal_exception,
     set_prototype: api_set_prototype,
     create_object_with_properties: api_create_object_with_properties,
+    post_finalizer: api_post_finalizer,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1741,6 +1800,25 @@ fn create_native_async_complete_value(
             work_id,
         },
         data,
+        true,
+    )
+}
+
+fn create_posted_finalizer_value(
+    environment: &Rc<NapiEnvironment>,
+    finalize: NapiFinalize,
+    data: *mut c_void,
+    hint: *mut c_void,
+) -> Result<Value, i32> {
+    create_native_callback_value_with_kind(
+        environment,
+        "node_api_post_finalizer",
+        NativeCallback::PostedFinalizer {
+            finalize,
+            data,
+            hint,
+        },
+        std::ptr::null_mut(),
         true,
     )
 }
@@ -2573,6 +2651,22 @@ fn register_environment(environment: &Rc<NapiEnvironment>) {
             .borrow_mut()
             .insert(environment.raw() as usize, Rc::downgrade(environment));
     });
+    if let Some(owner) = environment.owner.upgrade()
+        && let Ok(mut senders) = post_finalizer_senders().lock()
+    {
+        senders.insert(
+            environment.raw() as usize,
+            owner.borrow().runtime_notification_sender.clone(),
+        );
+    }
+}
+
+fn close_post_finalizer_senders(environments: &[Rc<NapiEnvironment>]) {
+    if let Ok(mut senders) = post_finalizer_senders().lock() {
+        for environment in environments {
+            senders.remove(&(environment.raw() as usize));
+        }
+    }
 }
 
 impl Drop for NapiEnvironment {
@@ -2585,6 +2679,9 @@ impl Drop for NapiEnvironment {
                 .borrow_mut()
                 .remove(&(self as *const Self as usize));
         });
+        if let Ok(mut senders) = post_finalizer_senders().lock() {
+            senders.remove(&(self as *const Self as usize));
+        }
     }
 }
 
@@ -3922,6 +4019,44 @@ unsafe extern "C" fn api_create_object_with_properties(
         unsafe { result.write(handle) };
         Ok(())
     })
+}
+
+/// Queue a finalizer for the runtime's owner-thread event loop. This entry
+/// point deliberately avoids the thread-local environment lookup used by
+/// ordinary Node-API functions, so native finalization work can safely post
+/// from a thread that cannot enter the interpreter.
+unsafe extern "C" fn api_post_finalizer(
+    env: NapiEnv,
+    finalize: Option<NapiFinalize>,
+    data: *mut c_void,
+    hint: *mut c_void,
+) -> i32 {
+    let status = match (env.is_null(), finalize) {
+        (false, Some(finalize)) => {
+            let notification = HostRuntimeNotification::PostedFinalizer(PostedFinalizer {
+                environment: env as usize,
+                finalize,
+                data: data as usize,
+                hint: hint as usize,
+            });
+            match post_finalizer_senders().lock() {
+                Ok(senders) => match senders.get(&(env as usize)) {
+                    Some(sender) => sender
+                        .send(notification)
+                        .map_or(NAPI_GENERIC_FAILURE, |_| NAPI_OK),
+                    None => NAPI_INVALID_ARG,
+                },
+                Err(_) => NAPI_GENERIC_FAILURE,
+            }
+        }
+        _ => NAPI_INVALID_ARG,
+    };
+    // `last_error` is owner-thread state. Update it only when this call is
+    // made on that thread; a worker must not touch the interpreter's `Cell`.
+    if let Ok(environment) = environment(env) {
+        environment.last_error.set(napi_extended_error_info(status));
+    }
+    status
 }
 
 fn napi_default_object_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
@@ -7589,6 +7724,14 @@ impl RustNodeApiHost {
                         .remove(&frame_key);
                     (returned, None)
                 }
+                NativeCallback::PostedFinalizer {
+                    finalize,
+                    data,
+                    hint,
+                } => {
+                    unsafe { finalize(callback.env.raw(), data, hint) };
+                    (std::ptr::null_mut(), None)
+                }
                 NativeCallback::AsyncComplete {
                     callback: callback_fn,
                     status,
@@ -8496,41 +8639,69 @@ impl HostBridge for RustNodeApiHost {
         };
         events.reserve(notifications.len());
         for notification in notifications {
-            let HostRuntimeNotification::AsyncWorkCompletion(completion) = notification else {
-                let HostRuntimeNotification::ThreadsafeFunction(function_id) = notification else {
-                    unreachable!();
-                };
-                events.extend(thread_safe_function_events(function_id)?);
-                continue;
-            };
-            let work = {
-                let state = self.state.borrow();
-                state.environments.iter().find_map(|environment| {
-                    environment
-                        .async_works
-                        .borrow()
-                        .get(&completion.work_id)
-                        .cloned()
-                        .map(|work| (environment.clone(), work))
-                })
-            };
-            let Some((environment, work)) = work else {
-                continue;
-            };
-            let callback = create_native_async_complete_value(
-                &environment,
-                work.complete,
-                completion.status,
-                work.data,
-                completion.work_id,
-            )
-            .map_err(|status| napi_error("creating async-work completion callback", status))?;
-            events.push(HostEvent::Callback(HostCallback {
-                callback,
-                this_value: Value::Undefined,
-                args: Vec::new(),
-                kind: HostCallbackKind::Call,
-            }));
+            match notification {
+                HostRuntimeNotification::AsyncWorkCompletion(completion) => {
+                    let work = {
+                        let state = self.state.borrow();
+                        state.environments.iter().find_map(|environment| {
+                            environment
+                                .async_works
+                                .borrow()
+                                .get(&completion.work_id)
+                                .cloned()
+                                .map(|work| (environment.clone(), work))
+                        })
+                    };
+                    let Some((environment, work)) = work else {
+                        continue;
+                    };
+                    let callback = create_native_async_complete_value(
+                        &environment,
+                        work.complete,
+                        completion.status,
+                        work.data,
+                        completion.work_id,
+                    )
+                    .map_err(|status| {
+                        napi_error("creating async-work completion callback", status)
+                    })?;
+                    events.push(HostEvent::Callback(HostCallback {
+                        callback,
+                        this_value: Value::Undefined,
+                        args: Vec::new(),
+                        kind: HostCallbackKind::Call,
+                    }));
+                }
+                HostRuntimeNotification::ThreadsafeFunction(function_id) => {
+                    events.extend(thread_safe_function_events(function_id)?);
+                }
+                HostRuntimeNotification::PostedFinalizer(finalizer) => {
+                    let environment = {
+                        let state = self.state.borrow();
+                        state
+                            .environments
+                            .iter()
+                            .find(|environment| environment.raw() as usize == finalizer.environment)
+                            .cloned()
+                    };
+                    let Some(environment) = environment else {
+                        continue;
+                    };
+                    let callback = create_posted_finalizer_value(
+                        &environment,
+                        finalizer.finalize,
+                        finalizer.data as *mut c_void,
+                        finalizer.hint as *mut c_void,
+                    )
+                    .map_err(|status| napi_error("creating posted finalizer callback", status))?;
+                    events.push(HostEvent::Callback(HostCallback {
+                        callback,
+                        this_value: Value::Undefined,
+                        args: Vec::new(),
+                        kind: HostCallbackKind::Call,
+                    }));
+                }
+            }
         }
         Ok(events)
     }
@@ -14528,7 +14699,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
     }
 
     #[test]
-    fn experimental_node_api_object_prototype_apis_match_reference_runtimes() {
+    fn experimental_node_api_object_and_finalizer_apis_match_reference_runtimes() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-node-api-set-prototype-{}-{}",
@@ -14559,9 +14730,10 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             .collect::<String>();
         if !experimental_headers.contains("node_api_set_prototype")
             || !experimental_headers.contains("node_api_create_object_with_properties")
+            || !experimental_headers.contains("node_api_post_finalizer")
         {
             eprintln!(
-                "skipping experimental Node-API fixture: installed Node headers lack the experimental object APIs"
+                "skipping experimental Node-API fixture: installed Node headers lack required experimental APIs"
             );
             let _ = fs::remove_dir_all(&root);
             return;
@@ -14597,6 +14769,66 @@ static napi_value default_cycle_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static int posted_finalizer_calls;
+static int posted_finalizer_api_status = -1;
+static int posted_finalizer_post_count;
+static int posted_finalizer_values[16];
+static int posted_finalizer_value;
+
+static void posted_finalizer(napi_env env, void* data, void* hint) {
+  (void)hint;
+  napi_value global, value;
+  int finalized_value = *(int*)data;
+  posted_finalizer_calls++;
+  posted_finalizer_value = finalized_value;
+  if (finalized_value == 42) return;
+  posted_finalizer_api_status = napi_get_global(env, &global);
+  if (posted_finalizer_api_status == napi_ok) {
+    posted_finalizer_api_status = napi_create_int32(env, finalized_value, &value);
+  }
+  if (posted_finalizer_api_status == napi_ok) {
+    posted_finalizer_api_status = napi_set_named_property(
+        env, global, "postedFinalizerValue", value);
+  }
+}
+
+static napi_value post_finalizer_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_value result;
+  int32_t data;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_value_int32(env, args[0], &data) != napi_ok ||
+      posted_finalizer_post_count >= 16)
+    return NULL;
+  int* finalizer_data = &posted_finalizer_values[posted_finalizer_post_count++];
+  *finalizer_data = data;
+  napi_status status = node_api_post_finalizer(
+      env, posted_finalizer, finalizer_data, NULL);
+  if (napi_create_int32(env, status, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value posted_finalizer_calls_probe(napi_env env, napi_callback_info info) {
+  napi_value result;
+  if (napi_create_int32(env, posted_finalizer_calls, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value posted_finalizer_status_probe(napi_env env, napi_callback_info info) {
+  napi_value result;
+  if (napi_create_int32(env, posted_finalizer_api_status, &result) != napi_ok) return NULL;
+  return result;
+}
+
+int napi_vm_test_posted_finalizer_calls(void) {
+  return posted_finalizer_calls;
+}
+
+int napi_vm_test_posted_finalizer_value(void) {
+  return posted_finalizer_value;
+}
+
 static napi_value create_object_with_properties_probe(
     napi_env env, napi_callback_info info) {
   size_t argc = 1;
@@ -14618,7 +14850,8 @@ static napi_value create_object_with_properties_probe(
 }
 
 NAPI_MODULE_INIT() {
-  napi_value function, cycle_function, create_function;
+  napi_value function, cycle_function, create_function, post_function;
+  napi_value finalizer_calls_function, finalizer_status_function;
   if (napi_create_function(env, "setPrototype", NAPI_AUTO_LENGTH,
                            set_prototype_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "setPrototype", function) != napi_ok ||
@@ -14628,7 +14861,20 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "createObject", NAPI_AUTO_LENGTH,
                            create_object_with_properties_probe, NULL,
                            &create_function) != napi_ok ||
-      napi_set_named_property(env, exports, "createObject", create_function) != napi_ok)
+      napi_set_named_property(env, exports, "createObject", create_function) != napi_ok ||
+      napi_create_function(env, "postFinalizer", NAPI_AUTO_LENGTH,
+                           post_finalizer_probe, NULL, &post_function) != napi_ok ||
+      napi_set_named_property(env, exports, "postFinalizer", post_function) != napi_ok ||
+      napi_create_function(env, "postedFinalizerCalls", NAPI_AUTO_LENGTH,
+                           posted_finalizer_calls_probe, NULL,
+                           &finalizer_calls_function) != napi_ok ||
+      napi_set_named_property(env, exports, "postedFinalizerCalls",
+                              finalizer_calls_function) != napi_ok ||
+      napi_create_function(env, "postedFinalizerStatus", NAPI_AUTO_LENGTH,
+                           posted_finalizer_status_probe, NULL,
+                           &finalizer_status_function) != napi_ok ||
+      napi_set_named_property(env, exports, "postedFinalizerStatus",
+                              finalizer_status_function) != napi_ok)
     return NULL;
   return exports;
 }
@@ -14660,20 +14906,93 @@ NAPI_MODULE_INIT() {
         let main = root.join("main.cjs");
         fs::write(
             &main,
-            "const addon = require('./fixture.node');\nconst prototype = { marker: 'inherited', twice() { return this.value * 2; } };\nconst target = { value: 21 };\nconst status = addon.setPrototype(target, prototype);\nconst cycleStatus = addon.setPrototype(target, target);\nconst defaultCycleStatus = addon.defaultCycle({});\nconst nullTarget = {};\nconst nullStatus = addon.setPrototype(nullTarget, null);\nObject.freeze(target);\nconst frozenSameStatus = addon.setPrototype(target, prototype);\nconst frozenChangeStatus = addon.setPrototype(target, null);\nconst [created, symbolKey] = addon.createObject(prototype);\nconst [nullCreated] = addon.createObject(null);\nconst [implicitlyNullCreated] = addon.createObject();\nmodule.exports = JSON.stringify({ status, cycleStatus, defaultCycleStatus, nullStatus, nullPrototype: Object.getPrototypeOf(nullTarget) === null, frozenSameStatus, frozenChangeStatus, samePrototype: Object.getPrototypeOf(target) === prototype, marker: target.marker, twice: target.twice(), createdPrototype: Object.getPrototypeOf(created) === prototype, createdLabel: created.label, createdValue: created.value, createdSymbol: created[symbolKey], inherited: created.marker, nullCreatedPrototype: Object.getPrototypeOf(nullCreated) === null, implicitlyNullCreatedPrototype: Object.getPrototypeOf(implicitlyNullCreated) === null });\n",
+            r#"const addon = require('./fixture.node');
+const prototype = { marker: 'inherited', twice() { return this.value * 2; } };
+const target = { value: 21 };
+const status = addon.setPrototype(target, prototype);
+const cycleStatus = addon.setPrototype(target, target);
+const defaultCycleStatus = addon.defaultCycle({});
+const nullTarget = {};
+const nullStatus = addon.setPrototype(nullTarget, null);
+Object.freeze(target);
+const frozenSameStatus = addon.setPrototype(target, prototype);
+const frozenChangeStatus = addon.setPrototype(target, null);
+const [created, symbolKey] = addon.createObject(prototype);
+const [nullCreated] = addon.createObject(null);
+const [implicitlyNullCreated] = addon.createObject();
+const finalizerStatus = addon.postFinalizer(23);
+const postedFinalizerCallsImmediately = addon.postedFinalizerCalls();
+module.exports = {
+  run: () => JSON.stringify({
+  status,
+  cycleStatus,
+  defaultCycleStatus,
+  nullStatus,
+  nullPrototype: Object.getPrototypeOf(nullTarget) === null,
+  frozenSameStatus,
+  frozenChangeStatus,
+  samePrototype: Object.getPrototypeOf(target) === prototype,
+  marker: target.marker,
+  twice: target.twice(),
+  createdPrototype: Object.getPrototypeOf(created) === prototype,
+  createdLabel: created.label,
+  createdValue: created.value,
+  createdSymbol: created[symbolKey],
+  inherited: created.marker,
+  nullCreatedPrototype: Object.getPrototypeOf(nullCreated) === null,
+  implicitlyNullCreatedPrototype: Object.getPrototypeOf(implicitlyNullCreated) === null,
+  finalizerStatus,
+  postedFinalizerCallsImmediately,
+  postedFinalizerCalls: addon.postedFinalizerCalls(),
+  postedFinalizerApiStatus: addon.postedFinalizerStatus(),
+  postedFinalizerValue: globalThis.postedFinalizerValue
+  }),
+  postAgain: () => addon.postFinalizer(42)
+};
+"#,
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
 
         let mut interpreter = Interpreter::with_builtins();
-        interpreter
+        let host = interpreter
             .enable_rust_node_api_addons(
                 RustNodeApiOptions::new([root.clone()])
                     .allow_native_addon_with_sha256(&addon, digest)
                     .entry(&main),
             )
             .unwrap();
-        let result = interpreter.eval_source("require('./main.cjs');").unwrap();
+        let host_weak = Rc::downgrade(&host);
+        drop(host);
+        let loaded_main = interpreter
+            .run_script_source("require('./main.cjs');")
+            .unwrap();
+        assert!(matches!(loaded_main, Value::Object { .. }));
+        let observer = unsafe { Library::open(Some(addon.as_os_str()), RTLD_NOW) }.unwrap();
+        let posted_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_posted_finalizer_calls\0")
+                .unwrap()
+        };
+        let posted_finalizer_value: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_posted_finalizer_value\0")
+                .unwrap()
+        };
+        let pre_event = interpreter
+            .run_script_source("require('./main.cjs').run();")
+            .unwrap();
+        let Value::String(pre_event_json) = &pre_event else {
+            panic!(
+                "experimental Node-API pre-event fixture did not return JSON text: {pre_event:?}"
+            );
+        };
+        let pre_event_result: serde_json::Value = serde_json::from_str(pre_event_json).unwrap();
+        assert_eq!(pre_event_result["postedFinalizerCallsImmediately"], 0);
+        assert!(interpreter.run_event_loop_once(Duration::ZERO).unwrap());
+        let result = interpreter
+            .run_script_source("require('./main.cjs').run();")
+            .unwrap();
         let Value::String(vm_json) = &result else {
             panic!("experimental Node-API fixture did not return JSON text: {result:?}");
         };
@@ -14697,11 +15016,16 @@ NAPI_MODULE_INIT() {
                 "createdSymbol": "symbol-value",
                 "inherited": "inherited",
                 "nullCreatedPrototype": true,
-                "implicitlyNullCreatedPrototype": true
+                "implicitlyNullCreatedPrototype": true,
+                "finalizerStatus": 0,
+                "postedFinalizerCallsImmediately": 0,
+                "postedFinalizerCalls": 1,
+                "postedFinalizerApiStatus": 0,
+                "postedFinalizerValue": 23
             })
         );
 
-        let runner = "process.stdout.write(require('./main.cjs'))";
+        let runner = "const main = require('./main.cjs'); const deadline = Date.now() + 1000; function poll() { const result = JSON.parse(main.run()); if (result.postedFinalizerCalls === 1) { process.stdout.write(JSON.stringify(result)); return; } if (Date.now() >= deadline) { process.stderr.write('posted finalizer did not run\\n'); process.exitCode = 1; return; } setTimeout(poll, 1); } poll();";
         if let Ok(node_version) = Command::new("node").arg("--version").output()
             && node_version.status.success()
         {
@@ -14718,11 +15042,12 @@ NAPI_MODULE_INIT() {
                 let stderr = String::from_utf8_lossy(&reference.stderr);
                 assert!(
                     stderr.contains("node_api_set_prototype")
-                        || stderr.contains("node_api_create_object_with_properties"),
+                        || stderr.contains("node_api_create_object_with_properties")
+                        || stderr.contains("node_api_post_finalizer"),
                     "Node experimental Node-API fixture failed for an unexpected reason: {stderr}"
                 );
                 eprintln!(
-                    "Node runtime lacks the experimental object APIs; skipped this reference comparison"
+                    "Node runtime lacks the experimental APIs; skipped this reference comparison"
                 );
             }
         }
@@ -14742,14 +15067,36 @@ NAPI_MODULE_INIT() {
                 let stderr = String::from_utf8_lossy(&reference.stderr);
                 assert!(
                     stderr.contains("node_api_set_prototype")
-                        || stderr.contains("node_api_create_object_with_properties"),
+                        || stderr.contains("node_api_create_object_with_properties")
+                        || stderr.contains("node_api_post_finalizer"),
                     "Bun experimental Node-API fixture failed for an unexpected reason: {stderr}"
                 );
                 eprintln!(
-                    "Bun does not export the experimental object APIs; skipped this reference comparison"
+                    "Bun does not export these experimental APIs; skipped this reference comparison"
                 );
             }
         }
+
+        let Value::Number(post_status) = interpreter
+            .run_script_source("require('./main.cjs').postAgain();")
+            .unwrap()
+        else {
+            panic!("shutdown finalizer scheduling did not return a status");
+        };
+        assert_eq!(post_status, 0.0);
+        drop(interpreter.commonjs_loader.take());
+        drop(interpreter.host.take());
+        assert!(host_weak.upgrade().is_none(), "native host was not dropped");
+        let Value::Number(shutdown_finalizer_value) = interpreter
+            .run_script_source("globalThis.postedFinalizerValue")
+            .unwrap()
+        else {
+            panic!("shutdown finalizer did not update the guest global");
+        };
+        assert_eq!(shutdown_finalizer_value, 23.0);
+        assert_eq!(unsafe { posted_finalizer_calls() }, 2);
+        assert_eq!(unsafe { posted_finalizer_value() }, 42);
+        drop(observer);
         drop(interpreter);
         fs::remove_dir_all(root).unwrap();
     }

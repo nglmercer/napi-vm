@@ -187,6 +187,13 @@ not raise the stable Node-API version reported by the host. Their fixture
 compares prototype identity, inherited behavior, and property values with
 Node. Bun 1.4 does not export these experimental symbols, so that comparison is
 recorded as unsupported there.
+`node_api_post_finalizer` queues a native finalizer as an external event for
+the interpreter's owner thread. The callback can use Node-API after the queued
+event runs; it never executes directly on the posting thread. During host
+shutdown, new posts are closed and already queued finalizers run before addon
+libraries unload. Guest callback dispatch is unavailable during this final
+shutdown drain, so finalizers that need to enter JavaScript must be processed
+while the runtime event loop is still active.
 The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
@@ -360,7 +367,8 @@ not return success with a partial or fabricated result.
 - [Node-API](https://nodejs.org/api/n-api.html) describes the opaque `napi_value`
   interface, the ABI stability boundary, and experimental
   [`node_api_set_prototype`](https://nodejs.org/api/n-api.html#node_api_set_prototype) and
-  [`node_api_create_object_with_properties`](https://nodejs.org/api/n-api.html#node_api_create_object_with_properties).
+  [`node_api_create_object_with_properties`](https://nodejs.org/api/n-api.html#node_api_create_object_with_properties) and
+  [`node_api_post_finalizer`](https://nodejs.org/api/n-api.html#node_api_post_finalizer).
 - [Node.js C++ addons](https://nodejs.org/api/addons.html) distinguishes
   Node-API, NAN, and direct V8/Node/libuv addon styles.
 - [Node.js CommonJS modules](https://nodejs.org/api/modules.html) documents
