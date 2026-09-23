@@ -171,8 +171,9 @@ function addonWorkerMain() {
       const entries=[];
       for(const key of Object.getOwnPropertyNames(value)){
         const descriptor=Object.getOwnPropertyDescriptor(value,key);
-        if(!descriptor||!Object.hasOwn(descriptor,'value'))throw new TypeError('accessor properties cannot cross the Node addon bridge');
-        entries.push([key,encode(descriptor.value,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
+        if(!descriptor)throw new TypeError('property descriptor cannot cross the Node addon bridge');
+        if(Object.hasOwn(descriptor,'value'))entries.push([key,encode(descriptor.value,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
+        else entries.push([key,{t:'undefined'},true,descriptor.enumerable,descriptor.configurable,descriptor.get?encode(descriptor.get,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):null,descriptor.set?encode(descriptor.set,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):null]);
       }
       if(Object.getOwnPropertySymbols(value).length)throw new TypeError('symbol properties cannot cross the Node addon bridge');
       const extensible=Object.isExtensible(value);
@@ -214,7 +215,7 @@ function addonWorkerMain() {
       };guestCallbackIds.set(callback,value.v);return callback;}
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
       case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});return a;}
-      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [k,v,writable=true,enumerable=true,configurable=true]=item;Object.defineProperty(o,k,{value:decode(v,depth+1,graph),enumerable,writable,configurable});}if(value.extensible===false)Object.preventExtensions(o);return o;}
+      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [k,v,writable=true,enumerable=true,configurable=true]=item;const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.extensible===false)Object.preventExtensions(o);return o;}
       default:throw new TypeError('unsupported napi-vm argument');
     }
   }
@@ -224,7 +225,7 @@ function addonWorkerMain() {
     for(const key of Object.getOwnPropertyNames(object)){
       if(Array.isArray(object)&&key==='length')continue;
       const descriptor=Object.getOwnPropertyDescriptor(object,key);
-      if(!descriptor||!Object.hasOwn(descriptor,'value'))throw new TypeError('accessor properties on guest objects cannot cross the Node addon bridge');
+      if(!descriptor)throw new TypeError('guest property descriptor could not be read');
       entries.set(key,descriptor);
     }
     return {entries,extensible:Object.isExtensible(object),prototype:Object.getPrototypeOf(object),length:Array.isArray(object)?object.length:undefined};
@@ -238,7 +239,7 @@ function addonWorkerMain() {
       else if(ArrayBuffer.isView(value))state.set(value,value.constructor.name+':'+Buffer.from(value.buffer,value.byteOffset,value.byteLength).toString('hex'));
       else if(value instanceof ArrayBuffer)state.set(value,'buffer:'+Buffer.from(value).toString('hex'));
       if(Array.isArray(value)||Object.getPrototypeOf(value)===Object.prototype||Object.getPrototypeOf(value)===null)
-        for(const key of Object.keys(value))visit(value[key]);
+        for(const key of Object.getOwnPropertyNames(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(descriptor&&Object.hasOwn(descriptor,'value'))visit(descriptor.value);}
     }
     for(const value of nodes.values())visit(value);
     return state;
@@ -262,7 +263,9 @@ function addonWorkerMain() {
       const changedKeys=[];
       for(const [key,descriptor] of now.entries){
         const prior=old.entries.get(key);
-        if(!prior||!Object.is(prior.value,descriptor.value)||prior.writable!==descriptor.writable||prior.enumerable!==descriptor.enumerable||prior.configurable!==descriptor.configurable)changedKeys.push(key);
+        const priorIsData=prior&&Object.hasOwn(prior,'value'),currentIsData=Object.hasOwn(descriptor,'value');
+        const valueChanged=!prior||priorIsData!==currentIsData||(currentIsData?!Object.is(prior.value,descriptor.value):!Object.is(prior.get,descriptor.get)||!Object.is(prior.set,descriptor.set));
+        if(valueChanged||prior.writable!==descriptor.writable||prior.enumerable!==descriptor.enumerable||prior.configurable!==descriptor.configurable)changedKeys.push(key);
       }
       const deleted=[...old.entries.keys()].filter(key=>!now.entries.has(key));
       const changed=old.extensible!==now.extensible||old.length!==now.length||changedKeys.length>0||deleted.length>0;
@@ -270,7 +273,8 @@ function addonWorkerMain() {
       const entries=[];
       for(const key of changedKeys){
         const descriptor=now.entries.get(key);
-        entries.push([key,encodeGuestValue(descriptor.value,value,1,graph,guestRefs,guestCallbackIds),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
+        if(Object.hasOwn(descriptor,'value'))entries.push([key,encodeGuestValue(descriptor.value,value,1,graph,guestRefs,guestCallbackIds),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
+        else entries.push([key,{t:'undefined'},true,descriptor.enumerable,descriptor.configurable,descriptor.get?encodeGuestValue(descriptor.get,value,1,graph,guestRefs,guestCallbackIds):null,descriptor.set?encodeGuestValue(descriptor.set,value,1,graph,guestRefs,guestCallbackIds):null]);
       }
       if(Array.isArray(value)){
         if(!now.extensible)throw new TypeError('preventExtensions on guest arrays is not supported by the Node addon bridge');
@@ -1163,6 +1167,23 @@ fn wire_bytes(value: &JsonValue) -> Result<Vec<u8>, VmErr> {
         .collect()
 }
 
+fn guest_accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
+    let name = match value {
+        Value::Function(function) => function.name.as_deref(),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            Some(name.as_ref())
+        }
+        _ => None,
+    }?;
+    if name == format!("get {key}") {
+        Some("get")
+    } else if name == format!("set {key}") {
+        Some("set")
+    } else {
+        None
+    }
+}
+
 fn guest_to_wire(
     sidecar: &NodeAddonSidecar,
     v: &Value,
@@ -1224,27 +1245,57 @@ fn guest_to_wire(
                 return Err(VmErr::Msg("guest object exceeds limit".into()));
             }
             let meta = props.meta.borrow();
-            if meta.has_accessors {
-                return Err(VmErr::Msg(
-                    "guest objects with accessors cannot cross the Node addon bridge yet".into(),
-                ));
-            }
             let extensible = !meta.non_extensible;
             let node_id = graph.register(id, v.clone())?;
-            let wire = entries
-                .iter()
-                .filter(|(k, _)| !crate::interpreter::is_internal_key(k))
-                .map(|(k, x)| {
-                    let attrs = meta.attrs_of(k);
-                    Ok(json!([
-                        k,
-                        guest_to_wire(sidecar, x, depth + 1, graph, proxy_ids)?,
+            let mut wire = Vec::with_capacity(entries.len());
+            for (key, value) in &entries {
+                if crate::interpreter::is_internal_key(key) {
+                    continue;
+                }
+                let attrs = meta.attrs_of(key);
+                let kind = guest_accessor_kind(key, value);
+                let getter = (kind == Some("get")).then_some(value);
+                let setter = if kind == Some("set") {
+                    Some(value)
+                } else if getter.is_some() {
+                    entries
+                        .iter()
+                        .find(|(slot, _)| slot == &format!("__setter:{key}__"))
+                        .and_then(|(_, candidate)| {
+                            (guest_accessor_kind(key, candidate) == Some("set"))
+                                .then_some(candidate)
+                        })
+                } else {
+                    None
+                };
+                if getter.is_some() || setter.is_some() {
+                    let getter = getter
+                        .map(|getter| guest_to_wire(sidecar, getter, depth + 1, graph, proxy_ids))
+                        .transpose()?
+                        .unwrap_or(JsonValue::Null);
+                    let setter = setter
+                        .map(|setter| guest_to_wire(sidecar, setter, depth + 1, graph, proxy_ids))
+                        .transpose()?
+                        .unwrap_or(JsonValue::Null);
+                    wire.push(json!([
+                        key,
+                        {"t":"undefined"},
+                        true,
+                        attrs.enumerable,
+                        attrs.configurable,
+                        getter,
+                        setter
+                    ]));
+                } else {
+                    wire.push(json!([
+                        key,
+                        guest_to_wire(sidecar, value, depth + 1, graph, proxy_ids)?,
                         attrs.writable,
                         attrs.enumerable,
                         attrs.configurable
-                    ]))
-                })
-                .collect::<Result<Vec<_>, VmErr>>()?;
+                    ]));
+                }
+            }
             json!({"t":"object","id":format!("g:{node_id}"),"v":wire,"extensible":extensible})
         }
         Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":bytes.borrow().as_slice()}),
@@ -1401,10 +1452,10 @@ fn mutation_property(
     sidecar: &NodeAddonSidecar,
     item: &JsonValue,
     graph: &mut WireDecodeContext,
-) -> Result<(String, Value, PropAttrs), VmErr> {
+) -> Result<GuestPropertyMutation, VmErr> {
     let pair = item
         .as_array()
-        .filter(|pair| pair.len() == 5)
+        .filter(|pair| pair.len() == 5 || pair.len() == 7)
         .ok_or_else(|| VmErr::Msg("invalid Node guest mutation property".into()))?;
     let key = pair[0]
         .as_str()
@@ -1420,11 +1471,60 @@ fn mutation_property(
             .as_bool()
             .ok_or_else(|| VmErr::Msg("invalid Node property configurable flag".into()))?,
     };
-    Ok((
-        key.to_string(),
-        wire_to_guest_with_context(sidecar, &pair[1], 0, graph)?,
+    let value = wire_to_guest_with_context(sidecar, &pair[1], 0, graph)?;
+    let getter = pair
+        .get(5)
+        .filter(|value| !value.is_null())
+        .map(|value| wire_to_guest_with_context(sidecar, value, 0, graph))
+        .transpose()?;
+    let setter = pair
+        .get(6)
+        .filter(|value| !value.is_null())
+        .map(|value| wire_to_guest_with_context(sidecar, value, 0, graph))
+        .transpose()?;
+    Ok(GuestPropertyMutation {
+        key: key.to_string(),
+        value,
         attrs,
-    ))
+        getter,
+        setter,
+    })
+}
+
+struct GuestPropertyMutation {
+    key: String,
+    value: Value,
+    attrs: PropAttrs,
+    getter: Option<Value>,
+    setter: Option<Value>,
+}
+
+fn callable_value(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
+    )
+}
+
+fn named_accessor(value: Value, name: String) -> Result<Value, VmErr> {
+    Ok(match &value {
+        Value::Function(function) => {
+            let mut function = function.clone();
+            function.name = Some(name.into());
+            Value::Function(function)
+        }
+        Value::NativeFunction { callable, .. } => Value::NativeFunction {
+            name: name.into(),
+            callable: *callable,
+        },
+        Value::HostFunction { id, .. } => Value::HostFunction {
+            name: name.into(),
+            id: *id,
+        },
+        _ => {
+            return Err(VmErr::Msg("Node accessor value is not callable".into()));
+        }
+    })
 }
 
 fn apply_guest_mutation(
@@ -1463,20 +1563,43 @@ fn apply_guest_mutation(
             let mut attributes = Vec::with_capacity(entries.len());
             let mut keys = HashSet::with_capacity(entries.len());
             for item in entries {
-                let (key, value, attrs) = mutation_property(sidecar, item, graph)?;
-                if crate::interpreter::is_internal_key(&key) {
+                let property = mutation_property(sidecar, item, graph)?;
+                if crate::interpreter::is_internal_key(&property.key) {
                     return Err(VmErr::Msg(
                         "Node addon mutation uses a reserved VM property name".into(),
                     ));
                 }
-                if !keys.insert(key.clone()) {
+                if !keys.insert(property.key.clone()) {
                     return Err(VmErr::Msg(
                         "Node object mutation has duplicate properties".into(),
                     ));
                 }
-                updates.push((key.clone(), value));
-                attributes.push((key, attrs));
+                if property.getter.is_some() || property.setter.is_some() {
+                    if property
+                        .getter
+                        .as_ref()
+                        .is_some_and(|getter| !callable_value(getter))
+                        || property
+                            .setter
+                            .as_ref()
+                            .is_some_and(|setter| !callable_value(setter))
+                    {
+                        return Err(VmErr::Msg(
+                            "Node accessor properties require callable getter/setter values".into(),
+                        ));
+                    }
+                    if property.getter.is_none() && property.setter.is_none() {
+                        return Err(VmErr::Msg(
+                            "empty Node accessor properties cannot be represented by the VM".into(),
+                        ));
+                    }
+                }
+                attributes.push((property.key.clone(), property.attrs));
+                updates.push(property);
             }
+            let has_accessor_updates = updates
+                .iter()
+                .any(|property| property.getter.is_some() || property.setter.is_some());
             let deleted = mutation
                 .get("deleted")
                 .and_then(JsonValue::as_array)
@@ -1497,15 +1620,37 @@ fn apply_guest_mutation(
                 ));
             }
             let mut slots = props.borrow_mut();
-            slots.retain(|(key, _)| !deleted.iter().any(|deleted| deleted == key));
-            for (key, value) in updates {
+            slots.retain(|(key, _)| {
+                !deleted
+                    .iter()
+                    .any(|deleted| deleted == key || key == &format!("__setter:{deleted}__"))
+            });
+            for property in updates {
+                let key = property.key;
+                let companion = format!("__setter:{key}__");
+                slots.retain(|(slot, _)| slot != &companion);
+                let (primary, setter) = match (property.getter, property.setter) {
+                    (Some(getter), Some(setter)) => (
+                        named_accessor(getter, format!("get {key}"))?,
+                        Some(named_accessor(setter, format!("set {key}"))?),
+                    ),
+                    (Some(getter), None) => (named_accessor(getter, format!("get {key}"))?, None),
+                    (None, Some(setter)) => (named_accessor(setter, format!("set {key}"))?, None),
+                    (None, None) => (property.value, None),
+                };
                 if let Some((_, slot)) = slots.iter_mut().find(|(name, _)| name == &key) {
-                    *slot = value;
+                    *slot = primary;
                 } else {
                     if slots.len() >= MAX_OBJECT_PROPS {
                         return Err(VmErr::Msg("Node object mutation exceeds VM limit".into()));
                     }
-                    slots.push((key, value));
+                    slots.push((key, primary));
+                }
+                if let Some(setter) = setter {
+                    if slots.len() >= MAX_OBJECT_PROPS {
+                        return Err(VmErr::Msg("Node object mutation exceeds VM limit".into()));
+                    }
+                    slots.push((companion, setter));
                 }
             }
             drop(slots);
@@ -1517,6 +1662,7 @@ fn apply_guest_mutation(
                 meta.forget(&key);
                 meta.set_attrs(&key, attrs);
             }
+            meta.has_accessors |= has_accessor_updates;
             if let Some(extensible) = mutation.get("extensible").and_then(JsonValue::as_bool) {
                 meta.non_extensible = !extensible;
             }
@@ -1542,34 +1688,39 @@ fn apply_guest_mutation(
             let mut named = array.named.borrow().clone();
             let mut keys = HashSet::with_capacity(entries.len());
             for item in entries {
-                let (key, value, attrs) = mutation_property(sidecar, item, graph)?;
-                if !keys.insert(key.clone()) {
+                let property = mutation_property(sidecar, item, graph)?;
+                if !keys.insert(property.key.clone()) {
                     return Err(VmErr::Msg(
                         "Node array mutation has duplicate properties".into(),
                     ));
                 }
-                if attrs != PropAttrs::default() {
+                if property.getter.is_some() || property.setter.is_some() {
+                    return Err(VmErr::Msg(
+                        "array accessor mutations cannot be written back to the VM".into(),
+                    ));
+                }
+                if property.attrs != PropAttrs::default() {
                     return Err(VmErr::Msg(
                         "non-default array property attributes cannot be written back to the VM"
                             .into(),
                     ));
                 }
-                if let Ok(index) = key.parse::<usize>()
-                    && key == index.to_string()
+                if let Ok(index) = property.key.parse::<usize>()
+                    && property.key == index.to_string()
                     && index < items.len()
                 {
-                    items[index] = value;
+                    items[index] = property.value;
                     continue;
                 }
-                if crate::interpreter::is_internal_key(&key) {
+                if crate::interpreter::is_internal_key(&property.key) {
                     return Err(VmErr::Msg(
                         "Node addon mutation uses a reserved VM property name".into(),
                     ));
                 }
-                if let Some((_, slot)) = named.iter_mut().find(|(name, _)| name == &key) {
-                    *slot = value;
+                if let Some((_, slot)) = named.iter_mut().find(|(name, _)| name == &property.key) {
+                    *slot = property.value;
                 } else {
-                    named.push((key, value));
+                    named.push((property.key, property.value));
                 }
             }
             let deleted = mutation
@@ -1902,18 +2053,54 @@ fn wire_to_guest_with_context(
             }
             let mut slots = Vec::with_capacity(a.len());
             let mut attrs = Vec::with_capacity(a.len());
+            let mut has_accessors = false;
             for item in a {
                 let pair = item
                     .as_array()
-                    .filter(|p| p.len() == 2 || p.len() == 5)
+                    .filter(|p| p.len() == 2 || p.len() == 5 || p.len() == 7)
                     .ok_or_else(|| VmErr::Msg("invalid Node property".into()))?;
                 let key = pair[0]
                     .as_str()
                     .ok_or_else(|| VmErr::Msg("invalid Node property key".into()))?;
-                slots.push((
-                    key.to_string(),
-                    wire_to_guest_with_context(sidecar, &pair[1], depth + 1, graph)?,
-                ));
+                if pair.len() == 7 {
+                    let getter = (!pair[5].is_null())
+                        .then(|| wire_to_guest_with_context(sidecar, &pair[5], depth + 1, graph))
+                        .transpose()?;
+                    let setter = (!pair[6].is_null())
+                        .then(|| wire_to_guest_with_context(sidecar, &pair[6], depth + 1, graph))
+                        .transpose()?;
+                    if getter.is_none() && setter.is_none() {
+                        return Err(VmErr::Msg(
+                            "empty Node accessor properties cannot be represented by the VM".into(),
+                        ));
+                    }
+                    if let Some(getter) = getter {
+                        if !callable_value(&getter) {
+                            return Err(VmErr::Msg("Node accessor getter is not callable".into()));
+                        }
+                        slots.push((
+                            key.to_string(),
+                            named_accessor(getter, format!("get {key}"))?,
+                        ));
+                    }
+                    if let Some(setter) = setter {
+                        if !callable_value(&setter) {
+                            return Err(VmErr::Msg("Node accessor setter is not callable".into()));
+                        }
+                        let slot = if slots.last().is_some_and(|(slot, _)| slot == key) {
+                            format!("__setter:{key}__")
+                        } else {
+                            key.to_string()
+                        };
+                        slots.push((slot, named_accessor(setter, format!("set {key}"))?));
+                    }
+                    has_accessors = true;
+                } else {
+                    slots.push((
+                        key.to_string(),
+                        wire_to_guest_with_context(sidecar, &pair[1], depth + 1, graph)?,
+                    ));
+                }
                 attrs.push((
                     key.to_string(),
                     PropAttrs {
@@ -1929,6 +2116,7 @@ fn wire_to_guest_with_context(
                 for (key, value) in attrs {
                     meta.set_attrs(&key, value);
                 }
+                meta.has_accessors = has_accessors;
                 if v.get("extensible").and_then(JsonValue::as_bool) == Some(false) {
                     meta.non_extensible = true;
                 }
@@ -2113,6 +2301,22 @@ static napi_value same_object(napi_env env, napi_callback_info info) {
       napi_strict_equals(env, argv[0], argv[1], &equal) != napi_ok ||
       napi_create_int32(env, equal ? 1 : 0, &result) != napi_ok) return NULL;
   return result;
+}
+
+static napi_value read_property(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_named_property(env, argv[0], "value", &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value write_property(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2];
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_set_named_property(env, argv[0], "value", argv[1]) != napi_ok) return NULL;
+  return argv[1];
 }
 
 static napi_value mutate_object(napi_env env, napi_callback_info info) {
@@ -2429,6 +2633,10 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "isNodeIterator", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "sameObject", NAPI_AUTO_LENGTH, same_object, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "sameObject", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "readProperty", NAPI_AUTO_LENGTH, read_property, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "readProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "writeProperty", NAPI_AUTO_LENGTH, write_property, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "writeProperty", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "mutateObject", NAPI_AUTO_LENGTH, mutate_object, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "mutateObject", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "mutateArray", NAPI_AUTO_LENGTH, mutate_array, NULL, &fn) != napi_ok) return NULL;
@@ -2674,6 +2882,23 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(
             mutations.get_prop("named"),
             Some(Value::String(ref value)) if value == "native"
+        ));
+        let accessor_bridge = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); let captured = 14; const object = {}; Object.defineProperty(object, 'value', {get: () => captured, set: (value) => { captured = value; }, enumerable: true, configurable: true}); const before = addon.readProperty(object); addon.writeProperty(object, 37); ({before, captured, after: addon.readProperty(object)});",
+            )
+            .unwrap();
+        assert!(matches!(
+            accessor_bridge.get_prop("before"),
+            Some(Value::Number(value)) if value == 14.0
+        ));
+        assert!(matches!(
+            accessor_bridge.get_prop("captured"),
+            Some(Value::Number(value)) if value == 37.0
+        ));
+        assert!(matches!(
+            accessor_bridge.get_prop("after"),
+            Some(Value::Number(value)) if value == 37.0
         ));
         let callback_mutations = interpreter
             .eval_source(

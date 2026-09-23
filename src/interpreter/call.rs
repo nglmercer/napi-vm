@@ -261,9 +261,12 @@ impl Interpreter {
                 // with *both* a getter and a setter (one slot cannot hold two
                 // functions), so it is looked for only when the object has
                 // accessors at all.
-                let is_setter = |value: &Value| {
-                    matches!(value, Value::Function(f)
-                        if f.name.as_ref().is_some_and(|n| n.starts_with("set ")))
+                let is_setter = |value: &Value| match value {
+                    Value::Function(f) => f.name.as_ref().is_some_and(|n| n.starts_with("set ")),
+                    Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                        name.starts_with("set ")
+                    }
+                    _ => false,
                 };
                 // One scan locates the slot and says whether it is an
                 // accessor. Every property write reaches this, so it does not

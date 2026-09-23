@@ -124,17 +124,46 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
 /// Is this slot an accessor stored under the `get …` / `set …` naming that the
 /// evaluator uses to recognize getters and setters?
 fn accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
-    let Value::Function(f) = value else {
-        return None;
-    };
-    let name = f.name.as_ref()?;
-    if name.as_ref() == format!("get {}", key) {
+    let name = match value {
+        Value::Function(function) => function.name.as_deref(),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            Some(name.as_ref())
+        }
+        _ => None,
+    }?;
+    if name == format!("get {}", key) {
         Some("get")
-    } else if name.as_ref() == format!("set {}", key) {
+    } else if name == format!("set {}", key) {
         Some("set")
     } else {
         None
     }
+}
+
+fn is_callable(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
+    )
+}
+
+fn name_callable(value: &Value, name: &str) -> Option<Value> {
+    Some(match value {
+        Value::Function(function) => {
+            let mut function = function.clone();
+            function.name = Some(name.into());
+            Value::Function(function)
+        }
+        Value::NativeFunction { callable, .. } => Value::NativeFunction {
+            name: name.into(),
+            callable: *callable,
+        },
+        Value::HostFunction { id, .. } => Value::HostFunction {
+            name: name.into(),
+            id: *id,
+        },
+        _ => return None,
+    })
 }
 
 fn desc_bool(desc: &Value, key: &str, default: bool) -> bool {
@@ -376,7 +405,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     let getter = own_slot(descriptor, "get");
     let setter = own_slot(descriptor, "set");
     let is_accessor =
-        matches!(getter, Some(Value::Function(_))) || matches!(setter, Some(Value::Function(_)));
+        getter.as_ref().is_some_and(is_callable) || setter.as_ref().is_some_and(is_callable);
 
     let attrs = PropAttrs {
         // An accessor has no `writable` attribute; its mutability is whether a
@@ -393,14 +422,14 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
 
     let mut values: Vec<(String, Value)> = Vec::new();
     if is_accessor {
-        if let Some(Value::Function(f)) = &getter {
-            let mut f = f.clone();
-            f.name = Some(format!("get {}", key).into());
-            values.push((key.to_string(), Value::Function(f)));
+        if let Some(getter) = getter.as_ref().filter(|value| is_callable(value)) {
+            let getter = name_callable(getter, &format!("get {}", key))
+                .expect("callable getter can retain its value type");
+            values.push((key.to_string(), getter));
         }
-        if let Some(Value::Function(f)) = &setter {
-            let mut f = f.clone();
-            f.name = Some(format!("set {}", key).into());
+        if let Some(setter) = setter.as_ref().filter(|value| is_callable(value)) {
+            let setter = name_callable(setter, &format!("set {}", key))
+                .expect("callable setter can retain its value type");
             // A setter lives in the same slot when there is no getter; with a
             // getter present it is stored under a companion slot the assign
             // path looks up.
@@ -409,7 +438,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
             } else {
                 format!("__setter:{}__", key)
             };
-            values.push((slot, Value::Function(f)));
+            values.push((slot, setter));
         }
     } else {
         values.push((

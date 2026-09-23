@@ -235,16 +235,26 @@ impl Interpreter {
         }
         let v = self.prop(o, p)?;
         let is_getter = match &v {
-            Value::Function(f) => {
-                !f.is_arrow && f.name.as_ref().is_some_and(|n| n.starts_with("get "))
-            }
+            Value::Function(f) => f.name.as_ref().is_some_and(|n| n.starts_with("get ")),
             // A native accessor — `Map.prototype.size` — is recognized the
             // same way, by the `get ` prefix on its name.
-            Value::NativeFunction { name, .. } => name.starts_with("get "),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.starts_with("get ")
+            }
+            _ => false,
+        };
+        let is_setter_only = match &v {
+            Value::Function(f) => f.name.as_ref().is_some_and(|n| n.starts_with("set ")),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.starts_with("set ")
+            }
             _ => false,
         };
         if is_getter {
             return self.call_this(&v, o.clone(), vec![]);
+        }
+        if is_setter_only {
+            return Ok(Value::Undefined);
         }
         Ok(v)
     }
