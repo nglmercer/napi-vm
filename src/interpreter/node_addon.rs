@@ -6,6 +6,7 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -23,6 +24,8 @@ use crate::value::{
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WIRE_DEPTH: usize = 128;
 const MAX_NATIVE_HANDLES: usize = 262_144;
+
+static NEXT_GUEST_GRAPH_NODE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy)]
 struct LocalObjectTrap {
@@ -78,7 +81,7 @@ function finishSyncCallback(message) {
   }
   pendingSyncCallbacks.delete(message.callId);
   syncCallbackActive = pendingSyncCallbacks.size > 0;
-  let response = {ok:message.ok===true,value:message.value};
+  let response = {ok:message.ok===true,value:message.value,snapshots:message.snapshots||[]};
   let bytes = Buffer.from(JSON.stringify(response));
   if (bytes.length > pending.shared.byteLength - 8) {
     response = {ok:false,value:{t:'error',name:'RangeError',message:'synchronous guest callback result exceeds the bridge limit'}};
@@ -109,6 +112,7 @@ function consume() {
 function addonWorkerMain() {
   'use strict';
   const { parentPort } = require('node:worker_threads');
+  const { types } = require('node:util');
   const MAX_SYNC_CALLBACK_RESULT_BYTES = 1024 * 1024;
   let nextHandle=1, nextCallbackCall=1, nextNativeSymbolId=1, dispatchDepth=0;
   const refs=new Map(), objectIds=new WeakMap(), functionIds=new WeakMap(), promiseIds=new WeakMap(), guestCallbackIds=new WeakMap();
@@ -116,7 +120,8 @@ function addonWorkerMain() {
   const wellKnownSymbols=[undefined,Symbol.iterator,Symbol.asyncIterator,Symbol.toStringTag,Symbol.hasInstance,Symbol.toPrimitive,Symbol.species,Symbol.unscopables,Symbol.isConcatSpreadable,Symbol.match,Symbol.matchAll,Symbol.replace,Symbol.search,Symbol.split];
   function symbolId(value){let id=symbolIds.get(value);if(id===undefined){if(symbols.size>=262144)throw new RangeError('symbol handle limit exceeded');id='n:'+nextNativeSymbolId++;symbols.set(id,value);symbolIds.set(value,id);}return id;}
   function newGraph(){return {seen:new Map(),nextId:1};}
-  function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');graph.set(id,value);}}
+  function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');graph.set(id,value);if(graph.guestRefs)graph.guestRefs.set(value,id);}}
+  function newDecodeGraph(){const graph=new Map();graph.guestRefs=new WeakMap();graph.guestCallbacks=new WeakMap();return graph;}
   function hold(value,receiver){
     const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
     if(existing!==undefined)return existing;
@@ -202,20 +207,23 @@ function addonWorkerMain() {
       case 'bytes':return Buffer.from(value.v);
       case 'error':{const error=new Error(value.message||'guest callback threw');error.name=value.name||'Error';if(value.code)error.code=value.code;return error;}
       case 'hostObject':{const entry=refs.get(value.v);if(!entry||!entry.value||typeof entry.value!=='object')throw new TypeError('native object handle is invalid');return entry.value;}
-      case 'guestCallback':{const callback=function(...args){
+      case 'guestCallback':{const callbackGraph=graph;const callback=function(...args){
         const graph=newGraph();
-        const payload={callbackId:value.v,thisValue:encode(this,undefined,0,graph),args:args.map(v=>encode(v,undefined,0,graph))};
+        const guestMutations=callbackGraph.mutationBefore?collectGuestMutations(callbackGraph,callbackGraph.mutationBefore,callbackGraph.guestRefs,callbackGraph.guestCallbacks,graph):[];
+        const payload={callbackId:value.v,thisValue:encodeGuestValue(this,undefined,0,graph,callbackGraph.guestRefs,callbackGraph.guestCallbacks),args:args.map(v=>encodeGuestValue(v,undefined,0,graph,callbackGraph.guestRefs,callbackGraph.guestCallbacks)),guestMutations};
         if(dispatchDepth===0){event({event:'guestCallback',...payload});return undefined;}
         const callId=nextCallbackCall++,shared=new SharedArrayBuffer(MAX_SYNC_CALLBACK_RESULT_BYTES+8),words=new Int32Array(shared,0,2);
         event({event:'syncGuestCallback',callId,shared,...payload});
         const status=Atomics.wait(words,0,0,60000);if(status==='timed-out')throw new Error('timed out waiting for synchronous guest callback');
         const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
         const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
-        if(!response.ok)throw decode(response.value,0,new Map());return decode(response.value,0,new Map());
-      };guestCallbackIds.set(callback,value.v);return callback;}
+        applyGuestSnapshots(response.snapshots||[],callbackGraph);
+        if(!response.ok)throw decode(response.value,0,callbackGraph);return decode(response.value,0,callbackGraph);
+      };guestCallbackIds.set(callback,value.v);if(callbackGraph.guestCallbacks)callbackGraph.guestCallbacks.set(callback,value.v);return callback;}
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
-      case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});return a;}
-      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.extensible===false)Object.preventExtensions(o);return o;}
+      case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(a));return a;}
+      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.extensible===false)Object.preventExtensions(o);if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(o));return o;}
+      case 'proxy':{const target=decode(value.target,depth+1,graph);const handler=decode(value.handler,depth+1,graph);if((!target||typeof target!=='object')&&typeof target!=='function')throw new TypeError('invalid guest Proxy target');if(!handler||typeof handler!=='object')throw new TypeError('invalid guest Proxy handler');const supported=new Set(['get','set','has','deleteProperty','ownKeys','apply','construct']);const filteredHandler=new Proxy(Object.create(null),{get(_target,key){return supported.has(key)?Reflect.get(handler,key,handler):undefined;}});const proxy=new Proxy(target,filteredHandler);setGraphNode(graph,value.id,proxy);return proxy;}
       default:throw new TypeError('unsupported napi-vm argument');
     }
   }
@@ -229,10 +237,36 @@ function addonWorkerMain() {
     }
     return {entries,extensible:Object.isExtensible(object),prototype:Object.getPrototypeOf(object),length:Array.isArray(object)?object.length:undefined};
   }
+  function applyGuestSnapshots(snapshots,graph){
+    for(const snapshot of snapshots){
+      const object=graph.get(snapshot.id);if(!object||types.isProxy(object))continue;
+      if(snapshot.t==='array'){
+        for(const key of Reflect.ownKeys(object))if(key!=='length')Reflect.deleteProperty(object,key);
+        object.length=0;
+        for(let index=0;index<snapshot.v.length;index++)Object.defineProperty(object,String(index),{value:decode(snapshot.v[index],0,graph),enumerable:true,writable:true,configurable:true});
+        const desired=new Set(['length',...snapshot.v.map((_,index)=>String(index))]);
+        for(const [key,value] of(snapshot.named||[])){desired.add(key);Object.defineProperty(object,key,{value:decode(value,0,graph),enumerable:true,writable:true,configurable:true});}
+        for(const key of Reflect.ownKeys(object))if(!desired.has(key))Reflect.deleteProperty(object,key);
+      }else if(snapshot.t==='object'){
+        const desired=new Set();
+        for(const item of snapshot.v){
+          const [wireKey,value,writable=true,enumerable=true,configurable=true]=item;
+          const key=typeof wireKey==='string'?wireKey:decode(wireKey,0,graph);desired.add(key);
+          const descriptor={enumerable,configurable};
+          if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],0,graph);if(item[6]!==null)descriptor.set=decode(item[6],0,graph);}
+          else{descriptor.value=decode(value,0,graph);descriptor.writable=writable;}
+          Object.defineProperty(object,key,descriptor);
+        }
+        for(const key of Reflect.ownKeys(object))if(!desired.has(key))Reflect.deleteProperty(object,key);
+        if(snapshot.extensible===false)Object.preventExtensions(object);
+      }
+      if(graph.mutationBefore)graph.mutationBefore.set(snapshot.id,descriptorState(object));
+    }
+  }
   function captureMutableState(nodes){
     const state=new Map(),visited=new WeakSet();
     function visit(value){
-      if(!value||typeof value!=='object'||visited.has(value))return;visited.add(value);
+      if(!value||typeof value!=='object'||visited.has(value)||types.isProxy(value))return;visited.add(value);
       if(value instanceof Date)state.set(value,'date:'+String(value.getTime()));
       else if(value instanceof RegExp)state.set(value,'regexp:'+value.source+'/'+value.flags+':'+value.lastIndex);
       else if(ArrayBuffer.isView(value))state.set(value,value.constructor.name+':'+Buffer.from(value.buffer,value.byteOffset,value.byteLength).toString('hex'));
@@ -257,7 +291,7 @@ function addonWorkerMain() {
     const mutations=[];
     for(const [id,value] of decodeGraph){
       if(typeof id!=='string'||!id.startsWith('g:'))continue;
-      const old=before.get(id),now=descriptorState(value);
+      const old=before.get(id);if(!old)continue;const now=descriptorState(value);
       if(old.prototype!==now.prototype)throw new TypeError('changing the prototype of a guest value through a Node addon is not supported');
       const changedKeys=[];
       for(const [key,descriptor] of now.entries){
@@ -289,7 +323,7 @@ function addonWorkerMain() {
   async function dispatch(r){
     dispatchDepth++;
     try{
-      let result,receiver;const decodeGraph=new Map();
+      let result,receiver;const decodeGraph=newDecodeGraph();
       if(r.op==='load')result=require(r.filename);
       else if(['get','set','has','delete','ownKeys'].includes(r.op)){
         const entry=refs.get(r.id);if(!entry||!entry.value||typeof entry.value!=='object')throw new Error('native object handle is invalid');
@@ -304,9 +338,10 @@ function addonWorkerMain() {
         const args=r.args.map(v=>decode(v,0,decodeGraph));
         const guestReceiver=Object.hasOwn(r,'receiver')?decode(r.receiver,0,decodeGraph):entry.receiver;
         receiver=guestReceiver;
-        const before=new Map();for(const [graphId,node] of decodeGraph)if(typeof graphId==='string'&&graphId.startsWith('g:'))before.set(graphId,descriptorState(node));
+        const before=new Map();for(const [graphId,node] of decodeGraph)if(typeof graphId==='string'&&graphId.startsWith('g:')&&!types.isProxy(node))before.set(graphId,descriptorState(node));
+        decodeGraph.mutationBefore=before;
         const mutableState=captureMutableState(decodeGraph);
-        const guestRefs=new WeakMap();for(const [graphId,node] of decodeGraph)if(typeof graphId==='string'&&graphId.startsWith('g:'))guestRefs.set(node,graphId);
+        const guestRefs=decodeGraph.guestRefs;
         let didThrow=false,thrownValue;
         try{
           if(r.op==='construct')result=Reflect.construct(entry.value,args);
@@ -360,6 +395,9 @@ struct State {
     object_proxies: HashMap<u64, Value>,
     proxy_ids: HashMap<usize, u64>,
     guest_callbacks: HashMap<u64, Value>,
+    guest_callback_keys: HashMap<(usize, usize), u64>,
+    guest_graph_nodes: HashMap<u64, Value>,
+    guest_callback_graphs: HashMap<u64, HashSet<u64>>,
     host_symbols: HashMap<String, Value>,
     symbol_remote_ids: HashMap<u64, String>,
     next_guest_callback_id: u64,
@@ -371,7 +409,7 @@ struct WireEncodeContext {
     seen: HashMap<usize, u64>,
     nodes: HashMap<u64, Value>,
     callbacks: HashMap<u64, Value>,
-    next_id: u64,
+    active_proxies: HashSet<usize>,
 }
 
 impl WireEncodeContext {
@@ -379,13 +417,32 @@ impl WireEncodeContext {
         if self.seen.len() >= MAX_NATIVE_HANDLES {
             return Err(VmErr::Msg("guest graph node limit exceeded".into()));
         }
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or_else(|| VmErr::Msg("native graph id exhausted".into()))?;
-        self.seen.insert(identity, self.next_id);
-        self.nodes.insert(self.next_id, value);
-        Ok(self.next_id)
+        let id = NEXT_GUEST_GRAPH_NODE_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| VmErr::Msg("native graph id exhausted".into()))?;
+        self.seen.insert(identity, id);
+        self.nodes.insert(id, value);
+        Ok(id)
+    }
+
+    fn from_callback_state(state: &State, callback_id: u64) -> Self {
+        let mut context = Self {
+            callbacks: state.guest_callbacks.clone(),
+            ..Self::default()
+        };
+        if let Some(ids) = state.guest_callback_graphs.get(&callback_id) {
+            for id in ids {
+                if let Some(value) = state.guest_graph_nodes.get(id) {
+                    context.nodes.insert(*id, value.clone());
+                    if let Some(identity) = guest_graph_identity(value) {
+                        context.seen.insert(identity, *id);
+                    }
+                }
+            }
+        }
+        context
     }
 }
 
@@ -407,6 +464,25 @@ impl WireDecodeContext {
         }
     }
 
+    fn from_callback_state(state: &State, callback_id: u64) -> Self {
+        let nodes = state
+            .guest_callback_graphs
+            .get(&callback_id)
+            .into_iter()
+            .flatten()
+            .filter_map(|id| {
+                state
+                    .guest_graph_nodes
+                    .get(id)
+                    .map(|value| (format!("g:{id}"), value.clone()))
+            })
+            .collect();
+        Self {
+            nodes,
+            callbacks: state.guest_callbacks.clone(),
+        }
+    }
+
     fn register(&mut self, id: String, value: Value) -> Result<(), VmErr> {
         if self.nodes.contains_key(&id) {
             return Err(VmErr::Msg("duplicate Node graph node id".into()));
@@ -416,6 +492,28 @@ impl WireDecodeContext {
         }
         self.nodes.insert(id, value);
         Ok(())
+    }
+}
+
+fn guest_graph_identity(value: &Value) -> Option<usize> {
+    match value {
+        Value::Array(array) => Some(Rc::as_ptr(array) as usize),
+        Value::Object { props } => Some(Rc::as_ptr(props) as usize),
+        Value::Proxy(proxy) => Some(Rc::as_ptr(proxy) as usize),
+        _ => None,
+    }
+}
+
+fn guest_callback_identity(value: &Value) -> Option<(usize, usize)> {
+    match value {
+        Value::Function(function) => Some((
+            Rc::as_ptr(&function.body) as usize,
+            function
+                .closure
+                .as_ref()
+                .map_or(0, |closure| Rc::as_ptr(closure) as usize),
+        )),
+        _ => None,
     }
 }
 
@@ -630,6 +728,9 @@ impl NodeAddonSidecar {
                 object_proxies: HashMap::new(),
                 proxy_ids: HashMap::new(),
                 guest_callbacks: HashMap::new(),
+                guest_callback_keys: HashMap::new(),
+                guest_graph_nodes: HashMap::new(),
+                guest_callback_graphs: HashMap::new(),
                 host_symbols: HashMap::new(),
                 symbol_remote_ids: HashMap::new(),
                 next_guest_callback_id: 1,
@@ -639,18 +740,118 @@ impl NodeAddonSidecar {
     }
 
     fn request(&self, message: JsonValue) -> Result<JsonValue, VmErr> {
-        self.request_with_callback_handler(message, &mut |_| {
-            Err(VmErr::Msg(
-                "synchronous guest callback was requested outside a VM host call".into(),
-            ))
-        })
+        self.request_with_callback_handler(
+            message,
+            &mut |_| {
+                Err(VmErr::Msg(
+                    "synchronous guest callback was requested outside a VM host call".into(),
+                ))
+            },
+            &WireEncodeContext::default(),
+        )
+    }
+
+    fn persist_guest_graph(
+        &self,
+        graph: &WireEncodeContext,
+        callback_scope: Option<u64>,
+    ) -> Result<(), VmErr> {
+        if graph.callbacks.is_empty() && callback_scope.is_none() {
+            return Ok(());
+        }
+        let mut state = self.state.borrow_mut();
+        let additional = graph
+            .nodes
+            .keys()
+            .filter(|id| !state.guest_graph_nodes.contains_key(id))
+            .count();
+        if state.guest_graph_nodes.len().saturating_add(additional) > MAX_NATIVE_HANDLES {
+            return Err(VmErr::Msg(
+                "persistent guest graph node limit exceeded".into(),
+            ));
+        }
+        for (id, value) in &graph.nodes {
+            state
+                .guest_graph_nodes
+                .entry(*id)
+                .or_insert_with(|| value.clone());
+        }
+        if let Some(callback_id) = callback_scope {
+            state
+                .guest_callback_graphs
+                .entry(callback_id)
+                .or_default()
+                .extend(graph.nodes.keys().copied());
+        }
+        let callback_ids = callback_scope
+            .map(|callback_id| vec![callback_id])
+            .unwrap_or_else(|| graph.callbacks.keys().copied().collect());
+        for callback_id in callback_ids {
+            state
+                .guest_callback_graphs
+                .entry(callback_id)
+                .or_default()
+                .extend(graph.nodes.keys().copied());
+        }
+        Ok(())
+    }
+
+    fn encode_context_for_callback(&self, callback_id: u64) -> WireEncodeContext {
+        WireEncodeContext::from_callback_state(&self.state.borrow(), callback_id)
+    }
+
+    fn guest_graph_snapshots(
+        &self,
+        callback_id: u64,
+    ) -> Result<(Vec<JsonValue>, WireEncodeContext), VmErr> {
+        let (mut graph, nodes) = {
+            let state = self.state.borrow();
+            let mut graph = WireEncodeContext::from_callback_state(&state, callback_id);
+            graph.callbacks.clear();
+            let nodes = state
+                .guest_callback_graphs
+                .get(&callback_id)
+                .into_iter()
+                .flatten()
+                .filter_map(|id| {
+                    state
+                        .guest_graph_nodes
+                        .get(id)
+                        .map(|value| (*id, value.clone()))
+                })
+                .collect::<Vec<_>>();
+            (graph, nodes)
+        };
+        let mut snapshots = Vec::new();
+        for (id, value) in nodes {
+            if let Some(snapshot) = guest_graph_node_snapshot(self, id, &value, &mut graph)? {
+                snapshots.push(snapshot);
+            }
+        }
+        Ok((snapshots, graph))
+    }
+
+    fn persist_snapshot_graph(
+        &self,
+        graph: &WireEncodeContext,
+        callback_id: u64,
+    ) -> Result<(), VmErr> {
+        self.persist_guest_graph(graph, Some(callback_id))?;
+        for new_callback_id in graph.callbacks.keys().copied() {
+            if new_callback_id != callback_id {
+                self.persist_guest_graph(graph, Some(new_callback_id))?;
+            }
+        }
+        Ok(())
     }
 
     fn request_with_callback_handler(
         &self,
         mut message: JsonValue,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+        guest_graph: &WireEncodeContext,
     ) -> Result<JsonValue, VmErr> {
+        self.persist_guest_graph(guest_graph, None)?;
         let id = {
             let mut state = self.state.borrow_mut();
             if state.failed {
@@ -785,33 +986,53 @@ impl NodeAddonSidecar {
             .get("callId")
             .and_then(JsonValue::as_u64)
             .ok_or_else(|| VmErr::Msg("Node synchronous callback id is invalid".into()))?;
+        let callback_id = event
+            .get("callbackId")
+            .and_then(JsonValue::as_u64)
+            .ok_or_else(|| VmErr::Msg("Node callback event has an invalid id".into()))?;
         let callback = self.guest_callback_from_event(event)?;
         let result = callback_handler(callback);
-        let (ok, value) = match result {
-            Ok(value) => match self.guest_to_wire(&value, 0) {
+        let mut graph = self.encode_context_for_callback(callback_id);
+        let (mut ok, mut value) = match result {
+            Ok(value) => match self.guest_to_wire_with_context(&value, 0, &mut graph) {
                 Ok(value) => (true, value),
                 Err(error) => (
                     false,
                     json!({"t":"error","name":"TypeError","message":error.to_string()}),
                 ),
             },
-            Err(VmErr::Throw(reason)) => match self.guest_to_wire(&reason, 0) {
-                Ok(value) => (false, value),
-                Err(error) => (
-                    false,
-                    json!({"t":"error","name":"TypeError","message":error.to_string()}),
-                ),
-            },
+            Err(VmErr::Throw(reason)) => {
+                match self.guest_to_wire_with_context(&reason, 0, &mut graph) {
+                    Ok(value) => (false, value),
+                    Err(error) => (
+                        false,
+                        json!({"t":"error","name":"TypeError","message":error.to_string()}),
+                    ),
+                }
+            }
             Err(error) => (
                 false,
                 json!({"t":"error","name":"Error","message":error.to_string()}),
             ),
+        };
+        self.persist_guest_graph(&graph, Some(callback_id))?;
+        let snapshots = match self.guest_graph_snapshots(callback_id) {
+            Ok((snapshots, snapshot_graph)) => {
+                self.persist_snapshot_graph(&snapshot_graph, callback_id)?;
+                snapshots
+            }
+            Err(error) => {
+                ok = false;
+                value = json!({"t":"error","name":"TypeError","message":error.to_string()});
+                Vec::new()
+            }
         };
         let response = json!({
             "event":"syncGuestCallbackResult",
             "callId":call_id,
             "ok":ok,
             "value":value,
+            "snapshots":snapshots,
         });
         let mut state = self.state.borrow_mut();
         write_frame(&mut state.stream, &response)
@@ -822,18 +1043,27 @@ impl NodeAddonSidecar {
             .get("callbackId")
             .and_then(JsonValue::as_u64)
             .ok_or_else(|| VmErr::Msg("Node callback event has an invalid id".into()))?;
-        let callback = self
-            .state
-            .borrow()
-            .guest_callbacks
-            .get(&callback_id)
-            .cloned()
-            .ok_or_else(|| VmErr::Msg("Node callback handle is invalid".into()))?;
+        let (callback, mut graph) = {
+            let state = self.state.borrow();
+            let callback = state
+                .guest_callbacks
+                .get(&callback_id)
+                .cloned()
+                .ok_or_else(|| VmErr::Msg("Node callback handle is invalid".into()))?;
+            (
+                callback,
+                WireDecodeContext::from_callback_state(&state, callback_id),
+            )
+        };
+        if let Some(mutations) = event.get("guestMutations").and_then(JsonValue::as_array) {
+            for mutation in mutations {
+                apply_guest_mutation(self, mutation, &mut graph)?;
+            }
+        }
         let this_wire = event
             .get("thisValue")
             .cloned()
             .unwrap_or_else(|| json!({"t":"undefined"}));
-        let mut graph = WireDecodeContext::default();
         let this_value = wire_to_guest_with_context(self, &this_wire, 0, &mut graph)?;
         let args = event
             .get("args")
@@ -853,19 +1083,22 @@ impl NodeAddonSidecar {
         wire_to_guest(self, value, depth)
     }
 
-    fn guest_to_wire(&self, value: &Value, depth: usize) -> Result<JsonValue, VmErr> {
+    fn guest_to_wire_with_context(
+        &self,
+        value: &Value,
+        depth: usize,
+        graph: &mut WireEncodeContext,
+    ) -> Result<JsonValue, VmErr> {
         let proxy_ids = self.state.borrow().proxy_ids.clone();
-        guest_to_wire(
-            self,
-            value,
-            depth,
-            &mut WireEncodeContext::default(),
-            &proxy_ids,
-        )
+        guest_to_wire(self, value, depth, graph, &proxy_ids)
     }
 
     fn register_guest_callback(&self, callback: Value) -> Result<u64, VmErr> {
         let mut state = self.state.borrow_mut();
+        let identity = guest_callback_identity(&callback);
+        if let Some(id) = identity.and_then(|identity| state.guest_callback_keys.get(&identity)) {
+            return Ok(*id);
+        }
         if state.guest_callbacks.len() >= MAX_NATIVE_HANDLES {
             return Err(VmErr::Msg("guest callback handle limit exceeded".into()));
         }
@@ -875,6 +1108,9 @@ impl NodeAddonSidecar {
             .checked_add(1)
             .ok_or_else(|| VmErr::Msg("guest callback handle id exhausted".into()))?;
         state.guest_callbacks.insert(id, callback);
+        if let Some(identity) = identity {
+            state.guest_callback_keys.insert(identity, id);
+        }
         Ok(id)
     }
 
@@ -947,6 +1183,8 @@ impl NodeAddonSidecar {
         args: Vec<Value>,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        let mut graph = WireEncodeContext::default();
+        let proxy_ids = self.state.borrow().proxy_ids.clone();
         let request = match trap.operation {
             ObjectOperation::Get => json!({
                 "op": "get",
@@ -957,7 +1195,13 @@ impl NodeAddonSidecar {
                 "op": "set",
                 "id": trap.object_id,
                 "key": required_string_arg(&args, 1)?,
-                "value": self.guest_to_wire(args.get(2).unwrap_or(&Value::Undefined), 0)?,
+                "value": guest_to_wire(
+                    self,
+                    args.get(2).unwrap_or(&Value::Undefined),
+                    0,
+                    &mut graph,
+                    &proxy_ids,
+                )?,
             }),
             ObjectOperation::Has => json!({
                 "op": "has",
@@ -974,7 +1218,7 @@ impl NodeAddonSidecar {
                 "id": trap.object_id,
             }),
         };
-        let result = self.request_with_callback_handler(request, callback_handler)?;
+        let result = self.request_with_callback_handler(request, callback_handler, &graph)?;
         self.wire_to_guest(&result, 0)
     }
 }
@@ -1124,6 +1368,7 @@ impl HostBridge for NodeAddonSidecar {
         let response = self.request_with_callback_handler(
             json!({"op":"call","id":id,"args":args,"receiver":receiver}),
             callback_handler,
+            &graph,
         )?;
         guest_call_result_to_value(self, &response, &graph)
     }
@@ -1149,6 +1394,7 @@ impl HostBridge for NodeAddonSidecar {
         let response = self.request_with_callback_handler(
             json!({"op":"construct","id":id,"args":args}),
             callback_handler,
+            &graph,
         )?;
         guest_call_result_to_value(self, &response, &graph)
     }
@@ -1459,9 +1705,29 @@ fn guest_to_wire(
             match proxy_ids.get(&proxy_id) {
                 Some(object_id) => json!({"t":"hostObject","v":object_id}),
                 None => {
-                    return Err(VmErr::Msg(
-                        "guest-created proxies cannot cross the Node addon bridge yet".into(),
-                    ));
+                    if let Some(node_id) = graph.seen.get(&proxy_id) {
+                        if graph.active_proxies.contains(&proxy_id) {
+                            return Err(VmErr::Msg(
+                                "cyclic guest Proxy graphs cannot cross the Node addon bridge yet"
+                                    .into(),
+                            ));
+                        }
+                        json!({"t":"ref","v":format!("g:{node_id}")})
+                    } else {
+                        let node_id = graph.register(proxy_id, v.clone())?;
+                        graph.active_proxies.insert(proxy_id);
+                        let target =
+                            guest_to_wire(sidecar, &proxy.target, depth + 1, graph, proxy_ids)?;
+                        let handler =
+                            guest_to_wire(sidecar, &proxy.handler, depth + 1, graph, proxy_ids)?;
+                        graph.active_proxies.remove(&proxy_id);
+                        json!({
+                            "t":"proxy",
+                            "id":format!("g:{node_id}"),
+                            "target":target,
+                            "handler":handler,
+                        })
+                    }
                 }
             }
         }
@@ -1484,6 +1750,115 @@ fn guest_to_wire(
             ));
         }
     })
+}
+
+fn guest_graph_node_snapshot(
+    sidecar: &NodeAddonSidecar,
+    node_id: u64,
+    value: &Value,
+    graph: &mut WireEncodeContext,
+) -> Result<Option<JsonValue>, VmErr> {
+    let snapshot = match value {
+        Value::Array(array) => {
+            let items = array.borrow().clone();
+            if items.len() > MAX_ARRAY_LEN {
+                return Err(VmErr::Msg(
+                    "guest array exceeds limit during callback sync".into(),
+                ));
+            }
+            let values = items
+                .iter()
+                .map(|item| sidecar.guest_to_wire_with_context(item, 0, graph))
+                .collect::<Result<Vec<_>, _>>()?;
+            let named = array
+                .named
+                .borrow()
+                .iter()
+                .filter(|(key, _)| !crate::interpreter::is_internal_key(key))
+                .map(|(key, item)| {
+                    Ok(json!([
+                        key,
+                        sidecar.guest_to_wire_with_context(item, 0, graph)?
+                    ]))
+                })
+                .collect::<Result<Vec<_>, VmErr>>()?;
+            json!({"t":"array","id":format!("g:{node_id}"),"v":values,"named":named})
+        }
+        Value::Object { props } => {
+            let entries = props.borrow().clone();
+            if entries.len() > MAX_OBJECT_PROPS {
+                return Err(VmErr::Msg(
+                    "guest object exceeds limit during callback sync".into(),
+                ));
+            }
+            let meta = props.meta.borrow();
+            let mut wire = Vec::with_capacity(entries.len());
+            for (key, item) in &entries {
+                let wire_key = if let Some(symbol) = meta.symbol_key(key) {
+                    guest_symbol_key_wire(sidecar, &symbol)
+                } else if crate::interpreter::symbol_id_from_slot(key).is_some() {
+                    return Err(VmErr::Msg(
+                        "guest symbol property has no symbol metadata".into(),
+                    ));
+                } else if crate::interpreter::is_internal_key(key) {
+                    continue;
+                } else {
+                    json!(key)
+                };
+                let attrs = meta.attrs_of(key);
+                let kind = guest_accessor_kind(key, item);
+                let getter = (kind == Some("get")).then_some(item);
+                let setter = if kind == Some("set") {
+                    Some(item)
+                } else if getter.is_some() {
+                    entries
+                        .iter()
+                        .find(|(slot, _)| slot == &format!("__setter:{key}__"))
+                        .and_then(|(_, candidate)| {
+                            (guest_accessor_kind(key, candidate) == Some("set"))
+                                .then_some(candidate)
+                        })
+                } else {
+                    None
+                };
+                if getter.is_some() || setter.is_some() {
+                    let getter = getter
+                        .map(|getter| sidecar.guest_to_wire_with_context(getter, 0, graph))
+                        .transpose()?
+                        .unwrap_or(JsonValue::Null);
+                    let setter = setter
+                        .map(|setter| sidecar.guest_to_wire_with_context(setter, 0, graph))
+                        .transpose()?
+                        .unwrap_or(JsonValue::Null);
+                    wire.push(json!([
+                        wire_key,
+                        {"t":"undefined"},
+                        true,
+                        attrs.enumerable,
+                        attrs.configurable,
+                        getter,
+                        setter
+                    ]));
+                } else {
+                    wire.push(json!([
+                        wire_key,
+                        sidecar.guest_to_wire_with_context(item, 0, graph)?,
+                        attrs.writable,
+                        attrs.enumerable,
+                        attrs.configurable
+                    ]));
+                }
+            }
+            json!({
+                "t":"object",
+                "id":format!("g:{node_id}"),
+                "v":wire,
+                "extensible":!meta.non_extensible,
+            })
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(snapshot))
 }
 
 fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Result<Value, VmErr> {
@@ -1515,6 +1890,16 @@ fn guest_call_result_to_value(
         ));
     }
     let mut graph = WireDecodeContext::from_encode_context(encoded);
+    {
+        let state = sidecar.state.borrow();
+        graph.nodes.extend(
+            state
+                .guest_graph_nodes
+                .iter()
+                .map(|(id, value)| (format!("g:{id}"), value.clone())),
+        );
+        graph.callbacks.extend(state.guest_callbacks.clone());
+    }
     let result = envelope
         .get("result")
         .ok_or_else(|| VmErr::Msg("Node call response has no result".into()))?;
@@ -2534,6 +2919,15 @@ static napi_value write_property(napi_env env, napi_callback_info info) {
   return argv[1];
 }
 
+static napi_value write_then_read_property(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_set_named_property(env, argv[0], "value", argv[1]) != napi_ok ||
+      napi_get_named_property(env, argv[0], "value", &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value read_symbol_property(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2], result;
@@ -2808,6 +3202,7 @@ static napi_value counter_self(napi_env env, napi_callback_info info) {
 typedef struct {
   napi_async_work work;
   napi_ref callback;
+  napi_ref value;
 } callback_work;
 
 static void execute_callback_work(napi_env env, void *data) {
@@ -2817,28 +3212,37 @@ static void execute_callback_work(napi_env env, void *data) {
 static void complete_callback_work(napi_env env, napi_status status, void *data) {
   callback_work *work = (callback_work *)data;
   napi_value callback, receiver, value;
+  napi_status value_status = work->value != NULL
+      ? napi_get_reference_value(env, work->value, &value)
+      : napi_create_string_utf8(env, "async-value", NAPI_AUTO_LENGTH, &value);
   if (napi_get_reference_value(env, work->callback, &callback) == napi_ok &&
-      napi_get_global(env, &receiver) == napi_ok &&
-      napi_create_string_utf8(env, "async-value", NAPI_AUTO_LENGTH, &value) == napi_ok) {
+      napi_get_global(env, &receiver) == napi_ok && value_status == napi_ok) {
     napi_call_function(env, receiver, callback, 1, &value, NULL);
   }
   napi_delete_reference(env, work->callback);
+  if (work->value != NULL) napi_delete_reference(env, work->value);
   napi_delete_async_work(env, work->work);
   free(work);
 }
 
 static napi_value on_later(napi_env env, napi_callback_info info) {
-  size_t argc = 1;
-  napi_value argv[1], resource_name;
-  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1) return NULL;
+  size_t argc = 2;
+  napi_value argv[2], resource_name;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc < 1) return NULL;
   callback_work *work = (callback_work *)calloc(1, sizeof(callback_work));
   if (!work) return NULL;
   if (napi_create_reference(env, argv[0], 1, &work->callback) != napi_ok) { free(work); return NULL; }
+  if (argc == 2 && napi_create_reference(env, argv[1], 1, &work->value) != napi_ok) {
+    napi_delete_reference(env, work->callback);
+    free(work);
+    return NULL;
+  }
   if (napi_create_string_utf8(env, "fixture callback", NAPI_AUTO_LENGTH, &resource_name) != napi_ok ||
       napi_create_async_work(env, NULL, resource_name, execute_callback_work,
                              complete_callback_work, work, &work->work) != napi_ok ||
       napi_queue_async_work(env, work->work) != napi_ok) {
     napi_delete_reference(env, work->callback);
+    if (work->value != NULL) napi_delete_reference(env, work->value);
     free(work);
     return NULL;
   }
@@ -2944,6 +3348,8 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "readProperty", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeProperty", NAPI_AUTO_LENGTH, write_property, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "writeProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "writeThenRead", NAPI_AUTO_LENGTH, write_then_read_property, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "writeThenRead", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "readSymbolProperty", NAPI_AUTO_LENGTH, read_symbol_property, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "readSymbolProperty", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeSymbolProperty", NAPI_AUTO_LENGTH, write_symbol_property, NULL, &fn) != napi_ok) return NULL;
@@ -3034,7 +3440,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
 
         let node_reference = ProcessCommand::new("node")
             .arg("-e")
-            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d}));")
+            .arg("const {createRequire}=require('node:module');const req=createRequire(process.argv[1]);const a=req('fixture');const b=req('#native');const c=req('./fixture.node');const d=req('fixture-wrapper');const target={value:40};let ownKeysCalls=0;const proxy=new Proxy(target,{get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}});const proxyBefore=a.readProperty(proxy);a.writeProperty(proxy,9);const simpleTarget={value:1};const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}});const proxyWriteRead=a.writeThenRead(setOnlyProxy,17);process.stdout.write(JSON.stringify({sum:a.add(19,23),same:a===c,importSame:a===b,wrapperSame:a===d,proxyBefore,proxyAfter:a.readProperty(proxy),targetValue:target.value,ownKeysCalls,proxyWriteRead}));")
             .arg(root.join("main.cjs"))
             .output()
             .unwrap();
@@ -3045,7 +3451,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         );
         assert_eq!(
             String::from_utf8_lossy(&node_reference.stdout),
-            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true}"#
+            r#"{"sum":42,"same":true,"importSame":true,"wrapperSame":true,"proxyBefore":42,"proxyAfter":11,"targetValue":9,"ownKeysCalls":0,"proxyWriteRead":17}"#
         );
 
         let mut interpreter = Interpreter::with_builtins();
@@ -3059,7 +3465,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             .unwrap();
         let package_result = interpreter
             .eval_source(
-                "const packageAddon = require('fixture'); const importAddon = require('#native'); const wrapperAddon = require('fixture-wrapper'); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon, wrapperSame: packageAddon === wrapperAddon});",
+                "const packageAddon = require('fixture'); const importAddon = require('#native'); const wrapperAddon = require('fixture-wrapper'); const target = {value:40}; let ownKeysCalls=0; const proxy = new Proxy(target, {get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}}); const proxyBefore = packageAddon.readProperty(proxy); packageAddon.writeProperty(proxy,9); const simpleTarget={value:1}; const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}}); const proxyWriteRead=packageAddon.writeThenRead(setOnlyProxy,17); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon, wrapperSame: packageAddon === wrapperAddon, proxyBefore, proxyAfter: packageAddon.readProperty(proxy), targetValue: target.value, ownKeysCalls, proxyWriteRead});",
             )
             .unwrap();
         assert!(matches!(
@@ -3077,6 +3483,26 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(
             package_result.get_prop("wrapperSame"),
             Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            package_result.get_prop("proxyBefore"),
+            Some(Value::Number(value)) if value == 42.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("proxyAfter"),
+            Some(Value::Number(value)) if value == 11.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("targetValue"),
+            Some(Value::Number(value)) if value == 9.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("ownKeysCalls"),
+            Some(Value::Number(value)) if value == 0.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("proxyWriteRead"),
+            Some(Value::Number(value)) if value == 17.0
         ));
         let result = interpreter
             .eval_source("require('./fixture.node').add(19, 23);")
@@ -3479,10 +3905,12 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             )
             .unwrap();
         assert!(
-            matches!(sync_throw.get_prop("name"), Some(Value::String(ref name)) if name == "TypeError")
+            matches!(sync_throw.get_prop("name"), Some(Value::String(ref name)) if name == "TypeError"),
+            "unexpected sync callback throw: {sync_throw:?}"
         );
         assert!(
-            matches!(sync_throw.get_prop("message"), Some(Value::String(ref message)) if message == "guest callback failure")
+            matches!(sync_throw.get_prop("message"), Some(Value::String(ref message)) if message == "guest callback failure"),
+            "unexpected sync callback throw: {sync_throw:?}"
         );
         let reentrant_addon_call = interpreter
             .eval_source(
@@ -3508,6 +3936,26 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(callback_value, Value::String(ref value) if value == "async-value"));
         let callback_this = interpreter.eval_source("callbackThisType;").unwrap();
         assert!(matches!(callback_this, Value::String(ref value) if value == "object"));
+        interpreter
+            .eval_source(
+                "globalThis.asyncReferenceTarget = {value:1}; globalThis.asyncCallbackIdentity = false; require('./fixture.node').onLater(value => { value.changed = 23; asyncCallbackIdentity = value === asyncReferenceTarget; }, asyncReferenceTarget);",
+            )
+            .unwrap();
+        assert!(
+            interpreter
+                .run_event_loop_once(Duration::from_secs(2))
+                .unwrap()
+        );
+        assert!(matches!(
+            interpreter
+                .eval_source("asyncReferenceTarget.changed;")
+                .unwrap(),
+            Value::Number(23.0)
+        ));
+        assert!(matches!(
+            interpreter.eval_source("asyncCallbackIdentity;").unwrap(),
+            Value::Bool(true)
+        ));
         interpreter
             .eval_source(
                 "globalThis.threadsafeValues = []; require('./fixture.node').onThreadsafe(value => { threadsafeValues.push(value); queueMicrotask(() => threadsafeValues.push('microtask')); });",
