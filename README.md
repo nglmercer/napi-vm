@@ -105,16 +105,16 @@ to pump external events. Synchronous callbacks into guest JavaScript run on
 the interpreter thread and return values and thrown errors to the addon. Native
 addon calls made from inside such a synchronous callback fail with
 `ERR_NAPI_VM_REENTRANT_ADDON_CALL` to avoid re-entering the worker while it is
-blocked on the callback. Cyclic guest values and guest-created proxies are not
-supported yet and fail clearly. Repeated references to a guest object or array
-preserve identity within one call. Mutations to plain guest objects and arrays
-are written back to the original VM values after a successful native call,
-including nested objects, named array properties, and property attributes on
-objects. Guest `Date`, `RegExp`, and binary values are copied; in-place changes
-to those values fail clearly. Accessor properties, symbol-keyed properties,
-sparse arrays, custom prototype behavior, and array descriptor changes are not
-fully compatible yet. Some reflection behavior still differs across the
-VM/Node boundary.
+blocked on the callback. Shared and cyclic plain object/array graphs preserve
+identity within each native call, including Node-created return graphs.
+Guest-created proxies are not supported yet and fail clearly. Mutations to
+plain guest objects and arrays are written back to the original VM values
+after a successful native call, including nested objects, named array
+properties, and property attributes on objects. Guest `Date`, `RegExp`, and
+binary values are copied; in-place changes to those values fail clearly.
+Accessor properties, symbol-keyed properties, sparse arrays, custom prototype
+behavior, and array descriptor changes are not fully compatible yet. Some
+reflection behavior still differs across the VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 

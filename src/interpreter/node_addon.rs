@@ -115,7 +115,7 @@ function addonWorkerMain() {
   const symbols=new Map(), symbolIds=new Map();
   const wellKnownSymbols=[undefined,Symbol.iterator,Symbol.asyncIterator,Symbol.toStringTag,Symbol.hasInstance,Symbol.toPrimitive,Symbol.species,Symbol.unscopables,Symbol.isConcatSpreadable,Symbol.match,Symbol.matchAll,Symbol.replace,Symbol.search,Symbol.split];
   function symbolId(value){let id=symbolIds.get(value);if(id===undefined){if(symbols.size>=262144)throw new RangeError('symbol handle limit exceeded');id='n:'+nextNativeSymbolId++;symbols.set(id,value);symbolIds.set(value,id);}return id;}
-  function newGraph(){return {seen:new Map(),active:new Set(),nextId:1};}
+  function newGraph(){return {seen:new Map(),nextId:1};}
   function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');graph.set(id,value);}}
   function hold(value,receiver){
     const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
@@ -154,22 +154,20 @@ function addonWorkerMain() {
     if(ArrayBuffer.isView(value))return {t:'typedArray',kind:value.constructor.name,length:value.length,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
     if(value instanceof ArrayBuffer)return {t:'arrayBuffer',v:Array.from(new Uint8Array(value))};
     if(Array.isArray(value)){
-      if(graph.active.has(value))throw new TypeError('cyclic native values are unsupported');
       const existing=graph.seen.get(value);if(existing!==undefined)return {t:'ref',v:existing};
       if(graph.seen.size>=262144)throw new RangeError('native graph node limit exceeded');
       if(value.length>262144)throw new RangeError('native array exceeds the VM limit');
-      const id='n:'+graph.nextId++;graph.seen.set(value,id);graph.active.add(value);
+      for(let i=0;i<value.length;i++)if(!Object.hasOwn(value,String(i)))throw new TypeError('sparse native arrays cannot cross the napi-vm bridge');
+      const id='n:'+graph.nextId++;graph.seen.set(value,id);
       const items=Array.from(value,v=>encode(v,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects));
       const named=[];
       for(const key of Object.keys(value))if(!/^(0|[1-9][0-9]*)$/.test(key)||Number(key)>=value.length)named.push([key,encode(value[key],value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects)]);
-      graph.active.delete(value);
       return {t:'array',id,v:items,named};
     }
-    if(graph.active.has(value))throw new TypeError('cyclic native values are unsupported');
     if(copyPlainObjects&&(Object.getPrototypeOf(value)===Object.prototype||Object.getPrototypeOf(value)===null)){
       const existing=graph.seen.get(value);if(existing!==undefined)return {t:'ref',v:existing};
       if(graph.seen.size>=262144)throw new RangeError('native graph node limit exceeded');
-      const id='n:'+graph.nextId++;graph.seen.set(value,id);graph.active.add(value);
+      const id='n:'+graph.nextId++;graph.seen.set(value,id);
       const entries=[];
       for(const key of Object.getOwnPropertyNames(value)){
         const descriptor=Object.getOwnPropertyDescriptor(value,key);
@@ -177,7 +175,7 @@ function addonWorkerMain() {
         entries.push([key,encode(descriptor.value,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
       }
       if(Object.getOwnPropertySymbols(value).length)throw new TypeError('symbol properties cannot cross the Node addon bridge');
-      const extensible=Object.isExtensible(value);graph.active.delete(value);
+      const extensible=Object.isExtensible(value);
       return {t:'object',id,v:entries,extensible};
     }
     return {t:'hostObject',v:hold(value,undefined)};
@@ -361,7 +359,6 @@ struct State {
 #[derive(Default)]
 struct WireEncodeContext {
     seen: HashMap<usize, u64>,
-    active: HashSet<usize>,
     nodes: HashMap<u64, Value>,
     callbacks: HashMap<u64, Value>,
     next_id: u64,
@@ -1185,9 +1182,6 @@ fn guest_to_wire(
         }
         Value::Array(a) => {
             let id = Rc::as_ptr(a) as usize;
-            if graph.active.contains(&id) {
-                return Err(VmErr::Msg("cyclic guest arguments are unsupported".into()));
-            }
             if let Some(node_id) = graph.seen.get(&id) {
                 return Ok(json!({"t":"ref","v":format!("g:{node_id}")}));
             }
@@ -1196,7 +1190,6 @@ fn guest_to_wire(
                 return Err(VmErr::Msg("guest array exceeds limit".into()));
             }
             let node_id = graph.register(id, v.clone())?;
-            graph.active.insert(id);
             let wire = items
                 .iter()
                 .map(|x| guest_to_wire(sidecar, x, depth + 1, graph, proxy_ids))
@@ -1213,14 +1206,10 @@ fn guest_to_wire(
                     ]))
                 })
                 .collect::<Result<Vec<_>, VmErr>>()?;
-            graph.active.remove(&id);
             json!({"t":"array","id":format!("g:{node_id}"),"v":wire,"named":named})
         }
         Value::Object { props } => {
             let id = Rc::as_ptr(props) as usize;
-            if graph.active.contains(&id) {
-                return Err(VmErr::Msg("cyclic guest arguments are unsupported".into()));
-            }
             if let Some(node_id) = graph.seen.get(&id) {
                 return Ok(json!({"t":"ref","v":format!("g:{node_id}")}));
             }
@@ -1236,7 +1225,6 @@ fn guest_to_wire(
             }
             let extensible = !meta.non_extensible;
             let node_id = graph.register(id, v.clone())?;
-            graph.active.insert(id);
             let wire = entries
                 .iter()
                 .filter(|(k, _)| !crate::interpreter::is_internal_key(k))
@@ -1251,7 +1239,6 @@ fn guest_to_wire(
                     ]))
                 })
                 .collect::<Result<Vec<_>, VmErr>>()?;
-            graph.active.remove(&id);
             json!({"t":"object","id":format!("g:{node_id}"),"v":wire,"extensible":extensible})
         }
         Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":bytes.borrow().as_slice()}),
@@ -1859,11 +1846,17 @@ fn wire_to_guest_with_context(
             if a.len() > MAX_ARRAY_LEN {
                 return Err(VmErr::Msg("Node array exceeds VM limit".into()));
             }
-            let array = Value::checked_array(
-                a.iter()
-                    .map(|x| wire_to_guest_with_context(sidecar, x, depth + 1, graph))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?;
+            let array = Value::checked_array(Vec::new())?;
+            if let Some(id) = v.get("id") {
+                graph.register(wire_graph_id(Some(id))?, array.clone())?;
+            }
+            let items = a
+                .iter()
+                .map(|x| wire_to_guest_with_context(sidecar, x, depth + 1, graph))
+                .collect::<Result<Vec<_>, _>>()?;
+            if let Value::Array(cell) = &array {
+                *cell.borrow_mut() = items;
+            }
             if let Some(named) = v.get("named").and_then(JsonValue::as_array) {
                 for property in named {
                     let pair = property
@@ -1879,10 +1872,6 @@ fn wire_to_guest_with_context(
                     }
                 }
             }
-            if let Some(id) = v.get("id") {
-                let id = wire_graph_id(Some(id))?;
-                graph.register(id, array.clone())?;
-            }
             Ok(array)
         }
         "object" => {
@@ -1893,7 +1882,11 @@ fn wire_to_guest_with_context(
             if a.len() > MAX_OBJECT_PROPS {
                 return Err(VmErr::Msg("Node object exceeds VM limit".into()));
             }
-            let mut props = Vec::with_capacity(a.len());
+            let object = Value::checked_object(Vec::new())?;
+            if let Some(id) = v.get("id") {
+                graph.register(wire_graph_id(Some(id))?, object.clone())?;
+            }
+            let mut slots = Vec::with_capacity(a.len());
             let mut attrs = Vec::with_capacity(a.len());
             for item in a {
                 let pair = item
@@ -1903,7 +1896,7 @@ fn wire_to_guest_with_context(
                 let key = pair[0]
                     .as_str()
                     .ok_or_else(|| VmErr::Msg("invalid Node property key".into()))?;
-                props.push((
+                slots.push((
                     key.to_string(),
                     wire_to_guest_with_context(sidecar, &pair[1], depth + 1, graph)?,
                 ));
@@ -1916,8 +1909,8 @@ fn wire_to_guest_with_context(
                     },
                 ));
             }
-            let object = Value::checked_object(props)?;
             if let Value::Object { props } = &object {
+                *props.borrow_mut() = slots;
                 let mut meta = props.meta.borrow_mut();
                 for (key, value) in attrs {
                     meta.set_attrs(&key, value);
@@ -1925,10 +1918,6 @@ fn wire_to_guest_with_context(
                 if v.get("extensible").and_then(JsonValue::as_bool) == Some(false) {
                     meta.non_extensible = true;
                 }
-            }
-            if let Some(id) = v.get("id") {
-                let id = wire_graph_id(Some(id))?;
-                graph.register(id, object.clone())?;
             }
             Ok(object)
         }
@@ -2173,6 +2162,24 @@ static napi_value make_shared_array(napi_env env, napi_callback_info info) {
   return outer;
 }
 
+static napi_value make_cycle(napi_env env, napi_callback_info info) {
+  napi_value object, child, value;
+  if (napi_create_object(env, &object) != napi_ok ||
+      napi_create_object(env, &child) != napi_ok ||
+      napi_create_int32(env, 1, &value) != napi_ok ||
+      napi_set_named_property(env, child, "value", value) != napi_ok ||
+      napi_set_named_property(env, object, "self", object) != napi_ok ||
+      napi_set_named_property(env, object, "child", child) != napi_ok) return NULL;
+  return object;
+}
+
+static napi_value make_cyclic_array(napi_env env, napi_callback_info info) {
+  napi_value array;
+  if (napi_create_array_with_length(env, 1, &array) != napi_ok ||
+      napi_set_element(env, array, 0, array) != napi_ok) return NULL;
+  return array;
+}
+
 static napi_value make_buffer(napi_env env, napi_callback_info info) {
   const char bytes[] = {'a', 'b', 'c'};
   napi_value result;
@@ -2408,6 +2415,10 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "assignAndReturn", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "makeSharedArray", NAPI_AUTO_LENGTH, make_shared_array, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "makeSharedArray", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeCycle", NAPI_AUTO_LENGTH, make_cycle, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeCycle", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeCyclicArray", NAPI_AUTO_LENGTH, make_cyclic_array, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeCyclicArray", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "makeBuffer", NAPI_AUTO_LENGTH, make_buffer, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "makeBuffer", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "isBuffer", NAPI_AUTO_LENGTH, is_buffer, NULL, &fn) != napi_ok) return NULL;
@@ -2564,6 +2575,38 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(
             identities.get_prop("nativeArray"),
             Some(Value::Bool(true))
+        ));
+        let cycles = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); const guestObject = {value:1}; guestObject.self = guestObject; const guestArray = []; guestArray.push(guestArray); const nativeObject = addon.makeCycle(); const nativeArray = addon.makeCyclicArray(); ({guestObject:guestObject.self === addon.echo(guestObject), guestArray:guestArray[0] === addon.echo(guestArray), nativeObject:nativeObject.self === nativeObject, nativeArray:nativeArray[0] === nativeArray});",
+            )
+            .unwrap();
+        for key in ["guestObject", "guestArray", "nativeObject", "nativeArray"] {
+            assert!(
+                matches!(cycles.get_prop(key), Some(Value::Bool(true))),
+                "{key}"
+            );
+        }
+        let cyclic_writeback = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); const object = addon.makeCycle(); const result = addon.mutateObject(object); ({same:result === object, self:object.self === object, changed:object.changed, child:object.child.value});",
+            )
+            .unwrap();
+        assert!(matches!(
+            cyclic_writeback.get_prop("same"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            cyclic_writeback.get_prop("self"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            cyclic_writeback.get_prop("changed"),
+            Some(Value::Number(value)) if value == 73.0
+        ));
+        assert!(matches!(
+            cyclic_writeback.get_prop("child"),
+            Some(Value::Number(value)) if value == 91.0
         ));
         let mutations = interpreter
             .eval_source(
