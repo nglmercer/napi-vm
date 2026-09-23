@@ -500,13 +500,13 @@ fn split_package_request(request: &str) -> Result<(String, String), VmErr> {
 }
 
 fn exports_target(exports: &JsonValue, key: &str) -> Result<Option<String>, VmErr> {
-    match exports {
+    let selection = match exports {
         JsonValue::String(_) | JsonValue::Array(_) | JsonValue::Null if key == "." => {
-            export_target_value(exports, None)
+            select_export_target(exports, None)
         }
         JsonValue::Object(entries) if entries.keys().any(|entry| entry.starts_with('.')) => {
             if let Some(target) = entries.get(key) {
-                return export_target_value(target, None);
+                return finish_export_selection(select_export_target(target, None));
             }
 
             let mut best: Option<(usize, usize, String, &JsonValue)> = None;
@@ -525,13 +525,15 @@ fn exports_target(exports: &JsonValue, key: &str) -> Result<Option<String>, VmEr
                     best = Some((star, pattern.len(), capture, target));
                 }
             }
-            best.map_or(Ok(None), |(_, _, capture, target)| {
-                export_target_value(target, Some(&capture))
-            })
+            best.map_or(
+                ExportTargetSelection::NoTarget,
+                |(_, _, capture, target)| select_export_target(target, Some(&capture)),
+            )
         }
-        JsonValue::Object(_) if key == "." => export_target_value(exports, None),
-        _ => Ok(None),
-    }
+        JsonValue::Object(_) if key == "." => select_export_target(exports, None),
+        _ => ExportTargetSelection::NoTarget,
+    };
+    finish_export_selection(selection)
 }
 
 fn match_export_pattern(pattern: &str, key: &str) -> Option<String> {
@@ -549,49 +551,115 @@ fn match_export_pattern(pattern: &str, key: &str) -> Option<String> {
     Some(key[prefix.len()..capture_end].to_string())
 }
 
-fn export_target_value(value: &JsonValue, capture: Option<&str>) -> Result<Option<String>, VmErr> {
+enum ExportTargetSelection {
+    Target(String),
+    NoTarget,
+    Invalid(String),
+}
+
+fn finish_export_selection(selection: ExportTargetSelection) -> Result<Option<String>, VmErr> {
+    match selection {
+        ExportTargetSelection::Target(target) => Ok(Some(target)),
+        ExportTargetSelection::NoTarget => Ok(None),
+        ExportTargetSelection::Invalid(message) => Err(VmErr::Msg(message)),
+    }
+}
+
+fn select_export_target(value: &JsonValue, capture: Option<&str>) -> ExportTargetSelection {
     match value {
         JsonValue::String(path) => {
-            if !path.starts_with("./") {
-                return Err(VmErr::Msg(format!(
-                    "unsupported package exports target '{path}'"
-                )));
-            }
             let target = match (path.contains('*'), capture) {
                 (true, Some(capture)) => path.replace('*', capture),
                 (true, None) => {
-                    return Err(VmErr::Msg(format!(
+                    return ExportTargetSelection::Invalid(format!(
                         "unsupported package exports target '{path}'"
-                    )));
+                    ));
                 }
                 (false, _) => path.clone(),
             };
-            Ok(Some(target[2..].to_string()))
+            let Some(target_path) = normalize_exports_target(&target) else {
+                return ExportTargetSelection::Invalid(format!(
+                    "unsupported package exports target '{target}'"
+                ));
+            };
+            ExportTargetSelection::Target(target_path)
         }
         JsonValue::Array(entries) => {
+            // Select the first syntactically usable target. The filesystem is
+            // checked later; a missing file does not make an otherwise valid
+            // export target fall through to the next array entry.
+            let mut last_invalid = None;
             for entry in entries {
-                if let Some(target) = export_target_value(entry, capture)? {
-                    return Ok(Some(target));
+                match select_export_target(entry, capture) {
+                    selection @ ExportTargetSelection::Target(_) => return selection,
+                    ExportTargetSelection::NoTarget => {}
+                    ExportTargetSelection::Invalid(message) => last_invalid = Some(message),
                 }
             }
-            Ok(None)
+            last_invalid.map_or(
+                ExportTargetSelection::NoTarget,
+                ExportTargetSelection::Invalid,
+            )
         }
         JsonValue::Object(entries) => {
             for (condition, value) in entries {
                 if matches!(
                     condition.as_str(),
                     "node-addons" | "node" | "require" | "default"
-                ) && let Some(target) = export_target_value(value, capture)?
-                {
-                    return Ok(Some(target));
+                ) {
+                    return select_export_target(value, capture);
                 }
             }
-            Ok(None)
+            ExportTargetSelection::NoTarget
         }
-        JsonValue::Null => Ok(None),
-        _ => Err(VmErr::Msg(
-            "invalid package exports entry; expected a path, conditions, or array".to_string(),
-        )),
+        JsonValue::Null => ExportTargetSelection::NoTarget,
+        _ => ExportTargetSelection::Invalid(
+            "invalid package exports entry; expected a path, conditions, array, or null".into(),
+        ),
+    }
+}
+
+fn normalize_exports_target(target: &str) -> Option<String> {
+    let path = target.strip_prefix("./")?;
+    let path = percent_decode_path(path)?;
+    if path.is_empty() || path.contains('\\') {
+        return None;
+    }
+    if path.split('/').any(|segment| {
+        segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.eq_ignore_ascii_case("node_modules")
+    }) {
+        return None;
+    }
+    Some(path)
+}
+
+fn percent_decode_path(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = *bytes.get(index + 1)?;
+            let low = *bytes.get(index + 2)?;
+            decoded.push((hex_digit(high)? << 4) | hex_digit(low)?);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -1178,7 +1246,6 @@ mod tests {
                 module.filename
             );
             if module.format == CommonJsModuleFormat::NativeAddon {
-                assert_eq!(module.format, CommonJsModuleFormat::NativeAddon);
                 assert!(module.source.is_none());
             }
 
@@ -1212,6 +1279,103 @@ mod tests {
                 .resolve("fixture/private/missing", Some(&entry_name))
                 .is_err()
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn filesystem_loader_uses_export_array_fallbacks_only_for_invalid_targets() {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-commonjs-exports-array-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let entry = root.join("main.cjs");
+        fs::create_dir_all(root.join("node_modules")).unwrap();
+        fs::write(&entry, "").unwrap();
+        let cases = [
+            ("invalid", r#"["not:valid","./fallback.cjs"]"#, true),
+            ("null", r#"[null,"./fallback.cjs"]"#, true),
+            (
+                "no-condition",
+                r#"[{"browser":"./browser.cjs"},"./fallback.cjs"]"#,
+                true,
+            ),
+            ("bad-target", r#"["../outside.cjs","./fallback.cjs"]"#, true),
+            ("encoded-path", r#""./fallback%2ecjs""#, true),
+            (
+                "encoded-dotdot",
+                r#"["./%2e%2e/outside.cjs","./fallback.cjs"]"#,
+                true,
+            ),
+            (
+                "encoded-node-modules",
+                r#"["./%6eode_modules/no.cjs","./fallback.cjs"]"#,
+                true,
+            ),
+            ("missing", r#"["./missing.cjs","./fallback.cjs"]"#, false),
+            (
+                "conditional-missing",
+                r#"{"node":"./missing.cjs","require":"./fallback.cjs"}"#,
+                false,
+            ),
+        ];
+        for (name, exports, _) in cases {
+            let package = root.join("node_modules").join(name);
+            fs::create_dir_all(&package).unwrap();
+            fs::write(
+                package.join("package.json"),
+                format!(r#"{{"exports":{exports}}}"#),
+            )
+            .unwrap();
+            fs::write(package.join("fallback.cjs"), "").unwrap();
+        }
+
+        let parent = entry.to_string_lossy().into_owned();
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let node_available = Command::new("node")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        for (name, _, should_fallback) in cases {
+            let resolved = loader.resolve(name, Some(&parent));
+            if should_fallback {
+                let module = resolved.unwrap();
+                assert!(module.filename.ends_with("fallback.cjs"));
+            } else {
+                assert!(
+                    resolved.is_err(),
+                    "{name} must not fall through on missing files"
+                );
+            }
+
+            if node_available {
+                let output = Command::new("node")
+                    .arg("-e")
+                    .arg("const {createRequire}=require('node:module');process.stdout.write(createRequire(process.argv[1]).resolve(process.argv[2]))")
+                    .arg(&entry)
+                    .arg(name)
+                    .output()
+                    .unwrap();
+                assert_eq!(
+                    output.status.success(),
+                    should_fallback,
+                    "Node resolution status differed for {name}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                if should_fallback {
+                    let module = loader.resolve(name, Some(&parent)).unwrap();
+                    assert_eq!(
+                        module.filename,
+                        String::from_utf8_lossy(&output.stdout).trim(),
+                        "Node and napi-vm chose different fallback targets for {name}"
+                    );
+                }
+            }
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
