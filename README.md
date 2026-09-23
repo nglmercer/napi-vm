@@ -180,7 +180,10 @@ zero-count references stay live until explicitly deleted. `napi_wrap`,
 identity. Wrap finalizers run once on the runtime's owning thread when the
 Rust Node-API host shuts down; removing a wrap does not call its finalizer.
 There is no guest-object garbage collector, so wrap finalizers do not run at
-ordinary object collection time. Async work, buffers and typed arrays, and
+ordinary object collection time. `napi_create_buffer`,
+`napi_create_buffer_copy`, `napi_get_buffer_info`, and `napi_is_buffer` are
+supported; these bytes appear to guest code as `Uint8Array` views. External
+buffers, the remaining direct typed-array/array-buffer APIs, async work, and
 thread-safe functions are not implemented.
 Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
 requires a C compiler at build time, and native addons have the desktop

@@ -75,9 +75,13 @@ does not clear until it is deleted. `napi_wrap`, `napi_unwrap`, and
 `napi_remove_wrap` work for values with stable VM object identity. Finalizers
 run once on the owning thread during Rust host shutdown, before addon libraries
 unload; removing a wrap skips its finalizer. Without guest-object collection,
-these finalizers do not run at normal object collection time. Async and
-thread-safe APIs remain unavailable. It is still an incomplete compatibility
-backend, and unimplemented imported symbols fail at load time.
+these finalizers do not run at normal object collection time. `napi_create_buffer`,
+`napi_create_buffer_copy`, `napi_get_buffer_info`, and `napi_is_buffer` are also
+supported. N-API buffers are surfaced as guest `Uint8Array` views; external
+buffers and the remaining direct typed-array/array-buffer APIs are not
+implemented. Async and thread-safe APIs remain unavailable. It is still an
+incomplete compatibility backend, and unimplemented imported symbols fail at
+load time.
 
 ## Implementation phases
 

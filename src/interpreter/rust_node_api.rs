@@ -20,7 +20,7 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{FileCommonJsLoader, Interpreter};
-use crate::value::{ErrorData, Value};
+use crate::value::{ErrorData, TypedArrayData, TypedKind, Value};
 
 const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
@@ -33,6 +33,7 @@ const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
+const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
 
 type NapiEnv = *mut c_void;
@@ -135,6 +136,7 @@ struct NapiEnvironment {
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
+    buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
     pending_exception: RefCell<Option<Value>>,
@@ -371,6 +373,16 @@ struct NapiVmApiTable {
     get_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut NapiValue) -> i32,
     set_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, NapiValue) -> i32,
     has_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut bool) -> i32,
+    create_buffer: unsafe extern "C" fn(NapiEnv, usize, *mut *mut c_void, *mut NapiValue) -> i32,
+    create_buffer_copy: unsafe extern "C" fn(
+        NapiEnv,
+        usize,
+        *const c_void,
+        *mut *mut c_void,
+        *mut NapiValue,
+    ) -> i32,
+    get_buffer_info: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void, *mut usize) -> i32,
+    is_buffer: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
     create_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
     create_type_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
     create_range_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
@@ -443,6 +455,10 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_element: api_get_element,
     set_element: api_set_element,
     has_element: api_has_element,
+    create_buffer: api_create_buffer,
+    create_buffer_copy: api_create_buffer_copy,
+    get_buffer_info: api_get_buffer_info,
+    is_buffer: api_is_buffer,
     create_error: api_create_error,
     create_type_error: api_create_type_error,
     create_range_error: api_create_range_error,
@@ -998,6 +1014,160 @@ unsafe extern "C" fn api_has_element(
             return Err(NAPI_ARRAY_EXPECTED);
         };
         unsafe { result.write(array.has_index(index as usize)) };
+        Ok(())
+    })
+}
+
+fn create_napi_buffer(bytes: Vec<u8>) -> Result<(Value, *mut c_void), i32> {
+    if bytes.len() > MAX_NAPI_BUFFER_BYTES {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    let length = bytes.len();
+    let value = Value::TypedArray(Rc::new(TypedArrayData {
+        kind: TypedKind::Uint8,
+        buffer: Rc::new(RefCell::new(bytes)),
+        byte_offset: 0,
+        length,
+    }));
+    let (data, _) = napi_buffer_data(&value)?;
+    Ok((value, data))
+}
+
+fn napi_buffer_data(value: &Value) -> Result<(*mut c_void, usize), i32> {
+    let Value::TypedArray(view) = value else {
+        return Err(NAPI_INVALID_ARG);
+    };
+    if view.kind != TypedKind::Uint8 {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let end = view
+        .byte_offset
+        .checked_add(view.length)
+        .ok_or(NAPI_INVALID_ARG)?;
+    let mut bytes = view.buffer.borrow_mut();
+    if end > bytes.len() {
+        return Err(NAPI_INVALID_ARG);
+    }
+    let data = unsafe { bytes.as_mut_ptr().add(view.byte_offset).cast::<c_void>() };
+    Ok((data, view.length))
+}
+
+fn remember_napi_buffer(environment: &NapiEnvironment, value: &Value) -> Result<(), i32> {
+    let Value::TypedArray(view) = value else {
+        return Err(NAPI_INVALID_ARG);
+    };
+    let identity = napi_object_identity(value)?;
+    let mut buffers = environment.buffer_values.borrow_mut();
+    buffers.retain(|_, buffer| buffer.strong_count() > 0);
+    buffers.insert(identity, Rc::downgrade(view));
+    Ok(())
+}
+
+fn is_napi_buffer(environment: &NapiEnvironment, value: &Value) -> bool {
+    let Value::TypedArray(view) = value else {
+        return false;
+    };
+    let Ok(identity) = napi_object_identity(value) else {
+        return false;
+    };
+    environment
+        .buffer_values
+        .borrow()
+        .get(&identity)
+        .and_then(Weak::upgrade)
+        .is_some_and(|registered| Rc::ptr_eq(view, &registered))
+}
+
+unsafe extern "C" fn api_create_buffer(
+    env: NapiEnv,
+    length: usize,
+    data: *mut *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() || length > MAX_NAPI_BUFFER_BYTES {
+            return Err(if result.is_null() {
+                NAPI_INVALID_ARG
+            } else {
+                NAPI_GENERIC_FAILURE
+            });
+        }
+        let environment = environment(env)?;
+        let (value, data_pointer) = create_napi_buffer(vec![0; length])?;
+        let handle = environment.handles.borrow_mut().create(value.clone())?;
+        remember_napi_buffer(&environment, &value)?;
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_buffer_copy(
+    env: NapiEnv,
+    length: usize,
+    data: *const c_void,
+    result_data: *mut *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() || length > MAX_NAPI_BUFFER_BYTES || (data.is_null() && length != 0) {
+            return Err(if result.is_null() || data.is_null() && length != 0 {
+                NAPI_INVALID_ARG
+            } else {
+                NAPI_GENERIC_FAILURE
+            });
+        }
+        let bytes = if length == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(data.cast::<u8>(), length) }.to_vec()
+        };
+        let environment = environment(env)?;
+        let (value, data_pointer) = create_napi_buffer(bytes)?;
+        let handle = environment.handles.borrow_mut().create(value.clone())?;
+        remember_napi_buffer(&environment, &value)?;
+        if !result_data.is_null() {
+            unsafe { result_data.write(data_pointer) };
+        }
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_buffer_info(
+    env: NapiEnv,
+    value: NapiValue,
+    data: *mut *mut c_void,
+    length: *mut usize,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        if !is_napi_buffer(&environment, &value) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let (data_pointer, byte_length) = napi_buffer_data(&value)?;
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        if !length.is_null() {
+            unsafe { length.write(byte_length) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_buffer(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let is_buffer = is_napi_buffer(&environment, &value);
+        unsafe { result.write(is_buffer) };
         Ok(())
     })
 }
@@ -1766,6 +1936,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
             wraps: RefCell::new(HashMap::new()),
+            buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
             active_callbacks: RefCell::new(HashMap::new()),
             pending_exception: RefCell::new(None),
@@ -2178,6 +2349,46 @@ static napi_value invalid_environment(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value buffer_probe(napi_env env, napi_callback_info info) {
+  const uint8_t seed[] = {65, 66, 67, 68};
+  napi_value copied, allocated, array, result, field;
+  void* copied_data = NULL;
+  void* allocated_data = NULL;
+  size_t copied_length = 0, allocated_length = 0;
+  bool copied_is_buffer = false, allocated_is_buffer = false, array_is_buffer = true;
+  (void)info;
+  if (napi_create_buffer_copy(env, sizeof(seed), seed, &copied_data, &copied) != napi_ok ||
+      copied_data == NULL ||
+      napi_get_buffer_info(env, copied, &copied_data, &copied_length) != napi_ok ||
+      copied_length != sizeof(seed) ||
+      napi_create_buffer(env, 3, &allocated_data, &allocated) != napi_ok ||
+      allocated_data == NULL ||
+      napi_get_buffer_info(env, allocated, &allocated_data, &allocated_length) != napi_ok ||
+      allocated_length != 3 ||
+      napi_create_array(env, &array) != napi_ok ||
+      napi_is_buffer(env, copied, &copied_is_buffer) != napi_ok ||
+      napi_is_buffer(env, allocated, &allocated_is_buffer) != napi_ok ||
+      napi_is_buffer(env, array, &array_is_buffer) != napi_ok) return NULL;
+  ((uint8_t*)copied_data)[1] = 120;
+  ((uint8_t*)allocated_data)[0] = 7;
+  ((uint8_t*)allocated_data)[1] = 8;
+  ((uint8_t*)allocated_data)[2] = 9;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "copy", copied) != napi_ok ||
+      napi_set_named_property(env, result, "allocated", allocated) != napi_ok ||
+      napi_get_boolean(env, copied_is_buffer, &field) != napi_ok ||
+      napi_set_named_property(env, result, "copyIsBuffer", field) != napi_ok ||
+      napi_get_boolean(env, allocated_is_buffer, &field) != napi_ok ||
+      napi_set_named_property(env, result, "allocatedIsBuffer", field) != napi_ok ||
+      napi_get_boolean(env, array_is_buffer, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayIsBuffer", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)copied_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "copyLength", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)allocated_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "allocatedLength", field) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value array_probe(napi_env env, napi_callback_info info) {
   napi_value array, empty, result, value, field;
   uint32_t length = 0, empty_length = 0;
@@ -2387,6 +2598,8 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "removeWrapProbe", function) != napi_ok ||
       napi_create_function(env, "duplicateWrapStatus", NAPI_AUTO_LENGTH, duplicate_wrap_status, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "duplicateWrapStatus", function) != napi_ok ||
+      napi_create_function(env, "bufferProbe", NAPI_AUTO_LENGTH, buffer_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "bufferProbe", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -2444,6 +2657,7 @@ const referenceReleased = addon.releaseReference();
 const makeClosure = () => () => {};
 const firstClosure = makeClosure();
 const secondClosure = makeClosure();
+const buffers = addon.bufferProbe();
 module.exports = {
   same: addon === require('./fixture.node'),
   sum: addon.add(19, 23),
@@ -2461,6 +2675,15 @@ module.exports = {
   removedWrap,
   duplicateWrapStatus,
   distinctFunctionIdentity: firstClosure !== secondClosure,
+  buffers: {
+    copy: [buffers.copy[0], buffers.copy[1], buffers.copy[2], buffers.copy[3]],
+    allocated: [buffers.allocated[0], buffers.allocated[1], buffers.allocated[2]],
+    copyIsBuffer: buffers.copyIsBuffer,
+    allocatedIsBuffer: buffers.allocatedIsBuffer,
+    arrayIsBuffer: buffers.arrayIsBuffer,
+    copyLength: buffers.copyLength,
+    allocatedLength: buffers.allocatedLength,
+  },
   undefinedResult: addon.returnsUndefined() === undefined,
   errors: {
     error: {name: errors.error.name, message: errors.error.message,
@@ -2614,6 +2837,44 @@ module.exports = {
         assert!(matches!(
             result.get_prop("distinctFunctionIdentity"),
             Some(Value::Bool(true))
+        ));
+        let buffers = result.get_prop("buffers").unwrap();
+        let copied = buffers.get_prop("copy").unwrap();
+        let Value::Array(copied) = &copied else {
+            panic!("copied buffer values are not an array");
+        };
+        let copied = copied.borrow();
+        assert!(matches!(copied.first(), Some(Value::Number(65.0))));
+        assert!(matches!(copied.get(1), Some(Value::Number(120.0))));
+        assert!(matches!(copied.get(2), Some(Value::Number(67.0))));
+        assert!(matches!(copied.get(3), Some(Value::Number(68.0))));
+        let allocated = buffers.get_prop("allocated").unwrap();
+        let Value::Array(allocated) = &allocated else {
+            panic!("allocated buffer values are not an array");
+        };
+        let allocated = allocated.borrow();
+        assert!(matches!(allocated.first(), Some(Value::Number(7.0))));
+        assert!(matches!(allocated.get(1), Some(Value::Number(8.0))));
+        assert!(matches!(allocated.get(2), Some(Value::Number(9.0))));
+        assert!(matches!(
+            buffers.get_prop("copyIsBuffer"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            buffers.get_prop("allocatedIsBuffer"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            buffers.get_prop("arrayIsBuffer"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            buffers.get_prop("copyLength"),
+            Some(Value::Number(4.0))
+        ));
+        assert!(matches!(
+            buffers.get_prop("allocatedLength"),
+            Some(Value::Number(3.0))
         ));
         assert!(matches!(
             result.get_prop("undefinedResult"),

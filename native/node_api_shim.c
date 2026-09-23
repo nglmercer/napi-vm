@@ -36,6 +36,11 @@ typedef struct napi_vm_node_api_table {
   napi_status (*get_element)(napi_env, napi_value, uint32_t, napi_value*);
   napi_status (*set_element)(napi_env, napi_value, uint32_t, napi_value);
   napi_status (*has_element)(napi_env, napi_value, uint32_t, bool*);
+  napi_status (*create_buffer)(napi_env, size_t, void**, napi_value*);
+  napi_status (*create_buffer_copy)(napi_env, size_t, const void*, void**,
+                                    napi_value*);
+  napi_status (*get_buffer_info)(napi_env, napi_value, void**, size_t*);
+  napi_status (*is_buffer)(napi_env, napi_value, bool*);
   napi_status (*create_error)(napi_env, napi_value, napi_value, napi_value*);
   napi_status (*create_type_error)(napi_env, napi_value, napi_value,
                                    napi_value*);
@@ -226,6 +231,36 @@ NAPI_VM_EXPORT napi_status napi_has_element(napi_env env, napi_value value,
                                              uint32_t index, bool* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->has_element(env, value, index, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_buffer(napi_env env, size_t length,
+                                               void** data,
+                                               napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_buffer(env, length, data, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_buffer_copy(napi_env env, size_t length,
+                                                    const void* data,
+                                                    void** result_data,
+                                                    napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_buffer_copy(env, length, data, result_data,
+                                            result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_buffer_info(napi_env env, napi_value value,
+                                                 void** data,
+                                                 size_t* length) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_buffer_info(env, value, data, length) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_is_buffer(napi_env env, napi_value value,
+                                           bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_buffer(env, value, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_create_error(napi_env env, napi_value code,
