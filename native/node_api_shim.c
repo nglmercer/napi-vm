@@ -137,6 +137,7 @@ typedef struct napi_vm_node_api_table {
                                const napi_value*, napi_value*);
   napi_status (*new_instance)(napi_env, napi_value, size_t, const napi_value*,
                               napi_value*);
+  napi_status (*instanceof)(napi_env, napi_value, napi_value, bool*);
   napi_status (*get_cb_info)(napi_env, napi_callback_info, size_t*, napi_value*,
                              napi_value*, void**);
   napi_status (*open_handle_scope)(napi_env, napi_handle_scope*);
@@ -735,6 +736,13 @@ NAPI_VM_EXPORT napi_status napi_new_instance(napi_env env,
                                               napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->new_instance(env, constructor, argc, argv, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_instanceof(napi_env env, napi_value object,
+                                            napi_value constructor,
+                                            bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->instanceof(env, object, constructor, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_cb_info(napi_env env,

@@ -770,6 +770,7 @@ struct NapiVmApiTable {
     ) -> i32,
     new_instance:
         unsafe extern "C" fn(NapiEnv, NapiValue, usize, *const NapiValue, *mut NapiValue) -> i32,
+    instanceof: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
     get_cb_info: unsafe extern "C" fn(
         NapiEnv,
         NapiCallbackInfo,
@@ -916,6 +917,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_property_names: api_get_property_names,
     call_function: api_call_function,
     new_instance: api_new_instance,
+    instanceof: api_instanceof,
     get_cb_info: api_get_cb_info,
     open_handle_scope: api_open_handle_scope,
     close_handle_scope: api_close_handle_scope,
@@ -4642,6 +4644,73 @@ unsafe extern "C" fn api_new_instance(
     })
 }
 
+unsafe extern "C" fn api_instanceof(
+    env: NapiEnv,
+    object: NapiValue,
+    constructor: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handles = environment.handles.borrow();
+        let object = handles.get(object)?;
+        let constructor = handles.get(constructor)?;
+        if !is_napi_function(&constructor) {
+            return Err(NAPI_FUNCTION_EXPECTED);
+        }
+        let Value::Class(class) = &constructor else {
+            // The VM does not yet materialize [[Prototype]] for ordinary
+            // Function values or implement callable-proxy [[HasInstance]].
+            return Err(NAPI_GENERIC_FAILURE);
+        };
+        let has_instance = Value::Object {
+            props: class.statics.clone(),
+        }
+        .get_prop("__symbol:4__");
+        if has_instance.is_some_and(|value| !matches!(value, Value::Undefined | Value::Null)) {
+            // Honor custom @@hasInstance code only after this API has a safe
+            // guest callback path for that call from addon code.
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let is_instance = napi_class_instanceof(&object, class)?;
+        unsafe { result.write(is_instance) };
+        Ok(())
+    })
+}
+
+fn napi_class_instanceof(object: &Value, class: &ClassData) -> Result<bool, i32> {
+    if let Value::Error(error) = object {
+        return Ok(class.name == "Error" || class.name == error.name);
+    }
+    if matches!(object, Value::Proxy(_)) {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    let mut prototype = object.proto_of();
+    let mut visited = HashSet::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let Some(current) = prototype else {
+            return Ok(false);
+        };
+        if super::strict_equals(current.as_ref(), class.prototype.as_ref()) {
+            return Ok(true);
+        }
+        let identity = match current.as_ref() {
+            Value::Object { props } => Rc::as_ptr(props) as usize,
+            Value::Class(class) => Rc::as_ptr(&class.prototype) as usize,
+            Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
+            _ => return Ok(false),
+        };
+        if !visited.insert(identity) {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        prototype = current.proto_of();
+    }
+    Err(NAPI_GENERIC_FAILURE)
+}
+
 unsafe extern "C" fn api_get_cb_info(
     env: NapiEnv,
     info: NapiCallbackInfo,
@@ -6832,6 +6901,16 @@ static napi_value get_prototype_probe(napi_env env, napi_callback_info info) {
   return prototype;
 }
 
+static napi_value instanceof_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  bool is_instance = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_instanceof(env, argv[0], argv[1], &is_instance) != napi_ok ||
+      napi_get_boolean(env, is_instance, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value returns_undefined(napi_env env, napi_callback_info info) {
   (void)env;
   (void)info;
@@ -7092,6 +7171,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "getPrototype", NAPI_AUTO_LENGTH,
                            get_prototype_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "getPrototype", function) != napi_ok ||
+      napi_create_function(env, "instanceofProbe", NAPI_AUTO_LENGTH,
+                           instanceof_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "instanceofProbe", function) != napi_ok ||
       napi_create_function(env, "arrayProbe", NAPI_AUTO_LENGTH, array_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "arrayProbe", function) != napi_ok ||
       napi_create_function(env, "returnsUndefined", NAPI_AUTO_LENGTH, returns_undefined, NULL, &function) != napi_ok ||
@@ -7224,6 +7306,15 @@ const counterInheritedBaseValue = CounterChild.baseValue;
 const counterInheritedStaticMethod = CounterChild.constant();
 const childCounter = new CounterChild(5);
 const childNewTargetInfo = addon.counterNewTargetInfo();
+const instanceChecks = {
+  counterIsCounter: addon.instanceofProbe(counter, addon.Counter),
+  counterIsChild: addon.instanceofProbe(counter, CounterChild),
+  childIsCounter: addon.instanceofProbe(childCounter, addon.Counter),
+  childIsChild: addon.instanceofProbe(childCounter, CounterChild),
+  numberIsCounter: addon.instanceofProbe(3, addon.Counter),
+  typeErrorIsError: addon.instanceofProbe(new TypeError('fixture'), Error),
+  typeErrorIsTypeError: addon.instanceofProbe(new TypeError('fixture'), TypeError),
+};
 const errors = addon.createErrors();
 let typeError;
 let rangeError;
@@ -7314,6 +7405,7 @@ module.exports = {
   counterNewTargetInfo,
   childNewTargetInfo,
   childCounterValue: childCounter.value,
+  instanceChecks,
   supportsNapiV4: addon.supportsNapiV4,
   definedConstant: addon.definedConstant,
   definedSymbolValue: addon[addon.descriptorSymbol],
@@ -7769,6 +7861,21 @@ module.exports = {
             result.get_prop("childCounterValue"),
             Some(Value::Number(6.0))
         ));
+        let instance_checks = result.get_prop("instanceChecks").unwrap();
+        for (name, expected) in [
+            ("counterIsCounter", true),
+            ("counterIsChild", false),
+            ("childIsCounter", true),
+            ("childIsChild", true),
+            ("numberIsCounter", false),
+            ("typeErrorIsError", true),
+            ("typeErrorIsTypeError", true),
+        ] {
+            assert!(matches!(
+                instance_checks.get_prop(name),
+                Some(Value::Bool(value)) if value == expected
+            ));
+        }
         assert!(matches!(
             result.get_prop("supportsNapiV4"),
             Some(Value::Bool(true))

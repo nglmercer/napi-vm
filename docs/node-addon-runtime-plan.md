@@ -79,6 +79,10 @@ outside the signed 64-bit range, and converts NaN and infinities to zero.
 values whose built-in prototype is not materialized (such as arrays and
 proxies) return a generic Node-API failure until that prototype model is
 implemented.
+`napi_instanceof` handles VM class constructors, inherited class prototypes,
+and VM error classes. Ordinary function objects, callable proxies, and custom
+`Symbol.hasInstance` methods still return a generic failure because their
+prototype or callback semantics are not represented by the Rust host yet.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.
