@@ -1968,44 +1968,7 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
             Ok(())
         }
         Value::Array(array) => {
-            if key == "length" {
-                let Value::Number(length) = value else {
-                    return Err(NAPI_INVALID_ARG);
-                };
-                if !length.is_finite()
-                    || length < 0.0
-                    || length.fract() != 0.0
-                    || length > crate::value::MAX_ARRAY_LEN as f64
-                {
-                    return Err(NAPI_INVALID_ARG);
-                }
-                let length = length as usize;
-                let old_length = array.borrow().len();
-                array.borrow_mut().resize(length, Value::Undefined);
-                array.resize_presence(old_length, length, false);
-                return Ok(());
-            }
-            if let Some(index) = crate::value::array_index(&key) {
-                if index >= crate::value::MAX_ARRAY_LEN {
-                    return Err(NAPI_GENERIC_FAILURE);
-                }
-                let old_length = array.borrow().len();
-                let mut elements = array.borrow_mut();
-                if index < elements.len() {
-                    elements[index] = value;
-                } else {
-                    elements.resize(index, Value::Undefined);
-                    elements.push(value);
-                }
-                let new_length = elements.len();
-                drop(elements);
-                if index >= old_length {
-                    array.resize_presence(old_length, new_length, false);
-                }
-                array.set_index_presence(index, true);
-                return Ok(());
-            }
-            array.set_named(key.clone(), value);
+            napi_array_set_property(array, &key, value)?;
             if let Some(symbol) = symbol {
                 array.set_symbol_key(&key, symbol);
             }
@@ -2013,6 +1976,58 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
         }
         _ => Err(NAPI_OBJECT_EXPECTED),
     }
+}
+
+fn napi_array_set_property(
+    array: &crate::value::ArrayCell,
+    key: &str,
+    value: Value,
+) -> Result<(), i32> {
+    if key == "length" {
+        let Value::Number(length) = value else {
+            return Err(NAPI_INVALID_ARG);
+        };
+        if !length.is_finite()
+            || length < 0.0
+            || length.fract() != 0.0
+            || length > crate::value::MAX_ARRAY_LEN as f64
+        {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if array.meta.borrow().attrs_of("length").writable {
+            array.set_length(length as usize);
+        }
+        return Ok(());
+    }
+    if let Some(index) = crate::value::array_index(key) {
+        if index >= crate::value::MAX_ARRAY_LEN {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let old_length = array.borrow().len();
+        let exists = index < old_length && array.has_index(index);
+        if (exists && !array.meta.borrow().attrs_of(key).writable)
+            || (!exists && array.meta.borrow().non_extensible)
+            || (index >= old_length && !array.meta.borrow().attrs_of("length").writable)
+        {
+            return Ok(());
+        }
+        if index >= old_length {
+            let new_length = index + 1;
+            array.borrow_mut().resize(new_length, Value::Undefined);
+            array.resize_presence(old_length, new_length, false);
+        }
+        array.borrow_mut()[index] = value;
+        array.set_index_presence(index, true);
+        return Ok(());
+    }
+    let exists = array.named_prop(key).is_some();
+    if (exists && !array.meta.borrow().attrs_of(key).writable)
+        || (!exists && array.meta.borrow().non_extensible)
+    {
+        return Ok(());
+    }
+    array.set_named(key.to_owned(), value);
+    Ok(())
 }
 
 fn napi_direct_has_own_property(object: &Value, key: &Value) -> Result<bool, i32> {
@@ -2112,11 +2127,19 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
                 return Ok(false);
             }
             if let Some(index) = crate::value::array_index(&key) {
-                if index < array.borrow().len() {
+                if index < array.borrow().len() && array.has_index(index) {
+                    if !array.meta.borrow().attrs_of(&key).configurable {
+                        return Ok(false);
+                    }
                     array.borrow_mut()[index] = Value::Undefined;
                     array.set_index_presence(index, false);
                 }
             } else {
+                if array.named_prop(&key).is_some()
+                    && !array.meta.borrow().attrs_of(&key).configurable
+                {
+                    return Ok(false);
+                }
                 array.named.borrow_mut().retain(|(name, _)| name != &key);
                 array.forget_symbol_key(&key);
             }
@@ -2312,11 +2335,12 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
             let length = array.borrow().len();
             for index in 0..length {
                 if array.has_index(index) {
+                    let index_key = index.to_string();
                     napi_push_direct_property_key(
                         &mut keys,
-                        &index.to_string(),
+                        &index_key,
                         None,
-                        PropAttrs::default(),
+                        array.meta.borrow().attrs_of(&index_key),
                     );
                 }
             }
@@ -2324,11 +2348,7 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
                 &mut keys,
                 "length",
                 None,
-                PropAttrs {
-                    writable: true,
-                    enumerable: false,
-                    configurable: false,
-                },
+                array.meta.borrow().attrs_of("length"),
             );
             for (key, _) in array.named.borrow().iter() {
                 napi_push_direct_property_key(
@@ -4312,15 +4332,7 @@ unsafe extern "C" fn api_set_element(
         if index >= crate::value::MAX_ARRAY_LEN {
             return Err(NAPI_GENERIC_FAILURE);
         }
-        let old_length = array.borrow().len();
-        if index >= old_length {
-            let new_length = index + 1;
-            array.borrow_mut().resize(new_length, Value::Undefined);
-            array.resize_presence(old_length, new_length, false);
-        }
-        array.borrow_mut()[index] = element;
-        array.set_index_presence(index, true);
-        Ok(())
+        napi_array_set_property(array, &index.to_string(), element)
     })
 }
 
@@ -4932,6 +4944,10 @@ unsafe extern "C" fn api_check_object_type_tag(
 }
 
 fn napi_set_object_integrity(value: &Value, freeze: bool) -> Result<(), i32> {
+    if let Value::Array(array) = value {
+        array.set_integrity(freeze);
+        return Ok(());
+    }
     if let Value::Function(function) = value {
         function.ensure_name_length_properties();
         function.prototype_value(value);
@@ -10569,11 +10585,12 @@ static void async_cleanup(napi_async_cleanup_hook_handle handle, void* data) {
 }
 
 static napi_value probe(napi_env env, napi_callback_info info) {
-  napi_value args[3], result, field;
-  size_t argc = 3;
+  napi_value args[4], result, field;
   bool matches = false, wrong_matches = true;
   napi_status duplicate_tag_status, freeze_status, seal_status, function_freeze_status;
-  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 3 ||
+  napi_status array_freeze_status, frozen_array_set_status;
+  size_t argc = 4;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 4 ||
       napi_type_tag_object(env, args[0], &fixture_tag) != napi_ok ||
       napi_check_object_type_tag(env, args[0], &fixture_tag, &matches) != napi_ok ||
       napi_check_object_type_tag(env, args[0], &other_tag, &wrong_matches) != napi_ok)
@@ -10582,6 +10599,9 @@ static napi_value probe(napi_env env, napi_callback_info info) {
   freeze_status = napi_object_freeze(env, args[0]);
   seal_status = napi_object_seal(env, args[1]);
   function_freeze_status = napi_object_freeze(env, args[2]);
+  array_freeze_status = napi_object_freeze(env, args[3]);
+  if (napi_create_int32(env, 77, &field) != napi_ok) return NULL;
+  frozen_array_set_status = napi_set_element(env, args[3], 0, field);
   if (napi_create_object(env, &result) != napi_ok ||
       napi_get_boolean(env, matches, &field) != napi_ok ||
       napi_set_named_property(env, result, "tagMatches", field) != napi_ok ||
@@ -10594,7 +10614,11 @@ static napi_value probe(napi_env env, napi_callback_info info) {
       napi_create_int32(env, seal_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "sealStatus", field) != napi_ok ||
       napi_create_int32(env, function_freeze_status, &field) != napi_ok ||
-      napi_set_named_property(env, result, "functionFreezeStatus", field) != napi_ok)
+      napi_set_named_property(env, result, "functionFreezeStatus", field) != napi_ok ||
+      napi_create_int32(env, array_freeze_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "arrayFreezeStatus", field) != napi_ok ||
+      napi_create_int32(env, frozen_array_set_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "frozenArraySetStatus", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -10638,13 +10662,31 @@ NAPI_MODULE_INIT() {
 const addon = require('./fixture.node');
 const target = {value: 41};
 const sealedTarget = {value: 9};
+const frozenArray = [13];
 function FrozenFunction() {}
-const native = addon.probe(target, sealedTarget, FrozenFunction);
+const native = addon.probe(target, sealedTarget, FrozenFunction, frozenArray);
+frozenArray[0] = 88;
+frozenArray[1] = 99;
+delete frozenArray[0];
+frozenArray.length = 0;
+const sealedArray = [17];
+Object.seal(sealedArray);
+sealedArray[0] = 19;
+sealedArray[1] = 21;
+delete sealedArray[0];
+sealedArray.length = 0;
 module.exports = {
   ...native,
   frozen: Object.isFrozen(target),
   sealed: Object.isSealed(sealedTarget),
   functionFrozen: Object.isFrozen(FrozenFunction),
+  arrayFrozen: Object.isFrozen(frozenArray),
+  frozenArrayLength: frozenArray.length,
+  frozenArrayValue: frozenArray[0],
+  sealedArraySealed: Object.isSealed(sealedArray),
+  sealedArrayFrozen: Object.isFrozen(sealedArray),
+  sealedArrayLength: sealedArray.length,
+  sealedArrayValue: sealedArray[0],
   targetValue: target.value,
   sealedValue: sealedTarget.value,
 };
@@ -10732,9 +10774,18 @@ module.exports = {
         assert_eq!(vm_report["freezeStatus"], NAPI_OK);
         assert_eq!(vm_report["sealStatus"], NAPI_OK);
         assert_eq!(vm_report["functionFreezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["arrayFreezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["frozenArraySetStatus"], NAPI_OK);
         assert_eq!(vm_report["frozen"], true);
         assert_eq!(vm_report["sealed"], true);
         assert_eq!(vm_report["functionFrozen"], true);
+        assert_eq!(vm_report["arrayFrozen"], true);
+        assert_eq!(vm_report["frozenArrayLength"], 1);
+        assert_eq!(vm_report["frozenArrayValue"], 13);
+        assert_eq!(vm_report["sealedArraySealed"], true);
+        assert_eq!(vm_report["sealedArrayFrozen"], false);
+        assert_eq!(vm_report["sealedArrayLength"], 1);
+        assert_eq!(vm_report["sealedArrayValue"], 19);
         assert_eq!(vm_report["targetValue"], 41);
         assert_eq!(vm_report["sealedValue"], 9);
         drop(observer);

@@ -651,6 +651,10 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
 /// Apply `seal`/`freeze`: mark the object non-extensible, and clear
 /// `configurable` (and, when freezing, `writable`) on every own property.
 fn lock(target: &Value, freeze: bool) {
+    if let Value::Array(array) = target {
+        array.set_integrity(freeze);
+        return;
+    }
     let Some(c) = cell(target) else { return };
     let keys: Vec<String> = c.borrow().iter().map(|(k, _)| k.clone()).collect();
     let mut meta = c.meta.borrow_mut();
@@ -669,6 +673,9 @@ fn lock(target: &Value, freeze: bool) {
 /// integrity level? An object with no properties is frozen as soon as it is
 /// non-extensible.
 fn locked(target: &Value, freeze: bool) -> bool {
+    if let Value::Array(array) = target {
+        return array.is_integrity_locked(freeze);
+    }
     let Some(c) = cell(target) else {
         // Primitives are frozen and sealed vacuously.
         return !matches!(target, Value::Array(_));
@@ -705,14 +712,17 @@ fn object_is_sealed(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 fn object_prevent_extensions(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if let Some(c) = cell(&v) {
+    if let Value::Array(array) = &v {
+        array.meta.borrow_mut().non_extensible = true;
+    } else if let Some(c) = cell(&v) {
         c.meta.borrow_mut().non_extensible = true;
     }
     Ok(v)
 }
 fn object_is_extensible(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(Value::Bool(
-        cell(&v).is_some_and(|c| !c.meta.borrow().non_extensible),
-    ))
+    Ok(Value::Bool(match &v {
+        Value::Array(array) => !array.meta.borrow().non_extensible,
+        _ => cell(&v).is_some_and(|c| !c.meta.borrow().non_extensible),
+    }))
 }

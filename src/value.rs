@@ -205,16 +205,29 @@ pub struct ArrayCell {
     pub symbol_keys: RefCell<Vec<(String, Rc<SymbolData>)>>,
 }
 
+fn array_meta() -> ObjectMeta {
+    let mut meta = ObjectMeta {
+        uses_default_prototype: true,
+        ..ObjectMeta::default()
+    };
+    meta.set_attrs(
+        "length",
+        PropAttrs {
+            writable: true,
+            enumerable: false,
+            configurable: false,
+        },
+    );
+    meta
+}
+
 impl ArrayCell {
     pub fn new(elements: Vec<Value>) -> Self {
         Self {
             elements: RefCell::new(elements),
             present: RefCell::new(None),
             named: RefCell::new(Vec::new()),
-            meta: RefCell::new(ObjectMeta {
-                uses_default_prototype: true,
-                ..ObjectMeta::default()
-            }),
+            meta: RefCell::new(array_meta()),
             symbol_keys: RefCell::new(Vec::new()),
         }
     }
@@ -228,12 +241,88 @@ impl ArrayCell {
             elements: RefCell::new(elements),
             present: RefCell::new(normalized),
             named: RefCell::new(Vec::new()),
-            meta: RefCell::new(ObjectMeta {
-                uses_default_prototype: true,
-                ..ObjectMeta::default()
-            }),
+            meta: RefCell::new(array_meta()),
             symbol_keys: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Apply an integrity level to array indices, named properties, and the
+    /// special `length` property using the same descriptor metadata consumed
+    /// by guest writes and Node-API property reflection.
+    pub fn set_integrity(&self, freeze: bool) {
+        let mut keys = self
+            .presence_snapshot()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, present)| *present)
+            .map(|(index, _)| index.to_string())
+            .collect::<Vec<_>>();
+        keys.extend(self.named.borrow().iter().map(|(key, _)| key.clone()));
+
+        let mut meta = self.meta.borrow_mut();
+        meta.non_extensible = true;
+        let mut length = meta.attrs_of("length");
+        length.enumerable = false;
+        length.configurable = false;
+        if freeze {
+            length.writable = false;
+        }
+        meta.set_attrs("length", length);
+        for key in keys {
+            let mut attributes = meta.attrs_of(&key);
+            attributes.configurable = false;
+            if freeze {
+                attributes.writable = false;
+            }
+            meta.set_attrs(&key, attributes);
+        }
+    }
+
+    /// Set an array's length while respecting its own indexed property
+    /// descriptors. Shrinking stops at the highest non-configurable index,
+    /// matching the partial truncation performed by ArraySetLength.
+    pub fn set_length(&self, requested: usize) {
+        let old_length = self.elements.borrow().len();
+        let mut length = requested;
+        if requested < old_length {
+            let meta = self.meta.borrow();
+            for index in (requested..old_length).rev() {
+                if self.has_index(index) && !meta.attrs_of(&index.to_string()).configurable {
+                    length = index + 1;
+                    break;
+                }
+            }
+        }
+        self.elements.borrow_mut().resize(length, Value::Undefined);
+        self.resize_presence(old_length, length, false);
+    }
+
+    /// Whether every own array property satisfies the requested integrity
+    /// level. Array length is non-configurable but remains writable when only
+    /// sealed, as required by ECMAScript.
+    pub fn is_integrity_locked(&self, freeze: bool) -> bool {
+        let meta = self.meta.borrow();
+        if !meta.non_extensible {
+            return false;
+        }
+        let length = meta.attrs_of("length");
+        if length.configurable || (freeze && length.writable) {
+            return false;
+        }
+        let indices_locked = self
+            .presence_snapshot()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, present)| *present)
+            .all(|(index, _)| {
+                let attributes = meta.attrs_of(&index.to_string());
+                !attributes.configurable && (!freeze || !attributes.writable)
+            });
+        indices_locked
+            && self.named.borrow().iter().all(|(key, _)| {
+                let attributes = meta.attrs_of(key);
+                !attributes.configurable && (!freeze || !attributes.writable)
+            })
     }
 
     pub fn has_index(&self, index: usize) -> bool {
@@ -262,6 +351,10 @@ impl ArrayCell {
         }
         if indices.iter().all(|present| *present) {
             *presence = None;
+        }
+        drop(presence);
+        if !present {
+            self.meta.borrow_mut().forget(&index.to_string());
         }
     }
 
@@ -301,6 +394,13 @@ impl ArrayCell {
             let mut present = vec![true; old_length];
             present.resize(length, false);
             *presence = Some(present);
+        }
+        drop(presence);
+        if length < old_length {
+            let mut metadata = self.meta.borrow_mut();
+            for index in length..old_length {
+                metadata.forget(&index.to_string());
+            }
         }
     }
 

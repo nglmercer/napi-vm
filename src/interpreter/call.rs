@@ -387,11 +387,19 @@ impl Interpreter {
                 }
                 if let Some(index) = crate::value::array_index(&property) {
                     let items_len = items.borrow().len();
-                    if index < items_len {
+                    if index < items_len && items.has_index(index) {
+                        if !items.meta.borrow().attrs_of(&property).configurable {
+                            return Ok(Value::Bool(false));
+                        }
                         items.borrow_mut()[index] = Value::Undefined;
                         items.set_index_presence(index, false);
                     }
                 } else {
+                    if items.named_prop(&property).is_some()
+                        && !items.meta.borrow().attrs_of(&property).configurable
+                    {
+                        return Ok(Value::Bool(false));
+                    }
                     items
                         .named
                         .borrow_mut()
@@ -672,22 +680,36 @@ impl Interpreter {
             (Value::Array(cell), Value::String(k))
                 if k != "length" && crate::value::array_index(k).is_none() =>
             {
+                let exists = cell.named_prop(k).is_some();
+                if (exists && !cell.meta.borrow().attrs_of(k).writable)
+                    || (!exists && cell.meta.borrow().non_extensible)
+                {
+                    return Ok(());
+                }
                 cell.set_named(k.clone(), val);
                 Ok(())
             }
             (Value::Array(cell), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
+                let exists = cell.named_prop(&slot).is_some();
+                if (exists && !cell.meta.borrow().attrs_of(&slot).writable)
+                    || (!exists && cell.meta.borrow().non_extensible)
+                {
+                    return Ok(());
+                }
                 cell.set_named(slot.clone(), val);
                 cell.set_symbol_key(&slot, symbol.clone());
                 Ok(())
             }
             (Value::Array(cell), Value::String(k)) if k == "length" => {
                 let length = self.tn(&val);
-                if length.is_finite() && length >= 0.0 && length.fract() == 0.0 {
+                if cell.meta.borrow().attrs_of("length").writable
+                    && length.is_finite()
+                    && length >= 0.0
+                    && length.fract() == 0.0
+                {
                     let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
-                    let old_length = cell.borrow().len();
-                    cell.borrow_mut().resize(length, Value::Undefined);
-                    cell.resize_presence(old_length, length, false);
+                    cell.set_length(length);
                 }
                 Ok(())
             }
@@ -704,6 +726,14 @@ impl Interpreter {
                 }
                 let idx = *i as usize;
                 let old_length = items.borrow().len();
+                let exists = idx < old_length && items.has_index(idx);
+                let attributes = items.meta.borrow().attrs_of(&idx.to_string());
+                if (exists && !attributes.writable)
+                    || (!exists && items.meta.borrow().non_extensible)
+                    || (idx >= old_length && !items.meta.borrow().attrs_of("length").writable)
+                {
+                    return Ok(());
+                }
                 let mut items = items.borrow_mut();
                 if idx < items.len() {
                     items[idx] = val;
