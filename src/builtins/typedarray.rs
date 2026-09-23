@@ -84,7 +84,7 @@ fn new_buffer(byte_length: usize) -> Result<Buffer, VmErr> {
     if byte_length > crate::value::MAX_ARRAY_LEN * 8 {
         return Err(range_err("Invalid array buffer length"));
     }
-    Ok(Rc::new(RefCell::new(vec![0u8; byte_length])))
+    Ok(Buffer::zeroed(byte_length))
 }
 
 fn new_array_buffer(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

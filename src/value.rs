@@ -1,4 +1,5 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
+use std::ptr::NonNull;
 use std::rc::Rc;
 
 use crate::error::VmErr;
@@ -490,8 +491,79 @@ pub struct RegExpData {
     pub last_index: std::cell::Cell<usize>,
 }
 
-/// The bytes behind an `ArrayBuffer`, shared by every view onto it.
-pub type Buffer = Rc<RefCell<Vec<u8>>>;
+/// Backing storage for owned and native-owned ArrayBuffer byte ranges.
+#[derive(Debug)]
+enum BufferStorage {
+    Owned(Vec<u8>),
+    External { data: NonNull<u8>, length: usize },
+}
+
+impl BufferStorage {
+    unsafe fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::External { data, length } => unsafe {
+                std::slice::from_raw_parts(data.as_ptr(), *length)
+            },
+        }
+    }
+
+    unsafe fn as_mut_slice(&mut self) -> &mut [u8] {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::External { data, length } => unsafe {
+                std::slice::from_raw_parts_mut(data.as_ptr(), *length)
+            },
+        }
+    }
+}
+
+/// A byte store shared by an ArrayBuffer and its views. External stores point
+/// at memory owned by a trusted native addon; that addon must keep it valid
+/// until its Node-API finalizer runs and synchronize any concurrent access.
+#[derive(Debug, Clone)]
+pub struct Buffer(Rc<RefCell<BufferStorage>>);
+
+impl Buffer {
+    pub fn owned(bytes: Vec<u8>) -> Self {
+        Self(Rc::new(RefCell::new(BufferStorage::Owned(bytes))))
+    }
+
+    pub fn zeroed(length: usize) -> Self {
+        Self::owned(vec![0; length])
+    }
+
+    /// Wrap a native-owned byte range without copying it.
+    ///
+    /// # Safety
+    /// `data` must point to `length` readable and writable bytes and remain
+    /// alive until all guest views are unusable and the addon finalizer runs.
+    pub unsafe fn external(data: *mut u8, length: usize) -> Option<Self> {
+        let data = match NonNull::new(data) {
+            Some(data) => data,
+            None if length == 0 => NonNull::dangling(),
+            None => return None,
+        };
+        Some(Self(Rc::new(RefCell::new(BufferStorage::External {
+            data,
+            length,
+        }))))
+    }
+
+    pub fn borrow(&self) -> Ref<'_, [u8]> {
+        Ref::map(self.0.borrow(), |storage| unsafe { storage.as_slice() })
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<'_, [u8]> {
+        RefMut::map(self.0.borrow_mut(), |storage| unsafe {
+            storage.as_mut_slice()
+        })
+    }
+
+    pub fn identity(&self) -> usize {
+        Rc::as_ptr(&self.0) as usize
+    }
+}
 
 /// A typed array's element type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

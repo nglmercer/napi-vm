@@ -21,7 +21,7 @@ use std::sync::Arc;
 use napi::sys;
 
 use crate::error::VmErr;
-use crate::value::{MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, Value};
+use crate::value::{Buffer, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, Value};
 
 #[inline]
 pub(super) fn chk(status: sys::napi_status) -> Result<(), VmErr> {
@@ -511,7 +511,7 @@ fn read_array_buffer(
             ));
         }
         let bytes = std::slice::from_raw_parts(data as *const u8, length).to_vec();
-        Ok(std::rc::Rc::new(std::cell::RefCell::new(bytes)))
+        Ok(Buffer::owned(bytes))
     }
 }
 
@@ -558,7 +558,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
         Ok(Value::TypedArray(std::rc::Rc::new(
             crate::value::TypedArrayData {
                 kind,
-                buffer: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
+                buffer: Buffer::owned(bytes),
                 byte_offset: 0,
                 length,
             },

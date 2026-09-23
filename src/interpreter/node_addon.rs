@@ -17,7 +17,7 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::NativeAddonLoader;
 use crate::value::{
-    MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, PropAttrs,
+    Buffer, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, PropAttrs,
     SymbolData, TypedArrayData, TypedKind, Value,
 };
 
@@ -1768,7 +1768,7 @@ fn guest_to_wire(
             };
             json!({"t":"object","id":format!("g:{node_id}"),"v":wire,"prototype":prototype,"extensible":extensible})
         }
-        Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":bytes.borrow().as_slice()}),
+        Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":&*bytes.borrow()}),
         Value::TypedArray(view) => {
             let start = view.byte_offset;
             let byte_len = view
@@ -2814,7 +2814,7 @@ fn wire_to_guest_with_context(
                 v.get("v")
                     .ok_or_else(|| VmErr::Msg("invalid Node bytes".into()))?,
             )?;
-            Ok(Value::ArrayBuffer(Rc::new(RefCell::new(bytes))))
+            Ok(Value::ArrayBuffer(Buffer::owned(bytes)))
         }
         "typedArray" => {
             let kind_name = v
@@ -2839,7 +2839,7 @@ fn wire_to_guest_with_context(
             }
             Ok(Value::TypedArray(Rc::new(TypedArrayData {
                 kind,
-                buffer: Rc::new(RefCell::new(bytes)),
+                buffer: Buffer::owned(bytes),
                 byte_offset: 0,
                 length,
             })))
@@ -2861,7 +2861,7 @@ fn wire_to_guest_with_context(
             }
             Ok(Value::DataView(Rc::new(TypedArrayData {
                 kind: TypedKind::Uint8,
-                buffer: Rc::new(RefCell::new(bytes)),
+                buffer: Buffer::owned(bytes),
                 byte_offset: 0,
                 length,
             })))

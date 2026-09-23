@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{TypedArrayData, TypedKind, Value};
+use crate::value::{Buffer, TypedArrayData, TypedKind, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("TextEncoder") {
@@ -77,7 +77,7 @@ fn encode(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
     let length = bytes.len();
     Ok(Value::TypedArray(Rc::new(TypedArrayData {
         kind: TypedKind::Uint8,
-        buffer: Rc::new(std::cell::RefCell::new(bytes)),
+        buffer: Buffer::owned(bytes),
         byte_offset: 0,
         length,
     })))
@@ -88,7 +88,7 @@ fn encode(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
 /// requires.
 fn decode(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let bytes = match a.first() {
-        Some(Value::ArrayBuffer(buffer)) => buffer.borrow().clone(),
+        Some(Value::ArrayBuffer(buffer)) => buffer.borrow().to_vec(),
         Some(Value::TypedArray(view)) | Some(Value::DataView(view)) => {
             let source = view.buffer.borrow();
             let from = view.byte_offset.min(source.len());
@@ -427,11 +427,9 @@ fn clone_value(
         | Value::String(_)
         | Value::BigInt(_) => value.clone(),
         Value::Date(ms) => Value::Date(Rc::new(std::cell::Cell::new(ms.get()))),
-        Value::ArrayBuffer(bytes) => {
-            Value::ArrayBuffer(Rc::new(std::cell::RefCell::new(bytes.borrow().clone())))
-        }
+        Value::ArrayBuffer(bytes) => Value::ArrayBuffer(Buffer::owned(bytes.borrow().to_vec())),
         Value::TypedArray(view) | Value::DataView(view) => {
-            let copy = Rc::new(std::cell::RefCell::new(view.buffer.borrow().clone()));
+            let copy = Buffer::owned(view.buffer.borrow().to_vec());
             let cloned = Rc::new(TypedArrayData {
                 kind: view.kind,
                 buffer: copy,

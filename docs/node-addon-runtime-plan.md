@@ -118,10 +118,14 @@ supported. `napi_create_external` and `napi_get_value_external` preserve an
 external's native pointer and distinct `napi_typeof` tag. In guest JavaScript,
 an external behaves like a non-extensible, null-prototype object with no own
 properties. Its finalizer runs during host shutdown because this VM does not
-collect guest objects. N-API buffers are surfaced as guest `Uint8Array` views;
-external buffers are not implemented. ArrayBuffer, typed-array, and DataView
-creation, type checks, and info APIs share storage with guest views and preserve
-byte offsets. `napi_adjust_external_memory` keeps a checked per-environment
+collect guest objects. N-API buffers are surfaced as guest `Uint8Array` views.
+`napi_create_external_arraybuffer` and `napi_create_external_buffer` expose
+addon-owned memory without copying, so guest typed-array writes are visible to
+the native allocation. The environment retains these values and invokes their
+finalizers once on the owner thread at host shutdown; finalization at ordinary
+guest garbage-collection time is unavailable. ArrayBuffer, typed-array, and
+DataView creation, type checks, and info APIs share storage with guest views
+and preserve byte offsets. `napi_adjust_external_memory` keeps a checked per-environment
 total and returns the updated value; the VM has no garbage collector to tune.
 `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During

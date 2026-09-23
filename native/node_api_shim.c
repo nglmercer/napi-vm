@@ -191,6 +191,10 @@ typedef struct napi_vm_node_api_table {
   napi_status (*run_script)(napi_env, napi_value, napi_value*);
   napi_status (*adjust_external_memory)(napi_env, int64_t, int64_t*);
   napi_status (*coerce_to_object)(napi_env, napi_value, napi_value*);
+  napi_status (*create_external_arraybuffer)(napi_env, void*, size_t,
+                                             napi_finalize, void*, napi_value*);
+  napi_status (*create_external_buffer)(napi_env, size_t, void*, napi_finalize,
+                                        void*, napi_value*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -492,6 +496,25 @@ NAPI_VM_EXPORT napi_status napi_create_arraybuffer(napi_env env,
                                                      napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->create_arraybuffer(env, byte_length, data, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_external_arraybuffer(
+    napi_env env, void* external_data, size_t byte_length,
+    napi_finalize finalize_cb, void* finalize_hint, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_external_arraybuffer(
+                     env, external_data, byte_length, finalize_cb,
+                     finalize_hint, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_external_buffer(
+    napi_env env, size_t length, void* data, napi_finalize finalize_cb,
+    void* finalize_hint, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_external_buffer(env, length, data, finalize_cb,
+                                                finalize_hint, result)
+               : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_arraybuffer_info(napi_env env,

@@ -296,6 +296,7 @@ struct NapiEnvironment {
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     externals: RefCell<HashMap<NapiObjectIdentity, NapiExternal>>,
+    external_buffers: RefCell<HashMap<NapiObjectIdentity, NapiExternalBuffer>>,
     external_memory: Cell<i64>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
@@ -445,6 +446,15 @@ struct NapiWrap {
 struct NapiExternal {
     // The Node-API external has no own properties or prototype, but it must
     // stay alive until its finalizer runs during environment shutdown.
+    _value: Value,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+}
+
+struct NapiExternalBuffer {
+    // Retain each external buffer value and its native memory until host
+    // shutdown, when its Node-API finalizer runs on the owning thread.
     _value: Value,
     data: *mut c_void,
     finalize: Option<NapiFinalize>,
@@ -921,6 +931,22 @@ struct NapiVmApiTable {
     run_script: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     adjust_external_memory: unsafe extern "C" fn(NapiEnv, i64, *mut i64) -> i32,
     coerce_to_object: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
+    create_external_arraybuffer: unsafe extern "C" fn(
+        NapiEnv,
+        *mut c_void,
+        usize,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiValue,
+    ) -> i32,
+    create_external_buffer: unsafe extern "C" fn(
+        NapiEnv,
+        usize,
+        *mut c_void,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiValue,
+    ) -> i32,
 }
 
 #[repr(C)]
@@ -1049,6 +1075,8 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     run_script: api_run_script,
     adjust_external_memory: api_adjust_external_memory,
     coerce_to_object: api_coerce_to_object,
+    create_external_arraybuffer: api_create_external_arraybuffer,
+    create_external_buffer: api_create_external_buffer,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1800,9 +1828,7 @@ fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
         )),
         Value::Date(date) => Ok(NapiObjectIdentity::Date(Rc::as_ptr(date) as usize)),
         Value::Proxy(proxy) => Ok(NapiObjectIdentity::Proxy(Rc::as_ptr(proxy) as usize)),
-        Value::ArrayBuffer(buffer) => {
-            Ok(NapiObjectIdentity::ArrayBuffer(Rc::as_ptr(buffer) as usize))
-        }
+        Value::ArrayBuffer(buffer) => Ok(NapiObjectIdentity::ArrayBuffer(buffer.identity())),
         Value::TypedArray(view) => Ok(NapiObjectIdentity::TypedArray(Rc::as_ptr(view) as usize)),
         Value::DataView(view) => Ok(NapiObjectIdentity::DataView(Rc::as_ptr(view) as usize)),
         Value::RegExp(regexp) => Ok(NapiObjectIdentity::RegExp(Rc::as_ptr(regexp) as usize)),
@@ -1843,6 +1869,19 @@ fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
 
     let externals = std::mem::take(&mut *environment.externals.borrow_mut());
     for external in externals.into_values() {
+        let Some(finalize) = external.finalize else {
+            continue;
+        };
+        let scope = environment.handles.borrow_mut().open_scope().ok();
+        unsafe { finalize(environment.raw(), external.data, external.hint) };
+        environment.pending_exception.borrow_mut().take();
+        if let Some(scope) = scope {
+            let _ = environment.handles.borrow_mut().close_scope(scope);
+        }
+    }
+
+    let external_buffers = std::mem::take(&mut *environment.external_buffers.borrow_mut());
+    for external in external_buffers.into_values() {
         let Some(finalize) = external.finalize else {
             continue;
         };
@@ -2798,7 +2837,7 @@ fn create_napi_buffer(bytes: Vec<u8>) -> Result<(Value, *mut c_void), i32> {
     let length = bytes.len();
     let value = Value::TypedArray(Rc::new(TypedArrayData {
         kind: TypedKind::Uint8,
-        buffer: Rc::new(RefCell::new(bytes)),
+        buffer: Buffer::owned(bytes),
         byte_offset: 0,
         length,
     }));
@@ -2834,6 +2873,31 @@ fn remember_napi_buffer(environment: &NapiEnvironment, value: &Value) -> Result<
     buffers.retain(|_, buffer| buffer.strong_count() > 0);
     buffers.insert(identity, Rc::downgrade(view));
     Ok(())
+}
+
+fn create_napi_external_buffer_value(
+    environment: &NapiEnvironment,
+    value: Value,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+    is_buffer: bool,
+) -> Result<NapiValue, i32> {
+    let identity = napi_object_identity(&value)?;
+    let handle = environment.handles.borrow_mut().create(value.clone())?;
+    if is_buffer {
+        remember_napi_buffer(environment, &value)?;
+    }
+    environment.external_buffers.borrow_mut().insert(
+        identity,
+        NapiExternalBuffer {
+            _value: value,
+            data,
+            finalize,
+            hint,
+        },
+    );
+    Ok(handle)
 }
 
 fn is_napi_buffer(environment: &NapiEnvironment, value: &Value) -> bool {
@@ -2904,6 +2968,40 @@ unsafe extern "C" fn api_create_buffer_copy(
         if !result_data.is_null() {
             unsafe { result_data.write(data_pointer) };
         }
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_external_buffer(
+    env: NapiEnv,
+    length: usize,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || (data.is_null() && length != 0) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        // SAFETY: Node-API requires the addon to keep this allocation live
+        // until its supplied finalizer is called. The environment retains the
+        // guest value and runs that finalizer only during host shutdown.
+        let backing =
+            unsafe { Buffer::external(data.cast::<u8>(), length) }.ok_or(NAPI_INVALID_ARG)?;
+        let value = Value::TypedArray(Rc::new(TypedArrayData {
+            kind: TypedKind::Uint8,
+            buffer: backing,
+            byte_offset: 0,
+            length,
+        }));
+        let handle =
+            create_napi_external_buffer_value(&environment, value, data, finalize, hint, true)?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -3047,7 +3145,7 @@ unsafe extern "C" fn api_create_arraybuffer(
             return Err(NAPI_GENERIC_FAILURE);
         }
         let environment = environment(env)?;
-        let buffer = Rc::new(RefCell::new(vec![0; byte_length]));
+        let buffer = Buffer::zeroed(byte_length);
         let (data_pointer, _) = napi_arraybuffer_data(&buffer);
         let handle = environment
             .handles
@@ -3056,6 +3154,41 @@ unsafe extern "C" fn api_create_arraybuffer(
         if !data.is_null() {
             unsafe { data.write(data_pointer) };
         }
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_external_arraybuffer(
+    env: NapiEnv,
+    external_data: *mut c_void,
+    byte_length: usize,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || (external_data.is_null() && byte_length != 0) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if byte_length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        // SAFETY: The native addon owns this memory and promises to keep it
+        // alive until its Node-API finalizer runs. We retain the ArrayBuffer
+        // in the environment so its backing memory remains reachable.
+        let buffer = unsafe { Buffer::external(external_data.cast::<u8>(), byte_length) }
+            .ok_or(NAPI_INVALID_ARG)?;
+        let value = Value::ArrayBuffer(buffer);
+        let handle = create_napi_external_buffer_value(
+            &environment,
+            value,
+            external_data,
+            finalize,
+            hint,
+            false,
+        )?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -5936,6 +6069,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
             externals: RefCell::new(HashMap::new()),
+            external_buffers: RefCell::new(HashMap::new()),
             external_memory: Cell::new(0),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
@@ -6451,6 +6585,10 @@ static napi_ref external_value_reference;
 static int wrapped_finalizer_calls;
 static int removed_finalizer_calls;
 static int external_finalizer_calls;
+static int external_arraybuffer_finalizer_calls;
+static int external_buffer_finalizer_calls;
+static uint8_t* external_arraybuffer_data;
+static uint8_t* external_buffer_data;
 static int finalizer_create_function_status = -1;
 static int cleanup_hook_order[4];
 static int cleanup_hook_count;
@@ -6489,6 +6627,26 @@ static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 static char external_native_data[] = "external-native-data";
 static char external_finalize_hint;
+
+static void finalize_external_arraybuffer(napi_env env, void* data, void* hint) {
+  (void)env;
+  (void)hint;
+  if (data == external_arraybuffer_data) {
+    external_arraybuffer_finalizer_calls++;
+    free(data);
+    external_arraybuffer_data = NULL;
+  }
+}
+
+static void finalize_external_buffer(napi_env env, void* data, void* hint) {
+  (void)env;
+  (void)hint;
+  if (data == external_buffer_data) {
+    external_buffer_finalizer_calls++;
+    free(data);
+    external_buffer_data = NULL;
+  }
+}
 
 static napi_value finalizer_noop(napi_env env, napi_callback_info info) {
   (void)env;
@@ -6595,6 +6753,83 @@ int napi_vm_test_removed_finalizer_calls(void) {
 
 int napi_vm_test_external_finalizer_calls(void) {
   return external_finalizer_calls;
+}
+
+int napi_vm_test_external_arraybuffer_finalizer_calls(void) {
+  return external_arraybuffer_finalizer_calls;
+}
+
+int napi_vm_test_external_buffer_finalizer_calls(void) {
+  return external_buffer_finalizer_calls;
+}
+
+static napi_value make_external_arraybuffer(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  external_arraybuffer_data = (uint8_t*)malloc(4);
+  if (external_arraybuffer_data == NULL) return NULL;
+  external_arraybuffer_data[0] = 11;
+  external_arraybuffer_data[1] = 22;
+  external_arraybuffer_data[2] = 33;
+  external_arraybuffer_data[3] = 44;
+  if (napi_create_external_arraybuffer(env, external_arraybuffer_data, 4,
+                                       finalize_external_arraybuffer, NULL,
+                                       &result) != napi_ok) {
+    free(external_arraybuffer_data);
+    external_arraybuffer_data = NULL;
+    return NULL;
+  }
+  return result;
+}
+
+static napi_value check_external_arraybuffer(napi_env env, napi_callback_info info) {
+  size_t argc = 1, length = 0;
+  napi_value argv[1], result;
+  void* data = NULL;
+  bool matches;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_arraybuffer_info(env, argv[0], &data, &length) != napi_ok)
+    return NULL;
+  matches = data == external_arraybuffer_data && length == 4 &&
+      ((uint8_t*)data)[0] == 11 && ((uint8_t*)data)[1] == 22 &&
+      ((uint8_t*)data)[2] == 77 && ((uint8_t*)data)[3] == 44;
+  if (napi_get_boolean(env, matches, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_external_buffer(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  external_buffer_data = (uint8_t*)malloc(4);
+  if (external_buffer_data == NULL) return NULL;
+  external_buffer_data[0] = 5;
+  external_buffer_data[1] = 6;
+  external_buffer_data[2] = 7;
+  external_buffer_data[3] = 8;
+  if (napi_create_external_buffer(env, 4, external_buffer_data,
+                                 finalize_external_buffer, NULL,
+                                 &result) != napi_ok) {
+    free(external_buffer_data);
+    external_buffer_data = NULL;
+    return NULL;
+  }
+  return result;
+}
+
+static napi_value check_external_buffer(napi_env env, napi_callback_info info) {
+  size_t argc = 1, length = 0;
+  napi_value argv[1], result;
+  void* data = NULL;
+  bool is_buffer = false, matches;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_is_buffer(env, argv[0], &is_buffer) != napi_ok || !is_buffer ||
+      napi_get_buffer_info(env, argv[0], &data, &length) != napi_ok)
+    return NULL;
+  matches = data == external_buffer_data && length == 4 &&
+      ((uint8_t*)data)[0] == 5 && ((uint8_t*)data)[1] == 88 &&
+      ((uint8_t*)data)[2] == 7 && ((uint8_t*)data)[3] == 8;
+  if (napi_get_boolean(env, matches, &result) != napi_ok) return NULL;
+  return result;
 }
 
 int napi_vm_test_finalizer_create_function_status(void) {
@@ -7791,6 +8026,18 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "externalProbe", NAPI_AUTO_LENGTH,
                            external_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalProbe", function) != napi_ok ||
+      napi_create_function(env, "makeExternalArrayBuffer", NAPI_AUTO_LENGTH,
+                           make_external_arraybuffer, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "makeExternalArrayBuffer", function) != napi_ok ||
+      napi_create_function(env, "checkExternalArrayBuffer", NAPI_AUTO_LENGTH,
+                           check_external_arraybuffer, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "checkExternalArrayBuffer", function) != napi_ok ||
+      napi_create_function(env, "makeExternalBuffer", NAPI_AUTO_LENGTH,
+                           make_external_buffer, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "makeExternalBuffer", function) != napi_ok ||
+      napi_create_function(env, "checkExternalBuffer", NAPI_AUTO_LENGTH,
+                           check_external_buffer, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "checkExternalBuffer", function) != napi_ok ||
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
@@ -7972,6 +8219,13 @@ const addon = require('./fixture.node');
 const values = addon.values;
 const external = addon.external;
 const externalProbe = addon.externalProbe();
+const externalArrayBuffer = addon.makeExternalArrayBuffer();
+const externalArrayBufferView = new Uint8Array(externalArrayBuffer);
+externalArrayBufferView[2] = 77;
+const externalArrayBufferAlias = addon.checkExternalArrayBuffer(externalArrayBuffer);
+const externalBuffer = addon.makeExternalBuffer();
+externalBuffer[1] = 88;
+const externalBufferAlias = addon.checkExternalBuffer(externalBuffer);
 const externalType = typeof external;
 const externalKeys = Object.keys(external);
 const externalJson = JSON.stringify(external);
@@ -8184,6 +8438,8 @@ module.exports = {
   counterInheritedBaseValue,
   counterInheritedStaticMethod,
   externalProbe,
+  externalArrayBufferAlias,
+  externalBufferAlias,
   externalType,
   externalKeys,
   externalJson,
@@ -8325,6 +8581,16 @@ module.exports = {
                 .get(b"napi_vm_test_external_finalizer_calls\0")
                 .unwrap()
         };
+        let external_arraybuffer_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_external_arraybuffer_finalizer_calls\0")
+                .unwrap()
+        };
+        let external_buffer_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_external_buffer_finalizer_calls\0")
+                .unwrap()
+        };
         let finalizer_create_function_status: unsafe extern "C" fn() -> i32 = unsafe {
             *observer
                 .get(b"napi_vm_test_finalizer_create_function_status\0")
@@ -8362,6 +8628,8 @@ module.exports = {
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { external_finalizer_calls() }, 0);
+        assert_eq!(unsafe { external_arraybuffer_finalizer_calls() }, 0);
+        assert_eq!(unsafe { external_buffer_finalizer_calls() }, 0);
         assert_eq!(unsafe { cleanup_hook_count() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
         let invalid_utf16 = interpreter
@@ -8667,6 +8935,14 @@ module.exports = {
         ));
         assert!(matches!(
             result.get_prop("externalProbe"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("externalArrayBufferAlias"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("externalBufferAlias"),
             Some(Value::Bool(true))
         ));
         assert!(matches!(
@@ -9691,6 +9967,8 @@ module.exports = {
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 1);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { external_finalizer_calls() }, 1);
+        assert_eq!(unsafe { external_arraybuffer_finalizer_calls() }, 1);
+        assert_eq!(unsafe { external_buffer_finalizer_calls() }, 1);
         assert_eq!(unsafe { finalizer_create_function_status() }, NAPI_OK);
         assert_eq!(unsafe { cleanup_hook_count() }, 2);
         assert_eq!(unsafe { cleanup_hook_value(0) }, 4);
