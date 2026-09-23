@@ -71,7 +71,7 @@ function send(message) {
   socket.write(Buffer.concat([header, body]));
 }
 function maybeSendHello() {
-  if (connected && workerReady) send({hello:process.env.NAPI_VM_BRIDGE_TOKEN});
+  if (connected && workerReady) send({hello:process.env.NAPI_VM_BRIDGE_TOKEN,nodeVersion:process.versions.node,napiVersion:process.versions.napi});
 }
 function finishSyncCallback(message) {
   const pending = pendingSyncCallbacks.get(message.callId);
@@ -604,6 +604,16 @@ impl Drop for StartupChild {
 #[derive(Clone)]
 pub struct NodeAddonSidecar {
     state: Rc<RefCell<State>>,
+    runtime_info: NodeAddonRuntimeInfo,
+}
+
+/// Runtime versions reported by the Node process hosting native addons.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeAddonRuntimeInfo {
+    /// The `process.versions.node` value reported by the sidecar.
+    pub node_version: String,
+    /// The Node-API ABI version reported by `process.versions.napi`.
+    pub napi_version: u32,
 }
 
 /// Host configuration for enabling CommonJS modules and trusted `.node`
@@ -622,6 +632,7 @@ pub struct NodeAddonOptions {
     pub(crate) roots: Vec<PathBuf>,
     pub(crate) allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
     pub(crate) entry: Option<PathBuf>,
+    pub(crate) minimum_napi_version: Option<u32>,
 }
 
 impl NodeAddonOptions {
@@ -639,6 +650,7 @@ impl NodeAddonOptions {
             roots: roots.into_iter().map(Into::into).collect(),
             allowed_addons: Vec::new(),
             entry: None,
+            minimum_napi_version: None,
         }
     }
 
@@ -661,6 +673,15 @@ impl NodeAddonOptions {
     ) -> Self {
         self.allowed_addons
             .push((path.into(), Some(expected_sha256)));
+        self
+    }
+
+    /// Require the configured Node runtime to provide at least this Node-API
+    /// version. The check runs during
+    /// [`Interpreter::enable_node_addons`](crate::interpreter::Interpreter::enable_node_addons)
+    /// and fails before any guest module or addon is loaded.
+    pub fn minimum_napi_version(mut self, version: u32) -> Self {
+        self.minimum_napi_version = Some(version);
         self
     }
 
@@ -736,6 +757,20 @@ impl NodeAddonSidecar {
         if hello.get("hello").and_then(JsonValue::as_str) != Some(&token) {
             return Err(VmErr::Msg("Node sidecar authentication failed".into()));
         }
+        let runtime_info = NodeAddonRuntimeInfo {
+            node_version: hello
+                .get("nodeVersion")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| VmErr::Msg("Node sidecar did not report its Node version".into()))?
+                .to_string(),
+            napi_version: hello
+                .get("napiVersion")
+                .and_then(JsonValue::as_str)
+                .and_then(|version| version.parse().ok())
+                .ok_or_else(|| {
+                    VmErr::Msg("Node sidecar does not expose a Node-API version".into())
+                })?,
+        };
         let mut read_stream = stream
             .try_clone()
             .map_err(|e| VmErr::Msg(format!("cannot clone Node bridge stream: {e}")))?;
@@ -782,7 +817,13 @@ impl NodeAddonSidecar {
                 next_guest_callback_id: 1,
                 native_promises: HashMap::new(),
             })),
+            runtime_info,
         })
+    }
+
+    /// Return the Node and Node-API versions supplied by the hosting process.
+    pub fn runtime_info(&self) -> &NodeAddonRuntimeInfo {
+        &self.runtime_info
     }
 
     fn request(&self, message: JsonValue) -> Result<JsonValue, VmErr> {
@@ -3801,9 +3842,21 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             .enable_node_addons(
                 NodeAddonOptions::new("node", [root.clone()])
                     .allow_native_addon_with_sha256(addon.clone(), expected_sha256)
+                    .minimum_napi_version(1)
                     .entry(root.join("main.cjs")),
             )
             .unwrap();
+        assert!(!_bridge.runtime_info().node_version.is_empty());
+        assert!(_bridge.runtime_info().napi_version >= 1);
+        let mut incompatible_interpreter = Interpreter::with_builtins();
+        let version_error = incompatible_interpreter
+            .enable_node_addons(
+                NodeAddonOptions::new("node", [root.clone()])
+                    .allow_native_addon_with_sha256(addon.clone(), expected_sha256)
+                    .minimum_napi_version(u32::MAX),
+            )
+            .unwrap_err();
+        assert!(version_error.to_string().contains("Node-API v4294967295"));
         let package_result = interpreter
             .eval_source(
                 "const packageAddon = require('fixture'); const importAddon = require('#native'); const wrapperAddon = require('fixture-wrapper'); const target = {value:40}; let ownKeysCalls=0; const proxy = new Proxy(target, {get:(t,k)=>k==='value'?t.value+2:Reflect.get(t,k),set:(t,k,v)=>{t[k]=v;return true},ownKeys:()=>{ownKeysCalls++;return ['value']}}); const proxyBefore = packageAddon.readProperty(proxy); packageAddon.writeProperty(proxy,9); const simpleTarget={value:1}; const setOnlyProxy=new Proxy(simpleTarget,{set:(t,k,v)=>{t[k]=v;return true}}); const proxyWriteRead=packageAddon.writeThenRead(setOnlyProxy,17); const inheritedValue=packageAddon.readProperty(Object.create({value:29})); const inheritedObject=Object.create({read:function(){return this.value+3}}); inheritedObject.value=40; const inheritedCall=packageAddon.callInherited(inheritedObject); const guestErrorText=packageAddon.callToString(new TypeError('bridge')); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node'), importSame: packageAddon === importAddon, wrapperSame: packageAddon === wrapperAddon, proxyBefore, proxyAfter: packageAddon.readProperty(proxy), targetValue: target.value, ownKeysCalls, proxyWriteRead, inheritedValue, inheritedCall, guestErrorText});",

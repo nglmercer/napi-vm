@@ -74,13 +74,14 @@ fn main() {
     let app_root = PathBuf::from("./app").canonicalize().unwrap();
     let addon = app_root.join("node_modules/example/build/Release/example.node");
     let mut runtime = Interpreter::with_builtins();
-    let _addon_bridge = runtime
+    let addon_bridge = runtime
         .enable_node_addons(
             NodeAddonOptions::new("node", [app_root.clone()])
                 .allow_native_addon(addon)
                 .entry(app_root.join("main.cjs")),
         )
         .unwrap();
+    println!("Node-API v{}", addon_bridge.runtime_info().napi_version);
     let result = runtime.eval_source("require('example').run();").unwrap();
     println!("{result:?}");
 }
@@ -93,7 +94,10 @@ may load; they do not constrain what that trusted addon can do on the host.
 checks it again before each load. For build-time integrity, use
 `allow_native_addon_with_sha256(path, expected_digest)` with the digest from a
 trusted host manifest; setup fails if the installed binary differs, and the
-digest is rechecked before loading.
+digest is rechecked before loading. `NodeAddonSidecar::runtime_info()` reports
+the Node and Node-API versions that were actually started. Hosts can set
+`NodeAddonOptions::minimum_napi_version(version)` to reject a Node executable
+that does not provide the required Node-API version during setup.
 The bridge supports synchronous function calls and constructors, Promise
 settlement, primitive values, arrays, byte buffers, BigInts, Dates, regular
 expressions, symbol identity, and identity-preserving native object proxies.

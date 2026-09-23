@@ -18,7 +18,7 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
-pub use node_addon::{NodeAddonOptions, NodeAddonSidecar};
+pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 
 /// The state a generator or async body must share with the interpreter that
 /// started it: the one event loop, and the one module registry.
@@ -322,6 +322,16 @@ impl Interpreter {
             .transpose()?;
 
         let bridge = Rc::new(NodeAddonSidecar::new(&options.node_executable)?);
+        if let Some(required_version) = options.minimum_napi_version
+            && bridge.runtime_info().napi_version < required_version
+        {
+            return Err(VmErr::Msg(format!(
+                "Node {} provides Node-API v{}, but Node-API v{} or newer is required",
+                bridge.runtime_info().node_version,
+                bridge.runtime_info().napi_version,
+                required_version
+            )));
+        }
         let loader = loader.with_native_addon_loader(bridge.clone());
         self.set_commonjs_loader(Rc::new(loader))?;
         self.set_host_bridge(bridge.clone());
