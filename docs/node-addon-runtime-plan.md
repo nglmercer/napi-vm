@@ -65,7 +65,9 @@ existing CommonJS resolver and allowlist. Its `max_napi_version` option
 defaults to 10, controls `napi_get_version`, and rejects registrations above
 the configured ceiling before calling their initializer. This is a version
 ceiling rather than a claim that every function in that Node-API version is
-implemented. On Linux it currently covers scoped handles, callback
+implemented. Before opening an addon, the in-process loader checks ELF headers
+on Linux and Mach-O headers on macOS for shared-library type, class, and host
+architecture. On Linux it currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,

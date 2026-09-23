@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -7709,11 +7709,341 @@ fn thread_safe_function_events(function_id: usize) -> Result<Vec<HostEvent>, VmE
     Ok(events)
 }
 
+fn validate_native_addon_binary(filename: &str) -> Result<(), VmErr> {
+    let mut file = fs::File::open(filename).map_err(|error| {
+        VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}"))
+    })?;
+    let file_length = file
+        .metadata()
+        .map_err(|error| VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}")))?
+        .len();
+    let mut header = [0_u8; 4096];
+    let length = file.read(&mut header).map_err(|error| {
+        VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}"))
+    })?;
+    validate_native_addon_header(
+        &header[..length],
+        file_length,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        cfg!(target_endian = "little"),
+    )
+    .map_err(|reason| VmErr::Msg(format!("incompatible Node-API addon {filename}: {reason}")))
+}
+
+fn validate_native_addon_header(
+    bytes: &[u8],
+    file_length: u64,
+    host_os: &str,
+    host_arch: &str,
+    host_is_little_endian: bool,
+) -> Result<(), String> {
+    match host_os {
+        "linux" => validate_elf_addon_header(bytes, file_length, host_arch, host_is_little_endian),
+        "macos" => validate_macho_addon_header(bytes, file_length, host_arch),
+        _ => Err(format!(
+            "the in-process Node-API host does not support binaries for {host_os}"
+        )),
+    }
+}
+
+fn validate_elf_addon_header(
+    bytes: &[u8],
+    file_length: u64,
+    host_arch: &str,
+    host_is_little_endian: bool,
+) -> Result<(), String> {
+    if !bytes.starts_with(b"\x7fELF") {
+        if looks_like_macho(bytes) {
+            return Err("found a Mach-O binary; this Linux host requires ELF".into());
+        }
+        return Err("the file is not an ELF shared library".into());
+    }
+    if bytes.len() < 20 {
+        return Err("the ELF header is truncated".into());
+    }
+    let (expected_machine, expected_64_bit) = elf_architecture(host_arch).ok_or_else(|| {
+        format!("the in-process host does not support ELF architecture {host_arch}")
+    })?;
+    let class = match bytes[4] {
+        1 => false,
+        2 => true,
+        _ => return Err(format!("the ELF class value {} is invalid", bytes[4])),
+    };
+    let required_header_length = if class { 64 } else { 52 };
+    if bytes.len() < required_header_length || file_length < required_header_length as u64 {
+        return Err("the ELF header is truncated".into());
+    }
+    if class != expected_64_bit {
+        return Err(format!(
+            "ELF class does not match host architecture {host_arch}"
+        ));
+    }
+    let little_endian = match bytes[5] {
+        1 => true,
+        2 => false,
+        _ => return Err(format!("the ELF byte-order value {} is invalid", bytes[5])),
+    };
+    if little_endian != host_is_little_endian {
+        return Err("ELF byte order does not match the host".into());
+    }
+    let header_size_offset = if class { 52 } else { 40 };
+    let header_size = read_u16(bytes, header_size_offset, little_endian)
+        .ok_or_else(|| "the ELF header is truncated".to_string())?;
+    if header_size as usize != required_header_length {
+        return Err(format!(
+            "ELF header size {header_size} does not match class size {required_header_length}"
+        ));
+    }
+    let file_type = read_u16(bytes, 16, little_endian)
+        .ok_or_else(|| "the ELF header is truncated".to_string())?;
+    if file_type != 3 {
+        return Err(format!(
+            "ELF file type {file_type} is not a shared object (ET_DYN)"
+        ));
+    }
+    let machine = read_u16(bytes, 18, little_endian)
+        .ok_or_else(|| "the ELF header is truncated".to_string())?;
+    if machine != expected_machine {
+        return Err(format!(
+            "ELF architecture {} does not match host architecture {host_arch}",
+            elf_architecture_name(machine)
+        ));
+    }
+    Ok(())
+}
+
+fn validate_macho_addon_header(
+    bytes: &[u8],
+    file_length: u64,
+    host_arch: &str,
+) -> Result<(), String> {
+    if !looks_like_macho(bytes) {
+        if bytes.starts_with(b"\x7fELF") {
+            return Err("found an ELF binary; this macOS host requires Mach-O".into());
+        }
+        return Err("the file is not a Mach-O shared library".into());
+    }
+    let expected_cpu = macho_cpu_type(host_arch).ok_or_else(|| {
+        format!("the in-process host does not support Mach-O architecture {host_arch}")
+    })?;
+    let magic =
+        read_u32(bytes, 0, false).ok_or_else(|| "the Mach-O header is truncated".to_string())?;
+    match magic {
+        0xfeed_face | 0xfeed_facf | 0xcefa_edfe | 0xcffa_edfe => {
+            validate_thin_macho(bytes, expected_cpu, host_arch)
+        }
+        0xcafe_babe | 0xcafe_babf | 0xbeba_feca | 0xbfba_feca => {
+            validate_fat_macho(bytes, file_length, expected_cpu, host_arch)
+        }
+        _ => Err("the Mach-O magic value is invalid".into()),
+    }
+}
+
+fn validate_thin_macho(bytes: &[u8], expected_cpu: u32, host_arch: &str) -> Result<(), String> {
+    let magic =
+        read_u32(bytes, 0, false).ok_or_else(|| "the Mach-O header is truncated".to_string())?;
+    let little_endian = matches!(magic, 0xcefa_edfe | 0xcffa_edfe);
+    let is_64_bit = matches!(magic, 0xfeed_facf | 0xcffa_edfe);
+    let host_is_64_bit = matches!(host_arch, "x86_64" | "aarch64");
+    if is_64_bit != host_is_64_bit {
+        return Err(format!(
+            "Mach-O class does not match host architecture {host_arch}"
+        ));
+    }
+    let required_length = if is_64_bit { 32 } else { 28 };
+    if bytes.len() < required_length {
+        return Err("the Mach-O header is truncated".into());
+    }
+    let cpu_type = read_u32(bytes, 4, little_endian)
+        .ok_or_else(|| "the Mach-O header is truncated".to_string())?;
+    if cpu_type != expected_cpu {
+        return Err(format!(
+            "Mach-O architecture {} does not match host architecture {host_arch}",
+            macho_architecture_name(cpu_type)
+        ));
+    }
+    validate_macho_file_type(bytes, little_endian)
+}
+
+fn validate_fat_macho(
+    bytes: &[u8],
+    file_length: u64,
+    expected_cpu: u32,
+    host_arch: &str,
+) -> Result<(), String> {
+    let magic = read_u32(bytes, 0, false)
+        .ok_or_else(|| "the universal Mach-O header is truncated".to_string())?;
+    let little_endian = matches!(magic, 0xbeba_feca | 0xbfba_feca);
+    let is_64_bit = matches!(magic, 0xcafe_babf | 0xbfba_feca);
+    let architecture_count = read_u32(bytes, 4, little_endian)
+        .ok_or_else(|| "the universal Mach-O header is truncated".to_string())?;
+    if architecture_count == 0 || architecture_count > 64 {
+        return Err(format!(
+            "universal Mach-O architecture count {architecture_count} is invalid"
+        ));
+    }
+    let entry_length = if is_64_bit { 32 } else { 20 };
+    let table_length = 8 + architecture_count as usize * entry_length;
+    if bytes.len() < table_length {
+        return Err("the universal Mach-O architecture table is truncated".into());
+    }
+    let mut found_host_arch = false;
+    for index in 0..architecture_count as usize {
+        let start = 8 + index * entry_length;
+        let cpu_type = read_u32(bytes, start, little_endian)
+            .ok_or_else(|| "the universal Mach-O architecture table is truncated".to_string())?;
+        let (offset, size) = if is_64_bit {
+            (
+                read_u64(bytes, start + 8, little_endian),
+                read_u64(bytes, start + 16, little_endian),
+            )
+        } else {
+            (
+                read_u32(bytes, start + 8, little_endian).map(u64::from),
+                read_u32(bytes, start + 12, little_endian).map(u64::from),
+            )
+        };
+        let (Some(offset), Some(size)) = (offset, size) else {
+            return Err("the universal Mach-O architecture table is truncated".into());
+        };
+        if offset.checked_add(size).is_none_or(|end| end > file_length) {
+            return Err("a universal Mach-O architecture slice extends past end of file".into());
+        }
+        if cpu_type == expected_cpu {
+            found_host_arch = true;
+        }
+    }
+    if !found_host_arch {
+        let available = (0..architecture_count as usize)
+            .filter_map(|index| read_u32(bytes, 8 + index * entry_length, little_endian))
+            .map(macho_architecture_name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "universal Mach-O contains [{available}] but host architecture is {host_arch}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_macho_file_type(bytes: &[u8], little_endian: bool) -> Result<(), String> {
+    let file_type = read_u32(bytes, 12, little_endian)
+        .ok_or_else(|| "the Mach-O header is truncated".to_string())?;
+    if matches!(file_type, 6 | 8) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Mach-O file type {file_type} is neither a dylib nor a bundle"
+        ))
+    }
+}
+
+fn looks_like_macho(bytes: &[u8]) -> bool {
+    read_u32(bytes, 0, false).is_some_and(|magic| {
+        matches!(
+            magic,
+            0xfeed_face
+                | 0xfeed_facf
+                | 0xcefa_edfe
+                | 0xcffa_edfe
+                | 0xcafe_babe
+                | 0xcafe_babf
+                | 0xbeba_feca
+                | 0xbfba_feca
+        )
+    })
+}
+
+fn read_u16(bytes: &[u8], offset: usize, little_endian: bool) -> Option<u16> {
+    let bytes: [u8; 2] = bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?;
+    Some(if little_endian {
+        u16::from_le_bytes(bytes)
+    } else {
+        u16::from_be_bytes(bytes)
+    })
+}
+
+fn read_u32(bytes: &[u8], offset: usize, little_endian: bool) -> Option<u32> {
+    let bytes: [u8; 4] = bytes.get(offset..offset.checked_add(4)?)?.try_into().ok()?;
+    Some(if little_endian {
+        u32::from_le_bytes(bytes)
+    } else {
+        u32::from_be_bytes(bytes)
+    })
+}
+
+fn read_u64(bytes: &[u8], offset: usize, little_endian: bool) -> Option<u64> {
+    let bytes: [u8; 8] = bytes.get(offset..offset.checked_add(8)?)?.try_into().ok()?;
+    Some(if little_endian {
+        u64::from_le_bytes(bytes)
+    } else {
+        u64::from_be_bytes(bytes)
+    })
+}
+
+fn elf_architecture(arch: &str) -> Option<(u16, bool)> {
+    match arch {
+        "x86" => Some((3, false)),
+        "x86_64" => Some((62, true)),
+        "arm" => Some((40, false)),
+        "aarch64" => Some((183, true)),
+        "powerpc" => Some((20, false)),
+        "powerpc64" | "powerpc64le" => Some((21, true)),
+        "s390x" => Some((22, true)),
+        "sparc64" => Some((43, true)),
+        "mips" => Some((8, false)),
+        "mips64" => Some((8, true)),
+        "riscv32" => Some((243, false)),
+        "riscv64" => Some((243, true)),
+        "loongarch64" => Some((258, true)),
+        _ => None,
+    }
+}
+
+fn elf_architecture_name(machine: u16) -> String {
+    match machine {
+        3 => "x86".into(),
+        40 => "arm".into(),
+        62 => "x86_64".into(),
+        183 => "aarch64".into(),
+        20 => "powerpc".into(),
+        21 => "powerpc64".into(),
+        22 => "s390x".into(),
+        43 => "sparc64".into(),
+        8 => "mips".into(),
+        243 => "riscv".into(),
+        258 => "loongarch64".into(),
+        _ => format!("ELF machine {machine}"),
+    }
+}
+
+fn macho_cpu_type(arch: &str) -> Option<u32> {
+    match arch {
+        "x86" => Some(7),
+        "x86_64" => Some(0x0100_0007),
+        "arm" => Some(12),
+        "aarch64" => Some(0x0100_000c),
+        _ => None,
+    }
+}
+
+fn macho_architecture_name(cpu_type: u32) -> String {
+    match cpu_type {
+        7 => "x86".into(),
+        0x0100_0007 => "x86_64".into(),
+        12 => "arm".into(),
+        0x0100_000c => "aarch64".into(),
+        _ => format!("Mach-O CPU type {cpu_type}"),
+    }
+}
+
 impl NativeAddonLoader for RustNodeApiHost {
     fn load(&self, filename: &Path) -> Result<Value, VmErr> {
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
+        validate_native_addon_binary(filename)?;
         let registration_scope = NapiModuleRegistrationScope::new();
         let library_result =
             unsafe { Library::open(Some(Path::new(filename).as_os_str()), RTLD_NOW) };
@@ -13701,6 +14031,119 @@ NAPI_MODULE_INIT() {
                 .to_string()
                 .contains("outside the supported range 1 through 10")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_addon_binary_preflight_checks_format_and_architecture() {
+        fn elf_header(class: u8, machine: u16) -> Vec<u8> {
+            let is_64_bit = class == 2;
+            let mut header = vec![0_u8; if is_64_bit { 64 } else { 52 }];
+            header[..4].copy_from_slice(b"\x7fELF");
+            header[4] = class;
+            header[5] = 1;
+            header[16..18].copy_from_slice(&3_u16.to_le_bytes());
+            header[18..20].copy_from_slice(&machine.to_le_bytes());
+            let header_size_offset = if is_64_bit { 52 } else { 40 };
+            let header_size = if is_64_bit { 64_u16 } else { 52_u16 };
+            header[header_size_offset..header_size_offset + 2]
+                .copy_from_slice(&header_size.to_le_bytes());
+            header
+        }
+
+        let valid_elf = elf_header(2, 62);
+        assert!(validate_native_addon_header(&valid_elf, 64, "linux", "x86_64", true).is_ok());
+
+        let wrong_arch = elf_header(2, 183);
+        assert!(
+            validate_native_addon_header(&wrong_arch, 64, "linux", "x86_64", true)
+                .unwrap_err()
+                .contains("ELF architecture aarch64 does not match host architecture x86_64")
+        );
+
+        let wrong_class = elf_header(1, 3);
+        assert!(
+            validate_native_addon_header(&wrong_class, 52, "linux", "x86_64", true)
+                .unwrap_err()
+                .contains("ELF class does not match host architecture x86_64")
+        );
+
+        let mut thin_macho = vec![0_u8; 32];
+        thin_macho[..4].copy_from_slice(&[0xcf, 0xfa, 0xed, 0xfe]);
+        thin_macho[4..8].copy_from_slice(&0x0100_000c_u32.to_le_bytes());
+        thin_macho[12..16].copy_from_slice(&8_u32.to_le_bytes());
+        assert!(validate_native_addon_header(&thin_macho, 32, "macos", "aarch64", true).is_ok());
+        assert!(
+            validate_native_addon_header(&thin_macho, 32, "macos", "x86_64", true)
+                .unwrap_err()
+                .contains("Mach-O architecture aarch64 does not match host architecture x86_64")
+        );
+        assert!(
+            validate_native_addon_header(&thin_macho, 32, "linux", "x86_64", true)
+                .unwrap_err()
+                .contains("found a Mach-O binary")
+        );
+        let mut wrong_class_macho = thin_macho.clone();
+        wrong_class_macho[..4].copy_from_slice(&[0xce, 0xfa, 0xed, 0xfe]);
+        assert!(
+            validate_native_addon_header(&wrong_class_macho, 32, "macos", "aarch64", true)
+                .unwrap_err()
+                .contains("Mach-O class does not match host architecture aarch64")
+        );
+
+        let mut universal_macho = vec![0_u8; 28];
+        universal_macho[..4].copy_from_slice(&[0xca, 0xfe, 0xba, 0xbe]);
+        universal_macho[4..8].copy_from_slice(&1_u32.to_be_bytes());
+        universal_macho[8..12].copy_from_slice(&0x0100_0007_u32.to_be_bytes());
+        universal_macho[16..20].copy_from_slice(&28_u32.to_be_bytes());
+        universal_macho[20..24].copy_from_slice(&100_u32.to_be_bytes());
+        assert!(
+            validate_native_addon_header(&universal_macho, 128, "macos", "x86_64", true).is_ok()
+        );
+
+        assert!(
+            validate_native_addon_header(b"bad", 3, "linux", "x86_64", true)
+                .unwrap_err()
+                .contains("not an ELF shared library")
+        );
+        assert!(
+            validate_native_addon_header(&valid_elf[..12], 12, "linux", "x86_64", true)
+                .unwrap_err()
+                .contains("ELF header is truncated")
+        );
+    }
+
+    #[test]
+    fn rust_node_api_require_classifies_a_non_library_file_before_dlopen() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-invalid-binary-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let addon = root.join("fixture.node");
+        fs::write(&addon, b"not a native library").unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest),
+            )
+            .unwrap();
+        let error = interpreter
+            .eval_source("require('./fixture.node');")
+            .unwrap_err();
+        assert!(error.to_string().contains("incompatible Node-API addon"));
+        assert!(match std::env::consts::OS {
+            "linux" => error.to_string().contains("not an ELF shared library"),
+            "macos" => error.to_string().contains("not a Mach-O shared library"),
+            _ => false,
+        });
+
+        drop(interpreter);
         fs::remove_dir_all(root).unwrap();
     }
 }

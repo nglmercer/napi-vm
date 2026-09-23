@@ -177,7 +177,9 @@ accepts addons requesting Node-API versions 1 through the configured maximum
 (10 by default), but only implements a selected API subset rather than every
 function in those versions. `max_napi_version()` also controls the value
 returned by `napi_get_version`; addon registrations above that ceiling fail
-before their initializer runs. The v1
+before their initializer runs. Before `dlopen`, the host checks that the file is
+an ELF shared object or Mach-O bundle/dylib for the current architecture and
+reports format, class, and architecture mismatches directly. The v1
 surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
 `napi_call_function` and `napi_new_instance`, local handle scopes, object
