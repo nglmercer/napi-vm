@@ -167,7 +167,7 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-accepts addons requesting Node-API versions 1 through 5, but only implements a
+accepts addons requesting Node-API versions 1 through 6, but only implements a
 selected API subset rather than every function in those versions. The v1
 surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
@@ -182,6 +182,16 @@ creation/index/length operations, and `napi_define_class` with native
 constructors plus static and instance data, methods, and accessors. Core error
 creation and pending-exception propagation are also supported.
 Node-API v5 date creation, type checks, and reads map to guest `Date` objects.
+The selected Node-API v6 surface adds the `BigInt` create/read functions,
+`napi_get_all_property_names` for ordinary objects, classes, arrays, errors,
+and regular expressions, and environment instance data. Property collection
+supports own or inherited keys, attribute filters, symbols, and numeric key
+conversion; proxies, functions, and the global object return a generic failure
+because their reflection behavior is not represented by this host. BigInt word
+arrays are capped at 2,048 64-bit words by the VM's integer-size limit.
+Replacing instance data overwrites the old slot without calling its finalizer;
+the current finalizer runs on the owner thread during host shutdown, after
+cleanup hooks.
 `napi_add_finalizer` supports its optional zero-count reference and runs the
 finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
 no guest-object garbage collector, so this does not provide collection-time

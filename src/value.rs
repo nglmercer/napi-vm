@@ -189,6 +189,8 @@ pub struct ArrayCell {
     /// bridges.
     present: RefCell<Option<Vec<bool>>>,
     pub named: RefCell<Vec<(String, Value)>>,
+    /// Original identities for symbol-keyed entries in `named`.
+    pub symbol_keys: RefCell<Vec<(String, Rc<SymbolData>)>>,
 }
 
 impl ArrayCell {
@@ -197,6 +199,7 @@ impl ArrayCell {
             elements: RefCell::new(elements),
             present: RefCell::new(None),
             named: RefCell::new(Vec::new()),
+            symbol_keys: RefCell::new(Vec::new()),
         }
     }
 
@@ -209,6 +212,7 @@ impl ArrayCell {
             elements: RefCell::new(elements),
             present: RefCell::new(normalized),
             named: RefCell::new(Vec::new()),
+            symbol_keys: RefCell::new(Vec::new()),
         }
     }
 
@@ -348,6 +352,29 @@ impl ArrayCell {
             Some((_, slot)) => *slot = value,
             None => named.push((key, value)),
         }
+    }
+
+    pub fn symbol_key(&self, key: &str) -> Option<Rc<SymbolData>> {
+        self.symbol_keys
+            .borrow()
+            .iter()
+            .find(|(slot, _)| slot == key)
+            .map(|(_, symbol)| symbol.clone())
+    }
+
+    pub fn set_symbol_key(&self, key: &str, symbol: Rc<SymbolData>) {
+        let mut keys = self.symbol_keys.borrow_mut();
+        if let Some((_, existing)) = keys.iter_mut().find(|(slot, _)| slot == key) {
+            *existing = symbol;
+        } else {
+            keys.push((key.to_owned(), symbol));
+        }
+    }
+
+    pub fn forget_symbol_key(&self, key: &str) {
+        self.symbol_keys
+            .borrow_mut()
+            .retain(|(slot, _)| slot != key);
     }
 
     /// Uncontended access to the elements, for the iterative `Drop`.

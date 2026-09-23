@@ -211,6 +211,18 @@ typedef struct napi_vm_node_api_table {
   napi_status (*get_date_value)(napi_env, napi_value, double*);
   napi_status (*add_finalizer)(napi_env, napi_value, void*, napi_finalize,
                                void*, void**);
+  napi_status (*create_bigint_int64)(napi_env, int64_t, napi_value*);
+  napi_status (*create_bigint_uint64)(napi_env, uint64_t, napi_value*);
+  napi_status (*create_bigint_words)(napi_env, int32_t, size_t,
+                                     const uint64_t*, napi_value*);
+  napi_status (*get_value_bigint_int64)(napi_env, napi_value, int64_t*, bool*);
+  napi_status (*get_value_bigint_uint64)(napi_env, napi_value, uint64_t*, bool*);
+  napi_status (*get_value_bigint_words)(napi_env, napi_value, int32_t*, size_t*,
+                                        uint64_t*);
+  napi_status (*get_all_property_names)(napi_env, napi_value, int32_t, int32_t,
+                                        int32_t, napi_value*);
+  napi_status (*set_instance_data)(napi_env, void*, napi_finalize, void*);
+  napi_status (*get_instance_data)(napi_env, void**);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -598,6 +610,82 @@ NAPI_VM_EXPORT napi_status napi_add_finalizer(
   return table ? table->add_finalizer(env, object, finalize_data, finalize_cb,
                                        finalize_hint, result)
                : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_bigint_int64(napi_env env,
+                                                      int64_t value,
+                                                      napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_bigint_int64(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_bigint_uint64(napi_env env,
+                                                       uint64_t value,
+                                                       napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_bigint_uint64(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_bigint_words(napi_env env,
+                                                      int32_t sign_bit,
+                                                      size_t word_count,
+                                                      const uint64_t* words,
+                                                      napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_bigint_words(env, sign_bit, word_count, words,
+                                             result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_value_bigint_int64(napi_env env,
+                                                         napi_value value,
+                                                         int64_t* result,
+                                                         bool* lossless) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_value_bigint_int64(env, value, result, lossless)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_value_bigint_uint64(napi_env env,
+                                                          napi_value value,
+                                                          uint64_t* result,
+                                                          bool* lossless) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_value_bigint_uint64(env, value, result, lossless)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_value_bigint_words(napi_env env,
+                                                         napi_value value,
+                                                         int32_t* sign_bit,
+                                                         size_t* word_count,
+                                                         uint64_t* words) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_value_bigint_words(env, value, sign_bit, word_count,
+                                                words)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_all_property_names(
+    napi_env env, napi_value object, int32_t key_mode, int32_t key_filter,
+    int32_t key_conversion, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_all_property_names(env, object, key_mode, key_filter,
+                                                key_conversion, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_set_instance_data(napi_env env, void* data,
+                                                   napi_finalize finalize_cb,
+                                                   void* finalize_hint) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->set_instance_data(env, data, finalize_cb, finalize_hint)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_instance_data(napi_env env, void** data) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_instance_data(env, data) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_arraybuffer_info(napi_env env,

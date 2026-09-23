@@ -260,6 +260,7 @@ impl Interpreter {
                         .named
                         .borrow_mut()
                         .retain(|(name, _)| name != &property);
+                    items.forget_symbol_key(&property);
                 }
                 Ok(Value::Bool(true))
             }
@@ -437,6 +438,12 @@ impl Interpreter {
                 if k != "length" && crate::value::array_index(k).is_none() =>
             {
                 cell.set_named(k.clone(), val);
+                Ok(())
+            }
+            (Value::Array(cell), Value::Symbol(symbol)) => {
+                let slot = crate::interpreter::symbol_slot_key(symbol);
+                cell.set_named(slot.clone(), val);
+                cell.set_symbol_key(&slot, symbol.clone());
                 Ok(())
             }
             (Value::Array(cell), Value::String(k)) if k == "length" => {

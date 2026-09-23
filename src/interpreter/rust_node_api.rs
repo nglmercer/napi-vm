@@ -45,6 +45,7 @@ const NAPI_HANDLE_SCOPE_MISMATCH: i32 = 13;
 const NAPI_CALLBACK_SCOPE_MISMATCH: i32 = 14;
 const NAPI_QUEUE_FULL: i32 = 15;
 const NAPI_CLOSING: i32 = 16;
+const NAPI_BIGINT_EXPECTED: i32 = 17;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
 const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
@@ -60,7 +61,8 @@ const TSFN_RELEASE: i32 = 0;
 const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
-const MAX_NODE_API_VERSION: i32 = 5;
+const MAX_BIGINT_WORDS: usize = 2048;
+const MAX_NODE_API_VERSION: i32 = 6;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -131,7 +133,7 @@ impl RustNodeApiOptions {
 }
 
 /// In-process Node-API addon host. This is opt-in and implements Linux ELF and
-/// macOS Mach-O loading for the selected Node-API v1-v5 calls below. Linux is runtime
+/// macOS Mach-O loading for the selected Node-API v1-v6 calls below. Linux is runtime
 /// tested; macOS still needs native CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
@@ -302,6 +304,7 @@ struct NapiEnvironment {
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     added_finalizers: RefCell<Vec<NapiAddedFinalizer>>,
+    instance_data: RefCell<Option<NapiInstanceData>>,
     externals: RefCell<HashMap<NapiObjectIdentity, NapiExternal>>,
     external_buffers: RefCell<HashMap<NapiObjectIdentity, NapiExternalBuffer>>,
     external_memory: Cell<i64>,
@@ -469,6 +472,13 @@ struct NapiAddedFinalizer {
     finalize: NapiFinalize,
     hint: *mut c_void,
     reference: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct NapiInstanceData {
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
 }
 
 struct NapiExternal {
@@ -1000,6 +1010,19 @@ struct NapiVmApiTable {
         *mut c_void,
         *mut NapiRef,
     ) -> i32,
+    create_bigint_int64: unsafe extern "C" fn(NapiEnv, i64, *mut NapiValue) -> i32,
+    create_bigint_uint64: unsafe extern "C" fn(NapiEnv, u64, *mut NapiValue) -> i32,
+    create_bigint_words:
+        unsafe extern "C" fn(NapiEnv, i32, usize, *const u64, *mut NapiValue) -> i32,
+    get_value_bigint_int64: unsafe extern "C" fn(NapiEnv, NapiValue, *mut i64, *mut bool) -> i32,
+    get_value_bigint_uint64: unsafe extern "C" fn(NapiEnv, NapiValue, *mut u64, *mut bool) -> i32,
+    get_value_bigint_words:
+        unsafe extern "C" fn(NapiEnv, NapiValue, *mut i32, *mut usize, *mut u64) -> i32,
+    get_all_property_names:
+        unsafe extern "C" fn(NapiEnv, NapiValue, i32, i32, i32, *mut NapiValue) -> i32,
+    set_instance_data:
+        unsafe extern "C" fn(NapiEnv, *mut c_void, Option<NapiFinalize>, *mut c_void) -> i32,
+    get_instance_data: unsafe extern "C" fn(NapiEnv, *mut *mut c_void) -> i32,
 }
 
 #[repr(C)]
@@ -1139,6 +1162,15 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     is_date: api_is_date,
     get_date_value: api_get_date_value,
     add_finalizer: api_add_finalizer,
+    create_bigint_int64: api_create_bigint_int64,
+    create_bigint_uint64: api_create_bigint_uint64,
+    create_bigint_words: api_create_bigint_words,
+    get_value_bigint_int64: api_get_value_bigint_int64,
+    get_value_bigint_uint64: api_get_value_bigint_uint64,
+    get_value_bigint_words: api_get_value_bigint_words,
+    get_all_property_names: api_get_all_property_names,
+    set_instance_data: api_set_instance_data,
+    get_instance_data: api_get_instance_data,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1148,6 +1180,7 @@ fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
         NAPI_OBJECT_EXPECTED => b"object expected\0",
         NAPI_STRING_EXPECTED => b"string expected\0",
         NAPI_DATE_EXPECTED => b"date expected\0",
+        NAPI_BIGINT_EXPECTED => b"bigint expected\0",
         NAPI_FUNCTION_EXPECTED => b"function expected\0",
         NAPI_NUMBER_EXPECTED => b"number expected\0",
         NAPI_BOOLEAN_EXPECTED => b"boolean expected\0",
@@ -1572,7 +1605,10 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
                 array.set_index_presence(index, true);
                 return Ok(());
             }
-            array.set_named(key, value);
+            array.set_named(key.clone(), value);
+            if let Some(symbol) = symbol {
+                array.set_symbol_key(&key, symbol);
+            }
             Ok(())
         }
         _ => Err(NAPI_OBJECT_EXPECTED),
@@ -1645,6 +1681,7 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
                 }
             } else {
                 array.named.borrow_mut().retain(|(name, _)| name != &key);
+                array.forget_symbol_key(&key);
             }
             Ok(true)
         }
@@ -1704,6 +1741,196 @@ fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
         Value::Error(error) => key == "code" && error.code.is_some(),
         _ => false,
     }
+}
+
+#[derive(Clone)]
+enum NapiPropertyKey {
+    String(String),
+    Symbol(Rc<crate::value::SymbolData>),
+}
+
+impl NapiPropertyKey {
+    fn matches(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::String(left), Self::String(right)) => left == right,
+            (Self::Symbol(left), Self::Symbol(right)) => left.id == right.id,
+            _ => false,
+        }
+    }
+}
+
+fn napi_push_direct_property_key(
+    keys: &mut Vec<(NapiPropertyKey, PropAttrs)>,
+    key: &str,
+    symbol: Option<Rc<crate::value::SymbolData>>,
+    attributes: PropAttrs,
+) {
+    if crate::interpreter::is_internal_key(key) && symbol.is_none() {
+        return;
+    }
+    let key = symbol.map_or_else(
+        || NapiPropertyKey::String(key.to_owned()),
+        NapiPropertyKey::Symbol,
+    );
+    if !keys.iter().any(|(existing, _)| existing.matches(&key)) {
+        keys.push((key, attributes));
+    }
+}
+
+fn napi_sort_property_keys(keys: &mut [(NapiPropertyKey, PropAttrs)]) {
+    keys.sort_by(|(left, _), (right, _)| match (left, right) {
+        (NapiPropertyKey::String(left), NapiPropertyKey::String(right)) => {
+            match (
+                crate::value::array_index(left),
+                crate::value::array_index(right),
+            ) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        }
+        (NapiPropertyKey::String(_), NapiPropertyKey::Symbol(_)) => std::cmp::Ordering::Less,
+        (NapiPropertyKey::Symbol(_), NapiPropertyKey::String(_)) => std::cmp::Ordering::Greater,
+        (NapiPropertyKey::Symbol(_), NapiPropertyKey::Symbol(_)) => std::cmp::Ordering::Equal,
+    });
+}
+
+fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey, PropAttrs)>, i32> {
+    let mut keys = Vec::new();
+    match object {
+        Value::Object { props } => {
+            let slots = props.borrow();
+            let metadata = props.meta.borrow();
+            for (key, _) in slots.iter() {
+                napi_push_direct_property_key(
+                    &mut keys,
+                    key,
+                    metadata.symbol_key(key),
+                    metadata.attrs_of(key),
+                );
+            }
+        }
+        Value::Class(class) => {
+            let slots = class.statics.borrow();
+            let metadata = class.statics.meta.borrow();
+            // Node's native class constructor creates these own properties
+            // in the order length, name, prototype before addon statics.
+            for key in ["length", "name", "prototype"] {
+                if slots.iter().any(|(name, _)| name == key) {
+                    napi_push_direct_property_key(
+                        &mut keys,
+                        key,
+                        metadata.symbol_key(key),
+                        metadata.attrs_of(key),
+                    );
+                }
+            }
+            for (key, _) in slots.iter() {
+                if matches!(key.as_str(), "length" | "name" | "prototype") {
+                    continue;
+                }
+                napi_push_direct_property_key(
+                    &mut keys,
+                    key,
+                    metadata.symbol_key(key),
+                    metadata.attrs_of(key),
+                );
+            }
+        }
+        Value::Array(array) => {
+            let length = array.borrow().len();
+            for index in 0..length {
+                if array.has_index(index) {
+                    napi_push_direct_property_key(
+                        &mut keys,
+                        &index.to_string(),
+                        None,
+                        PropAttrs::default(),
+                    );
+                }
+            }
+            napi_push_direct_property_key(
+                &mut keys,
+                "length",
+                None,
+                PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+            for (key, _) in array.named.borrow().iter() {
+                napi_push_direct_property_key(
+                    &mut keys,
+                    key,
+                    array.symbol_key(key),
+                    PropAttrs::default(),
+                );
+            }
+        }
+        Value::Error(error) => {
+            for key in ["name", "message", "stack"] {
+                napi_push_direct_property_key(
+                    &mut keys,
+                    key,
+                    None,
+                    PropAttrs {
+                        writable: true,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+            if error.code.is_some() {
+                napi_push_direct_property_key(&mut keys, "code", None, PropAttrs::default());
+            }
+        }
+        Value::RegExp(_) => napi_push_direct_property_key(
+            &mut keys,
+            "lastIndex",
+            None,
+            PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        ),
+        Value::TypedArray(view) => {
+            for index in 0..view.length {
+                napi_push_direct_property_key(
+                    &mut keys,
+                    &index.to_string(),
+                    None,
+                    PropAttrs::default(),
+                );
+            }
+        }
+        Value::Date(_)
+        | Value::Promise(_)
+        | Value::ArrayBuffer(_)
+        | Value::DataView(_)
+        | Value::StringIterator { .. }
+        | Value::Generator { .. } => {}
+        Value::Proxy(_)
+        | Value::Function(_)
+        | Value::NativeFunction { .. }
+        | Value::HostFunction { .. }
+        | Value::GlobalObject => return Err(NAPI_GENERIC_FAILURE),
+        Value::Undefined
+        | Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::HostPending { .. }
+        | Value::Symbol(_)
+        | Value::BigInt(_)
+        | Value::Binding(_) => return Err(NAPI_OBJECT_EXPECTED),
+        #[cfg(stackful_coroutines)]
+        Value::AsyncTask(_) => return Err(NAPI_OBJECT_EXPECTED),
+    }
+    napi_sort_property_keys(&mut keys);
+    Ok(keys)
 }
 
 fn napi_direct_prototype(object: &Value) -> Option<Rc<Value>> {
@@ -1918,6 +2145,18 @@ fn napi_is_external_value(environment: &NapiEnvironment, value: &Value) -> bool 
 }
 
 fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
+    if let Some(instance_data) = *environment.instance_data.borrow()
+        && let Some(finalize) = instance_data.finalize
+    {
+        let scope = environment.handles.borrow_mut().open_scope().ok();
+        unsafe { finalize(environment.raw(), instance_data.data, instance_data.hint) };
+        environment.pending_exception.borrow_mut().take();
+        if let Some(scope) = scope {
+            let _ = environment.handles.borrow_mut().close_scope(scope);
+        }
+    }
+    environment.instance_data.borrow_mut().take();
+
     let finalizers = std::mem::take(&mut *environment.added_finalizers.borrow_mut());
     for finalizer in finalizers {
         let scope = environment.handles.borrow_mut().open_scope().ok();
@@ -2315,6 +2554,76 @@ unsafe extern "C" fn api_create_int64(env: NapiEnv, value: i64, result: *mut Nap
     })
 }
 
+unsafe extern "C" fn api_create_bigint_int64(
+    env: NapiEnv,
+    value: i64,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let bigint = crate::bigint::BigInt::from_i64(value);
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::BigInt(Rc::new(bigint)))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_bigint_uint64(
+    env: NapiEnv,
+    value: u64,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let bigint = crate::bigint::BigInt::from_words(false, &[value]);
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::BigInt(Rc::new(bigint)))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_bigint_words(
+    env: NapiEnv,
+    sign_bit: i32,
+    word_count: usize,
+    words: *const u64,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || (word_count > 0 && words.is_null()) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if word_count > MAX_BIGINT_WORDS {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let words = if word_count == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(words, word_count) }
+        };
+        let environment = environment(env)?;
+        let bigint = crate::bigint::BigInt::from_words(sign_bit != 0, words);
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::BigInt(Rc::new(bigint)))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_string_utf8(
     env: NapiEnv,
     value: *const c_char,
@@ -2624,6 +2933,92 @@ unsafe extern "C" fn api_get_value_int64(env: NapiEnv, value: NapiValue, result:
         // zero, but maps NaN and infinities to zero. Rust's float-to-int cast
         // saturates infinities, so handle non-finite values explicitly.
         unsafe { result.write(if number.is_finite() { number as i64 } else { 0 }) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_bigint_int64(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut i64,
+    lossless: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || lossless.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::BigInt(value) = &value else {
+            return Err(NAPI_BIGINT_EXPECTED);
+        };
+        let narrowed = value.as_n_bit(64, true).map_err(|_| NAPI_GENERIC_FAILURE)?;
+        let number = narrowed
+            .to_decimal()
+            .parse::<i64>()
+            .map_err(|_| NAPI_GENERIC_FAILURE)?;
+        unsafe { result.write(number) };
+        unsafe { lossless.write(value.compare(&narrowed) == std::cmp::Ordering::Equal) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_bigint_uint64(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut u64,
+    lossless: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || lossless.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::BigInt(value) = &value else {
+            return Err(NAPI_BIGINT_EXPECTED);
+        };
+        let narrowed = value
+            .as_n_bit(64, false)
+            .map_err(|_| NAPI_GENERIC_FAILURE)?;
+        let (_, words) = narrowed.to_words();
+        unsafe { result.write(words.first().copied().unwrap_or(0)) };
+        unsafe { lossless.write(value.compare(&narrowed) == std::cmp::Ordering::Equal) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_value_bigint_words(
+    env: NapiEnv,
+    value: NapiValue,
+    sign_bit: *mut i32,
+    word_count: *mut usize,
+    words: *mut u64,
+) -> i32 {
+    with_ffi_status(env, || {
+        if word_count.is_null() || sign_bit.is_null() != words.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::BigInt(value) = &value else {
+            return Err(NAPI_BIGINT_EXPECTED);
+        };
+        let (negative, value_words) = value.to_words();
+        if value_words.len() > MAX_BIGINT_WORDS {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let capacity = unsafe { word_count.read() };
+        if !sign_bit.is_null() {
+            unsafe { sign_bit.write(i32::from(negative)) };
+            let copied = capacity.min(value_words.len());
+            if copied > 0 {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(value_words.as_ptr(), words, copied);
+                }
+            }
+        }
+        unsafe { word_count.write(value_words.len()) };
         Ok(())
     })
 }
@@ -3897,6 +4292,43 @@ unsafe extern "C" fn api_add_finalizer(
         if let Some(reference) = reference {
             unsafe { result.write(reference) };
         }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_set_instance_data(
+    env: NapiEnv,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        if environment.finalizing.get() {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        // Node-API replaces the prior slot without invoking its finalizer.
+        *environment.instance_data.borrow_mut() = Some(NapiInstanceData {
+            data,
+            finalize,
+            hint,
+        });
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_instance_data(env: NapiEnv, data: *mut *mut c_void) -> i32 {
+    with_ffi_status(env, || {
+        if data.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment
+            .instance_data
+            .borrow()
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |instance| instance.data);
+        unsafe { data.write(value) };
         Ok(())
     })
 }
@@ -5226,6 +5658,74 @@ unsafe extern "C" fn api_get_property_names(
     })
 }
 
+unsafe extern "C" fn api_get_all_property_names(
+    env: NapiEnv,
+    object: NapiValue,
+    key_mode: i32,
+    key_filter: i32,
+    key_conversion: i32,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null()
+            || !(0..=1).contains(&key_mode)
+            || !(0..=0x1f).contains(&key_filter)
+            || !(0..=1).contains(&key_conversion)
+        {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+
+        let mut current = object;
+        let mut seen = Vec::<NapiPropertyKey>::new();
+        let mut names = Vec::new();
+        for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+            for (key, attributes) in napi_direct_all_property_keys(&current)? {
+                if seen.iter().any(|existing| existing.matches(&key)) {
+                    continue;
+                }
+                // A filtered own key still shadows a matching key on the
+                // prototype chain, just as it does during JS property lookup.
+                seen.push(key.clone());
+                if seen.len() > crate::value::MAX_ARRAY_LEN {
+                    return Err(NAPI_GENERIC_FAILURE);
+                }
+                let filtered = (key_filter & 1 != 0 && !attributes.writable)
+                    || (key_filter & 2 != 0 && !attributes.enumerable)
+                    || (key_filter & 4 != 0 && !attributes.configurable)
+                    || (key_filter & 8 != 0 && matches!(key, NapiPropertyKey::String(_)))
+                    || (key_filter & 16 != 0 && matches!(key, NapiPropertyKey::Symbol(_)));
+                if filtered {
+                    continue;
+                }
+                names.push(match key {
+                    NapiPropertyKey::String(key) if key_conversion == 0 => {
+                        crate::value::array_index(&key)
+                            .map_or_else(|| Value::String(key), |index| Value::Number(index as f64))
+                    }
+                    NapiPropertyKey::String(key) => Value::String(key),
+                    NapiPropertyKey::Symbol(symbol) => Value::Symbol(symbol),
+                });
+            }
+            if key_mode == 1 {
+                break;
+            }
+            let Some(prototype) = napi_direct_prototype(&current) else {
+                break;
+            };
+            current = (*prototype).clone();
+        }
+        let names = Value::checked_array(names).map_err(|_| NAPI_GENERIC_FAILURE)?;
+        let handle = environment.handles.borrow_mut().create(names)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_async_init(
     env: NapiEnv,
     async_resource: NapiValue,
@@ -6413,6 +6913,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
             added_finalizers: RefCell::new(Vec::new()),
+            instance_data: RefCell::new(None),
             externals: RefCell::new(HashMap::new()),
             external_buffers: RefCell::new(HashMap::new()),
             external_memory: Cell::new(0),
@@ -6884,7 +7385,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_and_calls_a_real_napi_v5_addon_without_a_node_sidecar() {
+    fn loads_and_calls_a_real_napi_v6_addon_without_a_node_sidecar() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-rust-node-api-{}-{}",
@@ -6916,7 +7417,7 @@ mod tests {
             &source,
             r#"
 #define _POSIX_C_SOURCE 200809L
-#define NAPI_VERSION 5
+#define NAPI_VERSION 6
 #include <node_api.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -6976,6 +7477,12 @@ static char external_native_data[] = "external-native-data";
 static char external_finalize_hint;
 static char added_finalizer_data;
 static char added_finalizer_hint;
+static char instance_data_first_marker;
+static char instance_data_second_marker;
+static char instance_data_finalize_hint;
+static int instance_data_finalizer_calls;
+static int replaced_instance_data_finalizer_calls;
+static int instance_data_visible_in_finalizer;
 
 static void finalize_external_arraybuffer(napi_env env, void* data, void* hint) {
   (void)env;
@@ -7019,6 +7526,19 @@ static void finalize_added_date(napi_env env, void* data, void* hint) {
   (void)env;
   if (data == &added_finalizer_data && hint == &added_finalizer_hint)
     added_finalizer_calls++;
+}
+
+static void finalize_instance_data(napi_env env, void* data, void* hint) {
+  if (data == &instance_data_second_marker &&
+      hint == &instance_data_finalize_hint) {
+    void* current_data = NULL;
+    instance_data_finalizer_calls++;
+    if (napi_get_instance_data(env, &current_data) == napi_ok &&
+        current_data == data)
+      instance_data_visible_in_finalizer++;
+  }
+  if (data == &instance_data_first_marker)
+    replaced_instance_data_finalizer_calls++;
 }
 
 static void finalize_external_probe(napi_env env, void* data, void* hint) {
@@ -7129,6 +7649,136 @@ static napi_value date_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value bigint_probe(napi_env env, napi_callback_info info) {
+  napi_value signed_value, unsigned_value, wide_value, result, field;
+  napi_value signed_roundtrip, unsigned_roundtrip, wrapped_signed, wrapped_unsigned;
+  int64_t signed_out = 0, wrapped_signed_out = 0;
+  uint64_t unsigned_out = 0, wrapped_unsigned_out = 0;
+  bool signed_lossless = false, unsigned_lossless = false;
+  bool wrapped_signed_lossless = true, wrapped_unsigned_lossless = true;
+  bool invalid_lossless = false;
+  uint64_t wide_words[] = {UINT64_C(0x0123456789abcdef), UINT64_C(1)};
+  uint64_t read_words[2] = {0, 0};
+  int sign_bit = 0;
+  size_t word_count = 0;
+  napi_status invalid_type_status;
+  (void)info;
+  if (napi_create_bigint_int64(env, INT64_MIN, &signed_value) != napi_ok ||
+      napi_create_bigint_uint64(env, UINT64_MAX, &unsigned_value) != napi_ok ||
+      napi_create_bigint_words(env, 1, 2, wide_words, &wide_value) != napi_ok ||
+      napi_get_value_bigint_int64(env, signed_value, &signed_out,
+                                  &signed_lossless) != napi_ok ||
+      napi_get_value_bigint_uint64(env, unsigned_value, &unsigned_out,
+                                   &unsigned_lossless) != napi_ok ||
+      napi_get_value_bigint_int64(env, unsigned_value, &wrapped_signed_out,
+                                  &wrapped_signed_lossless) != napi_ok ||
+      napi_get_value_bigint_uint64(env, signed_value, &wrapped_unsigned_out,
+                                   &wrapped_unsigned_lossless) != napi_ok ||
+      napi_get_value_bigint_words(env, wide_value, NULL, &word_count, NULL) != napi_ok ||
+      word_count != 2)
+    return NULL;
+  word_count = 2;
+  if (napi_get_value_bigint_words(env, wide_value, &sign_bit, &word_count,
+                                  read_words) != napi_ok ||
+      word_count != 2 || sign_bit != 1 || read_words[0] != wide_words[0] ||
+      read_words[1] != wide_words[1] ||
+      napi_create_bigint_int64(env, signed_out, &signed_roundtrip) != napi_ok ||
+      napi_create_bigint_uint64(env, unsigned_out, &unsigned_roundtrip) != napi_ok ||
+      napi_create_bigint_int64(env, wrapped_signed_out, &wrapped_signed) != napi_ok ||
+      napi_create_bigint_uint64(env, wrapped_unsigned_out, &wrapped_unsigned) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "signed", signed_value) != napi_ok ||
+      napi_set_named_property(env, result, "unsigned", unsigned_value) != napi_ok ||
+      napi_set_named_property(env, result, "wide", wide_value) != napi_ok ||
+      napi_set_named_property(env, result, "signedRoundtrip", signed_roundtrip) != napi_ok ||
+      napi_set_named_property(env, result, "unsignedRoundtrip", unsigned_roundtrip) != napi_ok ||
+      napi_set_named_property(env, result, "wrappedSigned", wrapped_signed) != napi_ok ||
+      napi_set_named_property(env, result, "wrappedUnsigned", wrapped_unsigned) != napi_ok ||
+      napi_get_boolean(env, signed_lossless, &field) != napi_ok ||
+      napi_set_named_property(env, result, "signedLossless", field) != napi_ok ||
+      napi_get_boolean(env, unsigned_lossless, &field) != napi_ok ||
+      napi_set_named_property(env, result, "unsignedLossless", field) != napi_ok ||
+      napi_get_boolean(env, wrapped_signed_lossless, &field) != napi_ok ||
+      napi_set_named_property(env, result, "wrappedSignedLossless", field) != napi_ok ||
+      napi_get_boolean(env, wrapped_unsigned_lossless, &field) != napi_ok ||
+      napi_set_named_property(env, result, "wrappedUnsignedLossless", field) != napi_ok ||
+      napi_create_int32(env, sign_bit, &field) != napi_ok ||
+      napi_set_named_property(env, result, "signBit", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)word_count, &field) != napi_ok ||
+      napi_set_named_property(env, result, "wordCount", field) != napi_ok)
+    return NULL;
+  invalid_type_status = napi_get_value_bigint_int64(env, field, &signed_out,
+                                                     &invalid_lossless);
+  if (napi_create_int32(env, invalid_type_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "invalidTypeStatus", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value instance_data_probe(napi_env env, napi_callback_info info) {
+  void* data = NULL;
+  napi_value result;
+  (void)info;
+  if (napi_get_instance_data(env, &data) != napi_ok ||
+      napi_get_boolean(env, data == &instance_data_second_marker, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value property_names_probe(napi_env env, napi_callback_info info) {
+  napi_value args[2], target, class_target, result, all_own, enumerable, skip_strings;
+  napi_value with_prototype, keep_numbers, writable, configurable, class_names;
+  napi_value probe_array, array_element, array_names;
+  size_t argc = 2;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 2)
+    return NULL;
+  target = args[0];
+  class_target = args[1];
+  if (
+      napi_get_all_property_names(env, target, napi_key_own_only,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &all_own) != napi_ok ||
+      napi_get_all_property_names(env, target, napi_key_own_only,
+                                  napi_key_enumerable,
+                                  napi_key_numbers_to_strings, &enumerable) != napi_ok ||
+      napi_get_all_property_names(env, target, napi_key_own_only,
+                                  napi_key_skip_strings,
+                                  napi_key_numbers_to_strings, &skip_strings) != napi_ok ||
+      napi_get_all_property_names(env, target, napi_key_include_prototypes,
+                                  napi_key_enumerable,
+                                  napi_key_numbers_to_strings, &with_prototype) != napi_ok ||
+      napi_get_all_property_names(env, target, napi_key_own_only,
+                                  napi_key_enumerable,
+                                  napi_key_keep_numbers, &keep_numbers) != napi_ok ||
+      napi_get_all_property_names(env, target, napi_key_own_only,
+                                  napi_key_writable,
+                                  napi_key_numbers_to_strings, &writable) != napi_ok ||
+      napi_get_all_property_names(env, target, napi_key_own_only,
+                                  napi_key_configurable,
+                                  napi_key_numbers_to_strings, &configurable) != napi_ok ||
+      napi_get_all_property_names(env, class_target, napi_key_own_only,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &class_names) != napi_ok ||
+      napi_create_array_with_length(env, 2, &probe_array) != napi_ok ||
+      napi_create_int32(env, 7, &array_element) != napi_ok ||
+      napi_set_element(env, probe_array, 0, array_element) != napi_ok ||
+      napi_get_all_property_names(env, probe_array, napi_key_own_only,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &array_names) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "allOwn", all_own) != napi_ok ||
+      napi_set_named_property(env, result, "enumerable", enumerable) != napi_ok ||
+      napi_set_named_property(env, result, "skipStrings", skip_strings) != napi_ok ||
+      napi_set_named_property(env, result, "withPrototype", with_prototype) != napi_ok ||
+      napi_set_named_property(env, result, "keepNumbers", keep_numbers) != napi_ok ||
+      napi_set_named_property(env, result, "writable", writable) != napi_ok ||
+      napi_set_named_property(env, result, "configurable", configurable) != napi_ok ||
+      napi_set_named_property(env, result, "classNames", class_names) != napi_ok ||
+      napi_set_named_property(env, result, "arrayNames", array_names) != napi_ok)
+    return NULL;
+  return result;
+}
+
 int napi_vm_test_cleanup_hook_count(void) {
   return cleanup_hook_count;
 }
@@ -7147,6 +7797,18 @@ int napi_vm_test_wrapped_finalizer_calls(void) {
 
 int napi_vm_test_added_finalizer_calls(void) {
   return added_finalizer_calls;
+}
+
+int napi_vm_test_instance_data_finalizer_calls(void) {
+  return instance_data_finalizer_calls;
+}
+
+int napi_vm_test_replaced_instance_data_finalizer_calls(void) {
+  return replaced_instance_data_finalizer_calls;
+}
+
+int napi_vm_test_instance_data_visible_in_finalizer(void) {
+  return instance_data_visible_in_finalizer;
 }
 
 int napi_vm_test_removed_finalizer_calls(void) {
@@ -8381,6 +9043,7 @@ NAPI_MODULE_INIT() {
   napi_value descriptor_value, descriptor_symbol, descriptor_symbol_description;
   napi_value descriptor_symbol_value;
   napi_value global, global_key, global_object_constructor;
+  void* current_instance_data = NULL;
   napi_valuetype global_object_type;
   bool global_object_own = false;
   napi_property_descriptor defined_properties[4] = {
@@ -8412,7 +9075,17 @@ NAPI_MODULE_INIT() {
       supported_api_version < NAPI_VERSION ||
       napi_get_version(env, NULL) != napi_invalid_arg ||
       napi_get_boolean(env, supported_api_version >= NAPI_VERSION, &field) != napi_ok ||
-      napi_set_named_property(env, exports, "supportsNapiV5", field) != napi_ok)
+      napi_set_named_property(env, exports, "supportsNapiV6", field) != napi_ok)
+    return NULL;
+  if (napi_get_instance_data(env, &current_instance_data) != napi_ok ||
+      current_instance_data != NULL ||
+      napi_set_instance_data(env, &instance_data_first_marker,
+                             finalize_instance_data, NULL) != napi_ok ||
+      napi_set_instance_data(env, &instance_data_second_marker,
+                             finalize_instance_data,
+                             &instance_data_finalize_hint) != napi_ok ||
+      napi_get_instance_data(env, &current_instance_data) != napi_ok ||
+      current_instance_data != &instance_data_second_marker)
     return NULL;
   if (napi_create_external(env, external_native_data, finalize_external_probe,
                            &external_finalize_hint, &external) != napi_ok ||
@@ -8487,6 +9160,15 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "dateProbe", NAPI_AUTO_LENGTH,
                            date_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "dateProbe", function) != napi_ok ||
+      napi_create_function(env, "bigintProbe", NAPI_AUTO_LENGTH,
+                           bigint_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "bigintProbe", function) != napi_ok ||
+      napi_create_function(env, "instanceDataProbe", NAPI_AUTO_LENGTH,
+                           instance_data_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "instanceDataProbe", function) != napi_ok ||
+      napi_create_function(env, "propertyNamesProbe", NAPI_AUTO_LENGTH,
+                           property_names_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "propertyNamesProbe", function) != napi_ok ||
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
@@ -8649,7 +9331,7 @@ NAPI_MODULE_INIT() {
         #[cfg(target_os = "macos")]
         build.args(["-dynamiclib", "-undefined", "dynamic_lookup"]);
         let built = build
-            .args(["-pthread", "-DNAPI_VERSION=5", "-I"])
+            .args(["-pthread", "-DNAPI_VERSION=6", "-I"])
             .arg(include)
             .arg(&source)
             .arg("-o")
@@ -8768,6 +9450,24 @@ const buffers = addon.bufferProbe();
 const typedArrays = addon.typedArrayProbe();
 const stringEncodings = addon.stringEncodingProbe('Aé€😀');
 const dates = addon.dateProbe();
+const bigintValues = addon.bigintProbe();
+const bigintApi = {
+  signed: bigintValues.signed.toString(),
+  unsigned: bigintValues.unsigned.toString(),
+  wide: bigintValues.wide.toString(),
+  signedRoundtrip: bigintValues.signedRoundtrip.toString(),
+  unsignedRoundtrip: bigintValues.unsignedRoundtrip.toString(),
+  wrappedSigned: bigintValues.wrappedSigned.toString(),
+  wrappedUnsigned: bigintValues.wrappedUnsigned.toString(),
+  signedLossless: bigintValues.signedLossless,
+  unsignedLossless: bigintValues.unsignedLossless,
+  wrappedSignedLossless: bigintValues.wrappedSignedLossless,
+  wrappedUnsignedLossless: bigintValues.wrappedUnsignedLossless,
+  signBit: bigintValues.signBit,
+  wordCount: bigintValues.wordCount,
+  invalidTypeStatus: bigintValues.invalidTypeStatus,
+};
+const instanceDataMatches = addon.instanceDataProbe();
 const dateConstructorAlias = Date;
 const guestDate = new Date(17);
 globalThis.Date = function ReplacementDate() {};
@@ -8864,6 +9564,33 @@ Object.defineProperty(propertyTarget, 'assigned', {
 });
 propertyTarget.removeMe = true;
 const properties = addon.propertyProbe(propertyTarget);
+const propertyNamesTarget = Object.create({inheritedName: 'prototype', hidden: 'shadowed'});
+Object.defineProperty(propertyNamesTarget, 'visible', {
+  value: 'visible', enumerable: true, writable: true, configurable: true,
+});
+Object.defineProperty(propertyNamesTarget, 'hidden', {
+  value: 'hidden', enumerable: false, writable: true, configurable: false,
+});
+propertyNamesTarget[3] = 'three';
+propertyNamesTarget['01'] = 'named';
+propertyNamesTarget[Symbol('own')] = 'symbol';
+const rawPropertyNames = addon.propertyNamesProbe(propertyNamesTarget, addon.Counter);
+const describePropertyKey = key => typeof key === 'symbol'
+  ? key.toString()
+  : `${typeof key}:${key}`;
+const propertyNames = {
+  allOwn: rawPropertyNames.allOwn.map(describePropertyKey),
+  enumerable: rawPropertyNames.enumerable.map(describePropertyKey),
+  skipStrings: rawPropertyNames.skipStrings.map(describePropertyKey),
+  withPrototype: rawPropertyNames.withPrototype.map(describePropertyKey),
+  keepNumbers: rawPropertyNames.keepNumbers.map(describePropertyKey),
+  writable: rawPropertyNames.writable.map(describePropertyKey),
+  configurable: rawPropertyNames.configurable.map(describePropertyKey),
+  // Node and Bun insert the class prototype in different positions; keep the
+  // cross-runtime comparison focused on the shared class own-key set.
+  class: rawPropertyNames.classNames.map(describePropertyKey).sort(),
+  array: rawPropertyNames.arrayNames.map(describePropertyKey),
+};
 const backingBytes = new Uint8Array(typedArrays.buffer);
 const customPrototype = {marker: 'prototype'};
 const customPrototypeTarget = Object.create(customPrototype);
@@ -8882,7 +9609,10 @@ module.exports = {
   childNewTargetInfo,
   childCounterValue: childCounter.value,
   instanceChecks,
-  supportsNapiV5: addon.supportsNapiV5,
+  supportsNapiV6: addon.supportsNapiV6,
+  bigintApi,
+  instanceDataMatches,
+  propertyNames,
   dateApi: {
     value: dates.value,
     guestValue: dates.date.getTime(),
@@ -9054,6 +9784,21 @@ module.exports = {
         let added_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
             *observer
                 .get(b"napi_vm_test_added_finalizer_calls\0")
+                .unwrap()
+        };
+        let instance_data_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_instance_data_finalizer_calls\0")
+                .unwrap()
+        };
+        let replaced_instance_data_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_replaced_instance_data_finalizer_calls\0")
+                .unwrap()
+        };
+        let instance_data_visible_in_finalizer: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_instance_data_visible_in_finalizer\0")
                 .unwrap()
         };
         let removed_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
@@ -9416,9 +10161,145 @@ module.exports = {
             ));
         }
         assert!(matches!(
-            result.get_prop("supportsNapiV5"),
+            result.get_prop("supportsNapiV6"),
             Some(Value::Bool(true))
         ));
+        let bigint_api = result.get_prop("bigintApi").unwrap();
+        for (name, expected) in [
+            ("signed", "-9223372036854775808"),
+            ("unsigned", "18446744073709551615"),
+            ("signedRoundtrip", "-9223372036854775808"),
+            ("unsignedRoundtrip", "18446744073709551615"),
+            ("wrappedSigned", "-1"),
+            ("wrappedUnsigned", "9223372036854775808"),
+        ] {
+            assert!(matches!(
+                bigint_api.get_prop(name),
+                Some(Value::String(ref value)) if value == expected
+            ));
+        }
+        assert!(matches!(
+            bigint_api.get_prop("signedLossless"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            bigint_api.get_prop("unsignedLossless"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            bigint_api.get_prop("wrappedSignedLossless"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            bigint_api.get_prop("wrappedUnsignedLossless"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            bigint_api.get_prop("invalidTypeStatus"),
+            Some(Value::Number(status)) if status == NAPI_BIGINT_EXPECTED as f64
+        ));
+        assert!(matches!(
+            result.get_prop("instanceDataMatches"),
+            Some(Value::Bool(true))
+        ));
+        let property_names = result.get_prop("propertyNames").unwrap();
+        let get_names = |name: &str| -> Vec<String> {
+            let Value::Array(values) = &property_names.get_prop(name).unwrap() else {
+                panic!("Node-API v6 property name result {name} is not an array");
+            };
+            values
+                .borrow()
+                .iter()
+                .map(|value| match value {
+                    Value::String(value) => value.clone(),
+                    _ => panic!("Node-API v6 property name result has non-string label"),
+                })
+                .collect()
+        };
+        assert_eq!(
+            get_names("allOwn"),
+            [
+                "string:3",
+                "string:visible",
+                "string:hidden",
+                "string:01",
+                "Symbol(own)"
+            ]
+        );
+        assert_eq!(
+            get_names("enumerable"),
+            ["string:3", "string:visible", "string:01", "Symbol(own)"]
+        );
+        assert_eq!(get_names("skipStrings"), ["Symbol(own)"]);
+        assert_eq!(
+            get_names("withPrototype"),
+            [
+                "string:3",
+                "string:visible",
+                "string:01",
+                "Symbol(own)",
+                "string:inheritedName"
+            ]
+        );
+        assert_eq!(
+            get_names("keepNumbers"),
+            ["number:3", "string:visible", "string:01", "Symbol(own)"]
+        );
+        assert_eq!(
+            get_names("writable"),
+            [
+                "string:3",
+                "string:visible",
+                "string:hidden",
+                "string:01",
+                "Symbol(own)"
+            ]
+        );
+        assert_eq!(
+            get_names("configurable"),
+            ["string:3", "string:visible", "string:01", "Symbol(own)"]
+        );
+        assert_eq!(
+            get_names("class"),
+            [
+                "string:baseValue",
+                "string:constant",
+                "string:length",
+                "string:name",
+                "string:offset",
+                "string:prototype",
+                "string:readOnly"
+            ]
+        );
+        assert_eq!(get_names("array"), ["string:0", "string:length"]);
+        let class_name_value = interpreter
+            .eval_source(
+                "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter).classNames;",
+            )
+            .unwrap();
+        let Value::Array(class_names) = &class_name_value else {
+            panic!("Node-API v6 class own keys are not an array");
+        };
+        let class_names = class_names
+            .borrow()
+            .iter()
+            .map(|value| match value {
+                Value::String(value) => value.clone(),
+                _ => panic!("Node-API v6 class key is not a string"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            class_names,
+            [
+                "length",
+                "name",
+                "prototype",
+                "constant",
+                "baseValue",
+                "offset",
+                "readOnly"
+            ]
+        );
         let date_api = result.get_prop("dateApi").unwrap();
         assert!(matches!(
             date_api.get_prop("value"),
@@ -10524,6 +11405,9 @@ module.exports = {
         drop(interpreter);
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 1);
         assert_eq!(unsafe { added_finalizer_calls() }, 1);
+        assert_eq!(unsafe { instance_data_finalizer_calls() }, 1);
+        assert_eq!(unsafe { replaced_instance_data_finalizer_calls() }, 0);
+        assert_eq!(unsafe { instance_data_visible_in_finalizer() }, 1);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { external_finalizer_calls() }, 1);
         assert_eq!(unsafe { external_arraybuffer_finalizer_calls() }, 1);
