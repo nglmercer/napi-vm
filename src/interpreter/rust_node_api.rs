@@ -3957,6 +3957,30 @@ unsafe extern "C" fn api_get_prototype(
                     (None, false) => Value::Null,
                 }
             }
+            Value::Function(function) => {
+                let (prototype, uses_default_prototype) = {
+                    let meta = function.properties.meta.borrow();
+                    (meta.proto.clone(), meta.uses_default_prototype)
+                };
+                match (prototype, uses_default_prototype) {
+                    (Some(prototype), _) => prototype.as_ref().clone(),
+                    (None, false) => Value::Null,
+                    // Function.prototype is not materialized yet.
+                    (None, true) => return Err(NAPI_GENERIC_FAILURE),
+                }
+            }
+            Value::Class(class) => {
+                let (prototype, uses_default_prototype) = {
+                    let meta = class.statics.meta.borrow();
+                    (meta.proto.clone(), meta.uses_default_prototype)
+                };
+                match (prototype, uses_default_prototype) {
+                    (Some(prototype), _) => prototype.as_ref().clone(),
+                    (None, false) => Value::Null,
+                    // A base class constructor inherits Function.prototype.
+                    (None, true) => return Err(NAPI_GENERIC_FAILURE),
+                }
+            }
             Value::GlobalObject => napi_default_object_prototype(&environment)?,
             value if !is_napi_property_object(value) => return Err(NAPI_OBJECT_EXPECTED),
             // The VM does not yet materialize several built-in and proxy
@@ -3990,7 +4014,7 @@ unsafe extern "C" fn api_set_prototype(
         }
         let prototype = match &prototype {
             Value::Null => None,
-            Value::Object { .. } | Value::Class(_) => Some(Rc::new(prototype)),
+            Value::Object { .. } | Value::Function(_) | Value::Class(_) => Some(Rc::new(prototype)),
             other if !is_napi_property_object(other) => return Err(NAPI_OBJECT_EXPECTED),
             // This VM does not yet represent [[Prototype]] on arrays, proxies,
             // or specialized built-in values.
@@ -3998,6 +4022,7 @@ unsafe extern "C" fn api_set_prototype(
         };
         let target_cell = match &object {
             Value::Object { props } => props.clone(),
+            Value::Function(function) => function.properties.clone(),
             Value::Class(class) => class.statics.clone(),
             // Be explicit when the input is a genuine JS object that the
             // current VM data model cannot mutate as an ordinary object.
@@ -4016,6 +4041,9 @@ unsafe extern "C" fn api_set_prototype(
             let old_prototype = match (old_prototype, uses_default_prototype) {
                 (Some(prototype), _) => prototype.as_ref().clone(),
                 (None, true) => {
+                    if matches!(object, Value::Class(_) | Value::Function(_)) {
+                        return Err(NAPI_GENERIC_FAILURE);
+                    }
                     let default_prototype = napi_default_object_prototype(&environment)?;
                     if super::strict_equals(&object, &default_prototype) {
                         Value::Null
@@ -4067,6 +4095,7 @@ unsafe extern "C" fn api_set_prototype(
                         }
                     }
                     Value::Class(class) => class.statics.proto(),
+                    Value::Function(function) => function.properties.proto(),
                     _ => None,
                 };
                 depth += 1;
@@ -4109,7 +4138,9 @@ unsafe extern "C" fn api_create_object_with_properties(
         };
         let prototype = match &prototype_value {
             Value::Null => None,
-            Value::Object { .. } | Value::Class(_) => Some(Rc::new(prototype_value)),
+            Value::Object { .. } | Value::Function(_) | Value::Class(_) => {
+                Some(Rc::new(prototype_value))
+            }
             other if !is_napi_property_object(other) => return Err(NAPI_OBJECT_EXPECTED),
             _ => return Err(NAPI_GENERIC_FAILURE),
         };
@@ -4895,8 +4926,13 @@ unsafe extern "C" fn api_check_object_type_tag(
 }
 
 fn napi_set_object_integrity(value: &Value, freeze: bool) -> Result<(), i32> {
+    if let Value::Function(function) = value {
+        function.ensure_name_length_properties();
+        function.prototype_value(value);
+    }
     let cell = match value {
         Value::Object { props } => props,
+        Value::Function(function) => &function.properties,
         Value::Class(class) => &class.statics,
         _ => {
             return Err(if napi_object_identity(value).is_ok() {
@@ -10505,11 +10541,11 @@ static void async_cleanup(napi_async_cleanup_hook_handle handle, void* data) {
 }
 
 static napi_value probe(napi_env env, napi_callback_info info) {
-  napi_value args[2], result, field;
-  size_t argc = 2;
+  napi_value args[3], result, field;
+  size_t argc = 3;
   bool matches = false, wrong_matches = true;
-  napi_status duplicate_tag_status, freeze_status, seal_status;
-  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 2 ||
+  napi_status duplicate_tag_status, freeze_status, seal_status, function_freeze_status;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 3 ||
       napi_type_tag_object(env, args[0], &fixture_tag) != napi_ok ||
       napi_check_object_type_tag(env, args[0], &fixture_tag, &matches) != napi_ok ||
       napi_check_object_type_tag(env, args[0], &other_tag, &wrong_matches) != napi_ok)
@@ -10517,6 +10553,7 @@ static napi_value probe(napi_env env, napi_callback_info info) {
   duplicate_tag_status = napi_type_tag_object(env, args[0], &fixture_tag);
   freeze_status = napi_object_freeze(env, args[0]);
   seal_status = napi_object_seal(env, args[1]);
+  function_freeze_status = napi_object_freeze(env, args[2]);
   if (napi_create_object(env, &result) != napi_ok ||
       napi_get_boolean(env, matches, &field) != napi_ok ||
       napi_set_named_property(env, result, "tagMatches", field) != napi_ok ||
@@ -10527,7 +10564,9 @@ static napi_value probe(napi_env env, napi_callback_info info) {
       napi_create_int32(env, freeze_status, &field) != napi_ok ||
       napi_set_named_property(env, result, "freezeStatus", field) != napi_ok ||
       napi_create_int32(env, seal_status, &field) != napi_ok ||
-      napi_set_named_property(env, result, "sealStatus", field) != napi_ok)
+      napi_set_named_property(env, result, "sealStatus", field) != napi_ok ||
+      napi_create_int32(env, function_freeze_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "functionFreezeStatus", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -10571,11 +10610,13 @@ NAPI_MODULE_INIT() {
 const addon = require('./fixture.node');
 const target = {value: 41};
 const sealedTarget = {value: 9};
-const native = addon.probe(target, sealedTarget);
+function FrozenFunction() {}
+const native = addon.probe(target, sealedTarget, FrozenFunction);
 module.exports = {
   ...native,
   frozen: Object.isFrozen(target),
   sealed: Object.isSealed(sealedTarget),
+  functionFrozen: Object.isFrozen(FrozenFunction),
   targetValue: target.value,
   sealedValue: sealedTarget.value,
 };
@@ -10662,8 +10703,10 @@ module.exports = {
         assert_eq!(vm_report["duplicateTagStatus"], NAPI_INVALID_ARG);
         assert_eq!(vm_report["freezeStatus"], NAPI_OK);
         assert_eq!(vm_report["sealStatus"], NAPI_OK);
+        assert_eq!(vm_report["functionFreezeStatus"], NAPI_OK);
         assert_eq!(vm_report["frozen"], true);
         assert_eq!(vm_report["sealed"], true);
+        assert_eq!(vm_report["functionFrozen"], true);
         assert_eq!(vm_report["targetValue"], 41);
         assert_eq!(vm_report["sealedValue"], 9);
         drop(observer);
@@ -15787,6 +15830,15 @@ static napi_value set_prototype_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value get_prototype_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value object, prototype;
+  if (napi_get_cb_info(env, info, &argc, &object, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_prototype(env, object, &prototype) != napi_ok)
+    return NULL;
+  return prototype;
+}
+
 static napi_value default_cycle_probe(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1], prototype, result;
@@ -15879,11 +15931,14 @@ static napi_value create_object_with_properties_probe(
 }
 
 NAPI_MODULE_INIT() {
-  napi_value function, cycle_function, create_function, post_function;
+  napi_value function, get_function, cycle_function, create_function, post_function;
   napi_value finalizer_calls_function, finalizer_status_function;
   if (napi_create_function(env, "setPrototype", NAPI_AUTO_LENGTH,
                            set_prototype_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "setPrototype", function) != napi_ok ||
+      napi_create_function(env, "getPrototype", NAPI_AUTO_LENGTH,
+                           get_prototype_probe, NULL, &get_function) != napi_ok ||
+      napi_set_named_property(env, exports, "getPrototype", get_function) != napi_ok ||
       napi_create_function(env, "defaultCycle", NAPI_AUTO_LENGTH,
                            default_cycle_probe, NULL, &cycle_function) != napi_ok ||
       napi_set_named_property(env, exports, "defaultCycle", cycle_function) != napi_ok ||
@@ -15939,6 +15994,10 @@ NAPI_MODULE_INIT() {
 const prototype = { marker: 'inherited', twice() { return this.value * 2; } };
 const target = { value: 21 };
 const status = addon.setPrototype(target, prototype);
+function FunctionTarget() {}
+function FunctionParent() {}
+FunctionParent.marker = 'function-inherited';
+const functionStatus = addon.setPrototype(FunctionTarget, FunctionParent);
 const cycleStatus = addon.setPrototype(target, target);
 const defaultCycleStatus = addon.defaultCycle({});
 const nullTarget = {};
@@ -15947,6 +16006,7 @@ Object.freeze(target);
 const frozenSameStatus = addon.setPrototype(target, prototype);
 const frozenChangeStatus = addon.setPrototype(target, null);
 const [created, symbolKey] = addon.createObject(prototype);
+const [functionCreated] = addon.createObject(FunctionParent);
 const [nullCreated] = addon.createObject(null);
 const [implicitlyNullCreated] = addon.createObject();
 const finalizerStatus = addon.postFinalizer(23);
@@ -15954,6 +16014,10 @@ const postedFinalizerCallsImmediately = addon.postedFinalizerCalls();
 module.exports = {
   run: () => JSON.stringify({
   status,
+  functionStatus,
+  functionPrototypeSame: Object.getPrototypeOf(FunctionTarget) === FunctionParent,
+  functionNapiPrototypeSame: addon.getPrototype(FunctionTarget) === FunctionParent,
+  functionInherited: FunctionTarget.marker,
   cycleStatus,
   defaultCycleStatus,
   nullStatus,
@@ -15968,6 +16032,8 @@ module.exports = {
   createdValue: created.value,
   createdSymbol: created[symbolKey],
   inherited: created.marker,
+  functionCreatedPrototype: Object.getPrototypeOf(functionCreated) === FunctionParent,
+  functionCreatedInherited: functionCreated.marker,
   nullCreatedPrototype: Object.getPrototypeOf(nullCreated) === null,
   implicitlyNullCreatedPrototype: Object.getPrototypeOf(implicitlyNullCreated) === null,
   finalizerStatus,
@@ -16030,6 +16096,10 @@ module.exports = {
             vm_result,
             serde_json::json!({
                 "status": 0,
+                "functionStatus": 0,
+                "functionPrototypeSame": true,
+                "functionNapiPrototypeSame": true,
+                "functionInherited": "function-inherited",
                 "cycleStatus": 9,
                 "defaultCycleStatus": 9,
                 "nullStatus": 0,
@@ -16044,6 +16114,8 @@ module.exports = {
                 "createdValue": 17,
                 "createdSymbol": "symbol-value",
                 "inherited": "inherited",
+                "functionCreatedPrototype": true,
+                "functionCreatedInherited": "function-inherited",
                 "nullCreatedPrototype": true,
                 "implicitlyNullCreatedPrototype": true,
                 "finalizerStatus": 0,

@@ -72,7 +72,11 @@ fn cell(v: &Value) -> Option<&Rc<ObjectCell>> {
     match v {
         Value::Object { props } => Some(props),
         Value::Class(class) => Some(&class.statics),
-        Value::Function(function) => Some(&function.properties),
+        Value::Function(function) => {
+            function.ensure_name_length_properties();
+            function.prototype_value(v);
+            Some(&function.properties)
+        }
         _ => None,
     }
 }

@@ -97,10 +97,11 @@ objects with working `valueOf()` and basic `toString()` behavior. This
 conversion does not re-enter the interpreter because it does not invoke guest
 code. The guest `Object(value)` constructor shares the wrapper representation.
 `napi_get_prototype` preserves explicit prototypes and the realm's
-`Object.prototype` identity for ordinary objects. Prototype queries for VM
-values whose built-in prototype is not materialized (such as arrays and
-proxies) return a generic Node-API failure until that prototype model is
-implemented.
+`Object.prototype` identity for ordinary objects. It also returns an explicit
+prototype installed on an ordinary function. Queries for values whose built-in
+prototype is not materialized (including arrays, proxies, and ordinary
+functions that still use the default `Function.prototype`) return a generic
+Node-API failure.
 `napi_instanceof` handles VM class constructors and ordinary function
 constructors, inherited prototypes, VM error classes, and guest-defined
 `Symbol.hasInstance` methods when called through the active paused-callback
@@ -167,8 +168,11 @@ matches Node when `napi_is_detached_arraybuffer` receives a non-ArrayBuffer
 value (`napi_ok`, false); Bun 1.4.0 returns `napi_arraybuffer_expected` for
 that input, which the differential fixture records as a runtime difference.
 The selected Node-API v8 slice adds type tags for identity-bearing guest
-objects, freeze/seal for ordinary objects and class constructors, and async
-cleanup hooks. Hooks start in reverse registration order; asynchronous hooks
+objects, freeze/seal for ordinary objects, ordinary functions, and class
+constructors, and async cleanup hooks. Function integrity operations first
+materialize the standard own `name`, `length`, and `prototype` properties so
+the resulting descriptors are frozen or sealed. Hooks start in reverse
+registration order; asynchronous hooks
 start without blocking the remaining hooks, and shutdown waits for all of them
 to remove their handles before running finalizers. Addon libraries remain
 mapped through cleanup. Tagged values stay retained until host shutdown because
@@ -190,8 +194,11 @@ The experimental `node_api_set_prototype` and
 `node_api_create_object_with_properties` entry points are available to addons
 compiled with `NAPI_EXPERIMENTAL`; they update prototype metadata or create an
 ordinary object with ordered data properties. Prototype mutation is supported
-for ordinary VM objects and class constructors, and object creation accepts
-ordinary object/class prototypes or null. Specialized object representations
+for ordinary VM objects, ordinary functions, and class constructors, and
+object creation accepts ordinary object/function/class prototypes or null.
+Function prototype mutation is available when the function has an explicit
+prototype link; its default Function.prototype object is not materialized.
+Specialized object representations
 whose prototype model is not implemented fail explicitly. These functions do
 not raise the stable Node-API version reported by the host. Their fixture
 compares prototype identity, inherited behavior, and property values with
