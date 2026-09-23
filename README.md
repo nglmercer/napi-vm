@@ -167,7 +167,7 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-accepts addons requesting Node-API versions 1 through 9, but only implements a
+accepts addons requesting Node-API versions 1 through 10, but only implements a
 selected API subset rather than every function in those versions. The v1
 surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
@@ -216,6 +216,11 @@ The selected Node-API v9 functions provide the global symbol registry,
 SyntaxError creation and throwing, and the addon's `file://` URL.
 `node_api_symbol_for` shares identity with guest `Symbol.for`, and the URL
 storage remains valid for the lifetime of the addon environment.
+The selected Node-API v10 functions provide external Latin-1 and UTF-16 string
+creation with eager copy/finalizer handling, string property-key creation, and
+zero-copy `Buffer` views over `ArrayBuffer` storage. The Node and Bun fixture
+checks the documented external-string copy/finalizer contract, Unicode keys,
+buffer aliasing, and out-of-range errors.
 `napi_add_finalizer` supports its optional zero-count reference and runs the
 finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
 no guest-object garbage collector, so this does not provide collection-time

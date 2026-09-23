@@ -166,7 +166,7 @@ Every claim below was checked against the current build.
   requires a Node executable and has reflection gaps; array prototype
   mutation is not supported. It is not an in-process Rust implementation of
   Node-API. An experimental `node-api-host` Cargo feature now loads a real
-  Node-API v1-v8 fixture in process (Linux runtime-tested; macOS still needs
+  Node-API v1-v10 fixture in process (Linux runtime-tested; macOS still needs
   native verification) and supports a selected API
   slice: opaque scoped handles, callback info, native functions, object and
   global-object access, property operations, symbol creation, references,

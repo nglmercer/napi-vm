@@ -63,7 +63,7 @@ const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
 const MAX_BIGINT_WORDS: usize = 2048;
-const MAX_NODE_API_VERSION: i32 = 9;
+const MAX_NODE_API_VERSION: i32 = 10;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -136,7 +136,7 @@ impl RustNodeApiOptions {
 }
 
 /// In-process Node-API addon host. This is opt-in and implements Linux ELF and
-/// macOS Mach-O loading for the selected Node-API v1-v8 calls below. Linux is runtime
+/// macOS Mach-O loading for the selected Node-API v1-v10 calls below. Linux is runtime
 /// tested; macOS still needs native CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
@@ -1114,6 +1114,32 @@ struct NapiVmApiTable {
     create_syntax_error: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
     throw_syntax_error: unsafe extern "C" fn(NapiEnv, *const c_char, *const c_char) -> i32,
     get_module_file_name: unsafe extern "C" fn(NapiEnv, *mut *const c_char) -> i32,
+    create_external_string_latin1: unsafe extern "C" fn(
+        NapiEnv,
+        *mut c_char,
+        usize,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiValue,
+        *mut bool,
+    ) -> i32,
+    create_external_string_utf16: unsafe extern "C" fn(
+        NapiEnv,
+        *mut u16,
+        usize,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiValue,
+        *mut bool,
+    ) -> i32,
+    create_property_key_latin1:
+        unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
+    create_property_key_utf8:
+        unsafe extern "C" fn(NapiEnv, *const c_char, usize, *mut NapiValue) -> i32,
+    create_property_key_utf16:
+        unsafe extern "C" fn(NapiEnv, *const u16, usize, *mut NapiValue) -> i32,
+    create_buffer_from_arraybuffer:
+        unsafe extern "C" fn(NapiEnv, NapiValue, usize, usize, *mut NapiValue) -> i32,
 }
 
 #[repr(C)]
@@ -1274,6 +1300,12 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_syntax_error: api_create_syntax_error,
     throw_syntax_error: api_throw_syntax_error,
     get_module_file_name: api_get_module_file_name,
+    create_external_string_latin1: api_create_external_string_latin1,
+    create_external_string_utf16: api_create_external_string_utf16,
+    create_property_key_latin1: api_create_property_key_latin1,
+    create_property_key_utf8: api_create_property_key_utf8,
+    create_property_key_utf16: api_create_property_key_utf16,
+    create_buffer_from_arraybuffer: api_create_buffer_from_arraybuffer,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -2468,6 +2500,13 @@ unsafe fn read_latin1(pointer: *const c_char, length: usize) -> Result<String, i
     Ok(bytes.iter().copied().map(char::from).collect())
 }
 
+unsafe fn read_latin1_allow_empty(pointer: *const c_char, length: usize) -> Result<String, i32> {
+    if pointer.is_null() && length == 0 {
+        return Ok(String::new());
+    }
+    unsafe { read_latin1(pointer, length) }
+}
+
 unsafe fn read_utf16(pointer: *const u16, length: usize) -> Result<String, i32> {
     if pointer.is_null() {
         return Err(NAPI_INVALID_ARG);
@@ -2499,6 +2538,13 @@ unsafe fn read_utf16(pointer: *const u16, length: usize) -> Result<String, i32> 
         string.push(character);
     }
     Ok(string)
+}
+
+unsafe fn read_utf16_allow_empty(pointer: *const u16, length: usize) -> Result<String, i32> {
+    if pointer.is_null() && length == 0 {
+        return Ok(String::new());
+    }
+    unsafe { read_utf16(pointer, length) }
 }
 
 unsafe extern "C" fn api_get_undefined(env: NapiEnv, result: *mut NapiValue) -> i32 {
@@ -2886,6 +2932,97 @@ unsafe extern "C" fn api_create_string_utf16(
             ));
     }
     status
+}
+
+unsafe extern "C" fn api_create_external_string_latin1(
+    env: NapiEnv,
+    value: *mut c_char,
+    length: usize,
+    finalize: Option<NapiFinalize>,
+    finalize_hint: *mut c_void,
+    result: *mut NapiValue,
+    copied: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || copied.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let string = unsafe { read_latin1_allow_empty(value, length)? };
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::String(string))?;
+        unsafe {
+            result.write(handle);
+            copied.write(true);
+        }
+        if let Some(finalize) = finalize {
+            // The VM owns a decoded copy, so release the addon's source buffer
+            // immediately as Node-API requires when `copied` is true.
+            unsafe { finalize(env, value.cast(), finalize_hint) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_external_string_utf16(
+    env: NapiEnv,
+    value: *mut u16,
+    length: usize,
+    finalize: Option<NapiFinalize>,
+    finalize_hint: *mut c_void,
+    result: *mut NapiValue,
+    copied: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || copied.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let string = unsafe { read_utf16_allow_empty(value, length)? };
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::String(string))?;
+        unsafe {
+            result.write(handle);
+            copied.write(true);
+        }
+        if let Some(finalize) = finalize {
+            // The VM owns a decoded copy, so release the addon's source buffer
+            // immediately as Node-API requires when `copied` is true.
+            unsafe { finalize(env, value.cast(), finalize_hint) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_property_key_latin1(
+    env: NapiEnv,
+    value: *const c_char,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_string_latin1(env, value, length, result) }
+}
+
+unsafe extern "C" fn api_create_property_key_utf8(
+    env: NapiEnv,
+    value: *const c_char,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_string_utf8(env, value, length, result) }
+}
+
+unsafe extern "C" fn api_create_property_key_utf16(
+    env: NapiEnv,
+    value: *const u16,
+    length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    unsafe { api_create_string_utf16(env, value, length, result) }
 }
 
 unsafe extern "C" fn api_create_symbol(
@@ -3723,6 +3860,60 @@ unsafe extern "C" fn api_create_external_buffer(
         }));
         let handle =
             create_napi_external_buffer_value(&environment, value, data, finalize, hint, true)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_buffer_from_arraybuffer(
+    env: NapiEnv,
+    arraybuffer: NapiValue,
+    byte_offset: usize,
+    byte_length: usize,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let arraybuffer = environment.handles.borrow().get(arraybuffer)?;
+        let Value::ArrayBuffer(buffer) = &arraybuffer else {
+            return Err(NAPI_ARRAYBUFFER_EXPECTED);
+        };
+        if buffer.is_detached() {
+            set_pending_exception(
+                &environment,
+                Value::Error(ErrorData::new(
+                    "TypeError",
+                    "Cannot create a Buffer from a detached ArrayBuffer",
+                )),
+            )?;
+            return Err(NAPI_PENDING_EXCEPTION);
+        }
+        let backing_length = buffer.borrow().len();
+        let end = byte_offset.checked_add(byte_length);
+        if end.is_none_or(|end| end > backing_length) {
+            set_pending_exception(
+                &environment,
+                Value::Error(ErrorData::new(
+                    "RangeError",
+                    "Buffer byte range is outside the ArrayBuffer",
+                )),
+            )?;
+            return Err(NAPI_PENDING_EXCEPTION);
+        }
+        if byte_length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let value = Value::TypedArray(Rc::new(TypedArrayData {
+            kind: TypedKind::Uint8,
+            buffer: buffer.clone(),
+            byte_offset,
+            length: byte_length,
+        }));
+        let handle = environment.handles.borrow_mut().create(value.clone())?;
+        remember_napi_buffer(&environment, &value)?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -7831,6 +8022,312 @@ mod tests {
         let promise = promise.borrow();
         assert_eq!(promise.state, PromiseState::Fulfilled);
         assert!(matches!(promise.value, Value::Undefined));
+    }
+
+    #[test]
+    fn loads_napi_v10_external_strings_property_keys_and_arraybuffer_buffers() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-v10-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping Node-API v10 fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        let c_source = r#"
+#define NAPI_VERSION 10
+#include <node_api.h>
+#include <stdlib.h>
+
+static int external_string_finalizers;
+static void external_string_finalize(napi_env env, void* data, void* hint) {
+  (void)env;
+  (void)hint;
+  free(data);
+  external_string_finalizers++;
+}
+
+static napi_value external_strings(napi_env env, napi_callback_info info) {
+  char* latin1 = (char*)malloc(3);
+  char16_t* utf16 = (char16_t*)malloc(3 * sizeof(char16_t));
+  napi_value latin_value, utf16_value, result, field;
+  bool latin1_copied = false, utf16_copied = false;
+  (void)info;
+  if (latin1 == NULL || utf16 == NULL) {
+    free(latin1);
+    free(utf16);
+    return NULL;
+  }
+  latin1[0] = 'L'; latin1[1] = (char)0xe9; latin1[2] = 'X';
+  utf16[0] = 'O'; utf16[1] = 0x03a9; utf16[2] = 'K';
+  if (node_api_create_external_string_latin1(
+          env, latin1, 3, external_string_finalize, NULL, &latin_value,
+          &latin1_copied) != napi_ok ||
+      node_api_create_external_string_utf16(
+          env, utf16, 3, external_string_finalize, NULL, &utf16_value,
+          &utf16_copied) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "latin1", latin_value) != napi_ok ||
+      napi_set_named_property(env, result, "utf16", utf16_value) != napi_ok ||
+      napi_get_boolean(env, latin1_copied, &field) != napi_ok ||
+      napi_set_named_property(env, result, "latin1Copied", field) != napi_ok ||
+      napi_get_boolean(env, utf16_copied, &field) != napi_ok ||
+      napi_set_named_property(env, result, "utf16Copied", field) != napi_ok ||
+      napi_create_int32(env, external_string_finalizers, &field) != napi_ok ||
+      napi_set_named_property(env, result, "finalizersAtReturn", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value property_keys(napi_env env, napi_callback_info info) {
+  static const char latin1_key[] = {'k', 'e', 'y', (char)0xe9};
+  static const char utf8_key[] = "utf8-雪";
+  static const char16_t utf16_key[] = {'u', '1', '6', 0x03a9};
+  napi_value result, key, value;
+  (void)info;
+  if (napi_create_object(env, &result) != napi_ok ||
+      node_api_create_property_key_latin1(env, latin1_key,
+                                          sizeof(latin1_key), &key) != napi_ok ||
+      napi_create_string_utf8(env, "latin1-value", NAPI_AUTO_LENGTH,
+                              &value) != napi_ok ||
+      napi_set_property(env, result, key, value) != napi_ok ||
+      node_api_create_property_key_utf8(env, utf8_key, sizeof(utf8_key) - 1,
+                                        &key) != napi_ok ||
+      napi_create_string_utf8(env, "utf8-value", NAPI_AUTO_LENGTH,
+                              &value) != napi_ok ||
+      napi_set_property(env, result, key, value) != napi_ok ||
+      node_api_create_property_key_utf16(env, utf16_key,
+                                         sizeof(utf16_key) / sizeof(char16_t),
+                                         &key) != napi_ok ||
+      napi_create_string_utf8(env, "utf16-value", NAPI_AUTO_LENGTH,
+                              &value) != napi_ok ||
+      napi_set_property(env, result, key, value) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value buffer_from_arraybuffer(napi_env env, napi_callback_info info) {
+  napi_value arraybuffer, backing, buffer, result, field;
+  void* bytes = NULL;
+  void* buffer_bytes = NULL;
+  size_t buffer_length = 0;
+  bool is_buffer = false;
+  (void)info;
+  if (napi_create_arraybuffer(env, 6, &bytes, &arraybuffer) != napi_ok ||
+      bytes == NULL)
+    return NULL;
+  for (size_t i = 0; i < 6; i++) ((uint8_t*)bytes)[i] = (uint8_t)(10 + i);
+  if (napi_create_typedarray(env, napi_uint8_array, 6, arraybuffer, 0,
+                             &backing) != napi_ok ||
+      node_api_create_buffer_from_arraybuffer(env, arraybuffer, 2, 3,
+                                             &buffer) != napi_ok ||
+      napi_is_buffer(env, buffer, &is_buffer) != napi_ok ||
+      napi_get_buffer_info(env, buffer, &buffer_bytes, &buffer_length) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "backing", backing) != napi_ok ||
+      napi_set_named_property(env, result, "buffer", buffer) != napi_ok ||
+      napi_get_boolean(env, is_buffer, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isBuffer", field) != napi_ok ||
+      napi_get_boolean(env, buffer_bytes == (uint8_t*)bytes + 2, &field) != napi_ok ||
+      napi_set_named_property(env, result, "sharesBytes", field) != napi_ok ||
+      napi_create_uint32(env, (uint32_t)buffer_length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "length", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value buffer_range_error(napi_env env, napi_callback_info info) {
+  napi_value arraybuffer, result;
+  (void)info;
+  if (napi_create_arraybuffer(env, 4, NULL, &arraybuffer) != napi_ok)
+    return NULL;
+  (void)node_api_create_buffer_from_arraybuffer(env, arraybuffer, 3, 2,
+                                                &result);
+  return NULL;
+}
+
+NAPI_MODULE_INIT() {
+  napi_value function;
+  if (napi_create_function(env, "externalStrings", NAPI_AUTO_LENGTH,
+                           external_strings, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "externalStrings", function) != napi_ok ||
+      napi_create_function(env, "propertyKeys", NAPI_AUTO_LENGTH,
+                           property_keys, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "propertyKeys", function) != napi_ok ||
+      napi_create_function(env, "bufferFromArrayBuffer", NAPI_AUTO_LENGTH,
+                           buffer_from_arraybuffer, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "bufferFromArrayBuffer", function) != napi_ok ||
+      napi_create_function(env, "bufferRangeError", NAPI_AUTO_LENGTH,
+                           buffer_range_error, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "bufferRangeError", function) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#;
+        fs::write(&source, c_source).unwrap();
+        let built = Command::new("cc")
+            .args([
+                "-std=c11",
+                "-O2",
+                "-fPIC",
+                "-shared",
+                "-DNAPI_VERSION=10",
+                "-I",
+            ])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "Node-API v10 fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        fs::write(
+            root.join("main.cjs"),
+            r#"
+const addon = require('./fixture.node');
+const external = addon.externalStrings();
+const properties = addon.propertyKeys();
+const buffer = addon.bufferFromArrayBuffer();
+const backing = buffer.backing;
+const view = buffer.buffer;
+const before = [view[0], view[1], view[2]];
+view[1] = 99;
+let rangeErrorName = 'none';
+try { addon.bufferRangeError(); } catch (error) { rangeErrorName = error.name; }
+module.exports = {
+  external,
+  propertyKeys: Object.keys(properties),
+  propertyValues: [properties['keyé'], properties['utf8-雪'], properties['u16Ω']],
+  buffer: {
+    isBuffer: buffer.isBuffer,
+    sharesBytes: buffer.sharesBytes,
+    length: buffer.length,
+    before,
+    after: [backing[0], backing[1], backing[2], backing[3], backing[4], backing[5]],
+  },
+  rangeErrorName,
+};
+"#,
+        )
+        .unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
+        let observer = unsafe { Library::open(Some(addon.as_os_str()), RTLD_NOW) }.unwrap();
+        let vm_report = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .unwrap();
+        let Value::String(ref vm_report) = vm_report else {
+            panic!("Node-API v10 VM fixture did not return JSON");
+        };
+        let mut vm_report: serde_json::Value = serde_json::from_str(vm_report).unwrap();
+        assert_eq!(vm_report["external"]["latin1"], "LéX");
+        assert_eq!(vm_report["external"]["utf16"], "OΩK");
+        assert_eq!(vm_report["external"]["latin1Copied"], true);
+        assert_eq!(vm_report["external"]["utf16Copied"], true);
+        assert_eq!(vm_report["external"]["finalizersAtReturn"], 2);
+        assert_eq!(vm_report["propertyKeys"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            vm_report["propertyValues"],
+            serde_json::json!(["latin1-value", "utf8-value", "utf16-value"])
+        );
+        assert_eq!(vm_report["buffer"]["isBuffer"], true);
+        assert_eq!(vm_report["buffer"]["sharesBytes"], true);
+        assert_eq!(vm_report["buffer"]["length"], 3);
+        assert_eq!(
+            vm_report["buffer"]["before"],
+            serde_json::json!([12, 13, 14])
+        );
+        assert_eq!(
+            vm_report["buffer"]["after"],
+            serde_json::json!([10, 11, 12, 99, 14, 15])
+        );
+        assert_eq!(vm_report["rangeErrorName"], "RangeError");
+
+        // Whether a runtime can retain an external string is an engine choice.
+        // Compare the actual JavaScript strings and byte-view behavior while
+        // checking each engine's copied/finalizer contract separately.
+        let external = vm_report["external"].as_object_mut().unwrap();
+        external.remove("latin1Copied");
+        external.remove("utf16Copied");
+        external.remove("finalizersAtReturn");
+        let runner = r#"const value = require('./main.cjs');
+const e = value.external;
+const copied = Number(e.latin1Copied) + Number(e.utf16Copied);
+if (e.finalizersAtReturn !== copied) throw new Error('external string finalizer contract violated');
+delete e.latin1Copied; delete e.utf16Copied; delete e.finalizersAtReturn;
+process.stdout.write(JSON.stringify(value));"#;
+        let mut reference_reports = Vec::new();
+        for runtime in ["node", "bun"] {
+            if !Command::new(runtime)
+                .arg("--version")
+                .output()
+                .is_ok_and(|out| out.status.success())
+            {
+                continue;
+            }
+            let reference = Command::new(runtime)
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "{runtime} Node-API v10 fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let report: serde_json::Value = serde_json::from_slice(&reference.stdout)
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "{runtime} v10 result was not JSON: {}",
+                        String::from_utf8_lossy(&reference.stdout)
+                    )
+                });
+            reference_reports.push((runtime, report));
+        }
+        assert!(
+            !reference_reports.is_empty(),
+            "Node or Bun is required for the Node-API v10 differential fixture"
+        );
+        for (runtime, report) in reference_reports {
+            assert_eq!(
+                vm_report, report,
+                "Node-API v10 result differs from {runtime}"
+            );
+        }
+        drop(interpreter);
+        drop(observer);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

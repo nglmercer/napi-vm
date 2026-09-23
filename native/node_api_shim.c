@@ -245,6 +245,18 @@ typedef struct napi_vm_node_api_table {
                                      napi_value*);
   napi_status (*throw_syntax_error)(napi_env, const char*, const char*);
   napi_status (*get_module_file_name)(napi_env, const char**);
+  napi_status (*create_external_string_latin1)(
+      napi_env, char*, size_t, napi_finalize, void*, napi_value*, bool*);
+  napi_status (*create_external_string_utf16)(
+      napi_env, uint16_t*, size_t, napi_finalize, void*, napi_value*, bool*);
+  napi_status (*create_property_key_latin1)(napi_env, const char*, size_t,
+                                             napi_value*);
+  napi_status (*create_property_key_utf8)(napi_env, const char*, size_t,
+                                           napi_value*);
+  napi_status (*create_property_key_utf16)(napi_env, const uint16_t*, size_t,
+                                            napi_value*);
+  napi_status (*create_buffer_from_arraybuffer)(napi_env, napi_value, size_t,
+                                                  size_t, napi_value*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1288,4 +1300,54 @@ NAPI_VM_EXPORT napi_status node_api_get_module_file_name(
     napi_env env, const char** result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_module_file_name(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_external_string_latin1(
+    napi_env env, char* str, size_t length, napi_finalize finalize_callback,
+    void* finalize_hint, napi_value* result, bool* copied) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_external_string_latin1(
+                     env, str, length, finalize_callback, finalize_hint, result,
+                     copied)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_external_string_utf16(
+    napi_env env, uint16_t* str, size_t length,
+    napi_finalize finalize_callback, void* finalize_hint, napi_value* result,
+    bool* copied) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_external_string_utf16(
+                     env, str, length, finalize_callback, finalize_hint, result,
+                     copied)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_property_key_latin1(
+    napi_env env, const char* str, size_t length, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_property_key_latin1(env, str, length, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_property_key_utf8(
+    napi_env env, const char* str, size_t length, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_property_key_utf8(env, str, length, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_property_key_utf16(
+    napi_env env, const uint16_t* str, size_t length, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_property_key_utf16(env, str, length, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_buffer_from_arraybuffer(
+    napi_env env, napi_value arraybuffer, size_t byte_offset,
+    size_t byte_length, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_buffer_from_arraybuffer(
+                     env, arraybuffer, byte_offset, byte_length, result)
+               : 9;
 }
