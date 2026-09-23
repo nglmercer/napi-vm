@@ -65,15 +65,21 @@ existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
 Node-API versions 1 through 4 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
-numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean
-coercion, symbol creation, and `napi_define_properties` for ordinary object
-targets (data values, symbol keys, native methods, and accessors),
+numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
+number, and string coercion, symbol creation, and `napi_define_properties`
+for ordinary object targets (data values, symbol keys, native methods, and accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
 operations. Class static properties share object descriptor metadata and
 accessor behavior.
 `napi_get_value_int64` truncates finite Numbers toward zero, clamps values
 outside the signed 64-bit range, and converts NaN and infinities to zero.
+`napi_coerce_to_number` and `napi_coerce_to_string` perform guest-side
+conversion through the existing callback dispatcher. They honor
+`Symbol.toPrimitive`, `valueOf`, and `toString`; Symbol-to-string and
+Symbol/BigInt-to-number conversions raise guest `TypeError`s. These APIs do
+not call guest code directly from an arbitrary native context and require an
+active interpreter callback dispatcher.
 `napi_get_prototype` preserves explicit prototypes and the realm's
 `Object.prototype` identity for ordinary objects. Prototype queries for VM
 values whose built-in prototype is not materialized (such as arrays and

@@ -148,6 +148,121 @@ impl Interpreter {
         self.vs(value)
     }
 
+    /// Apply the ECMAScript abstract ToNumber operation to a Node-API value.
+    /// Unlike `Value::to_number`, this can call guest conversion methods and
+    /// rejects Symbols and BigInts instead of silently manufacturing a number.
+    pub(crate) fn napi_to_number(&mut self, value: &Value) -> Result<f64, VmErr> {
+        let primitive = self.coerce_object_to_primitive(value, "number")?;
+        match &primitive {
+            Value::Undefined => Ok(f64::NAN),
+            Value::Null => Ok(0.0),
+            Value::Bool(value) => Ok(if *value { 1.0 } else { 0.0 }),
+            Value::Number(value) => Ok(*value),
+            Value::String(value) => Ok(ecmascript_string_to_number(value)),
+            Value::Symbol(_) => Err(VmErr::Msg(
+                "TypeError: Cannot convert a Symbol value to a number".into(),
+            )),
+            Value::BigInt(_) => Err(VmErr::Msg(
+                "TypeError: Cannot convert a BigInt value to a number".into(),
+            )),
+            _ => Err(VmErr::Msg(
+                "TypeError: Cannot convert object to primitive value".into(),
+            )),
+        }
+    }
+
+    /// Apply ECMAScript ToString for Node-API. This deliberately differs from
+    /// the `String(Symbol())` function special case: abstract ToString throws
+    /// for Symbols, as does `napi_coerce_to_string`.
+    pub(crate) fn napi_to_string(&mut self, value: &Value) -> Result<String, VmErr> {
+        let primitive = self.coerce_object_to_primitive(value, "string")?;
+        match &primitive {
+            Value::Undefined => Ok("undefined".into()),
+            Value::Null => Ok("null".into()),
+            Value::Bool(value) => Ok(if *value { "true" } else { "false" }.into()),
+            Value::Number(value) => Ok(if *value == 0.0 {
+                "0".into()
+            } else {
+                crate::format::number_string(*value)
+            }),
+            Value::String(value) => Ok(value.clone()),
+            Value::BigInt(value) => Ok(value.to_decimal()),
+            Value::Symbol(_) => Err(VmErr::Msg(
+                "TypeError: Cannot convert a Symbol value to a string".into(),
+            )),
+            _ => Err(VmErr::Msg(
+                "TypeError: Cannot convert object to primitive value".into(),
+            )),
+        }
+    }
+
+    /// Perform ToPrimitive with the requested hint, including the guest's
+    /// `Symbol.toPrimitive` hook and ordinary `valueOf`/`toString` order.
+    fn coerce_object_to_primitive(&mut self, value: &Value, hint: &str) -> Result<Value, VmErr> {
+        let value = value.deref_binding();
+        if is_primitive(&value) {
+            return Ok(value);
+        }
+
+        let exotic_key = crate::builtins::well_known("toPrimitive")
+            .expect("Symbol.toPrimitive is a well-known symbol");
+        let exotic = self.get_prop_value(&value, &exotic_key)?;
+        if !matches!(exotic, Value::Undefined | Value::Null) {
+            if !is_callable(&exotic) {
+                return Err(VmErr::Msg(
+                    "TypeError: Symbol.toPrimitive must be a function".into(),
+                ));
+            }
+            let result =
+                self.call_this(&exotic, value.clone(), vec![Value::String(hint.to_owned())])?;
+            if is_primitive(&result) {
+                return Ok(result);
+            }
+            return Err(VmErr::Msg(
+                "TypeError: Cannot convert object to primitive value".into(),
+            ));
+        }
+
+        let order = if hint == "string" {
+            ["toString", "valueOf"]
+        } else {
+            ["valueOf", "toString"]
+        };
+        for name in order {
+            let method = self.member(&value, name)?;
+            if is_callable(&method) {
+                let result = self.call_this(&method, value.clone(), vec![])?;
+                if is_primitive(&result) {
+                    return Ok(result);
+                }
+                continue;
+            }
+
+            // Object.prototype.valueOf returns its receiver. The VM does not
+            // materialize Object.prototype, so preserve that behavior when
+            // the ordinary default prototype supplies the missing method.
+            if matches!(method, Value::Undefined)
+                && name == "valueOf"
+                && has_default_object_prototype(&value)
+            {
+                continue;
+            }
+
+            // Object.prototype.toString is likewise supplied by the runtime
+            // for ordinary objects whose prototype chain uses that default.
+            if matches!(method, Value::Undefined)
+                && name == "toString"
+                && has_default_object_prototype(&value)
+            {
+                return Ok(Value::String(self.vs(&value)?));
+            }
+        }
+
+        Err(VmErr::Msg(
+            "TypeError: Cannot convert object to primitive value".into(),
+        ))
+    }
+
     /// Does `+` have to reduce this value to a primitive first?
     ///
     /// Objects and arrays do: `1 + [2]` is `"12"`, because the array becomes
@@ -747,4 +862,135 @@ fn string_iter_self(
     _args: Vec<super::Value>,
 ) -> Result<super::Value, crate::error::VmErr> {
     Ok(this)
+}
+
+fn is_primitive(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Undefined
+            | Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Symbol(_)
+            | Value::BigInt(_)
+    )
+}
+
+fn is_callable(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
+    )
+}
+
+fn has_default_object_prototype(value: &Value) -> bool {
+    match value {
+        Value::Object { props } => {
+            let meta = props.meta.borrow();
+            meta.uses_default_prototype || meta.proto.is_some()
+        }
+        Value::Proxy(proxy) => has_default_object_prototype(&proxy.target),
+        // Built-in object kinds use their own prototype methods where the VM
+        // models them; missing Object methods come from Object.prototype.
+        _ => true,
+    }
+}
+
+fn ecmascript_string_to_number(input: &str) -> f64 {
+    let input = input.trim_matches(is_ecmascript_whitespace);
+    if input.is_empty() {
+        return 0.0;
+    }
+
+    let has_sign = matches!(input.as_bytes().first(), Some(b'+' | b'-'));
+    let (sign, unsigned) = match input.as_bytes()[0] {
+        b'+' => (1.0, &input[1..]),
+        b'-' => (-1.0, &input[1..]),
+        _ => (1.0, input),
+    };
+    if unsigned == "Infinity" {
+        return sign * f64::INFINITY;
+    }
+
+    // StringNumericLiteral accepts unsigned binary, octal, and hexadecimal
+    // forms. A leading sign makes these forms invalid (`Number("-0x1")`).
+    if !has_sign && unsigned.len() >= 2 && unsigned.as_bytes()[0] == b'0' {
+        let radix = match unsigned.as_bytes()[1] {
+            b'x' | b'X' => Some(16),
+            b'o' | b'O' => Some(8),
+            b'b' | b'B' => Some(2),
+            _ => None,
+        };
+        if let Some(radix) = radix {
+            return parse_radix_number(&unsigned[2..], radix).unwrap_or(f64::NAN);
+        }
+    }
+
+    if !is_decimal_numeric_literal(unsigned) {
+        return f64::NAN;
+    }
+    input.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+fn is_ecmascript_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}'..='\u{000D}'
+            | '\u{0020}'
+            | '\u{00A0}'
+            | '\u{1680}'
+            | '\u{2000}'..='\u{200A}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{202F}'
+            | '\u{205F}'
+            | '\u{3000}'
+            | '\u{FEFF}'
+    )
+}
+
+fn is_decimal_numeric_literal(input: &str) -> bool {
+    let bytes = input.as_bytes();
+    let mut index = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let mut digits = 0;
+    while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+        digits += 1;
+        index += 1;
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            digits += 1;
+            index += 1;
+        }
+    }
+    if digits == 0 {
+        return false;
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index += 1;
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        let exponent_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == exponent_start {
+            return false;
+        }
+    }
+    index == bytes.len()
+}
+
+fn parse_radix_number(input: &str, radix: u32) -> Option<f64> {
+    if input.is_empty() {
+        return None;
+    }
+    let mut value = 0.0;
+    for character in input.chars() {
+        value = value * radix as f64 + character.to_digit(radix)? as f64;
+    }
+    Some(value)
 }

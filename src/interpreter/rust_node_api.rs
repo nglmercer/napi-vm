@@ -638,6 +638,8 @@ struct NapiVmApiTable {
     get_null: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     get_boolean: unsafe extern "C" fn(NapiEnv, bool, *mut NapiValue) -> i32,
     coerce_to_bool: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
+    coerce_to_number: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
+    coerce_to_string: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     create_double: unsafe extern "C" fn(NapiEnv, f64, *mut NapiValue) -> i32,
     create_int32: unsafe extern "C" fn(NapiEnv, i32, *mut NapiValue) -> i32,
     create_uint32: unsafe extern "C" fn(NapiEnv, u32, *mut NapiValue) -> i32,
@@ -846,6 +848,8 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_null: api_get_null,
     get_boolean: api_get_boolean,
     coerce_to_bool: api_coerce_to_bool,
+    coerce_to_number: api_coerce_to_number,
+    coerce_to_string: api_coerce_to_string,
     create_double: api_create_double,
     create_int32: api_create_int32,
     create_uint32: api_create_uint32,
@@ -1903,6 +1907,72 @@ unsafe extern "C" fn api_coerce_to_bool(
             .handles
             .borrow_mut()
             .create(Value::Bool(value.deref_binding().is_truthy()))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+fn napi_guest_coerce_to_number(
+    interpreter: &mut Interpreter,
+    _receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = args.first().cloned().unwrap_or(Value::Undefined);
+    Ok(Value::Number(interpreter.napi_to_number(&value)?))
+}
+
+unsafe extern "C" fn api_coerce_to_number(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let value = run_napi_guest_operation(
+            &environment,
+            "napi_coerce_to_number",
+            napi_guest_coerce_to_number,
+            Value::Undefined,
+            vec![value],
+        )?;
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+fn napi_guest_coerce_to_string(
+    interpreter: &mut Interpreter,
+    _receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = args.first().cloned().unwrap_or(Value::Undefined);
+    Value::checked_string(interpreter.napi_to_string(&value)?)
+}
+
+unsafe extern "C" fn api_coerce_to_string(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let value = run_napi_guest_operation(
+            &environment,
+            "napi_coerce_to_string",
+            napi_guest_coerce_to_string,
+            Value::Undefined,
+            vec![value],
+        )?;
+        let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -6255,6 +6325,24 @@ static napi_value coerce_to_bool_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value coerce_to_number_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_coerce_to_number(env, argv[0], &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value coerce_to_string_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_coerce_to_string(env, argv[0], &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
 static napi_value invalid_environment(napi_env env, napi_callback_info info) {
   napi_value ignored, result;
   napi_status status = napi_get_null((napi_env)(uintptr_t)1, &ignored);
@@ -7113,6 +7201,12 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "coerceToBoolean", NAPI_AUTO_LENGTH,
                            coerce_to_bool_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "coerceToBoolean", function) != napi_ok ||
+      napi_create_function(env, "coerceToNumber", NAPI_AUTO_LENGTH,
+                           coerce_to_number_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "coerceToNumber", function) != napi_ok ||
+      napi_create_function(env, "coerceToString", NAPI_AUTO_LENGTH,
+                           coerce_to_string_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "coerceToString", function) != napi_ok ||
       napi_create_function(env, "stringEncodingProbe", NAPI_AUTO_LENGTH,
                            string_encoding_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "stringEncodingProbe", function) != napi_ok ||
@@ -7346,6 +7440,36 @@ const stringEncodings = addon.stringEncodingProbe('Aé€😀');
 const utf16 = addon.utf16Probe('Aé😀\0Z');
 const booleanCoercions = [undefined, null, false, 0, -0, NaN, '', 0n, [], {}]
   .map(value => addon.coerceToBoolean(value));
+const numberCoercions = [undefined, null, false, true, '',
+  ' ' + String.fromCharCode(0xFEFF) + ' ', '0x10', '0b11',
+  '0o10', '1.5', 'Infinity', 'not a number'].map(value => addon.coerceToNumber(value));
+const stringCoercions = [0, -0, null, undefined, true, 12n, [1, 2], {}]
+  .map(value => addon.coerceToString(value));
+const coercionEvents = [];
+const guestNumberCoercion = addon.coerceToNumber({valueOf() {
+  coercionEvents.push('number.valueOf');
+  return '42';
+}});
+const guestStringCoercion = addon.coerceToString({toString() {
+  coercionEvents.push('string.toString');
+  return 23;
+}});
+const exoticCoercion = {[Symbol.toPrimitive](hint) {
+  coercionEvents.push(`symbol:${hint}`);
+  return hint === 'number' ? '44' : 'exotic';
+}};
+const exoticNumberCoercion = addon.coerceToNumber(exoticCoercion);
+const exoticStringCoercion = addon.coerceToString(exoticCoercion);
+function captureCoercionError(operation) {
+  try { operation(); } catch (error) {
+    return {name: error.name, isTypeError: error instanceof TypeError};
+  }
+}
+const coercionErrors = {
+  symbolNumber: captureCoercionError(() => addon.coerceToNumber(Symbol('value'))),
+  symbolString: captureCoercionError(() => addon.coerceToString(Symbol('value'))),
+  bigintNumber: captureCoercionError(() => addon.coerceToNumber(1n)),
+};
 let typedArrayError;
 try { addon.invalidTypedArray(); } catch (error) {
   typedArrayError = {name: error.name, message: error.message, code: error.code,
@@ -7441,6 +7565,14 @@ module.exports = {
   stringEncodings,
   utf16,
   booleanCoercions,
+  numberCoercions,
+  stringCoercions,
+  guestNumberCoercion,
+  guestStringCoercion,
+  exoticNumberCoercion,
+  exoticStringCoercion,
+  coercionErrors,
+  coercionEvents,
   fraction: values.fraction,
   maxUint32: values.maxUint32,
   int64: values.int64,
@@ -8098,6 +8230,95 @@ module.exports = {
                 false, false, false, false, false, false, false, false, true, true
             ]
         );
+        let number_coercions = result.get_prop("numberCoercions").unwrap();
+        let Value::Array(number_coercions) = &number_coercions else {
+            panic!("Node-API number coercion fixture did not return an array");
+        };
+        let number_coercion_values = number_coercions.borrow();
+        let number_coercion_values = number_coercion_values
+            .iter()
+            .map(|value| match value {
+                Value::Number(value) => *value,
+                _ => panic!("Node-API number coercion returned a non-number"),
+            })
+            .collect::<Vec<_>>();
+        assert!(number_coercion_values[0].is_nan());
+        assert_eq!(
+            &number_coercion_values[1..11],
+            &[0.0, 0.0, 1.0, 0.0, 0.0, 16.0, 3.0, 8.0, 1.5, f64::INFINITY]
+        );
+        assert!(number_coercion_values[11].is_nan());
+        let string_coercions = result.get_prop("stringCoercions").unwrap();
+        let Value::Array(string_coercions) = &string_coercions else {
+            panic!("Node-API string coercion fixture did not return an array");
+        };
+        let string_coercion_values = {
+            let values = string_coercions.borrow();
+            values
+                .iter()
+                .map(|value| match value {
+                    Value::String(value) => value.clone(),
+                    _ => panic!("Node-API string coercion returned a non-string"),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            string_coercion_values,
+            [
+                "0",
+                "0",
+                "null",
+                "undefined",
+                "true",
+                "12",
+                "1,2",
+                "[object Object]"
+            ]
+        );
+        assert!(matches!(
+            result.get_prop("guestNumberCoercion"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            result.get_prop("guestStringCoercion"),
+            Some(Value::String(ref value)) if value == "23"
+        ));
+        assert!(matches!(
+            result.get_prop("exoticNumberCoercion"),
+            Some(Value::Number(44.0))
+        ));
+        assert!(matches!(
+            result.get_prop("exoticStringCoercion"),
+            Some(Value::String(ref value)) if value == "exotic"
+        ));
+        let coercion_errors = result.get_prop("coercionErrors").unwrap();
+        for name in ["symbolNumber", "symbolString", "bigintNumber"] {
+            let error = coercion_errors.get_prop(name).unwrap();
+            assert!(matches!(
+                error.get_prop("name"),
+                Some(Value::String(ref value)) if value == "TypeError"
+            ));
+            assert!(matches!(
+                error.get_prop("isTypeError"),
+                Some(Value::Bool(true))
+            ));
+        }
+        let coercion_events = result.get_prop("coercionEvents").unwrap();
+        let Value::Array(coercion_events) = &coercion_events else {
+            panic!("Node-API coercion event fixture did not return an array");
+        };
+        assert!(matches!(
+            coercion_events.borrow().as_slice(),
+            [
+                Value::String(number),
+                Value::String(string),
+                Value::String(number_hint),
+                Value::String(string_hint)
+            ] if number == "number.valueOf"
+                && string == "string.toString"
+                && number_hint == "symbol:number"
+                && string_hint == "symbol:string"
+        ));
         assert!(matches!(
             result.get_prop("fraction"),
             Some(Value::Number(value)) if value == 1.25
