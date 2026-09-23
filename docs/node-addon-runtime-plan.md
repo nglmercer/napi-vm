@@ -70,8 +70,9 @@ number, and string coercion, symbol creation, and `napi_define_properties`
 for ordinary object targets (data values, symbol keys, native methods, and accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
-operations. Class static properties share object descriptor metadata and
-accessor behavior.
+operations including `napi_delete_element`. Escapable handle scopes can
+promote one local handle into the parent scope. Class static properties share
+object descriptor metadata and accessor behavior.
 `napi_get_value_int64` truncates finite Numbers toward zero, clamps values
 outside the signed 64-bit range, and converts NaN and infinities to zero.
 `napi_coerce_to_number` and `napi_coerce_to_string` perform guest-side

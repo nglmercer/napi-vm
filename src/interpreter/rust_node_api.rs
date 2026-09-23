@@ -39,6 +39,8 @@ const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
 const NAPI_CANCELLED: i32 = 11;
+const NAPI_ESCAPE_CALLED_TWICE: i32 = 12;
+const NAPI_HANDLE_SCOPE_MISMATCH: i32 = 13;
 const NAPI_QUEUE_FULL: i32 = 15;
 const NAPI_CLOSING: i32 = 16;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
@@ -489,6 +491,8 @@ struct HandleSlot {
 struct HandleScope {
     id: u64,
     slots: Vec<usize>,
+    escapable: bool,
+    escape_used: bool,
 }
 
 struct NapiHandleArena {
@@ -497,7 +501,7 @@ struct NapiHandleArena {
     scopes: Vec<HandleScope>,
     next_scope_id: u64,
     handles: HashMap<usize, HandleRef>,
-    scope_handles: HashMap<usize, u64>,
+    scope_handles: HashMap<usize, (u64, bool)>,
 }
 
 impl Default for NapiHandleArena {
@@ -508,6 +512,8 @@ impl Default for NapiHandleArena {
             scopes: vec![HandleScope {
                 id: 0,
                 slots: Vec::new(),
+                escapable: false,
+                escape_used: false,
             }],
             next_scope_id: 1,
             handles: HashMap::new(),
@@ -518,9 +524,17 @@ impl Default for NapiHandleArena {
 
 impl NapiHandleArena {
     fn create(&mut self, value: Value) -> Result<NapiValue, i32> {
+        self.create_in_scope(value, self.scopes.len() - 1)
+    }
+
+    fn create_in_scope(&mut self, value: Value, scope_index: usize) -> Result<NapiValue, i32> {
         if self.handles.len() >= MAX_LOCAL_HANDLES {
             return Err(NAPI_GENERIC_FAILURE);
         }
+        if scope_index >= self.scopes.len() {
+            return Err(NAPI_HANDLE_SCOPE_MISMATCH);
+        }
+        let pointer = new_opaque_handle()?;
         let slot_index = if let Some(slot_index) = self.free_slots.pop() {
             slot_index
         } else {
@@ -534,13 +548,8 @@ impl NapiHandleArena {
         debug_assert!(slot.value.is_none());
         slot.value = Some(value);
         let generation = slot.generation;
-        self.scopes
-            .last_mut()
-            .expect("the root handle scope is permanent")
-            .slots
-            .push(slot_index);
+        self.scopes[scope_index].slots.push(slot_index);
 
-        let pointer = new_opaque_handle()?;
         self.handles.insert(
             pointer as usize,
             HandleRef {
@@ -572,27 +581,86 @@ impl NapiHandleArena {
         self.scopes.push(HandleScope {
             id,
             slots: Vec::new(),
+            escapable: false,
+            escape_used: false,
         });
         Ok(id)
     }
 
-    fn create_scope_handle(&mut self, id: u64) -> Result<NapiHandleScope, i32> {
+    fn open_escapable_scope(&mut self) -> Result<u64, i32> {
+        let id = self.open_scope()?;
+        self.scopes
+            .last_mut()
+            .expect("scope was just opened")
+            .escapable = true;
+        Ok(id)
+    }
+
+    fn create_scope_handle(&mut self, id: u64, escapable: bool) -> Result<NapiHandleScope, i32> {
         if self.scope_handles.len() >= MAX_LOCAL_HANDLES {
             return Err(NAPI_GENERIC_FAILURE);
         }
         let pointer = new_opaque_handle()?;
-        self.scope_handles.insert(pointer as usize, id);
+        self.scope_handles.insert(pointer as usize, (id, escapable));
         Ok(pointer)
     }
 
     fn close_scope_handle(&mut self, pointer: NapiHandleScope) -> Result<(), i32> {
-        let id = *self
+        self.close_scope_handle_with_kind(pointer, false)
+    }
+
+    fn close_escapable_scope_handle(&mut self, pointer: NapiHandleScope) -> Result<(), i32> {
+        self.close_scope_handle_with_kind(pointer, true)
+    }
+
+    fn close_scope_handle_with_kind(
+        &mut self,
+        pointer: NapiHandleScope,
+        escapable: bool,
+    ) -> Result<(), i32> {
+        let (id, actual_escapable) = *self
             .scope_handles
             .get(&(pointer as usize))
             .ok_or(NAPI_INVALID_ARG)?;
+        if actual_escapable != escapable {
+            return Err(NAPI_HANDLE_SCOPE_MISMATCH);
+        }
         self.close_scope(id)?;
         self.scope_handles.remove(&(pointer as usize));
         Ok(())
+    }
+
+    fn escape_handle(
+        &mut self,
+        scope_pointer: NapiHandleScope,
+        escapee: NapiValue,
+    ) -> Result<NapiValue, i32> {
+        let (id, escapable) = *self
+            .scope_handles
+            .get(&(scope_pointer as usize))
+            .ok_or(NAPI_INVALID_ARG)?;
+        if !escapable || self.scopes.len() <= 1 {
+            return Err(NAPI_HANDLE_SCOPE_MISMATCH);
+        }
+        let top_index = self.scopes.len() - 1;
+        let scope = &self.scopes[top_index];
+        if scope.id != id || !scope.escapable {
+            return Err(NAPI_HANDLE_SCOPE_MISMATCH);
+        }
+        if scope.escape_used {
+            return Err(NAPI_ESCAPE_CALLED_TWICE);
+        }
+        let handle = self
+            .handles
+            .get(&(escapee as usize))
+            .ok_or(NAPI_INVALID_ARG)?;
+        if !scope.slots.contains(&handle.slot) {
+            return Err(NAPI_HANDLE_SCOPE_MISMATCH);
+        }
+        let value = self.get(escapee)?;
+        let escaped = self.create_in_scope(value, top_index - 1)?;
+        self.scopes[top_index].escape_used = true;
+        Ok(escaped)
     }
 
     fn close_scope(&mut self, id: u64) -> Result<(), i32> {
@@ -759,6 +827,7 @@ struct NapiVmApiTable {
     set_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, NapiValue) -> i32,
     has_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
     delete_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
+    delete_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut bool) -> i32,
     has_own_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
     has_named_property: unsafe extern "C" fn(NapiEnv, NapiValue, *const c_char, *mut bool) -> i32,
     get_property_names: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
@@ -783,6 +852,9 @@ struct NapiVmApiTable {
     ) -> i32,
     open_handle_scope: unsafe extern "C" fn(NapiEnv, *mut NapiHandleScope) -> i32,
     close_handle_scope: unsafe extern "C" fn(NapiEnv, NapiHandleScope) -> i32,
+    open_escapable_handle_scope: unsafe extern "C" fn(NapiEnv, *mut NapiHandleScope) -> i32,
+    close_escapable_handle_scope: unsafe extern "C" fn(NapiEnv, NapiHandleScope) -> i32,
+    escape_handle: unsafe extern "C" fn(NapiEnv, NapiHandleScope, NapiValue, *mut NapiValue) -> i32,
     create_promise: unsafe extern "C" fn(NapiEnv, *mut NapiDeferred, *mut NapiValue) -> i32,
     resolve_deferred: unsafe extern "C" fn(NapiEnv, NapiDeferred, NapiValue) -> i32,
     reject_deferred: unsafe extern "C" fn(NapiEnv, NapiDeferred, NapiValue) -> i32,
@@ -916,6 +988,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     set_property: api_set_property,
     has_property: api_has_property,
     delete_property: api_delete_property,
+    delete_element: api_delete_element,
     has_own_property: api_has_own_property,
     has_named_property: api_has_named_property,
     get_property_names: api_get_property_names,
@@ -925,6 +998,9 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_cb_info: api_get_cb_info,
     open_handle_scope: api_open_handle_scope,
     close_handle_scope: api_close_handle_scope,
+    open_escapable_handle_scope: api_open_escapable_handle_scope,
+    close_escapable_handle_scope: api_close_escapable_handle_scope,
+    escape_handle: api_escape_handle,
     create_promise: api_create_promise,
     resolve_deferred: api_resolve_deferred,
     reject_deferred: api_reject_deferred,
@@ -960,6 +1036,8 @@ fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
         NAPI_ARRAY_EXPECTED => b"array expected\0",
         NAPI_PENDING_EXCEPTION => b"pending exception\0",
         NAPI_CANCELLED => b"cancelled\0",
+        NAPI_ESCAPE_CALLED_TWICE => b"escape called twice\0",
+        NAPI_HANDLE_SCOPE_MISMATCH => b"handle scope mismatch\0",
         NAPI_QUEUE_FULL => b"thread-safe function queue is full\0",
         NAPI_CLOSING => b"thread-safe function is closing\0",
         NAPI_ARRAYBUFFER_EXPECTED => b"ArrayBuffer expected\0",
@@ -4484,34 +4562,60 @@ unsafe extern "C" fn api_delete_property(
     with_ffi_status(env, || {
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
-        if !is_napi_property_object(&object) {
-            return Err(NAPI_OBJECT_EXPECTED);
-        }
         let key = environment.handles.borrow().get(key)?;
-        let deleted = if has_guest_callback_dispatcher(&environment) {
-            let value = run_napi_guest_operation(
-                &environment,
-                "napi_delete_property",
-                napi_guest_delete_property,
-                object,
-                vec![key],
-            )?;
-            let Value::Bool(deleted) = value else {
-                return Err(NAPI_GENERIC_FAILURE);
-            };
-            deleted
-        } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_delete(&environment, &napi_property_key(&key)?)?
-            } else {
-                napi_direct_delete_property(&object, &key)?
-            }
-        };
+        let deleted =
+            napi_delete_property_value(&environment, object, key, "napi_delete_property")?;
         if !result.is_null() {
             unsafe { result.write(deleted) };
         }
         Ok(())
     })
+}
+
+unsafe extern "C" fn api_delete_element(
+    env: NapiEnv,
+    object: NapiValue,
+    index: u32,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        let key = Value::String(index.to_string());
+        let deleted = napi_delete_property_value(&environment, object, key, "napi_delete_element")?;
+        if !result.is_null() {
+            unsafe { result.write(deleted) };
+        }
+        Ok(())
+    })
+}
+
+fn napi_delete_property_value(
+    environment: &NapiEnvironment,
+    object: Value,
+    key: Value,
+    operation_name: &'static str,
+) -> Result<bool, i32> {
+    if !is_napi_property_object(&object) {
+        return Err(NAPI_OBJECT_EXPECTED);
+    }
+    if has_guest_callback_dispatcher(environment) {
+        let value = run_napi_guest_operation(
+            environment,
+            operation_name,
+            napi_guest_delete_property,
+            object,
+            vec![key],
+        )?;
+        let Value::Bool(deleted) = value else {
+            return Err(NAPI_GENERIC_FAILURE);
+        };
+        Ok(deleted)
+    } else if matches!(object, Value::GlobalObject) {
+        napi_global_delete(environment, &napi_property_key(&key)?)
+    } else {
+        napi_direct_delete_property(&object, &key)
+    }
 }
 
 unsafe extern "C" fn api_has_own_property(
@@ -4879,7 +4983,7 @@ unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandle
         let environment = environment(env)?;
         let mut handles = environment.handles.borrow_mut();
         let scope = handles.open_scope()?;
-        let handle = match handles.create_scope_handle(scope) {
+        let handle = match handles.create_scope_handle(scope, false) {
             Ok(handle) => handle,
             Err(status) => {
                 let _ = handles.close_scope(scope);
@@ -4895,6 +4999,59 @@ unsafe extern "C" fn api_close_handle_scope(env: NapiEnv, scope: NapiHandleScope
     with_ffi_status(env, || {
         let environment = environment(env)?;
         environment.handles.borrow_mut().close_scope_handle(scope)
+    })
+}
+
+unsafe extern "C" fn api_open_escapable_handle_scope(
+    env: NapiEnv,
+    result: *mut NapiHandleScope,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let mut handles = environment.handles.borrow_mut();
+        let scope = handles.open_escapable_scope()?;
+        let handle = match handles.create_scope_handle(scope, true) {
+            Ok(handle) => handle,
+            Err(status) => {
+                let _ = handles.close_scope(scope);
+                return Err(status);
+            }
+        };
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_close_escapable_handle_scope(env: NapiEnv, scope: NapiHandleScope) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        environment
+            .handles
+            .borrow_mut()
+            .close_escapable_scope_handle(scope)
+    })
+}
+
+unsafe extern "C" fn api_escape_handle(
+    env: NapiEnv,
+    scope: NapiHandleScope,
+    escapee: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let escaped = environment
+            .handles
+            .borrow_mut()
+            .escape_handle(scope, escapee)?;
+        unsafe { result.write(escaped) };
+        Ok(())
     })
 }
 
@@ -5927,12 +6084,56 @@ mod tests {
     fn closed_scope_handles_become_stale() {
         let mut arena = NapiHandleArena::default();
         let scope_id = arena.open_scope().unwrap();
-        let scope_handle = arena.create_scope_handle(scope_id).unwrap();
+        let scope_handle = arena.create_scope_handle(scope_id, false).unwrap();
         arena.close_scope_handle(scope_handle).unwrap();
         assert_eq!(
             arena.close_scope_handle(scope_handle).unwrap_err(),
             NAPI_INVALID_ARG
         );
+    }
+
+    #[test]
+    fn escapable_scope_promotes_one_local_handle_to_its_parent() {
+        let mut arena = NapiHandleArena::default();
+        let outer = arena.create(Value::Number(7.0)).unwrap();
+        let scope_id = arena.open_escapable_scope().unwrap();
+        let scope_handle = arena.create_scope_handle(scope_id, true).unwrap();
+        let escapee = arena.create(Value::String("escaped".into())).unwrap();
+        let escaped = arena.escape_handle(scope_handle, escapee).unwrap();
+
+        assert!(matches!(arena.get(escaped), Ok(Value::String(ref value)) if value == "escaped"));
+        assert_eq!(
+            arena.escape_handle(scope_handle, escapee).unwrap_err(),
+            NAPI_ESCAPE_CALLED_TWICE
+        );
+        arena.close_escapable_scope_handle(scope_handle).unwrap();
+        assert_eq!(arena.get(escapee).unwrap_err(), NAPI_INVALID_ARG);
+        assert!(matches!(arena.get(escaped), Ok(Value::String(ref value)) if value == "escaped"));
+        assert!(matches!(arena.get(outer), Ok(Value::Number(7.0))));
+    }
+
+    #[test]
+    fn escapable_scope_rejects_parent_handles_and_regular_close_calls() {
+        let mut arena = NapiHandleArena::default();
+        let parent_handle = arena.create(Value::Number(7.0)).unwrap();
+        let scope_id = arena.open_escapable_scope().unwrap();
+        let scope_handle = arena.create_scope_handle(scope_id, true).unwrap();
+
+        assert_eq!(
+            arena
+                .escape_handle(scope_handle, parent_handle)
+                .unwrap_err(),
+            NAPI_HANDLE_SCOPE_MISMATCH
+        );
+        assert_eq!(
+            arena.close_scope_handle(scope_handle).unwrap_err(),
+            NAPI_HANDLE_SCOPE_MISMATCH
+        );
+
+        let local = arena.create(Value::Null).unwrap();
+        let escaped = arena.escape_handle(scope_handle, local).unwrap();
+        arena.close_escapable_scope_handle(scope_handle).unwrap();
+        assert!(matches!(arena.get(escaped), Ok(Value::Null)));
     }
 
     #[test]
@@ -6339,6 +6540,51 @@ static napi_value coerce_to_string_probe(napi_env env, napi_callback_info info) 
   napi_value argv[1], result;
   if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
       napi_coerce_to_string(env, argv[0], &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value delete_element_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result, field;
+  uint32_t index = 0, length = 0;
+  bool deleted = false, present = true;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_get_value_uint32(env, argv[1], &index) != napi_ok ||
+      napi_delete_element(env, argv[0], index, &deleted) != napi_ok ||
+      napi_delete_element(env, argv[0], index, NULL) != napi_ok ||
+      napi_has_element(env, argv[0], index, &present) != napi_ok ||
+      napi_get_array_length(env, argv[0], &length) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_get_boolean(env, deleted, &field) != napi_ok ||
+      napi_set_named_property(env, result, "deleted", field) != napi_ok ||
+      napi_get_boolean(env, present, &field) != napi_ok ||
+      napi_set_named_property(env, result, "present", field) != napi_ok ||
+      napi_create_uint32(env, length, &field) != napi_ok ||
+      napi_set_named_property(env, result, "length", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value escapable_scope_probe(napi_env env, napi_callback_info info) {
+  napi_escapable_handle_scope scope;
+  napi_value local, escaped, ignored, field, result, escaped_value;
+  napi_status second_escape_status;
+  (void)info;
+  if (napi_open_escapable_handle_scope(env, &scope) != napi_ok ||
+      napi_create_object(env, &local) != napi_ok ||
+      napi_create_int32(env, 42, &field) != napi_ok ||
+      napi_set_named_property(env, local, "value", field) != napi_ok ||
+      napi_escape_handle(env, scope, local, &escaped) != napi_ok)
+    return NULL;
+  second_escape_status = napi_escape_handle(env, scope, local, &ignored);
+  if (second_escape_status != napi_escape_called_twice ||
+      napi_close_escapable_handle_scope(env, scope) != napi_ok ||
+      napi_get_named_property(env, escaped, "value", &escaped_value) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "escaped", escaped_value) != napi_ok ||
+      napi_create_int32(env, (int32_t)second_escape_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "secondEscapeStatus", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -7207,6 +7453,12 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "coerceToString", NAPI_AUTO_LENGTH,
                            coerce_to_string_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "coerceToString", function) != napi_ok ||
+      napi_create_function(env, "deleteElementProbe", NAPI_AUTO_LENGTH,
+                           delete_element_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "deleteElementProbe", function) != napi_ok ||
+      napi_create_function(env, "escapableScopeProbe", NAPI_AUTO_LENGTH,
+                           escapable_scope_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "escapableScopeProbe", function) != napi_ok ||
       napi_create_function(env, "stringEncodingProbe", NAPI_AUTO_LENGTH,
                            string_encoding_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "stringEncodingProbe", function) != napi_ok ||
@@ -7438,6 +7690,9 @@ const buffers = addon.bufferProbe();
 const typedArrays = addon.typedArrayProbe();
 const stringEncodings = addon.stringEncodingProbe('Aé€😀');
 const utf16 = addon.utf16Probe('Aé😀\0Z');
+const elementDeleteTarget = [10, 20, 30];
+const elementDelete = addon.deleteElementProbe(elementDeleteTarget, 1);
+const escapableScope = addon.escapableScopeProbe();
 const booleanCoercions = [undefined, null, false, 0, -0, NaN, '', 0n, [], {}]
   .map(value => addon.coerceToBoolean(value));
 const numberCoercions = [undefined, null, false, true, '',
@@ -7564,6 +7819,11 @@ module.exports = {
   greeting: values.greeting,
   stringEncodings,
   utf16,
+  elementDelete,
+  escapableScope,
+  elementDeleteLength: elementDeleteTarget.length,
+  elementDeleteRemaining: [elementDeleteTarget[0], elementDeleteTarget[2]],
+  elementDeleteHole: !(1 in elementDeleteTarget),
   booleanCoercions,
   numberCoercions,
   stringCoercions,
@@ -8215,6 +8475,40 @@ module.exports = {
             number_array(utf16.get_prop("truncatedUnits").unwrap()),
             [65, 233, 0xD83D]
         );
+        let element_delete = result.get_prop("elementDelete").unwrap();
+        assert!(matches!(
+            element_delete.get_prop("deleted"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            element_delete.get_prop("present"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            element_delete.get_prop("length"),
+            Some(Value::Number(3.0))
+        ));
+        assert!(matches!(
+            result.get_prop("elementDeleteLength"),
+            Some(Value::Number(3.0))
+        ));
+        assert!(matches!(
+            result.get_prop("elementDeleteHole"),
+            Some(Value::Bool(true))
+        ));
+        assert_eq!(
+            number_array(result.get_prop("elementDeleteRemaining").unwrap()),
+            [10, 30]
+        );
+        let escapable_scope = result.get_prop("escapableScope").unwrap();
+        assert!(matches!(
+            escapable_scope.get_prop("escaped"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            escapable_scope.get_prop("secondEscapeStatus"),
+            Some(Value::Number(value)) if value == NAPI_ESCAPE_CALLED_TWICE as f64
+        ));
         let boolean_coercions = result.get_prop("booleanCoercions").unwrap();
         let Value::Array(boolean_coercions) = &boolean_coercions else {
             panic!("Node-API boolean coercion fixture did not return an array");

@@ -7,6 +7,7 @@ typedef void* napi_env;
 typedef void* napi_value;
 typedef void* napi_callback_info;
 typedef void* napi_handle_scope;
+typedef void* napi_escapable_handle_scope;
 typedef void* napi_deferred;
 typedef void* napi_async_work;
 typedef void* napi_threadsafe_function;
@@ -132,6 +133,7 @@ typedef struct napi_vm_node_api_table {
   napi_status (*set_property)(napi_env, napi_value, napi_value, napi_value);
   napi_status (*has_property)(napi_env, napi_value, napi_value, bool*);
   napi_status (*delete_property)(napi_env, napi_value, napi_value, bool*);
+  napi_status (*delete_element)(napi_env, napi_value, uint32_t, bool*);
   napi_status (*has_own_property)(napi_env, napi_value, napi_value, bool*);
   napi_status (*has_named_property)(napi_env, napi_value, const char*, bool*);
   napi_status (*get_property_names)(napi_env, napi_value, napi_value*);
@@ -144,6 +146,12 @@ typedef struct napi_vm_node_api_table {
                              napi_value*, void**);
   napi_status (*open_handle_scope)(napi_env, napi_handle_scope*);
   napi_status (*close_handle_scope)(napi_env, napi_handle_scope);
+  napi_status (*open_escapable_handle_scope)(napi_env,
+                                             napi_escapable_handle_scope*);
+  napi_status (*close_escapable_handle_scope)(napi_env,
+                                              napi_escapable_handle_scope);
+  napi_status (*escape_handle)(napi_env, napi_escapable_handle_scope,
+                               napi_value, napi_value*);
   napi_status (*create_promise)(napi_env, napi_deferred*, napi_value*);
   napi_status (*resolve_deferred)(napi_env, napi_deferred, napi_value);
   napi_status (*reject_deferred)(napi_env, napi_deferred, napi_value);
@@ -712,6 +720,13 @@ NAPI_VM_EXPORT napi_status napi_delete_property(napi_env env,
   return table ? table->delete_property(env, object, key, result) : 9;
 }
 
+NAPI_VM_EXPORT napi_status napi_delete_element(napi_env env,
+                                                napi_value object,
+                                                uint32_t index, bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->delete_element(env, object, index, result) : 9;
+}
+
 NAPI_VM_EXPORT napi_status napi_has_own_property(napi_env env,
                                                  napi_value object,
                                                  napi_value key, bool* result) {
@@ -774,9 +789,29 @@ NAPI_VM_EXPORT napi_status napi_open_handle_scope(napi_env env,
 }
 
 NAPI_VM_EXPORT napi_status napi_close_handle_scope(napi_env env,
-                                                    napi_handle_scope scope) {
+                                                     napi_handle_scope scope) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->close_handle_scope(env, scope) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_open_escapable_handle_scope(
+    napi_env env, napi_escapable_handle_scope* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->open_escapable_handle_scope(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_close_escapable_handle_scope(
+    napi_env env, napi_escapable_handle_scope scope) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->close_escapable_handle_scope(env, scope) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_escape_handle(napi_env env,
+                                               napi_escapable_handle_scope scope,
+                                               napi_value escapee,
+                                               napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->escape_handle(env, scope, escapee, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_create_promise(napi_env env,
