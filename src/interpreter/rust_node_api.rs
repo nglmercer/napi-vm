@@ -3982,6 +3982,9 @@ unsafe extern "C" fn api_get_prototype(
                 }
             }
             Value::GlobalObject => napi_default_object_prototype(&environment)?,
+            Value::NativeFunction { .. } | Value::HostFunction { .. } => {
+                napi_default_function_prototype(&environment)?
+            }
             value if !is_napi_property_object(value) => return Err(NAPI_OBJECT_EXPECTED),
             // The VM does not yet materialize several built-in and proxy
             // prototypes. Failing clearly is safer than returning a plausible
@@ -4223,6 +4226,16 @@ unsafe extern "C" fn api_post_finalizer(
         environment.last_error.set(napi_extended_error_info(status));
     }
     status
+}
+
+fn napi_default_function_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
+    let owner = environment.owner.upgrade().ok_or(NAPI_INVALID_ARG)?;
+    let global = owner.borrow().global.clone();
+    global
+        .borrow()
+        .get("Function")
+        .and_then(|constructor| constructor.get_prop("prototype"))
+        .ok_or(NAPI_GENERIC_FAILURE)
 }
 
 fn napi_default_object_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
@@ -13165,6 +13178,7 @@ module.exports = {
     .map(value => addon.int64ConversionProbe(value)),
   prototypes: {
     defaultMatches: addon.getPrototype({}) === Object.prototype,
+    nativeFunctionMatches: addon.getPrototype(addon.add) === Function.prototype,
     customMatches: addon.getPrototype(customPrototypeTarget) === customPrototype,
     nullMatches: addon.getPrototype(nullPrototypeTarget) === null,
   },
@@ -14678,6 +14692,10 @@ module.exports = {
         let prototypes = result.get_prop("prototypes").unwrap();
         assert!(matches!(
             prototypes.get_prop("defaultMatches"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            prototypes.get_prop("nativeFunctionMatches"),
             Some(Value::Bool(true))
         ));
         assert!(matches!(
