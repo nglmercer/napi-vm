@@ -75,9 +75,8 @@ pub trait NativeAddonLoader {
 ///
 /// Resolution is limited to configured roots. Symlinks are canonicalized and
 /// rejected when their targets leave those roots. Built-in modules are not
-/// loaded implicitly. Package `exports` supports exact subpaths and the
-/// `require`, `node`, and `default` conditions; wildcard exports are rejected
-/// explicitly until implemented.
+/// loaded implicitly. Package `exports` supports exact and wildcard subpaths
+/// and the `require`, `node`, and `default` conditions.
 pub struct FileCommonJsLoader {
     roots: Vec<PathBuf>,
     native_addons: Option<Rc<dyn NativeAddonLoader>>,
@@ -501,43 +500,88 @@ fn split_package_request(request: &str) -> Result<(String, String), VmErr> {
 }
 
 fn exports_target(exports: &JsonValue, key: &str) -> Result<Option<String>, VmErr> {
-    let target = match exports {
-        JsonValue::String(target) if key == "." => Some(exports),
-        JsonValue::Array(_) | JsonValue::Null => Some(exports),
-        JsonValue::Object(entries) if entries.keys().any(|entry| entry.starts_with('.')) => {
-            entries.get(key)
+    match exports {
+        JsonValue::String(_) | JsonValue::Array(_) | JsonValue::Null if key == "." => {
+            export_target_value(exports, None)
         }
-        JsonValue::Object(_) if key == "." => Some(exports),
-        _ => None,
-    };
-    let Some(target) = target else {
-        return Ok(None);
-    };
-    export_target_value(target)
+        JsonValue::Object(entries) if entries.keys().any(|entry| entry.starts_with('.')) => {
+            if let Some(target) = entries.get(key) {
+                return export_target_value(target, None);
+            }
+
+            let mut best: Option<(usize, usize, String, &JsonValue)> = None;
+            for (pattern, target) in entries {
+                let Some(capture) = match_export_pattern(pattern, key) else {
+                    continue;
+                };
+                let Some(star) = pattern.find('*') else {
+                    continue;
+                };
+                let specificity = (star, pattern.len());
+                if best
+                    .as_ref()
+                    .is_none_or(|(prefix, length, _, _)| specificity > (*prefix, *length))
+                {
+                    best = Some((star, pattern.len(), capture, target));
+                }
+            }
+            best.map_or(Ok(None), |(_, _, capture, target)| {
+                export_target_value(target, Some(&capture))
+            })
+        }
+        JsonValue::Object(_) if key == "." => export_target_value(exports, None),
+        _ => Ok(None),
+    }
 }
 
-fn export_target_value(value: &JsonValue) -> Result<Option<String>, VmErr> {
+fn match_export_pattern(pattern: &str, key: &str) -> Option<String> {
+    let star = pattern.find('*')?;
+    let prefix = &pattern[..star];
+    let suffix = &pattern[star + 1..];
+    if suffix.contains('*')
+        || !key.starts_with(prefix)
+        || !key.ends_with(suffix)
+        || key.len() < prefix.len() + suffix.len()
+    {
+        return None;
+    }
+    let capture_end = key.len() - suffix.len();
+    Some(key[prefix.len()..capture_end].to_string())
+}
+
+fn export_target_value(value: &JsonValue, capture: Option<&str>) -> Result<Option<String>, VmErr> {
     match value {
         JsonValue::String(path) => {
-            if !path.starts_with("./") || path.contains('*') {
+            if !path.starts_with("./") {
                 return Err(VmErr::Msg(format!(
                     "unsupported package exports target '{path}'"
                 )));
             }
-            Ok(Some(path[2..].to_string()))
+            let target = match (path.contains('*'), capture) {
+                (true, Some(capture)) => path.replace('*', capture),
+                (true, None) => {
+                    return Err(VmErr::Msg(format!(
+                        "unsupported package exports target '{path}'"
+                    )));
+                }
+                (false, _) => path.clone(),
+            };
+            Ok(Some(target[2..].to_string()))
         }
         JsonValue::Array(entries) => {
             for entry in entries {
-                if let Some(target) = export_target_value(entry)? {
+                if let Some(target) = export_target_value(entry, capture)? {
                     return Ok(Some(target));
                 }
             }
             Ok(None)
         }
         JsonValue::Object(entries) => {
-            for condition in ["require", "node", "default"] {
-                if let Some(value) = entries.get(condition)
-                    && let Some(target) = export_target_value(value)?
+            for (condition, value) in entries {
+                if matches!(
+                    condition.as_str(),
+                    "node-addons" | "node" | "require" | "default"
+                ) && let Some(target) = export_target_value(value, capture)?
                 {
                     return Ok(Some(target));
                 }
@@ -1080,6 +1124,94 @@ mod tests {
                 .contains("integrity check failed")
         );
 
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn filesystem_loader_resolves_wildcard_exports_with_node_pattern_precedence() {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-commonjs-exports-pattern-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package = root.join("node_modules/fixture");
+        let release = package.join("build/Release");
+        let generic = package.join("dist/generic");
+        let modern = package.join("dist/modern");
+        let extension = package.join("dist/extensions");
+        for directory in [&release, &generic, &modern, &extension] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        let entry = root.join("main.cjs");
+        fs::write(&entry, "").unwrap();
+        fs::write(
+            package.join("package.json"),
+            r#"{"exports":{".":{"node":"./dist/node.cjs","require":"./dist/require.cjs","default":"./dist/default.cjs"},"./native/*":{"node-addons":"./build/Release/*.node","default":"./fallback/*.js"},"./features/*":"./dist/generic/*.js","./features/modern-*":"./dist/modern/*.js","./features/*.js":"./dist/extensions/*.js"}}"#,
+        )
+        .unwrap();
+        fs::write(package.join("dist/node.cjs"), "").unwrap();
+        fs::write(package.join("dist/require.cjs"), "").unwrap();
+        fs::write(package.join("dist/default.cjs"), "").unwrap();
+        fs::write(release.join("fixture.node"), "").unwrap();
+        fs::write(generic.join("modern-item.js"), "").unwrap();
+        fs::write(modern.join("item.js"), "").unwrap();
+        fs::write(generic.join("read.js.js"), "").unwrap();
+        fs::write(extension.join("read.js"), "").unwrap();
+
+        let entry_name = entry.to_string_lossy().into_owned();
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let resolved = [
+            ("fixture", "dist/node.cjs"),
+            ("fixture/native/fixture", "build/Release/fixture.node"),
+            ("fixture/features/modern-item", "dist/modern/item.js"),
+            ("fixture/features/read.js", "dist/extensions/read.js"),
+        ];
+        for (specifier, expected_suffix) in resolved {
+            let module = loader.resolve(specifier, Some(&entry_name)).unwrap();
+            assert!(
+                module.filename.ends_with(expected_suffix),
+                "{specifier} resolved to {}",
+                module.filename
+            );
+            if module.format == CommonJsModuleFormat::NativeAddon {
+                assert_eq!(module.format, CommonJsModuleFormat::NativeAddon);
+                assert!(module.source.is_none());
+            }
+
+            if Command::new("node")
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                let output = Command::new("node")
+                    .arg("-e")
+                    .arg("const {createRequire}=require('node:module');process.stdout.write(createRequire(process.argv[1]).resolve(process.argv[2]))")
+                    .arg(&entry)
+                    .arg(specifier)
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "Node could not resolve {specifier}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert_eq!(
+                    module.filename,
+                    String::from_utf8_lossy(&output.stdout).trim(),
+                    "Node and napi-vm resolved {specifier} differently"
+                );
+            }
+        }
+
+        assert!(
+            loader
+                .resolve("fixture/private/missing", Some(&entry_name))
+                .is_err()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

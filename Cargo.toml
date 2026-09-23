@@ -23,7 +23,7 @@ wasm = ["dep:wasm-bindgen"]
 napi = { version = "3.12.2", features = ["napi8"], optional = true }
 napi-derive = { version = "3.6.3", optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 smallvec = "1"
 regex-syntax = "0.8"
