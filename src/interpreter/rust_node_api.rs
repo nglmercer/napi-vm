@@ -286,6 +286,7 @@ struct NapiEnvironment {
     async_works: RefCell<HashMap<usize, NapiAsyncWorkState>>,
     threadsafe_functions: RefCell<HashMap<usize, NapiThreadsafeFunctionState>>,
     cleanup_hooks: RefCell<Vec<NapiCleanupHookRecord>>,
+    last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
@@ -299,6 +300,15 @@ struct NapiCleanupHookRecord {
     function: NapiCleanupHook,
     function_address: usize,
     argument: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct NapiExtendedErrorInfo {
+    error_message: *const c_char,
+    engine_reserved: *mut c_void,
+    engine_error_code: u32,
+    error_code: i32,
 }
 
 #[derive(Clone, Copy)]
@@ -795,6 +805,7 @@ struct NapiVmApiTable {
         unsafe extern "C" fn(NapiEnv, Option<NapiCleanupHook>, *mut c_void) -> i32,
     remove_env_cleanup_hook:
         unsafe extern "C" fn(NapiEnv, Option<NapiCleanupHook>, *mut c_void) -> i32,
+    get_last_error_info: unsafe extern "C" fn(NapiEnv, *mut *const NapiExtendedErrorInfo) -> i32,
 }
 
 #[repr(C)]
@@ -901,12 +912,52 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     unref_threadsafe_function: api_unref_threadsafe_function,
     add_env_cleanup_hook: api_add_env_cleanup_hook,
     remove_env_cleanup_hook: api_remove_env_cleanup_hook,
+    get_last_error_info: api_get_last_error_info,
 };
 
-fn with_ffi_status(callback: impl FnOnce() -> Result<(), i32>) -> i32 {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback))
+fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
+    let message: &'static [u8] = match status {
+        NAPI_OK => b"success\0",
+        NAPI_INVALID_ARG => b"invalid argument\0",
+        NAPI_OBJECT_EXPECTED => b"object expected\0",
+        NAPI_STRING_EXPECTED => b"string expected\0",
+        NAPI_FUNCTION_EXPECTED => b"function expected\0",
+        NAPI_NUMBER_EXPECTED => b"number expected\0",
+        NAPI_BOOLEAN_EXPECTED => b"boolean expected\0",
+        NAPI_ARRAY_EXPECTED => b"array expected\0",
+        NAPI_PENDING_EXCEPTION => b"pending exception\0",
+        NAPI_CANCELLED => b"cancelled\0",
+        NAPI_QUEUE_FULL => b"thread-safe function queue is full\0",
+        NAPI_CLOSING => b"thread-safe function is closing\0",
+        NAPI_ARRAYBUFFER_EXPECTED => b"ArrayBuffer expected\0",
+        _ => b"generic Node-API failure\0",
+    };
+    NapiExtendedErrorInfo {
+        error_message: message.as_ptr().cast(),
+        engine_reserved: std::ptr::null_mut(),
+        engine_error_code: 0,
+        error_code: status,
+    }
+}
+
+fn with_ffi_status(env: NapiEnv, callback: impl FnOnce() -> Result<(), i32>) -> i32 {
+    let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback))
         .unwrap_or(Err(NAPI_GENERIC_FAILURE))
-        .map_or_else(|status| status, |_| NAPI_OK)
+        .map_or_else(|status| status, |_| NAPI_OK);
+    if let Ok(environment) = environment(env) {
+        environment.last_error.set(napi_extended_error_info(status));
+    }
+    status
+}
+
+fn with_threadsafe_ffi_status(
+    function: NapiThreadsafeFunction,
+    callback: impl FnOnce() -> Result<(), i32>,
+) -> i32 {
+    let env = get_threadsafe_function(function)
+        .map(|shared| shared.environment as NapiEnv)
+        .unwrap_or(std::ptr::null_mut());
+    with_ffi_status(env, callback)
 }
 
 fn environment(env: NapiEnv) -> Result<Rc<NapiEnvironment>, i32> {
@@ -926,6 +977,28 @@ fn environment(env: NapiEnv) -> Result<Rc<NapiEnvironment>, i32> {
             }
         })
         .unwrap_or(Err(NAPI_INVALID_ARG))
+}
+
+unsafe extern "C" fn api_get_last_error_info(
+    env: NapiEnv,
+    result: *mut *const NapiExtendedErrorInfo,
+) -> i32 {
+    let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let environment = environment(env)?;
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        unsafe { result.write(environment.last_error.as_ptr()) };
+        Ok(())
+    }))
+    .unwrap_or(Err(NAPI_GENERIC_FAILURE))
+    .map_or_else(|status| status, |_| NAPI_OK);
+    if status != NAPI_OK
+        && let Ok(environment) = environment(env)
+    {
+        environment.last_error.set(napi_extended_error_info(status));
+    }
+    status
 }
 
 unsafe fn dispatch_guest_callback(
@@ -1673,7 +1746,7 @@ unsafe fn read_utf8(pointer: *const c_char, length: usize) -> Result<String, i32
 }
 
 unsafe extern "C" fn api_get_undefined(env: NapiEnv, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1685,7 +1758,7 @@ unsafe extern "C" fn api_get_undefined(env: NapiEnv, result: *mut NapiValue) -> 
 }
 
 unsafe extern "C" fn api_get_global(env: NapiEnv, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1700,7 +1773,7 @@ unsafe extern "C" fn api_get_global(env: NapiEnv, result: *mut NapiValue) -> i32
 }
 
 unsafe extern "C" fn api_get_null(env: NapiEnv, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1712,7 +1785,7 @@ unsafe extern "C" fn api_get_null(env: NapiEnv, result: *mut NapiValue) -> i32 {
 }
 
 unsafe extern "C" fn api_get_boolean(env: NapiEnv, value: bool, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1727,7 +1800,7 @@ unsafe extern "C" fn api_get_boolean(env: NapiEnv, value: bool, result: *mut Nap
 }
 
 unsafe extern "C" fn api_create_double(env: NapiEnv, value: f64, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1742,7 +1815,7 @@ unsafe extern "C" fn api_create_double(env: NapiEnv, value: f64, result: *mut Na
 }
 
 unsafe extern "C" fn api_create_int32(env: NapiEnv, value: i32, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1757,7 +1830,7 @@ unsafe extern "C" fn api_create_int32(env: NapiEnv, value: i32, result: *mut Nap
 }
 
 unsafe extern "C" fn api_create_uint32(env: NapiEnv, value: u32, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1772,7 +1845,7 @@ unsafe extern "C" fn api_create_uint32(env: NapiEnv, value: u32, result: *mut Na
 }
 
 unsafe extern "C" fn api_create_int64(env: NapiEnv, value: i64, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1792,7 +1865,7 @@ unsafe extern "C" fn api_create_string_utf8(
     length: usize,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1812,7 +1885,7 @@ unsafe extern "C" fn api_create_symbol(
     description: NapiValue,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1836,7 +1909,7 @@ unsafe extern "C" fn api_create_symbol(
 }
 
 unsafe extern "C" fn api_typeof(env: NapiEnv, value: NapiValue, result: *mut i32) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1868,7 +1941,7 @@ fn napi_value_type(value: &Value) -> i32 {
 }
 
 unsafe extern "C" fn api_get_value_double(env: NapiEnv, value: NapiValue, result: *mut f64) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1883,7 +1956,7 @@ unsafe extern "C" fn api_get_value_double(env: NapiEnv, value: NapiValue, result
 }
 
 unsafe extern "C" fn api_get_value_int32(env: NapiEnv, value: NapiValue, result: *mut i32) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1898,7 +1971,7 @@ unsafe extern "C" fn api_get_value_int32(env: NapiEnv, value: NapiValue, result:
 }
 
 unsafe extern "C" fn api_get_value_uint32(env: NapiEnv, value: NapiValue, result: *mut u32) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1913,7 +1986,7 @@ unsafe extern "C" fn api_get_value_uint32(env: NapiEnv, value: NapiValue, result
 }
 
 unsafe extern "C" fn api_get_value_int64(env: NapiEnv, value: NapiValue, result: *mut i64) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1928,7 +2001,7 @@ unsafe extern "C" fn api_get_value_int64(env: NapiEnv, value: NapiValue, result:
 }
 
 unsafe extern "C" fn api_get_value_bool(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1949,7 +2022,7 @@ unsafe extern "C" fn api_get_value_string_utf8(
     buffer_size: usize,
     result: *mut usize,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if buffer.is_null() && buffer_size != 0 || buffer.is_null() && result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -1983,7 +2056,7 @@ unsafe extern "C" fn api_get_value_string_utf8(
 }
 
 unsafe extern "C" fn api_create_array(env: NapiEnv, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2002,7 +2075,7 @@ unsafe extern "C" fn api_create_array_with_length(
     length: usize,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2018,7 +2091,7 @@ unsafe extern "C" fn api_create_array_with_length(
 }
 
 unsafe extern "C" fn api_is_array(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2030,7 +2103,7 @@ unsafe extern "C" fn api_is_array(env: NapiEnv, value: NapiValue, result: *mut b
 }
 
 unsafe extern "C" fn api_get_array_length(env: NapiEnv, value: NapiValue, result: *mut u32) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2051,7 +2124,7 @@ unsafe extern "C" fn api_get_element(
     index: u32,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2077,7 +2150,7 @@ unsafe extern "C" fn api_set_element(
     index: u32,
     element: NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(value)?;
         let element = environment.handles.borrow().get(element)?;
@@ -2106,7 +2179,7 @@ unsafe extern "C" fn api_has_element(
     index: u32,
     result: *mut bool,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2186,7 +2259,7 @@ unsafe extern "C" fn api_create_buffer(
     data: *mut *mut c_void,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() || length > MAX_NAPI_BUFFER_BYTES {
             return Err(if result.is_null() {
                 NAPI_INVALID_ARG
@@ -2213,7 +2286,7 @@ unsafe extern "C" fn api_create_buffer_copy(
     result_data: *mut *mut c_void,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() || length > MAX_NAPI_BUFFER_BYTES || (data.is_null() && length != 0) {
             return Err(if result.is_null() || data.is_null() && length != 0 {
                 NAPI_INVALID_ARG
@@ -2244,7 +2317,7 @@ unsafe extern "C" fn api_get_buffer_info(
     data: *mut *mut c_void,
     length: *mut usize,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(value)?;
         if !is_napi_buffer(&environment, &value) {
@@ -2262,7 +2335,7 @@ unsafe extern "C" fn api_get_buffer_info(
 }
 
 unsafe extern "C" fn api_is_buffer(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2351,7 +2424,7 @@ fn validate_arraybuffer_window(
 }
 
 unsafe extern "C" fn api_is_arraybuffer(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2368,7 +2441,7 @@ unsafe extern "C" fn api_create_arraybuffer(
     data: *mut *mut c_void,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2396,7 +2469,7 @@ unsafe extern "C" fn api_get_arraybuffer_info(
     data: *mut *mut c_void,
     byte_length: *mut usize,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(value)?;
         let Value::ArrayBuffer(buffer) = &value else {
@@ -2414,7 +2487,7 @@ unsafe extern "C" fn api_get_arraybuffer_info(
 }
 
 unsafe extern "C" fn api_is_typedarray(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2433,7 +2506,7 @@ unsafe extern "C" fn api_create_typedarray(
     byte_offset: usize,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2498,7 +2571,7 @@ unsafe extern "C" fn api_get_typedarray_info(
     arraybuffer: *mut NapiValue,
     byte_offset: *mut usize,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(typedarray)?;
         let Value::TypedArray(view) = &value else {
@@ -2541,7 +2614,7 @@ unsafe extern "C" fn api_create_dataview(
     byte_offset: usize,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2564,7 +2637,7 @@ unsafe extern "C" fn api_create_dataview(
 }
 
 unsafe extern "C" fn api_is_dataview(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2583,7 +2656,7 @@ unsafe extern "C" fn api_get_dataview_info(
     arraybuffer: *mut NapiValue,
     byte_offset: *mut usize,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(dataview)?;
         let Value::DataView(view) = &value else {
@@ -2623,7 +2696,7 @@ unsafe fn api_create_error_with_name(
     result: *mut NapiValue,
     name: &'static str,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2690,7 +2763,7 @@ fn set_pending_exception(environment: &NapiEnvironment, exception: Value) -> Res
 }
 
 unsafe extern "C" fn api_throw(env: NapiEnv, error: NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let error = environment.handles.borrow().get(error)?;
         set_pending_exception(&environment, error)
@@ -2703,7 +2776,7 @@ unsafe fn api_throw_error_with_name(
     message: *const c_char,
     name: &'static str,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let message = unsafe { read_c_string(message)? };
         let code = if code.is_null() {
@@ -2742,7 +2815,7 @@ unsafe extern "C" fn api_throw_range_error(
 }
 
 unsafe extern "C" fn api_is_exception_pending(env: NapiEnv, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2753,7 +2826,7 @@ unsafe extern "C" fn api_is_exception_pending(env: NapiEnv, result: *mut bool) -
 }
 
 unsafe extern "C" fn api_get_and_clear_last_exception(env: NapiEnv, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2770,7 +2843,7 @@ unsafe extern "C" fn api_get_and_clear_last_exception(env: NapiEnv, result: *mut
 }
 
 unsafe extern "C" fn api_is_error(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2787,7 +2860,7 @@ unsafe extern "C" fn api_create_reference(
     initial_ref_count: u32,
     result: *mut NapiRef,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2807,7 +2880,7 @@ unsafe extern "C" fn api_create_reference(
 }
 
 unsafe extern "C" fn api_delete_reference(env: NapiEnv, reference: NapiRef) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         environment
             .references
@@ -2819,7 +2892,7 @@ unsafe extern "C" fn api_delete_reference(env: NapiEnv, reference: NapiRef) -> i
 }
 
 unsafe extern "C" fn api_reference_ref(env: NapiEnv, reference: NapiRef, result: *mut u32) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let mut references = environment.references.borrow_mut();
         let reference = references
@@ -2841,7 +2914,7 @@ unsafe extern "C" fn api_reference_unref(
     reference: NapiRef,
     result: *mut u32,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let mut references = environment.references.borrow_mut();
         let reference = references
@@ -2860,7 +2933,7 @@ unsafe extern "C" fn api_get_reference_value(
     reference: NapiRef,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2885,7 +2958,7 @@ unsafe extern "C" fn api_wrap(
     finalize_hint: *mut c_void,
     result: *mut NapiRef,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         if environment.finalizing.get() {
             return Err(NAPI_GENERIC_FAILURE);
@@ -2926,7 +2999,7 @@ unsafe extern "C" fn api_wrap(
 }
 
 unsafe extern "C" fn api_unwrap(env: NapiEnv, object: NapiValue, result: *mut *mut c_void) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2949,7 +3022,7 @@ unsafe extern "C" fn api_remove_wrap(
     object: NapiValue,
     result: *mut *mut c_void,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2968,7 +3041,7 @@ unsafe extern "C" fn api_remove_wrap(
 }
 
 unsafe extern "C" fn api_create_object(env: NapiEnv, result: *mut NapiValue) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -2987,7 +3060,7 @@ unsafe extern "C" fn api_create_promise(
     deferred_result: *mut NapiDeferred,
     promise_result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if deferred_result.is_null() || promise_result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3044,7 +3117,7 @@ unsafe extern "C" fn api_reject_deferred(
 }
 
 unsafe extern "C" fn api_is_promise(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3064,7 +3137,7 @@ unsafe extern "C" fn api_create_async_work(
     data: *mut c_void,
     result: *mut NapiAsyncWork,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3101,7 +3174,7 @@ unsafe extern "C" fn api_create_async_work(
 }
 
 unsafe extern "C" fn api_delete_async_work(env: NapiEnv, work: NapiAsyncWork) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if work.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3123,7 +3196,7 @@ unsafe extern "C" fn api_delete_async_work(env: NapiEnv, work: NapiAsyncWork) ->
 }
 
 unsafe extern "C" fn api_queue_async_work(env: NapiEnv, work: NapiAsyncWork) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if work.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3180,7 +3253,7 @@ unsafe extern "C" fn api_queue_async_work(env: NapiEnv, work: NapiAsyncWork) -> 
 }
 
 unsafe extern "C" fn api_cancel_async_work(env: NapiEnv, work: NapiAsyncWork) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if work.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3231,7 +3304,7 @@ unsafe extern "C" fn api_create_threadsafe_function(
     call_js: Option<NapiThreadsafeFunctionCallJs>,
     result: *mut NapiThreadsafeFunction,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() || initial_thread_count == 0 {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3307,7 +3380,7 @@ unsafe extern "C" fn api_get_threadsafe_function_context(
     function: NapiThreadsafeFunction,
     result: *mut *mut c_void,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_threadsafe_ffi_status(function, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3326,7 +3399,7 @@ unsafe extern "C" fn api_call_threadsafe_function(
     data: *mut c_void,
     call_mode: i32,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_threadsafe_ffi_status(function, || {
         if !matches!(call_mode, TSFN_BLOCKING | TSFN_NONBLOCKING) {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3367,7 +3440,7 @@ unsafe extern "C" fn api_call_threadsafe_function(
 }
 
 unsafe extern "C" fn api_acquire_threadsafe_function(function: NapiThreadsafeFunction) -> i32 {
-    with_ffi_status(|| {
+    with_threadsafe_ffi_status(function, || {
         let shared = get_threadsafe_function(function)?;
         let mut state = shared.state.lock().map_err(|_| NAPI_GENERIC_FAILURE)?;
         if state.closing || state.thread_count == 0 || state.finalized {
@@ -3385,7 +3458,7 @@ unsafe extern "C" fn api_release_threadsafe_function(
     function: NapiThreadsafeFunction,
     release_mode: i32,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_threadsafe_ffi_status(function, || {
         if !matches!(release_mode, TSFN_RELEASE | TSFN_ABORT) {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3439,14 +3512,18 @@ unsafe extern "C" fn api_ref_threadsafe_function(
     env: NapiEnv,
     function: NapiThreadsafeFunction,
 ) -> i32 {
-    with_ffi_status(|| set_threadsafe_function_referenced(env, function, true))
+    with_ffi_status(env, || {
+        set_threadsafe_function_referenced(env, function, true)
+    })
 }
 
 unsafe extern "C" fn api_unref_threadsafe_function(
     env: NapiEnv,
     function: NapiThreadsafeFunction,
 ) -> i32 {
-    with_ffi_status(|| set_threadsafe_function_referenced(env, function, false))
+    with_ffi_status(env, || {
+        set_threadsafe_function_referenced(env, function, false)
+    })
 }
 
 unsafe extern "C" fn api_add_env_cleanup_hook(
@@ -3454,7 +3531,7 @@ unsafe extern "C" fn api_add_env_cleanup_hook(
     function: Option<NapiCleanupHook>,
     argument: *mut c_void,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let function = function.ok_or(NAPI_INVALID_ARG)?;
         let environment = environment(env)?;
         if environment.finalizing.get() {
@@ -3488,7 +3565,7 @@ unsafe extern "C" fn api_remove_env_cleanup_hook(
     function: Option<NapiCleanupHook>,
     argument: *mut c_void,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let function = function.ok_or(NAPI_INVALID_ARG)?;
         let environment = environment(env)?;
         let function_address = function as usize;
@@ -3512,7 +3589,7 @@ fn settle_deferred(
     value_handle: NapiValue,
     rejected: bool,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if deferred.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3600,7 +3677,7 @@ unsafe extern "C" fn api_define_properties(
     property_count: usize,
     properties: *const NapiPropertyDescriptor,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if property_count > crate::value::MAX_OBJECT_PROPS {
             return Err(NAPI_GENERIC_FAILURE);
         }
@@ -3708,7 +3785,7 @@ unsafe extern "C" fn api_define_class(
     properties: *const NapiPropertyDescriptor,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3818,7 +3895,7 @@ unsafe extern "C" fn api_create_function(
     data: *mut c_void,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3850,7 +3927,7 @@ unsafe extern "C" fn api_set_named_property(
     name: *const c_char,
     value: NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let key = unsafe { read_c_string(name)? };
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
@@ -3888,7 +3965,7 @@ unsafe extern "C" fn api_get_named_property(
     name: *const c_char,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3925,7 +4002,7 @@ unsafe extern "C" fn api_get_property(
     key: NapiValue,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -3962,7 +4039,7 @@ unsafe extern "C" fn api_set_property(
     key: NapiValue,
     value: NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
         if !is_napi_property_object(&object) {
@@ -3995,7 +4072,7 @@ unsafe extern "C" fn api_has_property(
     key: NapiValue,
     result: *mut bool,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4035,7 +4112,7 @@ unsafe extern "C" fn api_delete_property(
     key: NapiValue,
     result: *mut bool,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
         if !is_napi_property_object(&object) {
@@ -4074,7 +4151,7 @@ unsafe extern "C" fn api_has_own_property(
     key: NapiValue,
     result: *mut bool,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4124,7 +4201,7 @@ unsafe extern "C" fn api_has_named_property(
     name: *const c_char,
     result: *mut bool,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4163,7 +4240,7 @@ unsafe extern "C" fn api_get_property_names(
     object: NapiValue,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4210,7 +4287,7 @@ unsafe extern "C" fn api_call_function(
     argv: *const NapiValue,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4243,7 +4320,7 @@ unsafe extern "C" fn api_new_instance(
     argv: *const NapiValue,
     result: *mut NapiValue,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4276,7 +4353,7 @@ unsafe extern "C" fn api_get_cb_info(
     this_arg: *mut NapiValue,
     data: *mut *mut c_void,
 ) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if argc.is_null() || info.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4308,7 +4385,7 @@ unsafe extern "C" fn api_get_cb_info(
 }
 
 unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandleScope) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         if result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -4328,7 +4405,7 @@ unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandle
 }
 
 unsafe extern "C" fn api_close_handle_scope(env: NapiEnv, scope: NapiHandleScope) -> i32 {
-    with_ffi_status(|| {
+    with_ffi_status(env, || {
         let environment = environment(env)?;
         environment.handles.borrow_mut().close_scope_handle(scope)
     })
@@ -4962,6 +5039,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             async_works: RefCell::new(HashMap::new()),
             threadsafe_functions: RefCell::new(HashMap::new()),
             cleanup_hooks: RefCell::new(Vec::new()),
+            last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
@@ -5458,6 +5536,31 @@ static napi_value cleanup_misuse_status(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "duplicate", status_value) != napi_ok ||
       napi_create_int32(env, unmatched_status, &status_value) != napi_ok ||
       napi_set_named_property(env, result, "unmatched", status_value) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value error_info_probe(napi_env env, napi_callback_info info) {
+  napi_value input, result, field;
+  const napi_extended_error_info* error_info = NULL;
+  double number = 0;
+  napi_status last_status;
+  bool message_matches;
+  (void)info;
+  if (napi_create_string_utf8(env, "not a number", NAPI_AUTO_LENGTH,
+                              &input) != napi_ok)
+    return NULL;
+  last_status = napi_get_value_double(env, input, &number);
+  if (last_status != napi_number_expected ||
+      napi_get_last_error_info(env, &error_info) != napi_ok ||
+      error_info == NULL)
+    return NULL;
+  message_matches = strcmp(error_info->error_message, "number expected") == 0;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_create_int32(env, last_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "lastStatus", field) != napi_ok ||
+      napi_get_boolean(env, message_matches, &field) != napi_ok ||
+      napi_set_named_property(env, result, "messageMatches", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -6401,7 +6504,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok ||
       napi_create_function(env, "cleanupMisuseStatus", NAPI_AUTO_LENGTH, cleanup_misuse_status, NULL, &function) != napi_ok ||
-      napi_set_named_property(env, exports, "cleanupMisuseStatus", function) != napi_ok) return NULL;
+      napi_set_named_property(env, exports, "cleanupMisuseStatus", function) != napi_ok ||
+      napi_create_function(env, "errorInfoProbe", NAPI_AUTO_LENGTH, error_info_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "errorInfoProbe", function) != napi_ok) return NULL;
   return exports;
 }
 "#,
@@ -7543,6 +7648,13 @@ module.exports = {
                 )
                 .unwrap(),
             Value::String(ref value) if value == "{\"duplicate\":1,\"unmatched\":1}"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source("JSON.stringify(require('./fixture.node').errorInfoProbe());")
+                .unwrap(),
+            Value::String(ref value)
+                if value == "{\"lastStatus\":6,\"messageMatches\":true}"
         ));
 
         drop(result);

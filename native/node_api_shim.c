@@ -22,6 +22,12 @@ typedef void (*napi_async_complete_callback)(napi_env env, napi_status status,
 typedef void (*napi_threadsafe_function_call_js)(napi_env env,
                                                   napi_value js_callback,
                                                   void* context, void* data);
+typedef struct napi_extended_error_info {
+  const char* error_message;
+  void* engine_reserved;
+  uint32_t engine_error_code;
+  napi_status error_code;
+} napi_extended_error_info;
 
 typedef struct napi_vm_property_descriptor {
   const char* utf8name;
@@ -153,6 +159,8 @@ typedef struct napi_vm_node_api_table {
                                            napi_threadsafe_function);
   napi_status (*add_env_cleanup_hook)(napi_env, napi_cleanup_hook, void*);
   napi_status (*remove_env_cleanup_hook)(napi_env, napi_cleanup_hook, void*);
+  napi_status (*get_last_error_info)(
+      napi_env, const napi_extended_error_info**);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -805,4 +813,10 @@ NAPI_VM_EXPORT napi_status napi_remove_env_cleanup_hook(
     napi_env env, napi_cleanup_hook fun, void* arg) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->remove_env_cleanup_hook(env, fun, arg) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_last_error_info(
+    napi_env env, const napi_extended_error_info** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_last_error_info(env, result) : 9;
 }

@@ -180,9 +180,11 @@ undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8 strings,
 (data values, symbol keys, native methods, and accessors), `napi_typeof`, array
 creation/index/length operations, and `napi_define_class` with native
 constructors plus static and instance data, methods, and accessors. Core error
-creation and pending-exception propagation are also supported. Returning a null
-callback value without a pending exception produces guest `undefined`. Imports
-outside that subset fail when the library is loaded. Strong `napi_ref` creation,
+creation and pending-exception propagation are also supported.
+`napi_get_last_error_info` exposes the most recent API status and a VM-neutral
+message. Its returned data is valid only until the next Node-API call. Returning
+a null callback value without a pending exception produces guest `undefined`.
+Imports outside that subset fail when the library is loaded. Strong `napi_ref` creation,
 lookup, count changes, and deletion are supported; because the VM has no tracing
 GC, zero-count references stay live until explicitly deleted. `napi_wrap`,
 `napi_unwrap`, and `napi_remove_wrap` work for VM values with stable object

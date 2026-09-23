@@ -75,8 +75,10 @@ accessor behavior.
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.
 It also creates Node-style errors, tracks pending exceptions, and transfers
-native callback throws into guest `try`/`catch`. A null callback result with no
-pending exception maps to guest `undefined`. Handle entries are reclaimed
+native callback throws into guest `try`/`catch`. `napi_get_last_error_info`
+reports the most recent Node-API status and a VM-neutral message. Its returned
+data remains valid only until the next Node-API call. A null callback result
+with no pending exception maps to guest `undefined`. Handle entries are reclaimed
 when local scopes close; opaque handles do not retain one heap allocation
 apiece. Strong N-API references support creation, lookup, count changes, and
 deletion. The VM has no tracing garbage collector, so a zero-count reference
