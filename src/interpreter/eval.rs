@@ -309,10 +309,13 @@ impl Interpreter {
                     let fn_val = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(mp),
                         body: Rc::new(mb.clone()),
                         closure: Some(member_closure.clone()),
                         is_arrow: false,
+                        is_constructor: false,
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(mb, "arguments"),
@@ -364,10 +367,13 @@ impl Interpreter {
                     let getter_fn = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![]),
                         body: Rc::new(gb.clone()),
                         closure: Some(member_closure.clone()),
                         is_arrow: false,
+                        is_constructor: false,
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(gb, "arguments"),
@@ -396,10 +402,13 @@ impl Interpreter {
                     let setter_fn = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(sb.clone()),
                         closure: Some(member_closure.clone()),
                         is_arrow: false,
+                        is_constructor: false,
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(sb, "arguments"),
@@ -470,6 +479,8 @@ impl Interpreter {
         let constructor = Value::Function(Box::new(FunctionData {
             identity: Rc::new(0),
             name: Some(Rc::from(name)),
+            properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+            standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
             params: Rc::new(
                 ctor_params
                     .into_iter()
@@ -480,6 +491,7 @@ impl Interpreter {
             body: Rc::new(full_ctor_body),
             closure: Some(ctor_closure),
             is_arrow: false,
+            is_constructor: false,
             is_async: false,
             is_generator: false,
         }));
@@ -632,10 +644,13 @@ impl Interpreter {
                     Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
                         body: Rc::new(body.clone()),
                         closure: Some(self.global.clone()),
                         is_arrow: false,
+                        is_constructor: !*is_async && !*is_generator,
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
@@ -1292,10 +1307,13 @@ impl Interpreter {
                     let function = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
                         body: Rc::new(body.clone()),
                         closure: Some(self.global.clone()),
                         is_arrow: false,
+                        is_constructor: false,
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
@@ -1313,10 +1331,13 @@ impl Interpreter {
                     let function = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("get {name}").into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![]),
                         body: Rc::new(body.clone()),
                         closure: Some(self.global.clone()),
                         is_arrow: false,
+                        is_constructor: false,
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(body, "arguments"),
@@ -1334,10 +1355,13 @@ impl Interpreter {
                     let function = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("set {name}").into()),
+                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(body.clone()),
                         closure: Some(self.global.clone()),
                         is_arrow: false,
+                        is_constructor: false,
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(body, "arguments"),
@@ -1548,6 +1572,9 @@ impl Interpreter {
                     _ => {}
                 }
                 let r = self.eval_expr(right)?;
+                if matches!(op, crate::parser::BinOp::Instanceof) {
+                    return self.instance_of(&l, &r);
+                }
                 // A proxy's `has` trap answers `in`. It runs guest code, so it
                 // cannot live in `bin_op`, which does not borrow mutably.
                 // `+` may need to run a guest `toString`, which `bin_op`
@@ -1991,6 +2018,8 @@ impl Interpreter {
             } => Ok(Value::Function(Box::new(FunctionData {
                 identity: Rc::new(0),
                 name: None,
+                properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                 params: intern_params(params),
                 closure: Some(self.global.clone()),
                 uses_arguments: arrow_body_references(body, "arguments"),
@@ -1999,6 +2028,7 @@ impl Interpreter {
                     ExprOrBlock::Expr(e) => vec![Statement::Return(Some(e.clone()))],
                 }),
                 is_arrow: true,
+                is_constructor: false,
                 is_async: *is_async,
                 is_generator: false,
             }))),
@@ -2011,10 +2041,13 @@ impl Interpreter {
             } => Ok(Value::Function(Box::new(FunctionData {
                 identity: Rc::new(0),
                 name: name.as_deref().map(Rc::from),
+                properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                 params: intern_params(params),
                 body: Rc::new(body.clone()),
                 closure: Some(self.global.clone()),
                 is_arrow: false,
+                is_constructor: !*is_async && !*is_generator,
                 is_async: *is_async,
                 is_generator: *is_generator,
                 uses_arguments: stmts_reference(body, "arguments"),

@@ -41,6 +41,18 @@ pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
         })
 }
 
+fn is_callable_value(value: &Value) -> bool {
+    match value {
+        Value::Function(_)
+        | Value::NativeFunction { .. }
+        | Value::HostFunction { .. }
+        | Value::Class(_) => true,
+        Value::Proxy(proxy) => is_callable_value(&proxy.target),
+        Value::Object { .. } => callable_slot(value, CALL_SLOT).is_some(),
+        _ => false,
+    }
+}
+
 fn is_js_object(value: &Value) -> bool {
     if matches!(
         value,
@@ -64,6 +76,83 @@ fn is_js_object(value: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// ECMAScript `instanceof`, including a guest-defined
+    /// `Symbol.hasInstance` method. This lives on the mutable interpreter
+    /// path because reading the method and invoking it can execute guest code.
+    pub(crate) fn instance_of(
+        &mut self,
+        object: &Value,
+        constructor: &Value,
+    ) -> Result<Value, VmErr> {
+        let symbol = crate::builtins::well_known("hasInstance")
+            .expect("Symbol.hasInstance is a well-known symbol");
+        let method = self.get_prop_value(constructor, &symbol)?;
+        if !matches!(method, Value::Undefined | Value::Null) {
+            if !is_callable_value(&method) {
+                return Err(VmErr::Msg(
+                    "TypeError: Symbol.hasInstance is not callable".into(),
+                ));
+            }
+            let result = self.call_this(&method, constructor.clone(), vec![object.clone()])?;
+            return Ok(Value::Bool(self.truthy(&result)));
+        }
+        if !is_callable_value(constructor) {
+            return Err(VmErr::Msg(
+                "TypeError: Right-hand side of instanceof is not callable".into(),
+            ));
+        }
+
+        if matches!(object, Value::Date(_))
+            && matches!(constructor, Value::Object { props }
+                if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
+        {
+            return Ok(Value::Bool(true));
+        }
+        if let (Value::Error(error), Value::Class(class)) = (object, constructor) {
+            return Ok(Value::Bool(
+                class.name == "Error" || class.name == error.name,
+            ));
+        }
+
+        let prototype =
+            self.get_prop_value(constructor, &Value::String("prototype".to_string()))?;
+        if !is_js_object(&prototype) {
+            return Err(VmErr::Msg(
+                "TypeError: Function has non-object prototype in instanceof check".into(),
+            ));
+        }
+        if !is_js_object(object) {
+            return Ok(Value::Bool(false));
+        }
+
+        let mut current = object.proto_of();
+        let mut visited = std::collections::HashSet::new();
+        for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+            let Some(link) = current else {
+                return Ok(Value::Bool(false));
+            };
+            if crate::interpreter::strict_equals(link.as_ref(), &prototype) {
+                return Ok(Value::Bool(true));
+            }
+            let identity = match link.as_ref() {
+                Value::Object { props } => Rc::as_ptr(props) as usize,
+                Value::Class(class) => Rc::as_ptr(&class.statics) as usize,
+                Value::Function(function) => Rc::as_ptr(&function.properties) as usize,
+                Value::Proxy(proxy) => Rc::as_ptr(proxy) as usize,
+                _ => return Ok(Value::Bool(false)),
+            };
+            if !visited.insert(identity) {
+                return Err(crate::value::limit_err(
+                    "Maximum prototype chain depth exceeded",
+                ));
+            }
+            current = link.proto_of();
+        }
+        Err(crate::value::limit_err(
+            "Maximum prototype chain depth exceeded",
+        ))
+    }
+
     pub(super) fn destructure(&mut self, pat: &Pattern, val: &Value) -> Result<Value, VmErr> {
         match pat {
             Pattern::Ident(name) => {
@@ -240,6 +329,33 @@ impl Interpreter {
                     .retain(|(name, _)| name != &slot && name != &companion);
                 class.statics.meta.borrow_mut().forget(&slot);
                 class.statics.meta.borrow_mut().forget(&companion);
+                Ok(Value::Bool(true))
+            }
+            Value::Function(function) => {
+                let slot = self.property_key(key)?;
+                function.ensure_name_length_properties();
+                function.prototype_value(obj);
+                if !function
+                    .properties
+                    .meta
+                    .borrow()
+                    .attrs_of(&slot)
+                    .configurable
+                    && function
+                        .properties
+                        .borrow()
+                        .iter()
+                        .any(|(name, _)| name == &slot)
+                {
+                    return Ok(Value::Bool(false));
+                }
+                let companion = format!("__setter:{}__", slot);
+                function
+                    .properties
+                    .borrow_mut()
+                    .retain(|(name, _)| name != &slot && name != &companion);
+                function.properties.meta.borrow_mut().forget(&slot);
+                function.properties.meta.borrow_mut().forget(&companion);
                 Ok(Value::Bool(true))
             }
             // Deleting an array element leaves an absent slot while reads
@@ -454,6 +570,27 @@ impl Interpreter {
             return self.assign_member(&target, prop, val);
         }
         match (obj, prop) {
+            (Value::Function(function), Value::Symbol(symbol)) => {
+                function.ensure_name_length_properties();
+                function.prototype_value(obj);
+                let slot = crate::interpreter::symbol_slot_key(symbol);
+                self.assign_cell_property(obj, &function.properties, &slot, val)?;
+                function
+                    .properties
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
+                Ok(())
+            }
+            (Value::Function(function), Value::String(key)) => {
+                function.ensure_name_length_properties();
+                function.prototype_value(obj);
+                self.assign_cell_property(obj, &function.properties, key, val)
+            }
+            (Value::Function(_), _) => {
+                let slot = self.property_key(prop)?;
+                self.assign_member(obj, &Value::String(slot), val)
+            }
             (Value::Object { props }, Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
                 self.assign_cell_property(obj, props, &slot, val)?;
@@ -982,7 +1119,16 @@ impl Interpreter {
                 if is_js_object(&r) { Ok(r) } else { Ok(inst) }
             }
             Value::Function(fd) => {
-                let inst = Value::object(vec![]);
+                if !fd.is_constructor {
+                    return vm_err("TypeError: function is not a constructor");
+                }
+                let prototype =
+                    self.get_prop_value(&new_target, &Value::String("prototype".to_string()))?;
+                let inst = if is_js_object(&prototype) {
+                    Value::object_with_proto(vec![], Some(Rc::new(prototype)))
+                } else {
+                    Value::object(vec![])
+                };
                 let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
 
                 let rest_idx = fd.params.iter().position(|p| p.starts_with("..."));

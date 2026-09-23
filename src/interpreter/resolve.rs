@@ -515,9 +515,33 @@ impl Interpreter {
                 },
                 &crate::interpreter::symbol_slot_key(symbol),
             ),
-            (Value::Function(_), Value::String(k)) => {
-                Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
+            (Value::Function(function), Value::String(k)) => {
+                if k == "prototype" {
+                    return Ok(function.prototype_value(o));
+                }
+                function.ensure_name_length_properties();
+                if let Some(value) = lookup_chain_found(
+                    &Value::Object {
+                        props: function.properties.clone(),
+                    },
+                    k,
+                )? {
+                    return Ok(value);
+                }
+                Ok(match k.as_str() {
+                    // These values are inherited from Function.prototype
+                    // when a callable's configurable own property is deleted.
+                    "name" => Value::String(String::new()),
+                    "length" => Value::Number(0.0),
+                    _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
+                })
             }
+            (Value::Function(function), Value::Symbol(symbol)) => lookup_chain(
+                &Value::Object {
+                    props: function.properties.clone(),
+                },
+                &super::symbol_slot_key(symbol),
+            ),
             (Value::Generator { .. }, Value::String(k)) => {
                 if k == "next" {
                     Ok(Value::NativeFunction {
@@ -722,6 +746,7 @@ fn lookup_chain_found(o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
         let props = match &current {
             Value::Object { props } => props,
             Value::Class(class) => &class.statics,
+            Value::Function(function) => &function.properties,
             _ => return Ok(None),
         };
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {

@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{FunctionData, Value};
+use crate::value::{FunctionData, ObjectCell, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("Function") {
@@ -65,12 +65,15 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     Ok(Value::Function(Box::new(FunctionData {
         identity: Rc::new(0),
         name: Some("anonymous".into()),
+        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
         params: Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect()),
         body: Rc::new(body),
         // The global scope, not the caller's: a function built from a string
         // must not capture bindings its source never named.
         closure: Some(interp.persistent_global.clone()),
         is_arrow: false,
+        is_constructor: true,
         is_async: false,
         is_generator: false,
         uses_arguments,

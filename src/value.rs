@@ -1,5 +1,5 @@
 use std::alloc::{Layout, alloc_zeroed, dealloc};
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::ptr::NonNull;
 use std::rc::Rc;
 #[cfg(target_has_atomic = "8")]
@@ -457,6 +457,27 @@ impl std::ops::Deref for ObjectCell {
     }
 }
 
+fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmErr> {
+    let writable = props.meta.borrow().attrs_of(&key).writable;
+    let mut slots = props.borrow_mut();
+    for (name, value) in slots.iter_mut() {
+        if name == &key {
+            if writable {
+                *value = val;
+            }
+            return Ok(());
+        }
+    }
+    if props.meta.borrow().non_extensible {
+        return Ok(());
+    }
+    if slots.len() >= MAX_OBJECT_PROPS {
+        return Err(limit_err("Maximum object property count exceeded"));
+    }
+    slots.push((key, val));
+    Ok(())
+}
+
 /// A symbol's identity.
 ///
 /// A symbol is unique: two symbols with the same description are different
@@ -494,6 +515,14 @@ pub struct FunctionData {
     /// creates a distinct one.
     pub identity: Rc<u8>,
     pub name: Option<Rc<str>>,
+    /// Shared own properties for this function object. A function's ordinary
+    /// prototype object is created on first access so unused functions do not
+    /// allocate prototype objects or form reference cycles.
+    pub properties: Rc<ObjectCell>,
+    /// Whether the standard own `name` and `length` descriptors have been
+    /// materialized in `properties`. Shared with function clones so deleting
+    /// one of those configurable properties does not recreate it later.
+    pub standard_properties_initialized: Rc<Cell<bool>>,
     // Shared (`Rc`) so closures created in hot loops reference the same AST
     // instead of deep-cloning the parameter list and body on every creation.
     // Param names are `Rc<str>` so binding them in a call frame is a refcount
@@ -502,11 +531,107 @@ pub struct FunctionData {
     pub body: Rc<Vec<Statement>>,
     pub closure: Option<Env>,
     pub is_arrow: bool,
+    /// Whether `new` may construct this function. Methods, accessors, arrows,
+    /// async functions, and generator functions are not constructors.
+    pub is_constructor: bool,
     pub is_async: bool,
     pub is_generator: bool,
     /// Whether the body references `arguments`. Frames for functions that
     /// never read it skip building the (detached) arguments object.
     pub uses_arguments: bool,
+}
+
+impl FunctionData {
+    pub fn ensure_name_length_properties(&self) {
+        if self.standard_properties_initialized.replace(true) {
+            return;
+        }
+        let mut properties = self.properties.borrow_mut();
+        if !properties.iter().any(|(key, _)| key == "length") {
+            properties.push((
+                "length".to_string(),
+                Value::Number(
+                    self.params
+                        .iter()
+                        .take_while(|parameter| !parameter.starts_with("..."))
+                        .count() as f64,
+                ),
+            ));
+            self.properties.meta.borrow_mut().set_attrs(
+                "length",
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        if !properties.iter().any(|(key, _)| key == "name") {
+            properties.push((
+                "name".to_string(),
+                Value::String(self.name.as_deref().unwrap_or_default().to_string()),
+            ));
+            self.properties.meta.borrow_mut().set_attrs(
+                "name",
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+    }
+
+    /// Return the function's own `prototype` property, creating the standard
+    /// object lazily for constructable ordinary functions.
+    pub fn prototype_value(&self, function: &Value) -> Value {
+        self.ensure_name_length_properties();
+        if let Some(value) = self
+            .properties
+            .borrow()
+            .iter()
+            .find(|(key, _)| key == "prototype")
+            .map(|(_, value)| value.deref_binding())
+        {
+            return value;
+        }
+        if !self.is_constructor {
+            return Value::Undefined;
+        }
+
+        let prototype = Value::object(vec![("constructor".to_string(), function.clone())]);
+        if let Value::Object { props } = &prototype {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        let mut properties = self.properties.borrow_mut();
+        // FunctionData is !Send and all guest execution is on one owner
+        // thread, but recheck after allocation to keep this helper robust to
+        // future host callbacks added during prototype creation.
+        if let Some(value) = properties
+            .iter()
+            .find(|(key, _)| key == "prototype")
+            .map(|(_, value)| value.deref_binding())
+        {
+            return value;
+        }
+        properties.push(("prototype".to_string(), prototype.clone()));
+        self.properties.meta.borrow_mut().set_attrs(
+            "prototype",
+            PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+        prototype
+    }
 }
 
 /// Lazy state for a string iterator. The source is shared and the cursor is a
@@ -1661,6 +1786,7 @@ impl Value {
         match self {
             Value::Object { props } => props.proto(),
             Value::Class(class) => class.statics.proto(),
+            Value::Function(function) => function.properties.proto(),
             _ => None,
         }
     }
@@ -1765,22 +1891,40 @@ impl Value {
     }
 
     pub fn get_prop(&self, key: &str) -> Option<Value> {
+        if let Value::Function(function) = self {
+            if key == "prototype" {
+                return Some(function.prototype_value(self));
+            }
+            function.ensure_name_length_properties();
+        }
         match self {
-            Value::Object { .. } | Value::Class(_) => {
+            Value::Object { .. } | Value::Class(_) | Value::Function(_) => {
                 let mut current = self.clone();
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
                     let props = match &current {
                         Value::Object { props } => props,
                         Value::Class(class) => &class.statics,
+                        Value::Function(function) => &function.properties,
                         _ => return None,
                     };
                     if let Some((_, value)) = props.borrow().iter().find(|(name, _)| name == key) {
                         return Some(value.deref_binding());
                     }
-                    let next = props.proto()?;
+                    let Some(next) = props.proto() else {
+                        break;
+                    };
                     current = next.as_ref().clone();
                 }
-                None
+                match self {
+                    Value::Function(_) => match key {
+                        // Function.prototype supplies these after an own
+                        // configurable name/length property is deleted.
+                        "name" => Some(Value::String(String::new())),
+                        "length" => Some(Value::Number(0.0)),
+                        _ => crate::builtins::function_method(key),
+                    },
+                    _ => None,
+                }
             }
             Value::Array(cell) => {
                 let items = cell.borrow();
@@ -1818,76 +1962,59 @@ impl Value {
 
     /// Insert or replace an own property while enforcing the object cap.
     pub fn set_prop(&self, key: String, val: Value) -> Result<(), VmErr> {
-        if let Value::Array(cell) = self {
-            cell.set_named(key, val);
-            return Ok(());
+        match self {
+            Value::Array(cell) => {
+                cell.set_named(key, val);
+                Ok(())
+            }
+            Value::Object { props } => set_cell_prop(props, key, val),
+            Value::Class(class) => set_cell_prop(&class.statics, key, val),
+            Value::Function(function) => {
+                function.ensure_name_length_properties();
+                set_cell_prop(&function.properties, key, val)
+            }
+            _ => Ok(()),
         }
-        if let Value::Object { props } = self {
-            let writable = props.meta.borrow().attrs_of(&key).writable;
-            let mut slots = props.borrow_mut();
-            for (k, v) in slots.iter_mut() {
-                if k == &key {
-                    // A non-writable property silently ignores the write, the
-                    // way a sloppy-mode assignment does.
-                    if writable {
-                        *v = val;
-                    }
-                    return Ok(());
-                }
-            }
-            if props.meta.borrow().non_extensible {
-                return Ok(());
-            }
-            if slots.len() >= MAX_OBJECT_PROPS {
-                return Err(limit_err("Maximum object property count exceeded"));
-            }
-            slots.push((key, val));
-            return Ok(());
-        }
-        if let Value::Class(class) = self {
-            let writable = class.statics.meta.borrow().attrs_of(&key).writable;
-            let mut slots = class.statics.borrow_mut();
-            for (name, value) in slots.iter_mut() {
-                if name == &key {
-                    if writable {
-                        *value = val;
-                    }
-                    return Ok(());
-                }
-            }
-            if class.statics.meta.borrow().non_extensible {
-                return Ok(());
-            }
-            if slots.len() >= MAX_OBJECT_PROPS {
-                return Err(limit_err("Maximum object property count exceeded"));
-            }
-            slots.push((key, val));
-        }
-        Ok(())
     }
 
     pub fn has_prop(&self, key: &str) -> bool {
+        // A proxy without a `has` trap answers for its target. The trap
+        // itself is applied by `bin_op`, which can call guest code.
+        if let Value::Proxy(proxy) = self {
+            return proxy.target.has_prop(key);
+        }
+        if let Value::Function(function) = self {
+            if key == "prototype" {
+                function.prototype_value(self);
+            } else {
+                function.ensure_name_length_properties();
+            }
+        }
         match self {
-            // A proxy without a `has` trap answers for its target. The trap
-            // itself is applied by `bin_op`, which can call guest code.
-            Value::Proxy(proxy) => proxy.target.has_prop(key),
-            Value::Object { .. } | Value::Class(_) => {
+            Value::Object { .. } | Value::Class(_) | Value::Function(_) => {
                 let mut current = self.clone();
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
                     let props = match &current {
                         Value::Object { props } => props,
                         Value::Class(class) => &class.statics,
+                        Value::Function(function) => &function.properties,
                         _ => return false,
                     };
                     if props.borrow().iter().any(|(name, _)| name == key) {
                         return true;
                     }
                     let Some(next) = props.proto() else {
-                        return false;
+                        break;
                     };
                     current = next.as_ref().clone();
                 }
-                false
+                match self {
+                    Value::Function(_) => {
+                        matches!(key, "name" | "length")
+                            || crate::builtins::function_method(key).is_some()
+                    }
+                    _ => false,
+                }
             }
             Value::Array(cell) => {
                 key == "length"

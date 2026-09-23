@@ -76,7 +76,8 @@ info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
 number, string, and object coercion, symbol creation, and `napi_define_properties`
-for ordinary object targets (data values, symbol keys, native methods, and accessors),
+for ordinary object, class, and ordinary function targets (data values, symbol
+keys, native methods, and accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
 operations including `napi_delete_element`. Escapable handle scopes can
@@ -100,12 +101,15 @@ code. The guest `Object(value)` constructor shares the wrapper representation.
 values whose built-in prototype is not materialized (such as arrays and
 proxies) return a generic Node-API failure until that prototype model is
 implemented.
-`napi_instanceof` handles VM class constructors, inherited class prototypes,
-VM error classes, and guest classes with a custom `Symbol.hasInstance` method
-when called through the active paused-callback dispatcher. That custom method
-receives the constructor as `this`, and its result follows JavaScript truthiness.
-Ordinary function objects and callable proxies still return a generic failure
-because their prototype semantics are not represented by the Rust host yet.
+`napi_instanceof` handles VM class constructors and ordinary function
+constructors, inherited prototypes, VM error classes, and guest-defined
+`Symbol.hasInstance` methods when called through the active paused-callback
+dispatcher. Custom methods receive the constructor as `this`, and their results
+follow JavaScript truthiness. Ordinary functions share a lazily created own
+`prototype` object with constructed instances; function `name`, `length`, and
+`prototype` descriptors participate in guest and Node-API property reflection.
+The Function.prototype object itself is not yet materialized, so callable
+proxies and complete built-in function prototype behavior remain unsupported.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path. `napi_run_script`
@@ -148,15 +152,15 @@ objects. `napi_add_finalizer` supports optional zero-count references and runs
 registered callbacks on the owner thread during environment shutdown, after
 cleanup hooks. As with wraps, ordinary guest-object collection is unavailable.
 The selected Node-API v6 surface includes BigInt creation and extraction,
-`napi_get_all_property_names` on ordinary objects, classes, arrays, errors,
-and regular expressions, plus environment instance data. Property collection
-supports own-only or prototype-chain keys, writable/enumerable/configurable
-filters, string and symbol keys, and numeric key conversion. Proxy, function,
-and global-object reflection returns a generic failure while those object
-models remain incomplete. BigInt word arrays are limited to 2,048 words by the
-VM's BigInt allocation cap. Replacing environment instance data overwrites the
-previous slot without calling its finalizer; the active finalizer runs on the
-owner thread during shutdown after cleanup hooks.
+`napi_get_all_property_names` on ordinary objects, classes, ordinary
+functions, arrays, errors, and regular expressions, plus environment instance
+data. Property collection supports own-only or prototype-chain keys,
+writable/enumerable/configurable filters, string and symbol keys, and numeric
+key conversion. Proxy and global-object reflection still return a generic
+failure while those object models remain incomplete. BigInt word arrays are
+limited to 2,048 words by the VM's BigInt allocation cap. Replacing environment
+instance data overwrites the previous slot without calling its finalizer; the
+active finalizer runs on the owner thread during shutdown after cleanup hooks.
 The selected Node-API v7 surface supports idempotent ArrayBuffer detachment,
 updates existing typed-array views, and exposes detached-state checks. The VM
 matches Node when `napi_is_detached_arraybuffer` receives a non-ArrayBuffer

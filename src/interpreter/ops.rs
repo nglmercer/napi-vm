@@ -247,10 +247,17 @@ impl Interpreter {
                 // `l instanceof r`: walk l's prototype chain looking for r's
                 // prototype object (compared by shared Rc identity).
                 let target_proto = match r {
-                    Value::Class(c) => match c.prototype.as_ref() {
-                        Value::Object { props, .. } => Some(props.clone()),
-                        _ => None,
-                    },
+                    Value::Class(c) => Some(c.prototype.as_ref().clone()),
+                    Value::Function(function) => {
+                        let prototype = function.prototype_value(r);
+                        if !is_js_object(&prototype) {
+                            return Err(VmErr::Msg(
+                                "TypeError: function has non-object prototype in instanceof check"
+                                    .into(),
+                            ));
+                        }
+                        Some(prototype)
+                    }
                     _ => None,
                 };
                 let mut result = false;
@@ -261,19 +268,21 @@ impl Interpreter {
                         let Some(p) = cur else {
                             break;
                         };
-                        if let Value::Object { props } = p.as_ref() {
-                            let identity = Rc::as_ptr(props) as *const ();
-                            if !visited.insert(identity) {
-                                break;
-                            }
-                            if Rc::ptr_eq(props, &tp) {
-                                result = true;
-                                break;
-                            }
-                            cur = props.proto();
-                        } else {
+                        if super::strict_equals(p.as_ref(), &tp) {
+                            result = true;
                             break;
                         }
+                        let identity = match p.as_ref() {
+                            Value::Object { props } => Rc::as_ptr(props) as usize,
+                            Value::Class(class) => Rc::as_ptr(&class.statics) as usize,
+                            Value::Function(function) => Rc::as_ptr(&function.properties) as usize,
+                            Value::Proxy(proxy) => Rc::as_ptr(proxy) as usize,
+                            _ => break,
+                        };
+                        if !visited.insert(identity) {
+                            break;
+                        }
+                        cur = p.proto_of();
                     }
                 }
                 Value::Bool(result)
@@ -677,4 +686,19 @@ impl Interpreter {
             Value::String(s.to_string())
         }
     }
+}
+
+fn is_js_object(value: &Value) -> bool {
+    !matches!(
+        value,
+        Value::Undefined
+            | Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Symbol(_)
+            | Value::BigInt(_)
+            | Value::HostPending { .. }
+            | Value::Binding(_)
+    )
 }

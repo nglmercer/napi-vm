@@ -72,6 +72,7 @@ fn cell(v: &Value) -> Option<&Rc<ObjectCell>> {
     match v {
         Value::Object { props } => Some(props),
         Value::Class(class) => Some(&class.statics),
+        Value::Function(function) => Some(&function.properties),
         _ => None,
     }
 }
@@ -86,6 +87,11 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
     match v {
         Value::Object { props } => own_object_names(props, enumerable_only),
         Value::Class(class) => own_object_names(&class.statics, enumerable_only),
+        Value::Function(function) => {
+            function.ensure_name_length_properties();
+            function.prototype_value(v);
+            own_object_names(&function.properties, enumerable_only)
+        }
         Value::Array(items) => {
             let mut names: Vec<String> = (0..items.borrow().len())
                 .filter(|index| items.has_index(*index))
@@ -128,6 +134,12 @@ fn own_names_for(
 /// Read an own property slot without walking the prototype chain and without
 /// invoking a getter.
 fn own_slot(v: &Value, key: &str) -> Option<Value> {
+    if let Value::Function(function) = v {
+        function.ensure_name_length_properties();
+        if key == "prototype" {
+            function.prototype_value(v);
+        }
+    }
     cell(v)?
         .borrow()
         .iter()
@@ -348,8 +360,9 @@ fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Resu
 fn proto_arg(proto: &Value) -> Result<Option<Rc<Value>>, VmErr> {
     match proto {
         Value::Null | Value::Undefined => Ok(None),
-        Value::Object { .. } => Ok(Some(Rc::new(proto.clone()))),
-        Value::Class(c) => Ok(Some(c.prototype.clone())),
+        Value::Object { .. } | Value::Function(_) | Value::Class(_) => {
+            Ok(Some(Rc::new(proto.clone())))
+        }
         _ => Err(type_err("Object prototype may only be an Object or null")),
     }
 }
@@ -424,6 +437,10 @@ fn apply_descriptor_map(
 /// which is why `defineProperty` produces a non-enumerable property by
 /// default while plain assignment produces an enumerable one.
 pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> Result<(), VmErr> {
+    if let Value::Function(function) = target {
+        function.ensure_name_length_properties();
+        function.prototype_value(target);
+    }
     let Some(c) = cell(target) else {
         return Err(type_err("Object.defineProperty called on non-object"));
     };

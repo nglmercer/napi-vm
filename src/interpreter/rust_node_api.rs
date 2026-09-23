@@ -1953,6 +1953,21 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
             }
             Ok(())
         }
+        Value::Function(function) => {
+            function.ensure_name_length_properties();
+            function.prototype_value(object);
+            object
+                .set_prop(key.clone(), value)
+                .map_err(|_| NAPI_GENERIC_FAILURE)?;
+            if let Some(symbol) = symbol {
+                function
+                    .properties
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&key, symbol);
+            }
+            Ok(())
+        }
         Value::Array(array) => {
             if key == "length" {
                 let Value::Number(length) = value else {
@@ -2003,8 +2018,17 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
 
 fn napi_direct_has_own_property(object: &Value, key: &Value) -> Result<bool, i32> {
     let key = napi_property_key(key)?;
+    if let Value::Function(function) = object {
+        function.ensure_name_length_properties();
+        function.prototype_value(object);
+    }
     Ok(match object {
         Value::Object { props } => props.borrow().iter().any(|(name, _)| name == &key),
+        Value::Function(function) => function
+            .properties
+            .borrow()
+            .iter()
+            .any(|(name, _)| name == &key),
         Value::Class(class) => class.statics.borrow().iter().any(|(name, _)| name == &key),
         Value::Array(array) => {
             key == "length"
@@ -2027,6 +2051,10 @@ fn napi_direct_has_own_property(object: &Value, key: &Value) -> Result<bool, i32
 
 fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32> {
     let key = napi_property_key(key)?;
+    if let Value::Function(function) = object {
+        function.ensure_name_length_properties();
+        function.prototype_value(object);
+    }
     match object {
         Value::Object { props } => {
             if !props.meta.borrow().attrs_of(&key).configurable
@@ -2056,6 +2084,30 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
             class.statics.meta.borrow_mut().forget(&companion);
             Ok(true)
         }
+        Value::Function(function) => {
+            if !function
+                .properties
+                .meta
+                .borrow()
+                .attrs_of(&key)
+                .configurable
+                && function
+                    .properties
+                    .borrow()
+                    .iter()
+                    .any(|(name, _)| name == &key)
+            {
+                return Ok(false);
+            }
+            let companion = format!("__setter:{}__", key);
+            function
+                .properties
+                .borrow_mut()
+                .retain(|(name, _)| name != &key && name != &companion);
+            function.properties.meta.borrow_mut().forget(&key);
+            function.properties.meta.borrow_mut().forget(&companion);
+            Ok(true)
+        }
         Value::Array(array) => {
             if key == "length" {
                 return Ok(false);
@@ -2077,8 +2129,18 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
 }
 
 fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
+    if let Value::Function(function) = object {
+        function.ensure_name_length_properties();
+        function.prototype_value(object);
+    }
     match object {
         Value::Object { props } => props.borrow().iter().map(|(key, _)| key.clone()).collect(),
+        Value::Function(function) => function
+            .properties
+            .borrow()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect(),
         Value::Class(class) => class
             .statics
             .borrow()
@@ -2116,6 +2178,14 @@ fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
         Value::Class(class) => {
             class.statics.borrow().iter().any(|(name, _)| name == key)
                 && class.statics.meta.borrow().attrs_of(key).enumerable
+        }
+        Value::Function(function) => {
+            function
+                .properties
+                .borrow()
+                .iter()
+                .any(|(name, _)| name == key)
+                && function.properties.meta.borrow().attrs_of(key).enumerable
         }
         Value::Array(array) => {
             key != "length"
@@ -2188,6 +2258,20 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
         Value::Object { props } => {
             let slots = props.borrow();
             let metadata = props.meta.borrow();
+            for (key, _) in slots.iter() {
+                napi_push_direct_property_key(
+                    &mut keys,
+                    key,
+                    metadata.symbol_key(key),
+                    metadata.attrs_of(key),
+                );
+            }
+        }
+        Value::Function(function) => {
+            function.ensure_name_length_properties();
+            function.prototype_value(object);
+            let slots = function.properties.borrow();
+            let metadata = function.properties.meta.borrow();
             for (key, _) in slots.iter() {
                 napi_push_direct_property_key(
                     &mut keys,
@@ -2300,7 +2384,6 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
         | Value::StringIterator { .. }
         | Value::Generator { .. } => {}
         Value::Proxy(_)
-        | Value::Function(_)
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::GlobalObject => return Err(NAPI_GENERIC_FAILURE),
@@ -6252,9 +6335,14 @@ unsafe extern "C" fn api_define_properties(
         if napi_is_external_value(&environment, &object) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
+        if let Value::Function(function) = &object {
+            function.ensure_name_length_properties();
+            function.prototype_value(&object);
+        }
         let props = match &object {
             Value::Object { props } => props,
             Value::Class(class) => &class.statics,
+            Value::Function(function) => &function.properties,
             _ => return Err(NAPI_OBJECT_EXPECTED),
         };
         let descriptors = if property_count == 0 {
@@ -6504,7 +6592,11 @@ unsafe extern "C" fn api_set_named_property(
         }
         if !matches!(
             object,
-            Value::Object { .. } | Value::Array(_) | Value::GlobalObject
+            Value::Object { .. }
+                | Value::Array(_)
+                | Value::Class(_)
+                | Value::Function(_)
+                | Value::GlobalObject
         ) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
@@ -7204,12 +7296,7 @@ unsafe extern "C" fn api_instanceof(
         if !is_napi_function(&constructor) {
             return Err(NAPI_FUNCTION_EXPECTED);
         }
-        let Value::Class(class) = &constructor else {
-            // The VM does not yet materialize [[Prototype]] for ordinary
-            // Function values or implement callable-proxy [[HasInstance]].
-            return Err(NAPI_GENERIC_FAILURE);
-        };
-        if napi_class_has_custom_has_instance(&constructor)? {
+        if napi_constructor_has_custom_has_instance(&constructor)? {
             if !has_guest_callback_dispatcher(&environment) {
                 // A custom @@hasInstance method can run guest code. Keep it
                 // on the interpreter's paused callback path; addon
@@ -7229,18 +7316,23 @@ unsafe extern "C" fn api_instanceof(
             unsafe { result.write(is_instance) };
             return Ok(());
         }
-        let is_instance = napi_class_instanceof(&object, class)?;
+        let is_instance = match &constructor {
+            Value::Class(class) => napi_class_instanceof(&object, class)?,
+            Value::Function(function) => napi_function_instanceof(&object, &constructor, function)?,
+            _ => return Err(NAPI_GENERIC_FAILURE),
+        };
         unsafe { result.write(is_instance) };
         Ok(())
     })
 }
 
-fn napi_class_has_custom_has_instance(constructor: &Value) -> Result<bool, i32> {
+fn napi_constructor_has_custom_has_instance(constructor: &Value) -> Result<bool, i32> {
     let mut current = constructor.clone();
     let mut visited = HashSet::new();
     for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
         let properties = match &current {
             Value::Class(class) => class.statics.clone(),
+            Value::Function(function) => function.properties.clone(),
             Value::Object { props } => props.clone(),
             Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
             _ => return Ok(false),
@@ -7274,15 +7366,17 @@ fn napi_guest_instanceof(
     constructor: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let Value::Class(class) = &constructor else {
-        return Err(VmErr::Msg("TypeError: constructor is not a class".into()));
-    };
     let symbol = crate::builtins::well_known("hasInstance")
         .expect("Symbol.hasInstance is a well-known symbol");
     let method = interpreter.get_prop_value(&constructor, &symbol)?;
     if matches!(method, Value::Undefined | Value::Null) {
         let value = args.first().cloned().unwrap_or(Value::Undefined);
-        return napi_class_instanceof(&value, class)
+        let result = match &constructor {
+            Value::Class(class) => napi_class_instanceof(&value, class),
+            Value::Function(function) => napi_function_instanceof(&value, &constructor, function),
+            _ => Err(NAPI_GENERIC_FAILURE),
+        };
+        return result
             .map(Value::Bool)
             .map_err(|_| VmErr::Msg("Node-API instanceof is unsupported for this value".into()));
     }
@@ -7294,6 +7388,45 @@ fn napi_guest_instanceof(
     let value = args.first().cloned().unwrap_or(Value::Undefined);
     let result = interpreter.call_this(&method, constructor, vec![value])?;
     Ok(Value::Bool(interpreter.truthy(&result)))
+}
+
+fn napi_function_instanceof(
+    object: &Value,
+    constructor: &Value,
+    function: &crate::value::FunctionData,
+) -> Result<bool, i32> {
+    if matches!(object, Value::Proxy(_)) {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    if !is_napi_property_object(object) {
+        return Ok(false);
+    }
+    let prototype = function.prototype_value(constructor);
+    if !is_napi_property_object(&prototype) {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    let mut current = object.proto_of();
+    let mut visited = HashSet::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let Some(prototype_link) = current else {
+            return Ok(false);
+        };
+        if super::strict_equals(prototype_link.as_ref(), &prototype) {
+            return Ok(true);
+        }
+        let identity = match prototype_link.as_ref() {
+            Value::Object { props } => Rc::as_ptr(props) as usize,
+            Value::Class(class) => Rc::as_ptr(&class.statics) as usize,
+            Value::Function(function) => Rc::as_ptr(&function.properties) as usize,
+            Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
+            _ => return Ok(false),
+        };
+        if !visited.insert(identity) {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        current = prototype_link.proto_of();
+    }
+    Err(NAPI_GENERIC_FAILURE)
 }
 
 fn napi_class_instanceof(object: &Value, class: &ClassData) -> Result<bool, i32> {
@@ -10880,14 +11013,26 @@ static napi_value instance_data_probe(napi_env env, napi_callback_info info) {
 }
 
 static napi_value property_names_probe(napi_env env, napi_callback_info info) {
-  napi_value args[2], target, class_target, result, all_own, enumerable, skip_strings;
+  napi_value args[3], target, class_target, function_target, result, all_own, enumerable, skip_strings;
   napi_value with_prototype, keep_numbers, writable, configurable, class_names;
-  napi_value probe_array, array_element, array_names;
-  size_t argc = 2;
-  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 2)
+  napi_value probe_array, array_element, array_names, function_names, function_property;
+  napi_property_descriptor function_descriptor = {
+      .utf8name = "definedByNapi",
+      .attributes = napi_writable | napi_configurable,
+  };
+  size_t argc = 3;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 3)
     return NULL;
   target = args[0];
   class_target = args[1];
+  function_target = args[2];
+  if (napi_create_int32(env, 23, &function_property) != napi_ok ||
+      napi_set_named_property(env, function_target, "nativeProperty", function_property) != napi_ok ||
+      napi_create_int32(env, 42, &function_property) != napi_ok)
+    return NULL;
+  function_descriptor.value = function_property;
+  if (napi_define_properties(env, function_target, 1, &function_descriptor) != napi_ok)
+    return NULL;
   if (
       napi_get_all_property_names(env, target, napi_key_own_only,
                                   napi_key_all_properties,
@@ -10913,6 +11058,9 @@ static napi_value property_names_probe(napi_env env, napi_callback_info info) {
       napi_get_all_property_names(env, class_target, napi_key_own_only,
                                   napi_key_all_properties,
                                   napi_key_numbers_to_strings, &class_names) != napi_ok ||
+      napi_get_all_property_names(env, function_target, napi_key_own_only,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &function_names) != napi_ok ||
       napi_create_array_with_length(env, 2, &probe_array) != napi_ok ||
       napi_create_int32(env, 7, &array_element) != napi_ok ||
       napi_set_element(env, probe_array, 0, array_element) != napi_ok ||
@@ -10928,6 +11076,7 @@ static napi_value property_names_probe(napi_env env, napi_callback_info info) {
       napi_set_named_property(env, result, "writable", writable) != napi_ok ||
       napi_set_named_property(env, result, "configurable", configurable) != napi_ok ||
       napi_set_named_property(env, result, "classNames", class_names) != napi_ok ||
+      napi_set_named_property(env, result, "functionNames", function_names) != napi_ok ||
       napi_set_named_property(env, result, "arrayNames", array_names) != napi_ok)
     return NULL;
   return result;
@@ -12826,7 +12975,9 @@ Object.defineProperty(propertyNamesTarget, 'hidden', {
 propertyNamesTarget[3] = 'three';
 propertyNamesTarget['01'] = 'named';
 propertyNamesTarget[Symbol('own')] = 'symbol';
-const rawPropertyNames = addon.propertyNamesProbe(propertyNamesTarget, addon.Counter);
+function reflectedFunction(argument) {}
+const rawPropertyNames = addon.propertyNamesProbe(
+  propertyNamesTarget, addon.Counter, reflectedFunction);
 const describePropertyKey = key => typeof key === 'symbol'
   ? key.toString()
   : `${typeof key}:${key}`;
@@ -12841,6 +12992,9 @@ const propertyNames = {
   // Node and Bun insert the class prototype in different positions; keep the
   // cross-runtime comparison focused on the shared class own-key set.
   class: rawPropertyNames.classNames.map(describePropertyKey).sort(),
+  function: rawPropertyNames.functionNames.map(describePropertyKey).filter(name =>
+    ['string:length', 'string:name', 'string:prototype', 'string:nativeProperty',
+      'string:definedByNapi'].includes(name)),
   array: rawPropertyNames.arrayNames.map(describePropertyKey),
 };
 const backingBytes = new Uint8Array(typedArrays.buffer);
@@ -13032,12 +13186,61 @@ Object.defineProperty(Marked, Symbol.hasInstance, {
   },
 });
 class MarkedChild extends Marked {}
+const functionCalls = [];
+function MarkedFunction() {}
+Object.defineProperty(MarkedFunction, Symbol.hasInstance, {
+  configurable: true,
+  value(value) {
+    functionCalls.push(this);
+    return value && value.marked ? 'yes' : '';
+  },
+});
+function InheritedMarkedFunction() {}
+Object.setPrototypeOf(InheritedMarkedFunction, MarkedFunction);
+function Ordinary(value) { this.value = value; }
+const ordinary = new Ordinary(17);
+function DeletedName() {}
+const nameDeleted = delete DeletedName.name &&
+  DeletedName.name === '' && !Object.hasOwn(DeletedName, 'name');
+const ordinaryNames = Object.getOwnPropertyNames(Ordinary);
+const ordinaryNameDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'name');
+const ordinaryLengthDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'length');
+const ordinaryPrototypeDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'prototype');
 module.exports = {
   matched: addon.instanceofProbe({marked: true}, Marked),
   rejected: addon.instanceofProbe({marked: false}, Marked),
   inherited: addon.instanceofProbe({marked: true}, MarkedChild),
-  receiverWasConstructor: calls.length === 3 && calls[0] === Marked &&
-    calls[1] === Marked && calls[2] === MarkedChild,
+  guestMatched: ({marked: true}) instanceof Marked,
+  guestInherited: ({marked: true}) instanceof MarkedChild,
+  receiverWasConstructor: calls.length === 5 && calls[0] === Marked &&
+    calls[1] === Marked && calls[2] === MarkedChild &&
+    calls[3] === Marked && calls[4] === MarkedChild,
+  functionMatched: addon.instanceofProbe({marked: true}, MarkedFunction),
+  functionRejected: addon.instanceofProbe({marked: false}, MarkedFunction),
+  functionInherited: addon.instanceofProbe({marked: true}, InheritedMarkedFunction),
+  guestFunctionMatched: ({marked: true}) instanceof MarkedFunction,
+  guestFunctionInherited: ({marked: true}) instanceof InheritedMarkedFunction,
+  functionReceiverWasConstructor: functionCalls.length === 5 &&
+    functionCalls[0] === MarkedFunction && functionCalls[1] === MarkedFunction &&
+    functionCalls[2] === InheritedMarkedFunction &&
+    functionCalls[3] === MarkedFunction &&
+    functionCalls[4] === InheritedMarkedFunction,
+  ordinaryIsInstance: addon.instanceofProbe(ordinary, Ordinary),
+  ordinaryGuestInstanceof: ordinary instanceof Ordinary,
+  ordinaryPrototypeShared: Object.getPrototypeOf(ordinary) === Ordinary.prototype,
+  ordinaryConstructorShared: ordinary.constructor === Ordinary,
+  ordinaryName: Ordinary.name,
+  ordinaryLength: Ordinary.length,
+  ordinaryStandardProperties: ['length', 'name', 'prototype'].every(name =>
+    ordinaryNames.includes(name)),
+  ordinaryDescriptors: ordinaryNameDescriptor.writable === false &&
+    ordinaryNameDescriptor.enumerable === false && ordinaryNameDescriptor.configurable === true &&
+    ordinaryLengthDescriptor.value === 1 && ordinaryLengthDescriptor.writable === false &&
+    ordinaryPrototypeDescriptor.writable === true &&
+    ordinaryPrototypeDescriptor.enumerable === false &&
+    ordinaryPrototypeDescriptor.configurable === false,
+  nameDeleted,
+  ordinaryValue: ordinary.value,
 };
 "#,
         )
@@ -13450,7 +13653,25 @@ module.exports = {
                 "matched": true,
                 "rejected": false,
                 "inherited": true,
-                "receiverWasConstructor": true
+                "guestMatched": true,
+                "guestInherited": true,
+                "receiverWasConstructor": true,
+                "functionMatched": true,
+                "functionRejected": false,
+                "functionInherited": true,
+                "guestFunctionMatched": true,
+                "guestFunctionInherited": true,
+                "functionReceiverWasConstructor": true,
+                "ordinaryIsInstance": true,
+                "ordinaryGuestInstanceof": true,
+                "ordinaryPrototypeShared": true,
+                "ordinaryConstructorShared": true,
+                "ordinaryName": "Ordinary",
+                "ordinaryLength": 1,
+                "ordinaryStandardProperties": true,
+                "ordinaryDescriptors": true,
+                "nameDeleted": true,
+                "ordinaryValue": 17
             })
         );
         let custom_instance_runner =
@@ -13641,10 +13862,20 @@ module.exports = {
                 "string:readOnly"
             ]
         );
+        assert_eq!(
+            get_names("function"),
+            [
+                "string:length",
+                "string:name",
+                "string:prototype",
+                "string:nativeProperty",
+                "string:definedByNapi"
+            ]
+        );
         assert_eq!(get_names("array"), ["string:0", "string:length"]);
         let class_name_value = interpreter
             .eval_source(
-                "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter).classNames;",
+                "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter, function Reflected(argument) {}).classNames;",
             )
             .unwrap();
         let Value::Array(class_names) = &class_name_value else {
