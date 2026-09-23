@@ -1084,6 +1084,7 @@ impl Interpreter {
         let mut object = Vec::new();
         let mut positions = HashMap::new();
         let mut accessors = HashMap::new();
+        let mut symbol_keys = Vec::new();
         for prop in props {
             match prop {
                 ObjectProp::Shorthand(name) => {
@@ -1109,6 +1110,10 @@ impl Interpreter {
                 }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     let key_value = self.eval_expr(key_expression)?;
+                    let symbol = match &key_value {
+                        Value::Symbol(symbol) => Some(symbol.clone()),
+                        _ => None,
+                    };
                     let key = match &key_value {
                         Value::String(value) => value.clone(),
                         Value::Number(value) => value.to_string(),
@@ -1119,10 +1124,13 @@ impl Interpreter {
                         &mut object,
                         &mut positions,
                         &mut accessors,
-                        key,
+                        key.clone(),
                         self.eval_expr(value_expression)?,
                         None,
                     );
+                    if let Some(symbol) = symbol {
+                        symbol_keys.push((key, symbol));
+                    }
                 }
                 ObjectProp::Method {
                     name,
@@ -1218,7 +1226,14 @@ impl Interpreter {
                 ));
             }
         }
-        Value::checked_object(object.into_iter().flatten().collect())
+        let result = Value::checked_object(object.into_iter().flatten().collect())?;
+        if let Value::Object { props } = &result {
+            let mut meta = props.meta.borrow_mut();
+            for (key, symbol) in symbol_keys {
+                meta.set_symbol_key(&key, symbol);
+            }
+        }
+        Ok(result)
     }
 
     /// Run a `switch`'s cases inside the scope the caller already pushed.

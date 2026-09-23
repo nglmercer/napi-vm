@@ -113,11 +113,12 @@ after native calls, including calls that throw. Writeback includes nested
 objects, named array properties, and property attributes on objects. Guest
 `Date`, `RegExp`, and binary values are copied; in-place changes to those
 values fail clearly.
-Accessor properties on plain guest objects can be read and written by native
-addons, including getter and setter callbacks into guest JavaScript. Accessors
-on arrays, symbol-keyed properties, sparse arrays, custom prototype behavior,
-and array descriptor changes are not fully compatible yet. Some reflection
-behavior still differs across the VM/Node boundary.
+Accessor and symbol-keyed properties on plain objects cross the native addon
+bridge. Accessors invoke guest getter and setter callbacks, and symbol keys
+retain identity in both directions. Accessors or symbol keys on arrays, sparse
+arrays, custom prototype behavior, and array descriptor changes are not fully
+compatible yet. Some reflection behavior still differs across the VM/Node
+boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 

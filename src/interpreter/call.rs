@@ -251,6 +251,15 @@ impl Interpreter {
             return self.assign_member(&target, prop, val);
         }
         match (obj, prop) {
+            (Value::Object { props }, Value::Symbol(symbol)) => {
+                let slot = crate::interpreter::symbol_slot_key(symbol);
+                self.assign_member(obj, &Value::String(slot.clone()), val)?;
+                props
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
+                Ok(())
+            }
             (Value::Object { props }, Value::String(k)) => {
                 // If a setter is defined for this key, invoke it.
                 //

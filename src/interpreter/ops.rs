@@ -78,6 +78,17 @@ pub fn symbol_slot_key(symbol: &crate::value::SymbolData) -> String {
     }
 }
 
+/// Recover the symbol id encoded in an object's internal symbol-key slot.
+pub fn symbol_id_from_slot(key: &str) -> Option<u64> {
+    if key == SYMBOL_ITERATOR_SLOT {
+        return Some(1);
+    }
+    key.strip_prefix("__symbol:")?
+        .strip_suffix("__")?
+        .parse()
+        .ok()
+}
+
 /// The slot every iterable stores its `[Symbol.iterator]` method in.
 pub const SYMBOL_ITERATOR_SLOT: &str = "__symbol_iterator__";
 

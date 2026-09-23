@@ -233,16 +233,31 @@ fn object_get_own_property_names(
 fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let source = a.first().cloned().unwrap_or(Value::Undefined);
     let mut props: Vec<(String, Value)> = Vec::new();
+    let mut symbol_keys = Vec::new();
     for entry in interp.iterate(&source)? {
         let raw_key = interp.member(&entry, "0")?;
+        let symbol = match &raw_key {
+            Value::Symbol(symbol) => Some(symbol.clone()),
+            _ => None,
+        };
         let key = interp.property_key(&raw_key)?;
         let value = interp.member(&entry, "1")?;
         match props.iter_mut().find(|(k, _)| *k == key) {
             Some((_, slot)) => *slot = value,
-            None => props.push((key, value)),
+            None => props.push((key.clone(), value)),
+        }
+        if let Some(symbol) = symbol {
+            symbol_keys.push((key, symbol));
         }
     }
-    Value::checked_object(props)
+    let object = Value::checked_object(props)?;
+    if let Value::Object { props } = &object {
+        let mut meta = props.meta.borrow_mut();
+        for (key, symbol) in symbol_keys {
+            meta.set_symbol_key(&key, symbol);
+        }
+    }
+    Ok(object)
 }
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -344,9 +359,17 @@ fn object_define_property(
     if cell(&target).is_none() {
         return Err(type_err("Object.defineProperty called on non-object"));
     }
-    let key = interp.property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let raw_key = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let symbol = match &raw_key {
+        Value::Symbol(symbol) => Some(symbol.clone()),
+        _ => None,
+    };
+    let key = interp.property_key(&raw_key)?;
     let descriptor = a.get(2).cloned().unwrap_or(Value::Undefined);
     define_property(&target, &key, &descriptor)?;
+    if let (Some(object), Some(symbol)) = (cell(&target), symbol) {
+        object.meta.borrow_mut().set_symbol_key(&key, symbol);
+    }
     Ok(target)
 }
 

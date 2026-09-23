@@ -74,6 +74,10 @@ pub struct ObjectMeta {
     pub proto: Option<Rc<Value>>,
     /// Non-default property attributes, keyed by property name.
     pub attrs: Vec<(String, PropAttrs)>,
+    /// Original identities for symbol-keyed property slots. The slot key keeps
+    /// prototype lookup compact; this table preserves symbol descriptions and
+    /// prevents a bridge from having to reconstruct a symbol from its id.
+    pub symbol_keys: Vec<(String, Rc<SymbolData>)>,
     /// Cleared by `Object.preventExtensions`/`seal`/`freeze`: no new own
     /// properties may be added.
     pub non_extensible: bool,
@@ -109,8 +113,24 @@ impl ObjectMeta {
         }
     }
 
+    pub fn symbol_key(&self, key: &str) -> Option<Rc<SymbolData>> {
+        self.symbol_keys
+            .iter()
+            .find(|(slot, _)| slot == key)
+            .map(|(_, symbol)| symbol.clone())
+    }
+
+    pub fn set_symbol_key(&mut self, key: &str, symbol: Rc<SymbolData>) {
+        if let Some((_, existing)) = self.symbol_keys.iter_mut().find(|(slot, _)| slot == key) {
+            *existing = symbol;
+        } else {
+            self.symbol_keys.push((key.to_string(), symbol));
+        }
+    }
+
     pub fn forget(&mut self, key: &str) {
         self.attrs.retain(|(k, _)| k != key);
+        self.symbol_keys.retain(|(k, _)| k != key);
     }
 }
 

@@ -169,13 +169,13 @@ function addonWorkerMain() {
       if(graph.seen.size>=262144)throw new RangeError('native graph node limit exceeded');
       const id='n:'+graph.nextId++;graph.seen.set(value,id);
       const entries=[];
-      for(const key of Object.getOwnPropertyNames(value)){
+      for(const key of Reflect.ownKeys(value)){
         const descriptor=Object.getOwnPropertyDescriptor(value,key);
         if(!descriptor)throw new TypeError('property descriptor cannot cross the Node addon bridge');
-        if(Object.hasOwn(descriptor,'value'))entries.push([key,encode(descriptor.value,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
-        else entries.push([key,{t:'undefined'},true,descriptor.enumerable,descriptor.configurable,descriptor.get?encode(descriptor.get,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):null,descriptor.set?encode(descriptor.set,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):null]);
+        const wireKey=typeof key==='symbol'?encode(key,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):key;
+        if(Object.hasOwn(descriptor,'value'))entries.push([wireKey,encode(descriptor.value,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
+        else entries.push([wireKey,{t:'undefined'},true,descriptor.enumerable,descriptor.configurable,descriptor.get?encode(descriptor.get,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):null,descriptor.set?encode(descriptor.set,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):null]);
       }
-      if(Object.getOwnPropertySymbols(value).length)throw new TypeError('symbol properties cannot cross the Node addon bridge');
       const extensible=Object.isExtensible(value);
       return {t:'object',id,v:entries,extensible};
     }
@@ -215,14 +215,13 @@ function addonWorkerMain() {
       };guestCallbackIds.set(callback,value.v);return callback;}
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
       case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});return a;}
-      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [k,v,writable=true,enumerable=true,configurable=true]=item;const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.extensible===false)Object.preventExtensions(o);return o;}
+      case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.extensible===false)Object.preventExtensions(o);return o;}
       default:throw new TypeError('unsupported napi-vm argument');
     }
   }
   function descriptorState(object){
-    const symbols=Object.getOwnPropertySymbols(object);if(symbols.length)throw new TypeError('symbol properties on guest objects cannot be mutated through the Node addon bridge');
     const entries=new Map();
-    for(const key of Object.getOwnPropertyNames(object)){
+    for(const key of Reflect.ownKeys(object)){
       if(Array.isArray(object)&&key==='length')continue;
       const descriptor=Object.getOwnPropertyDescriptor(object,key);
       if(!descriptor)throw new TypeError('guest property descriptor could not be read');
@@ -239,7 +238,7 @@ function addonWorkerMain() {
       else if(ArrayBuffer.isView(value))state.set(value,value.constructor.name+':'+Buffer.from(value.buffer,value.byteOffset,value.byteLength).toString('hex'));
       else if(value instanceof ArrayBuffer)state.set(value,'buffer:'+Buffer.from(value).toString('hex'));
       if(Array.isArray(value)||Object.getPrototypeOf(value)===Object.prototype||Object.getPrototypeOf(value)===null)
-        for(const key of Object.getOwnPropertyNames(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(descriptor&&Object.hasOwn(descriptor,'value'))visit(descriptor.value);}
+        for(const key of Reflect.ownKeys(value)){const descriptor=Object.getOwnPropertyDescriptor(value,key);if(descriptor&&Object.hasOwn(descriptor,'value'))visit(descriptor.value);}
     }
     for(const value of nodes.values())visit(value);
     return state;
@@ -273,16 +272,17 @@ function addonWorkerMain() {
       const entries=[];
       for(const key of changedKeys){
         const descriptor=now.entries.get(key);
-        if(Object.hasOwn(descriptor,'value'))entries.push([key,encodeGuestValue(descriptor.value,value,1,graph,guestRefs,guestCallbackIds),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
-        else entries.push([key,{t:'undefined'},true,descriptor.enumerable,descriptor.configurable,descriptor.get?encodeGuestValue(descriptor.get,value,1,graph,guestRefs,guestCallbackIds):null,descriptor.set?encodeGuestValue(descriptor.set,value,1,graph,guestRefs,guestCallbackIds):null]);
+        const wireKey=typeof key==='symbol'?encodeGuestValue(key,value,1,graph,guestRefs,guestCallbackIds):key;
+        if(Object.hasOwn(descriptor,'value'))entries.push([wireKey,encodeGuestValue(descriptor.value,value,1,graph,guestRefs,guestCallbackIds),descriptor.writable,descriptor.enumerable,descriptor.configurable]);
+        else entries.push([wireKey,{t:'undefined'},true,descriptor.enumerable,descriptor.configurable,descriptor.get?encodeGuestValue(descriptor.get,value,1,graph,guestRefs,guestCallbackIds):null,descriptor.set?encodeGuestValue(descriptor.set,value,1,graph,guestRefs,guestCallbackIds):null]);
       }
       if(Array.isArray(value)){
         if(!now.extensible)throw new TypeError('preventExtensions on guest arrays is not supported by the Node addon bridge');
         for(let i=0;i<value.length;i++)if(!Object.hasOwn(value,String(i)))throw new TypeError('sparse array mutations are not supported by the Node addon bridge');
         const lengthDescriptor=Object.getOwnPropertyDescriptor(value,'length');
         if(!lengthDescriptor||lengthDescriptor.writable!==true)throw new TypeError('array length descriptor changes are not supported by the Node addon bridge');
-        mutations.push({id,kind:'array',...(old.length!==now.length?{length:value.length}:{}),entries,deleted});
-      }else mutations.push({id,kind:'object',...(old.extensible!==now.extensible?{extensible:now.extensible}:{}),entries,deleted});
+        mutations.push({id,kind:'array',...(old.length!==now.length?{length:value.length}:{}),entries,deleted:deleted.map(key=>typeof key==='symbol'?encodeGuestValue(key,value,1,graph,guestRefs,guestCallbackIds):key)});
+      }else mutations.push({id,kind:'object',...(old.extensible!==now.extensible?{extensible:now.extensible}:{}),entries,deleted:deleted.map(key=>typeof key==='symbol'?encodeGuestValue(key,value,1,graph,guestRefs,guestCallbackIds):key)});
     }
     return mutations;
   }
@@ -1184,6 +1184,21 @@ fn guest_accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
     }
 }
 
+fn guest_symbol_key_wire(sidecar: &NodeAddonSidecar, symbol: &SymbolData) -> JsonValue {
+    let remote_id = sidecar
+        .state
+        .borrow()
+        .symbol_remote_ids
+        .get(&symbol.id)
+        .cloned()
+        .unwrap_or_else(|| format!("g:{}", symbol.id));
+    json!({
+        "t": "symbol",
+        "v": remote_id,
+        "description": symbol.description,
+    })
+}
+
 fn guest_to_wire(
     sidecar: &NodeAddonSidecar,
     v: &Value,
@@ -1249,9 +1264,17 @@ fn guest_to_wire(
             let node_id = graph.register(id, v.clone())?;
             let mut wire = Vec::with_capacity(entries.len());
             for (key, value) in &entries {
-                if crate::interpreter::is_internal_key(key) {
+                let wire_key = if let Some(symbol) = meta.symbol_key(key) {
+                    guest_symbol_key_wire(sidecar, &symbol)
+                } else if crate::interpreter::symbol_id_from_slot(key).is_some() {
+                    return Err(VmErr::Msg(
+                        "guest symbol property has no symbol metadata".into(),
+                    ));
+                } else if crate::interpreter::is_internal_key(key) {
                     continue;
-                }
+                } else {
+                    json!(key)
+                };
                 let attrs = meta.attrs_of(key);
                 let kind = guest_accessor_kind(key, value);
                 let getter = (kind == Some("get")).then_some(value);
@@ -1278,7 +1301,7 @@ fn guest_to_wire(
                         .transpose()?
                         .unwrap_or(JsonValue::Null);
                     wire.push(json!([
-                        key,
+                        wire_key,
                         {"t":"undefined"},
                         true,
                         attrs.enumerable,
@@ -1288,7 +1311,7 @@ fn guest_to_wire(
                     ]));
                 } else {
                     wire.push(json!([
-                        key,
+                        wire_key,
                         guest_to_wire(sidecar, value, depth + 1, graph, proxy_ids)?,
                         attrs.writable,
                         attrs.enumerable,
@@ -1457,9 +1480,7 @@ fn mutation_property(
         .as_array()
         .filter(|pair| pair.len() == 5 || pair.len() == 7)
         .ok_or_else(|| VmErr::Msg("invalid Node guest mutation property".into()))?;
-    let key = pair[0]
-        .as_str()
-        .ok_or_else(|| VmErr::Msg("invalid Node guest mutation property key".into()))?;
+    let (key, symbol) = wire_property_slot(sidecar, &pair[0], 0, graph)?;
     let attrs = PropAttrs {
         writable: pair[2]
             .as_bool()
@@ -1483,7 +1504,8 @@ fn mutation_property(
         .map(|value| wire_to_guest_with_context(sidecar, value, 0, graph))
         .transpose()?;
     Ok(GuestPropertyMutation {
-        key: key.to_string(),
+        key,
+        symbol,
         value,
         attrs,
         getter,
@@ -1491,8 +1513,34 @@ fn mutation_property(
     })
 }
 
+fn wire_property_slot(
+    sidecar: &NodeAddonSidecar,
+    key: &JsonValue,
+    depth: usize,
+    graph: &mut WireDecodeContext,
+) -> Result<(String, Option<Rc<SymbolData>>), VmErr> {
+    if let Some(key) = key.as_str() {
+        return Ok((key.to_string(), None));
+    }
+    let value = wire_to_guest_with_context(sidecar, key, depth, graph)?;
+    match &value {
+        Value::Symbol(symbol) => Ok((
+            crate::interpreter::symbol_slot_key(symbol),
+            Some(symbol.clone()),
+        )),
+        _ => Err(VmErr::Msg(
+            "invalid Node guest mutation property key".into(),
+        )),
+    }
+}
+
+fn is_reserved_guest_property_key(key: &str, symbol: bool) -> bool {
+    !symbol && crate::interpreter::is_internal_key(key)
+}
+
 struct GuestPropertyMutation {
     key: String,
+    symbol: Option<Rc<SymbolData>>,
     value: Value,
     attrs: PropAttrs,
     getter: Option<Value>,
@@ -1564,7 +1612,7 @@ fn apply_guest_mutation(
             let mut keys = HashSet::with_capacity(entries.len());
             for item in entries {
                 let property = mutation_property(sidecar, item, graph)?;
-                if crate::interpreter::is_internal_key(&property.key) {
+                if is_reserved_guest_property_key(&property.key, property.symbol.is_some()) {
                     return Err(VmErr::Msg(
                         "Node addon mutation uses a reserved VM property name".into(),
                     ));
@@ -1594,30 +1642,29 @@ fn apply_guest_mutation(
                         ));
                     }
                 }
-                attributes.push((property.key.clone(), property.attrs));
+                attributes.push((
+                    property.key.clone(),
+                    property.attrs,
+                    property.symbol.clone(),
+                ));
                 updates.push(property);
             }
             let has_accessor_updates = updates
                 .iter()
                 .any(|property| property.getter.is_some() || property.setter.is_some());
-            let deleted = mutation
+            let deleted_entries = mutation
                 .get("deleted")
                 .and_then(JsonValue::as_array)
-                .ok_or_else(|| VmErr::Msg("Node object mutation has invalid deletions".into()))?
-                .iter()
-                .map(|key| {
-                    key.as_str()
-                        .map(str::to_string)
-                        .ok_or_else(|| VmErr::Msg("Node deletion has an invalid key".into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            if deleted
-                .iter()
-                .any(|key| crate::interpreter::is_internal_key(key))
-            {
-                return Err(VmErr::Msg(
-                    "Node addon mutation deletes a reserved VM property name".into(),
-                ));
+                .ok_or_else(|| VmErr::Msg("Node object mutation has invalid deletions".into()))?;
+            let mut deleted = Vec::with_capacity(deleted_entries.len());
+            for key in deleted_entries {
+                let (key, symbol) = wire_property_slot(sidecar, key, 0, graph)?;
+                if is_reserved_guest_property_key(&key, symbol.is_some()) {
+                    return Err(VmErr::Msg(
+                        "Node addon mutation deletes a reserved VM property name".into(),
+                    ));
+                }
+                deleted.push(key);
             }
             let mut slots = props.borrow_mut();
             slots.retain(|(key, _)| {
@@ -1658,9 +1705,12 @@ fn apply_guest_mutation(
             for key in &deleted {
                 meta.forget(key);
             }
-            for (key, attrs) in attributes {
+            for (key, attrs, symbol) in attributes {
                 meta.forget(&key);
                 meta.set_attrs(&key, attrs);
+                if let Some(symbol) = symbol {
+                    meta.set_symbol_key(&key, symbol);
+                }
             }
             meta.has_accessors |= has_accessor_updates;
             if let Some(extensible) = mutation.get("extensible").and_then(JsonValue::as_bool) {
@@ -1689,6 +1739,11 @@ fn apply_guest_mutation(
             let mut keys = HashSet::with_capacity(entries.len());
             for item in entries {
                 let property = mutation_property(sidecar, item, graph)?;
+                if property.symbol.is_some() {
+                    return Err(VmErr::Msg(
+                        "symbol-keyed array mutation is not supported by the VM".into(),
+                    ));
+                }
                 if !keys.insert(property.key.clone()) {
                     return Err(VmErr::Msg(
                         "Node array mutation has duplicate properties".into(),
@@ -1728,9 +1783,12 @@ fn apply_guest_mutation(
                 .and_then(JsonValue::as_array)
                 .ok_or_else(|| VmErr::Msg("Node array mutation has invalid deletions".into()))?;
             for key in deleted {
-                let key = key
-                    .as_str()
-                    .ok_or_else(|| VmErr::Msg("Node deletion has an invalid key".into()))?;
+                let (key, symbol) = wire_property_slot(sidecar, key, 0, graph)?;
+                if symbol.is_some() {
+                    return Err(VmErr::Msg(
+                        "symbol-keyed array mutation is not supported by the VM".into(),
+                    ));
+                }
                 if let Ok(index) = key.parse::<usize>()
                     && key == index.to_string()
                     && index < items.len()
@@ -1739,7 +1797,7 @@ fn apply_guest_mutation(
                         "sparse Node array mutations cannot be represented by the VM".into(),
                     ));
                 }
-                named.retain(|(name, _)| name != key);
+                named.retain(|(name, _)| name != &key);
             }
             *array.borrow_mut() = items;
             *array.named.borrow_mut() = named;
@@ -2059,9 +2117,7 @@ fn wire_to_guest_with_context(
                     .as_array()
                     .filter(|p| p.len() == 2 || p.len() == 5 || p.len() == 7)
                     .ok_or_else(|| VmErr::Msg("invalid Node property".into()))?;
-                let key = pair[0]
-                    .as_str()
-                    .ok_or_else(|| VmErr::Msg("invalid Node property key".into()))?;
+                let (key, symbol) = wire_property_slot(sidecar, &pair[0], depth + 1, graph)?;
                 if pair.len() == 7 {
                     let getter = (!pair[5].is_null())
                         .then(|| wire_to_guest_with_context(sidecar, &pair[5], depth + 1, graph))
@@ -2078,16 +2134,13 @@ fn wire_to_guest_with_context(
                         if !callable_value(&getter) {
                             return Err(VmErr::Msg("Node accessor getter is not callable".into()));
                         }
-                        slots.push((
-                            key.to_string(),
-                            named_accessor(getter, format!("get {key}"))?,
-                        ));
+                        slots.push((key.clone(), named_accessor(getter, format!("get {key}"))?));
                     }
                     if let Some(setter) = setter {
                         if !callable_value(&setter) {
                             return Err(VmErr::Msg("Node accessor setter is not callable".into()));
                         }
-                        let slot = if slots.last().is_some_and(|(slot, _)| slot == key) {
+                        let slot = if slots.last().is_some_and(|(slot, _)| slot == &key) {
                             format!("__setter:{key}__")
                         } else {
                             key.to_string()
@@ -2097,24 +2150,28 @@ fn wire_to_guest_with_context(
                     has_accessors = true;
                 } else {
                     slots.push((
-                        key.to_string(),
+                        key.clone(),
                         wire_to_guest_with_context(sidecar, &pair[1], depth + 1, graph)?,
                     ));
                 }
                 attrs.push((
-                    key.to_string(),
+                    key.clone(),
                     PropAttrs {
                         writable: pair.get(2).and_then(JsonValue::as_bool).unwrap_or(true),
                         enumerable: pair.get(3).and_then(JsonValue::as_bool).unwrap_or(true),
                         configurable: pair.get(4).and_then(JsonValue::as_bool).unwrap_or(true),
                     },
+                    symbol,
                 ));
             }
             if let Value::Object { props } = &object {
                 *props.borrow_mut() = slots;
                 let mut meta = props.meta.borrow_mut();
-                for (key, value) in attrs {
+                for (key, value, symbol) in attrs {
                     meta.set_attrs(&key, value);
+                    if let Some(symbol) = symbol {
+                        meta.set_symbol_key(&key, symbol);
+                    }
                 }
                 meta.has_accessors = has_accessors;
                 if v.get("extensible").and_then(JsonValue::as_bool) == Some(false) {
@@ -2317,6 +2374,43 @@ static napi_value write_property(napi_env env, napi_callback_info info) {
   if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
       napi_set_named_property(env, argv[0], "value", argv[1]) != napi_ok) return NULL;
   return argv[1];
+}
+
+static napi_value read_symbol_property(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_get_property(env, argv[0], argv[1], &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value write_symbol_property(napi_env env, napi_callback_info info) {
+  size_t argc = 3;
+  napi_value argv[3];
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 3 ||
+      napi_set_property(env, argv[0], argv[1], argv[2]) != napi_ok) return NULL;
+  return argv[2];
+}
+
+static napi_value delete_symbol_property(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  bool deleted = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_delete_property(env, argv[0], argv[1], &deleted) != napi_ok ||
+      napi_get_boolean(env, deleted, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_symbol_object(napi_env env, napi_callback_info info) {
+  napi_value object, description, key, value;
+  if (napi_create_object(env, &object) != napi_ok ||
+      napi_create_string_utf8(env, "native-key", NAPI_AUTO_LENGTH, &description) != napi_ok ||
+      napi_create_symbol(env, description, &key) != napi_ok ||
+      napi_create_int32(env, 89, &value) != napi_ok ||
+      napi_set_property(env, object, key, value) != napi_ok ||
+      napi_set_named_property(env, object, "key", key) != napi_ok) return NULL;
+  return object;
 }
 
 static napi_value mutate_object(napi_env env, napi_callback_info info) {
@@ -2637,6 +2731,14 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "readProperty", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "writeProperty", NAPI_AUTO_LENGTH, write_property, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "writeProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "readSymbolProperty", NAPI_AUTO_LENGTH, read_symbol_property, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "readSymbolProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "writeSymbolProperty", NAPI_AUTO_LENGTH, write_symbol_property, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "writeSymbolProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "deleteSymbolProperty", NAPI_AUTO_LENGTH, delete_symbol_property, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "deleteSymbolProperty", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeSymbolObject", NAPI_AUTO_LENGTH, make_symbol_object, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeSymbolObject", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "mutateObject", NAPI_AUTO_LENGTH, mutate_object, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "mutateObject", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "mutateArray", NAPI_AUTO_LENGTH, mutate_array, NULL, &fn) != napi_ok) return NULL;
@@ -2899,6 +3001,60 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(
             accessor_bridge.get_prop("after"),
             Some(Value::Number(value)) if value == 37.0
+        ));
+        let symbol_bridge = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); const key = Symbol('addon-key'); const defined = Symbol('defined-key'); const accessKey = Symbol('accessor-key'); const object = {[key]:18}; Object.defineProperty(object, defined, {value:29, writable:true, enumerable:true, configurable:true}); let captured = 6; Object.defineProperty(object, accessKey, {get: () => captured, set: (value) => { captured = value; }, enumerable:true, configurable:true}); const accessorBefore = addon.readSymbolProperty(object, accessKey); addon.writeSymbolProperty(object, accessKey, 61); const accessorAfter = addon.readSymbolProperty(object, accessKey); const fromKey = Symbol('from-entries'); const fromObject = Object.fromEntries([[fromKey, 71]]); const fromEntries = addon.readSymbolProperty(fromObject, fromKey); const before = addon.readSymbolProperty(object, key); addon.writeSymbolProperty(object, key, 53); const after = object[key]; const deleted = addon.deleteSymbolProperty(object, key); ({before, after, deleted, final: object[key], defined: object[defined], fromEntries, accessorBefore, accessorAfter, captured});",
+            )
+            .unwrap();
+        assert!(matches!(
+            symbol_bridge.get_prop("before"),
+            Some(Value::Number(value)) if value == 18.0
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("after"),
+            Some(Value::Number(value)) if value == 53.0
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("deleted"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("final"),
+            Some(Value::Undefined)
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("defined"),
+            Some(Value::Number(value)) if value == 29.0
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("fromEntries"),
+            Some(Value::Number(value)) if value == 71.0
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("accessorBefore"),
+            Some(Value::Number(value)) if value == 6.0
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("accessorAfter"),
+            Some(Value::Number(value)) if value == 61.0
+        ));
+        assert!(matches!(
+            symbol_bridge.get_prop("captured"),
+            Some(Value::Number(value)) if value == 61.0
+        ));
+        let returned_symbol_bridge = interpreter
+            .eval_source(
+                "const native = require('./fixture.node').makeSymbolObject(); ({description: native.key.description, value: native[native.key]});",
+            )
+            .unwrap();
+        assert!(matches!(
+            returned_symbol_bridge.get_prop("description"),
+            Some(Value::String(ref value)) if value == "native-key"
+        ));
+        assert!(matches!(
+            returned_symbol_bridge.get_prop("value"),
+            Some(Value::Number(value)) if value == 89.0
         ));
         let callback_mutations = interpreter
             .eval_source(

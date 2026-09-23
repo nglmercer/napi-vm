@@ -62,7 +62,9 @@ impl Realm {
     }
 }
 pub use jobs::{Job, JobQueue, Jobs};
-pub use ops::{SYMBOL_ITERATOR_SLOT, is_internal_key, strict_equals, symbol_slot_key};
+pub use ops::{
+    SYMBOL_ITERATOR_SLOT, is_internal_key, strict_equals, symbol_id_from_slot, symbol_slot_key,
+};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
