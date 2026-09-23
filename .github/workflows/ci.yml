@@ -574,6 +574,70 @@ jobs:
           name: napi-vm-win-arm64
           path: "*.node"
 
+  # ── Windows in-process Node-API host ──────────────────────────────────
+  windows-node-api-host:
+    name: Windows Node-API host (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # v1.2.0
+        with:
+          toolchain: 1.96.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Test in-process Node-API loading (MSVC)
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsInstall = & $vswhere -latest -products '*' -property installationPath
+          if (-not $vsInstall) {
+            throw 'Could not locate Visual Studio for the MSVC Node-API test.'
+          }
+
+          $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
+          $envScript = Join-Path $env:RUNNER_TEMP 'load-msvc-environment.cmd'
+          @("call `"$vcvars`" -arch=x64 -host_arch=x64 >nul", 'set') |
+            Set-Content -Path $envScript -Encoding ascii
+          $msvcEnvironment = & cmd.exe /d /c $envScript
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not initialize the MSVC environment.'
+          }
+          foreach ($line in $msvcEnvironment) {
+            $separator = $line.IndexOf('=')
+            if ($separator -gt 0) {
+              $name = $line.Substring(0, $separator)
+              $value = $line.Substring($separator + 1)
+              Set-Item "Env:$name" $value
+            }
+          }
+
+          cargo build --release --no-default-features --features node-api-host --lib
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not build the in-process Node-API host.'
+          }
+
+          $importLibrary = Get-ChildItem 'target/release/build/napi-vm-*/out/node.lib' |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $importLibrary) {
+            throw 'The Node-API host did not produce node.lib.'
+          }
+
+          $fixture = Join-Path $env:RUNNER_TEMP 'windows-smoke.node'
+          $object = Join-Path $env:RUNNER_TEMP 'windows-smoke.obj'
+          & cl.exe /nologo /O2 /LD tests/fixtures/node-api/windows-smoke.c "/Fo$object" /link "/LIBPATH:$($importLibrary.DirectoryName)" node.lib "/OUT:$fixture"
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not link the Windows Node-API smoke addon.'
+          }
+
+          $env:NAPI_VM_WINDOWS_NODE_API_FIXTURE = $fixture
+          cargo test --release --no-default-features --features node-api-host --lib windows_tests:: -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The in-process Node-API host tests failed under MSVC.'
+          }
+
   # ── Node.js compatibility matrix ──────────────────────────────────────
   #
   # The main JS suite runs under Bun, which has its own module loader and
