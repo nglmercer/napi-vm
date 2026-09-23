@@ -125,7 +125,7 @@ impl Interpreter {
             return Ok(Value::Bool(false));
         }
 
-        let mut current = object.proto_of();
+        let mut current = self.prototype_of(object);
         let mut visited = std::collections::HashSet::new();
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
             let Some(link) = current else {
@@ -146,7 +146,7 @@ impl Interpreter {
                     "Maximum prototype chain depth exceeded",
                 ));
             }
-            current = link.proto_of();
+            current = self.prototype_of(link.as_ref());
         }
         Err(crate::value::limit_err(
             "Maximum prototype chain depth exceeded",

@@ -542,6 +542,25 @@ pub struct FunctionData {
 }
 
 impl FunctionData {
+    /// Get this realm's intrinsic `Function.prototype`, when the built-ins
+    /// have installed it. Function objects created during bootstrap use an
+    /// explicit prototype link and do not call this helper recursively.
+    pub fn default_function_prototype(global: &Env) -> Option<Value> {
+        global
+            .borrow()
+            .get("Function")
+            .and_then(|constructor| constructor.get_prop("prototype"))
+    }
+
+    /// Create own-property storage linked to the realm's Function.prototype.
+    pub fn properties_with_default_prototype(global: &Env) -> Rc<ObjectCell> {
+        let properties = Rc::new(ObjectCell::new_with_default_proto(Vec::new()));
+        if let Some(prototype) = Self::default_function_prototype(global) {
+            properties.set_proto(Some(Rc::new(prototype)));
+        }
+        properties
+    }
+
     pub fn ensure_name_length_properties(&self) {
         if self.standard_properties_initialized.replace(true) {
             return;

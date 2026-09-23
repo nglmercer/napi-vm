@@ -309,7 +309,9 @@ impl Interpreter {
                     let fn_val = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(mp),
                         body: Rc::new(mb.clone()),
@@ -367,7 +369,9 @@ impl Interpreter {
                     let getter_fn = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![]),
                         body: Rc::new(gb.clone()),
@@ -402,7 +406,9 @@ impl Interpreter {
                     let setter_fn = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(sb.clone()),
@@ -479,7 +485,7 @@ impl Interpreter {
         let constructor = Value::Function(Box::new(FunctionData {
             identity: Rc::new(0),
             name: Some(Rc::from(name)),
-            properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+            properties: FunctionData::properties_with_default_prototype(&self.persistent_global),
             standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
             params: Rc::new(
                 ctor_params
@@ -523,6 +529,10 @@ impl Interpreter {
         let static_properties = Rc::new(ObjectCell::new_with_default_proto(statics));
         if let Some(superclass) = &super_cls {
             static_properties.set_proto(Some(Rc::new(superclass.clone())));
+        } else if let Some(function_prototype) =
+            FunctionData::default_function_prototype(&self.persistent_global)
+        {
+            static_properties.set_proto(Some(Rc::new(function_prototype)));
         }
         {
             let mut meta = static_properties.meta.borrow_mut();
@@ -644,7 +654,9 @@ impl Interpreter {
                     Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
                         body: Rc::new(body.clone()),
@@ -1307,7 +1319,9 @@ impl Interpreter {
                     let function = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
                         body: Rc::new(body.clone()),
@@ -1331,7 +1345,9 @@ impl Interpreter {
                     let function = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("get {name}").into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![]),
                         body: Rc::new(body.clone()),
@@ -1355,7 +1371,9 @@ impl Interpreter {
                     let function = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("set {name}").into()),
-                        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                        properties: FunctionData::properties_with_default_prototype(
+                            &self.persistent_global,
+                        ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(body.clone()),
@@ -2018,7 +2036,9 @@ impl Interpreter {
             } => Ok(Value::Function(Box::new(FunctionData {
                 identity: Rc::new(0),
                 name: None,
-                properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                properties: FunctionData::properties_with_default_prototype(
+                    &self.persistent_global,
+                ),
                 standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                 params: intern_params(params),
                 closure: Some(self.global.clone()),
@@ -2041,7 +2061,9 @@ impl Interpreter {
             } => Ok(Value::Function(Box::new(FunctionData {
                 identity: Rc::new(0),
                 name: name.as_deref().map(Rc::from),
-                properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+                properties: FunctionData::properties_with_default_prototype(
+                    &self.persistent_global,
+                ),
                 standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                 params: intern_params(params),
                 body: Rc::new(body.clone()),

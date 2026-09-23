@@ -13,8 +13,68 @@ use crate::interpreter::{Environment, Interpreter};
 use crate::value::{FunctionData, ObjectCell, Value};
 
 pub(super) fn install(e: &mut Environment) {
-    if let Some(namespace) = e.get("Function") {
-        super::make_callable(&namespace, new_function, None);
+    let Some(namespace) = e.get("Function") else {
+        return;
+    };
+    super::make_callable(&namespace, new_function, None);
+
+    let object_prototype = e
+        .get("Object")
+        .and_then(|object| object.get_prop("prototype"));
+    let prototype = Value::Function(Box::new(FunctionData {
+        identity: Rc::new(0),
+        name: Some(Rc::from("")),
+        properties: Rc::new(ObjectCell::new(Vec::new(), object_prototype.map(Rc::new))),
+        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
+        params: Rc::new(Vec::new()),
+        body: Rc::new(Vec::new()),
+        closure: None,
+        is_arrow: false,
+        is_constructor: false,
+        is_async: false,
+        is_generator: false,
+        uses_arguments: false,
+    }));
+
+    prototype
+        .set_prop("constructor".to_string(), namespace.clone())
+        .expect("Function.prototype constructor");
+    if let Value::Function(function) = &prototype {
+        function.properties.meta.borrow_mut().set_attrs(
+            "constructor",
+            crate::value::PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
+    prototype
+        .set_prop("call".to_string(), super::nf("call", function_call))
+        .expect("Function.prototype.call");
+    if let Value::Function(function) = &prototype {
+        function.properties.meta.borrow_mut().set_attrs(
+            "call",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..crate::value::PropAttrs::default()
+            },
+        );
+    }
+
+    namespace
+        .set_prop("prototype".to_string(), prototype.clone())
+        .expect("Function.prototype");
+    if let Value::Object { props } = &namespace {
+        props.meta.borrow_mut().set_attrs(
+            "prototype",
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+        props.set_proto(Some(Rc::new(prototype)));
     }
 }
 
@@ -65,7 +125,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     Ok(Value::Function(Box::new(FunctionData {
         identity: Rc::new(0),
         name: Some("anonymous".into()),
-        properties: Rc::new(ObjectCell::new_with_default_proto(vec![])),
+        properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
         params: Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect()),
         body: Rc::new(body),

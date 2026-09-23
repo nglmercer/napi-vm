@@ -8,6 +8,41 @@ use crate::lang::CompletionKind;
 use crate::value::{BoxedPrimitive, Value};
 
 impl Interpreter {
+    /// Resolve an object's represented [[Prototype]], including the realm's
+    /// default Object.prototype and Function.prototype links that are stored
+    /// as defaults rather than copied into every property cell.
+    pub(crate) fn prototype_of(&self, object: &Value) -> Option<std::rc::Rc<Value>> {
+        if let Some(prototype) = object.proto_of() {
+            return Some(prototype);
+        }
+        let (builtin, uses_default) = match object {
+            Value::Object { props } => ("Object", props.meta.borrow().uses_default_prototype),
+            Value::Class(class) => (
+                "Function",
+                class.statics.meta.borrow().uses_default_prototype,
+            ),
+            Value::Function(function) => (
+                "Function",
+                function.properties.meta.borrow().uses_default_prototype,
+            ),
+            Value::GlobalObject => ("Object", true),
+            Value::NativeFunction { .. } | Value::HostFunction { .. } => ("Function", true),
+            _ => return None,
+        };
+        if !uses_default {
+            return None;
+        }
+        let prototype = self
+            .persistent_global
+            .borrow()
+            .get(builtin)
+            .and_then(|constructor| constructor.get_prop("prototype"))?;
+        if crate::interpreter::strict_equals(object, &prototype) {
+            return None;
+        }
+        Some(std::rc::Rc::new(prototype))
+    }
+
     /// Enumerate properties visible on a simple runtime receiver such as
     /// `store` or `user.profile`. This only reads existing values and walks
     /// their prototype objects; it never evaluates guest source.

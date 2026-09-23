@@ -342,10 +342,14 @@ fn object_is(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value,
 
 // --- Prototypes -------------------------------------------------------------
 
-fn object_get_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_get_prototype_of(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(match v.proto_of() {
-        Some(p) => p.as_ref().clone(),
+    Ok(match interp.prototype_of(&v) {
+        Some(prototype) => prototype.as_ref().clone(),
         None => Value::Null,
     })
 }
