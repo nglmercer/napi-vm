@@ -9446,7 +9446,7 @@ NAPI_MODULE_INIT() {
     }
 
     #[test]
-    fn loads_a_legacy_napi_module_registered_during_library_initialization() {
+    fn loads_a_legacy_napi_module_from_a_bare_package_node_addons_export() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-rust-node-api-legacy-{}-{}",
@@ -9472,8 +9472,11 @@ NAPI_MODULE_INIT() {
         };
         assert!(compiler.status.success(), "cc --version failed");
 
+        let package_root = root.join("node_modules/legacy-fixture");
+        let release_dir = package_root.join("build/Release");
+        fs::create_dir_all(&release_dir).unwrap();
         let source = root.join("fixture.c");
-        let addon = root.join("fixture.node");
+        let addon = release_dir.join("fixture.node");
         let c_source = r#"
 #define NAPI_VERSION 1
 #include <node_api.h>
@@ -9510,8 +9513,22 @@ __attribute__((constructor)) static void register_module(void) {
             "legacy Node-API fixture compilation failed: {}",
             String::from_utf8_lossy(&built.stderr)
         );
+        fs::write(
+            package_root.join("package.json"),
+            r#"{"name":"legacy-fixture","exports":{".":{"node-addons":"./build/Release/fixture.node","default":"./fallback.cjs"}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            package_root.join("fallback.cjs"),
+            "module.exports = {kind: 'javascript fallback'};",
+        )
+        .unwrap();
         let main = root.join("main.cjs");
-        fs::write(&main, "module.exports = require('./fixture.node').kind;").unwrap();
+        fs::write(
+            &main,
+            "const addon = require('legacy-fixture'); module.exports = {kind: addon.kind, cached: addon === require('legacy-fixture'), sameByPath: addon === require('./node_modules/legacy-fixture/build/Release/fixture.node')};",
+        )
+        .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
 
         let mut interpreter = Interpreter::with_builtins();
@@ -9522,20 +9539,51 @@ __attribute__((constructor)) static void register_module(void) {
                     .entry(&main),
             )
             .unwrap();
-        let value = interpreter.eval_source("require('./main.cjs')").unwrap();
-        assert!(matches!(value, Value::String(ref value) if value == "legacy registration"));
+        let value = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'))")
+            .unwrap();
+        assert!(
+            matches!(value, Value::String(ref value) if value == r#"{"kind":"legacy registration","cached":true,"sameByPath":true}"#)
+        );
 
         let node = Command::new("node")
             .current_dir(&root)
-            .args(["-e", "process.stdout.write(require('./fixture.node').kind)"])
+            .args([
+                "-e",
+                "process.stdout.write(JSON.stringify(require('./main.cjs')))",
+            ])
             .output()
             .unwrap();
         assert!(
             node.status.success(),
-            "Node legacy-registration fixture failed: {}",
+            "Node bare-package fixture failed: {}",
             String::from_utf8_lossy(&node.stderr)
         );
-        assert_eq!(node.stdout, b"legacy registration");
+        assert_eq!(
+            node.stdout,
+            br#"{"kind":"legacy registration","cached":true,"sameByPath":true}"#
+        );
+
+        if Command::new("bun")
+            .arg("--version")
+            .output()
+            .is_ok_and(|version| version.status.success())
+        {
+            let bun = Command::new("bun")
+                .current_dir(&root)
+                .args([
+                    "-e",
+                    "process.stdout.write(JSON.stringify(require('./main.cjs')))",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                bun.status.success(),
+                "Bun bare-package fixture failed: {}",
+                String::from_utf8_lossy(&bun.stderr)
+            );
+            assert_eq!(bun.stdout, node.stdout, "Node and Bun results differ");
+        }
 
         drop(interpreter);
         fs::remove_dir_all(&root).unwrap();

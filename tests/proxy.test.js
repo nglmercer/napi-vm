@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { runCode } from "../index.js";
 
 // ---------------------------------------------------------------------------
@@ -12,6 +13,21 @@ test("an empty handler is transparent", () => {
   expect(runCode("new Proxy({ a: 1 }, {}).a;")).toBe("1");
   expect(runCode("const p = new Proxy({ a: 1 }, {}); 'a' in p;")).toBe("true");
   expect(runCode("Object.keys(new Proxy({ a: 1, b: 2 }, {})).join();")).toBe("a,b");
+});
+
+test("a proxy may wrap another proxy", () => {
+  const source =
+    "const inner = new Proxy({ value: 40 }, {}); const outer = new Proxy(inner, { get: (target, key) => key === 'value' ? target[key] + 2 : undefined }); outer.value;";
+  const result = runCode(source);
+  const reference = "process.stdout.write(String(eval(process.argv.at(-1))))";
+  const node = spawnSync("node", ["-e", reference, source], { encoding: "utf8" });
+  const bun = spawnSync("bun", ["-e", reference, source], { encoding: "utf8" });
+
+  expect(result).toBe("42");
+  expect(node.status).toBe(0);
+  expect(bun.status).toBe(0);
+  expect(node.stdout).toBe(result);
+  expect(bun.stdout).toBe(result);
 });
 
 test("the get trap intercepts reads", () => {

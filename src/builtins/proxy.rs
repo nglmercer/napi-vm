@@ -23,7 +23,11 @@ fn new_proxy(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmEr
     let handler = a.get(1).cloned().unwrap_or(Value::Undefined);
     if !matches!(
         target,
-        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_)
+        Value::Object { .. }
+            | Value::Array(_)
+            | Value::Function(_)
+            | Value::Class(_)
+            | Value::Proxy(_)
     ) {
         return Err(VmErr::Msg(
             "TypeError: Cannot create proxy with a non-object as target".to_string(),
