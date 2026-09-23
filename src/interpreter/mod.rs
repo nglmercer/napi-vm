@@ -18,7 +18,7 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
-pub use node_addon::NodeAddonSidecar;
+pub use node_addon::{NodeAddonOptions, NodeAddonSidecar};
 
 /// The state a generator or async body must share with the interpreter that
 /// started it: the one event loop, and the one module registry.
@@ -262,6 +262,68 @@ impl Interpreter {
         self.commonjs_loader = Some(loader);
         self.commonjs_cache.borrow_mut().clear();
         Ok(())
+    }
+
+    /// Enable filesystem-backed `require()` and explicitly allowlisted
+    /// Node-API addons for a Rust-embedded runtime.
+    ///
+    /// JavaScript and JSON modules continue to execute in napi-vm. Native
+    /// `.node` modules are initialized by a Node.js child process and their
+    /// values cross the host bridge. Addons are trusted host code; the
+    /// allowlist and digest pin prevent accidental or unapproved loading but
+    /// do not sandbox addon behavior.
+    ///
+    /// This configures the CommonJS loader, host bridge, and optional entry
+    /// path together so asynchronous addon callbacks and Promise settlements
+    /// use the same event loop. Pump external events with
+    /// [`Self::run_event_loop_once`]; the interpreter retains the bridge.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_node_addons(
+        &mut self,
+        options: NodeAddonOptions,
+    ) -> Result<Rc<NodeAddonSidecar>, VmErr> {
+        let mut loader = FileCommonJsLoader::new(options.roots.iter())?;
+        for addon in &options.allowed_addons {
+            loader = loader.allow_native_addon(addon)?;
+        }
+
+        let entry = options
+            .entry
+            .map(|entry| {
+                let canonical = std::fs::canonicalize(&entry).map_err(|error| {
+                    VmErr::Msg(format!(
+                        "cannot use CommonJS entry {}: {error}",
+                        entry.display()
+                    ))
+                })?;
+                if !canonical.is_file() {
+                    return Err(VmErr::Msg(format!(
+                        "CommonJS entry is not a file: {}",
+                        canonical.display()
+                    )));
+                }
+                if !loader
+                    .roots()
+                    .iter()
+                    .any(|root| canonical.starts_with(root))
+                {
+                    return Err(VmErr::Msg(format!(
+                        "CommonJS entry escapes configured roots: {}",
+                        canonical.display()
+                    )));
+                }
+                Ok(canonical)
+            })
+            .transpose()?;
+
+        let bridge = Rc::new(NodeAddonSidecar::new(&options.node_executable)?);
+        let loader = loader.with_native_addon_loader(bridge.clone());
+        self.set_commonjs_loader(Rc::new(loader))?;
+        self.set_host_bridge(bridge.clone());
+        if let Some(entry) = entry {
+            self.set_commonjs_entry(entry.to_string_lossy().into_owned());
+        }
+        Ok(bridge)
     }
 
     /// Set the filename used to resolve `require()` in top-level source.

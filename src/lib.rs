@@ -28,13 +28,13 @@ pub use builtins::setup_builtins;
 pub use error::VmErr;
 pub use format::{PrintOptions, Printer};
 pub use host::{HostBridge, HostCallback, HostEvent};
-#[cfg(not(target_arch = "wasm32"))]
-pub use interpreter::NodeAddonSidecar;
 pub use interpreter::{
     CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
     ResolvedCommonJsModule,
 };
 pub use interpreter::{Environment, Interpreter, Module};
+#[cfg(not(target_arch = "wasm32"))]
+pub use interpreter::{NodeAddonOptions, NodeAddonSidecar};
 pub use lexer::{Lexer, Token};
 pub use parser::{Expr, Parser, Statement};
 pub use value::Value;

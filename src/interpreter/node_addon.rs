@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver};
@@ -460,6 +460,54 @@ impl Drop for StartupChild {
 #[derive(Clone)]
 pub struct NodeAddonSidecar {
     state: Rc<RefCell<State>>,
+}
+
+/// Host configuration for enabling CommonJS modules and trusted `.node`
+/// addons in a Rust-embedded interpreter.
+///
+/// JavaScript modules still execute inside napi-vm. Each native addon must be
+/// explicitly listed with [`Self::allow_native_addon`]; its current SHA-256 is
+/// pinned when the runtime is configured and checked again when it is loaded.
+/// The configured Node executable hosts the Node-API environment in a child
+/// process, so it must be compatible with the addon's Node-API requirements.
+#[derive(Clone, Debug)]
+pub struct NodeAddonOptions {
+    pub(crate) node_executable: OsString,
+    pub(crate) roots: Vec<PathBuf>,
+    pub(crate) allowed_addons: Vec<PathBuf>,
+    pub(crate) entry: Option<PathBuf>,
+}
+
+impl NodeAddonOptions {
+    /// Configure the Node executable and filesystem roots visible to
+    /// `require()`. Native addon loading stays disabled until at least one
+    /// path is added with [`Self::allow_native_addon`].
+    pub fn new<I, P>(node_executable: impl AsRef<OsStr>, roots: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<PathBuf>,
+    {
+        Self {
+            node_executable: node_executable.as_ref().to_owned(),
+            roots: roots.into_iter().map(Into::into).collect(),
+            allowed_addons: Vec::new(),
+            entry: None,
+        }
+    }
+
+    /// Trust one specific native addon binary. Its bytes are pinned when the
+    /// interpreter is configured. The path must be inside one of `roots`.
+    pub fn allow_native_addon(mut self, path: impl Into<PathBuf>) -> Self {
+        self.allowed_addons.push(path.into());
+        self
+    }
+
+    /// Set the application entry path used to resolve top-level `require()`.
+    /// The path must exist and be inside one of `roots`.
+    pub fn entry(mut self, path: impl Into<PathBuf>) -> Self {
+        self.entry = Some(path.into());
+        self
+    }
 }
 
 impl std::fmt::Debug for NodeAddonSidecar {
@@ -2199,11 +2247,48 @@ fn parse_wire_number(value: &str) -> Result<f64, VmErr> {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use crate::interpreter::{FileCommonJsLoader, Interpreter};
+    use crate::interpreter::{Interpreter, NodeAddonOptions};
     use std::fs;
     use std::path::PathBuf;
     use std::process::Command as ProcessCommand;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn node_addon_configuration_rejects_entry_outside_roots_before_startup() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "napi-vm-node-addon-config-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let root = base.join("root");
+        let outside = base.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        let entry = outside.join("main.cjs");
+        fs::write(&entry, "").unwrap();
+
+        let mut interpreter = Interpreter::with_builtins();
+        let error = interpreter
+            .enable_node_addons(
+                NodeAddonOptions::new("node-executable-must-not-start", [root]).entry(entry),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("CommonJS entry escapes configured roots")
+        );
+        assert!(
+            interpreter
+                .require_commonjs("./main.cjs", None)
+                .unwrap_err()
+                .to_string()
+                .contains("configure a host CommonJS module loader")
+        );
+
+        fs::remove_dir_all(base).unwrap();
+    }
 
     #[test]
     fn loads_and_invokes_a_real_node_api_addon() {
@@ -2827,16 +2912,14 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             String::from_utf8_lossy(&compile.stderr)
         );
 
-        let provider = Rc::new(NodeAddonSidecar::new("node").unwrap());
-        let loader = FileCommonJsLoader::new([&root])
-            .unwrap()
-            .allow_native_addon(&addon)
-            .unwrap()
-            .with_native_addon_loader(provider.clone());
         let mut interpreter = Interpreter::with_builtins();
-        interpreter.set_host_bridge(provider);
-        interpreter.set_commonjs_entry(root.join("main.cjs").to_string_lossy().into_owned());
-        interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
+        let _bridge = interpreter
+            .enable_node_addons(
+                NodeAddonOptions::new("node", [root.clone()])
+                    .allow_native_addon(addon.clone())
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
         let package_result = interpreter
             .eval_source(
                 "const packageAddon = require('fixture'); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node')});",

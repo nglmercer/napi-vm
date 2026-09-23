@@ -67,23 +67,20 @@ environment; Rust and the VM exchange bounded values and synchronous calls
 over a private loopback connection.
 
 ```rust
-use napi_vm::{FileCommonJsLoader, Interpreter, NodeAddonSidecar};
-use std::{path::PathBuf, rc::Rc};
+use napi_vm::{Interpreter, NodeAddonOptions};
+use std::path::PathBuf;
 
 fn main() {
     let app_root = PathBuf::from("./app").canonicalize().unwrap();
     let addon = app_root.join("node_modules/example/build/Release/example.node");
-    let node = Rc::new(NodeAddonSidecar::new("node").unwrap());
-    let loader = FileCommonJsLoader::new([&app_root])
-        .unwrap()
-        .allow_native_addon(&addon)
-        .unwrap()
-        .with_native_addon_loader(node.clone());
-
     let mut runtime = Interpreter::with_builtins();
-    runtime.set_host_bridge(node);
-    runtime.set_commonjs_entry(app_root.join("main.cjs").to_string_lossy().into_owned());
-    runtime.set_commonjs_loader(Rc::new(loader)).unwrap();
+    let _addon_bridge = runtime
+        .enable_node_addons(
+            NodeAddonOptions::new("node", [app_root.clone()])
+                .allow_native_addon(addon)
+                .entry(app_root.join("main.cjs")),
+        )
+        .unwrap();
     let result = runtime.eval_source("require('example').run();").unwrap();
     println!("{result:?}");
 }
