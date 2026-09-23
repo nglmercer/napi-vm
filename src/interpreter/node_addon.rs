@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ffi::OsStr;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -54,141 +54,167 @@ impl ObjectOperation {
 const NODE_BRIDGE: &str = r#"
 'use strict';
 const net = require('node:net');
+const { Worker } = require('node:worker_threads');
 const socket = net.connect({host:'127.0.0.1',port:Number(process.env.NAPI_VM_BRIDGE_PORT)});
 let input = Buffer.alloc(0);
-let serial = Promise.resolve();
-let nextHandle = 1;
-const refs = new Map();
-const objectIds = new WeakMap();
-const functionIds = new WeakMap();
-const promiseIds = new WeakMap();
-let dispatchDepth = 0;
-function hold(value, receiver) {
-  const kind=typeof value;
-  if(kind==='function'){
-    const existing=functionIds.get(value);
-    if(existing!==undefined)return existing;
-  }else{
-    const existing=objectIds.get(value);
-    if(existing!==undefined)return existing;
-  }
-  if (refs.size >= 262144) throw new RangeError('native function handle limit exceeded');
-  const id=nextHandle++;
-  refs.set(id,{value,receiver});
-  if(kind==='function')functionIds.set(value,id);
-  else objectIds.set(value,id);
-  return id;
-}
+let connected = false;
+let workerReady = false;
+let syncCallbackActive = false;
+const pendingSyncCallbacks = new Map();
 function send(message) {
   const body = Buffer.from(JSON.stringify(message));
   const header = Buffer.allocUnsafe(4);
   header.writeUInt32BE(body.length, 0);
   socket.write(Buffer.concat([header, body]));
 }
-function encode(value, receiver, depth, active) {
-  if (depth > 128) throw new RangeError('bridge depth exceeded');
-  if (value === undefined) return {t:'undefined'};
-  if (value === null) return {t:'null'};
-  if (typeof value === 'boolean') return {t:'boolean',v:value};
-  if (typeof value === 'number') return {t:'number',v:Object.is(value,-0)?'-0':String(value)};
-  if (typeof value === 'string') return {t:'string',v:value};
-  if (typeof value === 'bigint') return {t:'bigint',v:value.toString()};
-  if (typeof value === 'symbol') throw new TypeError('symbols are unsupported');
-  if (typeof value === 'function') {
-    return {t:'function',v:hold(value,receiver),n:value.name};
-  }
-  if (value && typeof value.then === 'function') {
-    let id=promiseIds.get(value);
-    if(id===undefined){
-      id=hold(value,undefined);
-      promiseIds.set(value,id);
-      Promise.resolve(value).then(
-        result=>send({event:'hostPromiseSettled',promiseId:id,state:'fulfilled',value:encode(result,undefined,0,new Set())}),
-        reason=>send({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:encode(reason,undefined,0,new Set())})
-      ).catch(error=>send({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:{t:'error',name:'TypeError',message:'native promise result could not be marshalled: '+String(error)}}));
-    }
-    return {t:'hostPromise',v:id};
-  }
-  if (Buffer.isBuffer(value)) return {t:'hostObject',v:hold(value,undefined)};
-  if (value instanceof DataView) return {t:'dataView',length:value.byteLength,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
-  if (ArrayBuffer.isView(value)) return {t:'typedArray',kind:value.constructor.name,length:value.length,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
-  if (value instanceof ArrayBuffer) return {t:'arrayBuffer',v:Array.from(new Uint8Array(value))};
-  if (active.has(value)) throw new TypeError('cyclic native values are unsupported');
-  if (Array.isArray(value)) {
-    if (value.length>262144) throw new RangeError('native array exceeds the VM limit');
-    active.add(value);
-    const result={t:'array',v:Array.from(value,v=>encode(v,value,depth+1,active))};
-    active.delete(value);
-    return result;
-  }
-  return {t:'hostObject',v:hold(value,undefined)};
+function maybeSendHello() {
+  if (connected && workerReady) send({hello:process.env.NAPI_VM_BRIDGE_TOKEN});
 }
-function decode(value,depth) {
-  if(depth>128)throw new RangeError('guest argument depth exceeded');
-  switch(value.t) {
-    case 'undefined':return undefined; case 'null':return null;
-    case 'boolean':return value.v;
-    case 'number':if(value.v==='-0')return -0;if(value.v==='NaN')return NaN;if(value.v==='Infinity')return Infinity;if(value.v==='-Infinity')return -Infinity;return Number(value.v);
-    case 'string':return value.v; case 'bigint':return BigInt(value.v);
-    case 'arrayBuffer':return Uint8Array.from(value.v).buffer;
-    case 'typedArray':{
-      const constructors={Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array};
-      const Constructor=constructors[value.kind];if(!Constructor)throw new TypeError('unsupported guest typed array kind');
-      const bytes=Uint8Array.from(value.bytes);
-      return new Constructor(bytes.buffer,0,value.length);
-    }
-    case 'dataView':{const bytes=Uint8Array.from(value.bytes);return new DataView(bytes.buffer,0,value.length);}
-    case 'bytes':return Buffer.from(value.v);
-    case 'hostObject':{const entry=refs.get(value.v);if(!entry||!entry.value||typeof entry.value!=='object')throw new TypeError('native object handle is invalid');return entry.value;}
-    case 'guestCallback':return function(...args){
-      if(dispatchDepth>0){const e=new TypeError('synchronous guest callbacks are unsupported');e.code='ERR_NAPI_VM_SYNC_GUEST_CALLBACK_UNSUPPORTED';throw e;}
-      try{send({event:'guestCallback',callbackId:value.v,thisValue:encode(this,undefined,0,new Set()),args:args.map(v=>encode(v,undefined,0,new Set()))});}
-      catch(e){send({event:'guestCallbackError',callbackId:value.v,error:{name:typeof e?.name==='string'?e.name:'Error',message:typeof e?.message==='string'?e.message:String(e)}});}
-      return undefined;
-    };
-    case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
-    case 'array':return value.v.map(v=>decode(v,depth+1));
-    case 'object':{const o={};for(const [k,v]of value.v)Object.defineProperty(o,k,{value:decode(v,depth+1),enumerable:true,writable:true,configurable:true});return o;}
-    default:throw new TypeError('unsupported napi-vm argument');
+function finishSyncCallback(message) {
+  const pending = pendingSyncCallbacks.get(message.callId);
+  if (!pending) {
+    socket.destroy(new Error('unknown synchronous guest callback response'));
+    return;
   }
-}
-async function dispatch(r) {
-  dispatchDepth++;
-  try {
-    let result, receiver;
-    if(r.op==='load')result=require(r.filename);
-    else if(['get','set','has','delete','ownKeys'].includes(r.op)){
-      const entry=refs.get(r.id);if(!entry||!entry.value||typeof entry.value!=='object')throw new Error('native object handle is invalid');
-      const object=entry.value;
-      if(r.op==='get'){result=Reflect.get(object,r.key,object);receiver=object;}
-      else if(r.op==='set')result=Reflect.set(object,r.key,decode(r.value,0),object);
-      else if(r.op==='has')result=Reflect.has(object,r.key);
-      else if(r.op==='delete')result=Reflect.deleteProperty(object,r.key);
-      else result=Object.keys(object);
-    }
-    else {
-      const entry=refs.get(r.id);if(!entry||typeof entry.value!=='function')throw new Error('native function handle is invalid');
-      const args=r.args.map(v=>decode(v,0));
-      if(r.op==='construct')result=Reflect.construct(entry.value,args);
-      else result=Reflect.apply(entry.value,Object.hasOwn(r,'receiver')?decode(r.receiver,0):entry.receiver,args);
-    }
-    return {requestId:r.requestId,ok:true,value:encode(result,receiver,0,new Set())};
-  } catch(e) {
-    return {requestId:r.requestId,ok:false,error:{name:typeof e?.name==='string'?e.name:'Error',message:typeof e?.message==='string'?e.message:String(e),code:typeof e?.code==='string'?e.code:undefined}};
-  } finally {
-    dispatchDepth--;
+  pendingSyncCallbacks.delete(message.callId);
+  syncCallbackActive = pendingSyncCallbacks.size > 0;
+  let response = {ok:message.ok===true,value:message.value};
+  let bytes = Buffer.from(JSON.stringify(response));
+  if (bytes.length > pending.shared.byteLength - 8) {
+    response = {ok:false,value:{t:'error',name:'RangeError',message:'synchronous guest callback result exceeds the bridge limit'}};
+    bytes = Buffer.from(JSON.stringify(response));
   }
+  new Uint8Array(pending.shared,8,bytes.length).set(bytes);
+  const words = new Int32Array(pending.shared,0,2);
+  Atomics.store(words,1,bytes.length);
+  Atomics.store(words,0,response.ok?1:2);
+  Atomics.notify(words,0);
 }
 function consume() {
   while(input.length>=4) {
     const n=input.readUInt32BE(0);if(n>16777216){socket.destroy(new Error('frame too large'));return;}
     if(input.length<n+4)return;
     const body=input.subarray(4,n+4);input=input.subarray(n+4);
-    let r;try{r=JSON.parse(body.toString('utf8'));}catch(e){socket.destroy(e);return;}
-    serial=serial.then(()=>dispatch(r)).then(send).catch(e=>socket.destroy(e));
+    let message;try{message=JSON.parse(body.toString('utf8'));}catch(e){socket.destroy(e);return;}
+    if(message.event==='syncGuestCallbackResult') finishSyncCallback(message);
+    else if(message.requestId!==undefined){
+      if(syncCallbackActive){
+        send({requestId:message.requestId,ok:false,error:{name:'TypeError',message:'native addon calls from a synchronous guest callback are not supported',code:'ERR_NAPI_VM_REENTRANT_ADDON_CALL'}});
+      } else if(!workerReady){
+        send({requestId:message.requestId,ok:false,error:{name:'Error',message:'native addon worker is not ready'}});
+      } else worker.postMessage({kind:'request',request:message});
+    } else {socket.destroy(new Error('invalid napi-vm bridge frame'));return;}
   }
 }
-socket.on('connect',()=>send({hello:process.env.NAPI_VM_BRIDGE_TOKEN}));
+function addonWorkerMain() {
+  'use strict';
+  const { parentPort } = require('node:worker_threads');
+  const MAX_SYNC_CALLBACK_RESULT_BYTES = 1024 * 1024;
+  let nextHandle=1, nextCallbackCall=1, dispatchDepth=0;
+  const refs=new Map(), objectIds=new WeakMap(), functionIds=new WeakMap(), promiseIds=new WeakMap();
+  function hold(value,receiver){
+    const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
+    if(existing!==undefined)return existing;
+    if(refs.size>=262144)throw new RangeError('native handle limit exceeded');
+    const id=nextHandle++;refs.set(id,{value,receiver});ids.set(value,id);return id;
+  }
+  function event(message){
+    if(message.event==='syncGuestCallback')parentPort.postMessage({kind:'syncGuestCallback',callId:message.callId,shared:message.shared,message});
+    else parentPort.postMessage({kind:'event',message});
+  }
+  function encode(value,receiver,depth,active){
+    if(depth>128)throw new RangeError('bridge depth exceeded');
+    if(value===undefined)return {t:'undefined'};if(value===null)return {t:'null'};
+    if(typeof value==='boolean')return {t:'boolean',v:value};
+    if(typeof value==='number')return {t:'number',v:Object.is(value,-0)?'-0':String(value)};
+    if(typeof value==='string')return {t:'string',v:value};
+    if(typeof value==='bigint')return {t:'bigint',v:value.toString()};
+    if(typeof value==='symbol')throw new TypeError('symbols are unsupported');
+    if(typeof value==='function')return {t:'function',v:hold(value,receiver),n:value.name};
+    if(value&&typeof value.then==='function'){
+      let id=promiseIds.get(value);
+      if(id===undefined){id=hold(value,undefined);promiseIds.set(value,id);Promise.resolve(value).then(
+        result=>event({event:'hostPromiseSettled',promiseId:id,state:'fulfilled',value:encode(result,undefined,0,new Set())}),
+        reason=>event({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:encode(reason,undefined,0,new Set())})
+      ).catch(error=>event({event:'hostPromiseSettled',promiseId:id,state:'rejected',value:{t:'error',name:'TypeError',message:'native promise result could not be marshalled: '+String(error)}}));}
+      return {t:'hostPromise',v:id};
+    }
+    if(Buffer.isBuffer(value))return {t:'hostObject',v:hold(value,undefined)};
+    if(value instanceof DataView)return {t:'dataView',length:value.byteLength,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
+    if(ArrayBuffer.isView(value))return {t:'typedArray',kind:value.constructor.name,length:value.length,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
+    if(value instanceof ArrayBuffer)return {t:'arrayBuffer',v:Array.from(new Uint8Array(value))};
+    if(active.has(value))throw new TypeError('cyclic native values are unsupported');
+    if(Array.isArray(value)){if(value.length>262144)throw new RangeError('native array exceeds the VM limit');active.add(value);const result={t:'array',v:Array.from(value,v=>encode(v,value,depth+1,active))};active.delete(value);return result;}
+    return {t:'hostObject',v:hold(value,undefined)};
+  }
+  function decode(value,depth){
+    if(depth>128)throw new RangeError('guest argument depth exceeded');
+    switch(value.t){
+      case 'undefined':return undefined;case 'null':return null;case 'boolean':return value.v;
+      case 'number':if(value.v==='-0')return -0;if(value.v==='NaN')return NaN;if(value.v==='Infinity')return Infinity;if(value.v==='-Infinity')return -Infinity;return Number(value.v);
+      case 'string':return value.v;case 'bigint':return BigInt(value.v);
+      case 'arrayBuffer':return Uint8Array.from(value.v).buffer;
+      case 'typedArray':{const Constructor=globalThis[value.kind];if(typeof Constructor!=='function')throw new TypeError('unsupported guest typed array kind');const bytes=Uint8Array.from(value.bytes);return new Constructor(bytes.buffer,0,value.length);}
+      case 'dataView':{const bytes=Uint8Array.from(value.bytes);return new DataView(bytes.buffer,0,value.length);}
+      case 'bytes':return Buffer.from(value.v);
+      case 'error':{const error=new Error(value.message||'guest callback threw');error.name=value.name||'Error';if(value.code)error.code=value.code;return error;}
+      case 'hostObject':{const entry=refs.get(value.v);if(!entry||!entry.value||typeof entry.value!=='object')throw new TypeError('native object handle is invalid');return entry.value;}
+      case 'guestCallback':return function(...args){
+        const payload={callbackId:value.v,thisValue:encode(this,undefined,0,new Set()),args:args.map(v=>encode(v,undefined,0,new Set()))};
+        if(dispatchDepth===0){event({event:'guestCallback',...payload});return undefined;}
+        const callId=nextCallbackCall++,shared=new SharedArrayBuffer(MAX_SYNC_CALLBACK_RESULT_BYTES+8),words=new Int32Array(shared,0,2);
+        event({event:'syncGuestCallback',callId,shared,...payload});
+        const status=Atomics.wait(words,0,0,60000);if(status==='timed-out')throw new Error('timed out waiting for synchronous guest callback');
+        const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
+        const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
+        if(!response.ok)throw decode(response.value,0);return decode(response.value,0);
+      };
+      case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
+      case 'array':return value.v.map(v=>decode(v,depth+1));
+      case 'object':{const o={};for(const [k,v]of value.v)Object.defineProperty(o,k,{value:decode(v,depth+1),enumerable:true,writable:true,configurable:true});return o;}
+      default:throw new TypeError('unsupported napi-vm argument');
+    }
+  }
+  async function dispatch(r){
+    dispatchDepth++;
+    try{
+      let result,receiver;
+      if(r.op==='load')result=require(r.filename);
+      else if(['get','set','has','delete','ownKeys'].includes(r.op)){
+        const entry=refs.get(r.id);if(!entry||!entry.value||typeof entry.value!=='object')throw new Error('native object handle is invalid');
+        const object=entry.value;
+        if(r.op==='get'){result=Reflect.get(object,r.key,object);receiver=object;}
+        else if(r.op==='set')result=Reflect.set(object,r.key,decode(r.value,0),object);
+        else if(r.op==='has')result=Reflect.has(object,r.key);
+        else if(r.op==='delete')result=Reflect.deleteProperty(object,r.key);
+        else result=Object.keys(object);
+      }else{
+        const entry=refs.get(r.id);if(!entry||typeof entry.value!=='function')throw new Error('native function handle is invalid');
+        const args=r.args.map(v=>decode(v,0));
+        if(r.op==='construct')result=Reflect.construct(entry.value,args);
+        else result=Reflect.apply(entry.value,Object.hasOwn(r,'receiver')?decode(r.receiver,0):entry.receiver,args);
+      }
+      return {requestId:r.requestId,ok:true,value:encode(result,receiver,0,new Set())};
+    }catch(e){return {requestId:r.requestId,ok:false,error:{name:typeof e?.name==='string'?e.name:'Error',message:typeof e?.message==='string'?e.message:String(e),code:typeof e?.code==='string'?e.code:undefined}};}
+    finally{dispatchDepth--;}
+  }
+  parentPort.on('message',message=>{
+    if(message.kind==='request')dispatch(message.request).then(response=>parentPort.postMessage({kind:'response',message:response}),error=>parentPort.postMessage({kind:'response',message:{requestId:message.request.requestId,ok:false,error:{name:'Error',message:String(error)}}}));
+  });
+  parentPort.postMessage({kind:'ready'});
+}
+const worker = new Worker('('+addonWorkerMain.toString()+')()', {eval:true});
+worker.on('message',message=>{
+  if(message.kind==='ready'){workerReady=true;maybeSendHello();}
+  else if(message.kind==='response')send(message.message);
+  else if(message.kind==='event')send(message.message);
+  else if(message.kind==='syncGuestCallback'){
+    syncCallbackActive=true;pendingSyncCallbacks.set(message.callId,message);send(message.message);
+  }
+});
+worker.on('error',error=>socket.destroy(error));
+worker.on('exit',code=>{if(code!==0)socket.destroy(new Error('Node addon worker exited with code '+code));});
+socket.on('connect',()=>{connected=true;maybeSendHello();});
 socket.on('data',c=>{input=Buffer.concat([input,c]);consume();});
 socket.on('error',e=>process.stderr.write('napi-vm sidecar: '+e.message+'\n'));
 "#;
@@ -199,6 +225,7 @@ struct State {
     reader: Option<JoinHandle<()>>,
     response_rx: Receiver<JsonValue>,
     event_rx: Receiver<JsonValue>,
+    pending_events: VecDeque<JsonValue>,
     request_id: u64,
     failed: bool,
     next_local_handle: usize,
@@ -346,6 +373,7 @@ impl NodeAddonSidecar {
                 reader: Some(reader),
                 response_rx,
                 event_rx,
+                pending_events: VecDeque::new(),
                 request_id: 1,
                 failed: false,
                 next_local_handle: 0,
@@ -359,58 +387,214 @@ impl NodeAddonSidecar {
         })
     }
 
-    fn request(&self, mut message: JsonValue) -> Result<JsonValue, VmErr> {
-        let mut state = self.state.borrow_mut();
-        if state.failed {
-            return Err(VmErr::Msg(
-                "Node addon bridge is unavailable after a transport failure".into(),
-            ));
-        }
-        let id = state.request_id;
-        state.request_id = state
-            .request_id
-            .checked_add(1)
-            .ok_or_else(|| VmErr::Msg("Node request id exhausted".into()))?;
-        message
-            .as_object_mut()
-            .ok_or_else(|| VmErr::Msg("invalid internal Node request".into()))?
-            .insert("requestId".into(), json!(id));
-        if let Err(error) = write_frame(&mut state.stream, &message) {
-            fail_state(&mut state);
-            return Err(error);
-        }
-        let response = match state.response_rx.recv_timeout(Duration::from_secs(60)) {
-            Ok(response) => response,
-            Err(error) => {
-                fail_state(&mut state);
-                return Err(VmErr::Msg(format!("Node sidecar did not respond: {error}")));
+    fn request(&self, message: JsonValue) -> Result<JsonValue, VmErr> {
+        self.request_with_callback_handler(message, &mut |_| {
+            Err(VmErr::Msg(
+                "synchronous guest callback was requested outside a VM host call".into(),
+            ))
+        })
+    }
+
+    fn request_with_callback_handler(
+        &self,
+        mut message: JsonValue,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<JsonValue, VmErr> {
+        let id = {
+            let mut state = self.state.borrow_mut();
+            if state.failed {
+                return Err(VmErr::Msg(
+                    "Node addon bridge is unavailable after a transport failure".into(),
+                ));
             }
+            let id = state.request_id;
+            state.request_id = state
+                .request_id
+                .checked_add(1)
+                .ok_or_else(|| VmErr::Msg("Node request id exhausted".into()))?;
+            message
+                .as_object_mut()
+                .ok_or_else(|| VmErr::Msg("invalid internal Node request".into()))?
+                .insert("requestId".into(), json!(id));
+            if let Err(error) = write_frame(&mut state.stream, &message) {
+                fail_state(&mut state);
+                return Err(error);
+            }
+            id
         };
-        if response.get("requestId").and_then(JsonValue::as_u64) != Some(id) {
-            fail_state(&mut state);
-            return Err(VmErr::Msg("Node response id mismatch".into()));
-        }
-        if response.get("ok").and_then(JsonValue::as_bool) == Some(true) {
-            return match response.get("value").cloned() {
-                Some(value) => Ok(value),
-                None => {
-                    fail_state(&mut state);
-                    Err(VmErr::Msg("Node response has no value".into()))
+
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let event = {
+                let mut state = self.state.borrow_mut();
+                state
+                    .pending_events
+                    .pop_front()
+                    .or_else(|| state.event_rx.try_recv().ok())
+            };
+            if let Some(event) = event {
+                if event.get("event").and_then(JsonValue::as_str) == Some("syncGuestCallback") {
+                    self.answer_sync_guest_callback(&event, callback_handler)?;
+                } else {
+                    self.state.borrow_mut().pending_events.push_back(event);
+                }
+            }
+
+            let response = {
+                let state = self.state.borrow();
+                match state.response_rx.try_recv() {
+                    Ok(response) => Some(response),
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err(VmErr::Msg("Node sidecar disconnected".into()));
+                    }
+                    Err(mpsc::TryRecvError::Empty) => None,
                 }
             };
+            if let Some(response) = response {
+                if response.get("requestId").and_then(JsonValue::as_u64) != Some(id) {
+                    return Err(VmErr::Msg("Node response id mismatch".into()));
+                }
+                if response.get("ok").and_then(JsonValue::as_bool) == Some(true) {
+                    return response
+                        .get("value")
+                        .cloned()
+                        .ok_or_else(|| VmErr::Msg("Node response has no value".into()));
+                }
+                let error = response.get("error").unwrap_or(&JsonValue::Null);
+                let name = error
+                    .get("name")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("Error");
+                let message = error
+                    .get("message")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("native addon failed");
+                let code = error.get("code").and_then(JsonValue::as_str);
+                let error = Value::Error(match code {
+                    Some(code) => crate::value::ErrorData::with_code(name, message, code),
+                    None => crate::value::ErrorData::new(name, message),
+                });
+                return Err(VmErr::Throw(error));
+            }
+
+            let now = Instant::now();
+            if now >= deadline {
+                let mut state = self.state.borrow_mut();
+                fail_state(&mut state);
+                return Err(VmErr::Msg(
+                    "Node sidecar did not respond before timeout".into(),
+                ));
+            }
+            let wait = (deadline - now).min(Duration::from_millis(2));
+            let receive = {
+                let state = self.state.borrow();
+                state.response_rx.recv_timeout(wait)
+            };
+            match receive {
+                Ok(response) => {
+                    if response.get("requestId").and_then(JsonValue::as_u64) != Some(id) {
+                        return Err(VmErr::Msg("Node response id mismatch".into()));
+                    }
+                    if response.get("ok").and_then(JsonValue::as_bool) == Some(true) {
+                        return response
+                            .get("value")
+                            .cloned()
+                            .ok_or_else(|| VmErr::Msg("Node response has no value".into()));
+                    }
+                    let error = response.get("error").unwrap_or(&JsonValue::Null);
+                    let name = error
+                        .get("name")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or("Error");
+                    let message = error
+                        .get("message")
+                        .and_then(JsonValue::as_str)
+                        .unwrap_or("native addon failed");
+                    let code = error.get("code").and_then(JsonValue::as_str);
+                    let error = Value::Error(match code {
+                        Some(code) => crate::value::ErrorData::with_code(name, message, code),
+                        None => crate::value::ErrorData::new(name, message),
+                    });
+                    return Err(VmErr::Throw(error));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(VmErr::Msg("Node sidecar disconnected".into()));
+                }
+            }
         }
-        let e = response.get("error").unwrap_or(&JsonValue::Null);
-        let name = e.get("name").and_then(JsonValue::as_str).unwrap_or("Error");
-        let message = e
-            .get("message")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("native addon failed");
-        let code = e.get("code").and_then(JsonValue::as_str);
-        let error = Value::Error(match code {
-            Some(code) => crate::value::ErrorData::with_code(name, message, code),
-            None => crate::value::ErrorData::new(name, message),
+    }
+
+    fn answer_sync_guest_callback(
+        &self,
+        event: &JsonValue,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<(), VmErr> {
+        let call_id = event
+            .get("callId")
+            .and_then(JsonValue::as_u64)
+            .ok_or_else(|| VmErr::Msg("Node synchronous callback id is invalid".into()))?;
+        let callback = self.guest_callback_from_event(event)?;
+        let result = callback_handler(callback);
+        let (ok, value) = match result {
+            Ok(value) => match self.guest_to_wire(&value, 0) {
+                Ok(value) => (true, value),
+                Err(error) => (
+                    false,
+                    json!({"t":"error","name":"TypeError","message":error.to_string()}),
+                ),
+            },
+            Err(VmErr::Throw(reason)) => match self.guest_to_wire(&reason, 0) {
+                Ok(value) => (false, value),
+                Err(error) => (
+                    false,
+                    json!({"t":"error","name":"TypeError","message":error.to_string()}),
+                ),
+            },
+            Err(error) => (
+                false,
+                json!({"t":"error","name":"Error","message":error.to_string()}),
+            ),
+        };
+        let response = json!({
+            "event":"syncGuestCallbackResult",
+            "callId":call_id,
+            "ok":ok,
+            "value":value,
         });
-        Err(VmErr::Throw(error))
+        let mut state = self.state.borrow_mut();
+        write_frame(&mut state.stream, &response)
+    }
+
+    fn guest_callback_from_event(&self, event: &JsonValue) -> Result<HostCallback, VmErr> {
+        let callback_id = event
+            .get("callbackId")
+            .and_then(JsonValue::as_u64)
+            .ok_or_else(|| VmErr::Msg("Node callback event has an invalid id".into()))?;
+        let callback = self
+            .state
+            .borrow()
+            .guest_callbacks
+            .get(&callback_id)
+            .cloned()
+            .ok_or_else(|| VmErr::Msg("Node callback handle is invalid".into()))?;
+        let this_wire = event
+            .get("thisValue")
+            .cloned()
+            .unwrap_or_else(|| json!({"t":"undefined"}));
+        let this_value = self.wire_to_guest(&this_wire, 0)?;
+        let args = event
+            .get("args")
+            .and_then(JsonValue::as_array)
+            .ok_or_else(|| VmErr::Msg("Node callback event has invalid arguments".into()))?
+            .iter()
+            .map(|arg| self.wire_to_guest(arg, 0))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(HostCallback {
+            callback,
+            this_value,
+            args,
+        })
     }
 
     fn wire_to_guest(&self, value: &JsonValue, depth: usize) -> Result<Value, VmErr> {
@@ -499,10 +683,11 @@ impl NodeAddonSidecar {
         Ok(Value::Promise(promise))
     }
 
-    fn dispatch_object_trap(
+    fn dispatch_object_trap_with_callback_handler(
         &self,
         trap: LocalObjectTrap,
         args: Vec<Value>,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
         let request = match trap.operation {
             ObjectOperation::Get => json!({
@@ -531,7 +716,7 @@ impl NodeAddonSidecar {
                 "id": trap.object_id,
             }),
         };
-        let result = self.request(request)?;
+        let result = self.request_with_callback_handler(request, callback_handler)?;
         self.wire_to_guest(&result, 0)
     }
 }
@@ -555,16 +740,19 @@ impl NativeAddonLoader for NodeAddonSidecar {
 impl HostBridge for NodeAddonSidecar {
     fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
         let events = {
-            let state = self.state.borrow_mut();
-            let first = if timeout.is_zero() {
-                state.event_rx.try_recv().ok()
-            } else {
-                state.event_rx.recv_timeout(timeout).ok()
-            };
+            let mut state = self.state.borrow_mut();
             let mut events = Vec::new();
-            if let Some(event) = first {
-                events.push(event);
-                events.extend(state.event_rx.try_iter());
+            events.extend(state.pending_events.drain(..));
+            if events.is_empty() {
+                let first = if timeout.is_zero() {
+                    state.event_rx.try_recv().ok()
+                } else {
+                    state.event_rx.recv_timeout(timeout).ok()
+                };
+                if let Some(event) = first {
+                    events.push(event);
+                    events.extend(state.event_rx.try_iter());
+                }
             }
             events
         };
@@ -587,6 +775,11 @@ impl HostBridge for NodeAddonSidecar {
                     ))));
                 }
                 Some("guestCallback") => {}
+                Some("syncGuestCallback") => {
+                    return Err(VmErr::Msg(
+                        "synchronous guest callback arrived outside a host call".into(),
+                    ));
+                }
                 Some("hostPromiseSettled") => {
                     let promise_id = event
                         .get("promiseId")
@@ -626,34 +819,7 @@ impl HostBridge for NodeAddonSidecar {
                 }
             }
 
-            let callback_id = event
-                .get("callbackId")
-                .and_then(JsonValue::as_u64)
-                .ok_or_else(|| VmErr::Msg("Node callback event has an invalid id".into()))?;
-            let callback = self
-                .state
-                .borrow()
-                .guest_callbacks
-                .get(&callback_id)
-                .cloned()
-                .ok_or_else(|| VmErr::Msg("Node callback handle is invalid".into()))?;
-            let this_wire = event
-                .get("thisValue")
-                .cloned()
-                .unwrap_or_else(|| json!({"t":"undefined"}));
-            let this_value = self.wire_to_guest(&this_wire, 0)?;
-            let args = event
-                .get("args")
-                .and_then(JsonValue::as_array)
-                .ok_or_else(|| VmErr::Msg("Node callback event has invalid arguments".into()))?
-                .iter()
-                .map(|arg| self.wire_to_guest(arg, 0))
-                .collect::<Result<Vec<_>, _>>()?;
-            host_events.push(HostEvent::Callback(HostCallback {
-                callback,
-                this_value,
-                args,
-            }));
+            host_events.push(HostEvent::Callback(self.guest_callback_from_event(&event)?));
         }
         Ok(host_events)
     }
@@ -672,9 +838,23 @@ impl HostBridge for NodeAddonSidecar {
         this_value: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        self.call_host_with_callback_handler(id, this_value, args, &mut |_| {
+            Err(VmErr::Msg(
+                "synchronous guest callback was requested outside a VM host call".into(),
+            ))
+        })
+    }
+
+    fn call_host_with_callback_handler(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
         let trap = self.state.borrow().local_handles.get(&id).copied();
         if let Some(trap) = trap {
-            return self.dispatch_object_trap(trap, args);
+            return self.dispatch_object_trap_with_callback_handler(trap, args, callback_handler);
         }
         let args = args
             .iter()
@@ -682,17 +862,35 @@ impl HostBridge for NodeAddonSidecar {
             .collect::<Result<Vec<_>, _>>()?;
         let receiver = self.guest_to_wire(&this_value, 0)?;
         self.wire_to_guest(
-            &self.request(json!({"op":"call","id":id,"args":args,"receiver":receiver}))?,
+            &self.request_with_callback_handler(
+                json!({"op":"call","id":id,"args":args,"receiver":receiver}),
+                callback_handler,
+            )?,
             0,
         )
     }
     fn construct_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
+        self.construct_host_with_callback_handler(id, args, &mut |_| {
+            Err(VmErr::Msg(
+                "synchronous guest callback was requested outside a VM host call".into(),
+            ))
+        })
+    }
+    fn construct_host_with_callback_handler(
+        &self,
+        id: usize,
+        args: Vec<Value>,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
         let args = args
             .iter()
             .map(|v| self.guest_to_wire(v, 0))
             .collect::<Result<Vec<_>, _>>()?;
         self.wire_to_guest(
-            &self.request(json!({"op":"construct","id":id,"args":args}))?,
+            &self.request_with_callback_handler(
+                json!({"op":"construct","id":id,"args":args}),
+                callback_handler,
+            )?,
             0,
         )
     }
@@ -868,6 +1066,12 @@ fn guest_to_wire(
             json!({"t":"dataView","length":view.length,"bytes":slice})
         }
         Value::BigInt(x) => json!({"t":"bigint","v":x.to_string()}),
+        Value::Error(error) => json!({
+            "t":"error",
+            "name":error.name,
+            "message":error.message,
+            "code":error.code,
+        }),
         Value::Proxy(proxy) => {
             let proxy_id = Rc::as_ptr(proxy) as usize;
             match proxy_ids.get(&proxy_id) {
@@ -1339,7 +1543,6 @@ static napi_value on_sync(napi_env env, napi_callback_info info) {
   if (napi_get_global(env, &receiver) != napi_ok ||
       napi_create_string_utf8(env, "sync-value", NAPI_AUTO_LENGTH, &value) != napi_ok) return NULL;
   if (napi_call_function(env, receiver, argv[0], 1, &value, &result) != napi_ok) return NULL;
-  napi_get_undefined(env, &result);
   return result;
 }
 
@@ -1514,20 +1717,37 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(
             matches!(async_rejection, Value::String(ref reason) if reason == "native-rejection")
         );
-        let sync_error = interpreter
+        let sync_result = interpreter
             .eval_source(
-                "let syncCallbackRan = false; try { require('./fixture.node').onSync(() => { syncCallbackRan = true; }); } catch (error) { ({name:error.name, code:error.code, ran:syncCallbackRan}); }",
+                "globalThis.syncCallbackThisType = ''; const syncCallbackResult = require('./fixture.node').onSync(function(value) { syncCallbackThisType = typeof this; return value + '-reply'; }); ({value:syncCallbackResult, thisType:syncCallbackThisType});",
             )
             .unwrap();
         assert!(
-            matches!(sync_error.get_prop("name"), Some(Value::String(ref name)) if name == "TypeError")
+            matches!(sync_result.get_prop("value"), Some(Value::String(ref value)) if value == "sync-value-reply")
         );
         assert!(
-            matches!(sync_error.get_prop("code"), Some(Value::String(ref code)) if code == "ERR_NAPI_VM_SYNC_GUEST_CALLBACK_UNSUPPORTED")
+            matches!(sync_result.get_prop("thisType"), Some(Value::String(ref value)) if value == "object")
         );
+        let sync_throw = interpreter
+            .eval_source(
+                "try { require('./fixture.node').onSync(() => { throw new TypeError('guest callback failure'); }); } catch (error) { ({name:error.name, message:error.message}); }",
+            )
+            .unwrap();
+        assert!(
+            matches!(sync_throw.get_prop("name"), Some(Value::String(ref name)) if name == "TypeError")
+        );
+        assert!(
+            matches!(sync_throw.get_prop("message"), Some(Value::String(ref message)) if message == "guest callback failure")
+        );
+        let reentrant_addon_call = interpreter
+            .eval_source(
+                "require('./fixture.node').onSync(() => { try { require('./fixture.node').add(1, 2); return 'unexpected'; } catch (error) { return error.name + ':' + error.code; } });",
+            )
+            .unwrap();
         assert!(matches!(
-            sync_error.get_prop("ran"),
-            Some(Value::Bool(false))
+            reentrant_addon_call,
+            Value::String(ref value)
+                if value == "TypeError:ERR_NAPI_VM_REENTRANT_ADDON_CALL"
         ));
         interpreter
             .eval_source(

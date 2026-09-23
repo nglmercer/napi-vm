@@ -595,7 +595,9 @@ impl Interpreter {
                     // pending sentinel. The interpreter parks at `await`.
                     bridge.call_host_async_with_this(*id, this_val, args)
                 } else {
-                    bridge.call_host_with_this(*id, this_val, args)
+                    bridge.call_host_with_callback_handler(*id, this_val, args, &mut |callback| {
+                        self.call_this(&callback.callback, callback.this_value, callback.args)
+                    })
                 }
             }
             // A proxy over a function: `apply` intercepts the call.
@@ -713,7 +715,9 @@ impl Interpreter {
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;
-                bridge.construct_host(*id, args)
+                bridge.construct_host_with_callback_handler(*id, args, &mut |callback| {
+                    self.call_this(&callback.callback, callback.this_value, callback.args)
+                })
             }
             Value::Class(c) => {
                 // The instance's prototype is the class prototype (shared Rc, so

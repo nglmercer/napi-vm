@@ -100,9 +100,13 @@ the original Node object. Node `Buffer` results stay live native objects;
 `ArrayBuffer`, typed array, and `DataView` values cross as copied bytes while
 preserving their view type. Asynchronous addon callbacks are queued and run at
 VM event-loop checkpoints; use `run_event_loop_once` from the desktop runtime
-to pump external events. Synchronous callbacks into guest JavaScript, symbols,
-cyclic guest values, and guest-created proxies are not supported yet and fail
-clearly. Some reflection behavior still differs across the VM/Node boundary.
+to pump external events. Synchronous callbacks into guest JavaScript run on
+the interpreter thread and return values and thrown errors to the addon. Native
+addon calls made from inside such a synchronous callback fail with
+`ERR_NAPI_VM_REENTRANT_ADDON_CALL` to avoid re-entering the worker while it is
+blocked on the callback. Symbols, cyclic guest values, and guest-created
+proxies are not supported yet and fail clearly. Some reflection behavior
+still differs across the VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 

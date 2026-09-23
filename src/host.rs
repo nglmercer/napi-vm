@@ -57,11 +57,35 @@ pub trait HostBridge {
         self.call_host(id, args)
     }
 
+    /// Invoke a host function while allowing it to synchronously request a
+    /// guest callback. The callback handler runs on the interpreter thread,
+    /// on the paused host-call stack; it must never be called from a native
+    /// or transport thread.
+    fn call_host_with_callback_handler(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        _callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.call_host_with_this(id, this_value, args)
+    }
+
     /// Construct a host function with `new`. The default preserves legacy
     /// bridges; runtimes that expose constructors can implement actual host
     /// construction semantics.
     fn construct_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
         self.call_host(id, args)
+    }
+
+    /// Constructor counterpart to [`HostBridge::call_host_with_callback_handler`].
+    fn construct_host_with_callback_handler(
+        &self,
+        id: usize,
+        args: Vec<Value>,
+        _callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.construct_host(id, args)
     }
 
     /// Whether the function registered under `id` is async (registered via
