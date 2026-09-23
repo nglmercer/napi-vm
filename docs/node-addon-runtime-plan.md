@@ -65,7 +65,8 @@ existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
 Node-API versions 1 through 4 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
-numbers, UTF-8 strings, symbol creation, `napi_define_properties` for ordinary
+numbers, UTF-8 and Latin-1 string conversion, boolean coercion, symbol creation,
+`napi_define_properties` for ordinary
 object targets (data values, symbol keys, native methods, and accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
