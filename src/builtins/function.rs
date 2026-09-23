@@ -52,9 +52,19 @@ pub(super) fn install(e: &mut Environment) {
     prototype
         .set_prop("call".to_string(), super::nf("call", function_call))
         .expect("Function.prototype.call");
+    prototype
+        .set_prop("apply".to_string(), super::nf("apply", function_apply))
+        .expect("Function.prototype.apply");
     if let Value::Function(function) = &prototype {
         function.properties.meta.borrow_mut().set_attrs(
             "call",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..crate::value::PropAttrs::default()
+            },
+        );
+        function.properties.meta.borrow_mut().set_attrs(
+            "apply",
             crate::value::PropAttrs {
                 enumerable: false,
                 ..crate::value::PropAttrs::default()
@@ -82,6 +92,7 @@ pub(super) fn install(e: &mut Environment) {
 pub(crate) fn function_method(name: &str) -> Option<Value> {
     Some(match name {
         "call" => super::nf("call", function_call),
+        "apply" => super::nf("apply", function_apply),
         _ => return None,
     })
 }
@@ -93,6 +104,36 @@ fn function_call(
 ) -> Result<Value, VmErr> {
     let receiver = args.first().cloned().unwrap_or(Value::Undefined);
     interp.call_this(&target, receiver, args.into_iter().skip(1).collect())
+}
+
+fn function_apply(
+    interp: &mut Interpreter,
+    target: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let receiver = args.first().cloned().unwrap_or(Value::Undefined);
+    let array_like = args.get(1).cloned().unwrap_or(Value::Undefined);
+    let call_args = match &array_like {
+        Value::Undefined | Value::Null => Vec::new(),
+        Value::Array(items) => items.borrow().clone(),
+        other => {
+            let length_value = interp.get_prop_value(other, &Value::String("length".into()))?;
+            let length = interp.ecmascript_to_number(&length_value)?;
+            let length = if length.is_nan() || length <= 0.0 {
+                0
+            } else if !length.is_finite() || length.floor() > crate::value::MAX_ARRAY_LEN as f64 {
+                return Err(crate::value::limit_err("Maximum argument count exceeded"));
+            } else {
+                length.floor() as usize
+            };
+            let mut values = Vec::with_capacity(length.min(1024));
+            for index in 0..length {
+                values.push(interp.get_prop_value(other, &Value::String(index.to_string()))?);
+            }
+            values
+        }
+    };
+    interp.call_this(&target, receiver, call_args)
 }
 
 fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

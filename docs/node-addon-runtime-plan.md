@@ -110,9 +110,9 @@ follow JavaScript truthiness. Ordinary functions share a lazily created own
 `prototype` object with constructed instances and inherit from a shared
 callable `Function.prototype`; function `name`, `length`, and `prototype`
 descriptors participate in guest and Node-API property reflection. The current
-Function.prototype method surface is limited to `call`; `apply`, `bind`, and
-source-aware `toString` behavior remain incomplete. Callable proxies also
-remain unsupported.
+Function.prototype method surface includes `call` and `apply`, including
+array-like arguments for `apply`; `bind` and source-aware `toString` behavior
+remain incomplete. Callable proxies also remain unsupported.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path. `napi_run_script`

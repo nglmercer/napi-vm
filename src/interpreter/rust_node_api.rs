@@ -2988,7 +2988,7 @@ fn napi_guest_coerce_to_number(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let value = args.first().cloned().unwrap_or(Value::Undefined);
-    Ok(Value::Number(interpreter.napi_to_number(&value)?))
+    Ok(Value::Number(interpreter.ecmascript_to_number(&value)?))
 }
 
 unsafe extern "C" fn api_coerce_to_number(
@@ -3965,7 +3965,7 @@ unsafe extern "C" fn api_get_prototype(
                 match (prototype, uses_default_prototype) {
                     (Some(prototype), _) => prototype.as_ref().clone(),
                     (None, false) => Value::Null,
-                    // Function.prototype is not materialized yet.
+                    // This property cell has no explicit realm intrinsic link.
                     (None, true) => return Err(NAPI_GENERIC_FAILURE),
                 }
             }
@@ -13281,6 +13281,13 @@ module.exports = {
   functionPrototypeObjectPrototype: Object.getPrototypeOf(Ordinary.prototype) === Object.prototype,
   functionPrototypeConstructorShared: Function.prototype.constructor === Function,
   functionCallIsInherited: typeof Ordinary.call === 'function',
+  functionApplyIsInherited: typeof Ordinary.apply === 'function',
+  functionApplyUsesReceiverAndArguments: (function (a, b) {
+    return this.base + a + b;
+  }).apply({base: 3}, [4, 5]) === 12,
+  functionApplyReadsArrayLike: (function (a, b) {
+    return a + b;
+  }).apply(null, {0: 'a', 1: 'b', length: 2}) === 'ab',
   functionPrototypeNapiIdentity: addon.getPrototype(Ordinary) === Function.prototype,
   functionPrototypeObjectNapiIdentity: addon.getPrototype(Ordinary.prototype) === Object.prototype,
   functionConstructorNapiIdentity: addon.getPrototype(Function) === Function.prototype,
@@ -13730,6 +13737,9 @@ module.exports = {
                 "functionPrototypeObjectPrototype": true,
                 "functionPrototypeConstructorShared": true,
                 "functionCallIsInherited": true,
+                "functionApplyIsInherited": true,
+                "functionApplyUsesReceiverAndArguments": true,
+                "functionApplyReadsArrayLike": true,
                 "functionPrototypeNapiIdentity": true,
                 "functionPrototypeObjectNapiIdentity": true,
                 "functionConstructorNapiIdentity": true,

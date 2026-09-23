@@ -183,10 +183,10 @@ impl Interpreter {
         self.vs(value)
     }
 
-    /// Apply the ECMAScript abstract ToNumber operation to a Node-API value.
-    /// Unlike `Value::to_number`, this can call guest conversion methods and
-    /// rejects Symbols and BigInts instead of silently manufacturing a number.
-    pub(crate) fn napi_to_number(&mut self, value: &Value) -> Result<f64, VmErr> {
+    /// Apply ECMAScript's abstract ToNumber operation. Unlike `Value::to_number`,
+    /// this can call guest conversion methods and rejects Symbols and BigInts
+    /// instead of silently manufacturing a number.
+    pub(crate) fn ecmascript_to_number(&mut self, value: &Value) -> Result<f64, VmErr> {
         let primitive = self.coerce_object_to_primitive(value, "number")?;
         match &primitive {
             Value::Undefined => Ok(f64::NAN),
