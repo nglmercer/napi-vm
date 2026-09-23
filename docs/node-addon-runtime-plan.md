@@ -194,6 +194,14 @@ shutdown, new posts are closed and already queued finalizers run before addon
 libraries unload. Guest callback dispatch is unavailable during this final
 shutdown drain, so finalizers that need to enter JavaScript must be processed
 while the runtime event loop is still active.
+The experimental `node_api_create_sharedarraybuffer`,
+`node_api_create_external_sharedarraybuffer`, and
+`node_api_is_sharedarraybuffer` entry points are not exported yet. The value
+model currently has no distinct shared-buffer storage or guest `Atomics`
+implementation; treating one as an ordinary `ArrayBuffer` would incorrectly
+promise shared-memory behavior. An addon that imports these symbols therefore
+fails during native-library loading. Implement them only alongside a distinct
+shared backing store, typed-view support, and concurrency-safe guest access.
 The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
