@@ -18,17 +18,23 @@
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=native/node_api_shim.c");
+    println!("cargo::rerun-if-env-changed=CC");
     println!("cargo::rustc-check-cfg=cfg(stackful_coroutines)");
     println!("cargo::rustc-check-cfg=cfg(node_api_host_unavailable)");
 
     if std::env::var_os("CARGO_FEATURE_NODE_API_HOST").is_some() {
         let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_os == "linux" {
+        if target_os == "linux" || target_os == "macos" {
             let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-            let library = out_dir.join("libnapi_vm_node_api_shim.so");
+            let (library_name, link_flag) = if target_os == "macos" {
+                ("libnapi_vm_node_api_shim.dylib", "-dynamiclib")
+            } else {
+                ("libnapi_vm_node_api_shim.so", "-shared")
+            };
+            let library = out_dir.join(library_name);
             let compiler = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
             let status = std::process::Command::new(compiler)
-                .args(["-std=c11", "-O2", "-fPIC", "-fvisibility=hidden", "-shared"])
+                .args(["-std=c11", "-O2", "-fPIC", "-fvisibility=hidden", link_flag])
                 .arg("native/node_api_shim.c")
                 .arg("-o")
                 .arg(&library)

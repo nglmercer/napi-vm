@@ -1,8 +1,8 @@
 //! Experimental in-process host for the Node-API C ABI.
 //!
-//! The first vertical slice intentionally implements the APIs needed by a
-//! small real addon. Unimplemented imports fail during dynamic loading; this
-//! backend does not emulate Node, V8, NAN, or libuv.
+//! The in-process host intentionally implements a selected Node-API surface.
+//! Unimplemented imports fail during dynamic loading; this backend does not
+//! emulate Node, V8, NAN, or libuv.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -122,8 +122,9 @@ impl RustNodeApiOptions {
     }
 }
 
-/// In-process Node-API addon host. This is opt-in and currently supports Linux
-/// ELF modules using the selected Node-API v1-v4 calls implemented below.
+/// In-process Node-API addon host. This is opt-in and implements Linux ELF and
+/// macOS Mach-O loading for the Node-API v1-v4 calls below. Linux is runtime
+/// tested; macOS still needs native CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
     _shim: Rc<NodeApiShim>,
@@ -4507,7 +4508,10 @@ impl NodeApiShim {
                 }
             }
         };
+        #[cfg(target_os = "linux")]
         let path = root.join("libnapi_vm_node_api_shim.so");
+        #[cfg(target_os = "macos")]
+        let path = root.join("libnapi_vm_node_api_shim.dylib");
         let write_result = (|| {
             let mut file = OpenOptions::new()
                 .write(true)
@@ -4553,8 +4557,8 @@ impl NodeApiShim {
 
 impl Drop for NodeApiShim {
     fn drop(&mut self) {
-        // Linux permits unlinking a loaded shared object; the mapping remains
-        // live until the Library is dropped immediately after this method.
+        // Linux and macOS permit unlinking a loaded shared object; the mapping
+        // remains live until the Library is dropped immediately after this method.
         if let Some(root) = self.path.parent() {
             let _ = fs::remove_dir_all(root);
         }
@@ -6684,16 +6688,14 @@ NAPI_MODULE_INIT() {
 "#,
         )
         .unwrap();
-        let built = Command::new("cc")
-            .args([
-                "-std=c11",
-                "-O2",
-                "-fPIC",
-                "-shared",
-                "-pthread",
-                "-DNAPI_VERSION=4",
-                "-I",
-            ])
+        let mut build = Command::new("cc");
+        build.args(["-std=c11", "-O2", "-fPIC"]);
+        #[cfg(target_os = "linux")]
+        build.arg("-shared");
+        #[cfg(target_os = "macos")]
+        build.args(["-dynamiclib", "-undefined", "dynamic_lookup"]);
+        let built = build
+            .args(["-pthread", "-DNAPI_VERSION=4", "-I"])
             .arg(include)
             .arg(&source)
             .arg("-o")

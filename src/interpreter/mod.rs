@@ -9,7 +9,10 @@ pub mod node_addon;
 mod ops;
 mod promise;
 mod resolve;
-#[cfg(all(feature = "node-api-host", target_os = "linux"))]
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos")
+))]
 pub mod rust_node_api;
 
 #[cfg(stackful_coroutines)]
@@ -21,7 +24,10 @@ pub use commonjs::{
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
-#[cfg(all(feature = "node-api-host", target_os = "linux"))]
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos")
+))]
 pub use rust_node_api::{RustNodeApiHost, RustNodeApiOptions};
 
 /// The state a generator or async body must share with the interpreter that

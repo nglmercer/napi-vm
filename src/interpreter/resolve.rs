@@ -200,7 +200,10 @@ impl Interpreter {
     /// present. This is the mutable counterpart to `Value::has_prop`, which
     /// cannot run guest code from its shared-reference call sites.
     #[cfg_attr(
-        not(all(feature = "node-api-host", target_os = "linux")),
+        not(all(
+            feature = "node-api-host",
+            any(target_os = "linux", target_os = "macos")
+        )),
         allow(dead_code)
     )]
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {

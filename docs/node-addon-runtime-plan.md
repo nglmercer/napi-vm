@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | Selected Node-API v1-v4 calls on Linux | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v4 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -59,10 +59,10 @@ parts are backend choice, allowed filesystem roots, integrity pins, supported
 Node-API version, and a stable compatibility report. A guest `require()` call
 still goes through the VM's CommonJS resolver and module cache.
 
-The first implementation is available behind Cargo feature `node-api-host`:
+The current implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
-existing CommonJS resolver and allowlist. Its Linux prototype accepts addons
-requesting Node-API versions 1 through 4 and currently covers scoped handles, callback
+existing CommonJS resolver and allowlist. On Linux it accepts addons requesting
+Node-API versions 1 through 4 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8 strings, symbol creation, `napi_define_properties` for ordinary
@@ -109,7 +109,10 @@ queue. Node-API v3 environment cleanup hooks run in reverse registration order
 on the owner thread before thread-safe function and wrap finalizers. Duplicate
 hook registrations and unmatched removals return `napi_invalid_arg` rather than
 aborting the embedding process. This remains an incomplete compatibility
-backend, and unimplemented imported symbols fail at load time.
+backend, and unimplemented imported symbols fail at load time. The macOS Mach-O
+build and loading path uses the same shim and fixture, but needs execution on a
+macOS host before it is claimed as verified. Windows currently uses the sidecar
+backend; its DLL import and symbol-export model needs a separate implementation.
 
 ## Implementation phases
 
