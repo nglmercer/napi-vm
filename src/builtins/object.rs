@@ -5,26 +5,79 @@ use std::rc::Rc;
 use super::nf;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter, is_internal_key};
-use crate::value::{ObjectCell, PropAttrs, Value};
+use crate::value::{BoxedPrimitive, ObjectCell, PropAttrs, Value};
 
 pub(super) fn install(e: &mut Environment) {
     let Some(o) = e.get("Object") else { return };
-    let prototype = Value::object(vec![]);
-    prototype
-        .set_prop(
-            "hasOwnProperty".to_string(),
+    let prototype = Value::object(vec![
+        ("constructor".into(), o.clone()),
+        (
+            "__defineGetter__".into(),
+            nf("__defineGetter__", object_define_getter),
+        ),
+        (
+            "__defineSetter__".into(),
+            nf("__defineSetter__", object_define_setter),
+        ),
+        (
+            "hasOwnProperty".into(),
             nf("hasOwnProperty", object_has_own_property),
-        )
-        .expect("built-in Object.prototype property");
+        ),
+        (
+            "__lookupGetter__".into(),
+            nf("__lookupGetter__", object_lookup_getter),
+        ),
+        (
+            "__lookupSetter__".into(),
+            nf("__lookupSetter__", object_lookup_setter),
+        ),
+        (
+            "isPrototypeOf".into(),
+            nf("isPrototypeOf", object_is_prototype_of),
+        ),
+        (
+            "propertyIsEnumerable".into(),
+            nf("propertyIsEnumerable", object_property_is_enumerable),
+        ),
+        (
+            "toLocaleString".into(),
+            nf("toLocaleString", object_to_locale_string),
+        ),
+        ("toString".into(), nf("toString", object_to_string)),
+        ("valueOf".into(), nf("valueOf", object_value_of)),
+    ]);
     if let Value::Object { props } = &prototype {
-        props.meta.borrow_mut().set_attrs(
+        let mut metadata = props.meta.borrow_mut();
+        for key in [
+            "constructor",
+            "__defineGetter__",
+            "__defineSetter__",
             "hasOwnProperty",
-            PropAttrs {
-                enumerable: false,
-                ..PropAttrs::default()
-            },
-        );
+            "__lookupGetter__",
+            "__lookupSetter__",
+            "isPrototypeOf",
+            "propertyIsEnumerable",
+            "toLocaleString",
+            "toString",
+            "valueOf",
+        ] {
+            metadata.set_attrs(
+                key,
+                PropAttrs {
+                    enumerable: false,
+                    ..PropAttrs::default()
+                },
+            );
+        }
     }
+    let proto_descriptor = Value::object(vec![
+        ("get".into(), nf("get __proto__", object_get_prototype)),
+        ("set".into(), nf("set __proto__", object_set_prototype)),
+        ("enumerable".into(), Value::Bool(false)),
+        ("configurable".into(), Value::Bool(true)),
+    ]);
+    define_property(&prototype, "__proto__", &proto_descriptor)
+        .expect("built-in Object.prototype __proto__ accessor");
     o.set_prop("prototype".to_string(), prototype.clone())
         .expect("built-in Object.prototype");
     if let Value::Object { props } = &o {
@@ -315,19 +368,14 @@ fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
+    if matches!(v, Value::Undefined | Value::Null) {
+        return Err(type_err("Cannot convert undefined or null to object"));
+    }
     let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
-    let found = match &v {
-        Value::GlobalObject => interp.global_keys().iter().any(|name| name == &key),
-        Value::Object { props } => props.borrow().iter().any(|(k, _)| *k == key),
-        Value::Array(items) => {
-            key == "length"
-                || crate::value::array_index(&key).is_some_and(|i| items.has_index(i))
-                || items.named_prop(&key).is_some()
-        }
-        Value::String(s) => {
-            key == "length" || key.parse::<usize>().is_ok_and(|i| i < s.chars().count())
-        }
-        _ => false,
+    let found = if matches!(v, Value::GlobalObject) {
+        interp.global_keys().iter().any(|name| name == &key)
+    } else {
+        object_property_attributes(&v, &key).is_some()
     };
     Ok(Value::Bool(found))
 }
@@ -342,6 +390,423 @@ fn object_has_own_property(
         Value::Undefined,
         vec![this, args.first().cloned().unwrap_or(Value::Undefined)],
     )
+}
+
+fn is_ecmascript_object(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Object { .. }
+            | Value::Array(_)
+            | Value::Function(_)
+            | Value::NativeFunction { .. }
+            | Value::HostFunction { .. }
+            | Value::GlobalObject
+            | Value::Class(_)
+            | Value::Promise(_)
+            | Value::Generator { .. }
+            | Value::StringIterator { .. }
+            | Value::Date(_)
+            | Value::Proxy(_)
+            | Value::ArrayBuffer(_)
+            | Value::SharedArrayBuffer(_)
+            | Value::TypedArray(_)
+            | Value::DataView(_)
+            | Value::RegExp(_)
+            | Value::Error(_)
+    )
+}
+
+fn to_object_receiver(value: &Value) -> Result<Value, VmErr> {
+    let value = value.deref_binding();
+    if matches!(value, Value::Undefined | Value::Null) {
+        return Err(type_err("Cannot convert undefined or null to object"));
+    }
+    if is_ecmascript_object(&value) {
+        return Ok(value);
+    }
+    Value::boxed_primitive(value).ok_or_else(|| type_err("Cannot convert value to object"))
+}
+
+fn object_property_attributes(value: &Value, key: &str) -> Option<PropAttrs> {
+    match value {
+        Value::GlobalObject => return None,
+        Value::Object { props } => {
+            if let Some(BoxedPrimitive::String(string)) =
+                props.meta.borrow().boxed_primitive.as_ref()
+            {
+                if key == "length" {
+                    return Some(PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: false,
+                    });
+                }
+                return crate::value::array_index(key)
+                    .filter(|index| *index < string.chars().count())
+                    .map(|_| PropAttrs {
+                        writable: false,
+                        enumerable: true,
+                        configurable: false,
+                    });
+            }
+        }
+        Value::Array(array) => {
+            if key == "length" {
+                return Some(array.meta.borrow().attrs_of(key));
+            }
+            if let Some(index) = crate::value::array_index(key) {
+                return array
+                    .has_index(index)
+                    .then(|| array.meta.borrow().attrs_of(key));
+            }
+            return array
+                .named_prop(key)
+                .map(|_| array.meta.borrow().attrs_of(key));
+        }
+        Value::String(string) => {
+            if key == "length" {
+                return Some(PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                });
+            }
+            return crate::value::array_index(key)
+                .filter(|index| *index < string.chars().count())
+                .map(|_| PropAttrs {
+                    writable: false,
+                    enumerable: true,
+                    configurable: false,
+                });
+        }
+        Value::Error(error) => {
+            return match key {
+                "name" | "message" | "stack" => Some(PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: true,
+                }),
+                "code" if error.code.is_some() => Some(PropAttrs::default()),
+                _ => None,
+            };
+        }
+        Value::RegExp(_) if key == "lastIndex" => {
+            return Some(PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            });
+        }
+        Value::TypedArray(view) => {
+            return crate::value::array_index(key)
+                .filter(|index| *index < view.effective_length())
+                .map(|_| PropAttrs::default());
+        }
+        _ => {}
+    }
+
+    if let Some(properties) = cell(value)
+        && own_slot(value, key).is_some()
+    {
+        return Some(properties.meta.borrow().attrs_of(key));
+    }
+    None
+}
+
+fn object_property_is_enumerable(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let receiver = to_object_receiver(&this)?;
+    let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
+    Ok(Value::Bool(
+        object_property_attributes(&receiver, &key).is_some_and(|attributes| attributes.enumerable),
+    ))
+}
+
+fn object_is_prototype_of(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let receiver = to_object_receiver(&this)?;
+    let mut current = args.first().cloned().unwrap_or(Value::Undefined);
+    if !is_ecmascript_object(&current) {
+        return Ok(Value::Bool(false));
+    }
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let Some(prototype) = interp.prototype_of(&current) else {
+            return Ok(Value::Bool(false));
+        };
+        if crate::interpreter::strict_equals(&receiver, &prototype) {
+            return Ok(Value::Bool(true));
+        }
+        current = prototype.as_ref().clone();
+    }
+    Err(crate::value::limit_err("Maximum prototype depth exceeded"))
+}
+
+fn object_to_string_tag(value: &Value) -> String {
+    match value {
+        Value::Undefined => "Undefined".into(),
+        Value::Null => "Null".into(),
+        Value::Bool(_) => "Boolean".into(),
+        Value::Number(_) => "Number".into(),
+        Value::String(_) => "String".into(),
+        Value::Symbol(_) => "Symbol".into(),
+        Value::BigInt(_) => "BigInt".into(),
+        Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
+            Some(BoxedPrimitive::Bool(_)) => "Boolean".into(),
+            Some(BoxedPrimitive::Number(_)) => "Number".into(),
+            Some(BoxedPrimitive::String(_)) => "String".into(),
+            Some(BoxedPrimitive::Symbol(_)) => "Symbol".into(),
+            Some(BoxedPrimitive::BigInt(_)) => "BigInt".into(),
+            None => "Object".into(),
+        },
+        Value::Array(_) => "Array".into(),
+        Value::Function(_)
+        | Value::NativeFunction { .. }
+        | Value::HostFunction { .. }
+        | Value::Class(_) => "Function".into(),
+        Value::GlobalObject => "global".into(),
+        Value::Promise(_) => "Promise".into(),
+        Value::Generator { .. } => "Generator".into(),
+        Value::StringIterator { .. } => "String Iterator".into(),
+        Value::HostPending { .. } | Value::Binding(_) => "Object".into(),
+        #[cfg(stackful_coroutines)]
+        Value::AsyncTask(_) => "AsyncTask".into(),
+        Value::Date(_) => "Date".into(),
+        Value::Proxy(_) => "Object".into(),
+        Value::ArrayBuffer(_) => "ArrayBuffer".into(),
+        Value::SharedArrayBuffer(_) => "SharedArrayBuffer".into(),
+        Value::TypedArray(view) if view.is_buffer => "Uint8Array".into(),
+        Value::TypedArray(view) => view.kind.name().into(),
+        Value::DataView(_) => "DataView".into(),
+        Value::RegExp(_) => "RegExp".into(),
+        Value::Error(_) => "Error".into(),
+    }
+}
+
+fn object_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let this = this.deref_binding();
+    let mut tag = object_to_string_tag(&this);
+    if !matches!(this, Value::Undefined | Value::Null)
+        && let Some(Value::Symbol(to_string_tag)) =
+            crate::builtins::well_known("toStringTag").as_ref()
+    {
+        let custom = interp.prop(&this, &Value::Symbol(to_string_tag.clone()))?;
+        if let Value::String(custom) = &custom {
+            tag.clone_from(custom);
+        }
+    }
+    Ok(Value::String(format!("[object {tag}]")))
+}
+
+fn object_to_locale_string(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let method = interp.prop(&this, &Value::String("toString".into()))?;
+    if !is_callable(&method) {
+        return Err(type_err("toString is not callable"));
+    }
+    interp.call_this(&method, this, vec![])
+}
+
+fn object_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let this = this.deref_binding();
+    if is_ecmascript_object(&this) {
+        Ok(this)
+    } else {
+        Value::boxed_primitive(this)
+            .ok_or_else(|| type_err("Cannot convert undefined or null to object"))
+    }
+}
+
+fn object_define_getter(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    object_define_accessor(interp, this, args, true)
+}
+
+fn object_define_setter(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    object_define_accessor(interp, this, args, false)
+}
+
+fn object_define_accessor(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    is_getter: bool,
+) -> Result<Value, VmErr> {
+    let target = this.deref_binding();
+    if !is_ecmascript_object(&target)
+        || (cell(&target).is_none() && !matches!(&target, Value::Array(_)))
+    {
+        return Err(type_err("Object.prototype accessor called on non-object"));
+    }
+    let raw_key = args.first().cloned().unwrap_or(Value::Undefined);
+    let symbol = match &raw_key {
+        Value::Symbol(symbol) => Some(symbol.clone()),
+        _ => None,
+    };
+    let key = interp.property_key(&raw_key)?;
+    let accessor = args.get(1).cloned().unwrap_or(Value::Undefined);
+    if !is_callable(&accessor) {
+        return Err(type_err("Getter and setter must be callable"));
+    }
+
+    let previous = descriptor_for(&target, &key);
+    let existing_getter = previous.get_prop("get").unwrap_or(Value::Undefined);
+    let existing_setter = previous.get_prop("set").unwrap_or(Value::Undefined);
+    let mut fields = vec![
+        (if is_getter { "get" } else { "set" }.into(), accessor),
+        ("enumerable".into(), Value::Bool(true)),
+        ("configurable".into(), Value::Bool(true)),
+    ];
+    if is_getter && is_callable(&existing_setter) {
+        fields.push(("set".into(), existing_setter));
+    }
+    if !is_getter && is_callable(&existing_getter) {
+        fields.push(("get".into(), existing_getter));
+    }
+    define_property(&target, &key, &Value::object(fields))?;
+    if let Some(symbol) = symbol {
+        if let Value::Array(array) = &target {
+            array.set_symbol_key(&key, symbol);
+        } else if let Some(properties) = cell(&target) {
+            properties.meta.borrow_mut().set_symbol_key(&key, symbol);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+fn object_lookup_getter(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    object_lookup_accessor(interp, this, args, false)
+}
+
+fn object_lookup_setter(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    object_lookup_accessor(interp, this, args, true)
+}
+
+fn object_lookup_accessor(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    want_setter: bool,
+) -> Result<Value, VmErr> {
+    let receiver = to_object_receiver(&this)?;
+    let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
+    let mut current = receiver;
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        if let Some(value) = own_slot(&current, &key) {
+            if accessor_kind(&key, &value) == Some("get") {
+                if !want_setter {
+                    return Ok(value);
+                }
+                return Ok(
+                    own_slot(&current, &format!("__setter:{key}__")).unwrap_or(Value::Undefined)
+                );
+            }
+            if accessor_kind(&key, &value) == Some("set") {
+                return Ok(if want_setter { value } else { Value::Undefined });
+            }
+            return Ok(Value::Undefined);
+        }
+        let Some(prototype) = interp.prototype_of(&current) else {
+            return Ok(Value::Undefined);
+        };
+        current = prototype.as_ref().clone();
+    }
+    Err(crate::value::limit_err("Maximum prototype depth exceeded"))
+}
+
+fn object_get_prototype(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let receiver = to_object_receiver(&this)?;
+    Ok(interp
+        .prototype_of(&receiver)
+        .map_or(Value::Null, |prototype| prototype.as_ref().clone()))
+}
+
+fn object_set_prototype(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let target = this.deref_binding();
+    if !is_ecmascript_object(&target) || args.is_empty() {
+        return Ok(Value::Undefined);
+    }
+    let requested = match args[0].deref_binding() {
+        Value::Null => None,
+        value if is_ecmascript_object(&value) => Some(Rc::new(value)),
+        _ => return Ok(Value::Undefined),
+    };
+    if !matches!(
+        &target,
+        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_)
+    ) {
+        return Ok(Value::Undefined);
+    }
+    if !object_is_extensible_value(&target)
+        && !crate::interpreter::strict_equals(
+            &interp
+                .prototype_of(&target)
+                .map_or(Value::Null, |prototype| prototype.as_ref().clone()),
+            &requested
+                .as_ref()
+                .map_or(Value::Null, |prototype| prototype.as_ref().clone()),
+        )
+    {
+        return Ok(Value::Undefined);
+    }
+    let mut current = requested
+        .clone()
+        .map(|prototype| prototype.as_ref().clone());
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let Some(prototype) = current else { break };
+        if crate::interpreter::strict_equals(&target, &prototype) {
+            return Ok(Value::Undefined);
+        }
+        current = interp
+            .prototype_of(&prototype)
+            .map(|prototype| prototype.as_ref().clone());
+    }
+    match &target {
+        Value::Object { props } => props.set_proto(requested),
+        Value::Array(array) => array.set_proto(requested),
+        Value::Function(function) => function.properties.set_proto(requested),
+        Value::Class(class) => class.statics.set_proto(requested),
+        _ => {}
+    }
+    Ok(Value::Undefined)
+}
+
+fn object_is_extensible_value(value: &Value) -> bool {
+    if let Value::Array(array) = value {
+        return !array.meta.borrow().non_extensible;
+    }
+    cell(value).is_some_and(|properties| !properties.meta.borrow().non_extensible)
 }
 
 fn object_is(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

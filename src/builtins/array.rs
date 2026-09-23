@@ -115,6 +115,7 @@ const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
     "every",
     "push",
     "pop",
+    "toString",
     "join",
     "indexOf",
     "includes",
@@ -232,6 +233,7 @@ pub fn array_method(name: &str) -> Option<Value> {
         "every" => array_every,
         "push" => array_push,
         "pop" => array_pop,
+        "toString" => array_to_string,
         "join" => array_join,
         "indexOf" => array_index_of,
         "includes" => array_includes,
@@ -257,6 +259,24 @@ pub fn array_method(name: &str) -> Option<Value> {
         _ => return None,
     };
     Some(nf(name, f))
+}
+
+fn array_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let join = interp.prop(&this, &Value::String("join".into()))?;
+    if matches!(
+        join,
+        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
+    ) {
+        return interp.call_this(&join, this, vec![]);
+    }
+    let object_prototype = interp
+        .global
+        .borrow()
+        .get("Object")
+        .and_then(|object| object.get_prop("prototype"))
+        .ok_or_else(|| VmErr::Msg("TypeError: Object.prototype is unavailable".into()))?;
+    let method = interp.prop(&object_prototype, &Value::String("toString".into()))?;
+    interp.call_this(&method, this, vec![])
 }
 
 /// `splice(start, deleteCount, ...items)`: remove a range in place and insert

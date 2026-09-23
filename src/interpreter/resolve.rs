@@ -428,19 +428,22 @@ impl Interpreter {
             )));
         }
         let v = self.prop(o, p)?;
+        let property_name = self.property_key(p)?;
+        let getter_name = format!("get {property_name}");
+        let setter_name = format!("set {property_name}");
         let is_getter = match &v {
-            Value::Function(f) => f.name.as_ref().is_some_and(|n| n.starts_with("get ")),
+            Value::Function(f) => f.name.as_deref() == Some(getter_name.as_str()),
             // A native accessor — `Map.prototype.size` — is recognized the
-            // same way, by the `get ` prefix on its name.
+            // same way, by its name matching this property's getter slot.
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.starts_with("get ")
+                name.as_ref() == getter_name
             }
             _ => false,
         };
         let is_setter_only = match &v {
-            Value::Function(f) => f.name.as_ref().is_some_and(|n| n.starts_with("set ")),
+            Value::Function(f) => f.name.as_deref() == Some(setter_name.as_str()),
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.starts_with("set ")
+                name.as_ref() == setter_name
             }
             _ => false,
         };
@@ -461,13 +464,27 @@ impl Interpreter {
     fn prop_raw(&self, o: &Value, p: &Value) -> Result<Value, VmErr> {
         match (o, p) {
             // `window.x` / `globalThis.x` / `self.x` read a real global.
-            (Value::GlobalObject, Value::String(k)) => Ok(self
-                .persistent_global
-                .borrow()
-                .get(k)
-                .unwrap_or(Value::Undefined)),
+            (Value::GlobalObject, Value::String(k)) => {
+                if let Some(value) = self.persistent_global.borrow().get(k) {
+                    return Ok(value);
+                }
+                if self.global_keys().iter().any(|key| key == k) {
+                    return Ok(Value::Undefined);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
+            }
+            (Value::GlobalObject, Value::Symbol(_)) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    self.prop(&prototype, p)
+                } else {
+                    Ok(Value::Undefined)
+                }
+            }
             (Value::Object { props }, Value::String(k)) => {
-                if let Some(value) = lookup_chain_found(o, k)? {
+                if let Some(value) = lookup_chain_found(self, o, k)? {
                     return Ok(value);
                 }
                 let boxed = props.meta.borrow().boxed_primitive.clone();
@@ -477,7 +494,7 @@ impl Interpreter {
             }
             (Value::Object { props }, Value::Number(index)) => {
                 let key = crate::format::number_string(*index);
-                if let Some(value) = lookup_chain_found(o, &key)? {
+                if let Some(value) = lookup_chain_found(self, o, &key)? {
                     return Ok(value);
                 }
                 let boxed = props.meta.borrow().boxed_primitive.clone();
@@ -557,12 +574,14 @@ impl Interpreter {
                     .unwrap_or(Value::Undefined))
             }
             (Value::Class(c), Value::String(k)) => lookup_chain(
+                self,
                 &Value::Object {
                     props: c.statics.clone(),
                 },
                 k,
             ),
             (Value::Class(c), Value::Symbol(symbol)) => lookup_chain(
+                self,
                 &Value::Object {
                     props: c.statics.clone(),
                 },
@@ -574,6 +593,7 @@ impl Interpreter {
                 }
                 function.ensure_name_length_properties();
                 if let Some(value) = lookup_chain_found(
+                    self,
                     &Value::Object {
                         props: function.properties.clone(),
                     },
@@ -590,6 +610,7 @@ impl Interpreter {
                 })
             }
             (Value::Function(function), Value::Symbol(symbol)) => lookup_chain(
+                self,
                 &Value::Object {
                     props: function.properties.clone(),
                 },
@@ -656,7 +677,7 @@ impl Interpreter {
                 else {
                     return Ok(Value::Undefined);
                 };
-                lookup_chain(&prototype, &super::symbol_slot_key(symbol))
+                lookup_chain(self, &prototype, &super::symbol_slot_key(symbol))
             }
 
             // Typed array indices and length-like values are resolved on the
@@ -801,7 +822,7 @@ impl Interpreter {
             // Object symbol-keyed lookup: `obj[Symbol.iterator]` resolves the
             // internal `__symbol_iterator__` property.
             (Value::Object { props }, Value::Symbol(symbol)) => {
-                if let Some(value) = lookup_chain_found(o, &super::symbol_slot_key(symbol))? {
+                if let Some(value) = lookup_chain_found(self, o, &super::symbol_slot_key(symbol))? {
                     return Ok(value);
                 }
                 if crate::builtins::is_iterator_symbol(p)
@@ -836,25 +857,27 @@ impl Interpreter {
 /// Walk an object's prototype chain looking for `key`, bounded by
 /// [`MAX_PROTOTYPE_DEPTH`](crate::value::MAX_PROTOTYPE_DEPTH) so a guest-built
 /// cycle spends bounded time instead of hanging.
-fn lookup_chain(o: &Value, key: &str) -> Result<Value, VmErr> {
-    Ok(lookup_chain_found(o, key)?.unwrap_or(Value::Undefined))
+fn lookup_chain(interp: &Interpreter, o: &Value, key: &str) -> Result<Value, VmErr> {
+    Ok(lookup_chain_found(interp, o, key)?.unwrap_or(Value::Undefined))
 }
 
 /// Look up an object property without conflating a missing property with an
 /// own or inherited property whose value is `undefined`.
-fn lookup_chain_found(o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
+fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
     let mut current = o.clone();
     for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
         let props = match &current {
             Value::Object { props } => props,
             Value::Array(array) => {
                 if let Some(value) = array.named_prop(key) {
-                    return Ok(Some(value));
+                    return Ok(Some(value.deref_binding()));
                 }
-                let Some(next) = array.proto() else {
+                // Array indices are handled by the caller before this walk.
+                // Named values and length live outside `ObjectCell`.
+                let Some(proto) = interp.prototype_of(&current) else {
                     return Ok(None);
                 };
-                current = next.as_ref().clone();
+                current = proto.as_ref().clone();
                 continue;
             }
             Value::Class(class) => &class.statics,
@@ -864,7 +887,7 @@ fn lookup_chain_found(o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {
             return Ok(Some(value.clone()));
         }
-        let Some(next) = props.proto() else {
+        let Some(next) = interp.prototype_of(&current) else {
             return Ok(None);
         };
         current = next.as_ref().clone();
@@ -1415,6 +1438,92 @@ mod boxed_primitive_prototype_tests {
             }
             let actual: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
             assert_eq!(expected, actual, "{runtime} primitive behavior differed");
+        }
+    }
+
+    #[test]
+    fn object_prototype_methods_match_node_and_bun() {
+        let fixture = r#"JSON.stringify((() => {
+  const plain = { own: 1 };
+  const customTag = { [Symbol.toStringTag]: 'Widget' };
+  const localized = { toString() { return 'localized'; } };
+  const accessors = {};
+  let assigned = 0;
+  accessors.__defineGetter__('answer', () => 42);
+  accessors.__defineSetter__('value', value => { assigned = value; });
+  accessors.value = 9;
+  const customPrototype = { inherited: true };
+  const child = {};
+  child.__proto__ = customPrototype;
+  const arrayChild = [];
+  arrayChild.__proto__ = customPrototype;
+  const boxedNumber = Object.prototype.valueOf.call(12);
+  return {
+    prototypeNames: Object.getOwnPropertyNames(Object.prototype).sort(),
+    objectString: Object.prototype.toString.call(plain),
+    nullString: Object.prototype.toString.call(null),
+    undefinedString: Object.prototype.toString.call(undefined),
+    arrayString: Object.prototype.toString.call([]),
+    dateString: Object.prototype.toString.call(new Date(0)),
+    customTag: Object.prototype.toString.call(customTag),
+    localeString: localized.toLocaleString(),
+    valueOf: [plain.valueOf() === plain, typeof boxedNumber, boxedNumber.valueOf()],
+    ownProperty: [plain.hasOwnProperty('own'), plain.hasOwnProperty('missing'),
+      globalThis.hasOwnProperty('Object')],
+    enumerable: [plain.propertyIsEnumerable('own'), plain.propertyIsEnumerable('missing'),
+      Object.prototype.propertyIsEnumerable.call('abc', '0')],
+    prototype: [Object.getPrototypeOf(plain).isPrototypeOf(plain),
+      Object.prototype.isPrototypeOf(plain)],
+    accessors: [accessors.answer, assigned,
+      accessors.__lookupGetter__('answer') === Object.getOwnPropertyDescriptor(accessors, 'answer').get,
+      accessors.__lookupSetter__('value') === Object.getOwnPropertyDescriptor(accessors, 'value').set],
+    protoAccessor: [child.__proto__ === customPrototype, child.inherited,
+      arrayChild.__proto__ === customPrototype, arrayChild.inherited,
+      Object.getOwnPropertyDescriptor(Object.prototype, '__proto__').enumerable],
+  };
+})())"#;
+
+        let mut interpreter = Interpreter::with_builtins();
+        let result = interpreter.eval_source(fixture).unwrap();
+        let Value::String(ref result) = result else {
+            panic!("Object.prototype fixture returned {result:?}");
+        };
+        let expected: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(expected["objectString"], "[object Object]");
+        assert_eq!(expected["customTag"], "[object Widget]");
+        assert_eq!(expected["localeString"], "localized");
+        assert_eq!(
+            expected["ownProperty"],
+            serde_json::json!([true, false, true])
+        );
+        assert_eq!(
+            expected["accessors"],
+            serde_json::json!([42, 9, true, true])
+        );
+        assert_eq!(
+            expected["protoAccessor"],
+            serde_json::json!([true, true, true, true, false])
+        );
+
+        for runtime in ["node", "bun"] {
+            let Ok(reference) = Command::new(runtime)
+                .args(["-e", &format!("process.stdout.write({fixture})")])
+                .output()
+            else {
+                continue;
+            };
+            if !reference.status.success() {
+                eprintln!(
+                    "skipping {runtime} Object.prototype comparison: {}",
+                    String::from_utf8_lossy(&reference.stderr)
+                );
+                continue;
+            }
+            let actual: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(
+                expected, actual,
+                "{runtime} Object.prototype behavior differed"
+            );
         }
     }
 }

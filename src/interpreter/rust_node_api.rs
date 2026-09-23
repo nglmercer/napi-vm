@@ -7277,13 +7277,6 @@ unsafe extern "C" fn api_get_all_property_names(
             // Node-API's writable/enumerable/configurable filters require.
             return Err(NAPI_GENERIC_FAILURE);
         }
-        if contains_global && key_mode != 1 {
-            // The VM currently synthesizes the global object's Object
-            // prototype methods during property lookup instead of storing all
-            // of them as own keys on Object.prototype. Returning a partial
-            // prototype chain here would silently produce the wrong list.
-            return Err(NAPI_GENERIC_FAILURE);
-        }
         if contains_proxy || contains_global {
             if !has_guest_callback_dispatcher(&environment) {
                 return Err(NAPI_GENERIC_FAILURE);
@@ -11601,8 +11594,12 @@ static napi_value proxy_property_names_probe(napi_env env, napi_callback_info in
 }
 
 static napi_value global_property_names_probe(napi_env env, napi_callback_info info) {
-  napi_value global, result, own_names, field;
-  bool has_object, has_global_this, prototype_supported;
+  napi_value global, result, own_names, all_names, field;
+  bool has_object, has_global_this, prototype_supported, has_object_prototype_names = true;
+  const char* object_prototype_names[] = {
+      "constructor", "__defineGetter__", "__defineSetter__", "hasOwnProperty",
+      "__lookupGetter__", "__lookupSetter__", "isPrototypeOf",
+      "propertyIsEnumerable", "toLocaleString", "toString", "valueOf", "__proto__"};
   (void)info;
   if (napi_get_global(env, &global) != napi_ok ||
       napi_get_all_property_names(env, global, napi_key_own_only,
@@ -11613,14 +11610,26 @@ static napi_value global_property_names_probe(napi_env env, napi_callback_info i
   has_global_this = property_name_array_has(env, own_names, "globalThis");
   prototype_supported = napi_get_all_property_names(
       env, global, napi_key_include_prototypes, napi_key_all_properties,
-      napi_key_numbers_to_strings, &own_names) == napi_ok;
+      napi_key_numbers_to_strings, &all_names) == napi_ok;
+  if (prototype_supported) {
+    for (size_t index = 0;
+         index < sizeof(object_prototype_names) / sizeof(object_prototype_names[0]);
+         index++) {
+      has_object_prototype_names = has_object_prototype_names &&
+          property_name_array_has(env, all_names, object_prototype_names[index]);
+    }
+  } else {
+    has_object_prototype_names = false;
+  }
   if (napi_create_object(env, &result) != napi_ok ||
       napi_get_boolean(env, has_object, &field) != napi_ok ||
       napi_set_named_property(env, result, "hasObject", field) != napi_ok ||
       napi_get_boolean(env, has_global_this, &field) != napi_ok ||
       napi_set_named_property(env, result, "hasGlobalThis", field) != napi_ok ||
       napi_get_boolean(env, prototype_supported, &field) != napi_ok ||
-      napi_set_named_property(env, result, "prototypeSupported", field) != napi_ok)
+      napi_set_named_property(env, result, "prototypeSupported", field) != napi_ok ||
+      napi_get_boolean(env, has_object_prototype_names, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasObjectPrototypeNames", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -14875,7 +14884,11 @@ module.exports = {
         }
         assert!(matches!(
             global_property_names.get_prop("prototypeSupported"),
-            Some(Value::Bool(false))
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            global_property_names.get_prop("hasObjectPrototypeNames"),
+            Some(Value::Bool(true))
         ));
         let class_name_value = interpreter
             .eval_source(
@@ -15999,33 +16012,14 @@ module.exports = {
                 "Node reference failed: {}",
                 String::from_utf8_lossy(&reference.stderr)
             );
-            let mut node_result: serde_json::Value =
+            let node_result: serde_json::Value =
                 serde_json::from_slice(&reference.stdout).expect("Node result is valid JSON");
-            let mut normalized_guest_result = guest_result.clone();
-            assert_eq!(
-                node_result
-                    .get("globalPropertyNames")
-                    .and_then(|names| names.get("prototypeSupported")),
-                Some(&serde_json::Value::Bool(true)),
-                "Node should enumerate the global prototype chain"
-            );
-            assert_eq!(
-                normalized_guest_result.pointer("/globalPropertyNames/prototypeSupported"),
-                Some(&serde_json::Value::Bool(false)),
-                "napi-vm should fail clearly for an unrepresented global prototype chain"
-            );
-            for output in [&mut node_result, &mut normalized_guest_result] {
-                output["globalPropertyNames"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("prototypeSupported");
-            }
             assert_eq!(
                 node_result.get("arrayBufferDetachment"),
-                normalized_guest_result.get("arrayBufferDetachment"),
+                guest_result.get("arrayBufferDetachment"),
                 "Node-API v7 detachment mismatch"
             );
-            assert_eq!(node_result, normalized_guest_result);
+            assert_eq!(node_result, guest_result);
         }
 
         if let Ok(bun_version) = Command::new("bun").arg("--version").output()
@@ -16047,21 +16041,6 @@ module.exports = {
             let mut bun_result: serde_json::Value =
                 serde_json::from_slice(&reference.stdout).expect("Bun result is valid JSON");
             let mut normalized_guest_result = guest_result.clone();
-            assert_eq!(
-                bun_result.pointer("/globalPropertyNames/prototypeSupported"),
-                Some(&serde_json::Value::Bool(true)),
-                "Bun should enumerate the global prototype chain"
-            );
-            assert_eq!(
-                normalized_guest_result.pointer("/globalPropertyNames/prototypeSupported"),
-                Some(&serde_json::Value::Bool(false))
-            );
-            for output in [&mut bun_result, &mut normalized_guest_result] {
-                output["globalPropertyNames"]
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("prototypeSupported");
-            }
             let bun_non_arraybuffer_status = bun_result
                 .pointer("/arrayBufferDetachment/nonArrayBufferStatus")
                 .and_then(serde_json::Value::as_i64);

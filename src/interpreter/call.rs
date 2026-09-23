@@ -476,23 +476,19 @@ impl Interpreter {
         key: &str,
         value: Value,
     ) -> Result<(), VmErr> {
+        let setter_name = format!("set {key}");
+        let getter_name = format!("get {key}");
         let is_setter = |value: &Value| match value {
-            Value::Function(function) => function
-                .name
-                .as_ref()
-                .is_some_and(|name| name.starts_with("set ")),
+            Value::Function(function) => function.name.as_deref() == Some(setter_name.as_str()),
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.starts_with("set ")
+                name.as_ref() == setter_name
             }
             _ => false,
         };
         let is_getter = |value: &Value| match value {
-            Value::Function(function) => function
-                .name
-                .as_ref()
-                .is_some_and(|name| name.starts_with("get ")),
+            Value::Function(function) => function.name.as_deref() == Some(getter_name.as_str()),
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.starts_with("get ")
+                name.as_ref() == getter_name
             }
             _ => false,
         };
@@ -534,7 +530,7 @@ impl Interpreter {
             }
             return Ok(());
         }
-        if let Some(prototype) = props.proto()
+        if let Some(prototype) = self.prototype_of(receiver)
             && self.assign_inherited_property(receiver, prototype.as_ref(), key, &value)?
         {
             return Ok(());
@@ -563,38 +559,55 @@ impl Interpreter {
         key: &str,
         value: &Value,
     ) -> Result<bool, VmErr> {
+        let setter_name = format!("set {key}");
+        let getter_name = format!("get {key}");
         let is_setter = |value: &Value| match value {
-            Value::Function(function) => function
-                .name
-                .as_ref()
-                .is_some_and(|name| name.starts_with("set ")),
+            Value::Function(function) => function.name.as_deref() == Some(setter_name.as_str()),
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.starts_with("set ")
+                name.as_ref() == setter_name
             }
             _ => false,
         };
         let is_getter = |value: &Value| match value {
-            Value::Function(function) => function
-                .name
-                .as_ref()
-                .is_some_and(|name| name.starts_with("get ")),
+            Value::Function(function) => function.name.as_deref() == Some(getter_name.as_str()),
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.starts_with("get ")
+                name.as_ref() == getter_name
             }
             _ => false,
         };
 
         let mut current = prototype.clone();
         for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
-            let props = match &current {
-                Value::Object { props } => props.clone(),
-                Value::Class(class) => class.statics.clone(),
+            let (slots, attributes, has_accessors) = match &current {
+                Value::Object { props } => {
+                    let meta = props.meta.borrow();
+                    (
+                        props.borrow().clone(),
+                        meta.attrs_of(key),
+                        meta.has_accessors,
+                    )
+                }
+                Value::Class(class) => {
+                    let meta = class.statics.meta.borrow();
+                    (
+                        class.statics.borrow().clone(),
+                        meta.attrs_of(key),
+                        meta.has_accessors,
+                    )
+                }
+                Value::Array(array) => {
+                    let meta = array.meta.borrow();
+                    (
+                        array.named.borrow().clone(),
+                        meta.attrs_of(key),
+                        meta.has_accessors,
+                    )
+                }
                 _ => return Ok(false),
             };
-            let slots = props.borrow().clone();
             if let Some((_, property)) = slots.iter().find(|(name, _)| name == key) {
                 let companion = format!("__setter:{}__", key);
-                let paired_setter = props.meta.borrow().has_accessors.then(|| {
+                let paired_setter = has_accessors.then(|| {
                     slots
                         .iter()
                         .find(|(name, candidate)| name == &companion && is_setter(candidate))
@@ -610,14 +623,13 @@ impl Interpreter {
                     return Ok(true);
                 }
                 if is_getter(property)
-                    || props.meta.borrow().has_accessors
-                        && slots.iter().any(|(name, _)| name == &companion)
+                    || has_accessors && slots.iter().any(|(name, _)| name == &companion)
                 {
                     return Ok(true);
                 }
-                return Ok(!props.meta.borrow().attrs_of(key).writable);
+                return Ok(!attributes.writable);
             }
-            let Some(next) = props.proto() else {
+            let Some(next) = self.prototype_of(&current) else {
                 return Ok(false);
             };
             current = next.as_ref().clone();
@@ -734,6 +746,12 @@ impl Interpreter {
                         return Ok(());
                     }
                 }
+                if !exists
+                    && let Some(prototype) = self.prototype_of(obj)
+                    && self.assign_inherited_property(obj, prototype.as_ref(), k, &val)?
+                {
+                    return Ok(());
+                }
                 if (exists && !cell.meta.borrow().attrs_of(k).writable)
                     || (!exists && cell.meta.borrow().non_extensible)
                 {
@@ -751,6 +769,12 @@ impl Interpreter {
                         self.call_this(&setter, obj.clone(), vec![val])?;
                         return Ok(());
                     }
+                }
+                if !exists
+                    && let Some(prototype) = self.prototype_of(obj)
+                    && self.assign_inherited_property(obj, prototype.as_ref(), &slot, &val)?
+                {
+                    return Ok(());
                 }
                 if (exists && !cell.meta.borrow().attrs_of(&slot).writable)
                     || (!exists && cell.meta.borrow().non_extensible)
