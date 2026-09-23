@@ -1089,6 +1089,47 @@ mod tests {
     }
 
     #[test]
+    fn sparse_arrays_preserve_holes_across_common_methods() {
+        let value = eval(
+            "const a = Array(4); a[1] = undefined; a[3] = 2; const mapped = a.map(x => x); const flat = [a].flat(); const flattened = a.flatMap(x => [x]); const sorted = Array(4); sorted[0] = 3; sorted[2] = 1; sorted[3] = undefined; sorted.sort(); ({keys: Object.keys(a).join(','), mapHole: Object.hasOwn(mapped, 0), mapUndefined: Object.hasOwn(mapped, 1), flatIndex0: Object.hasOwn(flat, 0), flatLength: flat.length, flatMapLength: flattened.length, reduced: a.reduceRight((count, value) => count + 1, 0), sorted: sorted.join(','), sortedHole: !Object.hasOwn(sorted, 3)});",
+        )
+        .unwrap();
+
+        assert!(matches!(value.get_prop("keys"), Some(Value::String(ref text)) if text == "1,3"));
+        assert!(matches!(
+            value.get_prop("mapHole"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            value.get_prop("flatIndex0"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            value.get_prop("sortedHole"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            value.get_prop("mapUndefined"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            value.get_prop("flatLength"),
+            Some(Value::Number(2.0))
+        ));
+        assert!(matches!(
+            value.get_prop("flatMapLength"),
+            Some(Value::Number(2.0))
+        ));
+        assert!(matches!(
+            value.get_prop("reduced"),
+            Some(Value::Number(2.0))
+        ));
+        assert!(
+            matches!(value.get_prop("sorted"), Some(Value::String(ref text)) if text == "1,3,,")
+        );
+    }
+
+    #[test]
     fn test_objects() {
         assert_eq!(eval_str("const o = {x: 1}; o.x;"), "1");
         assert_eq!(eval_str("const o = {x: 1}; o['x'];"), "1");

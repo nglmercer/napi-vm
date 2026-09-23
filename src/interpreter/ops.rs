@@ -476,7 +476,10 @@ impl Interpreter {
             // trap needs to call guest code, so it is applied in `Object.keys`
             // and `for…in`, which have `&mut self`.
             Value::Proxy(proxy) => self.keys(&proxy.target),
-            Value::Array(i) => (0..i.borrow().len()).map(|x| x.to_string()).collect(),
+            Value::Array(i) => (0..i.borrow().len())
+                .filter(|index| i.has_index(*index))
+                .map(|x| x.to_string())
+                .collect(),
             Value::GlobalObject => self.global_keys(),
             _ => vec![],
         }

@@ -115,12 +115,12 @@ function addonWorkerMain() {
   const { types } = require('node:util');
   const MAX_SYNC_CALLBACK_RESULT_BYTES = 1024 * 1024;
   let nextHandle=1, nextCallbackCall=1, nextNativeSymbolId=1, dispatchDepth=0;
-  const refs=new Map(), objectIds=new WeakMap(), functionIds=new WeakMap(), promiseIds=new WeakMap(), guestCallbackIds=new WeakMap();
+  const refs=new Map(), objectIds=new WeakMap(), functionIds=new WeakMap(), promiseIds=new WeakMap(), guestCallbackIds=new WeakMap(), guestGraphNodes=new Map();
   const symbols=new Map(), symbolIds=new Map();
   const wellKnownSymbols=[undefined,Symbol.iterator,Symbol.asyncIterator,Symbol.toStringTag,Symbol.hasInstance,Symbol.toPrimitive,Symbol.species,Symbol.unscopables,Symbol.isConcatSpreadable,Symbol.match,Symbol.matchAll,Symbol.replace,Symbol.search,Symbol.split];
   function symbolId(value){let id=symbolIds.get(value);if(id===undefined){if(symbols.size>=262144)throw new RangeError('symbol handle limit exceeded');id='n:'+nextNativeSymbolId++;symbols.set(id,value);symbolIds.set(value,id);}return id;}
   function newGraph(){return {seen:new Map(),nextId:1};}
-  function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');graph.set(id,value);if(graph.guestRefs)graph.guestRefs.set(value,id);}}
+  function setGraphNode(graph,id,value){if(id!==undefined){if(graph.has(id))throw new TypeError('duplicate guest graph node id');if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');if(!guestGraphNodes.has(id)&&guestGraphNodes.size>=262144)throw new RangeError('persistent guest graph node limit exceeded');graph.set(id,value);guestGraphNodes.set(id,value);if(graph.guestRefs)graph.guestRefs.set(value,id);}}
   function newDecodeGraph(){const graph=new Map();graph.guestRefs=new WeakMap();graph.guestCallbacks=new WeakMap();return graph;}
   function hold(value,receiver){
     const kind=typeof value,ids=kind==='function'?functionIds:objectIds,existing=ids.get(value);
@@ -162,9 +162,8 @@ function addonWorkerMain() {
       const existing=graph.seen.get(value);if(existing!==undefined)return {t:'ref',v:existing};
       if(graph.seen.size>=262144)throw new RangeError('native graph node limit exceeded');
       if(value.length>262144)throw new RangeError('native array exceeds the VM limit');
-      for(let i=0;i<value.length;i++)if(!Object.hasOwn(value,String(i)))throw new TypeError('sparse native arrays cannot cross the napi-vm bridge');
       const id='n:'+graph.nextId++;graph.seen.set(value,id);
-      const items=Array.from(value,v=>encode(v,value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects));
+      const items=Array.from({length:value.length},(_,i)=>Object.hasOwn(value,String(i))?encode(value[i],value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects):{t:'hole'});
       const named=[];
       for(const key of Object.keys(value))if(!/^(0|[1-9][0-9]*)$/.test(key)||Number(key)>=value.length)named.push([key,encode(value[key],value,depth+1,graph,guestRefs,guestCallbacks,copyPlainObjects)]);
       return {t:'array',id,v:items,named};
@@ -227,7 +226,7 @@ function addonWorkerMain() {
   function decode(value,depth,graph){
     if(depth>128)throw new RangeError('guest argument depth exceeded');
     switch(value.t){
-      case 'ref':{const result=graph.get(value.v);if(result===undefined)throw new TypeError('invalid guest object reference');return result;}
+      case 'ref':{let result;if(graph.has(value.v)){result=graph.get(value.v);}else{result=guestGraphNodes.get(value.v);if(result!==undefined){if(graph.size>=262144)throw new RangeError('guest graph node limit exceeded');graph.set(value.v,result);if(graph.guestRefs)graph.guestRefs.set(result,value.v);}}if(result===undefined)throw new TypeError('invalid guest object reference');return result;}
       case 'undefined':return undefined;case 'null':return null;case 'boolean':return value.v;
       case 'number':if(value.v==='-0')return -0;if(value.v==='NaN')return NaN;if(value.v==='Infinity')return Infinity;if(value.v==='-Infinity')return -Infinity;return Number(value.v);
       case 'string':return value.v;case 'bigint':return BigInt(value.v);
@@ -243,7 +242,7 @@ function addonWorkerMain() {
       case 'guestCallback':return makeGuestCallback(value,graph);
       case 'guestClass':return makeGuestCallback(value,graph,true);
       case 'function':{const entry=refs.get(value.v);if(!entry||typeof entry.value!=='function')throw new TypeError('native function handle is invalid');return entry.value;}
-      case 'array':{const a=[];setGraphNode(graph,value.id,a);for(const item of value.v)a.push(decode(item,depth+1,graph));for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(a));return a;}
+      case 'array':{const a=new Array(value.v.length);setGraphNode(graph,value.id,a);value.v.forEach((item,index)=>{if(item.t!=='hole')a[index]=decode(item,depth+1,graph);});for(const [k,v]of(value.named||[]))Object.defineProperty(a,k,{value:decode(v,depth+1,graph),enumerable:true,writable:true,configurable:true});if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(a));return a;}
       case 'object':{const o={};setGraphNode(graph,value.id,o);for(const item of value.v){const [key,v,writable=true,enumerable=true,configurable=true]=item;const k=typeof key==='string'?key:decode(key,depth+1,graph);if(typeof k!=='string'&&typeof k!=='symbol')throw new TypeError('invalid guest property key');const descriptor={enumerable,configurable};if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],depth+1,graph);if(item[6]!==null)descriptor.set=decode(item[6],depth+1,graph);}else{descriptor.value=decode(v,depth+1,graph);descriptor.writable=writable;}Object.defineProperty(o,k,descriptor);}if(value.prototype&&value.prototype.t!=='defaultPrototype'){const prototype=value.prototype.t==='null'?null:decode(value.prototype,depth+1,graph);if(prototype!==null&&typeof prototype!=='object'&&typeof prototype!=='function')throw new TypeError('invalid guest object prototype');Object.setPrototypeOf(o,prototype);}if(value.extensible===false)Object.preventExtensions(o);if(graph.mutationBefore&&value.id!==undefined&&!graph.mutationBefore.has(value.id))graph.mutationBefore.set(value.id,descriptorState(o));return o;}
       case 'proxy':{const target=decode(value.target,depth+1,graph);const handler=decode(value.handler,depth+1,graph);if((!target||typeof target!=='object')&&typeof target!=='function')throw new TypeError('invalid guest Proxy target');if(!handler||typeof handler!=='object')throw new TypeError('invalid guest Proxy handler');const supported=new Set(['get','set','has','deleteProperty','ownKeys','apply','construct']);const filteredHandler=new Proxy(Object.create(null),{get(_target,key){return supported.has(key)?Reflect.get(handler,key,handler):undefined;}});const proxy=new Proxy(target,filteredHandler);setGraphNode(graph,value.id,proxy);return proxy;}
       default:throw new TypeError('unsupported napi-vm argument');
@@ -265,8 +264,10 @@ function addonWorkerMain() {
       if(snapshot.t==='array'){
         for(const key of Reflect.ownKeys(object))if(key!=='length')Reflect.deleteProperty(object,key);
         object.length=0;
-        for(let index=0;index<snapshot.v.length;index++)Object.defineProperty(object,String(index),{value:decode(snapshot.v[index],0,graph),enumerable:true,writable:true,configurable:true});
-        const desired=new Set(['length',...snapshot.v.map((_,index)=>String(index))]);
+        object.length=snapshot.v.length;
+        for(let index=0;index<snapshot.v.length;index++)if(snapshot.v[index].t!=='hole')Object.defineProperty(object,String(index),{value:decode(snapshot.v[index],0,graph),enumerable:true,writable:true,configurable:true});
+        const desired=new Set(['length']);
+        for(let index=0;index<snapshot.v.length;index++)if(snapshot.v[index].t!=='hole')desired.add(String(index));
         for(const [key,value] of(snapshot.named||[])){desired.add(key);Object.defineProperty(object,key,{value:decode(value,0,graph),enumerable:true,writable:true,configurable:true});}
         for(const key of Reflect.ownKeys(object))if(!desired.has(key))Reflect.deleteProperty(object,key);
       }else if(snapshot.t==='object'){
@@ -350,7 +351,6 @@ function addonWorkerMain() {
       }
       if(Array.isArray(value)){
         if(!now.extensible)throw new TypeError('preventExtensions on guest arrays is not supported by the Node addon bridge');
-        for(let i=0;i<value.length;i++)if(!Object.hasOwn(value,String(i)))throw new TypeError('sparse array mutations are not supported by the Node addon bridge');
         const lengthDescriptor=Object.getOwnPropertyDescriptor(value,'length');
         if(!lengthDescriptor||lengthDescriptor.writable!==true)throw new TypeError('array length descriptor changes are not supported by the Node addon bridge');
         mutations.push({id,kind:'array',...(old.length!==now.length?{length:value.length}:{}),entries,deleted:deleted.map(key=>typeof key==='symbol'?encodeGuestValue(key,value,1,graph,guestRefs,guestCallbackIds):key)});
@@ -1592,13 +1592,21 @@ fn guest_to_wire(
                 return Ok(json!({"t":"ref","v":format!("g:{node_id}")}));
             }
             let items = a.borrow().clone();
+            let presence = a.presence_snapshot();
             if items.len() > MAX_ARRAY_LEN {
                 return Err(VmErr::Msg("guest array exceeds limit".into()));
             }
             let node_id = graph.register(id, v.clone())?;
             let wire = items
                 .iter()
-                .map(|x| guest_to_wire(sidecar, x, depth + 1, graph, proxy_ids))
+                .enumerate()
+                .map(|(index, x)| {
+                    if presence.get(index).copied().unwrap_or(true) {
+                        guest_to_wire(sidecar, x, depth + 1, graph, proxy_ids)
+                    } else {
+                        Ok(json!({"t":"hole"}))
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let named = a
                 .named
@@ -1874,7 +1882,14 @@ fn guest_graph_node_snapshot(
             }
             let values = items
                 .iter()
-                .map(|item| sidecar.guest_to_wire_with_context(item, 0, graph))
+                .enumerate()
+                .map(|(index, item)| {
+                    if array.has_index(index) {
+                        sidecar.guest_to_wire_with_context(item, 0, graph)
+                    } else {
+                        Ok(json!({"t":"hole"}))
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let named = array
                 .named
@@ -2382,9 +2397,12 @@ fn apply_guest_mutation(
                 })
                 .transpose()?;
             let mut items = array.borrow().clone();
+            let mut presence = array.presence_snapshot();
             if let Some(length) = requested_length {
                 items.truncate(length);
                 items.resize(length, Value::Undefined);
+                presence.resize(length, false);
+                presence.truncate(length);
             }
             let mut named = array.named.borrow().clone();
             let mut keys = HashSet::with_capacity(entries.len());
@@ -2416,6 +2434,7 @@ fn apply_guest_mutation(
                     && index < items.len()
                 {
                     items[index] = property.value;
+                    presence[index] = true;
                     continue;
                 }
                 if crate::interpreter::is_internal_key(&property.key) {
@@ -2444,13 +2463,14 @@ fn apply_guest_mutation(
                     && key == index.to_string()
                     && index < items.len()
                 {
-                    return Err(VmErr::Msg(
-                        "sparse Node array mutations cannot be represented by the VM".into(),
-                    ));
+                    presence[index] = false;
+                    items[index] = Value::Undefined;
+                    continue;
                 }
                 named.retain(|(name, _)| name != &key);
             }
             *array.borrow_mut() = items;
+            array.replace_presence(presence);
             *array.named.borrow_mut() = named;
         }
         _ => {
@@ -2498,6 +2518,7 @@ fn wire_to_guest_with_context(
                 .ok_or_else(|| VmErr::Msg("Node value references an unknown guest callback".into()))
         }
         "undefined" => Ok(Value::Undefined),
+        "hole" => Err(VmErr::Msg("array hole appeared outside an array".into())),
         "null" => Ok(Value::Null),
         "boolean" => v
             .get("v")
@@ -2724,12 +2745,22 @@ fn wire_to_guest_with_context(
             if let Some(id) = v.get("id") {
                 graph.register(wire_graph_id(Some(id))?, array.clone())?;
             }
+            let mut presence = Vec::with_capacity(a.len());
             let items = a
                 .iter()
-                .map(|x| wire_to_guest_with_context(sidecar, x, depth + 1, graph))
+                .map(|x| {
+                    let is_hole = x.get("t").and_then(JsonValue::as_str) == Some("hole");
+                    presence.push(!is_hole);
+                    if is_hole {
+                        Ok(Value::Undefined)
+                    } else {
+                        wire_to_guest_with_context(sidecar, x, depth + 1, graph)
+                    }
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             if let Value::Array(cell) = &array {
                 *cell.borrow_mut() = items;
+                cell.replace_presence(presence);
             }
             if let Some(named) = v.get("named").and_then(JsonValue::as_array) {
                 for property in named {
@@ -3221,6 +3252,40 @@ static napi_value mutate_array(napi_env env, napi_callback_info info) {
   return argv[0];
 }
 
+static napi_value make_sparse_array(napi_env env, napi_callback_info info) {
+  napi_value array, value;
+  if (napi_create_array_with_length(env, 4, &array) != napi_ok ||
+      napi_create_int32(env, 17, &value) != napi_ok ||
+      napi_set_element(env, array, 1, value) != napi_ok ||
+      napi_get_undefined(env, &value) != napi_ok ||
+      napi_set_element(env, array, 3, value) != napi_ok) return NULL;
+  return array;
+}
+
+static napi_value array_has_element(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  uint32_t index;
+  bool has = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_get_value_uint32(env, argv[1], &index) != napi_ok ||
+      napi_has_element(env, argv[0], index, &has) != napi_ok ||
+      napi_get_boolean(env, has, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value delete_array_element(napi_env env, napi_callback_info info) {
+  size_t argc = 2;
+  napi_value argv[2], result;
+  uint32_t index;
+  bool deleted = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_get_value_uint32(env, argv[1], &index) != napi_ok ||
+      napi_delete_element(env, argv[0], index, &deleted) != napi_ok ||
+      napi_get_boolean(env, deleted, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value mutate_after_callback(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2], receiver, value;
@@ -3596,6 +3661,12 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "mutateObject", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "mutateArray", NAPI_AUTO_LENGTH, mutate_array, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "mutateArray", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeSparseArray", NAPI_AUTO_LENGTH, make_sparse_array, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeSparseArray", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "arrayHasElement", NAPI_AUTO_LENGTH, array_has_element, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "arrayHasElement", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "deleteArrayElement", NAPI_AUTO_LENGTH, delete_array_element, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "deleteArrayElement", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "mutateAfterCallback", NAPI_AUTO_LENGTH, mutate_after_callback, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "mutateAfterCallback", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "assignAndReturn", NAPI_AUTO_LENGTH, assign_and_return, NULL, &fn) != napi_ok) return NULL;
@@ -3670,6 +3741,26 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             compile.status.success(),
             "could not compile Node-API fixture: {}",
             String::from_utf8_lossy(&compile.stderr)
+        );
+
+        let sparse_fixture = "const addon = require('./fixture.node'); const sparse = addon.makeSparseArray(); const initial = {hole: Object.hasOwn(sparse, 0), value: Object.hasOwn(sparse, 1), explicitUndefined: Object.hasOwn(sparse, 3), nativeHole: addon.arrayHasElement(sparse, 0), nativeValue: addon.arrayHasElement(sparse, 1)}; sparse[0] = 5; delete sparse[1]; const guestDeleted = !Object.hasOwn(sparse, 1); const guestDeleteReachedNative = !addon.arrayHasElement(sparse, 1); const hostDeleteResult = addon.deleteArrayElement(sparse, 3); const hostDeleteVisible = !Object.hasOwn(sparse, 3); addon.mutateArray(sparse); const mapped = sparse.map(value => value); ({length: sparse.length, initialHole: initial.hole, initialValue: initial.value, initialExplicitUndefined: initial.explicitUndefined, initialNativeHole: initial.nativeHole, initialNativeValue: initial.nativeValue, written: Object.hasOwn(sparse, 0), guestDeleted, guestDeleteReachedNative, hostDeleteResult, hostDeleteVisible, nativeDeleted: !addon.arrayHasElement(sparse, 3), restored: Object.hasOwn(sparse, 1), nativeRestored: addon.arrayHasElement(sparse, 1), keys: Object.keys(sparse).join(','), mappedLength: mapped.length, mappedIndex0: Object.hasOwn(mapped, 0), mappedIndex1: Object.hasOwn(mapped, 1), mappedIndex2: Object.hasOwn(mapped, 2), mappedIndex3: Object.hasOwn(mapped, 3)});";
+        let sparse_reference = ProcessCommand::new("node")
+            .arg("-e")
+            .arg(format!(
+                "process.stdout.write(JSON.stringify(eval({})))",
+                serde_json::to_string(sparse_fixture).unwrap()
+            ))
+            .current_dir(&root)
+            .output()
+            .unwrap();
+        assert!(
+            sparse_reference.status.success(),
+            "Node sparse array reference failed: {}",
+            String::from_utf8_lossy(&sparse_reference.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&sparse_reference.stdout),
+            r#"{"length":4,"initialHole":false,"initialValue":true,"initialExplicitUndefined":true,"initialNativeHole":false,"initialNativeValue":true,"written":true,"guestDeleted":true,"guestDeleteReachedNative":true,"hostDeleteResult":true,"hostDeleteVisible":true,"nativeDeleted":true,"restored":true,"nativeRestored":true,"keys":"0,1,2,tag","mappedLength":4,"mappedIndex0":true,"mappedIndex1":true,"mappedIndex2":true,"mappedIndex3":false}"#
         );
 
         let node_reference = ProcessCommand::new("node")
@@ -4305,6 +4396,53 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(roundtrip, Value::Bool(true)));
 
         drop(interpreter);
+        drop(_bridge);
+        let mut sparse_interpreter = Interpreter::with_builtins();
+        let _sparse_bridge = sparse_interpreter
+            .enable_node_addons(
+                NodeAddonOptions::new("node", [root.clone()])
+                    .allow_native_addon_with_sha256(addon.clone(), expected_sha256)
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
+        let sparse_result = sparse_interpreter.eval_source(sparse_fixture).unwrap();
+        for (key, expected) in [
+            ("initialHole", false),
+            ("initialValue", true),
+            ("initialExplicitUndefined", true),
+            ("initialNativeHole", false),
+            ("initialNativeValue", true),
+            ("written", true),
+            ("guestDeleted", true),
+            ("guestDeleteReachedNative", true),
+            ("hostDeleteResult", true),
+            ("hostDeleteVisible", true),
+            ("nativeDeleted", true),
+            ("restored", true),
+            ("nativeRestored", true),
+            ("mappedIndex0", true),
+            ("mappedIndex1", true),
+            ("mappedIndex2", true),
+            ("mappedIndex3", false),
+        ] {
+            assert!(
+                matches!(sparse_result.get_prop(key), Some(Value::Bool(value)) if value == expected),
+                "sparse array result mismatch for {key}: {:?}",
+                sparse_result.get_prop(key)
+            );
+        }
+        for key in ["length", "mappedLength"] {
+            assert!(
+                matches!(sparse_result.get_prop(key), Some(Value::Number(value)) if value == 4.0),
+                "sparse array length mismatch for {key}"
+            );
+        }
+        assert!(matches!(
+            sparse_result.get_prop("keys"),
+            Some(Value::String(ref value)) if value == "0,1,2,tag"
+        ));
+        drop(sparse_interpreter);
+        drop(_sparse_bridge);
         fs::remove_dir_all(root).unwrap();
     }
 }

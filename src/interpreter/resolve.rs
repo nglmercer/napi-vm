@@ -294,7 +294,7 @@ impl Interpreter {
                         name: "[Symbol.iterator]".into(),
                         callable: array_iter,
                     })
-                } else if let Ok(idx) = k.parse::<usize>() {
+                } else if let Some(idx) = crate::value::array_index(k) {
                     let items = items.borrow();
                     if idx < items.len() {
                         Ok(items[idx].clone())

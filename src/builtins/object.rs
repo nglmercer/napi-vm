@@ -93,7 +93,17 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
                 .map(|(k, _)| k.clone())
                 .collect()
         }
-        Value::Array(items) => (0..items.borrow().len()).map(|i| i.to_string()).collect(),
+        Value::Array(items) => {
+            let mut names: Vec<String> = (0..items.borrow().len())
+                .filter(|index| items.has_index(*index))
+                .map(|index| index.to_string())
+                .collect();
+            if !enumerable_only {
+                names.push("length".to_string());
+            }
+            names.extend(items.named.borrow().iter().map(|(key, _)| key.clone()));
+            names
+        }
         _ => Vec::new(),
     }
 }
@@ -266,7 +276,9 @@ fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
     let found = match &v {
         Value::Object { props } => props.borrow().iter().any(|(k, _)| *k == key),
         Value::Array(items) => {
-            key == "length" || key.parse::<usize>().is_ok_and(|i| i < items.borrow().len())
+            key == "length"
+                || crate::value::array_index(&key).is_some_and(|i| items.has_index(i))
+                || items.named_prop(&key).is_some()
         }
         Value::String(s) => {
             key == "length" || key.parse::<usize>().is_ok_and(|i| i < s.chars().count())
@@ -525,8 +537,11 @@ fn object_get_own_descriptors(
 fn descriptor_for(target: &Value, key: &str) -> Value {
     if let Value::Array(items) = target {
         let items = items.borrow();
-        if let Ok(index) = key.parse::<usize>()
+        if let Some(index) = crate::value::array_index(key)
             && index < items.len()
+            && target
+                .as_array()
+                .is_some_and(|array| array.has_index(index))
         {
             return Value::object(vec![
                 ("value".to_string(), items[index].clone()),
@@ -541,6 +556,14 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
                 ("writable".to_string(), Value::Bool(true)),
                 ("enumerable".to_string(), Value::Bool(false)),
                 ("configurable".to_string(), Value::Bool(false)),
+            ]);
+        }
+        if let Some(value) = target.as_array().and_then(|array| array.named_prop(key)) {
+            return Value::object(vec![
+                ("value".to_string(), value),
+                ("writable".to_string(), Value::Bool(true)),
+                ("enumerable".to_string(), Value::Bool(true)),
+                ("configurable".to_string(), Value::Bool(true)),
             ]);
         }
         return Value::Undefined;

@@ -204,16 +204,24 @@ impl Interpreter {
                 }
                 Ok(Value::Bool(true))
             }
-            // Deleting an array element leaves a hole, which this VM models as
-            // `undefined` (it has no sparse-array representation).
+            // Deleting an array element leaves an absent slot while reads
+            // continue to produce `undefined`.
             Value::Array(items) => {
-                let index = self.tn(key);
-                if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
-                    let mut items = items.borrow_mut();
-                    let index = index as usize;
-                    if index < items.len() {
-                        items[index] = Value::Undefined;
+                let property = self.property_key(key)?;
+                if property == "length" {
+                    return Ok(Value::Bool(false));
+                }
+                if let Some(index) = crate::value::array_index(&property) {
+                    let items_len = items.borrow().len();
+                    if index < items_len {
+                        items.borrow_mut()[index] = Value::Undefined;
+                        items.set_index_presence(index, false);
                     }
+                } else {
+                    items
+                        .named
+                        .borrow_mut()
+                        .retain(|(name, _)| name != &property);
                 }
                 Ok(Value::Bool(true))
             }
@@ -378,19 +386,25 @@ impl Interpreter {
             (Value::GlobalObject, Value::String(k)) => self.set_global_checked(k, val),
             // A non-index key on an array is a named property, not an
             // element: `strings.raw`, `arr.total = 3`.
-            (Value::Array(cell), Value::String(k)) if k.parse::<usize>().is_err() => {
-                if k == "length" {
-                    let length = self.tn(&val);
-                    if length.is_finite() && length >= 0.0 && length.fract() == 0.0 {
-                        cell.borrow_mut().resize(
-                            (length as usize).min(crate::value::MAX_ARRAY_LEN),
-                            Value::Undefined,
-                        );
-                    }
-                    return Ok(());
-                }
+            (Value::Array(cell), Value::String(k))
+                if k != "length" && crate::value::array_index(k).is_none() =>
+            {
                 cell.set_named(k.clone(), val);
                 Ok(())
+            }
+            (Value::Array(cell), Value::String(k)) if k == "length" => {
+                let length = self.tn(&val);
+                if length.is_finite() && length >= 0.0 && length.fract() == 0.0 {
+                    let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
+                    let old_length = cell.borrow().len();
+                    cell.borrow_mut().resize(length, Value::Undefined);
+                    cell.resize_presence(old_length, length, false);
+                }
+                Ok(())
+            }
+            (Value::Array(_), Value::String(k)) => {
+                let index = crate::value::array_index(k).expect("canonical array index guard");
+                self.assign_member(obj, &Value::Number(index as f64), val)
             }
             (Value::Array(items), Value::Number(i)) => {
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
@@ -400,6 +414,7 @@ impl Interpreter {
                     return Err(crate::value::limit_err("Maximum array length exceeded"));
                 }
                 let idx = *i as usize;
+                let old_length = items.borrow().len();
                 let mut items = items.borrow_mut();
                 if idx < items.len() {
                     items[idx] = val;
@@ -408,6 +423,14 @@ impl Interpreter {
                     // guest-visible native loop or an unchecked index.
                     items.resize(idx, Value::Undefined);
                     items.push(val);
+                }
+                let new_length = items.len();
+                drop(items);
+                if let Value::Array(cell) = obj {
+                    if idx >= old_length {
+                        cell.resize_presence(old_length, new_length, false);
+                    }
+                    cell.set_index_presence(idx, true);
                 }
                 Ok(())
             }

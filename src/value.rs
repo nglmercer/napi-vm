@@ -37,6 +37,13 @@ pub fn limit_err(msg: &str) -> VmErr {
     VmErr::Msg(format!("RangeError: {}", msg))
 }
 
+/// Parse a canonical ECMAScript array-index property name. Strings such as
+/// `"01"` and the reserved `"4294967295"` key are ordinary named properties.
+pub fn array_index(key: &str) -> Option<usize> {
+    let index = key.parse::<usize>().ok()?;
+    (index.to_string() == key && index < u32::MAX as usize).then_some(index)
+}
+
 /// Per-property attributes (`writable`, `enumerable`, `configurable`).
 ///
 /// Properties created by ordinary assignment or an object literal carry the
@@ -144,6 +151,11 @@ impl ObjectMeta {
 #[derive(Debug)]
 pub struct ArrayCell {
     elements: RefCell<Vec<Value>>,
+    /// Array indices can exist without owning a value. Element reads still
+    /// return `undefined` for those indices; this bitmap preserves the
+    /// observable distinction for `in`, `Object.hasOwn`, reflection, and host
+    /// bridges.
+    present: RefCell<Option<Vec<bool>>>,
     pub named: RefCell<Vec<(String, Value)>>,
 }
 
@@ -151,7 +163,142 @@ impl ArrayCell {
     pub fn new(elements: Vec<Value>) -> Self {
         Self {
             elements: RefCell::new(elements),
+            present: RefCell::new(None),
             named: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn with_presence(elements: Vec<Value>, present: Vec<bool>) -> Self {
+        let mut normalized = present;
+        normalized.resize(elements.len(), false);
+        normalized.truncate(elements.len());
+        let normalized = (!normalized.iter().all(|present| *present)).then_some(normalized);
+        Self {
+            elements: RefCell::new(elements),
+            present: RefCell::new(normalized),
+            named: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub fn has_index(&self, index: usize) -> bool {
+        let elements = self.elements.borrow();
+        if index >= elements.len() {
+            return false;
+        }
+        self.present
+            .borrow()
+            .as_ref()
+            .and_then(|present| present.get(index))
+            .copied()
+            .unwrap_or(true)
+    }
+
+    pub fn set_index_presence(&self, index: usize, present: bool) {
+        let length = self.elements.borrow().len();
+        let mut presence = self.present.borrow_mut();
+        if present && presence.is_none() {
+            return;
+        }
+        let indices = presence.get_or_insert_with(|| vec![true; length]);
+        indices.resize(length, true);
+        if let Some(slot) = indices.get_mut(index) {
+            *slot = present;
+        }
+        if indices.iter().all(|present| *present) {
+            *presence = None;
+        }
+    }
+
+    pub fn presence_snapshot(&self) -> Vec<bool> {
+        let length = self.elements.borrow().len();
+        let presence = self.present.borrow();
+        let Some(presence) = presence.as_ref() else {
+            return vec![true; length];
+        };
+        let mut snapshot = presence.clone();
+        snapshot.resize(length, true);
+        snapshot.truncate(length);
+        snapshot
+    }
+
+    pub fn replace_presence(&self, present: Vec<bool>) {
+        let length = self.elements.borrow().len();
+        let mut normalized = present;
+        normalized.resize(length, false);
+        normalized.truncate(length);
+        *self.present.borrow_mut() =
+            (!normalized.iter().all(|present| *present)).then_some(normalized);
+    }
+
+    pub fn resize_presence(&self, old_length: usize, length: usize, fill_present: bool) {
+        let mut presence = self.present.borrow_mut();
+        if let Some(present) = presence.as_mut() {
+            present.resize(length, fill_present);
+            present.truncate(length);
+            if present.iter().all(|present| *present) {
+                *presence = None;
+            }
+        } else if length < old_length {
+            // A dense bitmap is unnecessary when truncating an all-present
+            // array.
+        } else if length > old_length && !fill_present {
+            let mut present = vec![true; old_length];
+            present.resize(length, false);
+            *presence = Some(present);
+        }
+    }
+
+    pub fn append_present(&self, count: usize) {
+        if let Some(present) = self.present.borrow_mut().as_mut() {
+            present.resize(present.len().saturating_add(count), true);
+        }
+    }
+
+    pub fn truncate_presence(&self, length: usize) {
+        let mut presence = self.present.borrow_mut();
+        if let Some(present) = presence.as_mut() {
+            present.truncate(length);
+            if present.iter().all(|present| *present) {
+                *presence = None;
+            }
+        }
+    }
+
+    pub fn insert_present(&self, index: usize, count: usize) {
+        if let Some(present) = self.present.borrow_mut().as_mut() {
+            for offset in 0..count {
+                present.insert(index.saturating_add(offset).min(present.len()), true);
+            }
+        }
+    }
+
+    pub fn remove_presence(&self, index: usize) {
+        let mut presence = self.present.borrow_mut();
+        if let Some(present) = presence.as_mut()
+            && index < present.len()
+        {
+            present.remove(index);
+            if present.iter().all(|present| *present) {
+                *presence = None;
+            }
+        }
+    }
+
+    pub fn reverse_presence(&self) {
+        if let Some(present) = self.present.borrow_mut().as_mut() {
+            present.reverse();
+        }
+    }
+
+    pub fn fill_presence(&self, start: usize, end: usize) {
+        let mut presence = self.present.borrow_mut();
+        if let Some(present) = presence.as_mut() {
+            for slot in present.iter_mut().take(end).skip(start) {
+                *slot = true;
+            }
+            if present.iter().all(|present| *present) {
+                *presence = None;
+            }
         }
     }
 
@@ -847,11 +994,25 @@ impl Value {
         Value::Array(Rc::new(ArrayCell::new(items)))
     }
 
+    pub fn array_with_presence(items: Vec<Value>, present: Vec<bool>) -> Self {
+        Value::Array(Rc::new(ArrayCell::with_presence(items, present)))
+    }
+
     pub fn checked_array(items: Vec<Value>) -> Result<Self, VmErr> {
         if items.len() > MAX_ARRAY_LEN {
             return Err(limit_err("Maximum array length exceeded"));
         }
         Ok(Self::array(items))
+    }
+
+    pub fn checked_array_with_presence(
+        items: Vec<Value>,
+        present: Vec<bool>,
+    ) -> Result<Self, VmErr> {
+        if items.len() > MAX_ARRAY_LEN {
+            return Err(limit_err("Maximum array length exceeded"));
+        }
+        Ok(Self::array_with_presence(items, present))
     }
 
     pub fn checked_string(value: String) -> Result<Self, VmErr> {
@@ -932,7 +1093,7 @@ impl Value {
                 if key == "length" {
                     return Some(Value::Number(items.len() as f64));
                 }
-                if let Ok(idx) = key.parse::<usize>()
+                if let Some(idx) = array_index(key)
                     && idx < items.len()
                 {
                     return Some(items[idx].clone());
@@ -1014,7 +1175,7 @@ impl Value {
             }
             Value::Array(cell) => {
                 key == "length"
-                    || key.parse::<usize>().is_ok_and(|i| i < cell.borrow().len())
+                    || array_index(key).is_some_and(|i| cell.has_index(i))
                     || cell.named_prop(key).is_some()
             }
             Value::String(_) => key == "length",

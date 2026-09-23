@@ -7,6 +7,13 @@ use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
 use crate::value::Value;
 
+fn arr_presence(this: &Value) -> Vec<bool> {
+    match this {
+        Value::Array(array) => array.presence_snapshot(),
+        _ => vec![true; arr_items(this).len()],
+    }
+}
+
 pub(super) fn install(e: &mut Environment) {
     if let Some(a) = e.get("Array") {
         let statics: &[(&str, NativeFn)] = &[
@@ -37,7 +44,11 @@ fn array_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmE
         if *n > crate::value::MAX_ARRAY_LEN as f64 {
             return Err(crate::value::limit_err("Maximum array length exceeded"));
         }
-        return Ok(Value::array(vec![Value::Undefined; *n as usize]));
+        let length = *n as usize;
+        return Ok(Value::array_with_presence(
+            vec![Value::Undefined; length],
+            vec![false; length],
+        ));
     }
     Value::checked_array(a)
 }
@@ -174,11 +185,16 @@ fn array_splice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
     if length - remove + inserted.len() > crate::value::MAX_ARRAY_LEN {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
+    let mut presence = cell.presence_snapshot();
+    let removed_presence: Vec<bool> = presence
+        .splice(start..start + remove, vec![true; inserted.len()])
+        .collect();
     let removed: Vec<Value> = cell
         .borrow_mut()
         .splice(start..start + remove, inserted)
         .collect();
-    Value::checked_array(removed)
+    cell.replace_presence(presence);
+    Value::checked_array_with_presence(removed, removed_presence)
 }
 
 /// `at(index)`: a negative index counts back from the end.
@@ -258,9 +274,10 @@ fn array_last_index_of(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let needle = a.first().cloned().unwrap_or(Value::Undefined);
     for index in (0..items.len()).rev() {
-        if interp.seq(&items[index], &needle) {
+        if presence.get(index).copied().unwrap_or(true) && interp.seq(&items[index], &needle) {
             return Ok(Value::Number(index as f64));
         }
     }
@@ -276,7 +293,12 @@ fn array_shift(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
     if items.is_empty() {
         return Ok(Value::Undefined);
     }
-    Ok(items.remove(0))
+    let removed = items.remove(0);
+    let length = items.len();
+    drop(items);
+    cell.remove_presence(0);
+    cell.truncate_presence(length);
+    Ok(removed)
 }
 
 /// `unshift(...values)`: prepend, returning the new length.
@@ -284,6 +306,7 @@ fn array_unshift(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Valu
     let Value::Array(cell) = &this else {
         return Ok(Value::Number(0.0));
     };
+    let added = a.len();
     let mut items = cell.borrow_mut();
     if items.len().saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
@@ -291,7 +314,10 @@ fn array_unshift(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Valu
     for (offset, value) in a.into_iter().enumerate() {
         items.insert(offset, value);
     }
-    Ok(Value::Number(items.len() as f64))
+    let length = items.len();
+    drop(items);
+    cell.insert_present(0, added);
+    Ok(Value::Number(length as f64))
 }
 
 /// `fill(value, start, end)`.
@@ -319,11 +345,13 @@ fn array_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
     let start = resolve(a.get(1), 0);
     let end = resolve(a.get(2), length).max(start);
     let value = a.first().cloned().unwrap_or(Value::Undefined);
-    let mut items = cell.borrow_mut();
-    for slot in items.iter_mut().take(end).skip(start) {
-        *slot = value.clone();
+    {
+        let mut items = cell.borrow_mut();
+        for slot in items.iter_mut().take(end).skip(start) {
+            *slot = value.clone();
+        }
     }
-    drop(items);
+    cell.fill_presence(start, end);
     Ok(this)
 }
 
@@ -363,24 +391,36 @@ fn array_entries(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result
 
 fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     let mut out = Vec::with_capacity(items.len());
+    let mut out_presence = Vec::with_capacity(items.len());
     for (i, it) in items.iter().enumerate() {
+        if !presence.get(i).copied().unwrap_or(true) {
+            out.push(Value::Undefined);
+            out_presence.push(false);
+            continue;
+        }
         let r = interp.call_this(
             &cb,
             Value::Undefined,
             vec![it.clone(), Value::Number(i as f64), this.clone()],
         )?;
         out.push(r);
+        out_presence.push(true);
     }
-    Value::checked_array(out)
+    Value::checked_array_with_presence(out, out_presence)
 }
 
 fn array_filter(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     let mut out = Vec::new();
     for (i, it) in items.iter().enumerate() {
+        if !presence.get(i).copied().unwrap_or(true) {
+            continue;
+        }
         let keep = interp.call_this(
             &cb,
             Value::Undefined,
@@ -395,13 +435,22 @@ fn array_filter(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 
 fn array_reduce(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     let (mut acc, start) = if a.len() >= 2 {
         (a[1].clone(), 0)
     } else {
-        (items.first().cloned().unwrap_or(Value::Undefined), 1)
+        let Some(first) = presence.iter().position(|present| *present) else {
+            return Err(VmErr::Msg(
+                "TypeError: Reduce of empty array with no initial value".into(),
+            ));
+        };
+        (items[first].clone(), first + 1)
     };
     for (i, item) in items.iter().enumerate().skip(start) {
+        if !presence.get(i).copied().unwrap_or(true) {
+            continue;
+        }
         acc = interp.call_this(
             &cb,
             Value::Undefined,
@@ -413,8 +462,12 @@ fn array_reduce(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 
 fn array_for_each(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     for (i, it) in items.iter().enumerate() {
+        if !presence.get(i).copied().unwrap_or(true) {
+            continue;
+        }
         interp.call_this(
             &cb,
             Value::Undefined,
@@ -442,8 +495,12 @@ fn array_find(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 
 fn array_some(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     for (i, it) in items.iter().enumerate() {
+        if !presence.get(i).copied().unwrap_or(true) {
+            continue;
+        }
         let hit = interp.call_this(
             &cb,
             Value::Undefined,
@@ -458,8 +515,12 @@ fn array_some(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 
 fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     for (i, it) in items.iter().enumerate() {
+        if !presence.get(i).copied().unwrap_or(true) {
+            continue;
+        }
         let hit = interp.call_this(
             &cb,
             Value::Undefined,
@@ -474,6 +535,7 @@ fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
 
 fn array_push(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
+        let added = a.len();
         let mut b = items.borrow_mut();
         if b.len().saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum array length exceeded"));
@@ -481,14 +543,20 @@ fn array_push(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
         for x in a {
             b.push(x);
         }
-        return Ok(Value::Number(b.len() as f64));
+        let length = b.len();
+        drop(b);
+        items.append_present(added);
+        return Ok(Value::Number(length as f64));
     }
     Ok(Value::Undefined)
 }
 
 fn array_pop(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
-        return Ok(items.borrow_mut().pop().unwrap_or(Value::Undefined));
+        let result = items.borrow_mut().pop().unwrap_or(Value::Undefined);
+        let length = items.borrow().len();
+        items.truncate_presence(length);
+        return Ok(result);
     }
     Ok(Value::Undefined)
 }
@@ -519,9 +587,10 @@ fn array_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 
 fn array_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let target = a.first().cloned().unwrap_or(Value::Undefined);
     for (i, it) in items.iter().enumerate() {
-        if interp.seq(it, &target) {
+        if presence.get(i).copied().unwrap_or(true) && interp.seq(it, &target) {
             return Ok(Value::Number(i as f64));
         }
     }
@@ -541,6 +610,7 @@ fn array_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
 
 fn array_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let len = items.len() as i64;
     let norm = |v: f64| -> i64 {
         if v.is_nan() {
@@ -557,37 +627,49 @@ fn array_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value,
     if start >= end {
         return Ok(Value::array(vec![]));
     }
-    Value::checked_array(items[start as usize..end as usize].to_vec())
+    Value::checked_array_with_presence(
+        items[start as usize..end as usize].to_vec(),
+        presence[start as usize..end as usize].to_vec(),
+    )
 }
 
 fn array_concat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let mut out = arr_items(&this);
+    let mut presence = arr_presence(&this);
     for v in a {
         match &v {
             Value::Array(items) => {
-                let items = items.borrow();
-                if out.len().saturating_add(items.len()) > crate::value::MAX_ARRAY_LEN {
+                let source = items.borrow();
+                if out.len().saturating_add(source.len()) > crate::value::MAX_ARRAY_LEN {
                     return Err(crate::value::limit_err("Maximum array length exceeded"));
                 }
-                out.extend(items.iter().cloned());
+                out.extend(source.iter().cloned());
+                presence.extend(
+                    source
+                        .iter()
+                        .enumerate()
+                        .map(|(index, _)| items.has_index(index)),
+                );
             }
             _ => {
                 if out.len() >= crate::value::MAX_ARRAY_LEN {
                     return Err(crate::value::limit_err("Maximum array length exceeded"));
                 }
                 out.push(v);
+                presence.push(true);
             }
         }
         if out.len() > crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum array length exceeded"));
         }
     }
-    Value::checked_array(out)
+    Value::checked_array_with_presence(out, presence)
 }
 
 fn array_reverse(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
         items.borrow_mut().reverse();
+        items.reverse_presence();
         return Ok(this);
     }
     Ok(Value::Undefined)
@@ -654,8 +736,25 @@ fn array_sort(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
         // Comparators are allowed to re-enter the array (for example by
         // calling `push`), and keeping the RefMut across the callback used to
         // turn that normal JavaScript re-entry into a Rust RefCell panic.
-        let mut sorted = items.borrow().clone();
-        let original_len = sorted.len();
+        let original_values = items.borrow().clone();
+        let original_presence = items.presence_snapshot();
+        let original_len = original_values.len();
+        let present_undefined = original_values
+            .iter()
+            .zip(&original_presence)
+            .filter(|(value, present)| **present && matches!(value, Value::Undefined))
+            .count();
+        let hole_count = original_presence
+            .iter()
+            .filter(|present| !**present)
+            .count();
+        let mut sorted: Vec<Value> = original_values
+            .into_iter()
+            .zip(original_presence.iter().copied())
+            .filter_map(|(value, present)| {
+                (present && !matches!(value, Value::Undefined)).then_some(value)
+            })
+            .collect();
         if matches!(
             cmp,
             Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
@@ -683,22 +782,36 @@ fn array_sort(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
                 return Err(error);
             }
         }
+        let defined_len = sorted.len();
+        sorted.resize(original_len - hole_count, Value::Undefined);
+        let mut sorted_presence = vec![true; original_len - hole_count];
+        sorted_presence.resize(original_len, false);
+        debug_assert_eq!(defined_len + present_undefined + hole_count, original_len);
+
+        // Comparators may mutate the array. Keep values appended beyond the
+        // captured sort length, while the sorted prefix follows the captured
+        // values and preserves holes at the end.
+        let mut presence_after_compare = items.presence_snapshot();
         let mut current = items.borrow_mut();
-        // Sorting uses the array length captured on entry. If a comparator
-        // shrinks the array, writing the sorted range extends it again; if it
-        // appends values, those values remain after the sorted range.
         if current.len() < original_len {
             current.resize(original_len, Value::Undefined);
+            presence_after_compare.resize(original_len, false);
         }
         for (index, value) in sorted.into_iter().enumerate() {
             current[index] = value;
         }
+        if presence_after_compare.len() > original_len {
+            sorted_presence.extend_from_slice(&presence_after_compare[original_len..]);
+        }
+        drop(current);
+        items.replace_presence(sorted_presence);
     }
     Ok(this)
 }
 
 fn array_flat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let depth = a.first().map(|v| v.to_number()).unwrap_or(1.0);
     let depth = if depth.is_nan() { 0.0 } else { depth };
 
@@ -711,8 +824,10 @@ fn array_flat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
     }
 
     let mut work = Vec::with_capacity(items.len());
-    for item in items.into_iter().rev() {
-        work.push(Work::Value(item, depth));
+    for (index, item) in items.into_iter().enumerate().rev() {
+        if presence.get(index).copied().unwrap_or(true) {
+            work.push(Work::Value(item, depth));
+        }
     }
     let mut active = std::collections::HashSet::new();
     let mut out = Vec::new();
@@ -732,8 +847,11 @@ fn array_flat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
                     if active.insert(identity) {
                         work.push(Work::Leave(identity));
                         let children = inner.borrow().clone();
-                        for child in children.into_iter().rev() {
-                            work.push(Work::Value(child, remaining - 1.0));
+                        let child_presence = inner.presence_snapshot();
+                        for (index, child) in children.into_iter().enumerate().rev() {
+                            if child_presence.get(index).copied().unwrap_or(true) {
+                                work.push(Work::Value(child, remaining - 1.0));
+                            }
                         }
                         continue;
                     }
@@ -750,9 +868,13 @@ fn array_flat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
 
 fn array_flat_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     let mut out = Vec::new();
     for (i, it) in items.iter().enumerate() {
+        if !presence.get(i).copied().unwrap_or(true) {
+            continue;
+        }
         let r = interp.call_this(
             &cb,
             Value::Undefined,
@@ -760,11 +882,18 @@ fn array_flat_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
         )?;
         match &r {
             Value::Array(inner) => {
-                let inner = inner.borrow();
-                if out.len().saturating_add(inner.len()) > crate::value::MAX_ARRAY_LEN {
+                let values = inner.borrow().clone();
+                let inner_presence = inner.presence_snapshot();
+                let added = inner_presence.iter().filter(|present| **present).count();
+                if out.len().saturating_add(added) > crate::value::MAX_ARRAY_LEN {
                     return Err(crate::value::limit_err("Maximum array length exceeded"));
                 }
-                out.extend(inner.iter().cloned());
+                out.extend(
+                    values
+                        .into_iter()
+                        .zip(inner_presence)
+                        .filter_map(|(value, present)| present.then_some(value)),
+                );
             }
             _ => {
                 if out.len() >= crate::value::MAX_ARRAY_LEN {
@@ -786,26 +915,33 @@ fn array_reduce_right(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let items = arr_items(&this);
+    let presence = arr_presence(&this);
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     let len = items.len();
     let (mut acc, mut i) = if a.len() >= 2 {
         (a[1].clone(), len as i64 - 1)
-    } else if len == 0 {
-        return Ok(Value::Undefined);
     } else {
-        (items[len - 1].clone(), len as i64 - 2)
+        let Some(last) = presence.iter().rposition(|present| *present) else {
+            return Err(VmErr::Msg(
+                "TypeError: Reduce of empty array with no initial value".into(),
+            ));
+        };
+        (items[last].clone(), last as i64 - 1)
     };
     while i >= 0 {
-        acc = interp.call_this(
-            &cb,
-            Value::Undefined,
-            vec![
-                acc,
-                items[i as usize].clone(),
-                Value::Number(i as f64),
-                this.clone(),
-            ],
-        )?;
+        let index = i as usize;
+        if presence.get(index).copied().unwrap_or(true) {
+            acc = interp.call_this(
+                &cb,
+                Value::Undefined,
+                vec![
+                    acc,
+                    items[index].clone(),
+                    Value::Number(i as f64),
+                    this.clone(),
+                ],
+            )?;
+        }
         i -= 1;
     }
     Ok(acc)
