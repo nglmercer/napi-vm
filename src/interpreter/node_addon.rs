@@ -2236,8 +2236,19 @@ mod tests {
         assert!(node.status.success(), "node --version failed");
         assert!(cc.status.success(), "cc --version failed");
 
+        fs::write(root.join("main.cjs"), "").unwrap();
         let source = root.join("fixture.c");
-        let addon = root.join("fixture.node");
+        let package_root = root.join("node_modules/fixture");
+        let package_build = package_root.join("build/Release");
+        fs::create_dir_all(&package_build).unwrap();
+        fs::write(
+            package_root.join("package.json"),
+            r#"{"exports":{".":{"require":"./build/Release/fixture.node","default":"./build/Release/fixture.node"}}}"#,
+        )
+        .unwrap();
+        let addon = package_build.join("fixture.node");
+        let direct_addon = root.join("fixture.node");
+        std::os::unix::fs::symlink(&addon, &direct_addon).unwrap();
         fs::write(
             &source,
             r#"
@@ -2826,6 +2837,19 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         interpreter.set_host_bridge(provider);
         interpreter.set_commonjs_entry(root.join("main.cjs").to_string_lossy().into_owned());
         interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
+        let package_result = interpreter
+            .eval_source(
+                "const packageAddon = require('fixture'); ({sum: packageAddon.add(19, 23), same: packageAddon === require('./fixture.node')});",
+            )
+            .unwrap();
+        assert!(matches!(
+            package_result.get_prop("sum"),
+            Some(Value::Number(value)) if value == 42.0
+        ));
+        assert!(matches!(
+            package_result.get_prop("same"),
+            Some(Value::Bool(true))
+        ));
         let result = interpreter
             .eval_source("require('./fixture.node').add(19, 23);")
             .unwrap();
