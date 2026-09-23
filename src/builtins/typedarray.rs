@@ -1637,15 +1637,22 @@ mod tests {
   const second = Atomics.waitAsync(words, 0, 0, 50);
   const notEqual = Atomics.waitAsync(words, 1, 1, 50);
   const timedOut = Atomics.waitAsync(words, 1, 0, 0);
-  let notified = 0;
-  setTimeout(() => { notified = Atomics.notify(words, 0, 1); }, 10);
+  Atomics.store(words, 1, 7);
+  const nanTimeout = Atomics.waitAsync(words, 1, 7, NaN);
+  const defaultTimeout = Atomics.waitAsync(words, 1, 7, undefined);
+  let notified = [];
+  setTimeout(() => {
+    notified = [Atomics.notify(words, 0, 1), Atomics.notify(words, 1, 2)];
+  }, 10);
   const firstValue = await first.value;
   const secondValue = await second.value;
+  const nanValue = await nanTimeout.value;
+  const defaultValue = await defaultTimeout.value;
   return JSON.stringify({
-    async: [first.async, second.async, notEqual.async, timedOut.async],
+    async: [first.async, second.async, notEqual.async, timedOut.async, nanTimeout.async, defaultTimeout.async],
     immediate: [notEqual.value, timedOut.value],
     notified,
-    values: [firstValue, secondValue],
+    values: [firstValue, secondValue, nanValue, defaultValue],
   });
 }
 runWaiters()"#;
@@ -1663,10 +1670,10 @@ runWaiters()"#;
         assert_eq!(
             expected,
             serde_json::json!({
-                "async": [true, true, false, false],
+                "async": [true, true, false, false, true, true],
                 "immediate": ["not-equal", "timed-out"],
-                "notified": 1,
-                "values": ["ok", "timed-out"],
+                "notified": [1, 2],
+                "values": ["ok", "timed-out", "ok", "ok"],
             })
         );
 
@@ -1693,6 +1700,81 @@ runWaiters()"#;
             assert_eq!(
                 expected, actual,
                 "{runtime} Atomics.waitAsync behavior differed"
+            );
+        }
+    }
+
+    #[test]
+    fn atomics_wait_async_tracks_structured_cloned_shared_data() {
+        let fixture = r#"async function runClonedWaiter() {
+  const shared = new SharedArrayBuffer(4);
+  const waitingView = new Int32Array(shared);
+  const notifyingView = new Int32Array(structuredClone(shared));
+  const waiter = Atomics.waitAsync(waitingView, 0, 0, 30);
+  let notified = -1;
+  setTimeout(() => { notified = Atomics.notify(notifyingView, 0); }, 1);
+  const value = await waiter.value;
+  return JSON.stringify({ notified, value });
+}
+runClonedWaiter()"#;
+        let mut interpreter = Interpreter::with_builtins();
+        let result = interpreter.eval_source(fixture).unwrap();
+        let Some(promise) = result.as_promise() else {
+            panic!("cloned-buffer waitAsync fixture did not return a Promise: {result:?}");
+        };
+        let inner = promise.borrow();
+        assert_eq!(inner.state, PromiseState::Fulfilled);
+        let Value::String(ref result) = inner.value else {
+            panic!("cloned-buffer waitAsync fixture returned {:?}", inner.value);
+        };
+        let expected = serde_json::json!({"notified": 1, "value": "ok"});
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(result).unwrap(),
+            expected
+        );
+
+        let Ok(node) = Command::new("node")
+            .args([
+                "-e",
+                &format!(
+                    "setTimeout(() => {{}}, 50); {fixture}.then(value => process.stdout.write(value))"
+                ),
+            ])
+            .output()
+        else {
+            return;
+        };
+        if !node.status.success() {
+            eprintln!(
+                "skipping Node shared-clone Atomics comparison: {}",
+                String::from_utf8_lossy(&node.stderr)
+            );
+            return;
+        }
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&node.stdout).unwrap(),
+            expected
+        );
+
+        // Bun 1.4.0 does not share its wait list across structured-cloned
+        // SharedArrayBuffer wrappers. Keep that observable mismatch explicit
+        // instead of normalizing it to Node's behavior.
+        if let Ok(bun) = Command::new("bun")
+            .args([
+                "-e",
+                &format!(
+                    "setTimeout(() => {{}}, 50); {fixture}.then(value => process.stdout.write(value))"
+                ),
+            ])
+            .output()
+            && bun.status.success()
+        {
+            let actual: serde_json::Value = serde_json::from_slice(&bun.stdout).unwrap();
+            let bun_1_4_known_difference =
+                serde_json::json!({"notified": 0, "value": "timed-out"});
+            assert!(
+                actual == expected || actual == bun_1_4_known_difference,
+                "unexpected Bun Atomics clone-wait result: {actual}"
             );
         }
     }

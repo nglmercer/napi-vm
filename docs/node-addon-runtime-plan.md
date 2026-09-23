@@ -240,7 +240,11 @@ unsupported-operation error when it would block because napi-vm does not yet
 provide guest worker agents. Timeouts follow napi-vm's deterministic timer
 ordering, not a wall clock. Full blocking wait behavior remains a
 `MISSING_METHOD` compatibility gap until worker agents can notify the runtime
-without re-entering a running interpreter.
+without re-entering a running interpreter. The Node differential fixture also
+checks that `Atomics.notify` through a structured-cloned
+`SharedArrayBuffer` wakes the original wait list. Bun 1.4.0 currently reports
+zero waiters and times out in that case; the test records this as a
+`WRONG_SEMANTICS` difference instead of normalizing it.
 The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
