@@ -2238,6 +2238,171 @@ impl NapiPropertyKey {
     }
 }
 
+fn napi_property_key_from_guest(value: &Value) -> Result<NapiPropertyKey, VmErr> {
+    match value {
+        Value::String(key) => Ok(NapiPropertyKey::String(key.clone())),
+        Value::Symbol(symbol) => Ok(NapiPropertyKey::Symbol(symbol.clone())),
+        _ => Err(VmErr::Msg(
+            "TypeError: Proxy ownKeys trap returned a non-key".into(),
+        )),
+    }
+}
+
+fn napi_guest_own_property_keys(
+    interpreter: &mut Interpreter,
+    object: &Value,
+    depth: usize,
+) -> Result<Vec<(NapiPropertyKey, PropAttrs)>, VmErr> {
+    if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+        return Err(crate::value::limit_err("Maximum prototype depth exceeded"));
+    }
+    let Value::Proxy(proxy) = object else {
+        return napi_direct_all_property_keys(object).map_err(|_| {
+            VmErr::Msg("Node-API property key collection is unsupported for this value".into())
+        });
+    };
+
+    let target = proxy.target.clone();
+    let Some(trap) = interpreter.proxy_trap(proxy, "ownKeys") else {
+        return napi_guest_own_property_keys(interpreter, &target, depth + 1);
+    };
+    let result = interpreter.call_this(&trap, proxy.handler.clone(), vec![target.clone()])?;
+    let Value::Array(trap_keys) = &result else {
+        return Err(VmErr::Msg(
+            "TypeError: Proxy ownKeys trap must return an array".into(),
+        ));
+    };
+
+    let length = trap_keys.borrow().len();
+    if length > crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err(
+            "Maximum proxy property key count exceeded",
+        ));
+    }
+    let mut keys = Vec::with_capacity(length);
+    for index in 0..length {
+        let value = interpreter.get_prop_value(&result, &Value::Number(index as f64))?;
+        let key = napi_property_key_from_guest(&value)?;
+        if keys
+            .iter()
+            .any(|(existing, _): &(NapiPropertyKey, PropAttrs)| existing.matches(&key))
+        {
+            return Err(VmErr::Msg(
+                "TypeError: Proxy ownKeys trap returned duplicate keys".into(),
+            ));
+        }
+        keys.push((key, PropAttrs::default()));
+    }
+
+    let target_keys = napi_guest_own_property_keys(interpreter, &target, depth + 1)?;
+    for (key, attributes) in &mut keys {
+        let enumerable = target_keys
+            .iter()
+            .find(|(target_key, _)| target_key.matches(key))
+            .is_some_and(|(_, target_attributes)| target_attributes.enumerable);
+        // Node's napi_get_all_property_names preserves Proxy ownKeys results
+        // for writable/configurable filters, while enumerable still consults
+        // the target descriptor. Bun applies all three filters to descriptors.
+        // The Rust host follows Node's behavior; the differential fixture
+        // records Bun's distinct result.
+        *attributes = PropAttrs {
+            writable: true,
+            enumerable,
+            configurable: true,
+        };
+    }
+
+    if target_keys.iter().any(|(key, attrs)| {
+        !attrs.configurable && !keys.iter().any(|(found, _)| found.matches(key))
+    }) {
+        return Err(VmErr::Msg(
+            "TypeError: Proxy ownKeys trap omitted a non-configurable key".into(),
+        ));
+    }
+    if !napi_guest_object_is_extensible(&target)
+        && (keys.len() != target_keys.len()
+            || target_keys
+                .iter()
+                .any(|(key, _)| !keys.iter().any(|(found, _)| found.matches(key))))
+    {
+        return Err(VmErr::Msg(
+            "TypeError: Proxy ownKeys trap returned keys for a non-extensible target".into(),
+        ));
+    }
+    Ok(keys)
+}
+
+fn napi_guest_object_is_extensible(object: &Value) -> bool {
+    match object {
+        Value::Object { props } => !props.meta.borrow().non_extensible,
+        Value::Array(array) => !array.meta.borrow().non_extensible,
+        Value::Function(function) => !function.properties.meta.borrow().non_extensible,
+        Value::Class(class) => !class.statics.meta.borrow().non_extensible,
+        Value::Proxy(proxy) => napi_guest_object_is_extensible(&proxy.target),
+        _ => true,
+    }
+}
+
+fn napi_guest_property_key_value(key: NapiPropertyKey, key_conversion: i32) -> Value {
+    match key {
+        NapiPropertyKey::String(key) if key_conversion == 0 => crate::value::array_index(&key)
+            .map_or_else(|| Value::String(key), |index| Value::Number(index as f64)),
+        NapiPropertyKey::String(key) => Value::String(key),
+        NapiPropertyKey::Symbol(symbol) => Value::Symbol(symbol),
+    }
+}
+
+fn napi_guest_get_all_property_names(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let number_arg = |index: usize| match args.get(index) {
+        Some(Value::Number(value)) => *value as i32,
+        _ => 0,
+    };
+    let key_mode = number_arg(0);
+    let key_filter = number_arg(1);
+    let key_conversion = number_arg(2);
+
+    let mut current = receiver;
+    let mut seen = Vec::<NapiPropertyKey>::new();
+    let mut names = Vec::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        for (key, attributes) in napi_guest_own_property_keys(interpreter, &current, 0)? {
+            if seen.iter().any(|existing| existing.matches(&key)) {
+                continue;
+            }
+            seen.push(key.clone());
+            if seen.len() > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err(
+                    "Maximum property name count exceeded",
+                ));
+            }
+            let filtered = (key_filter & 1 != 0 && !attributes.writable)
+                || (key_filter & 2 != 0 && !attributes.enumerable)
+                || (key_filter & 4 != 0 && !attributes.configurable)
+                || (key_filter & 8 != 0 && matches!(key, NapiPropertyKey::String(_)))
+                || (key_filter & 16 != 0 && matches!(key, NapiPropertyKey::Symbol(_)));
+            if !filtered {
+                names.push(napi_guest_property_key_value(key, key_conversion));
+            }
+        }
+        if key_mode == 1 {
+            return Value::checked_array(names);
+        }
+        let prototype = match &current {
+            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target),
+            _ => interpreter.prototype_of(&current),
+        };
+        let Some(prototype) = prototype else {
+            return Value::checked_array(names);
+        };
+        current = (*prototype).clone();
+    }
+    Err(crate::value::limit_err("Maximum prototype depth exceeded"))
+}
+
 fn napi_push_direct_property_key(
     keys: &mut Vec<(NapiPropertyKey, PropAttrs)>,
     key: &str,
@@ -7079,6 +7244,42 @@ unsafe extern "C" fn api_get_all_property_names(
             return Err(NAPI_OBJECT_EXPECTED);
         }
 
+        // Proxy ownKeys traps execute guest code. Enumerate a chain containing
+        // a proxy through the paused-interpreter dispatcher; the direct path
+        // below remains available to addon initializers before that dispatcher
+        // exists.
+        let mut probe = object.clone();
+        let mut contains_proxy = false;
+        for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+            if matches!(probe, Value::Proxy(_)) {
+                contains_proxy = true;
+                break;
+            }
+            let Some(prototype) = napi_direct_prototype(&environment, &probe)? else {
+                break;
+            };
+            probe = (*prototype).clone();
+        }
+        if contains_proxy {
+            if !has_guest_callback_dispatcher(&environment) {
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            let names = run_napi_guest_operation(
+                &environment,
+                "napi_get_all_property_names",
+                napi_guest_get_all_property_names,
+                object,
+                vec![
+                    Value::Number(key_mode as f64),
+                    Value::Number(key_filter as f64),
+                    Value::Number(key_conversion as f64),
+                ],
+            )?;
+            let handle = environment.handles.borrow_mut().create(names)?;
+            unsafe { result.write(handle) };
+            return Ok(());
+        }
+
         let mut current = object;
         let mut seen = Vec::<NapiPropertyKey>::new();
         let mut names = Vec::new();
@@ -11341,6 +11542,40 @@ static bool property_name_array_has(napi_env env, napi_value names, const char* 
   return false;
 }
 
+static napi_value proxy_property_names_probe(napi_env env, napi_callback_info info) {
+  napi_value args[1], result, all_own, enumerable, skip_strings, with_prototype;
+  napi_value writable, configurable;
+  size_t argc = 1;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_all_property_names(env, args[0], napi_key_own_only,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &all_own) != napi_ok ||
+      napi_get_all_property_names(env, args[0], napi_key_own_only,
+                                  napi_key_enumerable,
+                                  napi_key_numbers_to_strings, &enumerable) != napi_ok ||
+      napi_get_all_property_names(env, args[0], napi_key_own_only,
+                                  napi_key_skip_strings,
+                                  napi_key_numbers_to_strings, &skip_strings) != napi_ok ||
+      napi_get_all_property_names(env, args[0], napi_key_include_prototypes,
+                                  napi_key_enumerable,
+                                  napi_key_numbers_to_strings, &with_prototype) != napi_ok ||
+      napi_get_all_property_names(env, args[0], napi_key_own_only,
+                                  napi_key_writable,
+                                  napi_key_numbers_to_strings, &writable) != napi_ok ||
+      napi_get_all_property_names(env, args[0], napi_key_own_only,
+                                  napi_key_configurable,
+                                  napi_key_numbers_to_strings, &configurable) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "allOwn", all_own) != napi_ok ||
+      napi_set_named_property(env, result, "enumerable", enumerable) != napi_ok ||
+      napi_set_named_property(env, result, "skipStrings", skip_strings) != napi_ok ||
+      napi_set_named_property(env, result, "withPrototype", with_prototype) != napi_ok ||
+      napi_set_named_property(env, result, "writable", writable) != napi_ok ||
+      napi_set_named_property(env, result, "configurable", configurable) != napi_ok)
+    return NULL;
+  return result;
+}
+
 static napi_value property_names_probe(napi_env env, napi_callback_info info) {
   napi_value args[4], target, class_target, function_target, promise_target, result, all_own, enumerable, skip_strings;
   napi_value with_prototype, keep_numbers, writable, configurable, class_names;
@@ -12885,6 +13120,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "propertyNamesProbe", NAPI_AUTO_LENGTH,
                            property_names_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "propertyNamesProbe", function) != napi_ok ||
+      napi_create_function(env, "proxyPropertyNamesProbe", NAPI_AUTO_LENGTH,
+                           proxy_property_names_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "proxyPropertyNamesProbe", function) != napi_ok ||
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
@@ -13349,6 +13587,30 @@ const propertyNames = {
   promiseHasCatch: rawPropertyNames.promiseHasCatch,
   promiseHasFinally: rawPropertyNames.promiseHasFinally,
 };
+const proxyPropertyNamesTarget = Object.create({proxyInherited: 'prototype'});
+Object.defineProperty(proxyPropertyNamesTarget, 'fixed', {
+  value: 'fixed', enumerable: false, writable: false, configurable: false,
+});
+proxyPropertyNamesTarget.visible = 'visible';
+const proxyPropertyNamesSymbol = Symbol('proxy-own');
+proxyPropertyNamesTarget[proxyPropertyNamesSymbol] = 'symbol';
+let proxyOwnKeysCalls = 0;
+const propertyNamesProxy = new Proxy(proxyPropertyNamesTarget, {
+  ownKeys() {
+    proxyOwnKeysCalls++;
+    return ['visible', 'fixed', proxyPropertyNamesSymbol, 'virtual'];
+  },
+});
+const rawProxyPropertyNames = addon.proxyPropertyNamesProbe(propertyNamesProxy);
+const proxyPropertyNames = {
+  allOwn: rawProxyPropertyNames.allOwn.map(describePropertyKey),
+  enumerable: rawProxyPropertyNames.enumerable.map(describePropertyKey),
+  skipStrings: rawProxyPropertyNames.skipStrings.map(describePropertyKey),
+  withPrototype: rawProxyPropertyNames.withPrototype.map(describePropertyKey),
+  writable: rawProxyPropertyNames.writable.map(describePropertyKey),
+  configurable: rawProxyPropertyNames.configurable.map(describePropertyKey),
+  ownKeysCalls: proxyOwnKeysCalls,
+};
 const backingBytes = new Uint8Array(typedArrays.buffer);
 const binaryTypedArray = new Uint8Array([1, 2, 3]);
 const binaryBuffer = new ArrayBuffer(4);
@@ -13376,6 +13638,7 @@ module.exports = {
   arrayBufferDetachment,
   instanceDataMatches,
   propertyNames,
+  proxyPropertyNames,
   dateApi: {
     value: dates.value,
     guestValue: dates.date.getTime(),
@@ -14488,6 +14751,64 @@ module.exports = {
                 "Node-API prototype key collection missed Promise.prototype.{property}"
             );
         }
+        let proxy_property_names = result.get_prop("proxyPropertyNames").unwrap();
+        let get_proxy_names = |name: &str| -> Vec<String> {
+            let Value::Array(values) = &proxy_property_names.get_prop(name).unwrap() else {
+                panic!("Node-API proxy property name result {name} is not an array");
+            };
+            values
+                .borrow()
+                .iter()
+                .map(|value| match value {
+                    Value::String(value) => value.clone(),
+                    _ => panic!("Node-API proxy property name result has non-string label"),
+                })
+                .collect()
+        };
+        assert_eq!(
+            get_proxy_names("allOwn"),
+            [
+                "string:visible",
+                "string:fixed",
+                "Symbol(proxy-own)",
+                "string:virtual"
+            ]
+        );
+        assert_eq!(
+            get_proxy_names("enumerable"),
+            ["string:visible", "Symbol(proxy-own)"]
+        );
+        assert_eq!(get_proxy_names("skipStrings"), ["Symbol(proxy-own)"]);
+        assert_eq!(
+            get_proxy_names("withPrototype"),
+            [
+                "string:visible",
+                "Symbol(proxy-own)",
+                "string:proxyInherited"
+            ]
+        );
+        assert_eq!(
+            get_proxy_names("writable"),
+            [
+                "string:visible",
+                "string:fixed",
+                "Symbol(proxy-own)",
+                "string:virtual"
+            ]
+        );
+        assert_eq!(
+            get_proxy_names("configurable"),
+            [
+                "string:visible",
+                "string:fixed",
+                "Symbol(proxy-own)",
+                "string:virtual"
+            ]
+        );
+        assert!(matches!(
+            proxy_property_names.get_prop("ownKeysCalls"),
+            Some(Value::Number(value)) if value == 6.0
+        ));
         let class_name_value = interpreter
             .eval_source(
                 "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter, function Reflected(argument) {}, Promise.resolve(1)).classNames;",
@@ -15668,6 +15989,34 @@ module.exports = {
                     error.remove("message");
                     error.remove("code");
                 }
+            }
+            let node_proxy_filter_result = serde_json::json!([
+                "string:visible",
+                "string:fixed",
+                "Symbol(proxy-own)",
+                "string:virtual"
+            ]);
+            let bun_proxy_filter_result =
+                serde_json::json!(["string:visible", "Symbol(proxy-own)"]);
+            for filter in ["writable", "configurable"] {
+                assert_eq!(
+                    normalized_guest_result.pointer(&format!("/proxyPropertyNames/{filter}")),
+                    Some(&node_proxy_filter_result),
+                    "napi-vm should follow Node's Proxy {filter} filter result"
+                );
+                assert_eq!(
+                    bun_result.pointer(&format!("/proxyPropertyNames/{filter}")),
+                    Some(&bun_proxy_filter_result),
+                    "Bun's Proxy {filter} filter behavior changed; review this runtime difference"
+                );
+            }
+            for output in [&mut bun_result, &mut normalized_guest_result] {
+                let proxy_names = output
+                    .get_mut("proxyPropertyNames")
+                    .and_then(serde_json::Value::as_object_mut)
+                    .unwrap();
+                proxy_names.remove("writable");
+                proxy_names.remove("configurable");
             }
             assert_eq!(bun_result, normalized_guest_result);
         }

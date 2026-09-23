@@ -197,12 +197,15 @@ constructors plus static and instance data, methods, and accessors. Core error
 creation and pending-exception propagation are also supported.
 Node-API v5 date creation, type checks, and reads map to guest `Date` objects.
 The selected Node-API v6 surface adds the `BigInt` create/read functions,
-`napi_get_all_property_names` for ordinary objects, classes, arrays, errors,
-and regular expressions, and environment instance data. Property collection
-supports own or inherited keys, attribute filters, symbols, and numeric key
-conversion; proxies, functions, and the global object return a generic failure
-because their reflection behavior is not represented by this host. BigInt word
-arrays are capped at 2,048 64-bit words by the VM's integer-size limit.
+`napi_get_all_property_names` for ordinary objects, classes, functions,
+arrays, errors, regular expressions, and Proxy chains with `ownKeys` traps
+when called from an active guest callback, plus environment instance data.
+Property collection supports own or inherited keys, attribute filters, symbols,
+and numeric key conversion. The Rust host follows Node's behavior for
+Proxy `writable` and `configurable` filters; Bun applies target descriptors for
+those filters. Global-object reflection still returns a generic failure.
+BigInt word arrays are capped at 2,048 64-bit words by the VM's integer-size
+limit.
 Replacing instance data overwrites the old slot without calling its finalizer;
 the current finalizer runs on the owner thread during host shutdown, after
 cleanup hooks.

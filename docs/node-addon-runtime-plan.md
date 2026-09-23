@@ -168,14 +168,20 @@ registered callbacks on the owner thread during environment shutdown, after
 cleanup hooks. As with wraps, ordinary guest-object collection is unavailable.
 The selected Node-API v6 surface includes BigInt creation and extraction,
 `napi_get_all_property_names` on ordinary objects, classes, ordinary
-functions, arrays, errors, and regular expressions, plus environment instance
-data. Property collection supports own-only or prototype-chain keys,
-writable/enumerable/configurable filters, string and symbol keys, and numeric
-key conversion. Proxy and global-object reflection still return a generic
-failure while those object models remain incomplete. BigInt word arrays are
-limited to 2,048 words by the VM's BigInt allocation cap. Replacing environment
-instance data overwrites the previous slot without calling its finalizer; the
-active finalizer runs on the owner thread during shutdown after cleanup hooks.
+functions, arrays, errors, and regular expressions, plus Proxy chains with
+`ownKeys` traps when the addon call has an active guest callback dispatcher,
+and environment instance data. Property collection supports own-only or
+prototype-chain keys, writable/enumerable/configurable filters, string and
+symbol keys, and numeric key conversion. For Proxy `ownKeys` results, the Rust
+host follows Node's behavior: enumerable filtering consults target property
+descriptors, while writable/configurable filters preserve the returned keys.
+Bun applies target descriptors to all three filters; the v7 differential
+fixture records this runtime difference. Global-object reflection still
+returns a generic failure because global property attributes are not
+represented by the VM. BigInt word arrays are limited to 2,048 words by the
+VM's BigInt allocation cap. Replacing environment instance data overwrites the
+previous slot without calling its finalizer; the active finalizer runs on the
+owner thread during shutdown after cleanup hooks.
 The selected Node-API v7 surface supports idempotent ArrayBuffer detachment,
 updates existing typed-array views, and exposes detached-state checks. The VM
 matches Node when `napi_is_detached_arraybuffer` receives a non-ArrayBuffer
