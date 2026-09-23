@@ -809,6 +809,7 @@ struct NapiVmApiTable {
         unsafe extern "C" fn(NapiEnv, Option<NapiCleanupHook>, *mut c_void) -> i32,
     get_last_error_info: unsafe extern "C" fn(NapiEnv, *mut *const NapiExtendedErrorInfo) -> i32,
     get_new_target: unsafe extern "C" fn(NapiEnv, NapiCallbackInfo, *mut NapiValue) -> i32,
+    get_version: unsafe extern "C" fn(NapiEnv, *mut u32) -> i32,
 }
 
 #[repr(C)]
@@ -917,6 +918,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     remove_env_cleanup_hook: api_remove_env_cleanup_hook,
     get_last_error_info: api_get_last_error_info,
     get_new_target: api_get_new_target,
+    get_version: api_get_version,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -4409,6 +4411,17 @@ unsafe extern "C" fn api_get_new_target(
     })
 }
 
+unsafe extern "C" fn api_get_version(env: NapiEnv, result: *mut u32) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let _environment = environment(env)?;
+        unsafe { result.write(MAX_NODE_API_VERSION as u32) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandleScope) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -6443,6 +6456,7 @@ static napi_value duplicate_wrap_status(napi_env env, napi_callback_info info) {
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
   napi_value scratch, function, metadata, version, values, field;
+  uint32_t supported_api_version = 0;
   napi_deferred initialized_deferred;
   napi_value initialized_promise, initialized_promise_value;
   bool initialized_is_promise = false;
@@ -6476,6 +6490,12 @@ NAPI_MODULE_INIT() {
   };
   napi_value counter_class, counter_base_value;
   int32_t checked_version = 0;
+  if (napi_get_version(env, &supported_api_version) != napi_ok ||
+      supported_api_version < NAPI_VERSION ||
+      napi_get_version(env, NULL) != napi_invalid_arg ||
+      napi_get_boolean(env, supported_api_version >= NAPI_VERSION, &field) != napi_ok ||
+      napi_set_named_property(env, exports, "supportsNapiV4", field) != napi_ok)
+    return NULL;
   cleanup_env = env;
   if (napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)1) != napi_ok ||
       napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)2) != napi_ok ||
@@ -6770,6 +6790,7 @@ module.exports = {
   counterNewTargetInfo,
   childNewTargetInfo,
   childCounterValue: childCounter.value,
+  supportsNapiV4: addon.supportsNapiV4,
   definedConstant: addon.definedConstant,
   definedSymbolValue: addon[addon.descriptorSymbol],
   definedMethodEnumerable: definedMethodDescriptor.enumerable,
@@ -7172,6 +7193,10 @@ module.exports = {
         assert!(matches!(
             result.get_prop("childCounterValue"),
             Some(Value::Number(6.0))
+        ));
+        assert!(matches!(
+            result.get_prop("supportsNapiV4"),
+            Some(Value::Bool(true))
         ));
         assert!(matches!(
             result.get_prop("definedConstant"),
