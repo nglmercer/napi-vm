@@ -8,11 +8,15 @@ typedef void* napi_value;
 typedef void* napi_callback_info;
 typedef void* napi_handle_scope;
 typedef void* napi_deferred;
+typedef void* napi_async_work;
 typedef int32_t napi_status;
 typedef int32_t napi_typedarray_type;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
 typedef void (*napi_finalize)(napi_env env, void* finalize_data,
                               void* finalize_hint);
+typedef void (*napi_async_execute_callback)(napi_env env, void* data);
+typedef void (*napi_async_complete_callback)(napi_env env, napi_status status,
+                                             void* data);
 
 typedef struct napi_vm_property_descriptor {
   const char* utf8name;
@@ -120,6 +124,13 @@ typedef struct napi_vm_node_api_table {
   napi_status (*resolve_deferred)(napi_env, napi_deferred, napi_value);
   napi_status (*reject_deferred)(napi_env, napi_deferred, napi_value);
   napi_status (*is_promise)(napi_env, napi_value, bool*);
+  napi_status (*create_async_work)(napi_env, napi_value, napi_value,
+                                   napi_async_execute_callback,
+                                   napi_async_complete_callback, void*,
+                                   napi_async_work*);
+  napi_status (*delete_async_work)(napi_env, napi_async_work);
+  napi_status (*queue_async_work)(napi_env, napi_async_work);
+  napi_status (*cancel_async_work)(napi_env, napi_async_work);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -678,4 +689,34 @@ NAPI_VM_EXPORT napi_status napi_is_promise(napi_env env, napi_value value,
                                             bool* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->is_promise(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_async_work(
+    napi_env env, napi_value async_resource, napi_value async_resource_name,
+    napi_async_execute_callback execute_callback,
+    napi_async_complete_callback complete_callback, void* data,
+    napi_async_work* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_async_work(
+                     env, async_resource, async_resource_name,
+                     execute_callback, complete_callback, data, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_delete_async_work(napi_env env,
+                                                   napi_async_work work) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->delete_async_work(env, work) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_queue_async_work(napi_env env,
+                                                  napi_async_work work) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->queue_async_work(env, work) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_cancel_async_work(napi_env env,
+                                                   napi_async_work work) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->cancel_async_work(env, work) : 9;
 }

@@ -11,7 +11,10 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
@@ -35,10 +38,18 @@ const NAPI_BOOLEAN_EXPECTED: i32 = 7;
 const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
+const NAPI_CANCELLED: i32 = 11;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
 const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
+const ASYNC_WORKER_COUNT: usize = 4;
+const ASYNC_WORK_QUEUE_CAPACITY: usize = 128;
+const ASYNC_WORK_CREATED: u8 = 0;
+const ASYNC_WORK_QUEUED: u8 = 1;
+const ASYNC_WORK_RUNNING: u8 = 2;
+const ASYNC_WORK_FINISHED: u8 = 3;
+const ASYNC_WORK_CANCELLED: u8 = 4;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
 
 type NapiEnv = *mut c_void;
@@ -47,8 +58,11 @@ type NapiCallbackInfo = *mut c_void;
 type NapiHandleScope = *mut c_void;
 type NapiRef = *mut c_void;
 type NapiDeferred = *mut c_void;
+type NapiAsyncWork = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
 type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
+type NapiAsyncExecuteCallback = unsafe extern "C" fn(NapiEnv, *mut c_void);
+type NapiAsyncCompleteCallback = unsafe extern "C" fn(NapiEnv, i32, *mut c_void);
 type NapiGuestOperation = fn(&mut Interpreter, Value, Vec<Value>) -> Result<Value, VmErr>;
 
 /// Filesystem and integrity policy for the experimental in-process backend.
@@ -106,11 +120,82 @@ pub struct RustNodeApiHost {
 
 impl Drop for RustNodeApiHost {
     fn drop(&mut self) {
+        let (async_work_sender, workers, environments) = {
+            let mut state = self.state.borrow_mut();
+            let environments = state.environments.clone();
+            for environment in &environments {
+                for work in environment.async_works.borrow().values() {
+                    let _ = work.state.compare_exchange(
+                        ASYNC_WORK_QUEUED,
+                        ASYNC_WORK_CANCELLED,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    );
+                }
+            }
+            (
+                state.async_work_sender.clone(),
+                std::mem::take(&mut state.async_workers),
+                environments,
+            )
+        };
+        for _ in 0..workers.len() {
+            let _ = async_work_sender.send(AsyncWorkTaskMessage::Stop);
+        }
+        for worker in workers {
+            let _ = worker.join();
+        }
+
+        // If the host is dropped before the VM drains its event queue, deliver
+        // completed callbacks once on the owner thread so addon work data can
+        // still be released while its library is loaded. Guest re-entry is
+        // unavailable during shutdown.
+        for environment in &environments {
+            let pending = environment
+                .async_works
+                .borrow()
+                .iter()
+                .filter_map(|(work_id, work)| {
+                    let status = work.completion_status.load(Ordering::Acquire);
+                    (status != u8::MAX && !work.callback_run).then_some((
+                        *work_id,
+                        work.clone(),
+                        status as i32,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            for (work_id, work, status) in pending {
+                self.state.borrow_mut().callbacks.retain(|_, callback| {
+                    !matches!(
+                        callback.callback,
+                        NativeCallback::AsyncComplete {
+                            work_id: callback_work_id,
+                            ..
+                        } if callback_work_id == work_id
+                    )
+                });
+                let Ok(Value::HostFunction { id, .. }) = create_native_async_complete_value(
+                    environment,
+                    work.complete,
+                    status,
+                    work.data,
+                    work_id,
+                ) else {
+                    continue;
+                };
+                let _ = self.invoke_native(
+                    id,
+                    Value::Undefined,
+                    Vec::new(),
+                    &mut reject_guest_callback,
+                );
+            }
+        }
+
         // Keep HostState strongly reachable while finalizers run so ordinary
         // Node-API calls made by a finalizer can still access the host. The
         // addon libraries and symbol shim remain loaded in HostState until
         // this callback pass is complete.
-        let environments = self.state.borrow().environments.clone();
         for environment in &environments {
             environment.finalizing.set(true);
         }
@@ -126,6 +211,9 @@ struct HostState {
     callbacks: HashMap<usize, NativeCallbackRecord>,
     environments: Vec<Rc<NapiEnvironment>>,
     libraries: Vec<Library>,
+    async_work_sender: SyncSender<AsyncWorkTaskMessage>,
+    async_work_completions: Receiver<AsyncWorkCompletion>,
+    async_workers: Vec<JoinHandle<()>>,
     // Keep the process-global ABI shim loaded until every addon library closes.
     _shim: Rc<NodeApiShim>,
 }
@@ -133,8 +221,19 @@ struct HostState {
 #[derive(Clone)]
 struct NativeCallbackRecord {
     env: Rc<NapiEnvironment>,
-    callback: NapiCallback,
+    callback: NativeCallback,
     data: *mut c_void,
+    one_shot: bool,
+}
+
+#[derive(Clone, Copy)]
+enum NativeCallback {
+    Function(NapiCallback),
+    AsyncComplete {
+        callback: NapiAsyncCompleteCallback,
+        status: i32,
+        work_id: usize,
+    },
 }
 
 struct NapiEnvironment {
@@ -143,6 +242,7 @@ struct NapiEnvironment {
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
     deferreds: RefCell<HashMap<usize, NapiDeferredState>>,
+    async_works: RefCell<HashMap<usize, NapiAsyncWorkState>>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
@@ -192,6 +292,43 @@ struct NapiDeferredState {
     promise: Rc<RefCell<PromiseInner>>,
     settling: bool,
 }
+
+#[derive(Clone)]
+struct NapiAsyncWorkState {
+    execute: NapiAsyncExecuteCallback,
+    complete: NapiAsyncCompleteCallback,
+    data: *mut c_void,
+    state: Arc<AtomicU8>,
+    completion_status: Arc<AtomicU8>,
+    completion_callback_active: bool,
+    callback_run: bool,
+}
+
+struct AsyncWorkTask {
+    work_id: usize,
+    environment: usize,
+    execute: NapiAsyncExecuteCallback,
+    data: usize,
+    state: Arc<AtomicU8>,
+    completion_status: Arc<AtomicU8>,
+}
+
+enum AsyncWorkTaskMessage {
+    Run(AsyncWorkTask),
+    Stop,
+}
+
+#[derive(Clone, Copy)]
+struct AsyncWorkCompletion {
+    work_id: usize,
+    status: i32,
+}
+
+type AsyncWorkPool = (
+    SyncSender<AsyncWorkTaskMessage>,
+    Receiver<AsyncWorkCompletion>,
+    Vec<JoinHandle<()>>,
+);
 
 struct NapiWrap {
     // Keeping the guest value alive prevents its identity pointer from being
@@ -538,6 +675,18 @@ struct NapiVmApiTable {
     resolve_deferred: unsafe extern "C" fn(NapiEnv, NapiDeferred, NapiValue) -> i32,
     reject_deferred: unsafe extern "C" fn(NapiEnv, NapiDeferred, NapiValue) -> i32,
     is_promise: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    create_async_work: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        NapiValue,
+        Option<NapiAsyncExecuteCallback>,
+        Option<NapiAsyncCompleteCallback>,
+        *mut c_void,
+        *mut NapiAsyncWork,
+    ) -> i32,
+    delete_async_work: unsafe extern "C" fn(NapiEnv, NapiAsyncWork) -> i32,
+    queue_async_work: unsafe extern "C" fn(NapiEnv, NapiAsyncWork) -> i32,
+    cancel_async_work: unsafe extern "C" fn(NapiEnv, NapiAsyncWork) -> i32,
 }
 
 #[repr(C)]
@@ -631,6 +780,10 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     resolve_deferred: api_resolve_deferred,
     reject_deferred: api_reject_deferred,
     is_promise: api_is_promise,
+    create_async_work: api_create_async_work,
+    delete_async_work: api_delete_async_work,
+    queue_async_work: api_queue_async_work,
+    cancel_async_work: api_cancel_async_work,
 };
 
 fn with_ffi_status(callback: impl FnOnce() -> Result<(), i32>) -> i32 {
@@ -836,6 +989,42 @@ fn create_native_callback_value(
     callback: NapiCallback,
     data: *mut c_void,
 ) -> Result<Value, i32> {
+    create_native_callback_value_with_kind(
+        environment,
+        function_name,
+        NativeCallback::Function(callback),
+        data,
+        false,
+    )
+}
+
+fn create_native_async_complete_value(
+    environment: &Rc<NapiEnvironment>,
+    callback: NapiAsyncCompleteCallback,
+    status: i32,
+    data: *mut c_void,
+    work_id: usize,
+) -> Result<Value, i32> {
+    create_native_callback_value_with_kind(
+        environment,
+        "napi_async_complete",
+        NativeCallback::AsyncComplete {
+            callback,
+            status,
+            work_id,
+        },
+        data,
+        true,
+    )
+}
+
+fn create_native_callback_value_with_kind(
+    environment: &Rc<NapiEnvironment>,
+    function_name: &str,
+    callback: NativeCallback,
+    data: *mut c_void,
+    one_shot: bool,
+) -> Result<Value, i32> {
     let owner = environment.owner.upgrade().ok_or(NAPI_GENERIC_FAILURE)?;
     let id = {
         let mut state = owner.borrow_mut();
@@ -847,6 +1036,7 @@ fn create_native_callback_value(
                 env: environment.clone(),
                 callback,
                 data,
+                one_shot,
             },
         );
         id
@@ -2674,6 +2864,7 @@ unsafe extern "C" fn api_create_promise(
             return Err(NAPI_GENERIC_FAILURE);
         }
         let promise = Value::pending_promise();
+        promise.borrow_mut().external_pending = true;
         let deferred = new_opaque_handle()?;
         environment.deferreds.borrow_mut().insert(
             deferred as usize,
@@ -2729,6 +2920,150 @@ unsafe extern "C" fn api_is_promise(env: NapiEnv, value: NapiValue, result: *mut
         let value = environment.handles.borrow().get(value)?;
         unsafe { result.write(matches!(value, Value::Promise(_))) };
         Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_async_work(
+    env: NapiEnv,
+    async_resource: NapiValue,
+    async_resource_name: NapiValue,
+    execute: Option<NapiAsyncExecuteCallback>,
+    complete: Option<NapiAsyncCompleteCallback>,
+    data: *mut c_void,
+    result: *mut NapiAsyncWork,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let execute = execute.ok_or(NAPI_INVALID_ARG)?;
+        let complete = complete.ok_or(NAPI_INVALID_ARG)?;
+        let environment = environment(env)?;
+        if !async_resource.is_null() {
+            environment.handles.borrow().get(async_resource)?;
+        }
+        let resource_name = environment.handles.borrow().get(async_resource_name)?;
+        if !matches!(resource_name, Value::String(_)) {
+            return Err(NAPI_STRING_EXPECTED);
+        }
+        let mut works = environment.async_works.borrow_mut();
+        if works.len() >= MAX_LOCAL_HANDLES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let work = new_opaque_handle()?;
+        works.insert(
+            work as usize,
+            NapiAsyncWorkState {
+                execute,
+                complete,
+                data,
+                state: Arc::new(AtomicU8::new(ASYNC_WORK_CREATED)),
+                completion_status: Arc::new(AtomicU8::new(u8::MAX)),
+                completion_callback_active: false,
+                callback_run: false,
+            },
+        );
+        unsafe { result.write(work) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_delete_async_work(env: NapiEnv, work: NapiAsyncWork) -> i32 {
+    with_ffi_status(|| {
+        if work.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let mut works = environment.async_works.borrow_mut();
+        let state = works.get(&(work as usize)).ok_or(NAPI_INVALID_ARG)?;
+        if !matches!(
+            state.state.load(Ordering::Acquire),
+            ASYNC_WORK_CREATED | ASYNC_WORK_FINISHED
+        ) || (state.state.load(Ordering::Acquire) == ASYNC_WORK_FINISHED
+            && !state.completion_callback_active
+            && !state.callback_run)
+        {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        works.remove(&(work as usize));
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_queue_async_work(env: NapiEnv, work: NapiAsyncWork) -> i32 {
+    with_ffi_status(|| {
+        if work.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let work_id = work as usize;
+        let (execute, data, state, completion_status) = {
+            let works = environment.async_works.borrow();
+            let work = works.get(&work_id).ok_or(NAPI_INVALID_ARG)?;
+            if work
+                .state
+                .compare_exchange(
+                    ASYNC_WORK_CREATED,
+                    ASYNC_WORK_QUEUED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_err()
+            {
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            (
+                work.execute,
+                work.data,
+                work.state.clone(),
+                work.completion_status.clone(),
+            )
+        };
+        let owner = environment.owner.upgrade().ok_or(NAPI_GENERIC_FAILURE)?;
+        let sender = owner.borrow().async_work_sender.clone();
+        let task = AsyncWorkTask {
+            work_id,
+            environment: environment.raw() as usize,
+            execute,
+            data: data as usize,
+            state: state.clone(),
+            completion_status,
+        };
+        match sender.try_send(AsyncWorkTaskMessage::Run(task)) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(AsyncWorkTaskMessage::Run(task))) => {
+                task.state.store(ASYNC_WORK_CREATED, Ordering::Release);
+                Err(NAPI_GENERIC_FAILURE)
+            }
+            Err(TrySendError::Disconnected(AsyncWorkTaskMessage::Run(task))) => {
+                task.state.store(ASYNC_WORK_CREATED, Ordering::Release);
+                Err(NAPI_GENERIC_FAILURE)
+            }
+            Err(
+                TrySendError::Full(AsyncWorkTaskMessage::Stop)
+                | TrySendError::Disconnected(AsyncWorkTaskMessage::Stop),
+            ) => Err(NAPI_GENERIC_FAILURE),
+        }
+    })
+}
+
+unsafe extern "C" fn api_cancel_async_work(env: NapiEnv, work: NapiAsyncWork) -> i32 {
+    with_ffi_status(|| {
+        if work.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let works = environment.async_works.borrow();
+        let work = works.get(&(work as usize)).ok_or(NAPI_INVALID_ARG)?;
+        work.state
+            .compare_exchange(
+                ASYNC_WORK_QUEUED,
+                ASYNC_WORK_CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .map(|_| ())
+            .map_err(|_| NAPI_GENERIC_FAILURE)
     })
 }
 
@@ -3651,9 +3986,80 @@ impl Drop for NodeApiShim {
     }
 }
 
+fn create_async_work_pool() -> Result<AsyncWorkPool, VmErr> {
+    let (task_sender, task_receiver) = mpsc::sync_channel(ASYNC_WORK_QUEUE_CAPACITY);
+    let task_receiver = Arc::new(Mutex::new(task_receiver));
+    let (completion_sender, completion_receiver) = mpsc::channel();
+    let mut workers: Vec<JoinHandle<()>> = Vec::with_capacity(ASYNC_WORKER_COUNT);
+
+    for worker_id in 0..ASYNC_WORKER_COUNT {
+        let task_receiver = task_receiver.clone();
+        let completion_sender = completion_sender.clone();
+        let worker = thread::Builder::new()
+            .name(format!("napi-vm-addon-{worker_id}"))
+            .spawn(move || {
+                loop {
+                    let message = match task_receiver.lock() {
+                        Ok(receiver) => receiver.recv(),
+                        Err(_) => return,
+                    };
+                    match message {
+                        Ok(AsyncWorkTaskMessage::Run(task)) => {
+                            let status = if task
+                                .state
+                                .compare_exchange(
+                                    ASYNC_WORK_QUEUED,
+                                    ASYNC_WORK_RUNNING,
+                                    Ordering::AcqRel,
+                                    Ordering::Acquire,
+                                )
+                                .is_ok()
+                            {
+                                // Node-API forbids using env from an execute callback.
+                                // Preserve the ABI argument for addons that only inspect it.
+                                unsafe {
+                                    (task.execute)(
+                                        task.environment as NapiEnv,
+                                        task.data as *mut c_void,
+                                    );
+                                }
+                                NAPI_OK
+                            } else if task.state.load(Ordering::Acquire) == ASYNC_WORK_CANCELLED {
+                                NAPI_CANCELLED
+                            } else {
+                                NAPI_GENERIC_FAILURE
+                            };
+                            task.state.store(ASYNC_WORK_FINISHED, Ordering::Release);
+                            task.completion_status
+                                .store(status as u8, Ordering::Release);
+                            let _ = completion_sender.send(AsyncWorkCompletion {
+                                work_id: task.work_id,
+                                status,
+                            });
+                        }
+                        Ok(AsyncWorkTaskMessage::Stop) | Err(_) => return,
+                    }
+                }
+            })
+            .map_err(|error| {
+                for _ in 0..workers.len() {
+                    let _ = task_sender.send(AsyncWorkTaskMessage::Stop);
+                }
+                for worker in workers.drain(..) {
+                    let _ = worker.join();
+                }
+                VmErr::Msg(format!("cannot start Node-API worker pool: {error}"))
+            })?;
+        workers.push(worker);
+    }
+
+    Ok((task_sender, completion_receiver, workers))
+}
+
 impl RustNodeApiHost {
     fn new(global: Env) -> Result<Self, VmErr> {
         let shim = Rc::new(NodeApiShim::load()?);
+        let (async_work_sender, async_work_completions, async_workers) = create_async_work_pool()?;
         Ok(Self {
             state: Rc::new(RefCell::new(HostState {
                 global,
@@ -3661,6 +4067,9 @@ impl RustNodeApiHost {
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
                 libraries: Vec::new(),
+                async_work_sender,
+                async_work_completions,
+                async_workers,
                 _shim: shim.clone(),
             })),
             _shim: shim,
@@ -3674,13 +4083,17 @@ impl RustNodeApiHost {
         args: Vec<Value>,
         mut callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
-        let callback = self
-            .state
-            .borrow()
-            .callbacks
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| VmErr::Msg("native callback handle is no longer valid".into()))?;
+        let callback = {
+            let mut state = self.state.borrow_mut();
+            let callback =
+                state.callbacks.get(&id).cloned().ok_or_else(|| {
+                    VmErr::Msg("native callback handle is no longer valid".into())
+                })?;
+            if callback.one_shot {
+                state.callbacks.remove(&id);
+            }
+            callback
+        };
         let scope = callback
             .env
             .handles
@@ -3688,35 +4101,6 @@ impl RustNodeApiHost {
             .open_scope()
             .map_err(|status| napi_error("opening callback handle scope", status))?;
         let result = (|| {
-            let this_arg = callback
-                .env
-                .handles
-                .borrow_mut()
-                .create(this_value)
-                .map_err(|status| napi_error("creating callback receiver handle", status))?;
-            let arg_handles = args
-                .into_iter()
-                .map(|value| {
-                    callback
-                        .env
-                        .handles
-                        .borrow_mut()
-                        .create(value)
-                        .map_err(|status| napi_error("creating callback argument handle", status))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let frame = CallbackFrame {
-                args: arg_handles,
-                this_arg,
-                data: callback.data,
-            };
-            let callback_info = (&frame as *const CallbackFrame).cast_mut().cast::<c_void>();
-            let frame_key = callback_info as usize;
-            callback
-                .env
-                .active_callbacks
-                .borrow_mut()
-                .insert(frame_key, frame.clone());
             let callback_handler_pointer: *mut &mut (
                      dyn FnMut(HostCallback) -> Result<Value, VmErr> + '_
                  ) = &mut callback_handler;
@@ -3726,13 +4110,71 @@ impl RustNodeApiHost {
             };
             let dispatcher_scope =
                 GuestCallbackDispatcherScope::push(callback.env.clone(), dispatcher);
-            let returned = unsafe { (callback.callback)(callback.env.raw(), callback_info) };
+            let (returned, completion_work_id) = match callback.callback {
+                NativeCallback::Function(callback_fn) => {
+                    let this_arg = callback
+                        .env
+                        .handles
+                        .borrow_mut()
+                        .create(this_value)
+                        .map_err(|status| {
+                            napi_error("creating callback receiver handle", status)
+                        })?;
+                    let arg_handles = args
+                        .into_iter()
+                        .map(|value| {
+                            callback
+                                .env
+                                .handles
+                                .borrow_mut()
+                                .create(value)
+                                .map_err(|status| {
+                                    napi_error("creating callback argument handle", status)
+                                })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let frame = CallbackFrame {
+                        args: arg_handles,
+                        this_arg,
+                        data: callback.data,
+                    };
+                    let callback_info =
+                        (&frame as *const CallbackFrame).cast_mut().cast::<c_void>();
+                    let frame_key = callback_info as usize;
+                    callback
+                        .env
+                        .active_callbacks
+                        .borrow_mut()
+                        .insert(frame_key, frame.clone());
+                    let returned = unsafe { callback_fn(callback.env.raw(), callback_info) };
+                    callback
+                        .env
+                        .active_callbacks
+                        .borrow_mut()
+                        .remove(&frame_key);
+                    (returned, None)
+                }
+                NativeCallback::AsyncComplete {
+                    callback: callback_fn,
+                    status,
+                    work_id,
+                } => {
+                    if let Some(work) = callback.env.async_works.borrow_mut().get_mut(&work_id) {
+                        work.completion_callback_active = true;
+                    }
+                    unsafe { callback_fn(callback.env.raw(), status, callback.data) };
+                    if let Some(work) = callback.env.async_works.borrow_mut().get_mut(&work_id) {
+                        work.completion_callback_active = false;
+                    }
+                    (std::ptr::null_mut(), Some(work_id))
+                }
+            };
             drop(dispatcher_scope);
-            callback
-                .env
-                .active_callbacks
-                .borrow_mut()
-                .remove(&frame_key);
+            if let Some(work_id) = completion_work_id
+                && let Some(work) = callback.env.async_works.borrow_mut().get_mut(&work_id)
+            {
+                work.callback_run = true;
+            }
             if let Some(exception) = callback.env.pending_exception.borrow_mut().take() {
                 Err(VmErr::Throw(exception))
             } else if returned.is_null() {
@@ -3801,6 +4243,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
             deferreds: RefCell::new(HashMap::new()),
+            async_works: RefCell::new(HashMap::new()),
             wraps: RefCell::new(HashMap::new()),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
@@ -3847,16 +4290,25 @@ impl NativeAddonLoader for RustNodeApiHost {
         let exports = match (result, close_result) {
             (Ok(exports), Ok(())) => exports,
             (Err(error), _) | (_, Err(error)) => {
-                environment.finalizing.set(true);
-                finalize_environment_wraps(&environment);
+                let has_async_work = !environment.async_works.borrow().is_empty();
                 self.state
                     .borrow_mut()
                     .callbacks
                     .retain(|_, callback| callback.env.module_path != filename);
-                self.state
-                    .borrow_mut()
-                    .environments
-                    .retain(|env| env.module_path != filename);
+                if has_async_work {
+                    // A queued execute callback can still be running addon
+                    // code, and its completion callback owns the work data.
+                    // Keep both environment and library alive until host
+                    // shutdown joins the workers and delivers that callback.
+                    self.state.borrow_mut().libraries.push(library);
+                } else {
+                    environment.finalizing.set(true);
+                    finalize_environment_wraps(&environment);
+                    self.state
+                        .borrow_mut()
+                        .environments
+                        .retain(|env| env.module_path != filename);
+                }
                 return Err(error);
             }
         };
@@ -3898,8 +4350,55 @@ impl HostBridge for RustNodeApiHost {
         self.invoke_native(id, Value::Undefined, args, callback_handler)
     }
 
-    fn poll_host_events(&self, _timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
-        Ok(Vec::new())
+    fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
+        let completions = {
+            let state = self.state.borrow();
+            let first = if timeout.is_zero() {
+                state.async_work_completions.try_recv().ok()
+            } else {
+                state.async_work_completions.recv_timeout(timeout).ok()
+            };
+            first
+                .into_iter()
+                .chain(state.async_work_completions.try_iter())
+                .collect::<Vec<_>>()
+        };
+        let mut events = Vec::with_capacity(completions.len());
+        for completion in completions {
+            let work = {
+                let state = self.state.borrow();
+                state.environments.iter().find_map(|environment| {
+                    environment
+                        .async_works
+                        .borrow()
+                        .get(&completion.work_id)
+                        .cloned()
+                        .map(|work| (environment.clone(), work))
+                })
+            };
+            let Some((environment, work)) = work else {
+                continue;
+            };
+            let callback = create_native_async_complete_value(
+                &environment,
+                work.complete,
+                completion.status,
+                work.data,
+                completion.work_id,
+            )
+            .map_err(|status| napi_error("creating async-work completion callback", status))?;
+            events.push(HostEvent::Callback(HostCallback {
+                callback,
+                this_value: Value::Undefined,
+                args: Vec::new(),
+                kind: HostCallbackKind::Call,
+            }));
+        }
+        Ok(events)
+    }
+
+    fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {
+        promise.borrow().external_pending
     }
 }
 
@@ -4140,6 +4639,7 @@ mod tests {
 #define NAPI_VERSION 1
 #include <node_api.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 static napi_ref persistent_values;
 static napi_ref removable_object;
@@ -4151,6 +4651,11 @@ static int descriptor_setter_value = 5;
 static int class_constructor_offset = 1;
 static int counter_static_offset = 8;
 static napi_deferred pending_promise_deferred;
+typedef struct async_work_context {
+  napi_deferred deferred;
+  napi_async_work work;
+  int32_t result;
+} async_work_context;
 static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 
@@ -4320,6 +4825,47 @@ static napi_value resolved_promise(napi_env env, napi_callback_info info) {
       napi_create_string_utf8(env, "resolved-from-addon", NAPI_AUTO_LENGTH,
                               &resolution) != napi_ok ||
       napi_resolve_deferred(env, deferred, resolution) != napi_ok) return NULL;
+  return promise;
+}
+
+static void async_work_execute(napi_env env, void* data) {
+  async_work_context* context = (async_work_context*)data;
+  (void)env;
+  context->result = 42;
+}
+
+static void async_work_complete(napi_env env, napi_status status, void* data) {
+  async_work_context* context = (async_work_context*)data;
+  napi_value result;
+  if (status == napi_ok &&
+      napi_create_int32(env, context->result, &result) == napi_ok) {
+    (void)napi_resolve_deferred(env, context->deferred, result);
+  } else {
+    (void)napi_create_int32(env, status, &result);
+    (void)napi_reject_deferred(env, context->deferred, result);
+  }
+  (void)napi_delete_async_work(env, context->work);
+  free(context);
+}
+
+static napi_value run_async_work(napi_env env, napi_callback_info info) {
+  async_work_context* context = (async_work_context*)calloc(1, sizeof(*context));
+  napi_value promise, resource_name;
+  (void)info;
+  if (context == NULL ||
+      napi_create_promise(env, &context->deferred, &promise) != napi_ok ||
+      napi_create_string_utf8(env, "napi-vm-test-async-work", NAPI_AUTO_LENGTH,
+                              &resource_name) != napi_ok ||
+      napi_create_async_work(env, NULL, resource_name, async_work_execute,
+                             async_work_complete, context, &context->work) != napi_ok) {
+    free(context);
+    return NULL;
+  }
+  if (napi_queue_async_work(env, context->work) != napi_ok) {
+    (void)napi_delete_async_work(env, context->work);
+    free(context);
+    return NULL;
+  }
   return promise;
 }
 
@@ -4853,6 +5399,8 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "constructGuest", function) != napi_ok ||
       napi_create_function(env, "resolvedPromise", NAPI_AUTO_LENGTH, resolved_promise, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "resolvedPromise", function) != napi_ok ||
+      napi_create_function(env, "runAsync", NAPI_AUTO_LENGTH, run_async_work, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "runAsync", function) != napi_ok ||
       napi_create_function(env, "rejectedPromise", NAPI_AUTO_LENGTH, rejected_promise, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "rejectedPromise", function) != napi_ok ||
       napi_create_function(env, "pendingPromise", NAPI_AUTO_LENGTH, pending_promise, NULL, &function) != napi_ok ||
@@ -5827,6 +6375,52 @@ module.exports = {
                 }
             }
             assert_eq!(bun_result, normalized_guest_result);
+        }
+
+        let async_runner = "(async function() { const addon = require('./fixture.node'); process.stdout.write(JSON.stringify({result: await addon.runAsync()})); })().catch(error => { console.error(error); process.exitCode = 1; });";
+        let vm_async_result = interpreter
+            .eval_source("let asyncResult = await require('./fixture.node').runAsync(); JSON.stringify({result: asyncResult});")
+            .unwrap();
+        let Value::String(ref vm_async_json) = vm_async_result else {
+            panic!("async Node-API fixture did not return JSON: {vm_async_result:?}");
+        };
+        let vm_async_result: serde_json::Value =
+            serde_json::from_str(vm_async_json).expect("VM async result is valid JSON");
+
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args(["-e", async_runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node async reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_async_result: serde_json::Value =
+                serde_json::from_slice(&reference.stdout).expect("Node async result is valid JSON");
+            assert_eq!(vm_async_result, node_async_result);
+        }
+
+        if let Ok(bun_version) = Command::new("bun").arg("--version").output()
+            && bun_version.status.success()
+        {
+            let reference = Command::new("bun")
+                .current_dir(&root)
+                .args(["-e", async_runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Bun async reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let bun_async_result: serde_json::Value =
+                serde_json::from_slice(&reference.stdout).expect("Bun async result is valid JSON");
+            assert_eq!(vm_async_result, bun_async_result);
         }
 
         let invalid_env = interpreter

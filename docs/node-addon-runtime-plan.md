@@ -94,9 +94,16 @@ offsets. `napi_create_promise`, deferred resolution/rejection, and
 module initialization, deferreds can be settled directly with primitive
 resolutions or any rejection. Object and promise resolutions require an active
 interpreter callback dispatcher because checking thenability can execute guest
-code. Async and thread-safe APIs remain unavailable. It is still an
-incomplete compatibility backend, and unimplemented imported symbols fail at
-load time.
+code. `napi_create_async_work`, `napi_queue_async_work`,
+`napi_cancel_async_work`, and `napi_delete_async_work` use a bounded pool of
+four worker threads and a queue of 128 work items. Execute callbacks run off
+the interpreter thread and must not call Node-API. Completion callbacks are
+queued as VM external events and run on the interpreter thread. On host
+shutdown, queued work is canceled, running work is joined, and completion
+callbacks for finished work run before addon libraries unload; guest callback
+dispatch is unavailable during this final cleanup. Thread-safe functions remain
+unavailable. It is still an incomplete compatibility backend, and unimplemented
+imported symbols fail at load time.
 
 ## Implementation phases
 
@@ -162,14 +169,16 @@ not return success with a partial or fabricated result.
 
 ### 5. Integrate asynchronous Node-API APIs with the VM event loop
 
-- Implement `napi_async_work` using a host worker pool. Run execute work off the
-  interpreter thread and completion callbacks as queued VM external events.
+- [x] Implement `napi_async_work` using a bounded host worker pool. Run execute
+  work off the interpreter thread and completion callbacks as queued VM
+  external events.
 - Implement `napi_threadsafe_function` with bounded queues, acquire/release
   accounting, abort/close behavior, and delivery on the VM owner thread.
-- Connect promise settlement and finalizers to the existing job/event
-  infrastructure; do not create a second guest event loop.
-- Specify shutdown behavior for pending work, references, finalizers, and
-  worker threads before exposing async APIs.
+- [x] Deliver async-work completion and deferred Promise settlement through the
+  existing job/event infrastructure; do not create a second guest event loop.
+- [x] Specify shutdown behavior for async work: cancel queued work, join
+  running workers, invoke completion callbacks for finished work, then unload
+  addon libraries.
 
 ### 6. Add package and native binary support
 

@@ -197,7 +197,11 @@ byte offsets. `napi_create_promise`, deferred resolution/rejection, and
 module initialization, deferreds can be settled directly with primitive
 resolutions or any rejection. Object and promise resolutions require an active
 interpreter callback dispatcher because checking thenability can execute guest
-code. Async work and thread-safe functions are not implemented.
+code. `napi_create_async_work`, `napi_queue_async_work`,
+`napi_cancel_async_work`, and `napi_delete_async_work` use a bounded pool of
+four worker threads with a 128-item queue. Execute callbacks run off-thread;
+completion callbacks enter the VM through its event queue. Execute callbacks
+must not call Node-API. Thread-safe functions remain unavailable.
 Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
 requires a C compiler at build time, and native addons have the desktop
 process's full privileges in either backend.
