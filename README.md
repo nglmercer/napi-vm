@@ -203,9 +203,12 @@ when called from an active guest callback, plus environment instance data.
 Property collection supports own or inherited keys, attribute filters, symbols,
 and numeric key conversion. The Rust host follows Node's behavior for
 Proxy `writable` and `configurable` filters; Bun applies target descriptors for
-those filters. Global-object reflection still returns a generic failure.
-BigInt word arrays are capped at 2,048 64-bit words by the VM's integer-size
-limit.
+those filters. Global-object key collection is available during an active
+guest callback for own keys when the filter does not depend on property
+attributes. Inherited-key requests and writable/enumerable/configurable filters
+return a generic failure because the VM does not yet represent the complete
+global prototype key set or global property descriptors. BigInt word arrays
+are capped at 2,048 64-bit words by the VM's integer-size limit.
 Replacing instance data overwrites the old slot without calling its finalizer;
 the current finalizer runs on the owner thread during host shutdown, after
 cleanup hooks.

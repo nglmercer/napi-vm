@@ -2256,6 +2256,16 @@ fn napi_guest_own_property_keys(
     if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
         return Err(crate::value::limit_err("Maximum prototype depth exceeded"));
     }
+    if matches!(object, Value::GlobalObject) {
+        let mut keys = interpreter
+            .global_keys()
+            .into_iter()
+            .filter(|key| !crate::interpreter::is_internal_key(key))
+            .map(|key| (NapiPropertyKey::String(key), PropAttrs::default()))
+            .collect::<Vec<_>>();
+        napi_sort_property_keys(&mut keys);
+        return Ok(keys);
+    }
     let Value::Proxy(proxy) = object else {
         return napi_direct_all_property_keys(object).map_err(|_| {
             VmErr::Msg("Node-API property key collection is unsupported for this value".into())
@@ -7250,17 +7260,31 @@ unsafe extern "C" fn api_get_all_property_names(
         // exists.
         let mut probe = object.clone();
         let mut contains_proxy = false;
+        let mut contains_global = false;
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-            if matches!(probe, Value::Proxy(_)) {
-                contains_proxy = true;
-                break;
+            match &probe {
+                Value::Proxy(_) => contains_proxy = true,
+                Value::GlobalObject => contains_global = true,
+                _ => {}
             }
             let Some(prototype) = napi_direct_prototype(&environment, &probe)? else {
                 break;
             };
             probe = (*prototype).clone();
         }
-        if contains_proxy {
+        if contains_global && key_filter & 0x07 != 0 {
+            // Global bindings do not retain the per-property attributes that
+            // Node-API's writable/enumerable/configurable filters require.
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        if contains_global && key_mode != 1 {
+            // The VM currently synthesizes the global object's Object
+            // prototype methods during property lookup instead of storing all
+            // of them as own keys on Object.prototype. Returning a partial
+            // prototype chain here would silently produce the wrong list.
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        if contains_proxy || contains_global {
             if !has_guest_callback_dispatcher(&environment) {
                 return Err(NAPI_GENERIC_FAILURE);
             }
@@ -11576,6 +11600,31 @@ static napi_value proxy_property_names_probe(napi_env env, napi_callback_info in
   return result;
 }
 
+static napi_value global_property_names_probe(napi_env env, napi_callback_info info) {
+  napi_value global, result, own_names, field;
+  bool has_object, has_global_this, prototype_supported;
+  (void)info;
+  if (napi_get_global(env, &global) != napi_ok ||
+      napi_get_all_property_names(env, global, napi_key_own_only,
+                                  napi_key_all_properties,
+                                  napi_key_numbers_to_strings, &own_names) != napi_ok)
+    return NULL;
+  has_object = property_name_array_has(env, own_names, "Object");
+  has_global_this = property_name_array_has(env, own_names, "globalThis");
+  prototype_supported = napi_get_all_property_names(
+      env, global, napi_key_include_prototypes, napi_key_all_properties,
+      napi_key_numbers_to_strings, &own_names) == napi_ok;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_get_boolean(env, has_object, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasObject", field) != napi_ok ||
+      napi_get_boolean(env, has_global_this, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasGlobalThis", field) != napi_ok ||
+      napi_get_boolean(env, prototype_supported, &field) != napi_ok ||
+      napi_set_named_property(env, result, "prototypeSupported", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
 static napi_value property_names_probe(napi_env env, napi_callback_info info) {
   napi_value args[4], target, class_target, function_target, promise_target, result, all_own, enumerable, skip_strings;
   napi_value with_prototype, keep_numbers, writable, configurable, class_names;
@@ -13123,6 +13172,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "proxyPropertyNamesProbe", NAPI_AUTO_LENGTH,
                            proxy_property_names_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "proxyPropertyNamesProbe", function) != napi_ok ||
+      napi_create_function(env, "globalPropertyNamesProbe", NAPI_AUTO_LENGTH,
+                           global_property_names_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "globalPropertyNamesProbe", function) != napi_ok ||
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
@@ -13611,6 +13663,7 @@ const proxyPropertyNames = {
   configurable: rawProxyPropertyNames.configurable.map(describePropertyKey),
   ownKeysCalls: proxyOwnKeysCalls,
 };
+const globalPropertyNames = addon.globalPropertyNamesProbe();
 const backingBytes = new Uint8Array(typedArrays.buffer);
 const binaryTypedArray = new Uint8Array([1, 2, 3]);
 const binaryBuffer = new ArrayBuffer(4);
@@ -13639,6 +13692,7 @@ module.exports = {
   instanceDataMatches,
   propertyNames,
   proxyPropertyNames,
+  globalPropertyNames,
   dateApi: {
     value: dates.value,
     guestValue: dates.date.getTime(),
@@ -14809,6 +14863,20 @@ module.exports = {
             proxy_property_names.get_prop("ownKeysCalls"),
             Some(Value::Number(value)) if value == 6.0
         ));
+        let global_property_names = result.get_prop("globalPropertyNames").unwrap();
+        for name in ["hasObject", "hasGlobalThis"] {
+            assert!(
+                matches!(
+                    global_property_names.get_prop(name),
+                    Some(Value::Bool(true))
+                ),
+                "Node-API global property enumeration missed {name}"
+            );
+        }
+        assert!(matches!(
+            global_property_names.get_prop("prototypeSupported"),
+            Some(Value::Bool(false))
+        ));
         let class_name_value = interpreter
             .eval_source(
                 "require('./fixture.node').propertyNamesProbe({}, require('./fixture.node').Counter, function Reflected(argument) {}, Promise.resolve(1)).classNames;",
@@ -15931,14 +15999,33 @@ module.exports = {
                 "Node reference failed: {}",
                 String::from_utf8_lossy(&reference.stderr)
             );
-            let node_result: serde_json::Value =
+            let mut node_result: serde_json::Value =
                 serde_json::from_slice(&reference.stdout).expect("Node result is valid JSON");
+            let mut normalized_guest_result = guest_result.clone();
+            assert_eq!(
+                node_result
+                    .get("globalPropertyNames")
+                    .and_then(|names| names.get("prototypeSupported")),
+                Some(&serde_json::Value::Bool(true)),
+                "Node should enumerate the global prototype chain"
+            );
+            assert_eq!(
+                normalized_guest_result.pointer("/globalPropertyNames/prototypeSupported"),
+                Some(&serde_json::Value::Bool(false)),
+                "napi-vm should fail clearly for an unrepresented global prototype chain"
+            );
+            for output in [&mut node_result, &mut normalized_guest_result] {
+                output["globalPropertyNames"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("prototypeSupported");
+            }
             assert_eq!(
                 node_result.get("arrayBufferDetachment"),
-                guest_result.get("arrayBufferDetachment"),
+                normalized_guest_result.get("arrayBufferDetachment"),
                 "Node-API v7 detachment mismatch"
             );
-            assert_eq!(node_result, guest_result);
+            assert_eq!(node_result, normalized_guest_result);
         }
 
         if let Ok(bun_version) = Command::new("bun").arg("--version").output()
@@ -15960,6 +16047,21 @@ module.exports = {
             let mut bun_result: serde_json::Value =
                 serde_json::from_slice(&reference.stdout).expect("Bun result is valid JSON");
             let mut normalized_guest_result = guest_result.clone();
+            assert_eq!(
+                bun_result.pointer("/globalPropertyNames/prototypeSupported"),
+                Some(&serde_json::Value::Bool(true)),
+                "Bun should enumerate the global prototype chain"
+            );
+            assert_eq!(
+                normalized_guest_result.pointer("/globalPropertyNames/prototypeSupported"),
+                Some(&serde_json::Value::Bool(false))
+            );
+            for output in [&mut bun_result, &mut normalized_guest_result] {
+                output["globalPropertyNames"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("prototypeSupported");
+            }
             let bun_non_arraybuffer_status = bun_result
                 .pointer("/arrayBufferDetachment/nonArrayBufferStatus")
                 .and_then(serde_json::Value::as_i64);

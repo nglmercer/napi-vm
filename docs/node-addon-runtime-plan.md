@@ -176,10 +176,13 @@ symbol keys, and numeric key conversion. For Proxy `ownKeys` results, the Rust
 host follows Node's behavior: enumerable filtering consults target property
 descriptors, while writable/configurable filters preserve the returned keys.
 Bun applies target descriptors to all three filters; the v7 differential
-fixture records this runtime difference. Global-object reflection still
-returns a generic failure because global property attributes are not
-represented by the VM. BigInt word arrays are limited to 2,048 words by the
-VM's BigInt allocation cap. Replacing environment instance data overwrites the
+fixture records this runtime difference. Global-object reflection supports
+own-key collection and string/symbol filtering during an active guest callback.
+Inherited-key requests return a generic failure because the VM does not yet
+represent the complete global prototype key set; writable/enumerable/configurable
+filters fail because global property attributes are not represented by the VM.
+BigInt word arrays are limited to 2,048 words by the VM's BigInt allocation
+cap. Replacing environment instance data overwrites the
 previous slot without calling its finalizer; the active finalizer runs on the
 owner thread during shutdown after cleanup hooks.
 The selected Node-API v7 surface supports idempotent ArrayBuffer detachment,
