@@ -16,7 +16,8 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostEvent};
 use crate::interpreter::NativeAddonLoader;
 use crate::value::{
-    MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, Value,
+    MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, TypedArrayData,
+    TypedKind, Value,
 };
 
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -108,9 +109,10 @@ function encode(value, receiver, depth, active) {
     }
     return {t:'hostPromise',v:id};
   }
-  if (Buffer.isBuffer(value)) return {t:'bytes',v:Array.from(value)};
-  if (ArrayBuffer.isView(value)) return {t:'bytes',v:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
-  if (value instanceof ArrayBuffer) return {t:'bytes',v:Array.from(new Uint8Array(value))};
+  if (Buffer.isBuffer(value)) return {t:'hostObject',v:hold(value,undefined)};
+  if (value instanceof DataView) return {t:'dataView',length:value.byteLength,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
+  if (ArrayBuffer.isView(value)) return {t:'typedArray',kind:value.constructor.name,length:value.length,bytes:Array.from(new Uint8Array(value.buffer,value.byteOffset,value.byteLength))};
+  if (value instanceof ArrayBuffer) return {t:'arrayBuffer',v:Array.from(new Uint8Array(value))};
   if (active.has(value)) throw new TypeError('cyclic native values are unsupported');
   if (Array.isArray(value)) {
     if (value.length>262144) throw new RangeError('native array exceeds the VM limit');
@@ -128,6 +130,14 @@ function decode(value,depth) {
     case 'boolean':return value.v;
     case 'number':if(value.v==='-0')return -0;if(value.v==='NaN')return NaN;if(value.v==='Infinity')return Infinity;if(value.v==='-Infinity')return -Infinity;return Number(value.v);
     case 'string':return value.v; case 'bigint':return BigInt(value.v);
+    case 'arrayBuffer':return Uint8Array.from(value.v).buffer;
+    case 'typedArray':{
+      const constructors={Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array};
+      const Constructor=constructors[value.kind];if(!Constructor)throw new TypeError('unsupported guest typed array kind');
+      const bytes=Uint8Array.from(value.bytes);
+      return new Constructor(bytes.buffer,0,value.length);
+    }
+    case 'dataView':{const bytes=Uint8Array.from(value.bytes);return new DataView(bytes.buffer,0,value.length);}
     case 'bytes':return Buffer.from(value.v);
     case 'hostObject':{const entry=refs.get(value.v);if(!entry||!entry.value||typeof entry.value!=='object')throw new TypeError('native object handle is invalid');return entry.value;}
     case 'guestCallback':return function(...args){
@@ -736,6 +746,37 @@ fn required_string_arg(args: &[Value], index: usize) -> Result<String, VmErr> {
     }
 }
 
+fn typed_kind(name: &str) -> Option<TypedKind> {
+    Some(match name {
+        "Int8Array" => TypedKind::Int8,
+        "Uint8Array" => TypedKind::Uint8,
+        "Uint8ClampedArray" => TypedKind::Uint8Clamped,
+        "Int16Array" => TypedKind::Int16,
+        "Uint16Array" => TypedKind::Uint16,
+        "Int32Array" => TypedKind::Int32,
+        "Uint32Array" => TypedKind::Uint32,
+        "Float32Array" => TypedKind::Float32,
+        "Float64Array" => TypedKind::Float64,
+        "BigInt64Array" => TypedKind::BigInt64,
+        "BigUint64Array" => TypedKind::BigUint64,
+        _ => return None,
+    })
+}
+
+fn wire_bytes(value: &JsonValue) -> Result<Vec<u8>, VmErr> {
+    value
+        .as_array()
+        .ok_or_else(|| VmErr::Msg("invalid Node bytes".into()))?
+        .iter()
+        .map(|byte| {
+            byte.as_u64()
+                .filter(|value| *value <= 255)
+                .map(|value| value as u8)
+                .ok_or_else(|| VmErr::Msg("invalid Node byte".into()))
+        })
+        .collect()
+}
+
 fn guest_to_wire(
     sidecar: &NodeAddonSidecar,
     v: &Value,
@@ -799,7 +840,33 @@ fn guest_to_wire(
             active.pop();
             json!({"t":"object","v":wire})
         }
-        Value::ArrayBuffer(bytes) => json!({"t":"bytes","v":bytes.borrow().as_slice()}),
+        Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":bytes.borrow().as_slice()}),
+        Value::TypedArray(view) => {
+            let start = view.byte_offset;
+            let byte_len = view
+                .length
+                .checked_mul(view.kind.size())
+                .ok_or_else(|| VmErr::Msg("guest typed array exceeds the bridge limit".into()))?;
+            let end = start
+                .checked_add(byte_len)
+                .ok_or_else(|| VmErr::Msg("guest typed array exceeds the bridge limit".into()))?;
+            let bytes = view.buffer.borrow();
+            let slice = bytes
+                .get(start..end)
+                .ok_or_else(|| VmErr::Msg("guest typed array has an invalid byte range".into()))?;
+            json!({"t":"typedArray","kind":view.kind.name(),"length":view.length,"bytes":slice})
+        }
+        Value::DataView(view) => {
+            let start = view.byte_offset;
+            let end = start
+                .checked_add(view.length)
+                .ok_or_else(|| VmErr::Msg("guest DataView exceeds the bridge limit".into()))?;
+            let bytes = view.buffer.borrow();
+            let slice = bytes
+                .get(start..end)
+                .ok_or_else(|| VmErr::Msg("guest DataView has an invalid byte range".into()))?;
+            json!({"t":"dataView","length":view.length,"bytes":slice})
+        }
         Value::BigInt(x) => json!({"t":"bigint","v":x.to_string()}),
         Value::Proxy(proxy) => {
             let proxy_id = Rc::as_ptr(proxy) as usize;
@@ -901,20 +968,62 @@ fn wire_to_guest(sidecar: &NodeAddonSidecar, v: &JsonValue, depth: usize) -> Res
                 .unwrap_or("native promise result could not be marshalled");
             Ok(Value::Error(crate::value::ErrorData::new(name, message)))
         }
-        "bytes" => {
-            let bytes = v
-                .get("v")
-                .and_then(JsonValue::as_array)
-                .ok_or_else(|| VmErr::Msg("invalid Node bytes".into()))?
-                .iter()
-                .map(|b| {
-                    b.as_u64()
-                        .filter(|n| *n <= 255)
-                        .map(|n| n as u8)
-                        .ok_or_else(|| VmErr::Msg("invalid Node byte".into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+        "arrayBuffer" | "bytes" => {
+            let bytes = wire_bytes(
+                v.get("v")
+                    .ok_or_else(|| VmErr::Msg("invalid Node bytes".into()))?,
+            )?;
             Ok(Value::ArrayBuffer(Rc::new(RefCell::new(bytes))))
+        }
+        "typedArray" => {
+            let kind_name = v
+                .get("kind")
+                .and_then(JsonValue::as_str)
+                .ok_or_else(|| VmErr::Msg("invalid Node typed array kind".into()))?;
+            let kind = typed_kind(kind_name)
+                .ok_or_else(|| VmErr::Msg("unsupported Node typed array kind".into()))?;
+            let length = v
+                .get("length")
+                .and_then(JsonValue::as_u64)
+                .and_then(|length| usize::try_from(length).ok())
+                .ok_or_else(|| VmErr::Msg("invalid Node typed array length".into()))?;
+            let bytes = wire_bytes(
+                v.get("bytes")
+                    .ok_or_else(|| VmErr::Msg("invalid Node typed array bytes".into()))?,
+            )?;
+            if length.checked_mul(kind.size()) != Some(bytes.len()) {
+                return Err(VmErr::Msg(
+                    "Node typed array has an invalid byte length".into(),
+                ));
+            }
+            Ok(Value::TypedArray(Rc::new(TypedArrayData {
+                kind,
+                buffer: Rc::new(RefCell::new(bytes)),
+                byte_offset: 0,
+                length,
+            })))
+        }
+        "dataView" => {
+            let length = v
+                .get("length")
+                .and_then(JsonValue::as_u64)
+                .and_then(|length| usize::try_from(length).ok())
+                .ok_or_else(|| VmErr::Msg("invalid Node DataView length".into()))?;
+            let bytes = wire_bytes(
+                v.get("bytes")
+                    .ok_or_else(|| VmErr::Msg("invalid Node DataView bytes".into()))?,
+            )?;
+            if length != bytes.len() {
+                return Err(VmErr::Msg(
+                    "Node DataView has an invalid byte length".into(),
+                ));
+            }
+            Ok(Value::DataView(Rc::new(TypedArrayData {
+                kind: TypedKind::Uint8,
+                buffer: Rc::new(RefCell::new(bytes)),
+                byte_offset: 0,
+                length,
+            })))
         }
         "function" => {
             let id = v
@@ -1020,6 +1129,7 @@ mod tests {
             r#"
 #include <node_api.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 static napi_value add(napi_env env, napi_callback_info info) {
@@ -1044,6 +1154,81 @@ static napi_value echo(napi_env env, napi_callback_info info) {
 static napi_value big(napi_env env, napi_callback_info info) {
   napi_value result;
   if (napi_create_bigint_int64(env, 9007199254740993LL, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_buffer(napi_env env, napi_callback_info info) {
+  const char bytes[] = {'a', 'b', 'c'};
+  napi_value result;
+  if (napi_create_buffer_copy(env, sizeof(bytes), bytes, NULL, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value is_buffer(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1], result;
+  bool is_buffer = false;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_is_buffer(env, argv[0], &is_buffer) != napi_ok ||
+      napi_create_int32(env, is_buffer ? 1 : 0, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value typed_array_length(napi_env env, napi_callback_info info) {
+  size_t argc = 1, length = 0;
+  napi_value argv[1], result;
+  napi_typedarray_type kind;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_typedarray_info(env, argv[0], &kind, &length, NULL, NULL, NULL) != napi_ok ||
+      napi_create_int32(env, kind == napi_uint16_array ? (int32_t)length : -1, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_typed_array(napi_env env, napi_callback_info info) {
+  napi_value buffer, result;
+  void *data = NULL;
+  if (napi_create_arraybuffer(env, 4, &data, &buffer) != napi_ok) return NULL;
+  uint16_t *items = (uint16_t *)data;
+  items[0] = 300;
+  items[1] = 400;
+  if (napi_create_typedarray(env, napi_uint16_array, 2, buffer, 0, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_array_buffer(napi_env env, napi_callback_info info) {
+  napi_value result;
+  void *data = NULL;
+  if (napi_create_arraybuffer(env, 3, &data, &result) != napi_ok) return NULL;
+  memcpy(data, "xyz", 3);
+  return result;
+}
+
+static napi_value array_buffer_length(napi_env env, napi_callback_info info) {
+  size_t argc = 1, length = 0;
+  napi_value argv[1], result;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_arraybuffer_info(env, argv[0], NULL, &length) != napi_ok ||
+      napi_create_int32(env, (int32_t)length, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value make_data_view(napi_env env, napi_callback_info info) {
+  napi_value buffer, result;
+  void *data = NULL;
+  if (napi_create_arraybuffer(env, 2, &data, &buffer) != napi_ok) return NULL;
+  ((uint8_t *)data)[0] = 17;
+  ((uint8_t *)data)[1] = 29;
+  if (napi_create_dataview(env, 2, buffer, 0, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value data_view_byte(napi_env env, napi_callback_info info) {
+  size_t argc = 1, length = 0, offset = 0;
+  napi_value argv[1], result;
+  void *data = NULL;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_dataview_info(env, argv[0], &length, &data, NULL, &offset) != napi_ok || length < 2 ||
+      napi_create_int32(env, ((uint8_t *)data)[1], &result) != napi_ok) return NULL;
   return result;
 }
 
@@ -1166,6 +1351,22 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_set_named_property(env, exports, "echo", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "big", NAPI_AUTO_LENGTH, big, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "big", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeBuffer", NAPI_AUTO_LENGTH, make_buffer, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeBuffer", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "isBuffer", NAPI_AUTO_LENGTH, is_buffer, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "isBuffer", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "typedArrayLength", NAPI_AUTO_LENGTH, typed_array_length, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "typedArrayLength", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeTypedArray", NAPI_AUTO_LENGTH, make_typed_array, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeTypedArray", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeArrayBuffer", NAPI_AUTO_LENGTH, make_array_buffer, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeArrayBuffer", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "arrayBufferLength", NAPI_AUTO_LENGTH, array_buffer_length, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "arrayBufferLength", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "makeDataView", NAPI_AUTO_LENGTH, make_data_view, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "makeDataView", fn) != napi_ok) return NULL;
+  if (napi_create_function(env, "dataViewByte", NAPI_AUTO_LENGTH, data_view_byte, NULL, &fn) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "dataViewByte", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "fail", NAPI_AUTO_LENGTH, fail, NULL, &fn) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "fail", fn) != napi_ok) return NULL;
   if (napi_create_function(env, "promiseResult", NAPI_AUTO_LENGTH, promise_result, NULL, &fn) != napi_ok) return NULL;
@@ -1227,6 +1428,46 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             .eval_source("String(require('./fixture.node').big());")
             .unwrap();
         assert!(matches!(bigint, Value::String(ref value) if value == "9007199254740993"));
+        let buffers = interpreter
+            .eval_source(
+                "const addon = require('./fixture.node'); const buffer = addon.makeBuffer(); const view = addon.makeDataView(); ({text:buffer.toString('utf8'), first:buffer[0], roundTrip:addon.isBuffer(buffer), inputLength:addon.typedArrayLength(new Uint16Array([300, 400])), typed:addon.makeTypedArray(), arrayBufferLength:addon.arrayBufferLength(new Uint8Array([1, 2, 3]).buffer), arrayBufferByte:new Uint8Array(addon.makeArrayBuffer())[1], dataViewLength:view.byteLength, dataViewByte:view.getUint8(1), dataViewRoundTrip:addon.dataViewByte(new DataView(new Uint8Array([4, 5]).buffer))});",
+            )
+            .unwrap();
+        assert!(
+            matches!(buffers.get_prop("text"), Some(Value::String(ref value)) if value == "abc")
+        );
+        assert!(matches!(buffers.get_prop("first"), Some(Value::Number(value)) if value == 97.0));
+        assert!(
+            matches!(buffers.get_prop("roundTrip"), Some(Value::Number(value)) if value == 1.0)
+        );
+        assert!(
+            matches!(buffers.get_prop("inputLength"), Some(Value::Number(value)) if value == 2.0)
+        );
+        assert!(
+            matches!(buffers.get_prop("arrayBufferLength"), Some(Value::Number(value)) if value == 3.0)
+        );
+        assert!(
+            matches!(buffers.get_prop("arrayBufferByte"), Some(Value::Number(value)) if value == 121.0)
+        );
+        assert!(
+            matches!(buffers.get_prop("dataViewLength"), Some(Value::Number(value)) if value == 2.0)
+        );
+        assert!(
+            matches!(buffers.get_prop("dataViewByte"), Some(Value::Number(value)) if value == 29.0)
+        );
+        assert!(
+            matches!(buffers.get_prop("dataViewRoundTrip"), Some(Value::Number(value)) if value == 5.0)
+        );
+        let typed_value = buffers.get_prop("typed").unwrap_or(Value::Undefined);
+        let Value::TypedArray(typed) = &typed_value else {
+            panic!("native Uint16Array was not preserved as a typed array");
+        };
+        assert_eq!(typed.kind, TypedKind::Uint16);
+        assert_eq!(typed.length, 2);
+        assert!(matches!(
+            crate::builtins::read_element(typed, 0),
+            Some(Value::Number(value)) if value == 300.0
+        ));
         let error = interpreter
             .eval_source(
                 "try { require('./fixture.node').fail(); } catch (error) { ({name:error.name, message:error.message, code:error.code}); }",

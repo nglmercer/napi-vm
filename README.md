@@ -96,12 +96,15 @@ The bridge supports synchronous function calls and constructors, Promise
 settlement, primitive values, arrays, byte buffers, BigInts, and
 identity-preserving native object proxies. Proxy property reads/writes, `in`,
 deletion, enumeration, method calls, object spread, and `Object.assign` reach
-the original Node object. Asynchronous addon callbacks are queued and run at
+the original Node object. Node `Buffer` results stay live native objects;
+`ArrayBuffer`, typed array, and `DataView` values cross as copied bytes while
+preserving their view type. Asynchronous addon callbacks are queued and run at
 VM event-loop checkpoints; use `run_event_loop_once` from the desktop runtime
 to pump external events. Synchronous callbacks into guest JavaScript, symbols,
 cyclic guest values, and guest-created proxies are not supported yet and fail
 clearly. Some reflection behavior still differs across the VM/Node boundary.
-A compatible Node executable must be installed on the desktop host.
+A compatible Node executable must be installed or bundled with the desktop
+application.
 
 ## Useful examples
 
