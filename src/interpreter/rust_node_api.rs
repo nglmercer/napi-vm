@@ -33,7 +33,7 @@ const NAPI_ARRAY_EXPECTED: i32 = 8;
 const NAPI_GENERIC_FAILURE: i32 = 9;
 const NAPI_PENDING_EXCEPTION: i32 = 10;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
-const NAPI_PROPERTY_STATIC: i32 = 1 << 3;
+const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -867,6 +867,35 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
             }
             Ok(())
         }
+        Value::Class(class) => {
+            if class.statics.meta.borrow().has_accessors {
+                let is_setter = |value: &Value| match value {
+                    Value::Function(function) => function
+                        .name
+                        .as_ref()
+                        .is_some_and(|name| name.starts_with("set ")),
+                    Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                        name.starts_with("set ")
+                    }
+                    _ => false,
+                };
+                if class
+                    .statics
+                    .borrow()
+                    .iter()
+                    .any(|(name, value)| name == &key && is_setter(value))
+                {
+                    return Err(NAPI_GENERIC_FAILURE);
+                }
+            }
+            object
+                .set_prop(key.clone(), value)
+                .map_err(|_| NAPI_GENERIC_FAILURE)?;
+            if let Some(symbol) = symbol {
+                class.statics.meta.borrow_mut().set_symbol_key(&key, symbol);
+            }
+            Ok(())
+        }
         Value::Array(array) => {
             if key == "length" {
                 let Value::Number(length) = value else {
@@ -916,6 +945,7 @@ fn napi_direct_has_own_property(object: &Value, key: &Value) -> Result<bool, i32
     let key = napi_property_key(key)?;
     Ok(match object {
         Value::Object { props } => props.borrow().iter().any(|(name, _)| name == &key),
+        Value::Class(class) => class.statics.borrow().iter().any(|(name, _)| name == &key),
         Value::Array(array) => {
             key == "length"
                 || crate::value::array_index(&key).is_some_and(|index| array.has_index(index))
@@ -952,6 +982,20 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
             }
             Ok(true)
         }
+        Value::Class(class) => {
+            if !class.statics.meta.borrow().attrs_of(&key).configurable
+                && class.statics.borrow().iter().any(|(name, _)| name == &key)
+            {
+                return Ok(false);
+            }
+            let companion = format!("__setter:{}__", key);
+            let mut slots = class.statics.borrow_mut();
+            slots.retain(|(name, _)| name != &key && name != &companion);
+            drop(slots);
+            class.statics.meta.borrow_mut().forget(&key);
+            class.statics.meta.borrow_mut().forget(&companion);
+            Ok(true)
+        }
         Value::Array(array) => {
             if key == "length" {
                 return Ok(false);
@@ -974,6 +1018,12 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
 fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
     match object {
         Value::Object { props } => props.borrow().iter().map(|(key, _)| key.clone()).collect(),
+        Value::Class(class) => class
+            .statics
+            .borrow()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect(),
         Value::Array(array) => {
             let mut names = vec!["length".to_owned()];
             names.extend(
@@ -1001,6 +1051,10 @@ fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
         Value::Object { props } => {
             props.borrow().iter().any(|(name, _)| name == key)
                 && props.meta.borrow().attrs_of(key).enumerable
+        }
+        Value::Class(class) => {
+            class.statics.borrow().iter().any(|(name, _)| name == key)
+                && class.statics.meta.borrow().attrs_of(key).enumerable
         }
         Value::Array(array) => {
             key != "length"
@@ -2572,8 +2626,10 @@ unsafe extern "C" fn api_define_properties(
         }
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
-        let Value::Object { props } = &object else {
-            return Err(NAPI_OBJECT_EXPECTED);
+        let props = match &object {
+            Value::Object { props } => props,
+            Value::Class(class) => &class.statics,
+            _ => return Err(NAPI_OBJECT_EXPECTED),
         };
         let descriptors = if property_count == 0 {
             &[][..]
@@ -2699,25 +2755,46 @@ unsafe extern "C" fn api_define_class(
         } else {
             unsafe { std::slice::from_raw_parts(properties, property_count) }
         };
-        // The VM stores class statics separately from ordinary object
-        // properties, so it cannot currently preserve descriptor attributes
-        // or accessors on the constructor itself. Refuse those descriptors
-        // instead of exposing values with different JavaScript semantics.
-        if descriptors
-            .iter()
-            .any(|descriptor| descriptor.attributes & NAPI_PROPERTY_STATIC != 0)
-        {
-            return Err(NAPI_GENERIC_FAILURE);
-        }
-
         let native_constructor =
             create_native_callback_value(&environment, &class_name, constructor, data)?;
         let prototype = Value::object(Vec::new());
+        let statics = Rc::new(crate::value::ObjectCell::new_with_default_proto(vec![
+            ("name".to_owned(), Value::String(class_name.clone())),
+            ("prototype".to_owned(), prototype.clone()),
+            ("length".to_owned(), Value::Number(0.0)),
+        ]));
+        {
+            let mut meta = statics.meta.borrow_mut();
+            meta.set_attrs(
+                "name",
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+            meta.set_attrs(
+                "prototype",
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+            meta.set_attrs(
+                "length",
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
         let class = Value::Class(Box::new(ClassData {
             name: class_name,
             constructor: Box::new(native_constructor),
             prototype: Rc::new(prototype.clone()),
-            statics: Rc::new(RefCell::new(Vec::new())),
+            statics,
         }));
         prototype
             .set_prop("constructor".to_owned(), class.clone())
@@ -2733,13 +2810,18 @@ unsafe extern "C" fn api_define_class(
             );
         }
         let prototype_handle = environment.handles.borrow_mut().create(prototype)?;
+        let class_handle = environment.handles.borrow_mut().create(class.clone())?;
         for descriptor in descriptors {
-            let status = unsafe { api_define_properties(env, prototype_handle, 1, descriptor) };
+            let target = if descriptor.attributes & NAPI_PROPERTY_STATIC != 0 {
+                class_handle
+            } else {
+                prototype_handle
+            };
+            let status = unsafe { api_define_properties(env, target, 1, descriptor) };
             if status != NAPI_OK {
                 return Err(status);
             }
         }
-        let class_handle = environment.handles.borrow_mut().create(class)?;
         unsafe { result.write(class_handle) };
         Ok(())
     })
@@ -3841,6 +3923,7 @@ static int removed_finalizer_calls;
 static int finalizer_create_function_status = -1;
 static int descriptor_setter_value = 5;
 static int class_constructor_offset = 1;
+static int counter_static_offset = 8;
 static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 
@@ -4090,6 +4173,39 @@ static napi_value counter_increment(napi_env env, napi_callback_info info) {
       napi_create_int32(env, current + 1, &result) != napi_ok ||
       napi_set_named_property(env, this_arg, "value", result) != napi_ok) return NULL;
   return result;
+}
+
+static napi_value counter_static_method(napi_env env, napi_callback_info info) {
+  napi_value this_arg, base_value, result;
+  size_t argc = 0;
+  int32_t base;
+  if (napi_get_cb_info(env, info, &argc, NULL, &this_arg, NULL) != napi_ok ||
+      napi_get_named_property(env, this_arg, "baseValue", &base_value) != napi_ok ||
+      napi_get_value_int32(env, base_value, &base) != napi_ok ||
+      napi_create_int32(env, base + 99, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value counter_static_getter(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (napi_create_int32(env, counter_static_offset, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value counter_static_read_only_getter(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (napi_create_int32(env, 21, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value counter_static_setter(napi_env env, napi_callback_info info) {
+  napi_value value;
+  size_t argc = 1;
+  if (napi_get_cb_info(env, info, &argc, &value, NULL, NULL) != napi_ok || argc < 1 ||
+      napi_get_value_int32(env, value, &counter_static_offset) != napi_ok) return NULL;
+  return NULL;
 }
 
 static napi_value symbol_probe(napi_env env, napi_callback_info info) {
@@ -4343,18 +4459,29 @@ NAPI_MODULE_INIT() {
   napi_property_descriptor counter_methods[] = {
       { .utf8name = "increment", .method = counter_increment,
         .attributes = napi_default },
+      { .utf8name = "constant", .method = counter_static_method,
+        .attributes = napi_static },
+      { .utf8name = "baseValue", .value = NULL,
+        .attributes = napi_static | napi_writable | napi_enumerable | napi_configurable },
+      { .utf8name = "offset", .getter = counter_static_getter,
+        .setter = counter_static_setter,
+        .attributes = napi_static | napi_enumerable },
+      { .utf8name = "readOnly", .getter = counter_static_read_only_getter,
+        .attributes = napi_static | napi_enumerable },
   };
-  napi_value counter_class;
+  napi_value counter_class, counter_base_value;
   int32_t checked_version = 0;
   if (napi_create_int32(env, 7, &descriptor_value) != napi_ok ||
       napi_create_string_utf8(env, "descriptor", NAPI_AUTO_LENGTH,
                               &descriptor_symbol_description) != napi_ok ||
       napi_create_symbol(env, descriptor_symbol_description,
                          &descriptor_symbol) != napi_ok ||
-      napi_create_int32(env, 17, &descriptor_symbol_value) != napi_ok) return NULL;
+      napi_create_int32(env, 17, &descriptor_symbol_value) != napi_ok ||
+      napi_create_int32(env, 6, &counter_base_value) != napi_ok) return NULL;
   defined_properties[2].value = descriptor_value;
   defined_properties[3].name = descriptor_symbol;
   defined_properties[3].value = descriptor_symbol_value;
+      counter_methods[2].value = counter_base_value;
   if (napi_get_global(env, &global) != napi_ok ||
       napi_create_string_utf8(env, "Object", NAPI_AUTO_LENGTH, &global_key) != napi_ok ||
       napi_get_named_property(env, global, "Object", &global_object_constructor) != napi_ok ||
@@ -4367,8 +4494,8 @@ NAPI_MODULE_INIT() {
       napi_close_handle_scope(env, scope) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "descriptorSymbol", descriptor_symbol) != napi_ok ||
       napi_define_properties(env, exports, 4, defined_properties) != napi_ok) return NULL;
-  if (napi_define_class(env, "Counter", NAPI_AUTO_LENGTH, counter_constructor,
-                        &class_constructor_offset, 1, counter_methods,
+      if (napi_define_class(env, "Counter", NAPI_AUTO_LENGTH, counter_constructor,
+                        &class_constructor_offset, 5, counter_methods,
                         &counter_class) != napi_ok ||
       napi_set_named_property(env, exports, "Counter", counter_class) != napi_ok) return NULL;
   if (napi_create_function(env, "add", NAPI_AUTO_LENGTH, add, NULL, &function) != napi_ok ||
@@ -4484,6 +4611,22 @@ const definedValueDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedVa
 const definedConstantDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedConstant');
 const counter = new addon.Counter(40);
 const counterIncremented = counter.increment();
+const counterStaticDescriptor = Object.getOwnPropertyDescriptor(addon.Counter, 'offset');
+const counterStaticMethodDescriptor = Object.getOwnPropertyDescriptor(addon.Counter, 'constant');
+const counterStaticBaseDescriptor = Object.getOwnPropertyDescriptor(addon.Counter, 'baseValue');
+const counterStaticBefore = addon.Counter.offset;
+addon.Counter.offset = 18;
+const counterStaticAfter = addon.Counter.offset;
+const counterReadOnlyBefore = addon.Counter.readOnly;
+addon.Counter.readOnly = 99;
+const counterReadOnlyAfter = addon.Counter.readOnly;
+const counterStaticDeleteRejected = delete addon.Counter.offset;
+Object.setPrototypeOf(addon.Counter, { inheritedStatic: 'inherited' });
+class CounterChild extends addon.Counter {}
+const counterInheritedStatic = CounterChild.inheritedStatic;
+const counterHasInheritedStatic = 'inheritedStatic' in CounterChild;
+const counterInheritedBaseValue = CounterChild.baseValue;
+const counterInheritedStaticMethod = CounterChild.constant();
 const errors = addon.createErrors();
 let typeError;
 let rangeError;
@@ -4570,6 +4713,21 @@ module.exports = {
   counterIncremented,
   counterInstance: counter instanceof addon.Counter,
   counterConstructor: counter.constructor === addon.Counter,
+  counterStaticMethod: addon.Counter.constant(),
+  counterStaticBaseValue: addon.Counter.baseValue,
+  counterStaticBefore,
+  counterStaticAfter,
+  counterReadOnlyBefore,
+  counterReadOnlyAfter,
+  counterStaticDeleteRejected,
+  counterInheritedStatic,
+  counterHasInheritedStatic,
+  counterInheritedBaseValue,
+  counterInheritedStaticMethod,
+  counterStaticEnumerable: counterStaticDescriptor.enumerable,
+  counterStaticMethodEnumerable: counterStaticMethodDescriptor.enumerable,
+  counterStaticBaseWritable: counterStaticBaseDescriptor.writable,
+  counterStaticKeys: Object.keys(addon.Counter).sort().join(','),
   symbols: addon.symbolProbe(),
   sum: addon.add(19, 23),
   version: addon.metadata.version,
@@ -4731,6 +4889,66 @@ module.exports = {
         assert!(matches!(
             result.get_prop("counterConstructor"),
             Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticMethod"),
+            Some(Value::Number(105.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticBaseValue"),
+            Some(Value::Number(6.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticBefore"),
+            Some(Value::Number(8.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticAfter"),
+            Some(Value::Number(18.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterReadOnlyBefore"),
+            Some(Value::Number(21.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterReadOnlyAfter"),
+            Some(Value::Number(21.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticDeleteRejected"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            result.get_prop("counterInheritedStatic"),
+            Some(Value::String(ref value)) if value == "inherited"
+        ));
+        assert!(matches!(
+            result.get_prop("counterHasInheritedStatic"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("counterInheritedBaseValue"),
+            Some(Value::Number(6.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterInheritedStaticMethod"),
+            Some(Value::Number(105.0))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticEnumerable"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticMethodEnumerable"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticBaseWritable"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("counterStaticKeys"),
+            Some(Value::String(ref value)) if value == "baseValue,offset,readOnly"
         ));
         let symbols = result.get_prop("symbols").unwrap();
         assert!(matches!(

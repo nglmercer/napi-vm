@@ -177,9 +177,8 @@ undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8 strings,
 `napi_create_symbol`, `napi_define_properties` on ordinary object targets
 (data values, symbol keys, native methods, and accessors), `napi_typeof`, array
 creation/index/length operations, and `napi_define_class` with native
-constructors and instance methods/accessors. Class static descriptors are not
-implemented yet and are rejected. Core error creation and pending-exception
-propagation are also supported. Returning a null
+constructors plus static and instance data, methods, and accessors. Core error
+creation and pending-exception propagation are also supported. Returning a null
 callback value without a pending exception produces guest `undefined`. Imports
 outside that subset fail when the library is loaded. Strong `napi_ref` creation,
 lookup, count changes, and deletion are supported; because the VM has no tracing

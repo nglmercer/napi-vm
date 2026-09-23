@@ -12,7 +12,7 @@ use crate::parser::{Pattern, Statement};
 use crate::span::Span;
 #[cfg(stackful_coroutines)]
 use crate::value::{GenOutcome, GenResume};
-use crate::value::{GeneratorInner, PromiseState, Value};
+use crate::value::{GeneratorInner, ObjectCell, PromiseState, Value};
 
 type Key = Rc<str>;
 
@@ -204,6 +204,22 @@ impl Interpreter {
                 }
                 Ok(Value::Bool(true))
             }
+            Value::Class(class) => {
+                let slot = self.property_key(key)?;
+                if !class.statics.meta.borrow().attrs_of(&slot).configurable
+                    && class.statics.borrow().iter().any(|(name, _)| name == &slot)
+                {
+                    return Ok(Value::Bool(false));
+                }
+                let companion = format!("__setter:{}__", slot);
+                class
+                    .statics
+                    .borrow_mut()
+                    .retain(|(name, _)| name != &slot && name != &companion);
+                class.statics.meta.borrow_mut().forget(&slot);
+                class.statics.meta.borrow_mut().forget(&companion);
+                Ok(Value::Bool(true))
+            }
             // Deleting an array element leaves an absent slot while reads
             // continue to produce `undefined`.
             Value::Array(items) => {
@@ -240,6 +256,84 @@ impl Interpreter {
         })
     }
 
+    fn assign_cell_property(
+        &mut self,
+        receiver: &Value,
+        props: &ObjectCell,
+        key: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let is_setter = |value: &Value| match value {
+            Value::Function(function) => function
+                .name
+                .as_ref()
+                .is_some_and(|name| name.starts_with("set ")),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.starts_with("set ")
+            }
+            _ => false,
+        };
+        let is_getter = |value: &Value| match value {
+            Value::Function(function) => function
+                .name
+                .as_ref()
+                .is_some_and(|name| name.starts_with("get ")),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.starts_with("get ")
+            }
+            _ => false,
+        };
+        let existing = {
+            let slots = props.borrow();
+            slots.iter().position(|(name, _)| name == key).map(|index| {
+                let property = &slots[index].1;
+                (
+                    index,
+                    is_setter(property).then(|| property.clone()),
+                    is_getter(property),
+                )
+            })
+        };
+        if let Some((_, Some(setter), _)) = &existing {
+            self.call_this(setter, receiver.clone(), vec![value])?;
+            return Ok(());
+        }
+        if props.meta.borrow().has_accessors {
+            let companion = format!("__setter:{}__", key);
+            let setter = props
+                .borrow()
+                .iter()
+                .find(|(name, value)| name == &companion && is_setter(value))
+                .map(|(_, value)| value.clone());
+            if let Some(setter) = setter {
+                self.call_this(&setter, receiver.clone(), vec![value])?;
+                return Ok(());
+            }
+        }
+        if let Some((_, _, true)) = existing {
+            // A getter without a setter is an accessor, not a writable data
+            // property. Accessors with a setter returned above.
+            return Ok(());
+        }
+        if let Some((index, _, _)) = existing {
+            if props.meta.borrow().attrs_of(key).writable {
+                props.borrow_mut()[index].1 = value;
+            }
+            return Ok(());
+        }
+        if props.meta.borrow().non_extensible {
+            return Ok(());
+        }
+        let mut slots = props.borrow_mut();
+        if slots.len() >= crate::value::MAX_OBJECT_PROPS {
+            return Err(crate::value::limit_err(
+                "Maximum object property count exceeded",
+            ));
+        }
+        slots.push((key.to_owned(), value));
+        Ok(())
+    }
+
     pub(crate) fn assign_member(
         &mut self,
         obj: &Value,
@@ -261,7 +355,7 @@ impl Interpreter {
         match (obj, prop) {
             (Value::Object { props }, Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_member(obj, &Value::String(slot.clone()), val)?;
+                self.assign_cell_property(obj, props, &slot, val)?;
                 props
                     .meta
                     .borrow_mut()
@@ -269,76 +363,7 @@ impl Interpreter {
                 Ok(())
             }
             (Value::Object { props }, Value::String(k)) => {
-                // If a setter is defined for this key, invoke it.
-                //
-                // Both lookups here are on the hot path — every property write
-                // reaches them — so neither allocates in the ordinary case.
-                // The companion slot below is the only one that needs a
-                // formatted name, and it exists only for an accessor declared
-                // with *both* a getter and a setter (one slot cannot hold two
-                // functions), so it is looked for only when the object has
-                // accessors at all.
-                let is_setter = |value: &Value| match value {
-                    Value::Function(f) => f.name.as_ref().is_some_and(|n| n.starts_with("set ")),
-                    Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                        name.starts_with("set ")
-                    }
-                    _ => false,
-                };
-                // One scan locates the slot and says whether it is an
-                // accessor. Every property write reaches this, so it does not
-                // scan twice and does not allocate.
-                let existing = {
-                    let slots = props.borrow();
-                    match slots.iter().position(|(xk, _)| xk == k) {
-                        Some(index) if is_setter(&slots[index].1) => {
-                            Some((index, Some(slots[index].1.clone())))
-                        }
-                        Some(index) => Some((index, None)),
-                        None => None,
-                    }
-                };
-                if let Some((_, Some(setter_fn))) = &existing {
-                    let setter_fn = setter_fn.clone();
-                    self.call_this(&setter_fn, obj.clone(), vec![val])?;
-                    return Ok(());
-                }
-                // The companion slot exists only for an accessor declared with
-                // *both* a getter and a setter — in which case the named slot
-                // holds the *getter*, so a slot being present is not a reason
-                // to skip this. Its formatted name is built only for an object
-                // that has an accessor at all.
-                if props.meta.borrow().has_accessors {
-                    let companion = format!("__setter:{}__", k);
-                    let setter = props
-                        .borrow()
-                        .iter()
-                        .find(|(xk, xv)| *xk == companion && is_setter(xv))
-                        .map(|(_, xv)| xv.clone());
-                    if let Some(setter_fn) = setter {
-                        self.call_this(&setter_fn, obj.clone(), vec![val])?;
-                        return Ok(());
-                    }
-                }
-                if let Some((index, _)) = existing {
-                    // Sloppy-mode semantics: a write to a non-writable
-                    // property is ignored rather than thrown.
-                    if props.meta.borrow().attrs_of(k).writable {
-                        props.borrow_mut()[index].1 = val;
-                    }
-                    return Ok(());
-                }
-                if props.meta.borrow().non_extensible {
-                    return Ok(());
-                }
-                let mut slots = props.borrow_mut();
-                if slots.len() >= crate::value::MAX_OBJECT_PROPS {
-                    return Err(crate::value::limit_err(
-                        "Maximum object property count exceeded",
-                    ));
-                }
-                slots.push((k.clone(), val));
-                Ok(())
+                self.assign_cell_property(obj, props, k, val)
             }
             // Any other key on an object is coerced to its slot name first:
             // `o[1] = v`, `o[sym] = v`, `o[{}] = v`.
@@ -346,22 +371,22 @@ impl Interpreter {
                 let slot = self.property_key(prop)?;
                 self.assign_member(obj, &Value::String(slot), val)
             }
-            // A class's statics live in its own table, not in an object, so
-            // `A.y = 1` and `static { … }` write there.
-            (Value::Class(class), Value::String(k)) => {
-                let mut statics = class.statics.borrow_mut();
-                match statics.iter_mut().find(|(name, _)| name == k) {
-                    Some((_, slot)) => *slot = val,
-                    None => {
-                        if statics.len() >= crate::value::MAX_OBJECT_PROPS {
-                            return Err(crate::value::limit_err(
-                                "Maximum object property count exceeded",
-                            ));
-                        }
-                        statics.push((k.clone(), val));
-                    }
-                }
+            (Value::Class(class), Value::Symbol(symbol)) => {
+                let slot = crate::interpreter::symbol_slot_key(symbol);
+                self.assign_cell_property(obj, &class.statics, &slot, val)?;
+                class
+                    .statics
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
                 Ok(())
+            }
+            (Value::Class(class), Value::String(k)) => {
+                self.assign_cell_property(obj, &class.statics, k, val)
+            }
+            (Value::Class(_), _) => {
+                let slot = self.property_key(prop)?;
+                self.assign_member(obj, &Value::String(slot), val)
             }
             // Writing an element of a typed array converts and wraps it to
             // the element type; an out-of-range index is ignored, not grown.

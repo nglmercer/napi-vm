@@ -67,10 +67,10 @@ info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8 strings, symbol creation, `napi_define_properties` for ordinary
 object targets (data values, symbol keys, native methods, and accessors),
-`napi_define_class` with native constructors and prototype descriptors,
-`napi_typeof`, and array creation/index/length operations. Class static
-descriptors are rejected until the VM can preserve their property attributes
-and accessor behavior.
+`napi_define_class` with native constructors, static descriptors, and
+prototype descriptors, `napi_typeof`, and array creation/index/length
+operations. Class static properties share object descriptor metadata and
+accessor behavior.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.

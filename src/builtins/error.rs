@@ -3,12 +3,11 @@
 //! `name` and `message` properties, so `throw new Error("x")` can be caught and
 //! inspected as an object (`e.message`, `e.name`).
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{ClassData, Value};
+use crate::value::{ClassData, ObjectCell, PropAttrs, Value};
 
 const ERROR_TYPES: &[&str] = &[
     "Error",
@@ -48,14 +47,31 @@ fn make_error_class(name: &str, parent_prototype: Option<Rc<Value>>) -> Value {
     prototype
         .set_prop("constructor".to_string(), constructor.clone())
         .expect("built-in Error prototype property");
+    let statics = Rc::new(ObjectCell::new_with_default_proto(vec![
+        ("name".to_string(), Value::String(name.to_string())),
+        ("prototype".to_string(), prototype.clone()),
+    ]));
+    statics.meta.borrow_mut().set_attrs(
+        "name",
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    statics.meta.borrow_mut().set_attrs(
+        "prototype",
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: false,
+        },
+    );
     Value::Class(Box::new(ClassData {
         name: name.to_string(),
         constructor: Box::new(constructor),
         prototype: Rc::new(prototype),
-        statics: Rc::new(RefCell::new(vec![(
-            "name".to_string(),
-            Value::String(name.to_string()),
-        )])),
+        statics,
     }))
 }
 

@@ -462,7 +462,10 @@ pub struct ClassData {
     // Shared so every instance references the same prototype object (cheap
     // `Rc` clone, and identity-comparable for `instanceof`).
     pub prototype: Rc<Value>,
-    pub statics: Rc<RefCell<Vec<(String, Value)>>>,
+    /// Constructor-owned properties. Sharing the ordinary object cell gives
+    /// class statics the same descriptors, symbols, and accessor storage as
+    /// other JavaScript objects.
+    pub statics: Rc<ObjectCell>,
 }
 
 /// Payload of `Value::RegExp`.
@@ -992,6 +995,7 @@ impl Value {
     pub fn proto_of(&self) -> Option<Rc<Value>> {
         match self {
             Value::Object { props } => props.proto(),
+            Value::Class(class) => class.statics.proto(),
             _ => None,
         }
     }
@@ -1096,11 +1100,13 @@ impl Value {
 
     pub fn get_prop(&self, key: &str) -> Option<Value> {
         match self {
-            Value::Object { .. } => {
+            Value::Object { .. } | Value::Class(_) => {
                 let mut current = self.clone();
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
-                    let Value::Object { props } = &current else {
-                        return None;
+                    let props = match &current {
+                        Value::Object { props } => props,
+                        Value::Class(class) => &class.statics,
+                        _ => return None,
                     };
                     if let Some((_, value)) = props.borrow().iter().find(|(name, _)| name == key) {
                         return Some(value.deref_binding());
@@ -1170,6 +1176,26 @@ impl Value {
                 return Err(limit_err("Maximum object property count exceeded"));
             }
             slots.push((key, val));
+            return Ok(());
+        }
+        if let Value::Class(class) = self {
+            let writable = class.statics.meta.borrow().attrs_of(&key).writable;
+            let mut slots = class.statics.borrow_mut();
+            for (name, value) in slots.iter_mut() {
+                if name == &key {
+                    if writable {
+                        *value = val;
+                    }
+                    return Ok(());
+                }
+            }
+            if class.statics.meta.borrow().non_extensible {
+                return Ok(());
+            }
+            if slots.len() >= MAX_OBJECT_PROPS {
+                return Err(limit_err("Maximum object property count exceeded"));
+            }
+            slots.push((key, val));
         }
         Ok(())
     }
@@ -1179,11 +1205,13 @@ impl Value {
             // A proxy without a `has` trap answers for its target. The trap
             // itself is applied by `bin_op`, which can call guest code.
             Value::Proxy(proxy) => proxy.target.has_prop(key),
-            Value::Object { .. } => {
+            Value::Object { .. } | Value::Class(_) => {
                 let mut current = self.clone();
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
-                    let Value::Object { props } = &current else {
-                        return false;
+                    let props = match &current {
+                        Value::Object { props } => props,
+                        Value::Class(class) => &class.statics,
+                        _ => return false,
                     };
                     if props.borrow().iter().any(|(name, _)| name == key) {
                         return true;
@@ -1301,7 +1329,12 @@ impl Value {
                 if Rc::strong_count(&cd.statics) == 1
                     && let Some(cell) = Rc::get_mut(&mut cd.statics)
                 {
-                    work.extend(cell.get_mut().drain(..).map(|(_, v)| v));
+                    work.extend(cell.slots_mut().drain(..).map(|(_, v)| v));
+                    if let Some(prototype) = cell.meta.get_mut().proto.take()
+                        && let Ok(inner) = Rc::try_unwrap(prototype)
+                    {
+                        work.push(inner);
+                    }
                 }
             }
             Value::Binding(cell) => {

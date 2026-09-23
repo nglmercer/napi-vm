@@ -10,12 +10,68 @@ use crate::parser::{
     AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Statement,
     UnOp, VarKind, arrow_body_references, stmts_reference,
 };
-use crate::value::{ClassData, FunctionData, PromiseState, Value};
+use crate::value::{ClassData, FunctionData, ObjectCell, PromiseState, PropAttrs, Value};
 
 /// Convert parser-owned parameter names into interned `Rc<str>` so call-frame
 /// binding is a refcount bump, not a heap allocation.
 fn intern_params(params: &[String]) -> Rc<Vec<Rc<str>>> {
     Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect())
+}
+
+fn class_accessor_kind(value: &Value) -> Option<&'static str> {
+    let name = match value {
+        Value::Function(function) => function.name.as_deref(),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            Some(name.as_ref())
+        }
+        _ => None,
+    }?;
+    if name.starts_with("get ") {
+        Some("get")
+    } else if name.starts_with("set ") {
+        Some("set")
+    } else {
+        None
+    }
+}
+
+fn insert_class_accessor(statics: &mut Vec<(String, Value)>, key: &str, accessor: Value) {
+    let companion = format!("__setter:{}__", key);
+    let primary = statics.iter().position(|(name, _)| name == key);
+    let setter = statics.iter().position(|(name, _)| name == &companion);
+    match class_accessor_kind(&accessor) {
+        Some("get") => {
+            if let Some(index) = primary
+                && class_accessor_kind(&statics[index].1) == Some("set")
+            {
+                let old_setter = statics[index].1.clone();
+                if let Some(setter_index) = setter {
+                    statics[setter_index].1 = old_setter;
+                } else {
+                    statics.push((companion, old_setter));
+                }
+            }
+            if let Some(index) = primary {
+                statics[index].1 = accessor;
+            } else {
+                statics.push((key.to_owned(), accessor));
+            }
+        }
+        Some("set") => {
+            if primary.is_some_and(|index| class_accessor_kind(&statics[index].1) == Some("get")) {
+                if let Some(index) = setter {
+                    statics[index].1 = accessor;
+                } else {
+                    statics.push((companion, accessor));
+                }
+            } else if let Some(index) = primary {
+                statics[index].1 = accessor;
+            } else {
+                statics.push((key.to_owned(), accessor));
+            }
+        }
+        _ => unreachable!("class accessor must be a getter or setter"),
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -229,6 +285,15 @@ impl Interpreter {
         let mut proto_props: Vec<(String, Value)> = Vec::new();
         let mut statics: Vec<(String, Value)> =
             vec![("name".to_string(), Value::String(name.to_string()))];
+        let mut static_attrs = vec![(
+            "name".to_owned(),
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        )];
+        let mut static_has_accessors = false;
         let mut static_blocks: Vec<Vec<Statement>> = Vec::new();
 
         for member in body {
@@ -254,6 +319,14 @@ impl Interpreter {
                     }));
                     if *st {
                         statics.push((mname.clone(), fn_val));
+                        static_attrs.push((
+                            mname.clone(),
+                            PropAttrs {
+                                writable: true,
+                                enumerable: false,
+                                configurable: true,
+                            },
+                        ));
                     } else if mname == "constructor" {
                         has_own_constructor = true;
                         ctor_params = mp.clone();
@@ -278,6 +351,7 @@ impl Interpreter {
                             None => Value::Undefined,
                         };
                         statics.push((fname.clone(), init_val));
+                        static_attrs.push((fname.clone(), PropAttrs::default()));
                     } else {
                         instance_fields.push((fname.clone(), init.clone()));
                     }
@@ -299,7 +373,16 @@ impl Interpreter {
                         uses_arguments: stmts_reference(gb, "arguments"),
                     }));
                     if *st {
-                        statics.push((gname.clone(), getter_fn));
+                        insert_class_accessor(&mut statics, gname, getter_fn);
+                        static_attrs.push((
+                            gname.clone(),
+                            PropAttrs {
+                                writable: false,
+                                enumerable: false,
+                                configurable: true,
+                            },
+                        ));
+                        static_has_accessors = true;
                     } else {
                         proto_props.push((gname.clone(), getter_fn));
                     }
@@ -322,7 +405,16 @@ impl Interpreter {
                         uses_arguments: stmts_reference(sb, "arguments"),
                     }));
                     if *st {
-                        statics.push((sname.clone(), setter_fn));
+                        insert_class_accessor(&mut statics, sname, setter_fn);
+                        static_attrs.push((
+                            sname.clone(),
+                            PropAttrs {
+                                writable: false,
+                                enumerable: false,
+                                configurable: true,
+                            },
+                        ));
+                        static_has_accessors = true;
                     } else {
                         proto_props.push((sname.clone(), setter_fn));
                     }
@@ -371,6 +463,10 @@ impl Interpreter {
             _ => self.global.clone(),
         };
 
+        let constructor_length = ctor_params
+            .iter()
+            .take_while(|parameter| !parameter.starts_with("..."))
+            .count();
         let constructor = Value::Function(Box::new(FunctionData {
             identity: Rc::new(0),
             name: Some(Rc::from(name)),
@@ -391,12 +487,61 @@ impl Interpreter {
         let prototype = Value::object_with_proto(proto_props, super_proto);
         prototype.set_prop("constructor".to_string(), constructor.clone())?;
 
+        statics.push((
+            "length".to_owned(),
+            Value::Number(constructor_length as f64),
+        ));
+        static_attrs.push((
+            "length".to_owned(),
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        ));
+        statics.push(("prototype".to_owned(), prototype.clone()));
+        static_attrs.push((
+            "prototype".to_owned(),
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        ));
+        let static_properties = Rc::new(ObjectCell::new_with_default_proto(statics));
+        if let Some(superclass) = &super_cls {
+            static_properties.set_proto(Some(Rc::new(superclass.clone())));
+        }
+        {
+            let mut meta = static_properties.meta.borrow_mut();
+            for (key, attrs) in static_attrs {
+                meta.set_attrs(&key, attrs);
+            }
+            meta.has_accessors = static_has_accessors;
+        }
+
         let class_val = Value::Class(Box::new(ClassData {
             name: name.to_string(),
             constructor: Box::new(constructor),
             prototype: Rc::new(prototype),
-            statics: Rc::new(RefCell::new(statics)),
+            statics: static_properties,
         }));
+        if let Value::Class(class) = &class_val {
+            class
+                .prototype
+                .as_ref()
+                .set_prop("constructor".to_owned(), class_val.clone())?;
+            if let Value::Object { props } = class.prototype.as_ref() {
+                props.meta.borrow_mut().set_attrs(
+                    "constructor",
+                    PropAttrs {
+                        writable: true,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
 
         // The class binds its own name inside static blocks and
         // method bodies, so `static { A.y = … }` can reach it.

@@ -239,7 +239,7 @@ function addonWorkerMain() {
       Object.defineProperty(callback,'prototype',{value:prototype,writable:false,enumerable:false,configurable:false});
       const constructorDescriptor=Object.getOwnPropertyDescriptor(prototype,'constructor');
       if(constructorDescriptor&&constructorDescriptor.configurable)Object.defineProperty(prototype,'constructor',{value:callback,writable:true,enumerable:false,configurable:true});
-      for(const [key,item]of(value.statics||[]))if(key!=='name')Object.defineProperty(callback,key,{value:decode(item,0,callbackGraph),enumerable:true,writable:true,configurable:true});
+      for(const [key,item]of(value.statics||[]))if(!['name','length','prototype','arguments','caller'].includes(key))Object.defineProperty(callback,key,{value:decode(item,0,callbackGraph),enumerable:true,writable:true,configurable:true});
     }
     return callback;
   }
@@ -310,7 +310,7 @@ function addonWorkerMain() {
       }else if(snapshot.t==='guestClass'&&typeof object==='function'){
         const desired=new Set(['arguments','caller','length','name','prototype']);
         for(const [key,value] of(snapshot.statics||[])){
-          if(key==='name')continue;
+          if(key==='name'||key==='length'||key==='prototype'||key==='arguments'||key==='caller')continue;
           desired.add(key);
           Object.defineProperty(object,key,{value:decode(value,0,graph),enumerable:true,writable:true,configurable:true});
         }
@@ -1890,7 +1890,10 @@ fn guest_to_wire(
                 .statics
                 .borrow()
                 .iter()
-                .filter(|(key, _)| key != "name" && !crate::interpreter::is_internal_key(key))
+                .filter(|(key, _)| {
+                    !matches!(key.as_str(), "name" | "length" | "prototype")
+                        && !crate::interpreter::is_internal_key(key)
+                })
                 .map(|(key, value)| {
                     Ok(json!([
                         key,
@@ -2066,7 +2069,10 @@ fn guest_graph_node_snapshot(
             }
             let statics = statics
                 .iter()
-                .filter(|(key, _)| key != "name" && !crate::interpreter::is_internal_key(key))
+                .filter(|(key, _)| {
+                    !matches!(key.as_str(), "name" | "length" | "prototype")
+                        && !crate::interpreter::is_internal_key(key)
+                })
                 .map(|(key, item)| {
                     Ok(json!([
                         key,

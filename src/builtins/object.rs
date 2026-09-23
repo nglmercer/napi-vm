@@ -71,6 +71,7 @@ pub(super) fn install(e: &mut Environment) {
 fn cell(v: &Value) -> Option<&Rc<ObjectCell>> {
     match v {
         Value::Object { props } => Some(props),
+        Value::Class(class) => Some(&class.statics),
         _ => None,
     }
 }
@@ -83,16 +84,8 @@ fn type_err(msg: &str) -> VmErr {
 /// symbol slots. `enumerable_only` applies the `enumerable` attribute.
 fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
     match v {
-        Value::Object { props } => {
-            let meta = props.meta.borrow();
-            props
-                .borrow()
-                .iter()
-                .filter(|(k, _)| !is_internal_key(k))
-                .filter(|(k, _)| !enumerable_only || meta.attrs_of(k).enumerable)
-                .map(|(k, _)| k.clone())
-                .collect()
-        }
+        Value::Object { props } => own_object_names(props, enumerable_only),
+        Value::Class(class) => own_object_names(&class.statics, enumerable_only),
         Value::Array(items) => {
             let mut names: Vec<String> = (0..items.borrow().len())
                 .filter(|index| items.has_index(*index))
@@ -106,6 +99,17 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+fn own_object_names(props: &Rc<ObjectCell>, enumerable_only: bool) -> Vec<String> {
+    let meta = props.meta.borrow();
+    props
+        .borrow()
+        .iter()
+        .filter(|(k, _)| !is_internal_key(k))
+        .filter(|(k, _)| !enumerable_only || meta.attrs_of(k).enumerable)
+        .map(|(k, _)| k.clone())
+        .collect()
 }
 
 fn own_names_for(
@@ -444,11 +448,11 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
         getter.as_ref().is_some_and(is_callable) || setter.as_ref().is_some_and(is_callable);
 
     let attrs = PropAttrs {
-        // An accessor has no `writable` attribute; its mutability is whether a
-        // setter exists, and the slot must stay assignable so the setter path
-        // in `assign_member` is reached.
+        // An accessor has no `writable` attribute. Assignment dispatches a
+        // setter before checking this flag, so accessors can stay non-writable
+        // here and getter-only properties cannot be overwritten as data.
         writable: if is_accessor {
-            true
+            false
         } else {
             desc_bool(descriptor, "writable", false)
         },

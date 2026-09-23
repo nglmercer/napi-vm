@@ -367,18 +367,18 @@ impl Interpreter {
                     .map(|c| Value::String(c.to_string()))
                     .unwrap_or(Value::Undefined))
             }
-            (Value::Class(c), Value::String(k)) => {
-                if k == "prototype" {
-                    return Ok(c.prototype.as_ref().clone());
-                }
-                if k == "name" {
-                    return Ok(Value::String(c.name.clone()));
-                }
-                if let Some(v) = c.statics.borrow().iter().find(|(xk, _)| xk == k) {
-                    return Ok(v.1.clone());
-                }
-                Ok(Value::Undefined)
-            }
+            (Value::Class(c), Value::String(k)) => lookup_chain(
+                &Value::Object {
+                    props: c.statics.clone(),
+                },
+                k,
+            ),
+            (Value::Class(c), Value::Symbol(symbol)) => lookup_chain(
+                &Value::Object {
+                    props: c.statics.clone(),
+                },
+                &crate::interpreter::symbol_slot_key(symbol),
+            ),
             (Value::Function(_), Value::String(k)) => {
                 Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
             }
@@ -552,8 +552,10 @@ impl Interpreter {
 fn lookup_chain(o: &Value, key: &str) -> Result<Value, VmErr> {
     let mut current = o.clone();
     for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
-        let Value::Object { props } = &current else {
-            return Ok(Value::Undefined);
+        let props = match &current {
+            Value::Object { props } => props,
+            Value::Class(class) => &class.statics,
+            _ => return Ok(Value::Undefined),
         };
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {
             return Ok(value.clone());
