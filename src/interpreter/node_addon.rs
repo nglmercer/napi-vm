@@ -254,7 +254,7 @@ function addonWorkerMain() {
       case 'date':return new Date(value.v==='NaN'?NaN:Number(value.v));
       case 'regexp':{const regex=new RegExp(value.source,value.flags);regex.lastIndex=Number(value.lastIndex||0);return regex;}
       case 'arrayBuffer':return Uint8Array.from(value.v).buffer;
-      case 'typedArray':{const Constructor=globalThis[value.kind];if(typeof Constructor!=='function')throw new TypeError('unsupported guest typed array kind');const bytes=Uint8Array.from(value.bytes);return new Constructor(bytes.buffer,0,value.length);}
+      case 'typedArray':{const bytes=Uint8Array.from(value.bytes);if(value.isBuffer)return Buffer.from(bytes);const Constructor=globalThis[value.kind];if(typeof Constructor!=='function')throw new TypeError('unsupported guest typed array kind');return new Constructor(bytes.buffer,0,value.length);}
       case 'dataView':{const bytes=Uint8Array.from(value.bytes);return new DataView(bytes.buffer,0,value.length);}
       case 'bytes':return Buffer.from(value.v);
       case 'error':{const error=new Error(value.message||'guest callback threw');error.name=value.name||'Error';if(value.code)error.code=value.code;return error;}
@@ -1792,7 +1792,7 @@ fn guest_to_wire(
                 .buffer
                 .read(start, end - start)
                 .ok_or_else(|| VmErr::Msg("guest typed array has an invalid byte range".into()))?;
-            json!({"t":"typedArray","kind":view.kind.name(),"length":view.effective_length(),"bytes":bytes})
+            json!({"t":"typedArray","kind":view.kind.name(),"length":view.effective_length(),"isBuffer":view.is_buffer,"bytes":bytes})
         }
         Value::DataView(view) => {
             if view.buffer.is_shared() {
@@ -2857,6 +2857,7 @@ fn wire_to_guest_with_context(
                 buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
                 length,
+                is_buffer: false,
             })))
         }
         "dataView" => {
@@ -2879,6 +2880,7 @@ fn wire_to_guest_with_context(
                 buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
                 length,
+                is_buffer: false,
             })))
         }
         "function" => {
@@ -4425,7 +4427,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         ));
         let buffers = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const buffer = addon.makeBuffer(); const view = addon.makeDataView(); ({text:buffer.toString('utf8'), first:buffer[0], roundTrip:addon.isBuffer(buffer), inputLength:addon.typedArrayLength(new Uint16Array([300, 400])), typed:addon.makeTypedArray(), arrayBufferLength:addon.arrayBufferLength(new Uint8Array([1, 2, 3]).buffer), arrayBufferByte:new Uint8Array(addon.makeArrayBuffer())[1], dataViewLength:view.byteLength, dataViewByte:view.getUint8(1), dataViewRoundTrip:addon.dataViewByte(new DataView(new Uint8Array([4, 5]).buffer))});",
+                "const addon = require('./fixture.node'); const buffer = addon.makeBuffer(); const view = addon.makeDataView(); ({text:buffer.toString('utf8'), first:buffer[0], roundTrip:addon.isBuffer(buffer), guestBufferIsBuffer:addon.isBuffer(Buffer.from([1, 2])), inputLength:addon.typedArrayLength(new Uint16Array([300, 400])), typed:addon.makeTypedArray(), arrayBufferLength:addon.arrayBufferLength(new Uint8Array([1, 2, 3]).buffer), arrayBufferByte:new Uint8Array(addon.makeArrayBuffer())[1], dataViewLength:view.byteLength, dataViewByte:view.getUint8(1), dataViewRoundTrip:addon.dataViewByte(new DataView(new Uint8Array([4, 5]).buffer))});",
             )
             .unwrap();
         assert!(
@@ -4435,6 +4437,10 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(
             matches!(buffers.get_prop("roundTrip"), Some(Value::Number(value)) if value == 1.0)
         );
+        assert!(matches!(
+            buffers.get_prop("guestBufferIsBuffer"),
+            Some(Value::Number(value)) if value == 1.0
+        ));
         assert!(
             matches!(buffers.get_prop("inputLength"), Some(Value::Number(value)) if value == 2.0)
         );

@@ -156,6 +156,20 @@ fn json_serialize(
             escape_json(s, out)?;
             append_json_char(out, '"')?;
         }
+        Value::TypedArray(view) if view.is_buffer => {
+            let to_json = interp.member(v, "toJSON")?;
+            if crate::interpreter::call::is_callable_value(&to_json) {
+                let converted = interp.call_this(&to_json, v.clone(), Vec::new())?;
+                return json_serialize(interp, &converted, out, visited, depth + 1);
+            }
+            json_serialize_typed_array(interp, view, out, visited, depth)?;
+        }
+        Value::TypedArray(view) => {
+            json_serialize_typed_array(interp, view, out, visited, depth)?;
+        }
+        Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_) | Value::DataView(_) => {
+            append_json_str(out, "{}")?;
+        }
         Value::Array(items) => {
             let ptr = std::rc::Rc::as_ptr(items) as *const ();
             if !visited.insert(ptr) {
@@ -244,6 +258,27 @@ fn json_serialize(
         _ => append_json_str(out, "null")?,
     }
     Ok(())
+}
+
+fn json_serialize_typed_array(
+    interp: &mut Interpreter,
+    view: &std::rc::Rc<crate::value::TypedArrayData>,
+    out: &mut String,
+    visited: &mut std::collections::HashSet<*const ()>,
+    depth: usize,
+) -> Result<(), VmErr> {
+    append_json_char(out, '{')?;
+    for index in 0..view.effective_length() {
+        if index > 0 {
+            append_json_char(out, ',')?;
+        }
+        append_json_char(out, '"')?;
+        append_json_str(out, &index.to_string())?;
+        append_json_str(out, "\":")?;
+        let value = crate::builtins::read_element(view, index).unwrap_or(Value::Undefined);
+        json_serialize(interp, &value, out, visited, depth + 1)?;
+    }
+    append_json_char(out, '}')
 }
 
 fn escape_json(s: &str, out: &mut String) -> Result<(), VmErr> {

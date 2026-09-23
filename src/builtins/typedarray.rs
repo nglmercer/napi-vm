@@ -709,11 +709,22 @@ fn typed(
     byte_offset: usize,
     length: usize,
 ) -> Value {
+    typed_with_buffer(kind, buffer, byte_offset, length, false)
+}
+
+pub(crate) fn typed_with_buffer(
+    kind: TypedKind,
+    buffer: impl Into<BufferBacking>,
+    byte_offset: usize,
+    length: usize,
+    is_buffer: bool,
+) -> Value {
     Value::TypedArray(Rc::new(TypedArrayData {
         kind,
         buffer: buffer.into(),
         byte_offset,
         length,
+        is_buffer,
     }))
 }
 
@@ -1031,11 +1042,12 @@ fn window(length: usize, a: &[Value]) -> (usize, usize) {
 fn typed_subarray(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
     let (start, end) = window(view.effective_length(), &a);
-    Ok(typed(
+    Ok(typed_with_buffer(
         view.kind,
         view.buffer.clone(),
         view.effective_byte_offset() + start * view.kind.size(),
         end - start,
+        view.is_buffer,
     ))
 }
 
@@ -1149,6 +1161,7 @@ fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
         buffer: backing,
         byte_offset,
         length: byte_length,
+        is_buffer: false,
     })))
 }
 
@@ -1188,6 +1201,7 @@ fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<Typed
         buffer: view.buffer.clone(),
         byte_offset: view.effective_byte_offset() + offset,
         length: 1,
+        is_buffer: false,
     }))
 }
 

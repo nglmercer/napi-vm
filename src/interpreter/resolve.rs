@@ -30,6 +30,7 @@ impl Interpreter {
             Value::Date(_) => ("Date", true),
             Value::ArrayBuffer(_) => ("ArrayBuffer", true),
             Value::SharedArrayBuffer(_) => ("SharedArrayBuffer", true),
+            Value::TypedArray(view) if view.is_buffer => ("Buffer", true),
             Value::TypedArray(view) => (view.kind.name(), true),
             Value::DataView(_) => ("DataView", true),
             Value::GlobalObject => ("Object", true),

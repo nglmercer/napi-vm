@@ -1325,6 +1325,9 @@ pub struct TypedArrayData {
     pub byte_offset: usize,
     /// Element count for a typed array; *byte* count for a `DataView`.
     pub length: usize,
+    /// Node's `Buffer` subclasses `Uint8Array`, but keeps distinct prototype
+    /// and coercion behavior. The shared storage shape represents both.
+    pub is_buffer: bool,
 }
 
 impl TypedArrayData {

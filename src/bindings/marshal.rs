@@ -571,6 +571,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
                 buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
                 length,
+                is_buffer: false,
             },
         )))
     }

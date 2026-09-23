@@ -431,7 +431,6 @@ struct NapiEnvironment {
     externals: RefCell<HashMap<NapiObjectIdentity, NapiExternal>>,
     external_buffers: RefCell<HashMap<NapiObjectIdentity, NapiExternalBuffer>>,
     external_memory: Cell<i64>,
-    buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
     guest_callback_dispatchers: RefCell<Vec<GuestCallbackDispatcher>>,
@@ -3999,7 +3998,12 @@ fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Re
             return napi_default_builtin_prototype(environment, "SharedArrayBuffer");
         }
         Value::TypedArray(view) => {
-            return napi_default_builtin_prototype(environment, view.kind.name());
+            let constructor = if view.is_buffer {
+                "Buffer"
+            } else {
+                view.kind.name()
+            };
+            return napi_default_builtin_prototype(environment, constructor);
         }
         Value::DataView(_) => return napi_default_builtin_prototype(environment, "DataView"),
         Value::GlobalObject => return napi_default_object_prototype(environment),
@@ -4338,6 +4342,7 @@ fn create_napi_buffer(bytes: Vec<u8>) -> Result<(Value, *mut c_void), i32> {
         buffer: Buffer::owned(bytes).into(),
         byte_offset: 0,
         length,
+        is_buffer: true,
     }));
     let (data, _) = napi_buffer_data(&value)?;
     Ok((value, data))
@@ -4357,30 +4362,15 @@ fn napi_buffer_data(value: &Value) -> Result<(*mut c_void, usize), i32> {
     Ok((data, length))
 }
 
-fn remember_napi_buffer(environment: &NapiEnvironment, value: &Value) -> Result<(), i32> {
-    let Value::TypedArray(view) = value else {
-        return Err(NAPI_INVALID_ARG);
-    };
-    let identity = napi_object_identity(value)?;
-    let mut buffers = environment.buffer_values.borrow_mut();
-    buffers.retain(|_, buffer| buffer.strong_count() > 0);
-    buffers.insert(identity, Rc::downgrade(view));
-    Ok(())
-}
-
 fn create_napi_external_buffer_value(
     environment: &NapiEnvironment,
     value: Value,
     data: *mut c_void,
     finalize: NapiExternalBufferFinalizer,
     hint: *mut c_void,
-    is_buffer: bool,
 ) -> Result<NapiValue, i32> {
     let identity = napi_object_identity(&value)?;
     let handle = environment.handles.borrow_mut().create(value.clone())?;
-    if is_buffer {
-        remember_napi_buffer(environment, &value)?;
-    }
     environment.external_buffers.borrow_mut().insert(
         identity,
         NapiExternalBuffer {
@@ -4393,19 +4383,8 @@ fn create_napi_external_buffer_value(
     Ok(handle)
 }
 
-fn is_napi_buffer(environment: &NapiEnvironment, value: &Value) -> bool {
-    let Value::TypedArray(view) = value else {
-        return false;
-    };
-    let Ok(identity) = napi_object_identity(value) else {
-        return false;
-    };
-    environment
-        .buffer_values
-        .borrow()
-        .get(&identity)
-        .and_then(Weak::upgrade)
-        .is_some_and(|registered| Rc::ptr_eq(view, &registered))
+fn is_napi_buffer(_: &NapiEnvironment, value: &Value) -> bool {
+    matches!(value, Value::TypedArray(view) if view.is_buffer)
 }
 
 unsafe extern "C" fn api_create_buffer(
@@ -4425,7 +4404,6 @@ unsafe extern "C" fn api_create_buffer(
         let environment = environment(env)?;
         let (value, data_pointer) = create_napi_buffer(vec![0; length])?;
         let handle = environment.handles.borrow_mut().create(value.clone())?;
-        remember_napi_buffer(&environment, &value)?;
         if !data.is_null() {
             unsafe { data.write(data_pointer) };
         }
@@ -4457,7 +4435,6 @@ unsafe extern "C" fn api_create_buffer_copy(
         let environment = environment(env)?;
         let (value, data_pointer) = create_napi_buffer(bytes)?;
         let handle = environment.handles.borrow_mut().create(value.clone())?;
-        remember_napi_buffer(&environment, &value)?;
         if !result_data.is_null() {
             unsafe { result_data.write(data_pointer) };
         }
@@ -4492,6 +4469,7 @@ unsafe extern "C" fn api_create_external_buffer(
             buffer: backing.into(),
             byte_offset: 0,
             length,
+            is_buffer: true,
         }));
         let handle = create_napi_external_buffer_value(
             &environment,
@@ -4499,7 +4477,6 @@ unsafe extern "C" fn api_create_external_buffer(
             data,
             NapiExternalBufferFinalizer::Napi(finalize),
             hint,
-            true,
         )?;
         unsafe { result.write(handle) };
         Ok(())
@@ -4552,9 +4529,9 @@ unsafe extern "C" fn api_create_buffer_from_arraybuffer(
             buffer: buffer.clone().into(),
             byte_offset,
             length: byte_length,
+            is_buffer: true,
         }));
         let handle = environment.handles.borrow_mut().create(value.clone())?;
-        remember_napi_buffer(&environment, &value)?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -4778,7 +4755,6 @@ unsafe extern "C" fn api_create_external_sharedarraybuffer(
             external_data,
             NapiExternalBufferFinalizer::NoEnv(finalize),
             hint,
-            false,
         )?;
         unsafe { result.write(handle) };
         Ok(())
@@ -4829,7 +4805,6 @@ unsafe extern "C" fn api_create_external_arraybuffer(
             external_data,
             NapiExternalBufferFinalizer::Napi(finalize),
             hint,
-            false,
         )?;
         unsafe { result.write(handle) };
         Ok(())
@@ -5127,6 +5102,7 @@ unsafe extern "C" fn api_create_typedarray(
             buffer: buffer.clone().into(),
             byte_offset,
             length,
+            is_buffer: false,
         }));
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
@@ -5204,6 +5180,7 @@ unsafe extern "C" fn api_create_dataview(
             buffer: buffer.clone().into(),
             byte_offset,
             length: byte_length,
+            is_buffer: false,
         }));
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
@@ -9102,7 +9079,6 @@ impl NativeAddonLoader for RustNodeApiHost {
             externals: RefCell::new(HashMap::new()),
             external_buffers: RefCell::new(HashMap::new()),
             external_memory: Cell::new(0),
-            buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
             active_callbacks: RefCell::new(HashMap::new()),
             guest_callback_dispatchers: RefCell::new(Vec::new()),
@@ -13299,6 +13275,14 @@ module.exports = {
     dataViewMethodCall: DataView.prototype.setUint8.call(binaryDataView, 0, 9) === undefined &&
       binaryDataView.getUint8(0) === 9,
     dataViewMethodsHidden: Object.keys(DataView.prototype).length === 0,
+    napiBufferIsBuffer: Buffer.isBuffer(buffers.copy),
+    napiBufferDefault: Object.getPrototypeOf(buffers.copy) === Buffer.prototype,
+    napiBufferPrototype: addon.getPrototype(buffers.copy) === Buffer.prototype,
+    bufferPrototypeParent: Object.getPrototypeOf(Buffer.prototype) === Uint8Array.prototype,
+    bufferConstructorParent: Object.getPrototypeOf(Buffer) === Uint8Array,
+    napiBufferText: buffers.copy.toString('hex') === '41784344',
+    napiBufferJson: JSON.stringify(buffers.copy) ===
+      '{"type":"Buffer","data":[65,120,67,68]}',
   },
   array: addon.arrayProbe(),
   wrapped,
@@ -14904,6 +14888,13 @@ module.exports = {
             "dataViewMethodShared",
             "dataViewMethodCall",
             "dataViewMethodsHidden",
+            "napiBufferIsBuffer",
+            "napiBufferDefault",
+            "napiBufferPrototype",
+            "bufferPrototypeParent",
+            "bufferConstructorParent",
+            "napiBufferText",
+            "napiBufferJson",
         ] {
             assert!(
                 matches!(

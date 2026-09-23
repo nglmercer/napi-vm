@@ -41,7 +41,7 @@ pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
         })
 }
 
-fn is_callable_value(value: &Value) -> bool {
+pub(crate) fn is_callable_value(value: &Value) -> bool {
     match value {
         Value::Function(_)
         | Value::NativeFunction { .. }

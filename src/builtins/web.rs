@@ -80,6 +80,7 @@ fn encode(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
         buffer: Buffer::owned(bytes).into(),
         byte_offset: 0,
         length,
+        is_buffer: false,
     })))
 }
 
@@ -446,6 +447,9 @@ fn clone_value(
                 buffer: copied_backing,
                 byte_offset: view.effective_byte_offset(),
                 length: view.effective_length(),
+                // Structured cloning a Buffer produces an ordinary
+                // Uint8Array in Node, so the clone is not a Buffer.
+                is_buffer: false,
             });
             match value {
                 Value::DataView(_) => Value::DataView(cloned),

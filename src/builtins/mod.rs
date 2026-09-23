@@ -1,5 +1,6 @@
 mod array;
 mod bigint;
+mod buffer;
 mod collections;
 mod date;
 mod error;
@@ -55,6 +56,7 @@ pub fn setup_builtins(env: &Env) {
         "ArrayBuffer",
         "DataView",
         "SharedArrayBuffer",
+        "Buffer",
         "Atomics",
         "RegExp",
         "Function",
@@ -442,6 +444,7 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     regexp::install(e);
     bigint::install(e);
     typedarray::install(e);
+    buffer::install(e);
     proxy::install(e);
     web::install(e);
     symbol::install(e);
