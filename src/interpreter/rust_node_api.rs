@@ -9715,7 +9715,7 @@ NAPI_MODULE_INIT() {
     }
 
     #[test]
-    fn loads_a_legacy_napi_module_from_a_bare_package_node_addons_export() {
+    fn require_module_node_loads_an_allowlisted_bare_napi_package() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-rust-node-api-legacy-{}-{}",
@@ -9741,7 +9741,7 @@ NAPI_MODULE_INIT() {
         };
         assert!(compiler.status.success(), "cc --version failed");
 
-        let package_root = root.join("node_modules/legacy-fixture");
+        let package_root = root.join("node_modules/module.node");
         let release_dir = package_root.join("build/Release");
         fs::create_dir_all(&release_dir).unwrap();
         let source = root.join("fixture.c");
@@ -9784,7 +9784,7 @@ __attribute__((constructor)) static void register_module(void) {
         );
         fs::write(
             package_root.join("package.json"),
-            r#"{"name":"legacy-fixture","exports":{".":{"node-addons":"./build/Release/fixture.node","default":"./fallback.cjs"}}}"#,
+            r#"{"name":"module.node","exports":{".":{"node-addons":"./build/Release/fixture.node","default":"./fallback.cjs"}}}"#,
         )
         .unwrap();
         fs::write(
@@ -9795,7 +9795,7 @@ __attribute__((constructor)) static void register_module(void) {
         let main = root.join("main.cjs");
         fs::write(
             &main,
-            "const addon = require('legacy-fixture'); module.exports = {kind: addon.kind, cached: addon === require('legacy-fixture'), sameByPath: addon === require('./node_modules/legacy-fixture/build/Release/fixture.node')};",
+            "const addon = require('module.node'); module.exports = {kind: addon.kind, cached: addon === require('module.node'), sameByPath: addon === require('./node_modules/module.node/build/Release/fixture.node')};",
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
