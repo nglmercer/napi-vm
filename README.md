@@ -212,19 +212,22 @@ values (`napi_ok` with `false`). Bun 1.4.0 returns
 `napi_arraybuffer_expected` for that same input; the differential fixture keeps
 this runtime difference explicit while checking all shared behavior.
 The selected Node-API v8 slice adds object type tags, freeze/seal for ordinary
-guest objects and class constructors, and asynchronous cleanup hooks. Type tags
-are shared across addon environments and remain attached to the guest object.
+guest objects, arrays, functions, and class constructors, and asynchronous
+cleanup hooks. Type tags are shared across addon environments and remain
+attached to the guest object.
 Because the VM has no object garbage collector, tagged objects remain retained
 until host shutdown; the tag table is capped at the local-handle limit.
-Cleanup hooks run in reverse registration order. Async hooks start in that
-order, synchronous hooks continue, and the host waits for async completion
-before finalizers while keeping addon libraries mapped. Freeze/seal currently
-support ordinary objects and class constructors; other object representations
-report a generic failure until their property metadata can enforce the same
-integrity rules. The compiled fixture compares type-tag and integrity behavior
-with Node and Bun, and verifies async cleanup ordering against Node. Bun 1.4.0
-exits without awaiting an asynchronous cleanup hook, so it is not used as the
-teardown-order reference.
+Array index and `length` descriptors reflect their frozen or sealed attributes.
+Guest writes, deletes, length truncation, Node-API element writes, and the
+implemented mutating array methods honor frozen arrays. Cleanup hooks run in
+reverse registration order. Async hooks start in that order, synchronous hooks
+continue, and the host waits for async completion before finalizers while
+keeping addon libraries mapped. Other object representations report a generic
+failure until their property metadata can enforce the same integrity rules.
+The compiled fixture compares type-tag and integrity behavior with Node and
+Bun, and verifies async cleanup ordering against Node. Bun 1.4.0 exits without
+awaiting an asynchronous cleanup hook, so it is not used as the teardown-order
+reference.
 The selected Node-API v9 functions provide the global symbol registry,
 SyntaxError creation and throwing, and the addon's `file://` URL.
 `node_api_symbol_for` shares identity with guest `Symbol.for`, and the URL

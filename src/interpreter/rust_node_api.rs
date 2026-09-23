@@ -10679,6 +10679,9 @@ sealedArray[0] = 19;
 sealedArray[1] = 21;
 delete sealedArray[0];
 sealedArray.length = 0;
+const frozenArrayIndexDescriptor = Object.getOwnPropertyDescriptor(frozenArray, '0');
+const frozenArrayLengthDescriptor = Object.getOwnPropertyDescriptor(frozenArray, 'length');
+const sealedArrayIndexDescriptor = Object.getOwnPropertyDescriptor(sealedArray, '0');
 module.exports = {
   ...native,
   frozen: Object.isFrozen(target),
@@ -10689,10 +10692,16 @@ module.exports = {
   frozenArrayValue: frozenArray[0],
   frozenArrayPushThrows,
   frozenArraySpliceThrows,
+  frozenIndexWritable: frozenArrayIndexDescriptor.writable,
+  frozenIndexConfigurable: frozenArrayIndexDescriptor.configurable,
+  frozenLengthWritable: frozenArrayLengthDescriptor.writable,
+  frozenLengthConfigurable: frozenArrayLengthDescriptor.configurable,
   sealedArraySealed: Object.isSealed(sealedArray),
   sealedArrayFrozen: Object.isFrozen(sealedArray),
   sealedArrayLength: sealedArray.length,
   sealedArrayValue: sealedArray[0],
+  sealedIndexWritable: sealedArrayIndexDescriptor.writable,
+  sealedIndexConfigurable: sealedArrayIndexDescriptor.configurable,
   targetValue: target.value,
   sealedValue: sealedTarget.value,
 };
@@ -10790,10 +10799,16 @@ module.exports = {
         assert_eq!(vm_report["frozenArrayValue"], 13);
         assert_eq!(vm_report["frozenArrayPushThrows"], true);
         assert_eq!(vm_report["frozenArraySpliceThrows"], true);
+        assert_eq!(vm_report["frozenIndexWritable"], false);
+        assert_eq!(vm_report["frozenIndexConfigurable"], false);
+        assert_eq!(vm_report["frozenLengthWritable"], false);
+        assert_eq!(vm_report["frozenLengthConfigurable"], false);
         assert_eq!(vm_report["sealedArraySealed"], true);
         assert_eq!(vm_report["sealedArrayFrozen"], false);
         assert_eq!(vm_report["sealedArrayLength"], 1);
         assert_eq!(vm_report["sealedArrayValue"], 19);
+        assert_eq!(vm_report["sealedIndexWritable"], true);
+        assert_eq!(vm_report["sealedIndexConfigurable"], false);
         assert_eq!(vm_report["targetValue"], 41);
         assert_eq!(vm_report["sealedValue"], 9);
         drop(observer);

@@ -181,10 +181,13 @@ matches Node when `napi_is_detached_arraybuffer` receives a non-ArrayBuffer
 value (`napi_ok`, false); Bun 1.4.0 returns `napi_arraybuffer_expected` for
 that input, which the differential fixture records as a runtime difference.
 The selected Node-API v8 slice adds type tags for identity-bearing guest
-objects, freeze/seal for ordinary objects, ordinary functions, and class
-constructors, and async cleanup hooks. Function integrity operations first
-materialize the standard own `name`, `length`, and `prototype` properties so
-the resulting descriptors are frozen or sealed. Hooks start in reverse
+objects, freeze/seal for ordinary objects, arrays, ordinary functions, and
+class constructors, and async cleanup hooks. Array index and `length`
+descriptors participate in guest writes, deletion, truncation, Node-API
+element writes, and property reflection. Implemented mutating array methods
+reject writes to frozen arrays. Function integrity operations first materialize
+the standard own `name`, `length`, and `prototype` properties so the resulting
+descriptors are frozen or sealed. Hooks start in reverse
 registration order; asynchronous hooks
 start without blocking the remaining hooks, and shutdown waits for all of them
 to remove their handles before running finalizers. Addon libraries remain

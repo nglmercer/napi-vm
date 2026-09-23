@@ -580,33 +580,31 @@ fn object_get_own_descriptors(
 /// property does not exist.
 fn descriptor_for(target: &Value, key: &str) -> Value {
     if let Value::Array(items) = target {
-        let items = items.borrow();
+        let array = items;
+        let items = array.borrow();
         if let Some(index) = crate::value::array_index(key)
             && index < items.len()
-            && target
-                .as_array()
-                .is_some_and(|array| array.has_index(index))
+            && array.has_index(index)
         {
+            let attrs = array.meta.borrow().attrs_of(key);
             return Value::object(vec![
                 ("value".to_string(), items[index].clone()),
-                ("writable".to_string(), Value::Bool(true)),
-                ("enumerable".to_string(), Value::Bool(true)),
-                ("configurable".to_string(), Value::Bool(true)),
+                ("writable".to_string(), Value::Bool(attrs.writable)),
+                ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
+                ("configurable".to_string(), Value::Bool(attrs.configurable)),
             ]);
         }
         if key == "length" {
+            let attrs = array.meta.borrow().attrs_of("length");
             return Value::object(vec![
                 ("value".to_string(), Value::Number(items.len() as f64)),
-                ("writable".to_string(), Value::Bool(true)),
-                ("enumerable".to_string(), Value::Bool(false)),
-                ("configurable".to_string(), Value::Bool(false)),
+                ("writable".to_string(), Value::Bool(attrs.writable)),
+                ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
+                ("configurable".to_string(), Value::Bool(attrs.configurable)),
             ]);
         }
-        if let Some(value) = target.as_array().and_then(|array| array.named_prop(key)) {
-            let attrs = target
-                .as_array()
-                .map(|array| array.meta.borrow().attrs_of(key))
-                .unwrap_or_default();
+        if let Some(value) = array.named_prop(key) {
+            let attrs = array.meta.borrow().attrs_of(key);
             return Value::object(vec![
                 ("value".to_string(), value),
                 ("writable".to_string(), Value::Bool(attrs.writable)),
