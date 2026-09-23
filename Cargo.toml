@@ -15,8 +15,8 @@ default = ["napi"]
 # `wasm32` target.
 napi = ["dep:napi", "dep:napi-derive"]
 # Experimental in-process loader for addons that use only the Node-API C ABI.
-# The in-process backend has Linux and macOS implementations; macOS still needs
-# native CI verification. The sidecar covers other addon ABIs and targets.
+# The in-process backend supports Linux, macOS, and Windows; macOS and Windows
+# still need native CI verification. The sidecar covers other addon ABIs.
 node-api-host = ["dep:libloading"]
 # The browser layer: a `#[wasm_bindgen]` `WasmVm` that runs the VM in-page and
 # exposes the shared language services (completion/diagnostics/symbols). Build

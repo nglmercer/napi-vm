@@ -11,7 +11,7 @@ mod promise;
 mod resolve;
 #[cfg(all(
     feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos")
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 pub mod rust_node_api;
 
@@ -26,7 +26,7 @@ pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, 
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 #[cfg(all(
     feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos")
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 pub use rust_node_api::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions};
 

@@ -24,20 +24,67 @@ fn main() {
 
     if std::env::var_os("CARGO_FEATURE_NODE_API_HOST").is_some() {
         let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-        if target_os == "linux" || target_os == "macos" {
+        if target_os == "linux" || target_os == "macos" || target_os == "windows" {
             let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-            let (library_name, link_flag) = if target_os == "macos" {
-                ("libnapi_vm_node_api_shim.dylib", "-dynamiclib")
-            } else {
-                ("libnapi_vm_node_api_shim.so", "-shared")
+            let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+            let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+            let library_name = match target_os.as_str() {
+                "macos" => "libnapi_vm_node_api_shim.dylib",
+                // Windows Node-API addon import libraries name node.exe as
+                // their provider, so the shim image must carry that module
+                // name even though it is a DLL image.
+                "windows" => "node.exe",
+                _ => "libnapi_vm_node_api_shim.so",
             };
             let library = out_dir.join(library_name);
-            let compiler = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
-            let status = std::process::Command::new(compiler)
-                .args(["-std=c11", "-O2", "-fPIC", "-fvisibility=hidden", link_flag])
-                .arg("native/node_api_shim.c")
-                .arg("-o")
-                .arg(&library)
+            let target = std::env::var("TARGET").unwrap_or_default();
+            let host = std::env::var("HOST").unwrap_or_default();
+            let target_specific_cc = std::env::var_os(format!("CC_{target}"))
+                .or_else(|| std::env::var_os(format!("CC_{}", target.replace('-', "_"))));
+            let compiler = target_specific_cc.unwrap_or_else(|| {
+                if target_os == "windows" && target_env == "gnu" && target != host {
+                    format!("{target_arch}-w64-mingw32-gcc").into()
+                } else if target_os == "windows" && target_env == "msvc" {
+                    std::env::var_os("CC").unwrap_or_else(|| "cl.exe".into())
+                } else if target_os == "windows" && target_env == "gnu" {
+                    std::env::var_os("CC").unwrap_or_else(|| "gcc".into())
+                } else {
+                    std::env::var_os("CC").unwrap_or_else(|| "cc".into())
+                }
+            });
+            let mut command = std::process::Command::new(compiler);
+            if target_os == "windows" && target_env == "msvc" {
+                command
+                    .args(["/nologo", "/O2", "/LD", "/TC"])
+                    .arg("native/node_api_shim.c")
+                    .arg(format!(
+                        "/Fo{}",
+                        out_dir.join("node_api_shim.obj").display()
+                    ))
+                    .arg("/link")
+                    .arg(format!("/IMPLIB:{}", out_dir.join("node.lib").display()))
+                    .arg(format!("/OUT:{}", library.display()));
+            } else {
+                let link_flag = if target_os == "macos" {
+                    "-dynamiclib"
+                } else {
+                    "-shared"
+                };
+                command.args(["-std=c11", "-O2", "-fvisibility=hidden", link_flag]);
+                if target_os != "windows" {
+                    command.arg("-fPIC");
+                } else {
+                    command.arg(format!(
+                        "-Wl,--out-implib,{}",
+                        out_dir.join("libnode.exe.a").display()
+                    ));
+                }
+                command
+                    .arg("native/node_api_shim.c")
+                    .arg("-o")
+                    .arg(&library);
+            }
+            let status = command
                 .status()
                 .expect("node-api-host requires a C compiler");
             assert!(

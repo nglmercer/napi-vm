@@ -6,9 +6,11 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{CStr, CString, OsStr, c_char, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(target_os = "windows")]
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -17,7 +19,24 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+#[cfg(unix)]
 use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
+#[cfg(target_os = "windows")]
+use libloading::os::windows::{
+    LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+    LOAD_LIBRARY_SEARCH_USER_DIRS, Library,
+};
+
+#[cfg(target_os = "windows")]
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn AddDllDirectory(new_directory: *const u16) -> *mut c_void;
+    fn GetModuleHandleW(module_name: *const u16) -> *mut c_void;
+    fn RemoveDllDirectory(cookie: *mut c_void) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+static WINDOWS_NODE_API_SHIM_DIRECTORIES: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
 
 use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
@@ -7562,8 +7581,10 @@ fn to_int32(number: f64) -> i32 {
 }
 
 struct NodeApiShim {
-    _library: Library,
+    _library: Option<Library>,
     path: PathBuf,
+    #[cfg(target_os = "windows")]
+    dll_directory_cookie: *mut c_void,
 }
 
 impl NodeApiShim {
@@ -7574,7 +7595,10 @@ impl NodeApiShim {
             let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
             let candidate = std::env::temp_dir()
                 .join(format!("napi-vm-node-api-{}-{nonce}", std::process::id()));
+            #[cfg(unix)]
             let mut builder = fs::DirBuilder::new();
+            #[cfg(not(unix))]
+            let builder = fs::DirBuilder::new();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::DirBuilderExt;
@@ -7594,6 +7618,8 @@ impl NodeApiShim {
         let path = root.join("libnapi_vm_node_api_shim.so");
         #[cfg(target_os = "macos")]
         let path = root.join("libnapi_vm_node_api_shim.dylib");
+        #[cfg(target_os = "windows")]
+        let path = root.join("node.exe");
         let write_result = (|| {
             let mut file = OpenOptions::new()
                 .write(true)
@@ -7615,34 +7641,120 @@ impl NodeApiShim {
             )));
         }
 
-        let library = unsafe { Library::open(Some(path.as_os_str()), RTLD_NOW | RTLD_GLOBAL) }
-            .map_err(|error| {
+        #[cfg(target_os = "windows")]
+        let dll_directory_cookie = {
+            use std::os::windows::ffi::OsStrExt;
+            let mut directory: Vec<u16> = root.as_os_str().encode_wide().collect();
+            directory.push(0);
+            let cookie = unsafe { AddDllDirectory(directory.as_ptr()) };
+            if cookie.is_null() {
+                let error = std::io::Error::last_os_error();
+                let _ = fs::remove_dir_all(&root);
+                return Err(VmErr::Msg(format!(
+                    "cannot register private Node-API shim directory: {error}"
+                )));
+            }
+            cookie
+        };
+
+        #[cfg(unix)]
+        let library_result =
+            unsafe { Library::open(Some(path.as_os_str()), RTLD_NOW | RTLD_GLOBAL) };
+        #[cfg(target_os = "windows")]
+        let library_result = unsafe { Library::new(path.as_os_str()) };
+        let library = library_result.map_err(|error| {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                let _ = RemoveDllDirectory(dll_directory_cookie);
+            }
+            {
                 let _ = fs::remove_dir_all(&root);
                 VmErr::Msg(format!("cannot load Node-API symbol shim: {error}"))
-            })?;
+            }
+        })?;
         let install: unsafe extern "C" fn(*const NapiVmApiTable) =
             match unsafe { library.get(b"napi_vm_install_node_api_table\0") } {
                 Ok(symbol) => *symbol,
                 Err(error) => {
                     drop(library);
+                    #[cfg(target_os = "windows")]
+                    unsafe {
+                        let _ = RemoveDllDirectory(dll_directory_cookie);
+                    }
                     let _ = fs::remove_dir_all(&root);
                     return Err(VmErr::Msg(format!("invalid Node-API symbol shim: {error}")));
                 }
             };
         unsafe { install(&NAPI_VM_API_TABLE) };
+        #[cfg(target_os = "windows")]
+        WINDOWS_NODE_API_SHIM_DIRECTORIES
+            .get_or_init(|| Mutex::new(Vec::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(root.clone());
         Ok(Self {
-            _library: library,
+            _library: Some(library),
             path,
+            #[cfg(target_os = "windows")]
+            dll_directory_cookie,
         })
+    }
+
+    fn load_addon(&self, filename: &OsStr) -> Result<Library, libloading::Error> {
+        #[cfg(unix)]
+        {
+            unsafe { Library::open(Some(filename), RTLD_NOW) }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            unsafe {
+                Library::load_with_flags(
+                    filename,
+                    LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+                        | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+                        | LOAD_LIBRARY_SEARCH_USER_DIRS,
+                )
+            }
+        }
     }
 }
 
 impl Drop for NodeApiShim {
     fn drop(&mut self) {
-        // Linux and macOS permit unlinking a loaded shared object; the mapping
-        // remains live until the Library is dropped immediately after this method.
-        if let Some(root) = self.path.parent() {
-            let _ = fs::remove_dir_all(root);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::ffi::OsStrExt;
+
+            // Addon library handles are stored before the shim in HostState,
+            // so they have closed before the Node-API import provider unloads.
+            drop(self._library.take());
+            unsafe {
+                let _ = RemoveDllDirectory(self.dll_directory_cookie);
+            }
+            let mut module_name: Vec<u16> = OsStr::new("node.exe").encode_wide().collect();
+            module_name.push(0);
+            if unsafe { GetModuleHandleW(module_name.as_ptr()) }.is_null()
+                && let Some(directories) = WINDOWS_NODE_API_SHIM_DIRECTORIES.get()
+            {
+                let mut directories = directories
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut roots: HashSet<PathBuf> = directories.drain(..).collect();
+                if let Some(root) = self.path.parent() {
+                    roots.insert(root.to_path_buf());
+                }
+                for root in roots {
+                    let _ = fs::remove_dir_all(root);
+                }
+            }
+        }
+        #[cfg(unix)]
+        {
+            // Unix permits unlinking a loaded shared object; the mapping
+            // remains live until the Library is dropped immediately after this method.
+            if let Some(root) = self.path.parent() {
+                let _ = fs::remove_dir_all(root);
+            }
         }
     }
 }
@@ -8178,10 +8290,19 @@ fn validate_native_addon_binary(filename: &str) -> Result<(), VmErr> {
         .metadata()
         .map_err(|error| VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}")))?
         .len();
-    let mut header = [0_u8; 4096];
-    let length = file.read(&mut header).map_err(|error| {
-        VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}"))
-    })?;
+    #[cfg(target_os = "windows")]
+    let (header, length) =
+        read_pe_header_for_validation(&mut file, file_length).map_err(|error| {
+            VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}"))
+        })?;
+    #[cfg(not(target_os = "windows"))]
+    let (header, length) = {
+        let mut header = [0_u8; 4096];
+        let length = file.read(&mut header).map_err(|error| {
+            VmErr::Msg(format!("cannot inspect Node-API addon {filename}: {error}"))
+        })?;
+        (header, length)
+    };
     validate_native_addon_header(
         &header[..length],
         file_length,
@@ -8190,6 +8311,36 @@ fn validate_native_addon_binary(filename: &str) -> Result<(), VmErr> {
         cfg!(target_endian = "little"),
     )
     .map_err(|reason| VmErr::Msg(format!("incompatible Node-API addon {filename}: {reason}")))
+}
+
+#[cfg(target_os = "windows")]
+fn read_pe_header_for_validation(
+    file: &mut fs::File,
+    file_length: u64,
+) -> std::io::Result<(Vec<u8>, usize)> {
+    let mut dos_header = [0_u8; 64];
+    let dos_length = file.read(&mut dos_header)?;
+    if dos_length < dos_header.len() || !dos_header.starts_with(b"MZ") {
+        return Ok((dos_header[..dos_length].to_vec(), dos_length));
+    }
+    let Some(pe_offset) = read_u32(&dos_header, 0x3c, true) else {
+        return Ok((dos_header.to_vec(), dos_header.len()));
+    };
+    let Some(pe_end) = u64::from(pe_offset).checked_add(26) else {
+        return Ok((dos_header.to_vec(), dos_header.len()));
+    };
+    if pe_end > file_length {
+        return Ok((dos_header.to_vec(), dos_header.len()));
+    }
+
+    let validation_pe_offset = dos_header.len();
+    let mut header = vec![0_u8; validation_pe_offset + 26];
+    header[..dos_header.len()].copy_from_slice(&dos_header);
+    header[0x3c..0x40].copy_from_slice(&(validation_pe_offset as u32).to_le_bytes());
+    file.seek(SeekFrom::Start(u64::from(pe_offset)))?;
+    file.read_exact(&mut header[validation_pe_offset..])?;
+    let length = header.len();
+    Ok((header, length))
 }
 
 fn validate_native_addon_header(
@@ -8202,9 +8353,78 @@ fn validate_native_addon_header(
     match host_os {
         "linux" => validate_elf_addon_header(bytes, file_length, host_arch, host_is_little_endian),
         "macos" => validate_macho_addon_header(bytes, file_length, host_arch),
+        "windows" => validate_pe_addon_header(bytes, file_length, host_arch),
         _ => Err(format!(
             "the in-process Node-API host does not support binaries for {host_os}"
         )),
+    }
+}
+
+fn validate_pe_addon_header(bytes: &[u8], file_length: u64, host_arch: &str) -> Result<(), String> {
+    if !bytes.starts_with(b"MZ") {
+        if bytes.starts_with(b"\x7fELF") {
+            return Err("found an ELF binary; this Windows host requires PE".into());
+        }
+        if looks_like_macho(bytes) {
+            return Err("found a Mach-O binary; this Windows host requires PE".into());
+        }
+        return Err("the file is not a PE image".into());
+    }
+    if bytes.len() < 64 || file_length < 64 {
+        return Err("the DOS header is truncated".into());
+    }
+    let pe_offset = read_u32(bytes, 0x3c, true)
+        .ok_or_else(|| "the DOS header is truncated".to_string())? as usize;
+    let optional_magic_end = pe_offset
+        .checked_add(26)
+        .ok_or_else(|| "the PE header offset overflows the file format".to_string())?;
+    if optional_magic_end > bytes.len() || optional_magic_end as u64 > file_length {
+        return Err("the PE/COFF header is truncated".into());
+    }
+    if bytes.get(pe_offset..pe_offset + 4) != Some(&b"PE\0\0"[..]) {
+        return Err("the PE signature is invalid".into());
+    }
+    let (expected_machine, expected_magic) = match host_arch {
+        "x86" => (0x014c, 0x010b),
+        "x86_64" => (0x8664, 0x020b),
+        "arm" => (0x01c4, 0x010b),
+        "aarch64" => (0xaa64, 0x020b),
+        _ => {
+            return Err(format!(
+                "the in-process host does not support PE architecture {host_arch}"
+            ));
+        }
+    };
+    let machine = read_u16(bytes, pe_offset + 4, true)
+        .ok_or_else(|| "the PE/COFF header is truncated".to_string())?;
+    if machine != expected_machine {
+        return Err(format!(
+            "PE architecture {} does not match host architecture {host_arch}",
+            pe_architecture_name(machine)
+        ));
+    }
+    let characteristics = read_u16(bytes, pe_offset + 22, true)
+        .ok_or_else(|| "the PE/COFF header is truncated".to_string())?;
+    if characteristics & 0x2000 == 0 {
+        return Err("the PE image is not a DLL".into());
+    }
+    let optional_magic = read_u16(bytes, pe_offset + 24, true)
+        .ok_or_else(|| "the PE optional header is truncated".to_string())?;
+    if optional_magic != expected_magic {
+        return Err(format!(
+            "PE optional-header format {optional_magic:#06x} does not match host architecture {host_arch}"
+        ));
+    }
+    Ok(())
+}
+
+fn pe_architecture_name(machine: u16) -> String {
+    match machine {
+        0x014c => "x86".into(),
+        0x8664 => "x86_64".into(),
+        0x01c4 => "armv7".into(),
+        0xaa64 => "aarch64".into(),
+        _ => format!("PE machine {machine:#06x}"),
     }
 }
 
@@ -8506,8 +8726,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
         validate_native_addon_binary(filename)?;
         let registration_scope = NapiModuleRegistrationScope::new();
-        let library_result =
-            unsafe { Library::open(Some(Path::new(filename).as_os_str()), RTLD_NOW) };
+        let library_result = self._shim.load_addon(Path::new(filename).as_os_str());
         let registered_modules = registration_scope.finish();
         let library = library_result.map_err(|error| {
             VmErr::Msg(format!(
@@ -8932,7 +9151,7 @@ fn validate_entry(
         .transpose()
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
     use crate::interpreter::Interpreter;
@@ -15494,5 +15713,177 @@ module.exports = {
         drop(observer);
         drop(interpreter);
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::{NodeApiShim, validate_native_addon_header};
+    use crate::interpreter::Interpreter;
+    use crate::value::Value;
+    use sha2::{Digest, Sha256};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    static SHIM_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn pe_image(machine: u16, optional_magic: u16, is_dll: bool) -> Vec<u8> {
+        let pe_offset = 0x80;
+        let mut image = vec![0_u8; pe_offset + 26];
+        image[..2].copy_from_slice(b"MZ");
+        image[0x3c..0x40].copy_from_slice(&(pe_offset as u32).to_le_bytes());
+        image[pe_offset..pe_offset + 4].copy_from_slice(b"PE\0\0");
+        image[pe_offset + 4..pe_offset + 6].copy_from_slice(&machine.to_le_bytes());
+        let characteristics = if is_dll { 0x2000_u16 } else { 0x0002_u16 };
+        image[pe_offset + 22..pe_offset + 24].copy_from_slice(&characteristics.to_le_bytes());
+        image[pe_offset + 24..pe_offset + 26].copy_from_slice(&optional_magic.to_le_bytes());
+        image
+    }
+
+    #[test]
+    fn pe_preflight_accepts_only_matching_windows_dlls() {
+        let x64 = pe_image(0x8664, 0x020b, true);
+        assert!(
+            validate_native_addon_header(&x64, x64.len() as u64, "windows", "x86_64", true).is_ok()
+        );
+        let arm64 = pe_image(0xaa64, 0x020b, true);
+        assert!(
+            validate_native_addon_header(&arm64, arm64.len() as u64, "windows", "aarch64", true)
+                .is_ok()
+        );
+        let arm32 = pe_image(0x01c4, 0x010b, true);
+        assert!(
+            validate_native_addon_header(&arm32, arm32.len() as u64, "windows", "arm", true)
+                .is_ok()
+        );
+
+        let wrong_machine = pe_image(0x014c, 0x010b, true);
+        assert!(
+            validate_native_addon_header(
+                &wrong_machine,
+                wrong_machine.len() as u64,
+                "windows",
+                "x86_64",
+                true
+            )
+            .unwrap_err()
+            .contains("does not match host architecture")
+        );
+
+        let executable = pe_image(0x8664, 0x020b, false);
+        assert!(
+            validate_native_addon_header(
+                &executable,
+                executable.len() as u64,
+                "windows",
+                "x86_64",
+                true
+            )
+            .unwrap_err()
+            .contains("not a DLL")
+        );
+
+        let wrong_format = pe_image(0x8664, 0x010b, true);
+        assert!(
+            validate_native_addon_header(
+                &wrong_format,
+                wrong_format.len() as u64,
+                "windows",
+                "x86_64",
+                true
+            )
+            .unwrap_err()
+            .contains("optional-header format")
+        );
+    }
+
+    #[test]
+    fn pe_preflight_rejects_malformed_and_foreign_binary_formats() {
+        let truncated = b"MZ";
+        assert!(
+            validate_native_addon_header(
+                truncated,
+                truncated.len() as u64,
+                "windows",
+                "x86_64",
+                true
+            )
+            .unwrap_err()
+            .contains("DOS header is truncated")
+        );
+
+        let elf = b"\x7fELF";
+        assert!(
+            validate_native_addon_header(elf, elf.len() as u64, "windows", "x86_64", true)
+                .unwrap_err()
+                .contains("requires PE")
+        );
+    }
+
+    #[test]
+    fn windows_node_api_shim_loads_with_the_node_import_name() {
+        let _guard = SHIM_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let shim = NodeApiShim::load().expect("load the Windows Node-API import provider");
+        assert_eq!(shim.path.file_name().unwrap(), "node.exe");
+    }
+
+    #[test]
+    fn windows_node_api_shim_directories_live_until_the_last_handle_closes() {
+        let _guard = SHIM_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let first = NodeApiShim::load().expect("load the first Node-API import provider");
+        let second = NodeApiShim::load().expect("load the second Node-API import provider");
+        let first_root = first.path.parent().unwrap().to_path_buf();
+        let second_root = second.path.parent().unwrap().to_path_buf();
+
+        drop(first);
+        assert!(
+            first_root.exists(),
+            "the active provider directory was removed"
+        );
+        assert!(
+            second_root.exists(),
+            "the active provider directory was removed"
+        );
+
+        drop(second);
+        assert!(!first_root.exists(), "the first provider directory leaked");
+        assert!(
+            !second_root.exists(),
+            "the second provider directory leaked"
+        );
+    }
+
+    #[test]
+    fn windows_node_api_addon_imports_from_the_shim() {
+        let _guard = SHIM_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(addon) = std::env::var_os("NAPI_VM_WINDOWS_NODE_API_FIXTURE").map(PathBuf::from)
+        else {
+            eprintln!(
+                "skipping Windows addon load fixture: NAPI_VM_WINDOWS_NODE_API_FIXTURE is unset"
+            );
+            return;
+        };
+        let source = std::fs::read(&addon).unwrap();
+        let digest: [u8; 32] = Sha256::digest(&source).into();
+        let root = addon
+            .parent()
+            .expect("fixture must have a parent directory");
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                super::RustNodeApiOptions::new([root])
+                    .allow_native_addon_with_sha256(&addon, digest),
+            )
+            .unwrap();
+        let result = interpreter
+            .run_script_source("require('./fixture.node').answer")
+            .unwrap();
+        assert!(matches!(result, Value::Number(42.0)));
     }
 }

@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | Selected Node-API v1-v10 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v10 calls; Linux runtime-tested, Windows GNU path cross-compiled and Wine-tested, macOS and native Windows verification pending | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -66,8 +66,12 @@ defaults to 10, controls `napi_get_version`, and rejects registrations above
 the configured ceiling before calling their initializer. This is a version
 ceiling rather than a claim that every function in that Node-API version is
 implemented. Before opening an addon, the in-process loader checks ELF headers
-on Linux and Mach-O headers on macOS for shared-library type, class, and host
-architecture. On Linux it currently covers scoped handles, callback
+on Linux, Mach-O headers on macOS, and PE headers on Windows for library type,
+class, and host architecture. The Windows backend builds a DLL image named
+`node.exe` to satisfy Node-API import libraries and adds its private directory
+only to flagged addon loads. Its GNU target compiled and loaded a fixture under
+Wine; native Windows and MSVC execution remain unverified. On Linux it currently
+covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8, Latin-1, and well-formed UTF-16 string conversion, boolean,
@@ -241,8 +245,14 @@ hook registrations and unmatched removals return `napi_invalid_arg` rather than
 aborting the embedding process. This remains an incomplete compatibility
 backend, and unimplemented imported symbols fail at load time. The macOS Mach-O
 build and loading path uses the same shim and fixture, but needs execution on a
-macOS host before it is claimed as verified. Windows currently uses the sidecar
-backend; its DLL import and symbol-export model needs a separate implementation.
+macOS host before it is claimed as verified. Windows addons that import
+`node.exe` use the generated PE DLL provider and Windows DLL search flags; the
+GNU target was cross-compiled and exercised under Wine, while native Windows
+and MSVC execution still need CI verification. The checked-in
+`tests/fixtures/node-api/windows-smoke.c` exercises this import path. The Windows
+unit test loads a prebuilt copy when `NAPI_VM_WINDOWS_NODE_API_FIXTURE` points to
+it, so native CI can compile the fixture against the generated `node.exe`
+import library and run the same `require('./fixture.node')` check.
 The VM's Rust `String` representation cannot preserve isolated UTF-16 surrogate
 code units, so `napi_create_string_utf16` currently returns
 `napi_generic_failure` for malformed UTF-16 instead of replacing or dropping
