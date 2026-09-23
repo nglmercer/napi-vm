@@ -344,6 +344,11 @@ impl Interpreter {
             }
             return Ok(());
         }
+        if let Some(prototype) = props.proto()
+            && self.assign_inherited_property(receiver, prototype.as_ref(), key, &value)?
+        {
+            return Ok(());
+        }
         if props.meta.borrow().non_extensible {
             return Ok(());
         }
@@ -355,6 +360,79 @@ impl Interpreter {
         }
         slots.push((key.to_owned(), value));
         Ok(())
+    }
+
+    /// Apply the `[[Set]]` behavior for a property found on the prototype
+    /// chain. Inherited accessors receive the original object as `this`,
+    /// inherited getter-only and non-writable properties block creation of an
+    /// own property, and inherited writable data properties allow it.
+    fn assign_inherited_property(
+        &mut self,
+        receiver: &Value,
+        prototype: &Value,
+        key: &str,
+        value: &Value,
+    ) -> Result<bool, VmErr> {
+        let is_setter = |value: &Value| match value {
+            Value::Function(function) => function
+                .name
+                .as_ref()
+                .is_some_and(|name| name.starts_with("set ")),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.starts_with("set ")
+            }
+            _ => false,
+        };
+        let is_getter = |value: &Value| match value {
+            Value::Function(function) => function
+                .name
+                .as_ref()
+                .is_some_and(|name| name.starts_with("get ")),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                name.starts_with("get ")
+            }
+            _ => false,
+        };
+
+        let mut current = prototype.clone();
+        for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
+            let props = match &current {
+                Value::Object { props } => props.clone(),
+                Value::Class(class) => class.statics.clone(),
+                _ => return Ok(false),
+            };
+            let slots = props.borrow().clone();
+            if let Some((_, property)) = slots.iter().find(|(name, _)| name == key) {
+                let companion = format!("__setter:{}__", key);
+                let paired_setter = props.meta.borrow().has_accessors.then(|| {
+                    slots
+                        .iter()
+                        .find(|(name, candidate)| name == &companion && is_setter(candidate))
+                        .map(|(_, setter)| setter.clone())
+                });
+                let setter = if is_setter(property) {
+                    Some(property.clone())
+                } else {
+                    paired_setter.flatten()
+                };
+                if let Some(setter) = setter {
+                    self.call_this(&setter, receiver.clone(), vec![value.clone()])?;
+                    return Ok(true);
+                }
+                if is_getter(property)
+                    || props.meta.borrow().has_accessors
+                        && slots.iter().any(|(name, _)| name == &companion)
+                {
+                    return Ok(true);
+                }
+                return Ok(!props.meta.borrow().attrs_of(key).writable);
+            }
+            let Some(next) = props.proto() else {
+                return Ok(false);
+            };
+            current = next.as_ref().clone();
+        }
+        Ok(false)
     }
 
     pub(crate) fn assign_member(

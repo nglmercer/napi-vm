@@ -194,6 +194,47 @@ test("defineProperty installs a getter and a setter together", () => {
   ).toBe("10");
 });
 
+test("assignment follows inherited accessor and data property descriptors", () => {
+  const result = runCode(`
+    let stored = 1;
+    const prototype = {};
+    Object.defineProperties(prototype, {
+      value: { get() { return stored; }, set(next) { stored = next; } },
+      readOnly: { get() { return 5; } },
+      fixed: { value: 6, writable: false },
+      writable: { value: 7, writable: true },
+    });
+    const instance = Object.create(prototype);
+    instance.value = 11;
+    instance.readOnly = 20;
+    instance.fixed = 21;
+    instance.writable = 22;
+    JSON.stringify({
+      value: instance.value,
+      stored,
+      valueIsOwn: Object.prototype.hasOwnProperty.call(instance, "value"),
+      readOnly: instance.readOnly,
+      readOnlyIsOwn: Object.prototype.hasOwnProperty.call(instance, "readOnly"),
+      fixed: instance.fixed,
+      fixedIsOwn: Object.prototype.hasOwnProperty.call(instance, "fixed"),
+      writable: instance.writable,
+      writableIsOwn: Object.prototype.hasOwnProperty.call(instance, "writable"),
+    });
+  `);
+
+  expect(JSON.parse(result)).toEqual({
+    value: 11,
+    stored: 11,
+    valueIsOwn: false,
+    readOnly: 5,
+    readOnlyIsOwn: false,
+    fixed: 6,
+    fixedIsOwn: false,
+    writable: 22,
+    writableIsOwn: true,
+  });
+});
+
 test("object literal getter and setter declarations combine", () => {
   expect(
     runCode("let value = 0; const o = { get x() { return value; }, set x(n) { value = n; } }; o.x = 5; o.x;"),

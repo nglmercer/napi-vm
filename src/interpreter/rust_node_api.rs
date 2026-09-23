@@ -14146,4 +14146,187 @@ NAPI_MODULE_INIT() {
         drop(interpreter);
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn loads_node_addon_api_cpp_fixture_with_shared_runtime_source() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-addon-api-cpp-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("c++").arg("--version").output();
+        let addon_api_dirs = [
+            std::env::var_os("NODE_ADDON_API_DIR").map(PathBuf::from),
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.join("node_modules/node-addon-api")),
+            Some(PathBuf::from("/usr/include/node-addon-api")),
+            Some(PathBuf::from("/usr/local/include/node-addon-api")),
+        ];
+        let addon_api_include = addon_api_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("napi.h").is_file());
+        let node_include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let node_include = node_include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(addon_api_include), Some(node_include)) =
+            (compiler, addon_api_include, node_include)
+        else {
+            eprintln!(
+                "skipping node-addon-api fixture: c++, Node headers, or node-addon-api headers are unavailable"
+            );
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "c++ --version failed");
+
+        let source = root.join("fixture.cc");
+        let addon = root.join("fixture.node");
+        fs::write(
+            &source,
+            r#"
+#define NAPI_VERSION 8
+#include <napi.h>
+
+class Counter : public Napi::ObjectWrap<Counter> {
+ public:
+  static Napi::Function Init(Napi::Env env, Napi::Object exports) {
+    Napi::Function constructor = DefineClass(
+        env, "Counter",
+        {InstanceMethod("increment", &Counter::Increment),
+         InstanceAccessor("value", &Counter::GetValue, &Counter::SetValue)});
+    exports.Set("Counter", constructor);
+    return constructor;
+  }
+
+  explicit Counter(const Napi::CallbackInfo& info)
+      : Napi::ObjectWrap<Counter>(info),
+        value_(info.Length() > 0 ? info[0].As<Napi::Number>().Int32Value() : 0) {}
+
+ private:
+  Napi::Value Increment(const Napi::CallbackInfo& info) {
+    ++value_;
+    return Napi::Number::New(info.Env(), value_);
+  }
+
+  Napi::Value GetValue(const Napi::CallbackInfo& info) {
+    return Napi::Number::New(info.Env(), value_);
+  }
+
+  void SetValue(const Napi::CallbackInfo& info, const Napi::Value& value) {
+    value_ = value.As<Napi::Number>().Int32Value();
+  }
+
+  int32_t value_;
+};
+
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  Counter::Init(env, exports);
+  return exports;
+}
+
+NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
+"#,
+        )
+        .unwrap();
+        let built = Command::new("c++")
+            .args([
+                "-std=c++17",
+                "-O2",
+                "-fPIC",
+                "-shared",
+                "-DNAPI_VERSION=8",
+                "-I",
+            ])
+            .arg(&node_include)
+            .arg("-I")
+            .arg(&addon_api_include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "node-addon-api fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let main = root.join("main.cjs");
+        fs::write(
+            &main,
+            "const { Counter } = require('./fixture.node');\nconst counter = new Counter(4);\nconst before = counter.value;\ncounter.value = 10;\nmodule.exports = { before, incremented: counter.increment(), value: counter.value };\n",
+        )
+        .unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(&main),
+            )
+            .unwrap();
+        let result = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .unwrap();
+        let Value::String(vm_json) = &result else {
+            panic!("C++ addon fixture did not return JSON text: {result:?}");
+        };
+        let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
+        assert_eq!(
+            vm_result,
+            serde_json::json!({"before": 4, "incremented": 11, "value": 11})
+        );
+
+        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node C++ addon reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_result: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(
+                vm_result, node_result,
+                "Node and napi-vm C++ results differ"
+            );
+        }
+        if let Ok(bun_version) = Command::new("bun").arg("--version").output()
+            && bun_version.status.success()
+        {
+            let reference = Command::new("bun")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Bun C++ addon reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let bun_result: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(vm_result, bun_result, "Bun and napi-vm C++ results differ");
+        }
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
+    }
 }
