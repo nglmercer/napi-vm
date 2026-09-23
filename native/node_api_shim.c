@@ -81,6 +81,13 @@ typedef struct napi_vm_node_api_table {
                                  void*, napi_value*);
   napi_status (*set_named_property)(napi_env, napi_value, const char*, napi_value);
   napi_status (*get_named_property)(napi_env, napi_value, const char*, napi_value*);
+  napi_status (*get_property)(napi_env, napi_value, napi_value, napi_value*);
+  napi_status (*set_property)(napi_env, napi_value, napi_value, napi_value);
+  napi_status (*has_property)(napi_env, napi_value, napi_value, bool*);
+  napi_status (*delete_property)(napi_env, napi_value, napi_value, bool*);
+  napi_status (*has_own_property)(napi_env, napi_value, napi_value, bool*);
+  napi_status (*has_named_property)(napi_env, napi_value, const char*, bool*);
+  napi_status (*get_property_names)(napi_env, napi_value, napi_value*);
   napi_status (*call_function)(napi_env, napi_value, napi_value, size_t,
                                const napi_value*, napi_value*);
   napi_status (*new_instance)(napi_env, napi_value, size_t, const napi_value*,
@@ -503,6 +510,55 @@ NAPI_VM_EXPORT napi_status napi_get_named_property(napi_env env,
                                                     napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_named_property(env, object, name, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_property(napi_env env, napi_value object,
+                                              napi_value key,
+                                              napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_property(env, object, key, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_set_property(napi_env env, napi_value object,
+                                              napi_value key,
+                                              napi_value value) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->set_property(env, object, key, value) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_has_property(napi_env env, napi_value object,
+                                              napi_value key, bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->has_property(env, object, key, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_delete_property(napi_env env,
+                                                 napi_value object,
+                                                 napi_value key, bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->delete_property(env, object, key, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_has_own_property(napi_env env,
+                                                 napi_value object,
+                                                 napi_value key, bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->has_own_property(env, object, key, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_has_named_property(napi_env env,
+                                                    napi_value object,
+                                                    const char* name,
+                                                    bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->has_named_property(env, object, name, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_property_names(napi_env env,
+                                                    napi_value object,
+                                                    napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_property_names(env, object, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_call_function(napi_env env, napi_value recv,

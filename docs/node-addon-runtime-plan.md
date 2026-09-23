@@ -63,8 +63,9 @@ The first implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
 existing CommonJS resolver and allowlist. Its Linux prototype loads real
 Node-API v1 shared libraries and currently covers scoped handles, callback
-info, synchronous C callbacks, object properties, primitive values, numbers,
-UTF-8 strings, `napi_typeof`, and array creation/index/length operations.
+info, synchronous C callbacks, named and general property operations, inherited
+enumerable property-name enumeration, primitive values, numbers, UTF-8 strings,
+`napi_typeof`, and array creation/index/length operations.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.

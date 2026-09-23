@@ -5,7 +5,7 @@
 //! backend does not emulate Node, V8, NAN, or libuv.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, c_char, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -481,6 +481,13 @@ struct NapiVmApiTable {
     set_named_property: unsafe extern "C" fn(NapiEnv, NapiValue, *const c_char, NapiValue) -> i32,
     get_named_property:
         unsafe extern "C" fn(NapiEnv, NapiValue, *const c_char, *mut NapiValue) -> i32,
+    get_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut NapiValue) -> i32,
+    set_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, NapiValue) -> i32,
+    has_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
+    delete_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
+    has_own_property: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
+    has_named_property: unsafe extern "C" fn(NapiEnv, NapiValue, *const c_char, *mut bool) -> i32,
+    get_property_names: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     call_function: unsafe extern "C" fn(
         NapiEnv,
         NapiValue,
@@ -561,6 +568,13 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_function: api_create_function,
     set_named_property: api_set_named_property,
     get_named_property: api_get_named_property,
+    get_property: api_get_property,
+    set_property: api_set_property,
+    has_property: api_has_property,
+    delete_property: api_delete_property,
+    has_own_property: api_has_own_property,
+    has_named_property: api_has_named_property,
+    get_property_names: api_get_property_names,
     call_function: api_call_function,
     new_instance: api_new_instance,
     get_cb_info: api_get_cb_info,
@@ -642,6 +656,54 @@ fn call_guest_callback(
     }
 }
 
+fn has_guest_callback_dispatcher(environment: &NapiEnvironment) -> bool {
+    !environment.guest_callback_dispatchers.borrow().is_empty()
+}
+
+fn run_napi_guest_operation(
+    environment: &NapiEnvironment,
+    name: &'static str,
+    operation: fn(&mut Interpreter, Value, Vec<Value>) -> Result<Value, VmErr>,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, i32> {
+    call_guest_callback(
+        environment,
+        HostCallback {
+            callback: Value::NativeFunction {
+                name: Rc::from(name),
+                callable: operation,
+            },
+            this_value: receiver,
+            args,
+            kind: HostCallbackKind::Call,
+        },
+    )
+}
+
+fn is_napi_property_object(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Object { .. }
+            | Value::Array(_)
+            | Value::Function(_)
+            | Value::NativeFunction { .. }
+            | Value::HostFunction { .. }
+            | Value::GlobalObject
+            | Value::Class(_)
+            | Value::Promise(_)
+            | Value::Generator { .. }
+            | Value::StringIterator { .. }
+            | Value::Date(_)
+            | Value::Proxy(_)
+            | Value::ArrayBuffer(_)
+            | Value::TypedArray(_)
+            | Value::DataView(_)
+            | Value::RegExp(_)
+            | Value::Error(_)
+    )
+}
+
 fn callback_arguments(
     environment: &NapiEnvironment,
     argc: usize,
@@ -673,6 +735,311 @@ fn is_napi_function(value: &Value) -> bool {
         }),
         _ => false,
     }
+}
+
+fn napi_property_key(value: &Value) -> Result<String, i32> {
+    match value {
+        Value::String(key) => Ok(key.clone()),
+        Value::Symbol(symbol) => Ok(crate::interpreter::symbol_slot_key(symbol)),
+        _ => Err(NAPI_INVALID_ARG),
+    }
+}
+
+fn napi_direct_get_property(object: &Value, key: &Value) -> Result<Value, i32> {
+    let key = napi_property_key(key)?;
+    Ok(object.get_prop(&key).unwrap_or(Value::Undefined))
+}
+
+fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result<(), i32> {
+    let symbol = match key {
+        Value::Symbol(symbol) => Some(symbol.clone()),
+        _ => None,
+    };
+    let key = napi_property_key(key)?;
+    match object {
+        Value::Object { props } => {
+            object
+                .set_prop(key.clone(), value)
+                .map_err(|_| NAPI_GENERIC_FAILURE)?;
+            if let Some(symbol) = symbol {
+                props.meta.borrow_mut().set_symbol_key(&key, symbol);
+            }
+            Ok(())
+        }
+        Value::Array(array) => {
+            if key == "length" {
+                let Value::Number(length) = value else {
+                    return Err(NAPI_INVALID_ARG);
+                };
+                if !length.is_finite()
+                    || length < 0.0
+                    || length.fract() != 0.0
+                    || length > crate::value::MAX_ARRAY_LEN as f64
+                {
+                    return Err(NAPI_INVALID_ARG);
+                }
+                let length = length as usize;
+                let old_length = array.borrow().len();
+                array.borrow_mut().resize(length, Value::Undefined);
+                array.resize_presence(old_length, length, false);
+                return Ok(());
+            }
+            if let Some(index) = crate::value::array_index(&key) {
+                if index >= crate::value::MAX_ARRAY_LEN {
+                    return Err(NAPI_GENERIC_FAILURE);
+                }
+                let old_length = array.borrow().len();
+                let mut elements = array.borrow_mut();
+                if index < elements.len() {
+                    elements[index] = value;
+                } else {
+                    elements.resize(index, Value::Undefined);
+                    elements.push(value);
+                }
+                let new_length = elements.len();
+                drop(elements);
+                if index >= old_length {
+                    array.resize_presence(old_length, new_length, false);
+                }
+                array.set_index_presence(index, true);
+                return Ok(());
+            }
+            array.set_named(key, value);
+            Ok(())
+        }
+        _ => Err(NAPI_OBJECT_EXPECTED),
+    }
+}
+
+fn napi_direct_has_own_property(object: &Value, key: &Value) -> Result<bool, i32> {
+    let key = napi_property_key(key)?;
+    Ok(match object {
+        Value::Object { props } => props.borrow().iter().any(|(name, _)| name == &key),
+        Value::Array(array) => {
+            key == "length"
+                || crate::value::array_index(&key).is_some_and(|index| array.has_index(index))
+                || array.named_prop(&key).is_some()
+        }
+        Value::Error(error) => {
+            matches!(key.as_str(), "name" | "message" | "stack")
+                || (key == "code" && error.code.is_some())
+        }
+        Value::String(string) => {
+            key == "length"
+                || key
+                    .parse::<usize>()
+                    .is_ok_and(|index| index < string.chars().count())
+        }
+        _ => false,
+    })
+}
+
+fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32> {
+    let key = napi_property_key(key)?;
+    match object {
+        Value::Object { props } => {
+            if !props.meta.borrow().attrs_of(&key).configurable
+                && props.borrow().iter().any(|(name, _)| name == &key)
+            {
+                return Ok(false);
+            }
+            let mut slots = props.borrow_mut();
+            if let Some(index) = slots.iter().position(|(name, _)| name == &key) {
+                slots.remove(index);
+                drop(slots);
+                props.meta.borrow_mut().forget(&key);
+            }
+            Ok(true)
+        }
+        Value::Array(array) => {
+            if key == "length" {
+                return Ok(false);
+            }
+            if let Some(index) = crate::value::array_index(&key) {
+                if index < array.borrow().len() {
+                    array.borrow_mut()[index] = Value::Undefined;
+                    array.set_index_presence(index, false);
+                }
+            } else {
+                array.named.borrow_mut().retain(|(name, _)| name != &key);
+            }
+            Ok(true)
+        }
+        Value::Proxy(proxy) => napi_direct_delete_property(&proxy.target, &Value::String(key)),
+        _ => Ok(true),
+    }
+}
+
+fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
+    match object {
+        Value::Object { props } => props.borrow().iter().map(|(key, _)| key.clone()).collect(),
+        Value::Array(array) => {
+            let mut names = vec!["length".to_owned()];
+            names.extend(
+                (0..array.borrow().len())
+                    .filter(|index| array.has_index(*index))
+                    .map(|index| index.to_string()),
+            );
+            names.extend(array.named.borrow().iter().map(|(key, _)| key.clone()));
+            names
+        }
+        Value::Proxy(proxy) => napi_direct_own_property_names(&proxy.target),
+        Value::Error(error) => {
+            let mut names = vec!["name".to_owned(), "message".to_owned(), "stack".to_owned()];
+            if error.code.is_some() {
+                names.push("code".to_owned());
+            }
+            names
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
+    match object {
+        Value::Object { props } => {
+            props.borrow().iter().any(|(name, _)| name == key)
+                && props.meta.borrow().attrs_of(key).enumerable
+        }
+        Value::Array(array) => {
+            key != "length"
+                && (crate::value::array_index(key).is_some_and(|index| array.has_index(index))
+                    || array.named_prop(key).is_some())
+        }
+        Value::Proxy(proxy) => napi_direct_property_is_enumerable(&proxy.target, key),
+        Value::Error(error) => key == "code" && error.code.is_some(),
+        _ => false,
+    }
+}
+
+fn napi_direct_prototype(object: &Value) -> Option<Rc<Value>> {
+    match object {
+        Value::Proxy(proxy) => proxy.target.proto_of(),
+        _ => object.proto_of(),
+    }
+}
+
+fn napi_direct_property_names(object: &Value) -> Result<Value, i32> {
+    let mut current = object.clone();
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        for key in napi_direct_own_property_names(&current) {
+            if crate::interpreter::is_internal_key(&key) || !seen.insert(key.clone()) {
+                continue;
+            }
+            if seen.len() > crate::value::MAX_ARRAY_LEN {
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            if napi_direct_property_is_enumerable(&current, &key) {
+                names.push(Value::String(key));
+            }
+        }
+        let Some(prototype) = napi_direct_prototype(&current) else {
+            return Value::checked_array(names).map_err(|_| NAPI_GENERIC_FAILURE);
+        };
+        current = (*prototype).clone();
+    }
+    Err(NAPI_GENERIC_FAILURE)
+}
+
+fn napi_guest_get_property(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let key = args.first().cloned().unwrap_or(Value::Undefined);
+    interpreter.get_prop_value(&receiver, &key)
+}
+
+fn napi_guest_set_property(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let key = args.first().cloned().unwrap_or(Value::Undefined);
+    let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+    interpreter.assign_member(&receiver, &key, value.clone())?;
+    Ok(value)
+}
+
+fn napi_guest_has_property(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let key = args.first().cloned().unwrap_or(Value::Undefined);
+    Ok(Value::Bool(interpreter.has_property(&receiver, &key)?))
+}
+
+fn napi_guest_has_own_property(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let key = args.first().cloned().unwrap_or(Value::Undefined);
+    let constructor = interpreter
+        .global
+        .borrow()
+        .get("Object")
+        .ok_or_else(|| VmErr::Msg("Object constructor is unavailable".into()))?;
+    let method = interpreter.member(&constructor, "hasOwn")?;
+    interpreter.call_this(&method, constructor, vec![receiver, key])
+}
+
+fn napi_guest_delete_property(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let key = args.first().cloned().unwrap_or(Value::Undefined);
+    interpreter.delete_member(&receiver, &key)
+}
+
+fn napi_guest_get_property_names(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let mut current = receiver;
+    let mut seen = HashSet::new();
+    let mut names = Vec::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let trapped_keys = if matches!(current, Value::Proxy(_)) {
+            Some(interpreter.keys_with_proxy_trap(&current)?)
+        } else {
+            None
+        };
+        let own_keys = trapped_keys
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| napi_direct_own_property_names(&current));
+        for key in &own_keys {
+            if crate::interpreter::is_internal_key(key) || !seen.insert(key.clone()) {
+                continue;
+            }
+            if seen.len() > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err(
+                    "Maximum property name count exceeded",
+                ));
+            }
+            if napi_direct_property_is_enumerable(&current, key) {
+                names.push(Value::String(key.clone()));
+            }
+        }
+        // Non-enumerable own keys still shadow enumerable properties farther
+        // up the prototype chain.
+        seen.extend(napi_direct_own_property_names(&current));
+        let prototype = match &current {
+            Value::Proxy(proxy) => proxy.target.proto_of(),
+            _ => current.proto_of(),
+        };
+        let Some(prototype) = prototype else {
+            return Value::checked_array(names);
+        };
+        current = (*prototype).clone();
+    }
+    Err(crate::value::limit_err("Maximum prototype depth exceeded"))
 }
 
 fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
@@ -2114,9 +2481,20 @@ unsafe extern "C" fn api_set_named_property(
         if !matches!(object, Value::Object { .. } | Value::Array(_)) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
-        object
-            .set_prop(key, value)
-            .map_err(|_| NAPI_GENERIC_FAILURE)
+        if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_set_named_property",
+                napi_guest_set_property,
+                object,
+                vec![Value::String(key), value],
+            )?;
+            Ok(())
+        } else {
+            object
+                .set_prop(key, value)
+                .map_err(|_| NAPI_GENERIC_FAILURE)
+        }
     })
 }
 
@@ -2139,8 +2517,264 @@ unsafe extern "C" fn api_get_named_property(
         ) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
-        let value = object.get_prop(&key).unwrap_or(Value::Undefined);
+        let value = if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_get_named_property",
+                napi_guest_get_property,
+                object,
+                vec![Value::String(key)],
+            )?
+        } else {
+            object.get_prop(&key).unwrap_or(Value::Undefined)
+        };
         let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_property(
+    env: NapiEnv,
+    object: NapiValue,
+    key: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let key = environment.handles.borrow().get(key)?;
+        let value = if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_get_property",
+                napi_guest_get_property,
+                object,
+                vec![key],
+            )?
+        } else {
+            napi_direct_get_property(&object, &key)?
+        };
+        let handle = environment.handles.borrow_mut().create(value)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_set_property(
+    env: NapiEnv,
+    object: NapiValue,
+    key: NapiValue,
+    value: NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let key = environment.handles.borrow().get(key)?;
+        let value = environment.handles.borrow().get(value)?;
+        if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_set_property",
+                napi_guest_set_property,
+                object,
+                vec![key, value],
+            )?;
+            Ok(())
+        } else {
+            napi_direct_set_property(&object, &key, value)
+        }
+    })
+}
+
+unsafe extern "C" fn api_has_property(
+    env: NapiEnv,
+    object: NapiValue,
+    key: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let key = environment.handles.borrow().get(key)?;
+        let found = if has_guest_callback_dispatcher(&environment) {
+            let value = run_napi_guest_operation(
+                &environment,
+                "napi_has_property",
+                napi_guest_has_property,
+                object,
+                vec![key],
+            )?;
+            let Value::Bool(found) = value else {
+                return Err(NAPI_GENERIC_FAILURE);
+            };
+            found
+        } else {
+            object.has_prop(&napi_property_key(&key)?)
+        };
+        unsafe { result.write(found) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_delete_property(
+    env: NapiEnv,
+    object: NapiValue,
+    key: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let key = environment.handles.borrow().get(key)?;
+        let deleted = if has_guest_callback_dispatcher(&environment) {
+            let value = run_napi_guest_operation(
+                &environment,
+                "napi_delete_property",
+                napi_guest_delete_property,
+                object,
+                vec![key],
+            )?;
+            let Value::Bool(deleted) = value else {
+                return Err(NAPI_GENERIC_FAILURE);
+            };
+            deleted
+        } else {
+            napi_direct_delete_property(&object, &key)?
+        };
+        if !result.is_null() {
+            unsafe { result.write(deleted) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_has_own_property(
+    env: NapiEnv,
+    object: NapiValue,
+    key: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let key = environment.handles.borrow().get(key)?;
+        if !matches!(key, Value::String(_) | Value::Symbol(_)) {
+            set_pending_exception(
+                &environment,
+                Value::Error(ErrorData::new(
+                    "TypeError",
+                    "property key must be a string or symbol",
+                )),
+            )?;
+            return Err(NAPI_PENDING_EXCEPTION);
+        }
+        let found = if has_guest_callback_dispatcher(&environment) {
+            let value = run_napi_guest_operation(
+                &environment,
+                "napi_has_own_property",
+                napi_guest_has_own_property,
+                object,
+                vec![key],
+            )?;
+            let Value::Bool(found) = value else {
+                return Err(NAPI_GENERIC_FAILURE);
+            };
+            found
+        } else {
+            napi_direct_has_own_property(&object, &key)?
+        };
+        unsafe { result.write(found) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_has_named_property(
+    env: NapiEnv,
+    object: NapiValue,
+    name: *const c_char,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let name = unsafe { read_c_string(name)? };
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let found = if has_guest_callback_dispatcher(&environment) {
+            let value = run_napi_guest_operation(
+                &environment,
+                "napi_has_named_property",
+                napi_guest_has_property,
+                object,
+                vec![Value::String(name)],
+            )?;
+            let Value::Bool(found) = value else {
+                return Err(NAPI_GENERIC_FAILURE);
+            };
+            found
+        } else {
+            object.has_prop(&name)
+        };
+        unsafe { result.write(found) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_property_names(
+    env: NapiEnv,
+    object: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        if !is_napi_property_object(&object) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        let names = if has_guest_callback_dispatcher(&environment) {
+            run_napi_guest_operation(
+                &environment,
+                "napi_get_property_names",
+                napi_guest_get_property_names,
+                object,
+                Vec::new(),
+            )?
+        } else {
+            napi_direct_property_names(&object)?
+        };
+        let handle = environment.handles.borrow_mut().create(names)?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -3007,6 +3641,40 @@ static napi_value construct_guest(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value property_probe(napi_env env, napi_callback_info info) {
+  napi_value args[1], object, computed_key, inherited_key, assigned_key;
+  napi_value remove_key, computed, assigned, names, result, field;
+  size_t argc = 1;
+  bool has_inherited = false, has_named_inherited = false;
+  bool has_own_inherited = true, deleted = false;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 1) return NULL;
+  object = args[0];
+  if (napi_create_string_utf8(env, "computed", NAPI_AUTO_LENGTH, &computed_key) != napi_ok ||
+      napi_create_string_utf8(env, "inherited", NAPI_AUTO_LENGTH, &inherited_key) != napi_ok ||
+      napi_create_string_utf8(env, "assigned", NAPI_AUTO_LENGTH, &assigned_key) != napi_ok ||
+      napi_create_string_utf8(env, "removeMe", NAPI_AUTO_LENGTH, &remove_key) != napi_ok ||
+      napi_get_property(env, object, computed_key, &computed) != napi_ok ||
+      napi_has_property(env, object, inherited_key, &has_inherited) != napi_ok ||
+      napi_has_named_property(env, object, "inherited", &has_named_inherited) != napi_ok ||
+      napi_has_own_property(env, object, inherited_key, &has_own_inherited) != napi_ok ||
+      napi_create_string_utf8(env, "set through addon", NAPI_AUTO_LENGTH, &assigned) != napi_ok ||
+      napi_set_property(env, object, assigned_key, assigned) != napi_ok ||
+      napi_delete_property(env, object, remove_key, &deleted) != napi_ok ||
+      napi_get_property_names(env, object, &names) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "computed", computed) != napi_ok ||
+      napi_get_boolean(env, has_inherited, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasInherited", field) != napi_ok ||
+      napi_get_boolean(env, has_named_inherited, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasNamedInherited", field) != napi_ok ||
+      napi_get_boolean(env, has_own_inherited, &field) != napi_ok ||
+      napi_set_named_property(env, result, "hasOwnInherited", field) != napi_ok ||
+      napi_get_boolean(env, deleted, &field) != napi_ok ||
+      napi_set_named_property(env, result, "deleted", field) != napi_ok ||
+      napi_set_named_property(env, result, "names", names) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value typedarray_probe(napi_env env, napi_callback_info info) {
   napi_value buffer, typed, typed_buffer, view, view_buffer, result, field;
   void* bytes = NULL;
@@ -3277,6 +3945,8 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "callGuest", function) != napi_ok ||
       napi_create_function(env, "constructGuest", NAPI_AUTO_LENGTH, construct_guest, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "constructGuest", function) != napi_ok ||
+      napi_create_function(env, "propertyProbe", NAPI_AUTO_LENGTH, property_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "propertyProbe", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -3363,6 +4033,21 @@ class GuestBox {
   constructor(value) { this.value = value; }
 }
 const constructed = addon.constructGuest(GuestBox, 'constructed');
+let propertyGetterCount = 0;
+let propertySetterValue;
+const propertyTarget = Object.create({inherited: true});
+Object.defineProperty(propertyTarget, 'computed', {
+  enumerable: true,
+  configurable: true,
+  get() { propertyGetterCount++; return 23; },
+});
+Object.defineProperty(propertyTarget, 'assigned', {
+  enumerable: true,
+  configurable: true,
+  set(value) { propertySetterValue = value; },
+});
+propertyTarget.removeMe = true;
+const properties = addon.propertyProbe(propertyTarget);
 const backingBytes = new Uint8Array(typedArrays.buffer);
 module.exports = {
   same: addon === require('./fixture.node'),
@@ -3408,6 +4093,17 @@ module.exports = {
   callbackError,
   callbackThrown,
   constructedValue: constructed.value,
+  properties: {
+    computed: properties.computed,
+    hasInherited: properties.hasInherited,
+    hasNamedInherited: properties.hasNamedInherited,
+    hasOwnInherited: properties.hasOwnInherited,
+    deleted: properties.deleted,
+    getterCount: propertyGetterCount,
+    setterValue: propertySetterValue,
+    removedFromGuest: !Object.hasOwn(propertyTarget, 'removeMe'),
+    names: properties.names,
+  },
   undefinedResult: addon.returnsUndefined() === undefined,
   errors: {
     error: {name: errors.error.name, message: errors.error.message,
@@ -3702,6 +4398,47 @@ module.exports = {
             result.get_prop("callbackThrown"),
             Some(Value::String(ref value)) if value == "guest primitive failure"
         ));
+        let properties = result.get_prop("properties").unwrap();
+        assert!(matches!(
+            properties.get_prop("computed"),
+            Some(Value::Number(23.0))
+        ));
+        assert!(matches!(
+            properties.get_prop("hasInherited"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            properties.get_prop("hasNamedInherited"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            properties.get_prop("hasOwnInherited"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            properties.get_prop("deleted"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            properties.get_prop("getterCount"),
+            Some(Value::Number(1.0))
+        ));
+        assert!(matches!(
+            properties.get_prop("setterValue"),
+            Some(Value::String(ref value)) if value == "set through addon"
+        ));
+        assert!(matches!(
+            properties.get_prop("removedFromGuest"),
+            Some(Value::Bool(true))
+        ));
+        let names = properties.get_prop("names").unwrap();
+        let Value::Array(names) = &names else {
+            panic!("property names are not an array");
+        };
+        let names = names.borrow();
+        assert!(
+            matches!(names.as_slice(), [Value::String(a), Value::String(b), Value::String(c)] if a == "computed" && b == "assigned" && c == "inherited")
+        );
         assert!(matches!(
             result.get_prop("undefinedResult"),
             Some(Value::Bool(true))

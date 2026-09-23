@@ -196,6 +196,28 @@ impl Interpreter {
         self.get_prop_value(o, &Value::String(key.to_string()))
     }
 
+    /// Test whether a property exists, using the proxy `has` trap when one is
+    /// present. This is the mutable counterpart to `Value::has_prop`, which
+    /// cannot run guest code from its shared-reference call sites.
+    #[cfg_attr(
+        not(all(feature = "node-api-host", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
+        let property = self.property_key(key)?;
+        if let Some(proxy) = object.as_proxy() {
+            let target = proxy.target.clone();
+            if let Some(trap) = self.proxy_trap(&proxy, "has") {
+                let handler = proxy.handler.clone();
+                let result =
+                    self.call_this(&trap, handler, vec![target, Value::String(property)])?;
+                return Ok(result.is_truthy());
+            }
+            return self.has_property(&target, &Value::String(property));
+        }
+        Ok(object.has_prop(&property))
+    }
+
     /// Every value an iterable produces, as a `Vec`.
     pub(crate) fn iterate(&mut self, source: &Value) -> Result<Vec<Value>, VmErr> {
         match source {
