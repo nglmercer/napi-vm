@@ -296,6 +296,7 @@ struct NapiEnvironment {
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     externals: RefCell<HashMap<NapiObjectIdentity, NapiExternal>>,
+    external_memory: Cell<i64>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
@@ -918,6 +919,7 @@ struct NapiVmApiTable {
     get_version: unsafe extern "C" fn(NapiEnv, *mut u32) -> i32,
     strict_equals: unsafe extern "C" fn(NapiEnv, NapiValue, NapiValue, *mut bool) -> i32,
     run_script: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
+    adjust_external_memory: unsafe extern "C" fn(NapiEnv, i64, *mut i64) -> i32,
 }
 
 #[repr(C)]
@@ -1044,6 +1046,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_version: api_get_version,
     strict_equals: api_strict_equals,
     run_script: api_run_script,
+    adjust_external_memory: api_adjust_external_memory,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -5075,6 +5078,27 @@ unsafe extern "C" fn api_get_new_target(
     })
 }
 
+unsafe extern "C" fn api_adjust_external_memory(
+    env: NapiEnv,
+    change_in_bytes: i64,
+    result: *mut i64,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let adjusted = environment
+            .external_memory
+            .get()
+            .checked_add(change_in_bytes)
+            .ok_or(NAPI_GENERIC_FAILURE)?;
+        environment.external_memory.set(adjusted);
+        unsafe { result.write(adjusted) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_get_version(env: NapiEnv, result: *mut u32) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -5873,6 +5897,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
             externals: RefCell::new(HashMap::new()),
+            external_memory: Cell::new(0),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
             active_callbacks: RefCell::new(HashMap::new()),
@@ -7609,6 +7634,17 @@ static napi_value external_property_probe(napi_env env, napi_callback_info info)
   return result;
 }
 
+static napi_value external_memory_probe(napi_env env, napi_callback_info info) {
+  int64_t first = 0, second = 0;
+  napi_value result;
+  (void)info;
+  if (napi_adjust_external_memory(env, INT64_C(65536), &first) != napi_ok ||
+      napi_adjust_external_memory(env, -INT64_C(4096), &second) != napi_ok ||
+      napi_create_int64(env, second - first, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
   napi_value scratch, function, metadata, version, values, field, external;
@@ -7710,6 +7746,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
+      napi_create_function(env, "externalMemoryProbe", NAPI_AUTO_LENGTH,
+                           external_memory_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "externalMemoryProbe", function) != napi_ok ||
       napi_create_function(env, "coerceToBoolean", NAPI_AUTO_LENGTH,
                            coerce_to_bool_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "coerceToBoolean", function) != napi_ok ||
@@ -9365,10 +9404,41 @@ module.exports = {
         ));
         assert!(matches!(
             interpreter
+                .eval_source("require('./fixture.node').externalMemoryProbe();")
+                .unwrap(),
+            Value::Number(value) if value == -4096.0
+        ));
+        assert!(matches!(
+            interpreter
                 .eval_source("(() => { const e = require('./fixture.node').external; return Object.getPrototypeOf(e) === null && !Object.isExtensible(e) && e.missing === undefined && Object.keys(e).length === 0; })();")
                 .unwrap(),
             Value::Bool(true)
         ));
+
+        // Bun 1.4.0 currently returns zero for this accounting API, so keep
+        // the Node-semantic check separate from the shared Node/Bun fixture.
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args([
+                    "-e",
+                    "process.stdout.write(String(require('./fixture.node').externalMemoryProbe()))",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node external-memory reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_delta = String::from_utf8_lossy(&reference.stdout)
+                .trim()
+                .parse::<i64>()
+                .expect("Node external-memory delta is an integer");
+            assert_eq!(node_delta, -4096);
+        }
 
         let guest_json = interpreter
             .eval_source("JSON.stringify(require('./main.cjs'));")

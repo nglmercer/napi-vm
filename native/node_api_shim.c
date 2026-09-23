@@ -189,6 +189,7 @@ typedef struct napi_vm_node_api_table {
   napi_status (*get_version)(napi_env, uint32_t*);
   napi_status (*strict_equals)(napi_env, napi_value, napi_value, bool*);
   napi_status (*run_script)(napi_env, napi_value, napi_value*);
+  napi_status (*adjust_external_memory)(napi_env, int64_t, int64_t*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -983,4 +984,11 @@ NAPI_VM_EXPORT napi_status napi_run_script(napi_env env, napi_value script,
                                              napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->run_script(env, script, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_adjust_external_memory(
+    napi_env env, int64_t change_in_bytes, int64_t* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->adjust_external_memory(env, change_in_bytes, result)
+               : 9;
 }

@@ -116,7 +116,9 @@ properties. Its finalizer runs during host shutdown because this VM does not
 collect guest objects. N-API buffers are surfaced as guest `Uint8Array` views;
 external buffers are not implemented. ArrayBuffer, typed-array, and DataView
 creation, type checks, and info APIs share storage with guest views and preserve
-byte offsets. `napi_create_promise`, deferred resolution/rejection, and
+byte offsets. `napi_adjust_external_memory` keeps a checked per-environment
+total and returns the updated value; the VM has no garbage collector to tune.
+`napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive
 resolutions or any rejection. Object and promise resolutions require an active
