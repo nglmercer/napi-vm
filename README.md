@@ -174,8 +174,10 @@ creation and named properties, `napi_get_global`, general property reads and
 writes, membership, deletion and own-property checks, and
 `napi_get_property_names` (including inherited enumerable names). It supports
 undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8 strings,
-`napi_create_symbol`, `napi_typeof`, array creation/index/length operations,
-and core error creation and pending-exception propagation. Returning a null
+`napi_create_symbol`, `napi_define_properties` on ordinary object targets
+(data values, symbol keys, native methods, and accessors), `napi_typeof`, array
+creation/index/length operations, and core error creation and
+pending-exception propagation. Returning a null
 callback value without a pending exception produces guest `undefined`. Imports
 outside that subset fail when the library is loaded. Strong `napi_ref` creation,
 lookup, count changes, and deletion are supported; because the VM has no tracing

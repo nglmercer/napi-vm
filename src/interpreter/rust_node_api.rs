@@ -134,7 +134,6 @@ struct NativeCallbackRecord {
 struct NapiEnvironment {
     module_path: String,
     owner: Weak<RefCell<HostState>>,
-    self_weak: Weak<NapiEnvironment>,
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
@@ -473,6 +472,8 @@ struct NapiVmApiTable {
     unwrap: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void) -> i32,
     remove_wrap: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void) -> i32,
     create_object: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
+    define_properties:
+        unsafe extern "C" fn(NapiEnv, NapiValue, usize, *const NapiPropertyDescriptor) -> i32,
     create_function: unsafe extern "C" fn(
         NapiEnv,
         *const c_char,
@@ -511,6 +512,18 @@ struct NapiVmApiTable {
     ) -> i32,
     open_handle_scope: unsafe extern "C" fn(NapiEnv, *mut NapiHandleScope) -> i32,
     close_handle_scope: unsafe extern "C" fn(NapiEnv, NapiHandleScope) -> i32,
+}
+
+#[repr(C)]
+struct NapiPropertyDescriptor {
+    utf8name: *const c_char,
+    name: NapiValue,
+    method: Option<NapiCallback>,
+    getter: Option<NapiCallback>,
+    setter: Option<NapiCallback>,
+    value: NapiValue,
+    attributes: i32,
+    data: *mut c_void,
 }
 
 static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
@@ -570,6 +583,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     unwrap: api_unwrap,
     remove_wrap: api_remove_wrap,
     create_object: api_create_object,
+    define_properties: api_define_properties,
     create_function: api_create_function,
     set_named_property: api_set_named_property,
     get_named_property: api_get_named_property,
@@ -782,6 +796,33 @@ fn is_napi_function(value: &Value) -> bool {
         }),
         _ => false,
     }
+}
+
+fn create_native_callback_value(
+    environment: &Rc<NapiEnvironment>,
+    function_name: &str,
+    callback: NapiCallback,
+    data: *mut c_void,
+) -> Result<Value, i32> {
+    let owner = environment.owner.upgrade().ok_or(NAPI_GENERIC_FAILURE)?;
+    let id = {
+        let mut state = owner.borrow_mut();
+        let id = state.next_callback_id;
+        state.next_callback_id = id.checked_add(1).ok_or(NAPI_GENERIC_FAILURE)?;
+        state.callbacks.insert(
+            id,
+            NativeCallbackRecord {
+                env: environment.clone(),
+                callback,
+                data,
+            },
+        );
+        id
+    };
+    Ok(Value::HostFunction {
+        name: Rc::from(function_name),
+        id,
+    })
 }
 
 fn napi_property_key(value: &Value) -> Result<String, i32> {
@@ -2503,6 +2544,108 @@ unsafe extern "C" fn api_create_object(env: NapiEnv, result: *mut NapiValue) -> 
     })
 }
 
+unsafe extern "C" fn api_define_properties(
+    env: NapiEnv,
+    object: NapiValue,
+    property_count: usize,
+    properties: *const NapiPropertyDescriptor,
+) -> i32 {
+    with_ffi_status(|| {
+        if property_count > crate::value::MAX_OBJECT_PROPS {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        if property_count > 0 && properties.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        let Value::Object { props } = &object else {
+            return Err(NAPI_OBJECT_EXPECTED);
+        };
+        let descriptors = if property_count == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(properties, property_count) }
+        };
+        for descriptor in descriptors {
+            if descriptor.utf8name.is_null() == descriptor.name.is_null() {
+                return Err(NAPI_INVALID_ARG);
+            }
+            let name = if descriptor.utf8name.is_null() {
+                environment.handles.borrow().get(descriptor.name)?
+            } else {
+                Value::String(unsafe { read_c_string(descriptor.utf8name)? })
+            };
+            let symbol = match &name {
+                Value::Symbol(symbol) => Some(symbol.clone()),
+                Value::String(_) => None,
+                _ => return Err(NAPI_INVALID_ARG),
+            };
+            let key = napi_property_key(&name)?;
+            let has_accessor = descriptor.getter.is_some() || descriptor.setter.is_some();
+            if has_accessor && (descriptor.method.is_some() || !descriptor.value.is_null()) {
+                return Err(NAPI_INVALID_ARG);
+            }
+            if !has_accessor && descriptor.method.is_some() && !descriptor.value.is_null() {
+                return Err(NAPI_INVALID_ARG);
+            }
+            let mut descriptor_properties = Vec::with_capacity(5);
+            descriptor_properties.push((
+                "enumerable".to_owned(),
+                Value::Bool(descriptor.attributes & 0b010 != 0),
+            ));
+            descriptor_properties.push((
+                "configurable".to_owned(),
+                Value::Bool(descriptor.attributes & 0b100 != 0),
+            ));
+            if has_accessor {
+                if let Some(getter) = descriptor.getter {
+                    descriptor_properties.push((
+                        "get".to_owned(),
+                        create_native_callback_value(
+                            &environment,
+                            &format!("get {key}"),
+                            getter,
+                            descriptor.data,
+                        )?,
+                    ));
+                }
+                if let Some(setter) = descriptor.setter {
+                    descriptor_properties.push((
+                        "set".to_owned(),
+                        create_native_callback_value(
+                            &environment,
+                            &format!("set {key}"),
+                            setter,
+                            descriptor.data,
+                        )?,
+                    ));
+                }
+            } else {
+                let value = if let Some(method) = descriptor.method {
+                    create_native_callback_value(&environment, &key, method, descriptor.data)?
+                } else if descriptor.value.is_null() {
+                    Value::Undefined
+                } else {
+                    environment.handles.borrow().get(descriptor.value)?
+                };
+                descriptor_properties.push(("value".to_owned(), value));
+                descriptor_properties.push((
+                    "writable".to_owned(),
+                    Value::Bool(descriptor.attributes & 0b001 != 0),
+                ));
+            }
+            let descriptor_value = Value::object(descriptor_properties);
+            crate::builtins::object::define_property(&object, &key, &descriptor_value)
+                .map_err(|_| NAPI_GENERIC_FAILURE)?;
+            if let Some(symbol) = symbol {
+                props.meta.borrow_mut().set_symbol_key(&key, symbol);
+            }
+        }
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_function(
     env: NapiEnv,
     name: *const c_char,
@@ -2517,10 +2660,6 @@ unsafe extern "C" fn api_create_function(
         }
         let callback = callback.ok_or(NAPI_FUNCTION_EXPECTED)?;
         let environment = environment(env)?;
-        let environment_rc = environment
-            .self_weak
-            .upgrade()
-            .ok_or(NAPI_GENERIC_FAILURE)?;
         let function_name = if name_length == usize::MAX {
             unsafe { read_c_string(name)? }
         } else if name_length == 0 {
@@ -2534,25 +2673,7 @@ unsafe extern "C" fn api_create_function(
                 .map_err(|_| NAPI_INVALID_ARG)?
                 .to_owned()
         };
-        let owner = environment.owner.upgrade().ok_or(NAPI_GENERIC_FAILURE)?;
-        let id = {
-            let mut state = owner.borrow_mut();
-            let id = state.next_callback_id;
-            state.next_callback_id = id.checked_add(1).ok_or(NAPI_GENERIC_FAILURE)?;
-            state.callbacks.insert(
-                id,
-                NativeCallbackRecord {
-                    env: environment_rc,
-                    callback,
-                    data,
-                },
-            );
-            id
-        };
-        let value = Value::HostFunction {
-            name: Rc::from(function_name.as_str()),
-            id,
-        };
+        let value = create_native_callback_value(&environment, &function_name, callback, data)?;
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
         Ok(())
@@ -3284,10 +3405,9 @@ impl NativeAddonLoader for RustNodeApiHost {
             })?
         };
 
-        let environment = Rc::new_cyclic(|weak| NapiEnvironment {
+        let environment = Rc::new(NapiEnvironment {
             module_path: filename.to_string(),
             owner: Rc::downgrade(&self.state),
-            self_weak: weak.clone(),
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
             wraps: RefCell::new(HashMap::new()),
@@ -3620,6 +3740,7 @@ static napi_ref wrapped_object_reference;
 static int wrapped_finalizer_calls;
 static int removed_finalizer_calls;
 static int finalizer_create_function_status = -1;
+static int descriptor_setter_value = 5;
 static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 
@@ -3822,6 +3943,28 @@ static napi_value global_probe(napi_env env, napi_callback_info info) {
       napi_typeof(env, object_constructor, &type) != napi_ok ||
       napi_get_boolean(env, type == napi_function, &result) != napi_ok) return NULL;
   return result;
+}
+
+static napi_value defined_method(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (napi_create_int32(env, 42, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value defined_getter(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (napi_create_int32(env, descriptor_setter_value, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value defined_setter(napi_env env, napi_callback_info info) {
+  napi_value value;
+  size_t argc = 1;
+  if (napi_get_cb_info(env, info, &argc, &value, NULL, NULL) != napi_ok || argc < 1 ||
+      napi_get_value_int32(env, value, &descriptor_setter_value) != napi_ok) return NULL;
+  return NULL;
 }
 
 static napi_value symbol_probe(napi_env env, napi_callback_info info) {
@@ -4057,10 +4200,31 @@ static napi_value duplicate_wrap_status(napi_env env, napi_callback_info info) {
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
   napi_value scratch, function, metadata, version, values, field;
+  napi_value descriptor_value, descriptor_symbol, descriptor_symbol_description;
+  napi_value descriptor_symbol_value;
   napi_value global, global_key, global_object_constructor;
   napi_valuetype global_object_type;
   bool global_object_own = false;
+  napi_property_descriptor defined_properties[4] = {
+      { .utf8name = "definedMethod", .method = defined_method,
+        .attributes = napi_default },
+      { .utf8name = "definedValue", .getter = defined_getter,
+        .setter = defined_setter, .attributes = napi_enumerable },
+      { .utf8name = "definedConstant", .value = NULL,
+        .attributes = napi_writable | napi_enumerable | napi_configurable },
+      { .name = NULL, .value = NULL,
+        .attributes = napi_writable | napi_enumerable | napi_configurable },
+  };
   int32_t checked_version = 0;
+  if (napi_create_int32(env, 7, &descriptor_value) != napi_ok ||
+      napi_create_string_utf8(env, "descriptor", NAPI_AUTO_LENGTH,
+                              &descriptor_symbol_description) != napi_ok ||
+      napi_create_symbol(env, descriptor_symbol_description,
+                         &descriptor_symbol) != napi_ok ||
+      napi_create_int32(env, 17, &descriptor_symbol_value) != napi_ok) return NULL;
+  defined_properties[2].value = descriptor_value;
+  defined_properties[3].name = descriptor_symbol;
+  defined_properties[3].value = descriptor_symbol_value;
   if (napi_get_global(env, &global) != napi_ok ||
       napi_create_string_utf8(env, "Object", NAPI_AUTO_LENGTH, &global_key) != napi_ok ||
       napi_get_named_property(env, global, "Object", &global_object_constructor) != napi_ok ||
@@ -4071,6 +4235,8 @@ NAPI_MODULE_INIT() {
       napi_open_handle_scope(env, &scope) != napi_ok ||
       napi_create_object(env, &scratch) != napi_ok ||
       napi_close_handle_scope(env, scope) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "descriptorSymbol", descriptor_symbol) != napi_ok ||
+      napi_define_properties(env, exports, 4, defined_properties) != napi_ok) return NULL;
   if (napi_create_function(env, "add", NAPI_AUTO_LENGTH, add, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "add", function) != napi_ok ||
       napi_create_object(env, &metadata) != napi_ok ||
@@ -4175,6 +4341,13 @@ NAPI_MODULE_INIT() {
             r#"
 const addon = require('./fixture.node');
 const values = addon.values;
+const definedMethod = addon.definedMethod();
+const definedValueBefore = addon.definedValue;
+addon.definedValue = 23;
+const definedValueAfter = addon.definedValue;
+const definedMethodDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedMethod');
+const definedValueDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedValue');
+const definedConstantDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedConstant');
 const errors = addon.createErrors();
 let typeError;
 let rangeError;
@@ -4249,6 +4422,14 @@ module.exports = {
   same: addon === require('./fixture.node'),
   global: addon.globalProbe(),
   globalHasObject: Object.hasOwn(globalThis, 'Object'),
+  definedMethod,
+  definedValueBefore,
+  definedValueAfter,
+  definedConstant: addon.definedConstant,
+  definedSymbolValue: addon[addon.descriptorSymbol],
+  definedMethodEnumerable: definedMethodDescriptor.enumerable,
+  definedValueEnumerable: definedValueDescriptor.enumerable,
+  definedConstantWritable: definedConstantDescriptor.writable,
   symbols: addon.symbolProbe(),
   sum: addon.add(19, 23),
   version: addon.metadata.version,
@@ -4361,6 +4542,38 @@ module.exports = {
         assert!(matches!(result.get_prop("global"), Some(Value::Bool(true))));
         assert!(matches!(
             result.get_prop("globalHasObject"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("definedMethod"),
+            Some(Value::Number(42.0))
+        ));
+        assert!(matches!(
+            result.get_prop("definedValueBefore"),
+            Some(Value::Number(5.0))
+        ));
+        assert!(matches!(
+            result.get_prop("definedValueAfter"),
+            Some(Value::Number(23.0))
+        ));
+        assert!(matches!(
+            result.get_prop("definedConstant"),
+            Some(Value::Number(7.0))
+        ));
+        assert!(matches!(
+            result.get_prop("definedSymbolValue"),
+            Some(Value::Number(17.0))
+        ));
+        assert!(matches!(
+            result.get_prop("definedMethodEnumerable"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            result.get_prop("definedValueEnumerable"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("definedConstantWritable"),
             Some(Value::Bool(true))
         ));
         let symbols = result.get_prop("symbols").unwrap();

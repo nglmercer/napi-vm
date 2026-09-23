@@ -13,6 +13,17 @@ typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
 typedef void (*napi_finalize)(napi_env env, void* finalize_data,
                               void* finalize_hint);
 
+typedef struct napi_vm_property_descriptor {
+  const char* utf8name;
+  napi_value name;
+  napi_callback method;
+  napi_callback getter;
+  napi_callback setter;
+  napi_value value;
+  int32_t attributes;
+  void* data;
+} napi_vm_property_descriptor;
+
 typedef struct napi_vm_node_api_table {
   napi_status (*get_undefined)(napi_env, napi_value*);
   napi_status (*get_global)(napi_env, napi_value*);
@@ -79,6 +90,8 @@ typedef struct napi_vm_node_api_table {
   napi_status (*unwrap)(napi_env, napi_value, void**);
   napi_status (*remove_wrap)(napi_env, napi_value, void**);
   napi_status (*create_object)(napi_env, napi_value*);
+  napi_status (*define_properties)(napi_env, napi_value, size_t,
+                                   const napi_vm_property_descriptor*);
   napi_status (*create_function)(napi_env, const char*, size_t, napi_callback,
                                  void*, napi_value*);
   napi_status (*set_named_property)(napi_env, napi_value, const char*, napi_value);
@@ -500,6 +513,14 @@ NAPI_VM_EXPORT napi_status napi_remove_wrap(napi_env env, napi_value object,
 NAPI_VM_EXPORT napi_status napi_create_object(napi_env env, napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->create_object(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_define_properties(
+    napi_env env, napi_value object, size_t property_count,
+    const napi_vm_property_descriptor* properties) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->define_properties(env, object, property_count, properties)
+               : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_create_function(
