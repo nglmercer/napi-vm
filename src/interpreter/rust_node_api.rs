@@ -63,7 +63,7 @@ const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
 const MAX_BIGINT_WORDS: usize = 2048;
-const MAX_NODE_API_VERSION: i32 = 7;
+const MAX_NODE_API_VERSION: i32 = 8;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -80,6 +80,8 @@ type NapiAsyncWork = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
 type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
 type NapiCleanupHook = unsafe extern "C" fn(*mut c_void);
+type NapiAsyncCleanupHookHandle = *mut c_void;
+type NapiAsyncCleanupHook = unsafe extern "C" fn(NapiAsyncCleanupHookHandle, *mut c_void);
 type NapiAsyncExecuteCallback = unsafe extern "C" fn(NapiEnv, *mut c_void);
 type NapiAsyncCompleteCallback = unsafe extern "C" fn(NapiEnv, i32, *mut c_void);
 type NapiThreadsafeFunction = *mut c_void;
@@ -134,7 +136,7 @@ impl RustNodeApiOptions {
 }
 
 /// In-process Node-API addon host. This is opt-in and implements Linux ELF and
-/// macOS Mach-O loading for the selected Node-API v1-v7 calls below. Linux is runtime
+/// macOS Mach-O loading for the selected Node-API v1-v8 calls below. Linux is runtime
 /// tested; macOS still needs native CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
@@ -222,9 +224,9 @@ impl Drop for RustNodeApiHost {
             }
         }
 
-        // Node runs synchronous environment cleanup hooks before N-API
-        // finalizers. Keep addon libraries loaded and the environment usable
-        // while hooks release native resources or stop addon-owned threads.
+        // Node runs cleanup hooks in reverse registration order before N-API
+        // finalizers. Keep addon libraries loaded while synchronous hooks run
+        // and asynchronous hooks complete.
         for environment in environments.iter().rev() {
             run_environment_cleanup_hooks(environment);
         }
@@ -258,6 +260,11 @@ struct HostState {
     next_callback_id: usize,
     callbacks: HashMap<usize, NativeCallbackRecord>,
     environments: Vec<Rc<NapiEnvironment>>,
+    // Type tags belong to the JavaScript object, not the addon environment:
+    // multiple addons must be able to recognize a tag set by another addon.
+    // Retain tagged values because this interpreter does not have a tracing GC
+    // and pointer identities must not be recycled while a tag is observable.
+    type_tags: HashMap<NapiObjectIdentity, (NapiTypeTag, Value)>,
     libraries: Vec<Library>,
     async_work_sender: SyncSender<AsyncWorkTaskMessage>,
     runtime_notifications: Receiver<HostRuntimeNotification>,
@@ -302,6 +309,8 @@ struct NapiEnvironment {
     async_contexts: RefCell<HashMap<usize, NapiAsyncContextState>>,
     callback_scopes: RefCell<Vec<NapiCallbackScopeState>>,
     cleanup_hooks: RefCell<Vec<NapiCleanupHookRecord>>,
+    async_cleanup_hooks: RefCell<Vec<NapiAsyncCleanupHookRecord>>,
+    next_cleanup_hook_order: Cell<u64>,
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     added_finalizers: RefCell<Vec<NapiAddedFinalizer>>,
@@ -321,6 +330,67 @@ struct NapiCleanupHookRecord {
     function: NapiCleanupHook,
     function_address: usize,
     argument: usize,
+    order: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NapiTypeTag {
+    lower: u64,
+    upper: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AsyncCleanupHookPhase {
+    Registered,
+    Running,
+    Removed,
+}
+
+struct AsyncCleanupHookControl {
+    phase: Mutex<AsyncCleanupHookPhase>,
+    completed: Condvar,
+}
+
+#[derive(Clone)]
+struct NapiAsyncCleanupHookRecord {
+    function: NapiAsyncCleanupHook,
+    function_address: usize,
+    argument: usize,
+    handle: usize,
+    order: u64,
+    control: Arc<AsyncCleanupHookControl>,
+}
+
+fn async_cleanup_hook_registry() -> &'static Mutex<HashMap<usize, Arc<AsyncCleanupHookControl>>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<usize, Arc<AsyncCleanupHookControl>>>> =
+        OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remove_async_cleanup_hook_handle(handle: NapiAsyncCleanupHookHandle) {
+    if handle.is_null() {
+        return;
+    }
+    let key = handle as usize;
+    let control = async_cleanup_hook_registry()
+        .lock()
+        .ok()
+        .and_then(|mut registry| registry.remove(&key));
+    if let Some(control) = control
+        && let Ok(mut phase) = control.phase.lock()
+    {
+        *phase = AsyncCleanupHookPhase::Removed;
+        control.completed.notify_all();
+    }
+}
+
+fn next_environment_cleanup_hook_order(environment: &NapiEnvironment) -> Result<u64, i32> {
+    let order = environment.next_cleanup_hook_order.get();
+    environment
+        .next_cleanup_hook_order
+        .set(order.checked_add(1).ok_or(NAPI_GENERIC_FAILURE)?);
+    Ok(order)
 }
 
 #[repr(C)]
@@ -518,6 +588,7 @@ enum NapiObjectIdentity {
     TypedArray(usize),
     DataView(usize),
     RegExp(usize),
+    Error(usize),
 }
 
 thread_local! {
@@ -1026,6 +1097,18 @@ struct NapiVmApiTable {
     get_instance_data: unsafe extern "C" fn(NapiEnv, *mut *mut c_void) -> i32,
     detach_arraybuffer: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
     is_detached_arraybuffer: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    type_tag_object: unsafe extern "C" fn(NapiEnv, NapiValue, *const NapiTypeTag) -> i32,
+    check_object_type_tag:
+        unsafe extern "C" fn(NapiEnv, NapiValue, *const NapiTypeTag, *mut bool) -> i32,
+    object_freeze: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
+    object_seal: unsafe extern "C" fn(NapiEnv, NapiValue) -> i32,
+    add_async_cleanup_hook: unsafe extern "C" fn(
+        NapiEnv,
+        Option<NapiAsyncCleanupHook>,
+        *mut c_void,
+        *mut NapiAsyncCleanupHookHandle,
+    ) -> i32,
+    remove_async_cleanup_hook: unsafe extern "C" fn(NapiAsyncCleanupHookHandle),
 }
 
 #[repr(C)]
@@ -1176,6 +1259,12 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_instance_data: api_get_instance_data,
     detach_arraybuffer: api_detach_arraybuffer,
     is_detached_arraybuffer: api_is_detached_arraybuffer,
+    type_tag_object: api_type_tag_object,
+    check_object_type_tag: api_check_object_type_tag,
+    object_freeze: api_object_freeze,
+    object_seal: api_object_seal,
+    add_async_cleanup_hook: api_add_async_cleanup_hook,
+    remove_async_cleanup_hook: api_remove_async_cleanup_hook,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -2129,6 +2218,9 @@ fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
         Value::TypedArray(view) => Ok(NapiObjectIdentity::TypedArray(Rc::as_ptr(view) as usize)),
         Value::DataView(view) => Ok(NapiObjectIdentity::DataView(Rc::as_ptr(view) as usize)),
         Value::RegExp(regexp) => Ok(NapiObjectIdentity::RegExp(Rc::as_ptr(regexp) as usize)),
+        Value::Error(error) => Ok(NapiObjectIdentity::Error(
+            Rc::as_ptr(&error.identity) as usize
+        )),
         Value::Undefined
         | Value::Null
         | Value::Bool(_)
@@ -2137,8 +2229,7 @@ fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
         | Value::HostPending { .. }
         | Value::Symbol(_)
         | Value::BigInt(_)
-        | Value::Binding(_)
-        | Value::Error(_) => Err(NAPI_OBJECT_EXPECTED),
+        | Value::Binding(_) => Err(NAPI_OBJECT_EXPECTED),
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => Err(NAPI_OBJECT_EXPECTED),
     }
@@ -2216,17 +2307,92 @@ fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
     }
 }
 
+enum NapiEnvironmentCleanupHook {
+    Sync(NapiCleanupHookRecord),
+    Async(NapiAsyncCleanupHookRecord),
+}
+
+fn take_next_environment_cleanup_hook(
+    environment: &NapiEnvironment,
+) -> Option<NapiEnvironmentCleanupHook> {
+    let sync_order = environment
+        .cleanup_hooks
+        .borrow()
+        .last()
+        .map(|hook| hook.order);
+    let async_order = environment
+        .async_cleanup_hooks
+        .borrow()
+        .last()
+        .map(|hook| hook.order);
+    match (sync_order, async_order) {
+        (Some(sync), Some(asynchronous)) if sync > asynchronous => environment
+            .cleanup_hooks
+            .borrow_mut()
+            .pop()
+            .map(NapiEnvironmentCleanupHook::Sync),
+        (Some(_), None) => environment
+            .cleanup_hooks
+            .borrow_mut()
+            .pop()
+            .map(NapiEnvironmentCleanupHook::Sync),
+        (_, Some(_)) => environment
+            .async_cleanup_hooks
+            .borrow_mut()
+            .pop()
+            .map(NapiEnvironmentCleanupHook::Async),
+        (None, None) => None,
+    }
+}
+
 fn run_environment_cleanup_hooks(environment: &Rc<NapiEnvironment>) {
-    loop {
-        let hook = environment.cleanup_hooks.borrow_mut().pop();
-        let Some(hook) = hook else {
-            break;
-        };
-        let scope = environment.handles.borrow_mut().open_scope().ok();
-        unsafe { (hook.function)(hook.argument as *mut c_void) };
-        environment.pending_exception.borrow_mut().take();
-        if let Some(scope) = scope {
-            let _ = environment.handles.borrow_mut().close_scope(scope);
+    let mut pending_async_hooks = Vec::new();
+    while let Some(hook) = take_next_environment_cleanup_hook(environment) {
+        match hook {
+            NapiEnvironmentCleanupHook::Sync(hook) => {
+                let scope = environment.handles.borrow_mut().open_scope().ok();
+                unsafe { (hook.function)(hook.argument as *mut c_void) };
+                environment.pending_exception.borrow_mut().take();
+                if let Some(scope) = scope {
+                    let _ = environment.handles.borrow_mut().close_scope(scope);
+                }
+            }
+            NapiEnvironmentCleanupHook::Async(hook) => {
+                let should_run = if let Ok(mut phase) = hook.control.phase.lock() {
+                    if *phase == AsyncCleanupHookPhase::Registered {
+                        *phase = AsyncCleanupHookPhase::Running;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if should_run {
+                    // Start every registered async hook in LIFO order before
+                    // waiting. Like Node, synchronous hooks later in the
+                    // sequence can therefore run while an earlier async hook
+                    // is still cleaning up.
+                    unsafe {
+                        (hook.function)(
+                            hook.handle as NapiAsyncCleanupHookHandle,
+                            hook.argument as *mut c_void,
+                        )
+                    };
+                    pending_async_hooks.push(hook.control);
+                }
+            }
+        }
+    }
+
+    for control in pending_async_hooks {
+        if let Ok(mut phase) = control.phase.lock() {
+            while *phase == AsyncCleanupHookPhase::Running {
+                match control.completed.wait(phase) {
+                    Ok(next) => phase = next,
+                    Err(_) => break,
+                }
+            }
         }
     }
 }
@@ -2241,6 +2407,9 @@ fn register_environment(environment: &Rc<NapiEnvironment>) {
 
 impl Drop for NapiEnvironment {
     fn drop(&mut self) {
+        for hook in self.async_cleanup_hooks.get_mut().drain(..) {
+            remove_async_cleanup_hook_handle(hook.handle as NapiAsyncCleanupHookHandle);
+        }
         let _ = NAPI_ENVIRONMENTS.try_with(|environments| {
             environments
                 .borrow_mut()
@@ -3772,6 +3941,163 @@ unsafe extern "C" fn api_is_detached_arraybuffer(
     })
 }
 
+unsafe extern "C" fn api_type_tag_object(
+    env: NapiEnv,
+    object: NapiValue,
+    type_tag: *const NapiTypeTag,
+) -> i32 {
+    with_ffi_status(env, || {
+        if type_tag.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(object)?;
+        let identity = napi_object_identity(&value)?;
+        let tag = unsafe { type_tag.read() };
+        let owner = environment.owner.upgrade().ok_or(NAPI_INVALID_ARG)?;
+        let mut state = owner.borrow_mut();
+        if state.type_tags.contains_key(&identity) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if state.type_tags.len() >= MAX_LOCAL_HANDLES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        state.type_tags.insert(identity, (tag, value));
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_check_object_type_tag(
+    env: NapiEnv,
+    object: NapiValue,
+    type_tag: *const NapiTypeTag,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if type_tag.is_null() || result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(object)?;
+        let identity = napi_object_identity(&value)?;
+        let tag = unsafe { type_tag.read() };
+        let owner = environment.owner.upgrade().ok_or(NAPI_INVALID_ARG)?;
+        let state = owner.borrow();
+        let matches = state
+            .type_tags
+            .get(&identity)
+            .is_some_and(|(existing, _)| *existing == tag);
+        unsafe { result.write(matches) };
+        Ok(())
+    })
+}
+
+fn napi_set_object_integrity(value: &Value, freeze: bool) -> Result<(), i32> {
+    let cell = match value {
+        Value::Object { props } => props,
+        Value::Class(class) => &class.statics,
+        _ => {
+            return Err(if napi_object_identity(value).is_ok() {
+                NAPI_GENERIC_FAILURE
+            } else {
+                NAPI_OBJECT_EXPECTED
+            });
+        }
+    };
+    let names = cell
+        .borrow()
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
+    let mut meta = cell.meta.borrow_mut();
+    meta.non_extensible = true;
+    for name in names {
+        let mut attributes = meta.attrs_of(&name);
+        attributes.configurable = false;
+        if freeze {
+            attributes.writable = false;
+        }
+        meta.set_attrs(&name, attributes);
+    }
+    Ok(())
+}
+
+unsafe extern "C" fn api_object_freeze(env: NapiEnv, object: NapiValue) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(object)?;
+        napi_set_object_integrity(&value, true)
+    })
+}
+
+unsafe extern "C" fn api_object_seal(env: NapiEnv, object: NapiValue) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(object)?;
+        napi_set_object_integrity(&value, false)
+    })
+}
+
+unsafe extern "C" fn api_add_async_cleanup_hook(
+    env: NapiEnv,
+    function: Option<NapiAsyncCleanupHook>,
+    argument: *mut c_void,
+    remove_handle: *mut NapiAsyncCleanupHookHandle,
+) -> i32 {
+    with_ffi_status(env, || {
+        let function = function.ok_or(NAPI_INVALID_ARG)?;
+        let environment = environment(env)?;
+        if environment.finalizing.get() {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let function_address = function as usize;
+        let argument = argument as usize;
+        let mut hooks = environment.async_cleanup_hooks.borrow_mut();
+        if hooks.iter().any(|hook| {
+            hook.function_address == function_address
+                && hook.argument == argument
+                && hook
+                    .control
+                    .phase
+                    .lock()
+                    .is_ok_and(|phase| *phase != AsyncCleanupHookPhase::Removed)
+        }) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if hooks.len() >= MAX_LOCAL_HANDLES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let order = next_environment_cleanup_hook_order(&environment)?;
+        let handle = new_opaque_handle()? as usize;
+        let control = Arc::new(AsyncCleanupHookControl {
+            phase: Mutex::new(AsyncCleanupHookPhase::Registered),
+            completed: Condvar::new(),
+        });
+        async_cleanup_hook_registry()
+            .lock()
+            .map_err(|_| NAPI_GENERIC_FAILURE)?
+            .insert(handle, control.clone());
+        hooks.push(NapiAsyncCleanupHookRecord {
+            function,
+            function_address,
+            argument,
+            handle,
+            order,
+            control,
+        });
+        if !remove_handle.is_null() {
+            unsafe { remove_handle.write(handle as NapiAsyncCleanupHookHandle) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_remove_async_cleanup_hook(handle: NapiAsyncCleanupHookHandle) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        remove_async_cleanup_hook_handle(handle);
+    }));
+}
+
 unsafe extern "C" fn api_is_typedarray(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -4939,10 +5265,12 @@ unsafe extern "C" fn api_add_env_cleanup_hook(
         if hooks.len() >= MAX_LOCAL_HANDLES {
             return Err(NAPI_GENERIC_FAILURE);
         }
+        let order = next_environment_cleanup_hook_order(&environment)?;
         hooks.push(NapiCleanupHookRecord {
             function,
             function_address,
             argument,
+            order,
         });
         Ok(())
     })
@@ -6492,6 +6820,7 @@ impl RustNodeApiHost {
                 next_callback_id: 1,
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
+                type_tags: HashMap::new(),
                 libraries: Vec::new(),
                 async_work_sender,
                 runtime_notifications,
@@ -6957,6 +7286,8 @@ impl NativeAddonLoader for RustNodeApiHost {
             async_contexts: RefCell::new(HashMap::new()),
             callback_scopes: RefCell::new(Vec::new()),
             cleanup_hooks: RefCell::new(Vec::new()),
+            async_cleanup_hooks: RefCell::new(Vec::new()),
+            next_cleanup_hook_order: Cell::new(1),
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
             added_finalizers: RefCell::new(Vec::new()),
@@ -7021,6 +7352,7 @@ impl NativeAddonLoader for RustNodeApiHost {
                     // shutdown joins the workers and delivers that callback.
                     self.state.borrow_mut().libraries.push(library);
                 } else {
+                    run_environment_cleanup_hooks(&environment);
                     environment.finalizing.set(true);
                     finalize_environment_wraps(&environment);
                     self.state
@@ -7430,6 +7762,244 @@ mod tests {
         let promise = promise.borrow();
         assert_eq!(promise.state, PromiseState::Fulfilled);
         assert!(matches!(promise.value, Value::Undefined));
+    }
+
+    #[test]
+    fn loads_napi_v8_type_tags_integrity_and_async_cleanup_hooks() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-v8-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping Node-API v8 fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        let marker = root.join("async-cleanup.marker");
+        let c_source = r#"
+#define _POSIX_C_SOURCE 200809L
+#define NAPI_VERSION 8
+#include <node_api.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static const napi_type_tag fixture_tag = { UINT64_C(0x123456789abcdef0), UINT64_C(0xfedcba9876543210) };
+static const napi_type_tag other_tag = { UINT64_C(0x1111111111111111), UINT64_C(0x2222222222222222) };
+
+static void append_cleanup_event(const char* event) {
+  FILE* file = fopen("__MARKER_PATH__", "a");
+  if (file != NULL) { fputs(event, file); fclose(file); }
+}
+
+static void sync_cleanup(void* data) {
+  (void)data;
+  append_cleanup_event("sync|");
+}
+
+static void* finish_async_cleanup(void* data) {
+  napi_async_cleanup_hook_handle handle = (napi_async_cleanup_hook_handle)data;
+  struct timespec delay = {0, 10000000};
+  nanosleep(&delay, NULL);
+  append_cleanup_event("async-done|");
+  napi_remove_async_cleanup_hook(handle);
+  return NULL;
+}
+
+static void async_cleanup(napi_async_cleanup_hook_handle handle, void* data) {
+  pthread_t worker;
+  (void)data;
+  append_cleanup_event("async-start|");
+  if (pthread_create(&worker, NULL, finish_async_cleanup, handle) == 0)
+    pthread_detach(worker);
+  else
+    napi_remove_async_cleanup_hook(handle);
+}
+
+static napi_value probe(napi_env env, napi_callback_info info) {
+  napi_value args[2], result, field;
+  size_t argc = 2;
+  bool matches = false, wrong_matches = true;
+  napi_status duplicate_tag_status, freeze_status, seal_status;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 2 ||
+      napi_type_tag_object(env, args[0], &fixture_tag) != napi_ok ||
+      napi_check_object_type_tag(env, args[0], &fixture_tag, &matches) != napi_ok ||
+      napi_check_object_type_tag(env, args[0], &other_tag, &wrong_matches) != napi_ok)
+    return NULL;
+  duplicate_tag_status = napi_type_tag_object(env, args[0], &fixture_tag);
+  freeze_status = napi_object_freeze(env, args[0]);
+  seal_status = napi_object_seal(env, args[1]);
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_get_boolean(env, matches, &field) != napi_ok ||
+      napi_set_named_property(env, result, "tagMatches", field) != napi_ok ||
+      napi_get_boolean(env, wrong_matches, &field) != napi_ok ||
+      napi_set_named_property(env, result, "wrongTagMatches", field) != napi_ok ||
+      napi_create_int32(env, duplicate_tag_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "duplicateTagStatus", field) != napi_ok ||
+      napi_create_int32(env, freeze_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "freezeStatus", field) != napi_ok ||
+      napi_create_int32(env, seal_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "sealStatus", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+NAPI_MODULE_INIT() {
+  napi_value function;
+  if (napi_add_env_cleanup_hook(env, sync_cleanup, NULL) != napi_ok ||
+      napi_add_async_cleanup_hook(env, async_cleanup, NULL, NULL) != napi_ok ||
+      napi_create_function(env, "probe", NAPI_AUTO_LENGTH, probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "probe", function) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#
+        .replace("__MARKER_PATH__", &marker.to_string_lossy());
+        fs::write(&source, c_source).unwrap();
+        let built = Command::new("cc")
+            .args([
+                "-std=c11",
+                "-O2",
+                "-fPIC",
+                "-shared",
+                "-pthread",
+                "-DNAPI_VERSION=8",
+                "-I",
+            ])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "Node-API v8 fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        fs::write(
+            root.join("main.cjs"),
+            r#"
+const addon = require('./fixture.node');
+const target = {value: 41};
+const sealedTarget = {value: 9};
+const native = addon.probe(target, sealedTarget);
+module.exports = {
+  ...native,
+  frozen: Object.isFrozen(target),
+  sealed: Object.isSealed(sealedTarget),
+  targetValue: target.value,
+  sealedValue: sealedTarget.value,
+};
+"#,
+        )
+        .unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
+        let observer = unsafe { Library::open(Some(addon.as_os_str()), RTLD_NOW) }.unwrap();
+        let vm_report = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .unwrap();
+        let Value::String(ref vm_report) = vm_report else {
+            panic!("Node-API v8 VM fixture did not return JSON");
+        };
+        let vm_report: serde_json::Value = serde_json::from_str(vm_report).unwrap();
+        drop(interpreter);
+        assert_eq!(
+            fs::read_to_string(&marker).unwrap(),
+            "async-start|sync|async-done|",
+            "napi-vm cleanup hook ordering differed"
+        );
+        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        let mut reference_reports = Vec::new();
+        for runtime in ["node", "bun"] {
+            if !Command::new(runtime)
+                .arg("--version")
+                .output()
+                .is_ok_and(|out| out.status.success())
+            {
+                continue;
+            }
+            let _ = fs::remove_file(&marker);
+            let reference = Command::new(runtime)
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "{runtime} Node-API v8 fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let report: serde_json::Value = serde_json::from_slice(&reference.stdout)
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "{runtime} v8 result was not JSON: {}",
+                        String::from_utf8_lossy(&reference.stdout)
+                    )
+                });
+            // Bun 1.4.0 returns the same v8 API results but exits without
+            // awaiting async cleanup hooks, so the teardown-order assertion
+            // is Node-specific while the API result remains differential.
+            if runtime == "node" {
+                let cleanup_result = fs::read_to_string(&marker)
+                    .unwrap_or_else(|error| panic!("Node async cleanup marker missing: {error}"));
+                assert_eq!(
+                    cleanup_result, "async-start|sync|async-done|",
+                    "Node cleanup order changed"
+                );
+            }
+            reference_reports.push((runtime, report));
+        }
+        assert!(
+            !reference_reports.is_empty(),
+            "Node or Bun is required for the N-API differential fixture"
+        );
+        for (runtime, report) in reference_reports {
+            assert_eq!(
+                vm_report, report,
+                "Node-API v8 result differs from {runtime}"
+            );
+        }
+        assert_eq!(vm_report["tagMatches"], true);
+        assert_eq!(vm_report["wrongTagMatches"], false);
+        assert_eq!(vm_report["duplicateTagStatus"], NAPI_INVALID_ARG);
+        assert_eq!(vm_report["freezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["sealStatus"], NAPI_OK);
+        assert_eq!(vm_report["frozen"], true);
+        assert_eq!(vm_report["sealed"], true);
+        assert_eq!(vm_report["targetValue"], 41);
+        assert_eq!(vm_report["sealedValue"], 9);
+        drop(observer);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

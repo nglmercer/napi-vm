@@ -165,14 +165,15 @@ Every claim below was checked against the current build.
   addon calls, including further synchronous callbacks. The bridge still
   requires a Node executable and has reflection gaps; array prototype
   mutation is not supported. It is not an in-process Rust implementation of
-  Node-API. An experimental Linux-only `node-api-host` Cargo feature now loads
-  a real Node-API v1-v7 ELF fixture in process and supports a selected API
+  Node-API. An experimental `node-api-host` Cargo feature now loads a real
+  Node-API v1-v8 fixture in process (Linux runtime-tested; macOS still needs
+  native verification) and supports a selected API
   slice: opaque scoped handles, callback info, native functions, object and
   global-object access, property operations, symbol creation, references,
   buffers, typed arrays, DataViews, promises, async work, thread-safe functions,
   Date and BigInt values, property-key collection, environment instance data,
-  ArrayBuffer detachment,
-  and controlled guest callbacks. The complete Node-API surface remains
+  ArrayBuffer detachment, object type tags, freeze/seal for supported object
+  models, async cleanup hooks, and controlled guest callbacks. The complete Node-API surface remains
   unsupported; unimplemented imports fail during loading
   (`src/interpreter/rust_node_api.rs`).
 

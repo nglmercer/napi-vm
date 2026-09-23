@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | Selected Node-API v1-v7 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v8 calls; Linux runtime-tested, macOS path awaiting native verification | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -151,6 +151,17 @@ updates existing typed-array views, and exposes detached-state checks. The VM
 matches Node when `napi_is_detached_arraybuffer` receives a non-ArrayBuffer
 value (`napi_ok`, false); Bun 1.4.0 returns `napi_arraybuffer_expected` for
 that input, which the differential fixture records as a runtime difference.
+The selected Node-API v8 slice adds type tags for identity-bearing guest
+objects, freeze/seal for ordinary objects and class constructors, and async
+cleanup hooks. Hooks start in reverse registration order; asynchronous hooks
+start without blocking the remaining hooks, and shutdown waits for all of them
+to remove their handles before running finalizers. Addon libraries remain
+mapped through cleanup. Tagged values stay retained until host shutdown because
+the VM has no object garbage collector, and the tag table is capped. Other
+object representations do not yet expose the property metadata needed by
+freeze/seal and return a generic failure. The v8 fixture compares tag and
+integrity results with Node and Bun; async shutdown is compared with Node
+because Bun 1.4.0 exits without awaiting async cleanup hooks.
 `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive

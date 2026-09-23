@@ -13,6 +13,7 @@ typedef void* napi_async_work;
 typedef void* napi_async_context;
 typedef void* napi_callback_scope;
 typedef void* napi_threadsafe_function;
+typedef void* napi_async_cleanup_hook_handle;
 typedef int32_t napi_status;
 typedef int32_t napi_typedarray_type;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
@@ -25,6 +26,12 @@ typedef void (*napi_async_complete_callback)(napi_env env, napi_status status,
 typedef void (*napi_threadsafe_function_call_js)(napi_env env,
                                                   napi_value js_callback,
                                                   void* context, void* data);
+typedef void (*napi_async_cleanup_hook)(napi_async_cleanup_hook_handle handle,
+                                        void* data);
+typedef struct napi_type_tag {
+  uint64_t lower;
+  uint64_t upper;
+} napi_type_tag;
 typedef struct napi_extended_error_info {
   const char* error_message;
   void* engine_reserved;
@@ -225,6 +232,14 @@ typedef struct napi_vm_node_api_table {
   napi_status (*get_instance_data)(napi_env, void**);
   napi_status (*detach_arraybuffer)(napi_env, napi_value);
   napi_status (*is_detached_arraybuffer)(napi_env, napi_value, bool*);
+  napi_status (*type_tag_object)(napi_env, napi_value, const napi_type_tag*);
+  napi_status (*check_object_type_tag)(napi_env, napi_value,
+                                       const napi_type_tag*, bool*);
+  napi_status (*object_freeze)(napi_env, napi_value);
+  napi_status (*object_seal)(napi_env, napi_value);
+  napi_status (*add_async_cleanup_hook)(napi_env, napi_async_cleanup_hook,
+                                        void*, napi_async_cleanup_hook_handle*);
+  void (*remove_async_cleanup_hook)(napi_async_cleanup_hook_handle);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1207,4 +1222,40 @@ NAPI_VM_EXPORT napi_status napi_adjust_external_memory(
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->adjust_external_memory(env, change_in_bytes, result)
                : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_type_tag_object(
+    napi_env env, napi_value object, const napi_type_tag* type_tag) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->type_tag_object(env, object, type_tag) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_check_object_type_tag(
+    napi_env env, napi_value object, const napi_type_tag* type_tag,
+    bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->check_object_type_tag(env, object, type_tag, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_object_freeze(napi_env env, napi_value object) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->object_freeze(env, object) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_object_seal(napi_env env, napi_value object) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->object_seal(env, object) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_add_async_cleanup_hook(
+    napi_env env, napi_async_cleanup_hook hook, void* arg,
+    napi_async_cleanup_hook_handle* remove_handle) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->add_async_cleanup_hook(env, hook, arg, remove_handle) : 9;
+}
+
+NAPI_VM_EXPORT void napi_remove_async_cleanup_hook(
+    napi_async_cleanup_hook_handle remove_handle) {
+  const napi_vm_node_api_table* table = get_api_table();
+  if (table) table->remove_async_cleanup_hook(remove_handle);
 }

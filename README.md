@@ -198,6 +198,20 @@ and follows Node's `napi_is_detached_arraybuffer` result for non-ArrayBuffer
 values (`napi_ok` with `false`). Bun 1.4.0 returns
 `napi_arraybuffer_expected` for that same input; the differential fixture keeps
 this runtime difference explicit while checking all shared behavior.
+The selected Node-API v8 slice adds object type tags, freeze/seal for ordinary
+guest objects and class constructors, and asynchronous cleanup hooks. Type tags
+are shared across addon environments and remain attached to the guest object.
+Because the VM has no object garbage collector, tagged objects remain retained
+until host shutdown; the tag table is capped at the local-handle limit.
+Cleanup hooks run in reverse registration order. Async hooks start in that
+order, synchronous hooks continue, and the host waits for async completion
+before finalizers while keeping addon libraries mapped. Freeze/seal currently
+support ordinary objects and class constructors; other object representations
+report a generic failure until their property metadata can enforce the same
+integrity rules. The compiled fixture compares type-tag and integrity behavior
+with Node and Bun, and verifies async cleanup ordering against Node. Bun 1.4.0
+exits without awaiting an asynchronous cleanup hook, so it is not used as the
+teardown-order reference.
 `napi_add_finalizer` supports its optional zero-count reference and runs the
 finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
 no guest-object garbage collector, so this does not provide collection-time
