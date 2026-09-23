@@ -21,11 +21,49 @@ fn is_callable(value: &Value) -> bool {
         .is_some()
 }
 
+fn promise_error_reason(error: VmErr) -> Value {
+    match error {
+        VmErr::Throw(reason) => reason,
+        VmErr::RuntimeError(data) => crate::error::error_value_from_msg(&data.message),
+        other => crate::error::error_value_from_msg(&other.to_string()),
+    }
+}
+
+fn claim_resolution(guard: &Value) -> bool {
+    if guard
+        .get_prop("resolved")
+        .is_some_and(|resolved| resolved.is_truthy())
+    {
+        return false;
+    }
+    guard
+        .set_prop("resolved".to_owned(), Value::Bool(true))
+        .is_ok()
+}
+
 impl Interpreter {
     /// Settle `promise` with `value` as its *resolution*, which is not the
     /// same as fulfilling it: resolving with a promise or a thenable adopts
     /// that object's eventual state instead of fulfilling with the object.
     pub(crate) fn resolve_promise(
+        &mut self,
+        promise: &Rc<RefCell<PromiseInner>>,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        {
+            let mut inner = promise.borrow_mut();
+            if inner.resolution_locked || inner.state != PromiseState::Pending {
+                return Ok(());
+            }
+            inner.resolution_locked = true;
+        }
+        self.resolve_promise_inner(promise, value)
+    }
+
+    /// Continue a resolution after the promise's public resolver has already
+    /// been used. This path is reserved for the one-shot resolve function
+    /// supplied to a thenable job.
+    fn resolve_promise_inner(
         &mut self,
         promise: &Rc<RefCell<PromiseInner>>,
         value: Value,
@@ -57,10 +95,30 @@ impl Interpreter {
         // as a promise, which is how promises from other implementations
         // interoperate.
         if matches!(value, Value::Object { .. }) {
-            let then = self.member(&value, "then")?;
+            let then = match self.member(&value, "then") {
+                Ok(then) => then,
+                Err(error) => {
+                    settle(
+                        &self.jobs,
+                        promise,
+                        PromiseState::Rejected,
+                        promise_error_reason(error),
+                    );
+                    return Ok(());
+                }
+            };
             if is_callable(&then) {
-                let target = promise.clone();
-                self.call_thenable(&value, &then, target)?;
+                self.jobs
+                    .borrow_mut()
+                    .push_microtask(Job::PromiseResolveThenable {
+                        target: promise.clone(),
+                        thenable: value,
+                        then,
+                        resolution_guard: Value::object(vec![(
+                            "resolved".to_owned(),
+                            Value::Bool(false),
+                        )]),
+                    });
                 return Ok(());
             }
         }
@@ -70,48 +128,51 @@ impl Interpreter {
     }
 
     pub(crate) fn reject_promise(&mut self, promise: &Rc<RefCell<PromiseInner>>, reason: Value) {
+        {
+            let mut inner = promise.borrow_mut();
+            if inner.resolution_locked || inner.state != PromiseState::Pending {
+                return;
+            }
+            inner.resolution_locked = true;
+        }
         settle(&self.jobs, promise, PromiseState::Rejected, reason);
     }
 
     /// Make `target` follow `source`'s eventual state.
     fn adopt(&mut self, source: &Value, target: Rc<RefCell<PromiseInner>>) -> Result<(), VmErr> {
-        self.register(
-            source,
-            Value::NativeFunction {
-                name: "".into(),
-                callable: adopt_fulfil,
-            },
-            Value::NativeFunction {
-                name: "".into(),
-                callable: adopt_reject,
-            },
-            Some(target),
-        )?;
+        self.register(source, Value::Undefined, Value::Undefined, Some(target))?;
         Ok(())
     }
 
-    /// Call a thenable's `then` with resolve/reject functions bound to
-    /// `target`. A `then` that throws before calling either rejects `target`.
-    fn call_thenable(
+    fn run_thenable_job(
         &mut self,
+        target: Rc<RefCell<PromiseInner>>,
         thenable: &Value,
         then: &Value,
-        target: Rc<RefCell<PromiseInner>>,
+        resolution_guard: Value,
     ) -> Result<(), VmErr> {
-        let (resolve, reject) = self.settle_functions(target.clone());
+        let (resolve, reject) =
+            Self::thenable_settle_functions(target.clone(), resolution_guard.clone());
         match self.call_this(then, thenable.clone(), vec![resolve, reject]) {
             Ok(_) => Ok(()),
-            Err(VmErr::Throw(reason)) => {
-                settle(&self.jobs, &target, PromiseState::Rejected, reason);
+            Err(error) if claim_resolution(&resolution_guard) => {
+                settle(
+                    &self.jobs,
+                    &target,
+                    PromiseState::Rejected,
+                    promise_error_reason(error),
+                );
                 Ok(())
             }
-            Err(other) => Err(other),
+            // A thenable that throws after using either resolver cannot change
+            // the promise's already chosen state.
+            Err(_) => Ok(()),
         }
     }
 
-    /// The `(resolve, reject)` pair handed to a `new Promise` executor or a
-    /// thenable's `then`. They carry the promise in a hidden property, since a
-    /// native function is a bare pointer with nowhere else to keep state.
+    /// The `(resolve, reject)` pair handed to a `new Promise` executor. They
+    /// carry the promise in a hidden property, since a native function is a
+    /// bare pointer with nowhere else to keep state.
     pub(crate) fn settle_functions(
         &mut self,
         promise: Rc<RefCell<PromiseInner>>,
@@ -140,6 +201,30 @@ impl Interpreter {
         (resolve, reject)
     }
 
+    fn thenable_settle_functions(
+        promise: Rc<RefCell<PromiseInner>>,
+        resolution_guard: Value,
+    ) -> (Value, Value) {
+        let carrier = Value::Promise(promise);
+        let make_resolver = |name: &str, callable| {
+            Value::object(vec![
+                (TARGET_SLOT.to_owned(), carrier.clone()),
+                (RESOLUTION_GUARD_SLOT.to_owned(), resolution_guard.clone()),
+                (
+                    crate::interpreter::call::CALL_SLOT.to_owned(),
+                    Value::NativeFunction {
+                        name: name.into(),
+                        callable,
+                    },
+                ),
+            ])
+        };
+        (
+            make_resolver("resolve", thenable_resolve),
+            make_resolver("reject", thenable_reject),
+        )
+    }
+
     /// `p.then(onFulfilled, onRejected)`.
     ///
     /// Returns the derived promise. When `p` has already settled the reaction
@@ -152,6 +237,7 @@ impl Interpreter {
         on_rejected: Value,
         derived: Option<Rc<RefCell<PromiseInner>>>,
     ) -> Result<Value, VmErr> {
+        let adopted = derived.is_some();
         let derived = derived.unwrap_or_else(Value::pending_promise);
         // A non-promise is registered on through `Promise.resolve(v)`, so its
         // handler still runs — as a microtask — rather than being skipped.
@@ -176,6 +262,7 @@ impl Interpreter {
             on_fulfilled,
             on_rejected,
             derived: derived.clone(),
+            adopted,
         };
         let settled = {
             let mut state = inner.borrow_mut();
@@ -206,6 +293,10 @@ impl Interpreter {
         value: Value,
         reaction: Reaction,
     ) -> Result<(), VmErr> {
+        if reaction.adopted {
+            settle(&self.jobs, &reaction.derived, state, value);
+            return Ok(());
+        }
         let handler = match state {
             PromiseState::Fulfilled => &reaction.on_fulfilled,
             _ => &reaction.on_rejected,
@@ -271,6 +362,12 @@ impl Interpreter {
                     value,
                     reaction,
                 } => self.run_reaction(state, value, reaction)?,
+                Job::PromiseResolveThenable {
+                    target,
+                    thenable,
+                    then,
+                    resolution_guard,
+                } => self.run_thenable_job(target, &thenable, &then, resolution_guard)?,
                 Job::Callback { callback, args } => {
                     match self.call_this(&callback, Value::Undefined, args) {
                         Ok(_) => {}
@@ -381,6 +478,12 @@ impl Interpreter {
                     value,
                     reaction,
                 } => self.run_reaction(state, value, reaction)?,
+                Job::PromiseResolveThenable {
+                    target,
+                    thenable,
+                    then,
+                    resolution_guard,
+                } => self.run_thenable_job(target, &thenable, &then, resolution_guard)?,
                 Job::Callback { callback, args } => {
                     self.call_this(&callback, Value::Undefined, args)?;
                 }
@@ -399,6 +502,7 @@ impl Interpreter {
 
 /// Hidden slot carrying the promise a `resolve`/`reject` function settles.
 const TARGET_SLOT: &str = "__symbol_promise_target__";
+const RESOLUTION_GUARD_SLOT: &str = "__symbol_promise_resolution_guard__";
 
 fn target_of(this: &Value) -> Option<Rc<RefCell<PromiseInner>>> {
     this.get_prop(TARGET_SLOT)?.as_promise()
@@ -427,14 +531,30 @@ fn executor_reject(
     Ok(Value::Undefined)
 }
 
-/// Handlers used when one promise adopts another's state. The derived promise
-/// *is* the target, so settling it is all these have to do.
-fn adopt_fulfil(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(args.into_iter().next().unwrap_or(Value::Undefined))
+fn thenable_resolve(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if let (Some(target), Some(guard)) = (target_of(&this), this.get_prop(RESOLUTION_GUARD_SLOT))
+        && claim_resolution(&guard)
+    {
+        let value = args.into_iter().next().unwrap_or(Value::Undefined);
+        interp.resolve_promise_inner(&target, value)?;
+    }
+    Ok(Value::Undefined)
 }
 
-fn adopt_reject(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    Err(VmErr::Throw(
-        args.into_iter().next().unwrap_or(Value::Undefined),
-    ))
+fn thenable_reject(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if let (Some(target), Some(guard)) = (target_of(&this), this.get_prop(RESOLUTION_GUARD_SLOT))
+        && claim_resolution(&guard)
+    {
+        let reason = args.into_iter().next().unwrap_or(Value::Undefined);
+        settle(&interp.jobs, &target, PromiseState::Rejected, reason);
+    }
+    Ok(Value::Undefined)
 }

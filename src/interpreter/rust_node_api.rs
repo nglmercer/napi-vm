@@ -20,7 +20,10 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{Env, FileCommonJsLoader, Interpreter};
-use crate::value::{Buffer, ClassData, ErrorData, PropAttrs, TypedArrayData, TypedKind, Value};
+use crate::value::{
+    Buffer, ClassData, ErrorData, PromiseInner, PromiseState, PropAttrs, TypedArrayData, TypedKind,
+    Value,
+};
 
 const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
@@ -43,8 +46,10 @@ type NapiValue = *mut c_void;
 type NapiCallbackInfo = *mut c_void;
 type NapiHandleScope = *mut c_void;
 type NapiRef = *mut c_void;
+type NapiDeferred = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
 type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
+type NapiGuestOperation = fn(&mut Interpreter, Value, Vec<Value>) -> Result<Value, VmErr>;
 
 /// Filesystem and integrity policy for the experimental in-process backend.
 ///
@@ -137,6 +142,7 @@ struct NapiEnvironment {
     owner: Weak<RefCell<HostState>>,
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
+    deferreds: RefCell<HashMap<usize, NapiDeferredState>>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
@@ -180,6 +186,11 @@ impl Drop for GuestCallbackDispatcherScope {
 struct NapiReference {
     value: Value,
     ref_count: u32,
+}
+
+struct NapiDeferredState {
+    promise: Rc<RefCell<PromiseInner>>,
+    settling: bool,
 }
 
 struct NapiWrap {
@@ -523,6 +534,10 @@ struct NapiVmApiTable {
     ) -> i32,
     open_handle_scope: unsafe extern "C" fn(NapiEnv, *mut NapiHandleScope) -> i32,
     close_handle_scope: unsafe extern "C" fn(NapiEnv, NapiHandleScope) -> i32,
+    create_promise: unsafe extern "C" fn(NapiEnv, *mut NapiDeferred, *mut NapiValue) -> i32,
+    resolve_deferred: unsafe extern "C" fn(NapiEnv, NapiDeferred, NapiValue) -> i32,
+    reject_deferred: unsafe extern "C" fn(NapiEnv, NapiDeferred, NapiValue) -> i32,
+    is_promise: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
 }
 
 #[repr(C)]
@@ -612,6 +627,10 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_cb_info: api_get_cb_info,
     open_handle_scope: api_open_handle_scope,
     close_handle_scope: api_close_handle_scope,
+    create_promise: api_create_promise,
+    resolve_deferred: api_resolve_deferred,
+    reject_deferred: api_reject_deferred,
+    is_promise: api_is_promise,
 };
 
 fn with_ffi_status(callback: impl FnOnce() -> Result<(), i32>) -> i32 {
@@ -1106,6 +1125,36 @@ fn napi_guest_get_property(
 ) -> Result<Value, VmErr> {
     let key = args.first().cloned().unwrap_or(Value::Undefined);
     interpreter.get_prop_value(&receiver, &key)
+}
+
+fn napi_guest_resolve_deferred(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let promise = receiver
+        .as_promise()
+        .ok_or_else(|| VmErr::Msg("Node-API deferred does not reference a promise".into()))?;
+    let resolution = args.into_iter().next().unwrap_or(Value::Undefined);
+    if let Err(error) = interpreter.resolve_promise(&promise, resolution) {
+        // Promise resolution converts errors while reading/calling a thenable
+        // into rejection. They must not escape as a synchronous N-API throw.
+        interpreter.reject_promise(&promise, exception_from_callback_error(error));
+    }
+    Ok(Value::Undefined)
+}
+
+fn napi_guest_reject_deferred(
+    interpreter: &mut Interpreter,
+    receiver: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let promise = receiver
+        .as_promise()
+        .ok_or_else(|| VmErr::Msg("Node-API deferred does not reference a promise".into()))?;
+    let rejection = args.into_iter().next().unwrap_or(Value::Undefined);
+    interpreter.reject_promise(&promise, rejection);
+    Ok(Value::Undefined)
 }
 
 fn napi_guest_set_property(
@@ -2611,6 +2660,166 @@ unsafe extern "C" fn api_create_object(env: NapiEnv, result: *mut NapiValue) -> 
     })
 }
 
+unsafe extern "C" fn api_create_promise(
+    env: NapiEnv,
+    deferred_result: *mut NapiDeferred,
+    promise_result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(|| {
+        if deferred_result.is_null() || promise_result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        if environment.deferreds.borrow().len() >= MAX_LOCAL_HANDLES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let promise = Value::pending_promise();
+        let deferred = new_opaque_handle()?;
+        environment.deferreds.borrow_mut().insert(
+            deferred as usize,
+            NapiDeferredState {
+                promise: promise.clone(),
+                settling: false,
+            },
+        );
+        let handle = match environment
+            .handles
+            .borrow_mut()
+            .create(Value::Promise(promise))
+        {
+            Ok(handle) => handle,
+            Err(status) => {
+                environment
+                    .deferreds
+                    .borrow_mut()
+                    .remove(&(deferred as usize));
+                return Err(status);
+            }
+        };
+        unsafe {
+            deferred_result.write(deferred);
+            promise_result.write(handle);
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_resolve_deferred(
+    env: NapiEnv,
+    deferred: NapiDeferred,
+    resolution: NapiValue,
+) -> i32 {
+    settle_deferred(env, deferred, resolution, false)
+}
+
+unsafe extern "C" fn api_reject_deferred(
+    env: NapiEnv,
+    deferred: NapiDeferred,
+    rejection: NapiValue,
+) -> i32 {
+    settle_deferred(env, deferred, rejection, true)
+}
+
+unsafe extern "C" fn api_is_promise(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::Promise(_))) };
+        Ok(())
+    })
+}
+
+fn settle_deferred(
+    env: NapiEnv,
+    deferred: NapiDeferred,
+    value_handle: NapiValue,
+    rejected: bool,
+) -> i32 {
+    with_ffi_status(|| {
+        if deferred.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value_handle)?;
+        let key = deferred as usize;
+        let promise = {
+            let mut deferreds = environment.deferreds.borrow_mut();
+            let deferred = deferreds.get_mut(&key).ok_or(NAPI_INVALID_ARG)?;
+            if deferred.settling {
+                return Err(NAPI_GENERIC_FAILURE);
+            }
+            deferred.settling = true;
+            deferred.promise.clone()
+        };
+
+        let result = if has_guest_callback_dispatcher(&environment) {
+            let (name, operation): (&'static str, NapiGuestOperation) = if rejected {
+                ("napi_reject_deferred", napi_guest_reject_deferred)
+            } else {
+                ("napi_resolve_deferred", napi_guest_resolve_deferred)
+            };
+            run_napi_guest_operation(
+                &environment,
+                name,
+                operation,
+                Value::Promise(promise),
+                vec![value.clone()],
+            )
+            .map(|_| ())
+        } else {
+            settle_deferred_without_interpreter(&promise, value, rejected)
+        };
+
+        if result.is_ok() {
+            environment.deferreds.borrow_mut().remove(&key);
+        } else if let Some(deferred) = environment.deferreds.borrow_mut().get_mut(&key) {
+            deferred.settling = false;
+        }
+        result
+    })
+}
+
+fn settle_deferred_without_interpreter(
+    promise: &Rc<RefCell<PromiseInner>>,
+    value: Value,
+    rejected: bool,
+) -> Result<(), i32> {
+    let mut promise = promise.borrow_mut();
+    if !promise.reactions.is_empty() {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    if !rejected
+        && !matches!(
+            value,
+            Value::Undefined
+                | Value::Null
+                | Value::Bool(_)
+                | Value::Number(_)
+                | Value::BigInt(_)
+                | Value::String(_)
+                | Value::Symbol(_)
+        )
+    {
+        // Assimilating an object or another promise can execute guest code,
+        // which is allowed only through the active interpreter dispatcher.
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    if promise.state == PromiseState::Pending {
+        promise.resolution_locked = true;
+        promise.state = if rejected {
+            PromiseState::Rejected
+        } else {
+            PromiseState::Fulfilled
+        };
+        promise.external_pending = false;
+        promise.value = value;
+    }
+    Ok(())
+}
+
 unsafe extern "C" fn api_define_properties(
     env: NapiEnv,
     object: NapiValue,
@@ -3591,6 +3800,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             owner: Rc::downgrade(&self.state),
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
+            deferreds: RefCell::new(HashMap::new()),
             wraps: RefCell::new(HashMap::new()),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
@@ -3880,6 +4090,22 @@ mod tests {
     }
 
     #[test]
+    fn deferred_resolution_without_interpreter_rejects_objects_but_accepts_undefined() {
+        let promise = Value::pending_promise();
+
+        assert_eq!(
+            settle_deferred_without_interpreter(&promise, Value::object(Vec::new()), false),
+            Err(NAPI_GENERIC_FAILURE)
+        );
+        assert_eq!(promise.borrow().state, PromiseState::Pending);
+
+        settle_deferred_without_interpreter(&promise, Value::Undefined, false).unwrap();
+        let promise = promise.borrow();
+        assert_eq!(promise.state, PromiseState::Fulfilled);
+        assert!(matches!(promise.value, Value::Undefined));
+    }
+
+    #[test]
     fn loads_and_calls_a_real_napi_v1_addon_without_a_node_sidecar() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
@@ -3924,6 +4150,7 @@ static int finalizer_create_function_status = -1;
 static int descriptor_setter_value = 5;
 static int class_constructor_offset = 1;
 static int counter_static_offset = 8;
+static napi_deferred pending_promise_deferred;
 static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 
@@ -4080,6 +4307,53 @@ static napi_value construct_guest(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc < 2) return NULL;
   if (napi_new_instance(env, args[0], 1, &args[1], &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value resolved_promise(napi_env env, napi_callback_info info) {
+  napi_deferred deferred;
+  napi_value promise, resolution;
+  bool is_promise = false;
+  (void)info;
+  if (napi_create_promise(env, &deferred, &promise) != napi_ok ||
+      napi_is_promise(env, promise, &is_promise) != napi_ok || !is_promise ||
+      napi_create_string_utf8(env, "resolved-from-addon", NAPI_AUTO_LENGTH,
+                              &resolution) != napi_ok ||
+      napi_resolve_deferred(env, deferred, resolution) != napi_ok) return NULL;
+  return promise;
+}
+
+static napi_value rejected_promise(napi_env env, napi_callback_info info) {
+  napi_deferred deferred;
+  napi_value promise, rejection;
+  bool is_promise = false;
+  (void)info;
+  if (napi_create_promise(env, &deferred, &promise) != napi_ok ||
+      napi_is_promise(env, promise, &is_promise) != napi_ok || !is_promise ||
+      napi_create_string_utf8(env, "rejected-from-addon", NAPI_AUTO_LENGTH,
+                              &rejection) != napi_ok ||
+      napi_reject_deferred(env, deferred, rejection) != napi_ok) return NULL;
+  return promise;
+}
+
+static napi_value pending_promise(napi_env env, napi_callback_info info) {
+  napi_value promise;
+  bool is_promise = false;
+  (void)info;
+  if (pending_promise_deferred != NULL ||
+      napi_create_promise(env, &pending_promise_deferred, &promise) != napi_ok ||
+      napi_is_promise(env, promise, &is_promise) != napi_ok || !is_promise) return NULL;
+  return promise;
+}
+
+static napi_value resolve_pending_promise(napi_env env, napi_callback_info info) {
+  napi_value resolution, result;
+  size_t argc = 1;
+  if (pending_promise_deferred == NULL ||
+      napi_get_cb_info(env, info, &argc, &resolution, NULL, NULL) != napi_ok || argc < 1 ||
+      napi_resolve_deferred(env, pending_promise_deferred, resolution) != napi_ok ||
+      napi_get_boolean(env, true, &result) != napi_ok) return NULL;
+  pending_promise_deferred = NULL;
   return result;
 }
 
@@ -4441,6 +4715,9 @@ static napi_value duplicate_wrap_status(napi_env env, napi_callback_info info) {
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
   napi_value scratch, function, metadata, version, values, field;
+  napi_deferred initialized_deferred;
+  napi_value initialized_promise, initialized_promise_value;
+  bool initialized_is_promise = false;
   napi_value descriptor_value, descriptor_symbol, descriptor_symbol_description;
   napi_value descriptor_symbol_value;
   napi_value global, global_key, global_object_constructor;
@@ -4492,6 +4769,16 @@ NAPI_MODULE_INIT() {
       napi_open_handle_scope(env, &scope) != napi_ok ||
       napi_create_object(env, &scratch) != napi_ok ||
       napi_close_handle_scope(env, scope) != napi_ok) return NULL;
+  if (napi_is_promise(env, exports, &initialized_is_promise) != napi_ok ||
+      initialized_is_promise ||
+      napi_create_promise(env, &initialized_deferred, &initialized_promise) != napi_ok ||
+      napi_is_promise(env, initialized_promise, &initialized_is_promise) != napi_ok ||
+      !initialized_is_promise ||
+      napi_create_string_utf8(env, "resolved-during-init", NAPI_AUTO_LENGTH,
+                              &initialized_promise_value) != napi_ok ||
+      napi_resolve_deferred(env, initialized_deferred, initialized_promise_value) != napi_ok ||
+      napi_set_named_property(env, exports, "initializedPromise", initialized_promise) != napi_ok)
+    return NULL;
   if (napi_set_named_property(env, exports, "descriptorSymbol", descriptor_symbol) != napi_ok ||
       napi_define_properties(env, exports, 4, defined_properties) != napi_ok) return NULL;
       if (napi_define_class(env, "Counter", NAPI_AUTO_LENGTH, counter_constructor,
@@ -4564,6 +4851,14 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "callGuest", function) != napi_ok ||
       napi_create_function(env, "constructGuest", NAPI_AUTO_LENGTH, construct_guest, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "constructGuest", function) != napi_ok ||
+      napi_create_function(env, "resolvedPromise", NAPI_AUTO_LENGTH, resolved_promise, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "resolvedPromise", function) != napi_ok ||
+      napi_create_function(env, "rejectedPromise", NAPI_AUTO_LENGTH, rejected_promise, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "rejectedPromise", function) != napi_ok ||
+      napi_create_function(env, "pendingPromise", NAPI_AUTO_LENGTH, pending_promise, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "pendingPromise", function) != napi_ok ||
+      napi_create_function(env, "resolvePendingPromise", NAPI_AUTO_LENGTH, resolve_pending_promise, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "resolvePendingPromise", function) != napi_ok ||
       napi_create_function(env, "propertyProbe", NAPI_AUTO_LENGTH, property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "propertyProbe", function) != napi_ok ||
       napi_create_function(env, "globalProbe", NAPI_AUTO_LENGTH, global_probe, NULL, &function) != napi_ok ||
@@ -4836,6 +5131,101 @@ module.exports = {
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
+        let initialized_promise_value = interpreter
+            .eval_source("await require('./fixture.node').initializedPromise;")
+            .unwrap();
+        assert!(
+            matches!(&initialized_promise_value, Value::String(value) if value == "resolved-during-init"),
+            "unexpected initialized promise result: {initialized_promise_value:?}"
+        );
+        assert!(matches!(
+            interpreter
+                .eval_source("await require('./fixture.node').resolvedPromise();")
+                .unwrap(),
+            Value::String(ref value) if value == "resolved-from-addon"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "try { await require('./fixture.node').rejectedPromise(); } catch (reason) { reason; }"
+                )
+                .unwrap(),
+            Value::String(ref value) if value == "rejected-from-addon"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "globalThis.napiHostPendingPromise = require('./fixture.node').pendingPromise(); globalThis.napiHostPendingResult = 'waiting'; globalThis.napiHostPendingPromise.then(value => { globalThis.napiHostPendingResult = value; }); 'created';"
+                )
+                .unwrap(),
+            Value::String(ref value) if value == "created"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "require('./fixture.node').resolvePendingPromise({ then: resolve => resolve('settled-after-callback') });"
+                )
+                .unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source("await globalThis.napiHostPendingPromise;")
+                .unwrap(),
+            Value::String(ref value) if value == "settled-after-callback"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source("globalThis.napiHostPendingResult;")
+                .unwrap(),
+            Value::String(ref value) if value == "settled-after-callback"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "globalThis.napiHostAdoptedPromise = require('./fixture.node').pendingPromise(); 'created';"
+                )
+                .unwrap(),
+            Value::String(ref value) if value == "created"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "require('./fixture.node').resolvePendingPromise(require('./fixture.node').resolvedPromise());"
+                )
+                .unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source("await globalThis.napiHostAdoptedPromise;")
+                .unwrap(),
+            Value::String(ref value) if value == "resolved-from-addon"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "globalThis.napiHostRejectedThenable = require('./fixture.node').pendingPromise(); 'created';"
+                )
+                .unwrap(),
+            Value::String(ref value) if value == "created"
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "require('./fixture.node').resolvePendingPromise({ then() { throw new TypeError('thenable failed'); } });"
+                )
+                .unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "try { await globalThis.napiHostRejectedThenable; } catch (error) { error.message; }"
+                )
+                .unwrap(),
+            Value::String(ref value) if value == "thenable failed"
+        ));
         assert!(matches!(result.get_prop("same"), Some(Value::Bool(true))));
         assert!(matches!(result.get_prop("global"), Some(Value::Bool(true))));
         assert!(matches!(

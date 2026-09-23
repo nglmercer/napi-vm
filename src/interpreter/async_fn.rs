@@ -105,7 +105,8 @@ impl Interpreter {
                         state,
                         value,
                     } => self.settle_host_promise(promise, state, value)?,
-                    crate::interpreter::Job::Reaction { .. } => {
+                    crate::interpreter::Job::Reaction { .. }
+                    | crate::interpreter::Job::PromiseResolveThenable { .. } => {
                         unreachable!("timers are callbacks")
                     }
                 }

@@ -143,6 +143,30 @@ test("resolving with a thenable adopts its value", () => {
   expect(runCode("await Promise.resolve({ then(res) { res(42); } });")).toBe("42");
 });
 
+test("thenable resolution runs its then method as a microtask", () => {
+  expect(
+    runCode(
+      "let events = []; const promise = Promise.resolve({ then(resolve) { events.push('then'); resolve(1); } }); events.push('sync'); await promise; events.join(',');",
+    ),
+  ).toBe("sync,then");
+});
+
+test("a throwing then getter rejects the promise", () => {
+  expect(
+    runCode(
+      "const thenable = { get then() { throw new TypeError('then getter failed'); } }; await Promise.resolve(thenable).catch(error => error.message);",
+    ),
+  ).toBe("then getter failed");
+});
+
+test("promise resolution ignores later resolve and reject calls", () => {
+  expect(
+    runCode(
+      "let resolveSource; let rejectOuter; const source = new Promise(resolve => { resolveSource = resolve; }); const outer = new Promise((resolve, reject) => { rejectOuter = reject; resolve({ then(resolveThenable) { resolveThenable(source); resolveThenable('second'); rejectOuter('third'); } }); }); resolveSource('first'); await outer;",
+    ),
+  ).toBe("first");
+});
+
 test("resolving with a rejecting thenable rejects", () => {
   expect(
     runCode("await Promise.resolve({ then(_, rej) { rej('no'); } }).catch((e) => e);"),

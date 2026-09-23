@@ -7,6 +7,7 @@ typedef void* napi_env;
 typedef void* napi_value;
 typedef void* napi_callback_info;
 typedef void* napi_handle_scope;
+typedef void* napi_deferred;
 typedef int32_t napi_status;
 typedef int32_t napi_typedarray_type;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
@@ -115,6 +116,10 @@ typedef struct napi_vm_node_api_table {
                              napi_value*, void**);
   napi_status (*open_handle_scope)(napi_env, napi_handle_scope*);
   napi_status (*close_handle_scope)(napi_env, napi_handle_scope);
+  napi_status (*create_promise)(napi_env, napi_deferred*, napi_value*);
+  napi_status (*resolve_deferred)(napi_env, napi_deferred, napi_value);
+  napi_status (*reject_deferred)(napi_env, napi_deferred, napi_value);
+  napi_status (*is_promise)(napi_env, napi_value, bool*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -646,4 +651,31 @@ NAPI_VM_EXPORT napi_status napi_close_handle_scope(napi_env env,
                                                     napi_handle_scope scope) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->close_handle_scope(env, scope) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_promise(napi_env env,
+                                                napi_deferred* deferred,
+                                                napi_value* promise) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_promise(env, deferred, promise) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_resolve_deferred(napi_env env,
+                                                  napi_deferred deferred,
+                                                  napi_value resolution) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->resolve_deferred(env, deferred, resolution) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_reject_deferred(napi_env env,
+                                                 napi_deferred deferred,
+                                                 napi_value rejection) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->reject_deferred(env, deferred, rejection) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_is_promise(napi_env env, napi_value value,
+                                            bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_promise(env, value, result) : 9;
 }

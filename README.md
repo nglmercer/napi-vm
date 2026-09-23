@@ -192,7 +192,12 @@ ordinary object collection time. `napi_create_buffer`,
 supported; these bytes appear to guest code as `Uint8Array` views. External
 buffers are not implemented. ArrayBuffer, typed-array, and DataView creation,
 type checks, and info APIs share backing storage with guest views and preserve
-byte offsets. Async work and thread-safe functions are not implemented.
+byte offsets. `napi_create_promise`, deferred resolution/rejection, and
+`napi_is_promise` use the VM's Promise and microtask implementation. During
+module initialization, deferreds can be settled directly with primitive
+resolutions or any rejection. Object and promise resolutions require an active
+interpreter callback dispatcher because checking thenability can execute guest
+code. Async work and thread-safe functions are not implemented.
 Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
 requires a C compiler at build time, and native addons have the desktop
 process's full privileges in either backend.

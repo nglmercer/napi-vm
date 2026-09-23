@@ -29,6 +29,14 @@ pub enum Job {
         value: Value,
         reaction: Reaction,
     },
+    /// Invoke a thenable's `then` method in a PromiseResolveThenableJob, after
+    /// the current JavaScript stack has finished.
+    PromiseResolveThenable {
+        target: Rc<RefCell<PromiseInner>>,
+        thenable: Value,
+        then: Value,
+        resolution_guard: Value,
+    },
     /// A plain callback: `queueMicrotask(fn)`, or a timer callback.
     Callback { callback: Value, args: Vec<Value> },
     /// Callback queued by a host runtime after an external event. Unlike
@@ -125,6 +133,7 @@ pub fn settle(jobs: &Jobs, promise: &Rc<RefCell<PromiseInner>>, state: PromiseSt
             return;
         }
         inner.state = state;
+        inner.resolution_locked = true;
         inner.external_pending = false;
         inner.value = value.clone();
         std::mem::take(&mut inner.reactions)

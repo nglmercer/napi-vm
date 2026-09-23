@@ -681,6 +681,10 @@ pub struct Reaction {
     pub on_fulfilled: Value,
     pub on_rejected: Value,
     pub derived: Rc<RefCell<PromiseInner>>,
+    /// Adoption reactions settle their target directly after following the
+    /// source promise; they must not re-enter the target's already-used
+    /// resolve function.
+    pub adopted: bool,
 }
 
 /// The shared state of one promise.
@@ -691,6 +695,9 @@ pub struct Reaction {
 #[derive(Debug)]
 pub struct PromiseInner {
     pub state: PromiseState,
+    /// The promise's resolve or reject function has already been called.
+    /// Resolution can remain pending while it adopts a thenable or promise.
+    pub resolution_locked: bool,
     /// Set while settlement depends on an external host event. This marker is
     /// propagated to chained promises so a synchronous await can pump the
     /// event loop only when its own promise needs host work.
@@ -710,6 +717,7 @@ impl Default for PromiseInner {
     fn default() -> Self {
         Self {
             state: PromiseState::Pending,
+            resolution_locked: false,
             external_pending: false,
             value: Value::Undefined,
             reactions: Vec::new(),
@@ -1005,6 +1013,7 @@ impl Value {
     pub fn settled_promise(state: PromiseState, value: Value) -> Self {
         Value::Promise(Rc::new(RefCell::new(PromiseInner {
             state,
+            resolution_locked: true,
             external_pending: false,
             value,
             reactions: Vec::new(),

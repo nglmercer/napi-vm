@@ -89,7 +89,12 @@ these finalizers do not run at normal object collection time. `napi_create_buffe
 supported. N-API buffers are surfaced as guest `Uint8Array` views; external
 buffers are not implemented. ArrayBuffer, typed-array, and DataView creation,
 type checks, and info APIs share storage with guest views and preserve byte
-offsets. Async and thread-safe APIs remain unavailable. It is still an
+offsets. `napi_create_promise`, deferred resolution/rejection, and
+`napi_is_promise` use the VM's Promise and microtask implementation. During
+module initialization, deferreds can be settled directly with primitive
+resolutions or any rejection. Object and promise resolutions require an active
+interpreter callback dispatcher because checking thenability can execute guest
+code. Async and thread-safe APIs remain unavailable. It is still an
 incomplete compatibility backend, and unimplemented imported symbols fail at
 load time.
 
