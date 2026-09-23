@@ -7384,10 +7384,13 @@ fn napi_constructor_has_custom_has_instance(constructor: &Value) -> Result<bool,
         {
             // An explicit nullish value shadows any inherited method and
             // restores ordinary class prototype checking.
-            return Ok(!matches!(
-                value.deref_binding(),
-                Value::Undefined | Value::Null
-            ));
+            let value = value.deref_binding();
+            if matches!(value, Value::Undefined | Value::Null) {
+                return Ok(false);
+            }
+            if !crate::builtins::is_default_has_instance_method(&value) {
+                return Ok(true);
+            }
         }
         if let Value::Function(function) = &current
             && let Some(bound) = &function.bound
@@ -13270,6 +13273,10 @@ Object.defineProperty(BoundOwnMarkedFunction, Symbol.hasInstance, {
 });
 function Ordinary(value) { this.value = value; }
 const ordinary = new Ordinary(17);
+const hasInstanceDescriptor = Object.getOwnPropertyDescriptor(
+  Function.prototype,
+  Symbol.hasInstance,
+);
 const BoundOrdinary = Ordinary.bind({value: -1}, 23);
 const boundOrdinary = new BoundOrdinary();
 class ClassConstructor { constructor(value) { this.value = value; } }
@@ -13332,6 +13339,18 @@ module.exports = {
   reboundName: reboundAdd.name,
   reboundLength: reboundAdd.length,
   boundArrowConstructThrows,
+  functionPrototypeHasInstanceIsFunction:
+    typeof Function.prototype[Symbol.hasInstance] === 'function',
+  functionPrototypeHasInstanceDescriptor:
+    hasInstanceDescriptor.writable === false &&
+    hasInstanceDescriptor.enumerable === false &&
+    hasInstanceDescriptor.configurable === false,
+  functionPrototypeHasInstanceOrdinary:
+    Function.prototype[Symbol.hasInstance].call(Ordinary, ordinary),
+  functionPrototypeHasInstanceBound:
+    Function.prototype[Symbol.hasInstance].call(BoundOrdinary, boundOrdinary),
+  functionPrototypeHasInstanceRejectsNonFunction:
+    Function.prototype[Symbol.hasInstance].call({}, ordinary) === false,
   ordinaryIsObject: ordinary instanceof Object,
   ordinaryIsFunction: Ordinary instanceof Function,
   ordinaryPrototypeIsObject: Ordinary.prototype instanceof Object,
@@ -13772,6 +13791,30 @@ module.exports = {
         };
         let vm_result: serde_json::Value = serde_json::from_str(custom_instance_json).unwrap();
         let mut expected_vm_result = vm_result.clone();
+        let has_instance_result_keys = [
+            "functionPrototypeHasInstanceIsFunction",
+            "functionPrototypeHasInstanceDescriptor",
+            "functionPrototypeHasInstanceOrdinary",
+            "functionPrototypeHasInstanceBound",
+            "functionPrototypeHasInstanceRejectsNonFunction",
+        ];
+        let has_instance_results = has_instance_result_keys
+            .iter()
+            .map(|key| ((*key).to_string(), vm_result[*key].clone()))
+            .collect::<serde_json::Map<_, _>>();
+        for key in has_instance_result_keys {
+            expected_vm_result.as_object_mut().unwrap().remove(key);
+        }
+        assert_eq!(
+            serde_json::Value::Object(has_instance_results),
+            serde_json::json!({
+                "functionPrototypeHasInstanceIsFunction": true,
+                "functionPrototypeHasInstanceDescriptor": true,
+                "functionPrototypeHasInstanceOrdinary": true,
+                "functionPrototypeHasInstanceBound": true,
+                "functionPrototypeHasInstanceRejectsNonFunction": true
+            })
+        );
         let bound_result_keys = [
             "boundFunctionMatched",
             "boundGuestFunctionMatched",

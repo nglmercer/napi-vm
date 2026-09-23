@@ -103,14 +103,16 @@ Queries for values whose built-in prototype is not represented (including
 arrays, proxies, and native callback function values) return a generic
 Node-API failure.
 `napi_instanceof` handles VM class constructors and ordinary function
-constructors, inherited prototypes, VM error classes, and guest-defined
-`Symbol.hasInstance` methods when called through the active paused-callback
-dispatcher. Custom methods receive the constructor as `this`, and their results
-follow JavaScript truthiness. Ordinary functions share a lazily created own
+constructors, inherited prototypes, VM error classes, and the shared
+`Function.prototype[Symbol.hasInstance]` intrinsic. Guest-defined
+`Symbol.hasInstance` methods run through the active paused-callback dispatcher;
+they receive the constructor as `this`, and their results follow JavaScript
+truthiness. Ordinary functions share a lazily created own
 `prototype` object with constructed instances and inherit from a shared
 callable `Function.prototype`; function `name`, `length`, and `prototype`
 descriptors participate in guest and Node-API property reflection. The current
-Function.prototype method surface includes `call`, `apply`, and `bind`.
+Function.prototype method surface includes `call`, `apply`, `bind`, and
+`[Symbol.hasInstance]`.
 `apply` accepts array-like arguments, and bound functions preserve call,
 construction, prototype, `name`, and `length` behavior for supported targets.
 Source-aware `toString` behavior and callable proxies remain incomplete.

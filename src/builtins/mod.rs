@@ -17,7 +17,7 @@ mod symbol;
 mod typedarray;
 mod web;
 
-pub(crate) use function::function_method;
+pub(crate) use function::{function_method, is_default_has_instance_method};
 pub(crate) use promise::promise_method;
 
 pub use array::array_method;

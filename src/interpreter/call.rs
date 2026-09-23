@@ -102,6 +102,20 @@ impl Interpreter {
             ));
         }
 
+        self.ordinary_instance_of(object, constructor)
+    }
+
+    /// Perform the ordinary prototype-based `instanceof` check without
+    /// looking up `Symbol.hasInstance`. The intrinsic method uses this path
+    /// after the operator has selected it.
+    pub(crate) fn ordinary_instance_of(
+        &mut self,
+        object: &Value,
+        constructor: &Value,
+    ) -> Result<Value, VmErr> {
+        if !is_callable_value(constructor) {
+            return Ok(Value::Bool(false));
+        }
         if let Value::Function(function) = constructor
             && let Some(bound) = &function.bound
         {

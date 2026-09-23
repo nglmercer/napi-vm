@@ -59,6 +59,24 @@ pub(super) fn install(e: &mut Environment) {
     prototype
         .set_prop("bind".to_string(), super::nf("bind", function_bind))
         .expect("Function.prototype.bind");
+    let has_instance =
+        crate::builtins::well_known("hasInstance").expect("Symbol.hasInstance is well-known");
+    if let Value::Symbol(symbol) = &has_instance {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        prototype
+            .set_prop(
+                key.clone(),
+                super::nf("[Symbol.hasInstance]", function_has_instance),
+            )
+            .expect("Function.prototype[Symbol.hasInstance]");
+        if let Value::Function(function) = &prototype {
+            function
+                .properties
+                .meta
+                .borrow_mut()
+                .set_symbol_key(&key, symbol.clone());
+        }
+    }
     if let Value::Function(function) = &prototype {
         function.properties.meta.borrow_mut().set_attrs(
             "call",
@@ -79,6 +97,17 @@ pub(super) fn install(e: &mut Environment) {
             crate::value::PropAttrs {
                 enumerable: false,
                 ..crate::value::PropAttrs::default()
+            },
+        );
+        function.properties.meta.borrow_mut().set_attrs(
+            &crate::interpreter::symbol_slot_key(match &has_instance {
+                Value::Symbol(symbol) => symbol,
+                _ => unreachable!("well-known symbol hasInstance"),
+            }),
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
             },
         );
     }
@@ -107,6 +136,12 @@ pub(crate) fn function_method(name: &str) -> Option<Value> {
         "bind" => super::nf("bind", function_bind),
         _ => return None,
     })
+}
+
+pub(crate) fn is_default_has_instance_method(value: &Value) -> bool {
+    let expected: super::NativeFn = function_has_instance;
+    matches!(value, Value::NativeFunction { callable, .. }
+        if std::ptr::fn_addr_eq(*callable, expected))
 }
 
 fn function_bind(
@@ -235,6 +270,23 @@ fn is_constructor(value: &Value) -> bool {
         }
         _ => false,
     }
+}
+
+fn function_has_instance(
+    interp: &mut Interpreter,
+    target: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if !is_callable(&target) {
+        return Ok(Value::Bool(false));
+    }
+    let object = args.first().cloned().unwrap_or(Value::Undefined);
+    if let Value::Function(function) = &target
+        && let Some(bound) = &function.bound
+    {
+        return interp.instance_of(&object, &bound.target);
+    }
+    interp.ordinary_instance_of(&object, &target)
 }
 
 fn function_call(

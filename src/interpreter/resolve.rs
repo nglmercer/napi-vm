@@ -5,7 +5,7 @@ use super::Interpreter;
 use crate::error::VmErr;
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use crate::lang::CompletionKind;
-use crate::value::{BoxedPrimitive, Value};
+use crate::value::{BoxedPrimitive, FunctionData, Value};
 
 impl Interpreter {
     /// Resolve an object's represented [[Prototype]], including the realm's
@@ -631,6 +631,14 @@ impl Interpreter {
                 } else {
                     Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
                 }
+            }
+            (Value::NativeFunction { .. } | Value::HostFunction { .. }, Value::Symbol(symbol)) => {
+                let Some(prototype) =
+                    FunctionData::default_function_prototype(&self.persistent_global)
+                else {
+                    return Ok(Value::Undefined);
+                };
+                lookup_chain(&prototype, &super::symbol_slot_key(symbol))
             }
 
             // A typed array resolves an index to an element and anything
