@@ -35,7 +35,8 @@ pub(crate) use symbol::{
     is_iterator_symbol, symbol_for, symbol_for_key, symbol_key_for, well_known,
 };
 pub use typedarray::{
-    array_buffer_member, data_view_member, note_method, read_element, typed_member, write_element,
+    array_buffer_member, data_view_member, note_method, read_element, shared_array_buffer_member,
+    typed_member, write_element,
 };
 
 use crate::error::VmErr;
@@ -52,6 +53,8 @@ pub fn setup_builtins(env: &Env) {
         "WeakMap",
         "WeakSet",
         "DataView",
+        "SharedArrayBuffer",
+        "Atomics",
         "RegExp",
         "Function",
         "globalThis",

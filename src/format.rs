@@ -212,6 +212,9 @@ fn render_plain_value(
         Value::ArrayBuffer(bytes) => {
             output.push_str(&format!("[object ArrayBuffer({})]", bytes.borrow().len()))
         }
+        Value::SharedArrayBuffer(bytes) => {
+            output.push_str(&format!("[object SharedArrayBuffer({})]", bytes.len()))
+        }
         Value::TypedArray(view) => output.push_str(&format!(
             "{}({})",
             view.kind.name(),
@@ -437,6 +440,11 @@ fn render_inspect_value(
             context.output,
             "2;37",
             &format!("ArrayBuffer({})", bytes.borrow().len()),
+        ),
+        Value::SharedArrayBuffer(bytes) => painter.write_wrapped(
+            context.output,
+            "2;37",
+            &format!("SharedArrayBuffer({})", bytes.len()),
         ),
         Value::TypedArray(view) => painter.write_wrapped(
             context.output,

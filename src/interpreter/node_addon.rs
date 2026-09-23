@@ -1768,8 +1768,18 @@ fn guest_to_wire(
             };
             json!({"t":"object","id":format!("g:{node_id}"),"v":wire,"prototype":prototype,"extensible":extensible})
         }
+        Value::SharedArrayBuffer(_) => {
+            return Err(VmErr::Msg(
+                "SharedArrayBuffer cannot cross the Node sidecar bridge because shared memory cannot be preserved".into(),
+            ));
+        }
         Value::ArrayBuffer(bytes) => json!({"t":"arrayBuffer","v":&*bytes.borrow()}),
         Value::TypedArray(view) => {
+            if view.buffer.is_shared() {
+                return Err(VmErr::Msg(
+                    "a typed array over SharedArrayBuffer cannot cross the Node sidecar bridge because shared memory cannot be preserved".into(),
+                ));
+            }
             let start = view.effective_byte_offset();
             let byte_len = view
                 .effective_length()
@@ -1778,22 +1788,27 @@ fn guest_to_wire(
             let end = start
                 .checked_add(byte_len)
                 .ok_or_else(|| VmErr::Msg("guest typed array exceeds the bridge limit".into()))?;
-            let bytes = view.buffer.borrow();
-            let slice = bytes
-                .get(start..end)
+            let bytes = view
+                .buffer
+                .read(start, end - start)
                 .ok_or_else(|| VmErr::Msg("guest typed array has an invalid byte range".into()))?;
-            json!({"t":"typedArray","kind":view.kind.name(),"length":view.effective_length(),"bytes":slice})
+            json!({"t":"typedArray","kind":view.kind.name(),"length":view.effective_length(),"bytes":bytes})
         }
         Value::DataView(view) => {
+            if view.buffer.is_shared() {
+                return Err(VmErr::Msg(
+                    "a DataView over SharedArrayBuffer cannot cross the Node sidecar bridge because shared memory cannot be preserved".into(),
+                ));
+            }
             let start = view.effective_byte_offset();
             let end = start
                 .checked_add(view.effective_length())
                 .ok_or_else(|| VmErr::Msg("guest DataView exceeds the bridge limit".into()))?;
-            let bytes = view.buffer.borrow();
-            let slice = bytes
-                .get(start..end)
+            let bytes = view
+                .buffer
+                .read(start, end - start)
                 .ok_or_else(|| VmErr::Msg("guest DataView has an invalid byte range".into()))?;
-            json!({"t":"dataView","length":view.effective_length(),"bytes":slice})
+            json!({"t":"dataView","length":view.effective_length(),"bytes":bytes})
         }
         Value::BigInt(x) => json!({"t":"bigint","v":x.to_string()}),
         Value::Date(milliseconds) => {
@@ -2839,7 +2854,7 @@ fn wire_to_guest_with_context(
             }
             Ok(Value::TypedArray(Rc::new(TypedArrayData {
                 kind,
-                buffer: Buffer::owned(bytes),
+                buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
                 length,
             })))
@@ -2861,7 +2876,7 @@ fn wire_to_guest_with_context(
             }
             Ok(Value::DataView(Rc::new(TypedArrayData {
                 kind: TypedKind::Uint8,
-                buffer: Buffer::owned(bytes),
+                buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
                 length,
             })))

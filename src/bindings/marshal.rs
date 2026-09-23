@@ -236,6 +236,11 @@ fn to_napi_d(
             Value::ArrayBuffer(bytes) => {
                 out = make_array_buffer(env, &bytes.borrow())?;
             }
+            Value::SharedArrayBuffer(_) => {
+                return Err(VmErr::Msg(
+                    "SharedArrayBuffer cannot cross the napi-vm Node-API binding without shared-memory support".into(),
+                ));
+            }
             Value::TypedArray(view) | Value::DataView(view) => {
                 out = make_typed_array(env, v, view)?;
             }
@@ -358,11 +363,15 @@ fn make_typed_array(
     } else {
         view.effective_length() * element_bytes
     };
-    let source = view.buffer.borrow();
+    if view.buffer.is_shared() {
+        return Err(VmErr::Msg(
+            "a view over SharedArrayBuffer cannot cross the napi-vm Node-API binding without shared-memory support".into(),
+        ));
+    }
+    let source = view.buffer.snapshot();
     let from = byte_offset.min(source.len());
     let to = (from + byte_length).min(source.len());
     let buffer = make_array_buffer(env, &source[from..to])?;
-    drop(source);
 
     unsafe {
         let mut out = ptr::null_mut();
@@ -559,7 +568,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
         Ok(Value::TypedArray(std::rc::Rc::new(
             crate::value::TypedArrayData {
                 kind,
-                buffer: Buffer::owned(bytes),
+                buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
                 length,
             },

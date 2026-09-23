@@ -196,12 +196,17 @@ shutdown drain, so finalizers that need to enter JavaScript must be processed
 while the runtime event loop is still active.
 The experimental `node_api_create_sharedarraybuffer`,
 `node_api_create_external_sharedarraybuffer`, and
-`node_api_is_sharedarraybuffer` entry points are not exported yet. The value
-model currently has no distinct shared-buffer storage or guest `Atomics`
-implementation; treating one as an ordinary `ArrayBuffer` would incorrectly
-promise shared-memory behavior. An addon that imports these symbols therefore
-fails during native-library loading. Implement them only alongside a distinct
-shared backing store, typed-view support, and concurrency-safe guest access.
+`node_api_is_sharedarraybuffer` entry points are exported. Owned shared byte
+stores have aligned backing memory and are distinct from ordinary
+`ArrayBuffer` values. Guest `SharedArrayBuffer`, typed-array, and `DataView`
+accesses use atomic byte operations, and structured cloning creates a new
+shared-buffer object over the same data block. External shared buffers preserve
+the `node_api_noenv_finalize` callback signature and run that callback on the
+owner thread during host shutdown. The guest `Atomics` object supports
+`isLockFree`, `load`, `store`, arithmetic and bitwise read-modify-write calls,
+`exchange`, and `compareExchange` for integer typed arrays. `wait`, `waitAsync`,
+and `notify` still need an event-loop-aware wait/notification mechanism and are
+reported as a `MISSING_METHOD` compatibility gap.
 The stable v1 `napi_get_node_version` function returns a numeric compatibility
 profile from `RustNodeApiOptions::reported_node_version`; the default is
 `0.0.0`, and the release name is `napi-vm`. This reports metadata only and does
@@ -376,7 +381,9 @@ not return success with a partial or fabricated result.
   interface, the ABI stability boundary, and experimental
   [`node_api_set_prototype`](https://nodejs.org/api/n-api.html#node_api_set_prototype) and
   [`node_api_create_object_with_properties`](https://nodejs.org/api/n-api.html#node_api_create_object_with_properties) and
-  [`node_api_post_finalizer`](https://nodejs.org/api/n-api.html#node_api_post_finalizer).
+  [`node_api_post_finalizer`](https://nodejs.org/api/n-api.html#node_api_post_finalizer),
+  [`node_api_create_sharedarraybuffer`](https://nodejs.org/api/n-api.html#node_api_create_sharedarraybuffer),
+  and [`node_api_create_external_sharedarraybuffer`](https://nodejs.org/api/n-api.html#node_api_create_external_sharedarraybuffer).
 - [Node.js C++ addons](https://nodejs.org/api/addons.html) distinguishes
   Node-API, NAN, and direct V8/Node/libuv addon styles.
 - [Node.js CommonJS modules](https://nodejs.org/api/modules.html) documents

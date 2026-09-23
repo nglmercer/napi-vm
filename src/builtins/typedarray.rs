@@ -10,7 +10,9 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{Buffer, TypedArrayData, TypedKind, Value};
+use crate::value::{
+    Buffer, BufferBacking, SharedAtomicOp, SharedBuffer, TypedArrayData, TypedKind, Value,
+};
 
 /// Every typed-array constructor, in the order the specification lists them.
 const KINDS: &[(&str, TypedKind)] = &[
@@ -36,6 +38,33 @@ pub(super) fn install(e: &mut Environment) {
             )
             .expect("built-in ArrayBuffer property");
         super::make_callable(&namespace, new_array_buffer, None);
+    }
+    if let Some(namespace) = e.get("SharedArrayBuffer") {
+        namespace
+            .set_prop(
+                "slice".to_string(),
+                super::nf("slice", shared_array_buffer_slice),
+            )
+            .expect("built-in SharedArrayBuffer property");
+        super::make_callable(&namespace, new_shared_array_buffer, None);
+    }
+    if let Some(namespace) = e.get("Atomics") {
+        for (name, method) in [
+            ("isLockFree", atomics_is_lock_free as _),
+            ("load", atomics_load as _),
+            ("store", atomics_store as _),
+            ("add", atomics_add as _),
+            ("sub", atomics_sub as _),
+            ("and", atomics_and as _),
+            ("or", atomics_or as _),
+            ("xor", atomics_xor as _),
+            ("exchange", atomics_exchange as _),
+            ("compareExchange", atomics_compare_exchange as _),
+        ] {
+            namespace
+                .set_prop(name.to_string(), super::nf(name, method))
+                .expect("built-in Atomics property");
+        }
     }
     if let Some(namespace) = e.get("DataView") {
         super::make_callable(&namespace, new_data_view, None);
@@ -95,6 +124,295 @@ fn new_array_buffer(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
     Ok(Value::ArrayBuffer(new_buffer(length as usize)?))
 }
 
+fn new_shared_array_buffer(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let length = a.first().map(|v| v.to_number()).unwrap_or(0.0);
+    if !length.is_finite() || length < 0.0 {
+        return Err(range_err("Invalid shared array buffer length"));
+    }
+    let length = length as usize;
+    if length > crate::value::MAX_ARRAY_LEN * 8 {
+        return Err(range_err("Invalid shared array buffer length"));
+    }
+    let buffer = SharedBuffer::zeroed(length)
+        .ok_or_else(|| range_err("Invalid shared array buffer length"))?;
+    Ok(Value::SharedArrayBuffer(buffer))
+}
+
+fn atomics_is_lock_free(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Some(value) = args.first() else {
+        return Ok(Value::Bool(false));
+    };
+    if matches!(value, Value::BigInt(_) | Value::Symbol(_)) {
+        return Err(VmErr::Msg(
+            "TypeError: cannot convert value to a lock-free size".into(),
+        ));
+    }
+    let size = interp.tn(value).trunc();
+    let size = if size.is_finite() && size >= 0.0 {
+        size as usize
+    } else {
+        0
+    };
+    Ok(Value::Bool(SharedBuffer::is_lock_free(size)))
+}
+
+#[derive(Clone, Copy)]
+enum AtomicsMethod {
+    Load,
+    Store,
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    Exchange,
+    CompareExchange,
+}
+
+fn atomics_load(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Load)
+}
+fn atomics_store(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Store)
+}
+fn atomics_add(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Add)
+}
+fn atomics_sub(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Sub)
+}
+fn atomics_and(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::And)
+}
+fn atomics_or(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Or)
+}
+fn atomics_xor(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Xor)
+}
+fn atomics_exchange(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::Exchange)
+}
+fn atomics_compare_exchange(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    atomics(i, &a, AtomicsMethod::CompareExchange)
+}
+
+fn atomics(
+    interp: &mut Interpreter,
+    args: &[Value],
+    method: AtomicsMethod,
+) -> Result<Value, VmErr> {
+    let Some(Value::TypedArray(view)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics requires an integer typed array".into(),
+        ));
+    };
+    if !matches!(
+        view.kind,
+        TypedKind::Int8
+            | TypedKind::Uint8
+            | TypedKind::Int16
+            | TypedKind::Uint16
+            | TypedKind::Int32
+            | TypedKind::Uint32
+            | TypedKind::BigInt64
+            | TypedKind::BigUint64
+    ) {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics requires an integer typed array".into(),
+        ));
+    }
+    let index_value = args
+        .get(1)
+        .ok_or_else(|| VmErr::Msg("TypeError: Atomics index is required".into()))?;
+    if matches!(index_value, Value::BigInt(_) | Value::Symbol(_)) {
+        return Err(VmErr::Msg(
+            "TypeError: cannot convert value to an Atomics index".into(),
+        ));
+    }
+    let index = interp.tn(index_value).trunc();
+    if !index.is_finite() || index < 0.0 {
+        return Err(range_err("Atomics index is outside the typed array"));
+    }
+    let index = index as usize;
+    if index >= view.effective_length() {
+        return Err(range_err("Atomics index is outside the typed array"));
+    }
+    let width = view.kind.size();
+    let offset = view.effective_byte_offset() + index * width;
+    let result = match method {
+        AtomicsMethod::Load => atomics_load_bits(&view.buffer, offset, width),
+        AtomicsMethod::Store => {
+            let value = atomics_argument_bits(
+                interp,
+                view.kind,
+                args.get(2).ok_or_else(|| {
+                    VmErr::Msg("TypeError: Atomics store value is required".into())
+                })?,
+            )?;
+            if !atomics_store_bits(&view.buffer, offset, width, value) {
+                return Err(VmErr::Msg(
+                    "TypeError: atomic access is unaligned or unavailable on this target".into(),
+                ));
+            }
+            return Ok(atomics_value(view.kind, value));
+        }
+        operation => {
+            let value = atomics_argument_bits(
+                interp,
+                view.kind,
+                args.get(2)
+                    .ok_or_else(|| VmErr::Msg("TypeError: Atomics value is required".into()))?,
+            )?;
+            let replacement = if matches!(operation, AtomicsMethod::CompareExchange) {
+                atomics_argument_bits(
+                    interp,
+                    view.kind,
+                    args.get(3).ok_or_else(|| {
+                        VmErr::Msg("TypeError: Atomics replacement value is required".into())
+                    })?,
+                )?
+            } else {
+                0
+            };
+            let operation = match operation {
+                AtomicsMethod::Add => SharedAtomicOp::Add,
+                AtomicsMethod::Sub => SharedAtomicOp::Sub,
+                AtomicsMethod::And => SharedAtomicOp::And,
+                AtomicsMethod::Or => SharedAtomicOp::Or,
+                AtomicsMethod::Xor => SharedAtomicOp::Xor,
+                AtomicsMethod::Exchange => SharedAtomicOp::Exchange,
+                AtomicsMethod::CompareExchange => SharedAtomicOp::CompareExchange,
+                AtomicsMethod::Load | AtomicsMethod::Store => unreachable!(),
+            };
+            atomics_rmw_bits(&view.buffer, offset, width, operation, value, replacement)
+        }
+    };
+    result
+        .map(|value| atomics_value(view.kind, value))
+        .ok_or_else(|| {
+            VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
+        })
+}
+
+fn atomics_load_bits(buffer: &BufferBacking, offset: usize, width: usize) -> Option<u64> {
+    match buffer {
+        BufferBacking::Shared(shared) => shared.atomic_load(offset, width),
+        BufferBacking::Array(_) => {
+            let bytes = buffer.read(offset, width)?;
+            let mut bits = [0; 8];
+            bits[..width].copy_from_slice(&bytes);
+            Some(u64::from_le_bytes(bits))
+        }
+    }
+}
+
+fn atomics_store_bits(buffer: &BufferBacking, offset: usize, width: usize, value: u64) -> bool {
+    match buffer {
+        BufferBacking::Shared(shared) => shared.atomic_store(offset, width, value),
+        BufferBacking::Array(_) => buffer.write(offset, &value.to_le_bytes()[..width]),
+    }
+}
+
+fn atomics_rmw_bits(
+    buffer: &BufferBacking,
+    offset: usize,
+    width: usize,
+    operation: SharedAtomicOp,
+    value: u64,
+    replacement: u64,
+) -> Option<u64> {
+    if let BufferBacking::Shared(buffer) = buffer {
+        return buffer.atomic_rmw(offset, width, operation, value, replacement);
+    }
+
+    let previous = atomics_load_bits(buffer, offset, width)?;
+    let mask = if width == 8 {
+        u64::MAX
+    } else {
+        (1_u64 << (width * 8)) - 1
+    };
+    let next = match operation {
+        SharedAtomicOp::Add => previous.wrapping_add(value) & mask,
+        SharedAtomicOp::Sub => previous.wrapping_sub(value) & mask,
+        SharedAtomicOp::And => previous & value,
+        SharedAtomicOp::Or => previous | value,
+        SharedAtomicOp::Xor => previous ^ value,
+        SharedAtomicOp::Exchange => value,
+        SharedAtomicOp::CompareExchange => {
+            if previous == value {
+                replacement
+            } else {
+                previous
+            }
+        }
+    };
+    if !atomics_store_bits(buffer, offset, width, next) {
+        return None;
+    }
+    Some(previous)
+}
+
+fn atomics_argument_bits(
+    interp: &Interpreter,
+    kind: TypedKind,
+    value: &Value,
+) -> Result<u64, VmErr> {
+    if matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64) {
+        let bigint = match value {
+            Value::BigInt(value) => value.as_ref().clone(),
+            Value::Bool(false) => crate::bigint::BigInt::zero(),
+            Value::Bool(true) => crate::bigint::BigInt::from_i64(1),
+            Value::String(value) => crate::bigint::BigInt::parse(value)
+                .map_err(|_| VmErr::Msg("SyntaxError: invalid BigInt value".into()))?,
+            _ => {
+                return Err(VmErr::Msg(
+                    "TypeError: Atomics BigInt typed arrays require a BigInt value".into(),
+                ));
+            }
+        };
+        let wrapped = bigint.as_n_bit(64, false).map_err(VmErr::Msg)?;
+        return wrapped
+            .to_decimal()
+            .parse()
+            .map_err(|_| VmErr::Msg("RangeError: invalid Atomics BigInt value".into()));
+    }
+    if matches!(value, Value::BigInt(_) | Value::Symbol(_)) {
+        return Err(VmErr::Msg(
+            "TypeError: cannot convert value to an Atomics Number element".into(),
+        ));
+    }
+    let bits = to_int(interp.tn(value)) as u32 as u64;
+    let width = kind.size();
+    Ok(if width == 4 {
+        bits
+    } else {
+        bits & ((1_u64 << (width * 8)) - 1)
+    })
+}
+
+fn atomics_value(kind: TypedKind, bits: u64) -> Value {
+    match kind {
+        TypedKind::Int8 => Value::Number(bits as u8 as i8 as f64),
+        TypedKind::Uint8 => Value::Number(bits as u8 as f64),
+        TypedKind::Int16 => Value::Number(bits as u16 as i16 as f64),
+        TypedKind::Uint16 => Value::Number(bits as u16 as f64),
+        TypedKind::Int32 => Value::Number(bits as u32 as i32 as f64),
+        TypedKind::Uint32 => Value::Number(bits as u32 as f64),
+        TypedKind::BigInt64 => Value::BigInt(Rc::new(crate::bigint::BigInt::from_i64(bits as i64))),
+        TypedKind::BigUint64 => Value::BigInt(Rc::new(
+            crate::bigint::BigInt::parse(&bits.to_string()).expect("u64 decimal is a BigInt"),
+        )),
+        TypedKind::Uint8Clamped | TypedKind::Float32 | TypedKind::Float64 => {
+            unreachable!("Atomics cannot access non-integer typed arrays")
+        }
+    }
+}
+
 fn array_buffer_is_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::Bool(matches!(
         a.first(),
@@ -141,6 +459,25 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
             }
             Ok(typed(kind, buffer.clone(), byte_offset, length))
         }
+        Some(Value::SharedArrayBuffer(buffer)) => {
+            let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0);
+            if !byte_offset.is_finite() || byte_offset < 0.0 {
+                return Err(range_err("Invalid typed array offset"));
+            }
+            let byte_offset = byte_offset as usize;
+            let available = buffer.len();
+            if byte_offset > available || !byte_offset.is_multiple_of(size) {
+                return Err(range_err("Start offset is outside the buffer"));
+            }
+            let length = match a.get(2) {
+                Some(Value::Undefined) | None => (available - byte_offset) / size,
+                Some(v) => v.to_number().max(0.0) as usize,
+            };
+            if byte_offset + length * size > available {
+                return Err(range_err("Invalid typed array length"));
+            }
+            Ok(typed(kind, buffer.clone(), byte_offset, length))
+        }
         // A typed array or any iterable copies element-wise.
         Some(source) => {
             let items = match source {
@@ -159,10 +496,15 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
     }
 }
 
-fn typed(kind: TypedKind, buffer: Buffer, byte_offset: usize, length: usize) -> Value {
+fn typed(
+    kind: TypedKind,
+    buffer: impl Into<BufferBacking>,
+    byte_offset: usize,
+    length: usize,
+) -> Value {
     Value::TypedArray(Rc::new(TypedArrayData {
         kind,
-        buffer,
+        buffer: buffer.into(),
         byte_offset,
         length,
     }))
@@ -216,9 +558,8 @@ pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
     if index >= view.effective_length() {
         return None;
     }
-    let buffer = view.buffer.borrow();
     let at = view.effective_byte_offset() + index * view.kind.size();
-    let bytes = buffer.get(at..at + view.kind.size())?;
+    let bytes = view.buffer.read(at, view.kind.size())?;
     Some(match view.kind {
         TypedKind::Int8 => Value::Number(bytes[0] as i8 as f64),
         TypedKind::Uint8 | TypedKind::Uint8Clamped => Value::Number(bytes[0] as f64),
@@ -285,10 +626,7 @@ pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) -> 
             }
         }
     };
-    let mut buffer = view.buffer.borrow_mut();
-    if at + size <= buffer.len() {
-        buffer[at..at + size].copy_from_slice(&bytes);
-    }
+    view.buffer.write(at, &bytes);
     Ok(())
 }
 
@@ -323,7 +661,7 @@ pub fn typed_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
         "byteLength" => Value::Number((length * view.kind.size()) as f64),
         "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
         "BYTES_PER_ELEMENT" => Value::Number(view.kind.size() as f64),
-        "buffer" => Value::ArrayBuffer(view.buffer.clone()),
+        "buffer" => view.buffer.to_value(),
         "set" => super::nf("set", typed_set),
         "subarray" => super::nf("subarray", typed_subarray),
         "slice" => super::nf("slice", typed_slice),
@@ -470,13 +808,10 @@ fn typed_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value,
     let (start, end) = window(view.effective_length(), &a);
     let size = view.kind.size();
     let copy = new_buffer((end - start) * size)?;
-    {
-        let source = view.buffer.borrow();
-        let from = view.effective_byte_offset() + start * size;
-        let to = view.effective_byte_offset() + end * size;
-        if to <= source.len() {
-            copy.borrow_mut().copy_from_slice(&source[from..to]);
-        }
+    let from = view.effective_byte_offset() + start * size;
+    let to = view.effective_byte_offset() + end * size;
+    if let Some(source) = view.buffer.read(from, to - from) {
+        copy.borrow_mut().copy_from_slice(&source);
     }
     Ok(typed(view.kind, copy, 0, end - start))
 }
@@ -511,6 +846,14 @@ pub fn array_buffer_member(buffer: &Buffer, key: &str) -> Option<Value> {
     })
 }
 
+pub fn shared_array_buffer_member(buffer: &SharedBuffer, key: &str) -> Option<Value> {
+    Some(match key {
+        "byteLength" => Value::Number(buffer.len() as f64),
+        "slice" => super::nf("slice", shared_array_buffer_slice),
+        _ => return None,
+    })
+}
+
 fn array_buffer_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let Value::ArrayBuffer(buffer) = &this else {
         return Err(VmErr::Msg("TypeError: not an ArrayBuffer".to_string()));
@@ -528,20 +871,43 @@ fn array_buffer_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     Ok(Value::ArrayBuffer(copy))
 }
 
+fn shared_array_buffer_slice(
+    _: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Value::SharedArrayBuffer(buffer) = &this else {
+        return Err(VmErr::Msg("TypeError: not a SharedArrayBuffer".to_string()));
+    };
+    let (start, end) = window(buffer.len(), &a);
+    let copy = SharedBuffer::zeroed(end - start)
+        .ok_or_else(|| range_err("Invalid shared array buffer length"))?;
+    let bytes = buffer
+        .read(start, end - start)
+        .ok_or_else(|| range_err("Invalid shared array buffer range"))?;
+    copy.write(0, &bytes);
+    Ok(Value::SharedArrayBuffer(copy))
+}
+
 // --- DataView ---------------------------------------------------------------
 
 fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Some(Value::ArrayBuffer(buffer)) = a.first() else {
+    let Some(value @ (Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_))) = a.first() else {
         return Err(VmErr::Msg(
             "TypeError: First argument to DataView constructor must be an ArrayBuffer".to_string(),
         ));
     };
-    if buffer.is_detached() {
+    if matches!(value, Value::ArrayBuffer(buffer) if buffer.is_detached()) {
         return Err(VmErr::Msg(
             "TypeError: Cannot construct a DataView from a detached ArrayBuffer".to_string(),
         ));
     }
-    let available = buffer.borrow().len();
+    let backing = match value {
+        Value::ArrayBuffer(buffer) => BufferBacking::Array(buffer.clone()),
+        Value::SharedArrayBuffer(buffer) => BufferBacking::Shared(buffer.clone()),
+        _ => unreachable!(),
+    };
+    let available = backing.len();
     let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0).max(0.0) as usize;
     if byte_offset > available {
         return Err(range_err("Start offset is outside the buffer"));
@@ -555,7 +921,7 @@ fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
     }
     Ok(Value::DataView(Rc::new(TypedArrayData {
         kind: TypedKind::Uint8,
-        buffer: buffer.clone(),
+        buffer: backing,
         byte_offset,
         length: byte_length,
     })))
@@ -568,7 +934,7 @@ pub fn data_view_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
     Some(match key {
         "byteLength" => Value::Number(view.effective_length() as f64),
         "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
-        "buffer" => Value::ArrayBuffer(view.buffer.clone()),
+        "buffer" => view.buffer.to_value(),
         _ if key.starts_with("get") && element_kind(&key[3..]).is_some() => {
             super::nf(key, data_view_get)
         }
@@ -626,11 +992,11 @@ fn swap_if_big_endian(slot: &Rc<TypedArrayData>, little_endian: bool) {
     if little_endian || slot.kind.size() == 1 {
         return;
     }
-    let mut buffer = slot.buffer.borrow_mut();
     let at = slot.byte_offset;
     let size = slot.kind.size();
-    if at + size <= buffer.len() {
-        buffer[at..at + size].reverse();
+    if let Some(mut bytes) = slot.buffer.read(at, size) {
+        bytes.reverse();
+        slot.buffer.write(at, &bytes);
     }
 }
 
@@ -655,4 +1021,131 @@ fn data_view_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     let little_endian = a.get(2).map(|v| v.is_truthy()).unwrap_or(false);
     swap_if_big_endian(&slot, little_endian);
     Ok(Value::Undefined)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::interpreter::Interpreter;
+    use crate::value::Value;
+    use std::process::Command;
+
+    #[test]
+    fn atomics_shared_buffer_fixture_matches_node_and_bun() {
+        let fixture = r#"(() => {
+  const shared = new SharedArrayBuffer(16);
+  const bytes = new Uint8Array(shared);
+  const signed = new Int16Array(shared, 2, 1);
+  const bits = new Uint32Array(shared, 4, 1);
+  const big = new BigInt64Array(shared, 8, 1);
+  const byteResults = [
+    Atomics.store(bytes, 0, 255),
+    Atomics.add(bytes, 0, 2),
+    Atomics.compareExchange(bytes, 0, 1, 42),
+    Atomics.load(bytes, 0),
+  ];
+  const fractionalIndexResults = [
+    Atomics.store(bytes, -0.5, 43),
+    Atomics.load(bytes, 0.9),
+  ];
+  const signedResults = [
+    Atomics.store(signed, 0, -3),
+    Atomics.add(signed, 0, 10),
+    Atomics.sub(signed, 0, 10),
+    Atomics.load(signed, 0),
+  ];
+  const bitwiseResults = [
+    Atomics.store(bits, 0, 10),
+    Atomics.and(bits, 0, 12),
+    Atomics.or(bits, 0, 1),
+    Atomics.xor(bits, 0, 3),
+    Atomics.exchange(bits, 0, 7),
+    Atomics.load(bits, 0),
+  ];
+  const bigIntResults = [
+    String(Atomics.store(big, 0, -9007199254740993n)),
+    String(Atomics.add(big, 0, 2n)),
+    String(Atomics.load(big, 0)),
+  ];
+  const errorName = (callback) => {
+    try { callback(); return 'none'; } catch (error) { return error.name; }
+  };
+  const ordinary = new Int32Array([5]);
+  const ordinaryResults = [
+    Atomics.load(ordinary, 0),
+    Atomics.add(ordinary, 0, 3),
+    Atomics.store(ordinary, 0, 9),
+    Atomics.compareExchange(ordinary, 0, 9, 12),
+    Atomics.load(ordinary, 0),
+  ];
+  return JSON.stringify({
+    byteResults,
+    fractionalIndexResults,
+    signedResults,
+    bitwiseResults,
+    bigIntResults,
+    ordinaryResults,
+    lockFree: [1, 2, 4, 8, 3].map(size => Atomics.isLockFree(size)),
+    invalidFloatArray: errorName(() => Atomics.add(new Float32Array(1), 0, 1)),
+    nonSharedBuffer: errorName(() => Atomics.load(new Int32Array(1), 0)),
+  });
+})()"#;
+        let mut interpreter = Interpreter::with_builtins();
+        let result = interpreter.eval_source(fixture).unwrap();
+        let Value::String(ref result) = result else {
+            panic!("Atomics fixture returned {result:?}");
+        };
+        let expected: serde_json::Value = serde_json::from_str(result).unwrap();
+        assert_eq!(
+            expected["byteResults"],
+            serde_json::json!([255, 255, 1, 42])
+        );
+        assert_eq!(
+            expected["fractionalIndexResults"],
+            serde_json::json!([43, 43])
+        );
+        assert_eq!(
+            expected["signedResults"],
+            serde_json::json!([-3, -3, 7, -3])
+        );
+        assert_eq!(
+            expected["bitwiseResults"],
+            serde_json::json!([10, 10, 8, 9, 10, 7])
+        );
+        assert_eq!(
+            expected["bigIntResults"],
+            serde_json::json!([
+                "-9007199254740993",
+                "-9007199254740993",
+                "-9007199254740991"
+            ])
+        );
+        assert_eq!(
+            expected["ordinaryResults"],
+            serde_json::json!([5, 5, 9, 9, 12])
+        );
+        assert_eq!(expected["invalidFloatArray"], "TypeError");
+        assert_eq!(expected["nonSharedBuffer"], "none");
+        assert!(matches!(
+            interpreter.eval_source("Atomics.isLockFree(1.5)").unwrap(),
+            Value::Bool(true)
+        ));
+
+        for runtime in ["node", "bun"] {
+            let Ok(reference) = Command::new(runtime)
+                .args(["-e", &format!("process.stdout.write({fixture})")])
+                .output()
+            else {
+                continue;
+            };
+            if !reference.status.success() {
+                eprintln!(
+                    "skipping {runtime} Atomics comparison: {}",
+                    String::from_utf8_lossy(&reference.stderr)
+                );
+                continue;
+            }
+            let actual: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(expected, actual, "{runtime} Atomics behavior differed");
+        }
+    }
 }

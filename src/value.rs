@@ -1,6 +1,16 @@
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::cell::{Ref, RefCell, RefMut};
 use std::ptr::NonNull;
 use std::rc::Rc;
+#[cfg(target_has_atomic = "8")]
+use std::sync::atomic::{AtomicU8, Ordering};
+#[cfg(all(
+    target_has_atomic = "8",
+    target_has_atomic = "16",
+    target_has_atomic = "32",
+    target_has_atomic = "64"
+))]
+use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64};
 
 use crate::error::VmErr;
 use crate::interpreter::{Env, Interpreter};
@@ -620,6 +630,469 @@ impl Buffer {
     }
 }
 
+/// Backing storage for a `SharedArrayBuffer`. Owned bytes are allocated with
+/// alignment suitable for every Atomics element width and accessed through
+/// byte atomics so native workers cannot race ordinary Rust slice access.
+/// External storage is owned by a trusted addon and follows the same lifetime
+/// and synchronization contract as external ArrayBuffers.
+#[derive(Debug)]
+enum SharedByteStorage {
+    Owned {
+        data: NonNull<u8>,
+        length: usize,
+        layout: Layout,
+    },
+    External {
+        data: NonNull<u8>,
+        length: usize,
+    },
+}
+
+unsafe fn load_shared_byte(pointer: *mut u8) -> u8 {
+    #[cfg(target_has_atomic = "8")]
+    {
+        // SAFETY: callers validate the pointer's byte range. AtomicU8 has
+        // byte alignment and its representation matches a byte.
+        unsafe { &*pointer.cast::<AtomicU8>() }.load(Ordering::SeqCst)
+    }
+    #[cfg(not(target_has_atomic = "8"))]
+    {
+        // Targets without byte atomics cannot share this memory with native
+        // workers; this fallback keeps the value model available there.
+        unsafe { pointer.read() }
+    }
+}
+
+unsafe fn store_shared_byte(pointer: *mut u8, value: u8) {
+    #[cfg(target_has_atomic = "8")]
+    {
+        // SAFETY: callers validate the pointer's byte range. AtomicU8 has
+        // byte alignment and its representation matches a byte.
+        unsafe { &*pointer.cast::<AtomicU8>() }.store(value, Ordering::SeqCst);
+    }
+    #[cfg(not(target_has_atomic = "8"))]
+    {
+        unsafe { pointer.write(value) };
+    }
+}
+
+impl SharedByteStorage {
+    fn data(&self) -> NonNull<u8> {
+        match self {
+            Self::Owned { data, .. } | Self::External { data, .. } => *data,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Owned { length, .. } | Self::External { length, .. } => *length,
+        }
+    }
+
+    fn snapshot(&self) -> Vec<u8> {
+        (0..self.len())
+            .map(|index| {
+                // SAFETY: the allocation covers `len` bytes and AtomicU8 has
+                // byte alignment. The caller must use atomic access whenever
+                // native code can access this shared memory concurrently.
+                unsafe { load_shared_byte(self.data().as_ptr().add(index)) }
+            })
+            .collect()
+    }
+
+    fn read(&self, offset: usize, length: usize) -> Option<Vec<u8>> {
+        let end = offset.checked_add(length)?;
+        if end > self.len() {
+            return None;
+        }
+        Some(
+            (offset..end)
+                .map(|index| {
+                    // SAFETY: the range is within the backing store and
+                    // AtomicU8 permits access at every byte address.
+                    unsafe { load_shared_byte(self.data().as_ptr().add(index)) }
+                })
+                .collect(),
+        )
+    }
+
+    fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+        let Some(end) = offset.checked_add(bytes.len()) else {
+            return false;
+        };
+        if end > self.len() {
+            return false;
+        }
+        for (index, byte) in bytes.iter().copied().enumerate() {
+            // SAFETY: bounds are checked above, the pointer is byte-aligned,
+            // and all VM accesses to shared storage use AtomicU8.
+            unsafe { store_shared_byte(self.data().as_ptr().add(offset + index), byte) };
+        }
+        true
+    }
+}
+
+impl Drop for SharedByteStorage {
+    fn drop(&mut self) {
+        if let Self::Owned { data, layout, .. } = self {
+            // SAFETY: this pointer and layout are the exact pair returned by
+            // `alloc_zeroed` in `SharedBuffer::zeroed`.
+            unsafe { dealloc(data.as_ptr(), *layout) };
+        }
+    }
+}
+
+/// A guest `SharedArrayBuffer`. Cloning this handle preserves JS object
+/// identity. Its byte store is separate from ordinary `ArrayBuffer` storage.
+#[derive(Debug)]
+struct SharedArrayBufferData {
+    bytes: Rc<SharedByteStorage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SharedBuffer(Rc<SharedArrayBufferData>);
+
+#[derive(Debug, Clone, Copy)]
+pub enum SharedAtomicOp {
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    Exchange,
+    CompareExchange,
+}
+
+impl SharedBuffer {
+    pub fn zeroed(length: usize) -> Option<Self> {
+        // Pad the allocation so Atomics can address aligned 16/32/64-bit
+        // elements through the pointer returned by Node-API.
+        let allocation_length = length.max(1).checked_add(7)? & !7;
+        let layout = Layout::from_size_align(allocation_length, 8).ok()?;
+        // SAFETY: layout is non-zero and valid; the storage is deallocated by
+        // SharedByteStorage::drop.
+        let data = NonNull::new(unsafe { alloc_zeroed(layout) })?;
+        Some(Self(Rc::new(SharedArrayBufferData {
+            bytes: Rc::new(SharedByteStorage::Owned {
+                data,
+                length,
+                layout,
+            }),
+        })))
+    }
+
+    /// Wrap addon-owned bytes as a shared buffer without copying them.
+    ///
+    /// # Safety
+    /// `data` must point to `length` readable and writable bytes and remain
+    /// alive until the registered native finalizer runs. Native threads that
+    /// access these bytes concurrently with the VM must use compatible atomic
+    /// operations and synchronization.
+    pub unsafe fn external(data: *mut u8, length: usize) -> Option<Self> {
+        let data = match NonNull::new(data) {
+            Some(data) => data,
+            None if length == 0 => NonNull::dangling(),
+            None => return None,
+        };
+        Some(Self(Rc::new(SharedArrayBufferData {
+            bytes: Rc::new(SharedByteStorage::External { data, length }),
+        })))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.bytes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.0.bytes.snapshot()
+    }
+
+    pub fn read(&self, offset: usize, length: usize) -> Option<Vec<u8>> {
+        self.0.bytes.read(offset, length)
+    }
+
+    pub fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+        self.0.bytes.write(offset, bytes)
+    }
+
+    pub fn data_ptr(&self) -> *mut u8 {
+        self.0.bytes.data().as_ptr()
+    }
+
+    pub fn identity(&self) -> usize {
+        Rc::as_ptr(&self.0) as usize
+    }
+
+    fn atomic_pointer(&self, offset: usize, width: usize) -> Option<*mut u8> {
+        if !matches!(width, 1 | 2 | 4 | 8)
+            || !offset.is_multiple_of(width)
+            || offset.checked_add(width)? > self.len()
+        {
+            return None;
+        }
+        let pointer = unsafe { self.data_ptr().add(offset) };
+        ((pointer as usize).is_multiple_of(width)).then_some(pointer)
+    }
+
+    #[cfg(all(
+        target_has_atomic = "8",
+        target_has_atomic = "16",
+        target_has_atomic = "32",
+        target_has_atomic = "64"
+    ))]
+    pub fn atomic_load(&self, offset: usize, width: usize) -> Option<u64> {
+        let pointer = self.atomic_pointer(offset, width)?;
+        // SAFETY: `atomic_pointer` checks bounds and alignment. The shared
+        // allocation is initialized to zero and VM/native concurrent access
+        // is required to use atomic operations.
+        Some(unsafe {
+            match width {
+                1 => (&*pointer.cast::<AtomicU8>()).load(Ordering::SeqCst) as u64,
+                2 => (&*pointer.cast::<AtomicU16>()).load(Ordering::SeqCst) as u64,
+                4 => (&*pointer.cast::<AtomicU32>()).load(Ordering::SeqCst) as u64,
+                8 => (&*pointer.cast::<AtomicU64>()).load(Ordering::SeqCst),
+                _ => return None,
+            }
+        })
+    }
+
+    #[cfg(not(all(
+        target_has_atomic = "8",
+        target_has_atomic = "16",
+        target_has_atomic = "32",
+        target_has_atomic = "64"
+    )))]
+    pub fn atomic_load(&self, _offset: usize, _width: usize) -> Option<u64> {
+        None
+    }
+
+    #[cfg(all(
+        target_has_atomic = "8",
+        target_has_atomic = "16",
+        target_has_atomic = "32",
+        target_has_atomic = "64"
+    ))]
+    pub fn atomic_store(&self, offset: usize, width: usize, value: u64) -> bool {
+        let Some(pointer) = self.atomic_pointer(offset, width) else {
+            return false;
+        };
+        // SAFETY: `atomic_pointer` checks bounds and alignment. All concurrent
+        // VM/native accesses to this shared allocation are atomic.
+        unsafe {
+            match width {
+                1 => (&*pointer.cast::<AtomicU8>()).store(value as u8, Ordering::SeqCst),
+                2 => (&*pointer.cast::<AtomicU16>()).store(value as u16, Ordering::SeqCst),
+                4 => (&*pointer.cast::<AtomicU32>()).store(value as u32, Ordering::SeqCst),
+                8 => (&*pointer.cast::<AtomicU64>()).store(value, Ordering::SeqCst),
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    #[cfg(not(all(
+        target_has_atomic = "8",
+        target_has_atomic = "16",
+        target_has_atomic = "32",
+        target_has_atomic = "64"
+    )))]
+    pub fn atomic_store(&self, _offset: usize, _width: usize, _value: u64) -> bool {
+        false
+    }
+
+    #[cfg(all(
+        target_has_atomic = "8",
+        target_has_atomic = "16",
+        target_has_atomic = "32",
+        target_has_atomic = "64"
+    ))]
+    pub fn atomic_rmw(
+        &self,
+        offset: usize,
+        width: usize,
+        operation: SharedAtomicOp,
+        value: u64,
+        replacement: u64,
+    ) -> Option<u64> {
+        let pointer = self.atomic_pointer(offset, width)?;
+        // SAFETY: `atomic_pointer` checks bounds and alignment. All concurrent
+        // VM/native accesses to this shared allocation are atomic.
+        Some(unsafe {
+            macro_rules! apply {
+                ($atomic:ty, $value:expr, $replacement:expr) => {{
+                    let atomic = &*pointer.cast::<$atomic>();
+                    match operation {
+                        SharedAtomicOp::Add => atomic.fetch_add($value, Ordering::SeqCst),
+                        SharedAtomicOp::Sub => atomic.fetch_sub($value, Ordering::SeqCst),
+                        SharedAtomicOp::And => atomic.fetch_and($value, Ordering::SeqCst),
+                        SharedAtomicOp::Or => atomic.fetch_or($value, Ordering::SeqCst),
+                        SharedAtomicOp::Xor => atomic.fetch_xor($value, Ordering::SeqCst),
+                        SharedAtomicOp::Exchange => atomic.swap($value, Ordering::SeqCst),
+                        SharedAtomicOp::CompareExchange => atomic
+                            .compare_exchange(
+                                $value,
+                                $replacement,
+                                Ordering::SeqCst,
+                                Ordering::SeqCst,
+                            )
+                            .unwrap_or_else(|observed| observed),
+                    }
+                }};
+            }
+            match width {
+                1 => apply!(AtomicU8, value as u8, replacement as u8) as u64,
+                2 => apply!(AtomicU16, value as u16, replacement as u16) as u64,
+                4 => apply!(AtomicU32, value as u32, replacement as u32) as u64,
+                8 => apply!(AtomicU64, value, replacement),
+                _ => return None,
+            }
+        })
+    }
+
+    #[cfg(not(all(
+        target_has_atomic = "8",
+        target_has_atomic = "16",
+        target_has_atomic = "32",
+        target_has_atomic = "64"
+    )))]
+    pub fn atomic_rmw(
+        &self,
+        _offset: usize,
+        _width: usize,
+        _operation: SharedAtomicOp,
+        _value: u64,
+        _replacement: u64,
+    ) -> Option<u64> {
+        None
+    }
+
+    pub fn is_lock_free(width: usize) -> bool {
+        matches!(
+            (
+                width,
+                cfg!(target_has_atomic = "8"),
+                cfg!(target_has_atomic = "16"),
+                cfg!(target_has_atomic = "32"),
+                cfg!(target_has_atomic = "64"),
+            ),
+            (1, true, _, _, _) | (2, _, true, _, _) | (4, _, _, true, _) | (8, _, _, _, true)
+        )
+    }
+
+    /// Structured cloning creates a distinct SAB object over the same shared
+    /// data block, as required by the structured clone algorithm.
+    pub fn shared_clone(&self) -> Self {
+        Self(Rc::new(SharedArrayBufferData {
+            bytes: self.0.bytes.clone(),
+        }))
+    }
+}
+
+/// The kind of byte buffer underlying a typed array or DataView.
+#[derive(Debug, Clone)]
+pub enum BufferBacking {
+    Array(Buffer),
+    Shared(SharedBuffer),
+}
+
+impl From<Buffer> for BufferBacking {
+    fn from(buffer: Buffer) -> Self {
+        Self::Array(buffer)
+    }
+}
+
+impl From<SharedBuffer> for BufferBacking {
+    fn from(buffer: SharedBuffer) -> Self {
+        Self::Shared(buffer)
+    }
+}
+
+impl BufferBacking {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Array(buffer) => buffer.borrow().len(),
+            Self::Shared(buffer) => buffer.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn is_detached(&self) -> bool {
+        match self {
+            Self::Array(buffer) => buffer.is_detached(),
+            Self::Shared(_) => false,
+        }
+    }
+
+    pub fn is_shared(&self) -> bool {
+        matches!(self, Self::Shared(_))
+    }
+
+    pub fn identity(&self) -> usize {
+        match self {
+            Self::Array(buffer) => buffer.identity(),
+            Self::Shared(buffer) => buffer.identity(),
+        }
+    }
+
+    pub fn snapshot(&self) -> Vec<u8> {
+        match self {
+            Self::Array(buffer) => buffer.borrow().to_vec(),
+            Self::Shared(buffer) => buffer.snapshot(),
+        }
+    }
+
+    pub fn read(&self, offset: usize, length: usize) -> Option<Vec<u8>> {
+        let end = offset.checked_add(length)?;
+        if end > self.len() {
+            return None;
+        }
+        match self {
+            Self::Array(buffer) => Some(buffer.borrow()[offset..end].to_vec()),
+            Self::Shared(buffer) => buffer.read(offset, length),
+        }
+    }
+
+    pub fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+        let end = match offset.checked_add(bytes.len()) {
+            Some(end) if end <= self.len() => end,
+            _ => return false,
+        };
+        match self {
+            Self::Array(buffer) => {
+                buffer.borrow_mut()[offset..end].copy_from_slice(bytes);
+                true
+            }
+            Self::Shared(buffer) => buffer.write(offset, bytes),
+        }
+    }
+
+    pub fn to_value(&self) -> Value {
+        match self {
+            Self::Array(buffer) => Value::ArrayBuffer(buffer.clone()),
+            Self::Shared(buffer) => Value::SharedArrayBuffer(buffer.clone()),
+        }
+    }
+
+    pub fn data_ptr(&self) -> *mut u8 {
+        match self {
+            Self::Array(buffer) => {
+                if buffer.is_detached() {
+                    return std::ptr::null_mut();
+                }
+                buffer.borrow_mut().as_mut_ptr()
+            }
+            Self::Shared(buffer) => buffer.data_ptr(),
+        }
+    }
+}
+
 /// A typed array's element type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypedKind {
@@ -670,7 +1143,7 @@ impl TypedKind {
 #[derive(Debug)]
 pub struct TypedArrayData {
     pub kind: TypedKind,
-    pub buffer: Buffer,
+    pub buffer: BufferBacking,
     pub byte_offset: usize,
     /// Element count for a typed array; *byte* count for a `DataView`.
     pub length: usize,
@@ -796,6 +1269,8 @@ pub enum Value {
     Proxy(Rc<ProxyData>),
     /// Raw bytes. Shared, so every view onto it sees the same storage.
     ArrayBuffer(Buffer),
+    /// Shared raw bytes with atomic backing storage for native workers.
+    SharedArrayBuffer(SharedBuffer),
     /// A typed view onto a buffer: an element type plus a window.
     TypedArray(Rc<TypedArrayData>),
     /// A `DataView`: the same window, read and written one element at a time
@@ -1604,5 +2079,32 @@ impl Drop for Value {
             // `v` drops here with its children already removed: a shallow,
             // non-recursive drop.
         }
+    }
+}
+
+#[cfg(all(test, target_has_atomic = "32"))]
+mod shared_array_buffer_tests {
+    use super::SharedBuffer;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[test]
+    fn shared_backing_is_aligned_stable_and_clones_share_bytes() {
+        let buffer = SharedBuffer::zeroed(12).unwrap();
+        let data = buffer.data_ptr();
+        assert_eq!(data as usize % std::mem::align_of::<AtomicU32>(), 0);
+
+        // Node-API returns this pointer to addons which use native atomics.
+        // Check both aliasing and pointer stability through a cloned SAB.
+        let word = unsafe { &*data.cast::<AtomicU32>().add(1) };
+        word.store(0x1234_5678, Ordering::SeqCst);
+        let clone = buffer.shared_clone();
+        assert_ne!(buffer.identity(), clone.identity());
+        assert_eq!(buffer.data_ptr(), clone.data_ptr());
+        assert_eq!(
+            clone.read(4, 4).unwrap(),
+            0x1234_5678_u32.to_ne_bytes().to_vec()
+        );
+        assert!(clone.write(4, &[1, 2, 3, 4]));
+        assert_eq!(word.load(Ordering::SeqCst).to_ne_bytes(), [1, 2, 3, 4]);
     }
 }

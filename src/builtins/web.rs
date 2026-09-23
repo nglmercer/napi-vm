@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{Buffer, TypedArrayData, TypedKind, Value};
+use crate::value::{Buffer, BufferBacking, SharedBuffer, TypedArrayData, TypedKind, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("TextEncoder") {
@@ -77,7 +77,7 @@ fn encode(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
     let length = bytes.len();
     Ok(Value::TypedArray(Rc::new(TypedArrayData {
         kind: TypedKind::Uint8,
-        buffer: Buffer::owned(bytes),
+        buffer: Buffer::owned(bytes).into(),
         byte_offset: 0,
         length,
     })))
@@ -89,8 +89,9 @@ fn encode(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
 fn decode(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let bytes = match a.first() {
         Some(Value::ArrayBuffer(buffer)) => buffer.borrow().to_vec(),
+        Some(Value::SharedArrayBuffer(buffer)) => buffer.snapshot(),
         Some(Value::TypedArray(view)) | Some(Value::DataView(view)) => {
-            let source = view.buffer.borrow();
+            let source = view.buffer.snapshot();
             let from = view.effective_byte_offset().min(source.len());
             let to = (from + view.effective_length() * view.kind.size()).min(source.len());
             source[from..to].to_vec()
@@ -428,11 +429,21 @@ fn clone_value(
         | Value::BigInt(_) => value.clone(),
         Value::Date(ms) => Value::Date(Rc::new(std::cell::Cell::new(ms.get()))),
         Value::ArrayBuffer(bytes) => Value::ArrayBuffer(Buffer::owned(bytes.borrow().to_vec())),
+        Value::SharedArrayBuffer(bytes) => {
+            Value::SharedArrayBuffer(clone_shared_buffer(bytes, seen))
+        }
         Value::TypedArray(view) | Value::DataView(view) => {
-            let copy = Buffer::owned(view.buffer.borrow().to_vec());
+            let copied_backing = match &view.buffer {
+                BufferBacking::Array(buffer) => {
+                    BufferBacking::Array(Buffer::owned(buffer.borrow().to_vec()))
+                }
+                BufferBacking::Shared(buffer) => {
+                    BufferBacking::Shared(clone_shared_buffer(buffer, seen))
+                }
+            };
             let cloned = Rc::new(TypedArrayData {
                 kind: view.kind,
-                buffer: copy,
+                buffer: copied_backing,
                 byte_offset: view.effective_byte_offset(),
                 length: view.effective_length(),
             });
@@ -489,4 +500,16 @@ fn clone_value(
         }
         other => other.clone(),
     })
+}
+
+fn clone_shared_buffer(source: &SharedBuffer, seen: &mut Vec<(usize, Value)>) -> SharedBuffer {
+    if let Some((_, Value::SharedArrayBuffer(existing))) = seen
+        .iter()
+        .find(|(identity, _)| *identity == source.identity())
+    {
+        return existing.clone();
+    }
+    let clone = source.shared_clone();
+    seen.push((source.identity(), Value::SharedArrayBuffer(clone.clone())));
+    clone
 }

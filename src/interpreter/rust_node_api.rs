@@ -24,8 +24,8 @@ use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::{Env, FileCommonJsLoader, Interpreter};
 use crate::value::{
-    Buffer, ClassData, ErrorData, PromiseInner, PromiseState, PropAttrs, TypedArrayData, TypedKind,
-    Value,
+    Buffer, ClassData, ErrorData, PromiseInner, PromiseState, PropAttrs, SharedBuffer,
+    TypedArrayData, TypedKind, Value,
 };
 
 const NAPI_OK: i32 = 0;
@@ -80,6 +80,7 @@ type NapiDeferred = *mut c_void;
 type NapiAsyncWork = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
 type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
+type NodeApiNoEnvFinalize = unsafe extern "C" fn(*mut c_void, *mut c_void);
 type NapiCleanupHook = unsafe extern "C" fn(*mut c_void);
 type NapiAsyncCleanupHookHandle = *mut c_void;
 type NapiAsyncCleanupHook = unsafe extern "C" fn(NapiAsyncCleanupHookHandle, *mut c_void);
@@ -698,8 +699,14 @@ struct NapiExternalBuffer {
     // shutdown, when its Node-API finalizer runs on the owning thread.
     _value: Value,
     data: *mut c_void,
-    finalize: Option<NapiFinalize>,
+    finalize: NapiExternalBufferFinalizer,
     hint: *mut c_void,
+}
+
+#[derive(Clone, Copy)]
+enum NapiExternalBufferFinalizer {
+    Napi(Option<NapiFinalize>),
+    NoEnv(Option<NodeApiNoEnvFinalize>),
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -717,6 +724,7 @@ enum NapiObjectIdentity {
     Date(usize),
     Proxy(usize),
     ArrayBuffer(usize),
+    SharedArrayBuffer(usize),
     TypedArray(usize),
     DataView(usize),
     RegExp(usize),
@@ -1320,6 +1328,17 @@ struct NapiVmApiTable {
     ) -> i32,
     post_finalizer:
         unsafe extern "C" fn(NapiEnv, Option<NapiFinalize>, *mut c_void, *mut c_void) -> i32,
+    create_sharedarraybuffer:
+        unsafe extern "C" fn(NapiEnv, usize, *mut *mut c_void, *mut NapiValue) -> i32,
+    create_external_sharedarraybuffer: unsafe extern "C" fn(
+        NapiEnv,
+        *mut c_void,
+        usize,
+        Option<NodeApiNoEnvFinalize>,
+        *mut c_void,
+        *mut NapiValue,
+    ) -> i32,
+    is_sharedarraybuffer: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
 }
 
 #[repr(C)]
@@ -1494,6 +1513,9 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     set_prototype: api_set_prototype,
     create_object_with_properties: api_create_object_with_properties,
     post_finalizer: api_post_finalizer,
+    create_sharedarraybuffer: api_create_sharedarraybuffer,
+    create_external_sharedarraybuffer: api_create_external_sharedarraybuffer,
+    is_sharedarraybuffer: api_is_sharedarraybuffer,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1729,6 +1751,7 @@ fn is_napi_property_object(value: &Value) -> bool {
             | Value::Date(_)
             | Value::Proxy(_)
             | Value::ArrayBuffer(_)
+            | Value::SharedArrayBuffer(_)
             | Value::TypedArray(_)
             | Value::DataView(_)
             | Value::RegExp(_)
@@ -2252,6 +2275,7 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
         Value::Date(_)
         | Value::Promise(_)
         | Value::ArrayBuffer(_)
+        | Value::SharedArrayBuffer(_)
         | Value::DataView(_)
         | Value::StringIterator { .. }
         | Value::Generator { .. } => {}
@@ -2463,6 +2487,9 @@ fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
         Value::Date(date) => Ok(NapiObjectIdentity::Date(Rc::as_ptr(date) as usize)),
         Value::Proxy(proxy) => Ok(NapiObjectIdentity::Proxy(Rc::as_ptr(proxy) as usize)),
         Value::ArrayBuffer(buffer) => Ok(NapiObjectIdentity::ArrayBuffer(buffer.identity())),
+        Value::SharedArrayBuffer(buffer) => {
+            Ok(NapiObjectIdentity::SharedArrayBuffer(buffer.identity()))
+        }
         Value::TypedArray(view) => Ok(NapiObjectIdentity::TypedArray(Rc::as_ptr(view) as usize)),
         Value::DataView(view) => Ok(NapiObjectIdentity::DataView(Rc::as_ptr(view) as usize)),
         Value::RegExp(regexp) => Ok(NapiObjectIdentity::RegExp(Rc::as_ptr(regexp) as usize)),
@@ -2543,14 +2570,19 @@ fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
 
     let external_buffers = std::mem::take(&mut *environment.external_buffers.borrow_mut());
     for external in external_buffers.into_values() {
-        let Some(finalize) = external.finalize else {
-            continue;
-        };
-        let scope = environment.handles.borrow_mut().open_scope().ok();
-        unsafe { finalize(environment.raw(), external.data, external.hint) };
-        environment.pending_exception.borrow_mut().take();
-        if let Some(scope) = scope {
-            let _ = environment.handles.borrow_mut().close_scope(scope);
+        match external.finalize {
+            NapiExternalBufferFinalizer::Napi(Some(finalize)) => {
+                let scope = environment.handles.borrow_mut().open_scope().ok();
+                unsafe { finalize(environment.raw(), external.data, external.hint) };
+                environment.pending_exception.borrow_mut().take();
+                if let Some(scope) = scope {
+                    let _ = environment.handles.borrow_mut().close_scope(scope);
+                }
+            }
+            NapiExternalBufferFinalizer::NoEnv(Some(finalize)) => unsafe {
+                finalize(external.data, external.hint)
+            },
+            NapiExternalBufferFinalizer::Napi(None) | NapiExternalBufferFinalizer::NoEnv(None) => {}
         }
     }
 }
@@ -4150,7 +4182,7 @@ fn create_napi_buffer(bytes: Vec<u8>) -> Result<(Value, *mut c_void), i32> {
     let length = bytes.len();
     let value = Value::TypedArray(Rc::new(TypedArrayData {
         kind: TypedKind::Uint8,
-        buffer: Buffer::owned(bytes),
+        buffer: Buffer::owned(bytes).into(),
         byte_offset: 0,
         length,
     }));
@@ -4187,7 +4219,7 @@ fn create_napi_external_buffer_value(
     environment: &NapiEnvironment,
     value: Value,
     data: *mut c_void,
-    finalize: Option<NapiFinalize>,
+    finalize: NapiExternalBufferFinalizer,
     hint: *mut c_void,
     is_buffer: bool,
 ) -> Result<NapiValue, i32> {
@@ -4304,12 +4336,18 @@ unsafe extern "C" fn api_create_external_buffer(
             unsafe { Buffer::external(data.cast::<u8>(), length) }.ok_or(NAPI_INVALID_ARG)?;
         let value = Value::TypedArray(Rc::new(TypedArrayData {
             kind: TypedKind::Uint8,
-            buffer: backing,
+            buffer: backing.into(),
             byte_offset: 0,
             length,
         }));
-        let handle =
-            create_napi_external_buffer_value(&environment, value, data, finalize, hint, true)?;
+        let handle = create_napi_external_buffer_value(
+            &environment,
+            value,
+            data,
+            NapiExternalBufferFinalizer::Napi(finalize),
+            hint,
+            true,
+        )?;
         unsafe { result.write(handle) };
         Ok(())
     })
@@ -4358,7 +4396,7 @@ unsafe extern "C" fn api_create_buffer_from_arraybuffer(
         }
         let value = Value::TypedArray(Rc::new(TypedArrayData {
             kind: TypedKind::Uint8,
-            buffer: buffer.clone(),
+            buffer: buffer.clone().into(),
             byte_offset,
             length: byte_length,
         }));
@@ -4425,11 +4463,15 @@ fn napi_typedarray_data(view: &TypedArrayData) -> Result<(*mut c_void, usize), i
         .byte_offset
         .checked_add(byte_length)
         .ok_or(NAPI_INVALID_ARG)?;
-    let mut bytes = view.buffer.borrow_mut();
-    if end > bytes.len() {
+    if end > view.buffer.len() {
         return Err(NAPI_INVALID_ARG);
     }
-    let data = unsafe { bytes.as_mut_ptr().add(view.byte_offset).cast::<c_void>() };
+    let data = unsafe {
+        view.buffer
+            .data_ptr()
+            .add(view.byte_offset)
+            .cast::<c_void>()
+    };
     Ok((data, byte_length))
 }
 
@@ -4527,6 +4569,85 @@ unsafe extern "C" fn api_create_arraybuffer(
     })
 }
 
+unsafe extern "C" fn api_create_sharedarraybuffer(
+    env: NapiEnv,
+    byte_length: usize,
+    data: *mut *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if byte_length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        let buffer = SharedBuffer::zeroed(byte_length).ok_or(NAPI_GENERIC_FAILURE)?;
+        let data_pointer = buffer.data_ptr().cast::<c_void>();
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::SharedArrayBuffer(buffer))?;
+        if !data.is_null() {
+            unsafe { data.write(data_pointer) };
+        }
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_external_sharedarraybuffer(
+    env: NapiEnv,
+    external_data: *mut c_void,
+    byte_length: usize,
+    finalize: Option<NodeApiNoEnvFinalize>,
+    hint: *mut c_void,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() || (external_data.is_null() && byte_length != 0) {
+            return Err(NAPI_INVALID_ARG);
+        }
+        if byte_length > MAX_NAPI_BUFFER_BYTES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let environment = environment(env)?;
+        // SAFETY: Node-API transfers the external byte range's lifetime to the
+        // addon finalizer. The host retains this value until that finalizer
+        // runs during environment shutdown.
+        let buffer = unsafe { SharedBuffer::external(external_data.cast::<u8>(), byte_length) }
+            .ok_or(NAPI_INVALID_ARG)?;
+        let value = Value::SharedArrayBuffer(buffer);
+        let handle = create_napi_external_buffer_value(
+            &environment,
+            value,
+            external_data,
+            NapiExternalBufferFinalizer::NoEnv(finalize),
+            hint,
+            false,
+        )?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_sharedarraybuffer(
+    env: NapiEnv,
+    value: NapiValue,
+    result: *mut bool,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::SharedArrayBuffer(_))) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_external_arraybuffer(
     env: NapiEnv,
     external_data: *mut c_void,
@@ -4553,7 +4674,7 @@ unsafe extern "C" fn api_create_external_arraybuffer(
             &environment,
             value,
             external_data,
-            finalize,
+            NapiExternalBufferFinalizer::Napi(finalize),
             hint,
             false,
         )?;
@@ -4845,7 +4966,7 @@ unsafe extern "C" fn api_create_typedarray(
         }
         let value = Value::TypedArray(Rc::new(TypedArrayData {
             kind,
-            buffer: buffer.clone(),
+            buffer: buffer.clone().into(),
             byte_offset,
             length,
         }));
@@ -4878,7 +4999,7 @@ unsafe extern "C" fn api_get_typedarray_info(
                 environment
                     .handles
                     .borrow_mut()
-                    .create(Value::ArrayBuffer(view.buffer.clone()))?,
+                    .create(view.buffer.to_value())?,
             )
         };
         if !kind.is_null() {
@@ -4922,7 +5043,7 @@ unsafe extern "C" fn api_create_dataview(
         validate_arraybuffer_window(buffer, byte_offset, byte_length, 1)?;
         let value = Value::DataView(Rc::new(TypedArrayData {
             kind: TypedKind::Uint8,
-            buffer: buffer.clone(),
+            buffer: buffer.clone().into(),
             byte_offset,
             length: byte_length,
         }));
@@ -4966,7 +5087,7 @@ unsafe extern "C" fn api_get_dataview_info(
                 environment
                     .handles
                     .borrow_mut()
-                    .create(Value::ArrayBuffer(view.buffer.clone()))?,
+                    .create(view.buffer.to_value())?,
             )
         };
         if !byte_length.is_null() {
@@ -14399,6 +14520,280 @@ NAPI_MODULE_INIT() {
                 .to_string()
                 .contains("outside the supported range 1 through 10")
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn experimental_sharedarraybuffer_node_api_preserves_shared_identity_and_views() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-shared-arraybuffer-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping SharedArrayBuffer fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+        let experimental_headers = fs::read_to_string(include.join("js_native_api.h")).unwrap();
+        if !experimental_headers.contains("node_api_create_sharedarraybuffer")
+            || !experimental_headers.contains("node_api_create_external_sharedarraybuffer")
+            || !experimental_headers.contains("node_api_is_sharedarraybuffer")
+        {
+            eprintln!("skipping SharedArrayBuffer fixture: experimental APIs are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        }
+
+        let source = root.join("fixture.c");
+        let addon = root.join("fixture.node");
+        fs::write(
+            &source,
+            r#"
+#define NAPI_EXPERIMENTAL 1
+#define NAPI_VERSION 10
+#include <node_api.h>
+#include <stdint.h>
+
+static _Alignas(8) uint32_t external_shared[2];
+static int external_finalizer_count;
+
+int fixture_external_finalizer_count(void) {
+  return external_finalizer_count;
+}
+
+static void finalize_shared(void* data, void* hint) {
+  (void)data; (void)hint;
+  external_finalizer_count++;
+}
+
+static napi_value make_shared(napi_env env, napi_callback_info info) {
+  void* data = NULL;
+  napi_value result;
+  (void)info;
+  if (node_api_create_sharedarraybuffer(env, 8, &data, &result) != napi_ok)
+    return NULL;
+  ((uint8_t*)data)[0] = 17;
+  return result;
+}
+
+static napi_value make_external_shared(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  external_shared[0] = UINT32_C(0x12345678);
+  external_shared[1] = UINT32_C(0xabcdef01);
+  if (node_api_create_external_sharedarraybuffer(
+          env, external_shared, sizeof(external_shared), finalize_shared,
+          NULL, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value is_shared(napi_env env, napi_callback_info info) {
+  napi_value args[1], result;
+  size_t argc = 1;
+  bool shared = false;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok ||
+      argc != 1 || node_api_is_sharedarraybuffer(env, args[0], &shared) != napi_ok ||
+      napi_get_boolean(env, shared, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value is_arraybuffer(napi_env env, napi_callback_info info) {
+  napi_value args[1], result;
+  size_t argc = 1;
+  bool arraybuffer = false;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok ||
+      argc != 1 || napi_is_arraybuffer(env, args[0], &arraybuffer) != napi_ok ||
+      napi_get_boolean(env, arraybuffer, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value external_finalizers(napi_env env, napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (napi_create_int32(env, external_finalizer_count, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+NAPI_MODULE_INIT() {
+  napi_property_descriptor properties[] = {
+      { .utf8name = "makeShared", .method = make_shared },
+      { .utf8name = "makeExternalShared", .method = make_external_shared },
+      { .utf8name = "isShared", .method = is_shared },
+      { .utf8name = "isArrayBuffer", .method = is_arraybuffer },
+      { .utf8name = "externalFinalizers", .method = external_finalizers },
+  };
+  if (napi_define_properties(env, exports,
+                             sizeof(properties) / sizeof(properties[0]),
+                             properties) != napi_ok)
+    return NULL;
+  return exports;
+}
+"#,
+        )
+        .unwrap();
+        let built = Command::new("cc")
+            .args(["-std=c11", "-O2", "-fPIC", "-shared", "-I"])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "SharedArrayBuffer Node-API fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()]).allow_native_addon(&addon),
+            )
+            .unwrap();
+        let guest = interpreter
+            .eval_source(
+                r#"
+const addon = require('./fixture.node');
+const shared = addon.makeShared();
+const view = new Uint8Array(shared);
+const dataView = new DataView(shared);
+view[1] = 29;
+dataView.setUint8(2, 41);
+const words = new Int32Array(shared);
+const stored = Atomics.store(words, 1, 20);
+const prior = Atomics.add(words, 1, 7);
+const compared = Atomics.compareExchange(words, 1, 27, 40);
+const exchanged = Atomics.exchange(words, 1, 41);
+const atomicLoaded = Atomics.load(words, 1);
+const bigWords = new BigInt64Array(shared);
+const bigPrior = Atomics.add(bigWords, 0, 2n);
+const clone = structuredClone(shared);
+new Uint8Array(clone)[3] = 53;
+const graphClone = structuredClone({ shared, view });
+const slice = shared.slice(1, 3);
+new Uint8Array(slice)[0] = 67;
+const external = addon.makeExternalShared();
+const externalView = new Uint32Array(external);
+externalView[1] = 0x76543210;
+JSON.stringify({
+  byteLength: shared.byteLength,
+  isShared: addon.isShared(shared),
+  isArrayBuffer: addon.isArrayBuffer(shared),
+  view: Array.from(view),
+  atomics: [stored, prior, compared, exchanged, atomicLoaded],
+  atomicsBigInt: [String(bigPrior), String(Atomics.load(bigWords, 0))],
+  isLockFree: [Atomics.isLockFree(1), Atomics.isLockFree(4), Atomics.isLockFree(8)],
+  dataViewByte: dataView.getUint8(2),
+  cloneIsDistinct: clone !== shared,
+  cloneWriteVisible: view[3],
+  cloneKeepsBufferAlias: graphClone.shared === graphClone.view.buffer,
+  slice: Array.from(new Uint8Array(slice)),
+  externalIsShared: addon.isShared(external),
+  externalValues: Array.from(externalView),
+  finalizersBeforeShutdown: addon.externalFinalizers()
+});
+"#,
+            )
+            .unwrap();
+        let Value::String(ref guest_json) = guest else {
+            panic!("SharedArrayBuffer fixture returned {guest:?}");
+        };
+        let guest_result: serde_json::Value = serde_json::from_str(guest_json).unwrap();
+        let finalizer_library = unsafe {
+            Library::open(Some(&addon), RTLD_NOW | RTLD_GLOBAL)
+                .expect("retain SharedArrayBuffer fixture for finalizer verification")
+        };
+
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let runner = r#"
+const addon = require('./fixture.node');
+const shared = addon.makeShared();
+const view = new Uint8Array(shared);
+const dataView = new DataView(shared);
+view[1] = 29;
+dataView.setUint8(2, 41);
+const words = new Int32Array(shared);
+const stored = Atomics.store(words, 1, 20);
+const prior = Atomics.add(words, 1, 7);
+const compared = Atomics.compareExchange(words, 1, 27, 40);
+const exchanged = Atomics.exchange(words, 1, 41);
+const atomicLoaded = Atomics.load(words, 1);
+const bigWords = new BigInt64Array(shared);
+const bigPrior = Atomics.add(bigWords, 0, 2n);
+const clone = structuredClone(shared);
+new Uint8Array(clone)[3] = 53;
+const graphClone = structuredClone({ shared, view });
+const slice = shared.slice(1, 3);
+new Uint8Array(slice)[0] = 67;
+const external = addon.makeExternalShared();
+const externalView = new Uint32Array(external);
+externalView[1] = 0x76543210;
+process.stdout.write(JSON.stringify({
+  byteLength: shared.byteLength,
+  isShared: addon.isShared(shared),
+  isArrayBuffer: addon.isArrayBuffer(shared),
+  view: Array.from(view),
+  atomics: [stored, prior, compared, exchanged, atomicLoaded],
+  atomicsBigInt: [String(bigPrior), String(Atomics.load(bigWords, 0))],
+  isLockFree: [Atomics.isLockFree(1), Atomics.isLockFree(4), Atomics.isLockFree(8)],
+  dataViewByte: dataView.getUint8(2),
+  cloneIsDistinct: clone !== shared,
+  cloneWriteVisible: view[3],
+  cloneKeepsBufferAlias: graphClone.shared === graphClone.view.buffer,
+  slice: Array.from(new Uint8Array(slice)),
+  externalIsShared: addon.isShared(external),
+  externalValues: Array.from(externalView),
+  finalizersBeforeShutdown: addon.externalFinalizers()
+}));
+"#;
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node SharedArrayBuffer reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_result: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(guest_result, node_result);
+        }
+
+        drop(interpreter);
+        let finalizer_count = unsafe {
+            finalizer_library
+                .get::<unsafe extern "C" fn() -> i32>(b"fixture_external_finalizer_count\0")
+                .expect("SharedArrayBuffer finalizer counter is exported")()
+        };
+        assert_eq!(
+            finalizer_count, 1,
+            "external shared buffer finalizer runs once"
+        );
+        drop(finalizer_library);
         fs::remove_dir_all(root).unwrap();
     }
 

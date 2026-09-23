@@ -604,6 +604,10 @@ impl Interpreter {
             (Value::ArrayBuffer(bytes), Value::String(k)) => {
                 Ok(crate::builtins::array_buffer_member(bytes, k).unwrap_or(Value::Undefined))
             }
+            (Value::SharedArrayBuffer(bytes), Value::String(k)) => {
+                Ok(crate::builtins::shared_array_buffer_member(bytes, k)
+                    .unwrap_or(Value::Undefined))
+            }
             (Value::DataView(view), Value::String(k)) => {
                 if view.buffer.is_detached() && matches!(k.as_str(), "byteLength" | "byteOffset") {
                     return Err(VmErr::Msg(

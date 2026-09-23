@@ -20,6 +20,8 @@ typedef int32_t napi_typedarray_type;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
 typedef void (*napi_finalize)(napi_env env, void* finalize_data,
                               void* finalize_hint);
+typedef void (*node_api_noenv_finalize)(void* finalize_data,
+                                        void* finalize_hint);
 typedef void (*napi_cleanup_hook)(void* arg);
 typedef void (*napi_async_execute_callback)(napi_env env, void* data);
 typedef void (*napi_async_complete_callback)(napi_env env, napi_status status,
@@ -275,6 +277,11 @@ typedef struct napi_vm_node_api_table {
                                                 napi_value*, napi_value*,
                                                 size_t, napi_value*);
   napi_status (*post_finalizer)(napi_env, napi_finalize, void*, void*);
+  napi_status (*create_sharedarraybuffer)(napi_env, size_t, void**,
+                                           napi_value*);
+  napi_status (*create_external_sharedarraybuffer)(
+      napi_env, void*, size_t, node_api_noenv_finalize, void*, napi_value*);
+  napi_status (*is_sharedarraybuffer)(napi_env, napi_value, bool*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -1428,4 +1435,28 @@ NAPI_VM_EXPORT napi_status node_api_post_finalizer(napi_env env,
   return table ? table->post_finalizer(env, finalize_cb, finalize_data,
                                        finalize_hint)
                : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_sharedarraybuffer(
+    napi_env env, size_t byte_length, void** data, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_sharedarraybuffer(env, byte_length, data, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_create_external_sharedarraybuffer(
+    napi_env env, void* external_data, size_t byte_length,
+    node_api_noenv_finalize finalize_callback, void* finalize_hint,
+    napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_external_sharedarraybuffer(
+                     env, external_data, byte_length, finalize_callback,
+                     finalize_hint, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status node_api_is_sharedarraybuffer(
+    napi_env env, napi_value value, bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_sharedarraybuffer(env, value, result) : 9;
 }

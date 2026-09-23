@@ -49,6 +49,7 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         (Value::Symbol(x), Value::Symbol(y)) => x.id == y.id,
         (Value::BigInt(x), Value::BigInt(y)) => x.compare(y).is_eq(),
         (Value::Date(x), Value::Date(y)) => Rc::ptr_eq(x, y),
+        (Value::SharedArrayBuffer(x), Value::SharedArrayBuffer(y)) => x.identity() == y.identity(),
         (Value::Error(x), Value::Error(y)) => Rc::ptr_eq(&x.identity, &y.identity),
         _ => false,
     }
@@ -457,6 +458,7 @@ impl Interpreter {
                     Value::Error(_) | Value::RegExp(_) => "object",
                     Value::BigInt(_) => "bigint",
                     Value::ArrayBuffer(_)
+                    | Value::SharedArrayBuffer(_)
                     | Value::TypedArray(_)
                     | Value::DataView(_)
                     | Value::Date(_) => "object",
@@ -598,6 +600,7 @@ impl Interpreter {
             Value::Proxy(proxy) => self.vs_rec(&proxy.target, visited, depth, output),
             Value::Date(ms) => output.push_str(&crate::builtins::iso_string(ms.get())),
             Value::ArrayBuffer(_) => output.push_str("[object ArrayBuffer]"),
+            Value::SharedArrayBuffer(_) => output.push_str("[object SharedArrayBuffer]"),
             Value::DataView(_) => output.push_str("[object DataView]"),
             #[cfg(stackful_coroutines)]
             Value::AsyncTask(_) => output.push_str("[object AsyncTask]"),
