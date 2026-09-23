@@ -5,7 +5,6 @@
 //! other's writes, which is the whole point of the type — so the buffer is
 //! shared (`Rc<RefCell<Vec<u8>>>`) and the view holds only the window.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::error::VmErr;
@@ -30,6 +29,11 @@ const KINDS: &[(&str, TypedKind)] = &[
 ];
 
 pub(super) fn install(e: &mut Environment) {
+    let object_prototype = e
+        .get("Object")
+        .and_then(|object| object.get_prop("prototype"))
+        .map(Rc::new);
+
     if let Some(namespace) = e.get("ArrayBuffer") {
         namespace
             .set_prop(
@@ -38,15 +42,21 @@ pub(super) fn install(e: &mut Environment) {
             )
             .expect("built-in ArrayBuffer property");
         super::make_callable(&namespace, new_array_buffer, None);
+        let prototype = make_prototype(
+            object_prototype.clone(),
+            namespace.clone(),
+            [("slice", super::nf("slice", array_buffer_slice))],
+        );
+        super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
     if let Some(namespace) = e.get("SharedArrayBuffer") {
-        namespace
-            .set_prop(
-                "slice".to_string(),
-                super::nf("slice", shared_array_buffer_slice),
-            )
-            .expect("built-in SharedArrayBuffer property");
         super::make_callable(&namespace, new_shared_array_buffer, None);
+        let prototype = make_prototype(
+            object_prototype.clone(),
+            namespace.clone(),
+            [("slice", super::nf("slice", shared_array_buffer_slice))],
+        );
+        super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
     if let Some(namespace) = e.get("Atomics") {
         for (name, method) in [
@@ -68,7 +78,11 @@ pub(super) fn install(e: &mut Environment) {
     }
     if let Some(namespace) = e.get("DataView") {
         super::make_callable(&namespace, new_data_view, None);
+        let prototype = data_view_prototype(object_prototype.clone(), namespace.clone());
+        super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
+
+    let typed_array_prototype = typed_array_prototype(object_prototype.clone());
     for (name, kind) in KINDS {
         // The constructors are not in the pre-seeded global list, so declare
         // them here with their element size as a static.
@@ -85,9 +99,202 @@ pub(super) fn install(e: &mut Environment) {
         namespace
             .set_prop(KIND_SLOT.to_string(), Value::String(name.to_string()))
             .expect("built-in typed-array property");
+        if let Value::Object { props } = &namespace {
+            props.meta.borrow_mut().set_attrs(
+                "BYTES_PER_ELEMENT",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
         super::make_callable(&namespace, new_typed_array, None);
+        let prototype = Value::object_with_proto(
+            vec![
+                ("constructor".into(), namespace.clone()),
+                (
+                    "BYTES_PER_ELEMENT".into(),
+                    Value::Number(kind.size() as f64),
+                ),
+            ],
+            Some(Rc::new(typed_array_prototype.clone())),
+        );
+        if let Value::Object { props } = &prototype {
+            for name in ["constructor", "BYTES_PER_ELEMENT"] {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..crate::value::PropAttrs::default()
+                    },
+                );
+            }
+            props.meta.borrow_mut().set_attrs(
+                "BYTES_PER_ELEMENT",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+        super::set_builtin_constructor_prototype(e, &namespace, prototype);
         e.set(name, namespace);
     }
+}
+
+fn make_prototype<const N: usize>(
+    parent: Option<Rc<Value>>,
+    constructor: Value,
+    methods: [(&str, Value); N],
+) -> Value {
+    let mut properties = vec![("constructor".to_string(), constructor)];
+    properties.extend(
+        methods
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), value.clone())),
+    );
+    let prototype = Value::object_with_proto(properties, parent);
+    if let Value::Object { props } = &prototype {
+        let mut metadata = props.meta.borrow_mut();
+        metadata.set_attrs(
+            "constructor",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..crate::value::PropAttrs::default()
+            },
+        );
+        for (name, _) in methods {
+            metadata.set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..crate::value::PropAttrs::default()
+                },
+            );
+        }
+    }
+    prototype
+}
+
+fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
+    const METHODS: &[&str] = &[
+        "set",
+        "subarray",
+        "slice",
+        "fill",
+        "at",
+        "toString",
+        "join",
+        "map",
+        "filter",
+        "forEach",
+        "reduce",
+        "some",
+        "every",
+        "find",
+        "findIndex",
+        "indexOf",
+        "includes",
+        "reverse",
+        "sort",
+        "keys",
+        "values",
+        "entries",
+    ];
+    let prototype = Value::object_with_proto(Vec::new(), object_prototype);
+    for name in METHODS {
+        prototype
+            .set_prop((*name).into(), typed_prototype_method(name))
+            .expect("typed-array prototype method");
+    }
+    if let Some(Value::Symbol(ref symbol)) = super::well_known("iterator") {
+        let slot = crate::interpreter::symbol_slot_key(symbol);
+        prototype
+            .set_prop(slot.clone(), typed_prototype_method("values"))
+            .expect("typed-array iterator method");
+        if let Value::Object { props } = &prototype {
+            props
+                .meta
+                .borrow_mut()
+                .set_symbol_key(&slot, symbol.clone());
+        }
+    }
+    if let Value::Object { props } = &prototype {
+        let mut metadata = props.meta.borrow_mut();
+        for name in METHODS {
+            metadata.set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..crate::value::PropAttrs::default()
+                },
+            );
+        }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("iterator") {
+            metadata.set_attrs(
+                &crate::interpreter::symbol_slot_key(symbol),
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..crate::value::PropAttrs::default()
+                },
+            );
+        }
+    }
+    prototype
+}
+
+fn data_view_prototype(object_prototype: Option<Rc<Value>>, constructor: Value) -> Value {
+    let methods = [
+        ("getInt8", data_view_get_int8 as super::NativeFn),
+        ("getUint8", data_view_get_uint8),
+        ("getInt16", data_view_get_int16),
+        ("getUint16", data_view_get_uint16),
+        ("getInt32", data_view_get_int32),
+        ("getUint32", data_view_get_uint32),
+        ("getFloat32", data_view_get_float32),
+        ("getFloat64", data_view_get_float64),
+        ("getBigInt64", data_view_get_bigint64),
+        ("getBigUint64", data_view_get_biguint64),
+        ("setInt8", data_view_set_int8),
+        ("setUint8", data_view_set_uint8),
+        ("setInt16", data_view_set_int16),
+        ("setUint16", data_view_set_uint16),
+        ("setInt32", data_view_set_int32),
+        ("setUint32", data_view_set_uint32),
+        ("setFloat32", data_view_set_float32),
+        ("setFloat64", data_view_set_float64),
+        ("setBigInt64", data_view_set_bigint64),
+        ("setBigUint64", data_view_set_biguint64),
+    ];
+    let mut properties = vec![("constructor".to_string(), constructor)];
+    properties.extend(
+        methods
+            .iter()
+            .map(|(name, function)| (name.to_string(), super::nf(name, *function))),
+    );
+    let prototype = Value::object_with_proto(properties, object_prototype);
+    if let Value::Object { props } = &prototype {
+        let mut metadata = props.meta.borrow_mut();
+        metadata.set_attrs(
+            "constructor",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..crate::value::PropAttrs::default()
+            },
+        );
+        for (name, _) in methods {
+            metadata.set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..crate::value::PropAttrs::default()
+                },
+            );
+        }
+    }
+    prototype
 }
 
 /// Slot naming which typed-array constructor a namespace object is, so one
@@ -660,21 +867,7 @@ pub fn typed_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
         "length" => Value::Number(length as f64),
         "byteLength" => Value::Number((length * view.kind.size()) as f64),
         "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
-        "BYTES_PER_ELEMENT" => Value::Number(view.kind.size() as f64),
         "buffer" => view.buffer.to_value(),
-        "set" => super::nf("set", typed_set),
-        "subarray" => super::nf("subarray", typed_subarray),
-        "slice" => super::nf("slice", typed_slice),
-        "fill" => super::nf("fill", typed_fill),
-        "at" => super::nf("at", typed_at),
-        "toString" | "join" => super::nf("join", typed_join),
-        // The iteration methods work on the elements, so they go through an
-        // ordinary array rather than being reimplemented eleven times.
-        "map" | "filter" | "forEach" | "reduce" | "some" | "every" | "find" | "findIndex"
-        | "indexOf" | "includes" | "reverse" | "sort" | "keys" | "values" | "entries" => {
-            super::nf(key, typed_delegate)
-        }
-        crate::interpreter::SYMBOL_ITERATOR_SLOT => super::nf("[Symbol.iterator]", typed_iterator),
         _ => return None,
     })
 }
@@ -691,28 +884,72 @@ fn require(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
 /// The methods that produce a new collection return a plain array here rather
 /// than a typed one. That differs from the specification for `map`, `filter`
 /// and `slice`; it is the honest report of what this implementation does.
-fn typed_delegate(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn typed_delegate_named(
+    interp: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+    name: &str,
+) -> Result<Value, VmErr> {
     let view = require(&this)?;
-    let name = current_method(interp)?;
     let array = Value::array(read_all(&view));
-    let method = interp.member(&array, &name)?;
+    let method = interp.member(&array, name)?;
     interp.call_this(&method, array, a)
 }
 
-thread_local! {
-    /// The method name the current `typed_delegate` call stands for. A native
-    /// function is a bare pointer, so the name it was reached under is not
-    /// otherwise recoverable inside the call.
-    static ACTIVE_METHOD: RefCell<String> = const { RefCell::new(String::new()) };
+macro_rules! typed_delegate_method {
+    ($function:ident, $name:literal) => {
+        fn $function(
+            interp: &mut Interpreter,
+            this: Value,
+            args: Vec<Value>,
+        ) -> Result<Value, VmErr> {
+            typed_delegate_named(interp, this, args, $name)
+        }
+    };
 }
 
-/// Record which method a delegating typed-array member was resolved as.
-pub fn note_method(name: &str) {
-    ACTIVE_METHOD.with(|active| *active.borrow_mut() = name.to_string());
-}
+typed_delegate_method!(typed_map, "map");
+typed_delegate_method!(typed_filter, "filter");
+typed_delegate_method!(typed_for_each, "forEach");
+typed_delegate_method!(typed_reduce, "reduce");
+typed_delegate_method!(typed_some, "some");
+typed_delegate_method!(typed_every, "every");
+typed_delegate_method!(typed_find, "find");
+typed_delegate_method!(typed_find_index, "findIndex");
+typed_delegate_method!(typed_index_of, "indexOf");
+typed_delegate_method!(typed_includes, "includes");
+typed_delegate_method!(typed_reverse, "reverse");
+typed_delegate_method!(typed_sort, "sort");
+typed_delegate_method!(typed_keys, "keys");
+typed_delegate_method!(typed_values, "values");
+typed_delegate_method!(typed_entries, "entries");
 
-fn current_method(_: &Interpreter) -> Result<String, VmErr> {
-    Ok(ACTIVE_METHOD.with(|active| active.borrow().clone()))
+fn typed_prototype_method(name: &str) -> Value {
+    let callable: super::NativeFn = match name {
+        "set" => typed_set,
+        "subarray" => typed_subarray,
+        "slice" => typed_slice,
+        "fill" => typed_fill,
+        "at" => typed_at,
+        "toString" | "join" => typed_join,
+        "map" => typed_map,
+        "filter" => typed_filter,
+        "forEach" => typed_for_each,
+        "reduce" => typed_reduce,
+        "some" => typed_some,
+        "every" => typed_every,
+        "find" => typed_find,
+        "findIndex" => typed_find_index,
+        "indexOf" => typed_index_of,
+        "includes" => typed_includes,
+        "reverse" => typed_reverse,
+        "sort" => typed_sort,
+        "keys" => typed_keys,
+        "values" => typed_values,
+        "entries" => typed_entries,
+        _ => unreachable!("unknown typed-array prototype method"),
+    };
+    super::nf(name, callable)
 }
 
 fn typed_at(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -826,22 +1063,11 @@ fn typed_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
     Ok(this)
 }
 
-fn typed_iterator(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let array = Value::array(read_all(&view));
-    let iterator = interp.prop(
-        &array,
-        &Value::String(crate::interpreter::SYMBOL_ITERATOR_SLOT.to_string()),
-    )?;
-    interp.call_this(&iterator, array, vec![])
-}
-
 // --- ArrayBuffer members ----------------------------------------------------
 
 pub fn array_buffer_member(buffer: &Buffer, key: &str) -> Option<Value> {
     Some(match key {
         "byteLength" => Value::Number(buffer.borrow().len() as f64),
-        "slice" => super::nf("slice", array_buffer_slice),
         _ => return None,
     })
 }
@@ -849,7 +1075,6 @@ pub fn array_buffer_member(buffer: &Buffer, key: &str) -> Option<Value> {
 pub fn shared_array_buffer_member(buffer: &SharedBuffer, key: &str) -> Option<Value> {
     Some(match key {
         "byteLength" => Value::Number(buffer.len() as f64),
-        "slice" => super::nf("slice", shared_array_buffer_slice),
         _ => return None,
     })
 }
@@ -935,28 +1160,6 @@ pub fn data_view_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
         "byteLength" => Value::Number(view.effective_length() as f64),
         "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
         "buffer" => view.buffer.to_value(),
-        _ if key.starts_with("get") && element_kind(&key[3..]).is_some() => {
-            super::nf(key, data_view_get)
-        }
-        _ if key.starts_with("set") && element_kind(&key[3..]).is_some() => {
-            super::nf(key, data_view_set)
-        }
-        _ => return None,
-    })
-}
-
-fn element_kind(name: &str) -> Option<TypedKind> {
-    Some(match name {
-        "Int8" => TypedKind::Int8,
-        "Uint8" => TypedKind::Uint8,
-        "Int16" => TypedKind::Int16,
-        "Uint16" => TypedKind::Uint16,
-        "Int32" => TypedKind::Int32,
-        "Uint32" => TypedKind::Uint32,
-        "Float32" => TypedKind::Float32,
-        "Float64" => TypedKind::Float64,
-        "BigInt64" => TypedKind::BigInt64,
-        "BigUint64" => TypedKind::BigUint64,
         _ => return None,
     })
 }
@@ -1000,9 +1203,7 @@ fn swap_if_big_endian(slot: &Rc<TypedArrayData>, little_endian: bool) {
     }
 }
 
-fn data_view_get(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let kind = element_kind(&current_method(interp)?[3..])
-        .ok_or_else(|| VmErr::Msg("TypeError: unknown DataView accessor".to_string()))?;
+fn data_view_get_kind(this: Value, a: Vec<Value>, kind: TypedKind) -> Result<Value, VmErr> {
     let slot = data_view_slot(&this, &a, kind)?;
     let little_endian = a.get(1).map(|v| v.is_truthy()).unwrap_or(false);
     swap_if_big_endian(&slot, little_endian);
@@ -1012,9 +1213,7 @@ fn data_view_get(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     Ok(value)
 }
 
-fn data_view_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let kind = element_kind(&current_method(interp)?[3..])
-        .ok_or_else(|| VmErr::Msg("TypeError: unknown DataView accessor".to_string()))?;
+fn data_view_set_kind(this: Value, a: Vec<Value>, kind: TypedKind) -> Result<Value, VmErr> {
     let slot = data_view_slot(&this, &a, kind)?;
     let value = a.get(1).cloned().unwrap_or(Value::Undefined);
     write_element(&slot, 0, &value)?;
@@ -1022,6 +1221,93 @@ fn data_view_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     swap_if_big_endian(&slot, little_endian);
     Ok(Value::Undefined)
 }
+
+macro_rules! data_view_accessors {
+    ($(($get_fn:ident, $set_fn:ident, $kind:ident, $get_name:literal, $set_name:literal)),* $(,)?) => {
+        $(
+            fn $get_fn(_: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+                data_view_get_kind(this, args, TypedKind::$kind)
+            }
+
+            fn $set_fn(_: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+                data_view_set_kind(this, args, TypedKind::$kind)
+            }
+        )*
+    };
+}
+
+data_view_accessors!(
+    (
+        data_view_get_int8,
+        data_view_set_int8,
+        Int8,
+        "getInt8",
+        "setInt8"
+    ),
+    (
+        data_view_get_uint8,
+        data_view_set_uint8,
+        Uint8,
+        "getUint8",
+        "setUint8"
+    ),
+    (
+        data_view_get_int16,
+        data_view_set_int16,
+        Int16,
+        "getInt16",
+        "setInt16"
+    ),
+    (
+        data_view_get_uint16,
+        data_view_set_uint16,
+        Uint16,
+        "getUint16",
+        "setUint16"
+    ),
+    (
+        data_view_get_int32,
+        data_view_set_int32,
+        Int32,
+        "getInt32",
+        "setInt32"
+    ),
+    (
+        data_view_get_uint32,
+        data_view_set_uint32,
+        Uint32,
+        "getUint32",
+        "setUint32"
+    ),
+    (
+        data_view_get_float32,
+        data_view_set_float32,
+        Float32,
+        "getFloat32",
+        "setFloat32"
+    ),
+    (
+        data_view_get_float64,
+        data_view_set_float64,
+        Float64,
+        "getFloat64",
+        "setFloat64"
+    ),
+    (
+        data_view_get_bigint64,
+        data_view_set_bigint64,
+        BigInt64,
+        "getBigInt64",
+        "setBigInt64"
+    ),
+    (
+        data_view_get_biguint64,
+        data_view_set_biguint64,
+        BigUint64,
+        "getBigUint64",
+        "setBigUint64"
+    ),
+);
 
 #[cfg(test)]
 mod tests {

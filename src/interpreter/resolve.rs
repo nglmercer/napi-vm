@@ -28,6 +28,10 @@ impl Interpreter {
             ),
             Value::Promise(_) => ("Promise", true),
             Value::Date(_) => ("Date", true),
+            Value::ArrayBuffer(_) => ("ArrayBuffer", true),
+            Value::SharedArrayBuffer(_) => ("SharedArrayBuffer", true),
+            Value::TypedArray(view) => (view.kind.name(), true),
+            Value::DataView(_) => ("DataView", true),
             Value::GlobalObject => ("Object", true),
             Value::NativeFunction { .. } | Value::HostFunction { .. } => ("Function", true),
             _ => return None,
@@ -643,10 +647,9 @@ impl Interpreter {
                 lookup_chain(&prototype, &super::symbol_slot_key(symbol))
             }
 
-            // A typed array resolves an index to an element and anything
-            // else to a member. `note_method` records which name a delegating
-            // method was reached under, since a native function is a bare
-            // pointer that cannot carry it.
+            // Typed array indices and length-like values are resolved on the
+            // receiver; methods live on the shared `%TypedArray%.prototype`
+            // chain so their identity matches constructor prototypes.
             (Value::TypedArray(view), Value::Number(i)) => {
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
                     return Ok(Value::Undefined);
@@ -659,23 +662,37 @@ impl Interpreter {
                         crate::builtins::read_element(view, index).unwrap_or(Value::Undefined)
                     );
                 }
-                crate::builtins::note_method(k);
-                Ok(crate::builtins::typed_member(view, k).unwrap_or(Value::Undefined))
+                if let Some(value) = crate::builtins::typed_member(view, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
             }
-            (Value::TypedArray(view), Value::Symbol(_))
-                if crate::builtins::is_iterator_symbol(p) =>
-            {
-                Ok(
-                    crate::builtins::typed_member(view, crate::interpreter::SYMBOL_ITERATOR_SLOT)
-                        .unwrap_or(Value::Undefined),
-                )
+            (Value::TypedArray(_), Value::Symbol(_)) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
             }
             (Value::ArrayBuffer(bytes), Value::String(k)) => {
-                Ok(crate::builtins::array_buffer_member(bytes, k).unwrap_or(Value::Undefined))
+                if let Some(value) = crate::builtins::array_buffer_member(bytes, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
             }
             (Value::SharedArrayBuffer(bytes), Value::String(k)) => {
-                Ok(crate::builtins::shared_array_buffer_member(bytes, k)
-                    .unwrap_or(Value::Undefined))
+                if let Some(value) = crate::builtins::shared_array_buffer_member(bytes, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
             }
             (Value::DataView(view), Value::String(k)) => {
                 if view.buffer.is_detached() && matches!(k.as_str(), "byteLength" | "byteOffset") {
@@ -684,8 +701,22 @@ impl Interpreter {
                             .to_string(),
                     ));
                 }
-                crate::builtins::note_method(k);
-                Ok(crate::builtins::data_view_member(view, k).unwrap_or(Value::Undefined))
+                if let Some(value) = crate::builtins::data_view_member(view, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
+            }
+            (
+                Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_) | Value::DataView(_),
+                Value::Symbol(_),
+            ) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
             }
             (Value::Date(_), Value::String(k)) => {
                 if let Some(prototype) = self.prototype_of(o) {

@@ -2426,6 +2426,10 @@ fn napi_direct_prototype(
             | Value::HostFunction { .. }
             | Value::Promise(_)
             | Value::Date(_)
+            | Value::ArrayBuffer(_)
+            | Value::SharedArrayBuffer(_)
+            | Value::TypedArray(_)
+            | Value::DataView(_)
     ) {
         return Ok(None);
     }
@@ -3988,6 +3992,16 @@ fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Re
         }
         Value::Promise(_) => return napi_default_builtin_prototype(environment, "Promise"),
         Value::Date(_) => return napi_default_builtin_prototype(environment, "Date"),
+        Value::ArrayBuffer(_) => {
+            return napi_default_builtin_prototype(environment, "ArrayBuffer");
+        }
+        Value::SharedArrayBuffer(_) => {
+            return napi_default_builtin_prototype(environment, "SharedArrayBuffer");
+        }
+        Value::TypedArray(view) => {
+            return napi_default_builtin_prototype(environment, view.kind.name());
+        }
+        Value::DataView(_) => return napi_default_builtin_prototype(environment, "DataView"),
         Value::GlobalObject => return napi_default_object_prototype(environment),
         Value::NativeFunction { .. } | Value::HostFunction { .. } => {
             return napi_default_function_prototype(environment);
@@ -13108,6 +13122,10 @@ const propertyNames = {
   promiseHasFinally: rawPropertyNames.promiseHasFinally,
 };
 const backingBytes = new Uint8Array(typedArrays.buffer);
+const binaryTypedArray = new Uint8Array([1, 2, 3]);
+const binaryBuffer = new ArrayBuffer(4);
+const binaryDataView = new DataView(binaryBuffer);
+const binarySharedBuffer = new SharedArrayBuffer(4);
 const customPrototype = {marker: 'prototype'};
 const customPrototypeTarget = Object.create(customPrototype);
 const nullPrototypeTarget = Object.create(null);
@@ -13253,6 +13271,34 @@ module.exports = {
     constructorMatches: Promise.prototype.constructor === Promise,
     methodIsShared: Promise.resolve(1).then === Promise.prototype.then,
     methodsAreHidden: Object.keys(Promise.prototype).length === 0,
+  },
+  binaryPrototypes: {
+    typedArrayDefault: Object.getPrototypeOf(binaryTypedArray) === Uint8Array.prototype,
+    typedArrayNapi: addon.getPrototype(binaryTypedArray) === Uint8Array.prototype,
+    typedArrayParentsShared:
+      Object.getPrototypeOf(Uint8Array.prototype) === Object.getPrototypeOf(Int8Array.prototype),
+    typedArrayConstructor: Uint8Array.prototype.constructor === Uint8Array,
+    typedArrayIteratorIsValues: Uint8Array.prototype[Symbol.iterator] ===
+      Uint8Array.prototype.values,
+    typedArrayMethodShared: binaryTypedArray.map === Uint8Array.prototype.map,
+    typedArrayMethodCall: Array.from(Uint8Array.prototype.map.call(binaryTypedArray, x => x * 2))
+      .join(',') === '2,4,6',
+    typedArrayMethodsHidden: Object.keys(Uint8Array.prototype).length === 0,
+    arrayBufferDefault: Object.getPrototypeOf(binaryBuffer) === ArrayBuffer.prototype,
+    arrayBufferNapi: addon.getPrototype(binaryBuffer) === ArrayBuffer.prototype,
+    arrayBufferMethodShared: binaryBuffer.slice === ArrayBuffer.prototype.slice,
+    arrayBufferSlice: binaryBuffer.slice(1).byteLength === 3,
+    sharedArrayBufferDefault:
+      Object.getPrototypeOf(binarySharedBuffer) === SharedArrayBuffer.prototype,
+    sharedArrayBufferNapi: addon.getPrototype(binarySharedBuffer) === SharedArrayBuffer.prototype,
+    sharedArrayBufferMethodShared:
+      binarySharedBuffer.slice === SharedArrayBuffer.prototype.slice,
+    dataViewDefault: Object.getPrototypeOf(binaryDataView) === DataView.prototype,
+    dataViewNapi: addon.getPrototype(binaryDataView) === DataView.prototype,
+    dataViewMethodShared: binaryDataView.getUint8 === DataView.prototype.getUint8,
+    dataViewMethodCall: DataView.prototype.setUint8.call(binaryDataView, 0, 9) === undefined &&
+      binaryDataView.getUint8(0) === 9,
+    dataViewMethodsHidden: Object.keys(DataView.prototype).length === 0,
   },
   array: addon.arrayProbe(),
   wrapped,
@@ -14834,6 +14880,37 @@ module.exports = {
                     Some(Value::Bool(true))
                 ),
                 "Promise prototype result {property} did not match Node/Bun"
+            );
+        }
+        let binary_prototypes = result.get_prop("binaryPrototypes").unwrap();
+        for property in [
+            "typedArrayDefault",
+            "typedArrayNapi",
+            "typedArrayParentsShared",
+            "typedArrayConstructor",
+            "typedArrayIteratorIsValues",
+            "typedArrayMethodShared",
+            "typedArrayMethodCall",
+            "typedArrayMethodsHidden",
+            "arrayBufferDefault",
+            "arrayBufferNapi",
+            "arrayBufferMethodShared",
+            "arrayBufferSlice",
+            "sharedArrayBufferDefault",
+            "sharedArrayBufferNapi",
+            "sharedArrayBufferMethodShared",
+            "dataViewDefault",
+            "dataViewNapi",
+            "dataViewMethodShared",
+            "dataViewMethodCall",
+            "dataViewMethodsHidden",
+        ] {
+            assert!(
+                matches!(
+                    binary_prototypes.get_prop(property),
+                    Some(Value::Bool(true))
+                ),
+                "binary prototype result {property} did not match Node/Bun"
             );
         }
         let round_trip = result.get_prop("roundTrip").unwrap();
