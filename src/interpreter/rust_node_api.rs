@@ -19,7 +19,7 @@ use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
 use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
-use crate::interpreter::{FileCommonJsLoader, Interpreter};
+use crate::interpreter::{Env, FileCommonJsLoader, Interpreter};
 use crate::value::{Buffer, ErrorData, TypedArrayData, TypedKind, Value};
 
 const NAPI_OK: i32 = 0;
@@ -115,6 +115,7 @@ impl Drop for RustNodeApiHost {
 }
 
 struct HostState {
+    global: Env,
     next_callback_id: usize,
     callbacks: HashMap<usize, NativeCallbackRecord>,
     environments: Vec<Rc<NapiEnvironment>>,
@@ -385,6 +386,7 @@ impl NapiEnvironment {
 #[repr(C)]
 struct NapiVmApiTable {
     get_undefined: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
+    get_global: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     get_null: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     get_boolean: unsafe extern "C" fn(NapiEnv, bool, *mut NapiValue) -> i32,
     create_double: unsafe extern "C" fn(NapiEnv, f64, *mut NapiValue) -> i32,
@@ -512,6 +514,7 @@ struct NapiVmApiTable {
 
 static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     get_undefined: api_get_undefined,
+    get_global: api_get_global,
     get_null: api_get_null,
     get_boolean: api_get_boolean,
     create_double: api_create_double,
@@ -658,6 +661,48 @@ fn call_guest_callback(
 
 fn has_guest_callback_dispatcher(environment: &NapiEnvironment) -> bool {
     !environment.guest_callback_dispatchers.borrow().is_empty()
+}
+
+fn napi_global_scope(environment: &NapiEnvironment) -> Result<Env, i32> {
+    environment
+        .owner
+        .upgrade()
+        .map(|owner| owner.borrow().global.clone())
+        .ok_or(NAPI_INVALID_ARG)
+}
+
+fn napi_global_get(environment: &NapiEnvironment, key: &str) -> Result<Value, i32> {
+    Ok(napi_global_scope(environment)?
+        .borrow()
+        .get(key)
+        .unwrap_or(Value::Undefined))
+}
+
+fn napi_global_has(environment: &NapiEnvironment, key: &str) -> Result<bool, i32> {
+    Ok(napi_global_scope(environment)?.borrow().get(key).is_some())
+}
+
+fn napi_global_has_own(environment: &NapiEnvironment, key: &str) -> Result<bool, i32> {
+    Ok(napi_global_scope(environment)?
+        .borrow()
+        .all_keys()
+        .iter()
+        .any(|name| name == key))
+}
+
+fn napi_global_set(environment: &NapiEnvironment, key: &str, value: Value) -> Result<(), i32> {
+    napi_global_scope(environment)?
+        .borrow_mut()
+        .try_set(key, value)
+        .map_err(|_| NAPI_GENERIC_FAILURE)
+}
+
+fn napi_global_delete(environment: &NapiEnvironment, key: &str) -> Result<bool, i32> {
+    let global = napi_global_scope(environment)?;
+    if global.borrow().has(key) {
+        return Ok(global.borrow_mut().remove(key));
+    }
+    Ok(true)
 }
 
 fn run_napi_guest_operation(
@@ -907,6 +952,7 @@ fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
                     || array.named_prop(key).is_some())
         }
         Value::Proxy(proxy) => napi_direct_property_is_enumerable(&proxy.target, key),
+        Value::GlobalObject => true,
         Value::Error(error) => key == "code" && error.code.is_some(),
         _ => false,
     }
@@ -1005,7 +1051,9 @@ fn napi_guest_get_property_names(
     let mut seen = HashSet::new();
     let mut names = Vec::new();
     for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-        let trapped_keys = if matches!(current, Value::Proxy(_)) {
+        let trapped_keys = if matches!(current, Value::GlobalObject) {
+            Some(interpreter.global_keys())
+        } else if matches!(current, Value::Proxy(_)) {
             Some(interpreter.keys_with_proxy_trap(&current)?)
         } else {
             None
@@ -1155,6 +1203,21 @@ unsafe extern "C" fn api_get_undefined(env: NapiEnv, result: *mut NapiValue) -> 
     })
 }
 
+unsafe extern "C" fn api_get_global(env: NapiEnv, result: *mut NapiValue) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::GlobalObject)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_get_null(env: NapiEnv, result: *mut NapiValue) -> i32 {
     with_ffi_status(|| {
         if result.is_null() {
@@ -1279,6 +1342,9 @@ unsafe extern "C" fn api_typeof(env: NapiEnv, value: NapiValue, result: *mut i32
 
 fn napi_value_type(value: &Value) -> i32 {
     let resolved = value.deref_binding();
+    if is_napi_function(&resolved) {
+        return 7; // napi_function
+    }
     match &resolved {
         Value::Undefined => 0, // napi_undefined
         Value::Null => 1,      // napi_null
@@ -1287,10 +1353,6 @@ fn napi_value_type(value: &Value) -> i32 {
         Value::String(_) => 4, // napi_string
         Value::Symbol(_) => 5, // napi_symbol
         Value::BigInt(_) => 9, // napi_bigint
-        Value::HostFunction { .. }
-        | Value::NativeFunction { .. }
-        | Value::Function(_)
-        | Value::Class(_) => 7, // napi_function
         Value::Proxy(proxy) => napi_value_type(&proxy.target),
         _ => 6, // napi_object
     }
@@ -2478,7 +2540,10 @@ unsafe extern "C" fn api_set_named_property(
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
         let value = environment.handles.borrow().get(value)?;
-        if !matches!(object, Value::Object { .. } | Value::Array(_)) {
+        if !matches!(
+            object,
+            Value::Object { .. } | Value::Array(_) | Value::GlobalObject
+        ) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
         if has_guest_callback_dispatcher(&environment) {
@@ -2491,9 +2556,13 @@ unsafe extern "C" fn api_set_named_property(
             )?;
             Ok(())
         } else {
-            object
-                .set_prop(key, value)
-                .map_err(|_| NAPI_GENERIC_FAILURE)
+            if matches!(object, Value::GlobalObject) {
+                napi_global_set(&environment, &key, value)
+            } else {
+                object
+                    .set_prop(key, value)
+                    .map_err(|_| NAPI_GENERIC_FAILURE)
+            }
         }
     })
 }
@@ -2511,10 +2580,7 @@ unsafe extern "C" fn api_get_named_property(
         let key = unsafe { read_c_string(name)? };
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
-        if !matches!(
-            object,
-            Value::Object { .. } | Value::Array(_) | Value::String(_)
-        ) {
+        if !is_napi_property_object(&object) && !matches!(object, Value::String(_)) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
         let value = if has_guest_callback_dispatcher(&environment) {
@@ -2526,7 +2592,11 @@ unsafe extern "C" fn api_get_named_property(
                 vec![Value::String(key)],
             )?
         } else {
-            object.get_prop(&key).unwrap_or(Value::Undefined)
+            if matches!(object, Value::GlobalObject) {
+                napi_global_get(&environment, &key)?
+            } else {
+                object.get_prop(&key).unwrap_or(Value::Undefined)
+            }
         };
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
@@ -2559,7 +2629,11 @@ unsafe extern "C" fn api_get_property(
                 vec![key],
             )?
         } else {
-            napi_direct_get_property(&object, &key)?
+            if matches!(object, Value::GlobalObject) {
+                napi_global_get(&environment, &napi_property_key(&key)?)?
+            } else {
+                napi_direct_get_property(&object, &key)?
+            }
         };
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
@@ -2591,7 +2665,11 @@ unsafe extern "C" fn api_set_property(
             )?;
             Ok(())
         } else {
-            napi_direct_set_property(&object, &key, value)
+            if matches!(object, Value::GlobalObject) {
+                napi_global_set(&environment, &napi_property_key(&key)?, value)
+            } else {
+                napi_direct_set_property(&object, &key, value)
+            }
         }
     })
 }
@@ -2625,7 +2703,11 @@ unsafe extern "C" fn api_has_property(
             };
             found
         } else {
-            object.has_prop(&napi_property_key(&key)?)
+            if matches!(object, Value::GlobalObject) {
+                napi_global_has(&environment, &napi_property_key(&key)?)?
+            } else {
+                object.has_prop(&napi_property_key(&key)?)
+            }
         };
         unsafe { result.write(found) };
         Ok(())
@@ -2658,7 +2740,11 @@ unsafe extern "C" fn api_delete_property(
             };
             deleted
         } else {
-            napi_direct_delete_property(&object, &key)?
+            if matches!(object, Value::GlobalObject) {
+                napi_global_delete(&environment, &napi_property_key(&key)?)?
+            } else {
+                napi_direct_delete_property(&object, &key)?
+            }
         };
         if !result.is_null() {
             unsafe { result.write(deleted) };
@@ -2706,7 +2792,11 @@ unsafe extern "C" fn api_has_own_property(
             };
             found
         } else {
-            napi_direct_has_own_property(&object, &key)?
+            if matches!(object, Value::GlobalObject) {
+                napi_global_has_own(&environment, &napi_property_key(&key)?)?
+            } else {
+                napi_direct_has_own_property(&object, &key)?
+            }
         };
         unsafe { result.write(found) };
         Ok(())
@@ -2742,7 +2832,11 @@ unsafe extern "C" fn api_has_named_property(
             };
             found
         } else {
-            object.has_prop(&name)
+            if matches!(object, Value::GlobalObject) {
+                napi_global_has(&environment, &name)?
+            } else {
+                object.has_prop(&name)
+            }
         };
         unsafe { result.write(found) };
         Ok(())
@@ -2772,7 +2866,20 @@ unsafe extern "C" fn api_get_property_names(
                 Vec::new(),
             )?
         } else {
-            napi_direct_property_names(&object)?
+            if matches!(object, Value::GlobalObject) {
+                Value::checked_array(
+                    napi_global_scope(&environment)?
+                        .borrow()
+                        .all_keys()
+                        .into_iter()
+                        .filter(|key| !crate::interpreter::is_internal_key(key))
+                        .map(Value::String)
+                        .collect(),
+                )
+                .map_err(|_| NAPI_GENERIC_FAILURE)?
+            } else {
+                napi_direct_property_names(&object)?
+            }
         };
         let handle = environment.handles.borrow_mut().create(names)?;
         unsafe { result.write(handle) };
@@ -3004,10 +3111,11 @@ impl Drop for NodeApiShim {
 }
 
 impl RustNodeApiHost {
-    fn new() -> Result<Self, VmErr> {
+    fn new(global: Env) -> Result<Self, VmErr> {
         let shim = Rc::new(NodeApiShim::load()?);
         Ok(Self {
             state: Rc::new(RefCell::new(HostState {
+                global,
                 next_callback_id: 1,
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
@@ -3296,7 +3404,7 @@ impl Interpreter {
             };
         }
         let entry = validate_entry(&loader, options.entry)?;
-        let host = Rc::new(RustNodeApiHost::new()?);
+        let host = Rc::new(RustNodeApiHost::new(self.persistent_global.clone())?);
         let loader = loader.with_native_addon_loader(host.clone());
         self.set_commonjs_loader(Rc::new(loader))?;
         self.set_host_bridge(host.clone());
@@ -3675,6 +3783,17 @@ static napi_value property_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value global_probe(napi_env env, napi_callback_info info) {
+  napi_value global, object_constructor, result;
+  napi_valuetype type;
+  (void)info;
+  if (napi_get_global(env, &global) != napi_ok ||
+      napi_get_named_property(env, global, "Object", &object_constructor) != napi_ok ||
+      napi_typeof(env, object_constructor, &type) != napi_ok ||
+      napi_get_boolean(env, type == napi_function, &result) != napi_ok) return NULL;
+  return result;
+}
+
 static napi_value typedarray_probe(napi_env env, napi_callback_info info) {
   napi_value buffer, typed, typed_buffer, view, view_buffer, result, field;
   void* bytes = NULL;
@@ -3875,8 +3994,18 @@ static napi_value duplicate_wrap_status(napi_env env, napi_callback_info info) {
 NAPI_MODULE_INIT() {
   napi_handle_scope scope;
   napi_value scratch, function, metadata, version, values, field;
+  napi_value global, global_key, global_object_constructor;
+  napi_valuetype global_object_type;
+  bool global_object_own = false;
   int32_t checked_version = 0;
-  if (napi_open_handle_scope(env, &scope) != napi_ok ||
+  if (napi_get_global(env, &global) != napi_ok ||
+      napi_create_string_utf8(env, "Object", NAPI_AUTO_LENGTH, &global_key) != napi_ok ||
+      napi_get_named_property(env, global, "Object", &global_object_constructor) != napi_ok ||
+      napi_typeof(env, global_object_constructor, &global_object_type) != napi_ok ||
+      global_object_type != napi_function ||
+      napi_has_own_property(env, global, global_key, &global_object_own) != napi_ok ||
+      !global_object_own ||
+      napi_open_handle_scope(env, &scope) != napi_ok ||
       napi_create_object(env, &scratch) != napi_ok ||
       napi_close_handle_scope(env, scope) != napi_ok) return NULL;
   if (napi_create_function(env, "add", NAPI_AUTO_LENGTH, add, NULL, &function) != napi_ok ||
@@ -3947,6 +4076,8 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "constructGuest", function) != napi_ok ||
       napi_create_function(env, "propertyProbe", NAPI_AUTO_LENGTH, property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "propertyProbe", function) != napi_ok ||
+      napi_create_function(env, "globalProbe", NAPI_AUTO_LENGTH, global_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "globalProbe", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -4051,6 +4182,8 @@ const properties = addon.propertyProbe(propertyTarget);
 const backingBytes = new Uint8Array(typedArrays.buffer);
 module.exports = {
   same: addon === require('./fixture.node'),
+  global: addon.globalProbe(),
+  globalHasObject: Object.hasOwn(globalThis, 'Object'),
   sum: addon.add(19, 23),
   version: addon.metadata.version,
   truth: values.truth,
@@ -4159,6 +4292,11 @@ module.exports = {
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
         assert!(matches!(result.get_prop("same"), Some(Value::Bool(true))));
+        assert!(matches!(result.get_prop("global"), Some(Value::Bool(true))));
+        assert!(matches!(
+            result.get_prop("globalHasObject"),
+            Some(Value::Bool(true))
+        ));
         assert!(matches!(
             result.get_prop("sum"),
             Some(Value::Number(value)) if value == 42.0

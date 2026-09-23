@@ -15,6 +15,7 @@ typedef void (*napi_finalize)(napi_env env, void* finalize_data,
 
 typedef struct napi_vm_node_api_table {
   napi_status (*get_undefined)(napi_env, napi_value*);
+  napi_status (*get_global)(napi_env, napi_value*);
   napi_status (*get_null)(napi_env, napi_value*);
   napi_status (*get_boolean)(napi_env, bool, napi_value*);
   napi_status (*create_double)(napi_env, double, napi_value*);
@@ -118,6 +119,11 @@ static const napi_vm_node_api_table* get_api_table(void) {
 NAPI_VM_EXPORT napi_status napi_get_undefined(napi_env env, napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_undefined(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_global(napi_env env, napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_global(env, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_null(napi_env env, napi_value* result) {

@@ -274,6 +274,7 @@ fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
     let v = a.first().cloned().unwrap_or(Value::Undefined);
     let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
     let found = match &v {
+        Value::GlobalObject => interp.global_keys().iter().any(|name| name == &key),
         Value::Object { props } => props.borrow().iter().any(|(k, _)| *k == key),
         Value::Array(items) => {
             key == "length"
