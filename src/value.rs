@@ -426,6 +426,10 @@ impl SymbolData {
 /// Payload of `Value::Function`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct FunctionData {
+    /// Shared identity for this function object. Cloning a VM `Value` keeps the
+    /// same identity, while evaluating the same function expression again
+    /// creates a distinct one.
+    pub identity: Rc<u8>,
     pub name: Option<Rc<str>>,
     // Shared (`Rc`) so closures created in hot loops reference the same AST
     // instead of deep-cloning the parameter list and body on every creation.

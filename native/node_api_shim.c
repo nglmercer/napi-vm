@@ -9,6 +9,8 @@ typedef void* napi_callback_info;
 typedef void* napi_handle_scope;
 typedef int32_t napi_status;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
+typedef void (*napi_finalize)(napi_env env, void* finalize_data,
+                              void* finalize_hint);
 
 typedef struct napi_vm_node_api_table {
   napi_status (*get_undefined)(napi_env, napi_value*);
@@ -51,6 +53,9 @@ typedef struct napi_vm_node_api_table {
   napi_status (*reference_ref)(napi_env, void*, uint32_t*);
   napi_status (*reference_unref)(napi_env, void*, uint32_t*);
   napi_status (*get_reference_value)(napi_env, void*, napi_value*);
+  napi_status (*wrap)(napi_env, napi_value, void*, napi_finalize, void*, void**);
+  napi_status (*unwrap)(napi_env, napi_value, void**);
+  napi_status (*remove_wrap)(napi_env, napi_value, void**);
   napi_status (*create_object)(napi_env, napi_value*);
   napi_status (*create_function)(napi_env, const char*, size_t, napi_callback,
                                  void*, napi_value*);
@@ -320,6 +325,28 @@ NAPI_VM_EXPORT napi_status napi_get_reference_value(napi_env env,
                                                      napi_value* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_reference_value(env, reference, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_wrap(napi_env env, napi_value object,
+                                     void* native_object,
+                                     napi_finalize finalize_cb,
+                                     void* finalize_hint, void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->wrap(env, object, native_object, finalize_cb,
+                             finalize_hint, result)
+               : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_unwrap(napi_env env, napi_value object,
+                                       void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->unwrap(env, object, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_remove_wrap(napi_env env, napi_value object,
+                                            void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->remove_wrap(env, object, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_create_object(napi_env env, napi_value* result) {

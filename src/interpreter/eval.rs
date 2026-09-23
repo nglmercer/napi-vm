@@ -242,6 +242,7 @@ impl Interpreter {
                     is_generator,
                 } => {
                     let fn_val = Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
                         params: intern_params(mp),
                         body: Rc::new(mb.clone()),
@@ -287,6 +288,7 @@ impl Interpreter {
                     body: gb,
                 } => {
                     let getter_fn = Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
                         params: Rc::new(vec![]),
                         body: Rc::new(gb.clone()),
@@ -309,6 +311,7 @@ impl Interpreter {
                     body: sb,
                 } => {
                     let setter_fn = Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(sb.clone()),
@@ -369,6 +372,7 @@ impl Interpreter {
         };
 
         let constructor = Value::Function(Box::new(FunctionData {
+            identity: Rc::new(0),
             name: Some(Rc::from(name)),
             params: Rc::new(
                 ctor_params
@@ -481,6 +485,7 @@ impl Interpreter {
                 self.set_binding(
                     name,
                     Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(name.as_str().into()),
                         params: intern_params(params),
                         body: Rc::new(body.clone()),
@@ -1140,6 +1145,7 @@ impl Interpreter {
                     is_generator,
                 } => {
                     let function = Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(name.as_str().into()),
                         params: intern_params(params),
                         body: Rc::new(body.clone()),
@@ -1160,6 +1166,7 @@ impl Interpreter {
                 }
                 ObjectProp::Getter { name, body } => {
                     let function = Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(format!("get {name}").into()),
                         params: Rc::new(vec![]),
                         body: Rc::new(body.clone()),
@@ -1180,6 +1187,7 @@ impl Interpreter {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let function = Value::Function(Box::new(FunctionData {
+                        identity: Rc::new(0),
                         name: Some(format!("set {name}").into()),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(body.clone()),
@@ -1835,6 +1843,7 @@ impl Interpreter {
                 body,
                 is_async,
             } => Ok(Value::Function(Box::new(FunctionData {
+                identity: Rc::new(0),
                 name: None,
                 params: intern_params(params),
                 closure: Some(self.global.clone()),
@@ -1854,6 +1863,7 @@ impl Interpreter {
                 is_async,
                 is_generator,
             } => Ok(Value::Function(Box::new(FunctionData {
+                identity: Rc::new(0),
                 name: name.as_deref().map(Rc::from),
                 params: intern_params(params),
                 body: Rc::new(body.clone()),

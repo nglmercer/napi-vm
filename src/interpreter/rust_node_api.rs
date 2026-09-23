@@ -4,7 +4,7 @@
 //! small real addon. Unimplemented imports fail during dynamic loading; this
 //! backend does not emulate Node, V8, NAN, or libuv.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
 use std::fs::{self, OpenOptions};
@@ -41,6 +41,7 @@ type NapiCallbackInfo = *mut c_void;
 type NapiHandleScope = *mut c_void;
 type NapiRef = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
+type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
 
 /// Filesystem and integrity policy for the experimental in-process backend.
 ///
@@ -95,6 +96,22 @@ pub struct RustNodeApiHost {
     _shim: Rc<NodeApiShim>,
 }
 
+impl Drop for RustNodeApiHost {
+    fn drop(&mut self) {
+        // Keep HostState strongly reachable while finalizers run so ordinary
+        // Node-API calls made by a finalizer can still access the host. The
+        // addon libraries and symbol shim remain loaded in HostState until
+        // this callback pass is complete.
+        let environments = self.state.borrow().environments.clone();
+        for environment in &environments {
+            environment.finalizing.set(true);
+        }
+        for environment in &environments {
+            finalize_environment_wraps(environment);
+        }
+    }
+}
+
 struct HostState {
     next_callback_id: usize,
     callbacks: HashMap<usize, NativeCallbackRecord>,
@@ -117,6 +134,8 @@ struct NapiEnvironment {
     self_weak: Weak<NapiEnvironment>,
     handles: RefCell<NapiHandleArena>,
     references: RefCell<HashMap<usize, NapiReference>>,
+    wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
+    finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
     pending_exception: RefCell<Option<Value>>,
 }
@@ -124,6 +143,35 @@ struct NapiEnvironment {
 struct NapiReference {
     value: Value,
     ref_count: u32,
+}
+
+struct NapiWrap {
+    // Keeping the guest value alive prevents its identity pointer from being
+    // reused while native data is still attached to it.
+    _value: Value,
+    data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    hint: *mut c_void,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+enum NapiObjectIdentity {
+    Global,
+    Object(usize),
+    Array(usize),
+    Function(usize),
+    NativeFunction(usize),
+    HostFunction(usize),
+    Class(usize),
+    Promise(usize),
+    Generator(usize),
+    StringIterator(usize),
+    Date(usize),
+    Proxy(usize),
+    ArrayBuffer(usize),
+    TypedArray(usize),
+    DataView(usize),
+    RegExp(usize),
 }
 
 thread_local! {
@@ -338,6 +386,16 @@ struct NapiVmApiTable {
     reference_ref: unsafe extern "C" fn(NapiEnv, NapiRef, *mut u32) -> i32,
     reference_unref: unsafe extern "C" fn(NapiEnv, NapiRef, *mut u32) -> i32,
     get_reference_value: unsafe extern "C" fn(NapiEnv, NapiRef, *mut NapiValue) -> i32,
+    wrap: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        *mut c_void,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiRef,
+    ) -> i32,
+    unwrap: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void) -> i32,
+    remove_wrap: unsafe extern "C" fn(NapiEnv, NapiValue, *mut *mut c_void) -> i32,
     create_object: unsafe extern "C" fn(NapiEnv, *mut NapiValue) -> i32,
     create_function: unsafe extern "C" fn(
         NapiEnv,
@@ -400,6 +458,9 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     reference_ref: api_reference_ref,
     reference_unref: api_reference_unref,
     get_reference_value: api_get_reference_value,
+    wrap: api_wrap,
+    unwrap: api_unwrap,
+    remove_wrap: api_remove_wrap,
     create_object: api_create_object,
     create_function: api_create_function,
     set_named_property: api_set_named_property,
@@ -432,6 +493,66 @@ fn environment(env: NapiEnv) -> Result<Rc<NapiEnvironment>, i32> {
             }
         })
         .unwrap_or(Err(NAPI_INVALID_ARG))
+}
+
+fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
+    match value {
+        Value::GlobalObject => Ok(NapiObjectIdentity::Global),
+        Value::Object { props } => Ok(NapiObjectIdentity::Object(Rc::as_ptr(props) as usize)),
+        Value::Array(array) => Ok(NapiObjectIdentity::Array(Rc::as_ptr(array) as usize)),
+        // FunctionData carries a shared identity token so Value clones remain
+        // the same function object without conflating separate closures.
+        Value::Function(function) => Ok(NapiObjectIdentity::Function(
+            Rc::as_ptr(&function.identity) as usize,
+        )),
+        Value::NativeFunction { name, .. } => Ok(NapiObjectIdentity::NativeFunction(
+            Rc::as_ptr(name) as *const () as usize,
+        )),
+        Value::HostFunction { id, .. } => Ok(NapiObjectIdentity::HostFunction(*id)),
+        Value::Class(class) => Ok(NapiObjectIdentity::Class(
+            Rc::as_ptr(&class.prototype) as usize
+        )),
+        Value::Promise(promise) => Ok(NapiObjectIdentity::Promise(Rc::as_ptr(promise) as usize)),
+        Value::Generator { inner } => Ok(NapiObjectIdentity::Generator(Rc::as_ptr(inner) as usize)),
+        Value::StringIterator { inner } => Ok(NapiObjectIdentity::StringIterator(
+            Rc::as_ptr(inner) as usize,
+        )),
+        Value::Date(date) => Ok(NapiObjectIdentity::Date(Rc::as_ptr(date) as usize)),
+        Value::Proxy(proxy) => Ok(NapiObjectIdentity::Proxy(Rc::as_ptr(proxy) as usize)),
+        Value::ArrayBuffer(buffer) => {
+            Ok(NapiObjectIdentity::ArrayBuffer(Rc::as_ptr(buffer) as usize))
+        }
+        Value::TypedArray(view) => Ok(NapiObjectIdentity::TypedArray(Rc::as_ptr(view) as usize)),
+        Value::DataView(view) => Ok(NapiObjectIdentity::DataView(Rc::as_ptr(view) as usize)),
+        Value::RegExp(regexp) => Ok(NapiObjectIdentity::RegExp(Rc::as_ptr(regexp) as usize)),
+        Value::Undefined
+        | Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::HostPending { .. }
+        | Value::Symbol(_)
+        | Value::BigInt(_)
+        | Value::Binding(_)
+        | Value::Error(_) => Err(NAPI_OBJECT_EXPECTED),
+        #[cfg(stackful_coroutines)]
+        Value::AsyncTask(_) => Err(NAPI_OBJECT_EXPECTED),
+    }
+}
+
+fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
+    let wraps = std::mem::take(&mut *environment.wraps.borrow_mut());
+    for wrap in wraps.into_values() {
+        let Some(finalize) = wrap.finalize else {
+            continue;
+        };
+        let scope = environment.handles.borrow_mut().open_scope().ok();
+        unsafe { finalize(environment.raw(), wrap.data, wrap.hint) };
+        environment.pending_exception.borrow_mut().take();
+        if let Some(scope) = scope {
+            let _ = environment.handles.borrow_mut().close_scope(scope);
+        }
+    }
 }
 
 fn register_environment(environment: &Rc<NapiEnvironment>) {
@@ -1142,6 +1263,96 @@ unsafe extern "C" fn api_get_reference_value(
     })
 }
 
+unsafe extern "C" fn api_wrap(
+    env: NapiEnv,
+    object: NapiValue,
+    native_object: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    finalize_hint: *mut c_void,
+    result: *mut NapiRef,
+) -> i32 {
+    with_ffi_status(|| {
+        let environment = environment(env)?;
+        if environment.finalizing.get() {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let value = environment.handles.borrow().get(object)?;
+        let identity = napi_object_identity(&value)?;
+        if environment.wraps.borrow().contains_key(&identity) {
+            return Err(NAPI_INVALID_ARG);
+        }
+
+        let reference = if result.is_null() {
+            None
+        } else {
+            let reference = new_opaque_handle()?;
+            environment.references.borrow_mut().insert(
+                reference as usize,
+                NapiReference {
+                    value: value.clone(),
+                    ref_count: 0,
+                },
+            );
+            Some(reference)
+        };
+        environment.wraps.borrow_mut().insert(
+            identity,
+            NapiWrap {
+                _value: value,
+                data: native_object,
+                finalize,
+                hint: finalize_hint,
+            },
+        );
+        if let Some(reference) = reference {
+            unsafe { result.write(reference) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_unwrap(env: NapiEnv, object: NapiValue, result: *mut *mut c_void) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(object)?;
+        let identity = napi_object_identity(&value)?;
+        let data = environment
+            .wraps
+            .borrow()
+            .get(&identity)
+            .map(|wrap| wrap.data)
+            .ok_or(NAPI_INVALID_ARG)?;
+        unsafe { result.write(data) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_remove_wrap(
+    env: NapiEnv,
+    object: NapiValue,
+    result: *mut *mut c_void,
+) -> i32 {
+    with_ffi_status(|| {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(object)?;
+        let identity = napi_object_identity(&value)?;
+        let wrap = environment
+            .wraps
+            .borrow_mut()
+            .remove(&identity)
+            .ok_or(NAPI_INVALID_ARG)?;
+        unsafe { result.write(wrap.data) };
+        // Removing a wrap deliberately drops its finalizer without calling it.
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_create_object(env: NapiEnv, result: *mut NapiValue) -> i32 {
     with_ffi_status(|| {
         if result.is_null() {
@@ -1554,6 +1765,8 @@ impl NativeAddonLoader for RustNodeApiHost {
             self_weak: weak.clone(),
             handles: RefCell::new(NapiHandleArena::default()),
             references: RefCell::new(HashMap::new()),
+            wraps: RefCell::new(HashMap::new()),
+            finalizing: Cell::new(false),
             active_callbacks: RefCell::new(HashMap::new()),
             pending_exception: RefCell::new(None),
         });
@@ -1596,6 +1809,8 @@ impl NativeAddonLoader for RustNodeApiHost {
         let exports = match (result, close_result) {
             (Ok(exports), Ok(())) => exports,
             (Err(error), _) | (_, Err(error)) => {
+                environment.finalizing.set(true);
+                finalize_environment_wraps(&environment);
                 self.state
                     .borrow_mut()
                     .callbacks
@@ -1866,6 +2081,42 @@ mod tests {
 #include <stdint.h>
 
 static napi_ref persistent_values;
+static napi_ref removable_object;
+static napi_ref wrapped_object_reference;
+static int wrapped_finalizer_calls;
+static int removed_finalizer_calls;
+static int finalizer_create_function_status = -1;
+static char wrapped_native_data[] = "wrapped-native-data";
+static char removable_native_data[] = "removed-native-data";
+
+static napi_value finalizer_noop(napi_env env, napi_callback_info info) {
+  (void)env;
+  (void)info;
+  return NULL;
+}
+
+static void finalize_probe(napi_env env, void* data, void* hint) {
+  (void)hint;
+  if (data == wrapped_native_data) {
+    napi_value ignored;
+    wrapped_finalizer_calls++;
+    finalizer_create_function_status = napi_create_function(
+        env, "fromFinalizer", NAPI_AUTO_LENGTH, finalizer_noop, NULL, &ignored);
+  }
+  if (data == removable_native_data) removed_finalizer_calls++;
+}
+
+int napi_vm_test_wrapped_finalizer_calls(void) {
+  return wrapped_finalizer_calls;
+}
+
+int napi_vm_test_removed_finalizer_calls(void) {
+  return removed_finalizer_calls;
+}
+
+int napi_vm_test_finalizer_create_function_status(void) {
+  return finalizer_create_function_status;
+}
 
 static napi_value add(napi_env env, napi_callback_info info) {
   size_t argc = 2;
@@ -2038,7 +2289,38 @@ static napi_value release_reference(napi_env env, napi_callback_info info) {
   napi_value result;
   (void)info;
   if (napi_delete_reference(env, persistent_values) != napi_ok ||
+      napi_delete_reference(env, wrapped_object_reference) != napi_ok ||
       napi_get_boolean(env, true, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value wrap_probe(napi_env env, napi_callback_info info) {
+  napi_value object, result;
+  void* data = NULL;
+  (void)info;
+  if (napi_get_reference_value(env, wrapped_object_reference, &object) != napi_ok ||
+      napi_unwrap(env, object, &data) != napi_ok || data != wrapped_native_data ||
+      napi_create_string_utf8(env, (const char*)data, NAPI_AUTO_LENGTH, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value remove_wrap_probe(napi_env env, napi_callback_info info) {
+  napi_value object, result;
+  void* data = NULL;
+  (void)info;
+  if (napi_get_reference_value(env, removable_object, &object) != napi_ok ||
+      napi_remove_wrap(env, object, &data) != napi_ok || data != removable_native_data ||
+      napi_create_string_utf8(env, (const char*)data, NAPI_AUTO_LENGTH, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value duplicate_wrap_status(napi_env env, napi_callback_info info) {
+  napi_value object, result;
+  napi_status status;
+  (void)info;
+  if (napi_get_reference_value(env, wrapped_object_reference, &object) != napi_ok) return NULL;
+  status = napi_wrap(env, object, wrapped_native_data, finalize_probe, NULL, NULL);
+  if (napi_create_int32(env, status, &result) != napi_ok) return NULL;
   return result;
 }
 
@@ -2074,7 +2356,11 @@ NAPI_MODULE_INIT() {
       napi_create_int64(env, INT64_C(2147483648), &field) != napi_ok ||
       napi_set_named_property(env, values, "int64", field) != napi_ok ||
       napi_set_named_property(env, exports, "values", values) != napi_ok ||
+      napi_wrap(env, values, wrapped_native_data, finalize_probe, NULL, &wrapped_object_reference) != napi_ok ||
       napi_create_reference(env, values, 1, &persistent_values) != napi_ok ||
+      napi_create_object(env, &field) != napi_ok ||
+      napi_wrap(env, field, removable_native_data, finalize_probe, NULL, NULL) != napi_ok ||
+      napi_create_reference(env, field, 1, &removable_object) != napi_ok ||
       napi_create_function(env, "roundTrip", NAPI_AUTO_LENGTH, round_trip, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "roundTrip", function) != napi_ok ||
       napi_create_function(env, "arrayProbe", NAPI_AUTO_LENGTH, array_probe, NULL, &function) != napi_ok ||
@@ -2095,6 +2381,12 @@ NAPI_MODULE_INIT() {
       napi_set_named_property(env, exports, "referenceProbe", function) != napi_ok ||
       napi_create_function(env, "releaseReference", NAPI_AUTO_LENGTH, release_reference, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "releaseReference", function) != napi_ok ||
+      napi_create_function(env, "wrapProbe", NAPI_AUTO_LENGTH, wrap_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "wrapProbe", function) != napi_ok ||
+      napi_create_function(env, "removeWrapProbe", NAPI_AUTO_LENGTH, remove_wrap_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "removeWrapProbe", function) != napi_ok ||
+      napi_create_function(env, "duplicateWrapStatus", NAPI_AUTO_LENGTH, duplicate_wrap_status, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "duplicateWrapStatus", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
   return exports;
@@ -2144,8 +2436,14 @@ try { addon.throwCreatedError(); } catch (error) {
     isTypeError: error instanceof TypeError, isError: error instanceof Error};
 }
 const cleared = addon.throwAndClear();
+const wrapped = addon.wrapProbe();
+const removedWrap = addon.removeWrapProbe();
+const duplicateWrapStatus = addon.duplicateWrapStatus();
 const reference = addon.referenceProbe();
 const referenceReleased = addon.releaseReference();
+const makeClosure = () => () => {};
+const firstClosure = makeClosure();
+const secondClosure = makeClosure();
 module.exports = {
   same: addon === require('./fixture.node'),
   sum: addon.add(19, 23),
@@ -2159,6 +2457,10 @@ module.exports = {
   int64: values.int64,
   roundTrip: addon.roundTrip(true, 4.25, 'native ✓', 4294967295, -2.5),
   array: addon.arrayProbe(),
+  wrapped,
+  removedWrap,
+  duplicateWrapStatus,
+  distinctFunctionIdentity: firstClosure !== secondClosure,
   undefinedResult: addon.returnsUndefined() === undefined,
   errors: {
     error: {name: errors.error.name, message: errors.error.message,
@@ -2194,6 +2496,24 @@ module.exports = {
                     .entry(root.join("main.cjs")),
             )
             .unwrap();
+        let observer = unsafe { Library::open(Some(addon.as_os_str()), RTLD_NOW) }.unwrap();
+        let wrapped_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_wrapped_finalizer_calls\0")
+                .unwrap()
+        };
+        let removed_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_removed_finalizer_calls\0")
+                .unwrap()
+        };
+        let finalizer_create_function_status: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_finalizer_create_function_status\0")
+                .unwrap()
+        };
+        assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
+        assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
         assert!(matches!(result.get_prop("same"), Some(Value::Bool(true))));
         assert!(matches!(
@@ -2282,6 +2602,19 @@ module.exports = {
             Some(Value::Bool(false))
         ));
         assert!(matches!(array.get_prop("value"), Some(Value::Bool(true))));
+        assert!(
+            matches!(result.get_prop("wrapped"), Some(Value::String(ref value)) if value == "wrapped-native-data")
+        );
+        assert!(
+            matches!(result.get_prop("removedWrap"), Some(Value::String(ref value)) if value == "removed-native-data")
+        );
+        assert!(
+            matches!(result.get_prop("duplicateWrapStatus"), Some(Value::Number(value)) if value == NAPI_INVALID_ARG as f64)
+        );
+        assert!(matches!(
+            result.get_prop("distinctFunctionIdentity"),
+            Some(Value::Bool(true))
+        ));
         assert!(matches!(
             result.get_prop("undefinedResult"),
             Some(Value::Bool(true))
@@ -2443,6 +2776,13 @@ module.exports = {
             Value::Number(value) if value == NAPI_INVALID_ARG as f64
         ));
 
+        drop(result);
+        drop(invalid_env);
+        drop(interpreter);
+        assert_eq!(unsafe { wrapped_finalizer_calls() }, 1);
+        assert_eq!(unsafe { removed_finalizer_calls() }, 0);
+        assert_eq!(unsafe { finalizer_create_function_status() }, NAPI_OK);
+        drop(observer);
         fs::remove_dir_all(root).unwrap();
     }
 }

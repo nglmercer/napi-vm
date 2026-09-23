@@ -71,9 +71,13 @@ pending exception maps to guest `undefined`. Handle entries are reclaimed
 when local scopes close; opaque handles do not retain one heap allocation
 apiece. Strong N-API references support creation, lookup, count changes, and
 deletion. The VM has no tracing garbage collector, so a zero-count reference
-does not clear until it is deleted; wrap/finalizer and async/thread-safe APIs
-remain unavailable. It is still an incomplete compatibility backend, and
-unimplemented imported symbols fail at load time.
+does not clear until it is deleted. `napi_wrap`, `napi_unwrap`, and
+`napi_remove_wrap` work for values with stable VM object identity. Finalizers
+run once on the owning thread during Rust host shutdown, before addon libraries
+unload; removing a wrap skips its finalizer. Without guest-object collection,
+these finalizers do not run at normal object collection time. Async and
+thread-safe APIs remain unavailable. It is still an incomplete compatibility
+backend, and unimplemented imported symbols fail at load time.
 
 ## Implementation phases
 

@@ -40,7 +40,7 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
             Rc::ptr_eq(x, y)
         }
         (Value::Class(x), Value::Class(y)) => Rc::ptr_eq(&x.prototype, &y.prototype),
-        (Value::Function(x), Value::Function(y)) => Rc::ptr_eq(&x.body, &y.body),
+        (Value::Function(x), Value::Function(y)) => Rc::ptr_eq(&x.identity, &y.identity),
         (Value::NativeFunction { callable: x, .. }, Value::NativeFunction { callable: y, .. }) => {
             std::ptr::fn_addr_eq(*x, *y)
         }

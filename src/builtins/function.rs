@@ -63,6 +63,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
 
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
     Ok(Value::Function(Box::new(FunctionData {
+        identity: Rc::new(0),
         name: Some("anonymous".into()),
         params: Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect()),
         body: Rc::new(body),
