@@ -15,6 +15,7 @@ typedef int32_t napi_typedarray_type;
 typedef napi_value (*napi_callback)(napi_env env, napi_callback_info info);
 typedef void (*napi_finalize)(napi_env env, void* finalize_data,
                               void* finalize_hint);
+typedef void (*napi_cleanup_hook)(void* arg);
 typedef void (*napi_async_execute_callback)(napi_env env, void* data);
 typedef void (*napi_async_complete_callback)(napi_env env, napi_status status,
                                              void* data);
@@ -150,6 +151,8 @@ typedef struct napi_vm_node_api_table {
                                          napi_threadsafe_function);
   napi_status (*unref_threadsafe_function)(napi_env,
                                            napi_threadsafe_function);
+  napi_status (*add_env_cleanup_hook)(napi_env, napi_cleanup_hook, void*);
+  napi_status (*remove_env_cleanup_hook)(napi_env, napi_cleanup_hook, void*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -790,4 +793,16 @@ NAPI_VM_EXPORT napi_status napi_unref_threadsafe_function(
     napi_env env, napi_threadsafe_function function) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->unref_threadsafe_function(env, function) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_add_env_cleanup_hook(
+    napi_env env, napi_cleanup_hook fun, void* arg) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->add_env_cleanup_hook(env, fun, arg) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_remove_env_cleanup_hook(
+    napi_env env, napi_cleanup_hook fun, void* arg) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->remove_env_cleanup_hook(env, fun, arg) : 9;
 }

@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | A small Node-API v1 subset on Linux | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v4 calls on Linux | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -61,8 +61,8 @@ still goes through the VM's CommonJS resolver and module cache.
 
 The first implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
-existing CommonJS resolver and allowlist. Its Linux prototype loads real
-Node-API v1 shared libraries and currently covers scoped handles, callback
+existing CommonJS resolver and allowlist. Its Linux prototype accepts addons
+requesting Node-API versions 1 through 4 and currently covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,
 numbers, UTF-8 strings, symbol creation, `napi_define_properties` for ordinary
@@ -101,9 +101,13 @@ the interpreter thread and must not call Node-API. Completion callbacks are
 queued as VM external events and run on the interpreter thread. On host
 shutdown, queued work is canceled, running work is joined, and completion
 callbacks for finished work run before addon libraries unload; guest callback
-dispatch is unavailable during this final cleanup. Thread-safe functions remain
-unavailable. It is still an incomplete compatibility backend, and unimplemented
-imported symbols fail at load time.
+dispatch is unavailable during this final cleanup. Selected Node-API v4
+thread-safe function calls are supported through the existing external-event
+queue. Node-API v3 environment cleanup hooks run in reverse registration order
+on the owner thread before thread-safe function and wrap finalizers. Duplicate
+hook registrations and unmatched removals return `napi_invalid_arg` rather than
+aborting the embedding process. This remains an incomplete compatibility
+backend, and unimplemented imported symbols fail at load time.
 
 ## Implementation phases
 
@@ -150,6 +154,8 @@ Implement the C API in versioned groups and record each function as
    array buffers, and data views.
 5. Promises, deferred settlement, exception propagation, and rejection
    behavior.
+6. Environment cleanup hooks and shutdown ordering relative to other
+   finalizers.
 
 The first release should declare a conservative maximum Node-API version and
 return a categorized compatibility error for APIs outside that version. Do
@@ -219,8 +225,9 @@ not return success with a partial or fabricated result.
 3. Every Node-API function in the declared version matrix has a conformance
    test or an explicit unsupported result.
 4. Synchronous guest callbacks, nested native calls, async work, and
-   thread-safe function callbacks run on documented VM checkpoints without
-   unsafe interpreter re-entry.
+   thread-safe function callbacks, and cleanup hooks run on documented VM
+   checkpoints without unsafe interpreter re-entry. Cleanup hooks run before
+   N-API finalizers.
 5. Documentation clearly states that native addons execute with host process
    privileges and that direct V8/NAN/Node C++ addons require the Node backend.
 

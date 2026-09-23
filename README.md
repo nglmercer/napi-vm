@@ -144,7 +144,7 @@ application.
 ### Experimental Rust Node-API host
 
 Linux desktop builds can enable the `node-api-host` Cargo feature to load a
-small Node-API v1 addon directly into the Rust process, without a Node
+Node-API addon directly into the Rust process, without a Node
 executable. It uses the same guest `require()` resolver, root restrictions,
 and hash allowlist:
 
@@ -214,6 +214,12 @@ callback data is offered to the addon with a null environment for cleanup, and
 the addon libraries and ABI shim remain mapped to keep later closing/release
 calls safe. Such outstanding functions do not run their finalizers during that
 shutdown path.
+`napi_add_env_cleanup_hook` and `napi_remove_env_cleanup_hook` are also
+supported. Hooks run in reverse registration order on the VM owner thread
+before thread-safe function and wrap finalizers. Duplicate registrations and
+unmatched removals return `napi_invalid_arg`; Node aborts for these misuse cases,
+while the Rust host reports a recoverable error to protect the embedding
+process.
 Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
 requires a C compiler at build time, and native addons have the desktop
 process's full privileges in either backend.

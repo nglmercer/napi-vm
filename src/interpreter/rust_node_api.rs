@@ -68,6 +68,7 @@ type NapiDeferred = *mut c_void;
 type NapiAsyncWork = *mut c_void;
 type NapiCallback = unsafe extern "C" fn(NapiEnv, NapiCallbackInfo) -> NapiValue;
 type NapiFinalize = unsafe extern "C" fn(NapiEnv, *mut c_void, *mut c_void);
+type NapiCleanupHook = unsafe extern "C" fn(*mut c_void);
 type NapiAsyncExecuteCallback = unsafe extern "C" fn(NapiEnv, *mut c_void);
 type NapiAsyncCompleteCallback = unsafe extern "C" fn(NapiEnv, i32, *mut c_void);
 type NapiThreadsafeFunction = *mut c_void;
@@ -122,7 +123,7 @@ impl RustNodeApiOptions {
 }
 
 /// In-process Node-API addon host. This is opt-in and currently supports Linux
-/// ELF modules using the small Node-API v1 surface implemented below.
+/// ELF modules using the selected Node-API v1-v4 calls implemented below.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
     _shim: Rc<NodeApiShim>,
@@ -208,6 +209,13 @@ impl Drop for RustNodeApiHost {
             }
         }
 
+        // Node runs synchronous environment cleanup hooks before N-API
+        // finalizers. Keep addon libraries loaded and the environment usable
+        // while hooks release native resources or stop addon-owned threads.
+        for environment in environments.iter().rev() {
+            run_environment_cleanup_hooks(environment);
+        }
+
         // Queue callbacks are reclaimed with a null env at shutdown. If a
         // native producer has not released its TSFN yet, keep the addon and
         // ABI shim mapped so its eventual closing/release calls stay valid.
@@ -277,12 +285,20 @@ struct NapiEnvironment {
     deferreds: RefCell<HashMap<usize, NapiDeferredState>>,
     async_works: RefCell<HashMap<usize, NapiAsyncWorkState>>,
     threadsafe_functions: RefCell<HashMap<usize, NapiThreadsafeFunctionState>>,
+    cleanup_hooks: RefCell<Vec<NapiCleanupHookRecord>>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
     buffer_values: RefCell<HashMap<NapiObjectIdentity, Weak<TypedArrayData>>>,
     finalizing: Cell<bool>,
     active_callbacks: RefCell<HashMap<usize, CallbackFrame>>,
     guest_callback_dispatchers: RefCell<Vec<GuestCallbackDispatcher>>,
     pending_exception: RefCell<Option<Value>>,
+}
+
+#[derive(Clone, Copy)]
+struct NapiCleanupHookRecord {
+    function: NapiCleanupHook,
+    function_address: usize,
+    argument: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -775,6 +791,10 @@ struct NapiVmApiTable {
     release_threadsafe_function: unsafe extern "C" fn(NapiThreadsafeFunction, i32) -> i32,
     ref_threadsafe_function: unsafe extern "C" fn(NapiEnv, NapiThreadsafeFunction) -> i32,
     unref_threadsafe_function: unsafe extern "C" fn(NapiEnv, NapiThreadsafeFunction) -> i32,
+    add_env_cleanup_hook:
+        unsafe extern "C" fn(NapiEnv, Option<NapiCleanupHook>, *mut c_void) -> i32,
+    remove_env_cleanup_hook:
+        unsafe extern "C" fn(NapiEnv, Option<NapiCleanupHook>, *mut c_void) -> i32,
 }
 
 #[repr(C)]
@@ -879,6 +899,8 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     release_threadsafe_function: api_release_threadsafe_function,
     ref_threadsafe_function: api_ref_threadsafe_function,
     unref_threadsafe_function: api_unref_threadsafe_function,
+    add_env_cleanup_hook: api_add_env_cleanup_hook,
+    remove_env_cleanup_hook: api_remove_env_cleanup_hook,
 };
 
 fn with_ffi_status(callback: impl FnOnce() -> Result<(), i32>) -> i32 {
@@ -1587,6 +1609,21 @@ fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
         };
         let scope = environment.handles.borrow_mut().open_scope().ok();
         unsafe { finalize(environment.raw(), wrap.data, wrap.hint) };
+        environment.pending_exception.borrow_mut().take();
+        if let Some(scope) = scope {
+            let _ = environment.handles.borrow_mut().close_scope(scope);
+        }
+    }
+}
+
+fn run_environment_cleanup_hooks(environment: &Rc<NapiEnvironment>) {
+    loop {
+        let hook = environment.cleanup_hooks.borrow_mut().pop();
+        let Some(hook) = hook else {
+            break;
+        };
+        let scope = environment.handles.borrow_mut().open_scope().ok();
+        unsafe { (hook.function)(hook.argument as *mut c_void) };
         environment.pending_exception.borrow_mut().take();
         if let Some(scope) = scope {
             let _ = environment.handles.borrow_mut().close_scope(scope);
@@ -3412,6 +3449,63 @@ unsafe extern "C" fn api_unref_threadsafe_function(
     with_ffi_status(|| set_threadsafe_function_referenced(env, function, false))
 }
 
+unsafe extern "C" fn api_add_env_cleanup_hook(
+    env: NapiEnv,
+    function: Option<NapiCleanupHook>,
+    argument: *mut c_void,
+) -> i32 {
+    with_ffi_status(|| {
+        let function = function.ok_or(NAPI_INVALID_ARG)?;
+        let environment = environment(env)?;
+        if environment.finalizing.get() {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let function_address = function as usize;
+        let argument = argument as usize;
+        let mut hooks = environment.cleanup_hooks.borrow_mut();
+        if hooks
+            .iter()
+            .any(|hook| hook.function_address == function_address && hook.argument == argument)
+        {
+            // Node aborts for duplicate pairs. Return an error instead so a
+            // malformed addon cannot terminate the embedding desktop app.
+            return Err(NAPI_INVALID_ARG);
+        }
+        if hooks.len() >= MAX_LOCAL_HANDLES {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        hooks.push(NapiCleanupHookRecord {
+            function,
+            function_address,
+            argument,
+        });
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_remove_env_cleanup_hook(
+    env: NapiEnv,
+    function: Option<NapiCleanupHook>,
+    argument: *mut c_void,
+) -> i32 {
+    with_ffi_status(|| {
+        let function = function.ok_or(NAPI_INVALID_ARG)?;
+        let environment = environment(env)?;
+        let function_address = function as usize;
+        let argument = argument as usize;
+        let mut hooks = environment.cleanup_hooks.borrow_mut();
+        let Some(index) = hooks.iter().position(|hook| {
+            hook.function_address == function_address && hook.argument == argument
+        }) else {
+            // Node aborts for an unknown pair. Keep the same exact-match
+            // requirement while reporting a recoverable argument error.
+            return Err(NAPI_INVALID_ARG);
+        };
+        hooks.remove(index);
+        Ok(())
+    })
+}
+
 fn settle_deferred(
     env: NapiEnv,
     deferred: NapiDeferred,
@@ -4867,6 +4961,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             deferreds: RefCell::new(HashMap::new()),
             async_works: RefCell::new(HashMap::new()),
             threadsafe_functions: RefCell::new(HashMap::new()),
+            cleanup_hooks: RefCell::new(Vec::new()),
             wraps: RefCell::new(HashMap::new()),
             buffer_values: RefCell::new(HashMap::new()),
             finalizing: Cell::new(false),
@@ -5237,7 +5332,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_and_calls_a_real_napi_v1_addon_without_a_node_sidecar() {
+    fn loads_and_calls_a_real_napi_v4_addon_without_a_node_sidecar() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-rust-node-api-{}-{}",
@@ -5283,6 +5378,10 @@ static napi_ref wrapped_object_reference;
 static int wrapped_finalizer_calls;
 static int removed_finalizer_calls;
 static int finalizer_create_function_status = -1;
+static int cleanup_hook_order[4];
+static int cleanup_hook_count;
+static int cleanup_before_wrap_finalizer;
+static napi_env cleanup_env;
 static int descriptor_setter_value = 5;
 static int class_constructor_offset = 1;
 static int counter_static_offset = 8;
@@ -5322,10 +5421,57 @@ static void finalize_probe(napi_env env, void* data, void* hint) {
   if (data == wrapped_native_data) {
     napi_value ignored;
     wrapped_finalizer_calls++;
+    cleanup_before_wrap_finalizer = cleanup_hook_count == 2;
     finalizer_create_function_status = napi_create_function(
         env, "fromFinalizer", NAPI_AUTO_LENGTH, finalizer_noop, NULL, &ignored);
   }
   if (data == removable_native_data) removed_finalizer_calls++;
+}
+
+static void cleanup_probe(void* arg) {
+  if (cleanup_hook_count < 4) {
+    cleanup_hook_order[cleanup_hook_count++] = (int)(intptr_t)arg;
+  }
+}
+
+static void cleanup_remove_other(void* arg) {
+  if (napi_remove_env_cleanup_hook(cleanup_env, cleanup_probe, arg) != napi_ok) {
+    cleanup_probe((void*)(intptr_t)-1);
+    return;
+  }
+  cleanup_probe((void*)(intptr_t)4);
+}
+
+static napi_value cleanup_misuse_status(napi_env env, napi_callback_info info) {
+  napi_value result, status_value;
+  napi_status duplicate_status, unmatched_status;
+  (void)info;
+  if (napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)5) != napi_ok)
+    return NULL;
+  duplicate_status = napi_add_env_cleanup_hook(env, cleanup_probe,
+                                               (void*)(intptr_t)5);
+  unmatched_status = napi_remove_env_cleanup_hook(env, cleanup_probe,
+                                                  (void*)(intptr_t)6);
+  if (napi_remove_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)5) != napi_ok ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_create_int32(env, duplicate_status, &status_value) != napi_ok ||
+      napi_set_named_property(env, result, "duplicate", status_value) != napi_ok ||
+      napi_create_int32(env, unmatched_status, &status_value) != napi_ok ||
+      napi_set_named_property(env, result, "unmatched", status_value) != napi_ok)
+    return NULL;
+  return result;
+}
+
+int napi_vm_test_cleanup_hook_count(void) {
+  return cleanup_hook_count;
+}
+
+int napi_vm_test_cleanup_hook_value(int index) {
+  return index >= 0 && index < cleanup_hook_count ? cleanup_hook_order[index] : -1;
+}
+
+int napi_vm_test_cleanup_before_wrap_finalizer(void) {
+  return cleanup_before_wrap_finalizer;
 }
 
 int napi_vm_test_wrapped_finalizer_calls(void) {
@@ -6119,6 +6265,14 @@ NAPI_MODULE_INIT() {
   };
   napi_value counter_class, counter_base_value;
   int32_t checked_version = 0;
+  cleanup_env = env;
+  if (napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)1) != napi_ok ||
+      napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)2) != napi_ok ||
+      napi_add_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)3) != napi_ok ||
+      napi_remove_env_cleanup_hook(env, cleanup_probe, (void*)(intptr_t)2) != napi_ok ||
+      napi_add_env_cleanup_hook(env, cleanup_remove_other,
+                                (void*)(intptr_t)1) != napi_ok)
+    return NULL;
   if (napi_create_int32(env, 7, &descriptor_value) != napi_ok ||
       napi_create_string_utf8(env, "descriptor", NAPI_AUTO_LENGTH,
                               &descriptor_symbol_description) != napi_ok ||
@@ -6245,7 +6399,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "symbolProbe", NAPI_AUTO_LENGTH, symbol_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "symbolProbe", function) != napi_ok ||
       napi_create_function(env, "invalidEnvironment", NAPI_AUTO_LENGTH, invalid_environment, NULL, &function) != napi_ok ||
-      napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok) return NULL;
+      napi_set_named_property(env, exports, "invalidEnvironment", function) != napi_ok ||
+      napi_create_function(env, "cleanupMisuseStatus", NAPI_AUTO_LENGTH, cleanup_misuse_status, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "cleanupMisuseStatus", function) != napi_ok) return NULL;
   return exports;
 }
 "#,
@@ -6508,6 +6664,15 @@ module.exports = {
                 .get(b"napi_vm_test_finalizer_create_function_status\0")
                 .unwrap()
         };
+        let cleanup_hook_count: unsafe extern "C" fn() -> i32 =
+            unsafe { *observer.get(b"napi_vm_test_cleanup_hook_count\0").unwrap() };
+        let cleanup_hook_value: unsafe extern "C" fn(i32) -> i32 =
+            unsafe { *observer.get(b"napi_vm_test_cleanup_hook_value\0").unwrap() };
+        let cleanup_before_wrap_finalizer: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_cleanup_before_wrap_finalizer\0")
+                .unwrap()
+        };
         let threadsafe_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
             *observer
                 .get(b"napi_vm_test_threadsafe_finalizer_calls\0")
@@ -6530,6 +6695,7 @@ module.exports = {
         };
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
+        assert_eq!(unsafe { cleanup_hook_count() }, 0);
         let result = interpreter.eval_source("require('./main.cjs');").unwrap();
         let initialized_promise_value = interpreter
             .eval_source("await require('./fixture.node').initializedPromise;")
@@ -7370,6 +7536,14 @@ module.exports = {
             invalid_env,
             Value::Number(value) if value == NAPI_INVALID_ARG as f64
         ));
+        assert!(matches!(
+            interpreter
+                .eval_source(
+                    "JSON.stringify(require('./fixture.node').cleanupMisuseStatus());"
+                )
+                .unwrap(),
+            Value::String(ref value) if value == "{\"duplicate\":1,\"unmatched\":1}"
+        ));
 
         drop(result);
         drop(invalid_env);
@@ -7377,6 +7551,10 @@ module.exports = {
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 1);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { finalizer_create_function_status() }, NAPI_OK);
+        assert_eq!(unsafe { cleanup_hook_count() }, 2);
+        assert_eq!(unsafe { cleanup_hook_value(0) }, 4);
+        assert_eq!(unsafe { cleanup_hook_value(1) }, 3);
+        assert_eq!(unsafe { cleanup_before_wrap_finalizer() }, 1);
         drop(observer);
         fs::remove_dir_all(root).unwrap();
     }
