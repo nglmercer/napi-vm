@@ -206,6 +206,11 @@ typedef struct napi_vm_node_api_table {
   napi_status (*open_callback_scope)(napi_env, napi_value, napi_async_context,
                                      napi_callback_scope*);
   napi_status (*close_callback_scope)(napi_env, napi_callback_scope);
+  napi_status (*create_date)(napi_env, double, napi_value*);
+  napi_status (*is_date)(napi_env, napi_value, bool*);
+  napi_status (*get_date_value)(napi_env, napi_value, double*);
+  napi_status (*add_finalizer)(napi_env, napi_value, void*, napi_finalize,
+                               void*, void**);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -566,6 +571,33 @@ NAPI_VM_EXPORT napi_status napi_close_callback_scope(
     napi_env env, napi_callback_scope scope) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->close_callback_scope(env, scope) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_create_date(napi_env env, double time,
+                                             napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->create_date(env, time, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_is_date(napi_env env, napi_value value,
+                                         bool* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->is_date(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_date_value(napi_env env, napi_value value,
+                                                double* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_date_value(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_add_finalizer(
+    napi_env env, napi_value object, void* finalize_data,
+    napi_finalize finalize_cb, void* finalize_hint, void** result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->add_finalizer(env, object, finalize_data, finalize_cb,
+                                       finalize_hint, result)
+               : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_arraybuffer_info(napi_env env,

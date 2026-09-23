@@ -167,7 +167,7 @@ let result = runtime.eval_source("require('./native/example.node').run();").unwr
 ```
 
 This is an early compatibility slice, not a general Node replacement. It
-accepts addons requesting Node-API versions 1 through 4, but only implements a
+accepts addons requesting Node-API versions 1 through 5, but only implements a
 selected API subset rather than every function in those versions. The v1
 surface includes C callbacks and
 callback info, controlled synchronous guest callback entry through
@@ -181,6 +181,11 @@ undefined/null/boolean values, double/int32/uint32/int64 numbers, UTF-8 strings,
 creation/index/length operations, and `napi_define_class` with native
 constructors plus static and instance data, methods, and accessors. Core error
 creation and pending-exception propagation are also supported.
+Node-API v5 date creation, type checks, and reads map to guest `Date` objects.
+`napi_add_finalizer` supports its optional zero-count reference and runs the
+finalizer on the owning thread at host shutdown, after cleanup hooks. The VM has
+no guest-object garbage collector, so this does not provide collection-time
+finalization.
 `napi_get_last_error_info` exposes the most recent API status and a VM-neutral
 message. Its returned data is valid only until the next Node-API call. Returning
 a null callback value without a pending exception produces guest `undefined`.

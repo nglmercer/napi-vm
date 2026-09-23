@@ -32,6 +32,7 @@ const NAPI_OK: i32 = 0;
 const NAPI_INVALID_ARG: i32 = 1;
 const NAPI_OBJECT_EXPECTED: i32 = 2;
 const NAPI_STRING_EXPECTED: i32 = 3;
+const NAPI_DATE_EXPECTED: i32 = 18;
 const NAPI_FUNCTION_EXPECTED: i32 = 5;
 const NAPI_NUMBER_EXPECTED: i32 = 6;
 const NAPI_BOOLEAN_EXPECTED: i32 = 7;
@@ -59,7 +60,7 @@ const TSFN_RELEASE: i32 = 0;
 const TSFN_ABORT: i32 = 1;
 const TSFN_NONBLOCKING: i32 = 0;
 const TSFN_BLOCKING: i32 = 1;
-const MAX_NODE_API_VERSION: i32 = 4;
+const MAX_NODE_API_VERSION: i32 = 5;
 const UTF16_INPUT_ERROR_MESSAGE: &[u8] =
     b"UTF-16 input is malformed or exceeds napi-vm string limits\0";
 static NEXT_OPAQUE_HANDLE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -130,7 +131,7 @@ impl RustNodeApiOptions {
 }
 
 /// In-process Node-API addon host. This is opt-in and implements Linux ELF and
-/// macOS Mach-O loading for the Node-API v1-v4 calls below. Linux is runtime
+/// macOS Mach-O loading for the selected Node-API v1-v5 calls below. Linux is runtime
 /// tested; macOS still needs native CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
@@ -300,6 +301,7 @@ struct NapiEnvironment {
     cleanup_hooks: RefCell<Vec<NapiCleanupHookRecord>>,
     last_error: Cell<NapiExtendedErrorInfo>,
     wraps: RefCell<HashMap<NapiObjectIdentity, NapiWrap>>,
+    added_finalizers: RefCell<Vec<NapiAddedFinalizer>>,
     externals: RefCell<HashMap<NapiObjectIdentity, NapiExternal>>,
     external_buffers: RefCell<HashMap<NapiObjectIdentity, NapiExternalBuffer>>,
     external_memory: Cell<i64>,
@@ -457,6 +459,16 @@ struct NapiWrap {
     data: *mut c_void,
     finalize: Option<NapiFinalize>,
     hint: *mut c_void,
+}
+
+struct NapiAddedFinalizer {
+    // As with wraps and externals, the VM has no tracing GC, so preserve the
+    // associated guest value until the owning environment shuts down.
+    _value: Value,
+    data: *mut c_void,
+    finalize: NapiFinalize,
+    hint: *mut c_void,
+    reference: Option<usize>,
 }
 
 struct NapiExternal {
@@ -977,6 +989,17 @@ struct NapiVmApiTable {
     open_callback_scope:
         unsafe extern "C" fn(NapiEnv, NapiValue, NapiAsyncContext, *mut NapiCallbackScope) -> i32,
     close_callback_scope: unsafe extern "C" fn(NapiEnv, NapiCallbackScope) -> i32,
+    create_date: unsafe extern "C" fn(NapiEnv, f64, *mut NapiValue) -> i32,
+    is_date: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
+    get_date_value: unsafe extern "C" fn(NapiEnv, NapiValue, *mut f64) -> i32,
+    add_finalizer: unsafe extern "C" fn(
+        NapiEnv,
+        NapiValue,
+        *mut c_void,
+        Option<NapiFinalize>,
+        *mut c_void,
+        *mut NapiRef,
+    ) -> i32,
 }
 
 #[repr(C)]
@@ -1112,6 +1135,10 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     make_callback: api_make_callback,
     open_callback_scope: api_open_callback_scope,
     close_callback_scope: api_close_callback_scope,
+    create_date: api_create_date,
+    is_date: api_is_date,
+    get_date_value: api_get_date_value,
+    add_finalizer: api_add_finalizer,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -1120,6 +1147,7 @@ fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
         NAPI_INVALID_ARG => b"invalid argument\0",
         NAPI_OBJECT_EXPECTED => b"object expected\0",
         NAPI_STRING_EXPECTED => b"string expected\0",
+        NAPI_DATE_EXPECTED => b"date expected\0",
         NAPI_FUNCTION_EXPECTED => b"function expected\0",
         NAPI_NUMBER_EXPECTED => b"number expected\0",
         NAPI_BOOLEAN_EXPECTED => b"boolean expected\0",
@@ -1890,6 +1918,19 @@ fn napi_is_external_value(environment: &NapiEnvironment, value: &Value) -> bool 
 }
 
 fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
+    let finalizers = std::mem::take(&mut *environment.added_finalizers.borrow_mut());
+    for finalizer in finalizers {
+        let scope = environment.handles.borrow_mut().open_scope().ok();
+        unsafe { (finalizer.finalize)(environment.raw(), finalizer.data, finalizer.hint) };
+        environment.pending_exception.borrow_mut().take();
+        if let Some(scope) = scope {
+            let _ = environment.handles.borrow_mut().close_scope(scope);
+        }
+        if let Some(reference) = finalizer.reference {
+            environment.references.borrow_mut().remove(&reference);
+        }
+    }
+
     let wraps = std::mem::take(&mut *environment.wraps.borrow_mut());
     for wrap in wraps.into_values() {
         let Some(finalize) = wrap.finalize else {
@@ -2418,6 +2459,48 @@ unsafe extern "C" fn api_create_external(
             },
         );
         unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_create_date(env: NapiEnv, time: f64, result: *mut NapiValue) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let handle = environment
+            .handles
+            .borrow_mut()
+            .create(Value::Date(Rc::new(Cell::new(time))))?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_is_date(env: NapiEnv, value: NapiValue, result: *mut bool) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        unsafe { result.write(matches!(value, Value::Date(_))) };
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_get_date_value(env: NapiEnv, value: NapiValue, result: *mut f64) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let value = environment.handles.borrow().get(value)?;
+        let Value::Date(date) = &value else {
+            return Err(NAPI_DATE_EXPECTED);
+        };
+        unsafe { result.write(date.get()) };
         Ok(())
     })
 }
@@ -3761,6 +3844,56 @@ unsafe extern "C" fn api_wrap(
                 hint: finalize_hint,
             },
         );
+        if let Some(reference) = reference {
+            unsafe { result.write(reference) };
+        }
+        Ok(())
+    })
+}
+
+unsafe extern "C" fn api_add_finalizer(
+    env: NapiEnv,
+    object: NapiValue,
+    finalize_data: *mut c_void,
+    finalize: Option<NapiFinalize>,
+    finalize_hint: *mut c_void,
+    result: *mut NapiRef,
+) -> i32 {
+    with_ffi_status(env, || {
+        let environment = environment(env)?;
+        if environment.finalizing.get() {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        let finalize = finalize.ok_or(NAPI_INVALID_ARG)?;
+        let value = environment.handles.borrow().get(object)?;
+        if napi_is_external_value(&environment, &value) {
+            return Err(NAPI_OBJECT_EXPECTED);
+        }
+        napi_object_identity(&value)?;
+
+        let reference = if result.is_null() {
+            None
+        } else {
+            let reference = new_opaque_handle()?;
+            environment.references.borrow_mut().insert(
+                reference as usize,
+                NapiReference {
+                    value: value.clone(),
+                    ref_count: 0,
+                },
+            );
+            Some(reference)
+        };
+        environment
+            .added_finalizers
+            .borrow_mut()
+            .push(NapiAddedFinalizer {
+                _value: value,
+                data: finalize_data,
+                finalize,
+                hint: finalize_hint,
+                reference: reference.map(|reference| reference as usize),
+            });
         if let Some(reference) = reference {
             unsafe { result.write(reference) };
         }
@@ -5340,6 +5473,12 @@ unsafe extern "C" fn api_instanceof(
         let handles = environment.handles.borrow();
         let object = handles.get(object)?;
         let constructor = handles.get(constructor)?;
+        if matches!(&constructor, Value::Object { props }
+            if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
+        {
+            unsafe { result.write(matches!(object, Value::Date(_))) };
+            return Ok(());
+        }
         if !is_napi_function(&constructor) {
             return Err(NAPI_FUNCTION_EXPECTED);
         }
@@ -6273,6 +6412,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             cleanup_hooks: RefCell::new(Vec::new()),
             last_error: Cell::new(napi_extended_error_info(NAPI_OK)),
             wraps: RefCell::new(HashMap::new()),
+            added_finalizers: RefCell::new(Vec::new()),
             externals: RefCell::new(HashMap::new()),
             external_buffers: RefCell::new(HashMap::new()),
             external_memory: Cell::new(0),
@@ -6472,6 +6612,7 @@ fn napi_error(action: &str, status: i32) -> VmErr {
     let detail = match status {
         NAPI_INVALID_ARG => "invalid argument or stale handle",
         NAPI_OBJECT_EXPECTED => "object expected",
+        NAPI_DATE_EXPECTED => "date expected",
         NAPI_FUNCTION_EXPECTED => "function expected",
         NAPI_NUMBER_EXPECTED => "number expected",
         NAPI_ARRAY_EXPECTED => "array expected",
@@ -6743,7 +6884,7 @@ mod tests {
     }
 
     #[test]
-    fn loads_and_calls_a_real_napi_v4_addon_without_a_node_sidecar() {
+    fn loads_and_calls_a_real_napi_v5_addon_without_a_node_sidecar() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "napi-vm-rust-node-api-{}-{}",
@@ -6775,7 +6916,7 @@ mod tests {
             &source,
             r#"
 #define _POSIX_C_SOURCE 200809L
-#define NAPI_VERSION 4
+#define NAPI_VERSION 5
 #include <node_api.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -6788,6 +6929,7 @@ static napi_ref removable_object;
 static napi_ref wrapped_object_reference;
 static napi_ref external_value_reference;
 static int wrapped_finalizer_calls;
+static int added_finalizer_calls;
 static int removed_finalizer_calls;
 static int external_finalizer_calls;
 static int external_arraybuffer_finalizer_calls;
@@ -6832,6 +6974,8 @@ static char wrapped_native_data[] = "wrapped-native-data";
 static char removable_native_data[] = "removed-native-data";
 static char external_native_data[] = "external-native-data";
 static char external_finalize_hint;
+static char added_finalizer_data;
+static char added_finalizer_hint;
 
 static void finalize_external_arraybuffer(napi_env env, void* data, void* hint) {
   (void)env;
@@ -6869,6 +7013,12 @@ static void finalize_probe(napi_env env, void* data, void* hint) {
         env, "fromFinalizer", NAPI_AUTO_LENGTH, finalizer_noop, NULL, &ignored);
   }
   if (data == removable_native_data) removed_finalizer_calls++;
+}
+
+static void finalize_added_date(napi_env env, void* data, void* hint) {
+  (void)env;
+  if (data == &added_finalizer_data && hint == &added_finalizer_hint)
+    added_finalizer_calls++;
 }
 
 static void finalize_external_probe(napi_env env, void* data, void* hint) {
@@ -6936,6 +7086,49 @@ static napi_value error_info_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value date_probe(napi_env env, napi_callback_info info) {
+  napi_value date, result, field, number, reference_value, global, date_constructor;
+  napi_ref weak_reference;
+  double date_value = 0;
+  bool is_date = false, number_is_date = true, reference_matches = false;
+  bool napi_instance = false;
+  napi_status invalid_date_status;
+  (void)info;
+  if (napi_create_date(env, 1700000000123.0, &date) != napi_ok ||
+      napi_is_date(env, date, &is_date) != napi_ok || !is_date ||
+      napi_get_date_value(env, date, &date_value) != napi_ok ||
+      napi_add_finalizer(env, date, &added_finalizer_data, finalize_added_date,
+                         &added_finalizer_hint, &weak_reference) != napi_ok ||
+      napi_get_reference_value(env, weak_reference, &reference_value) != napi_ok ||
+      napi_strict_equals(env, date, reference_value, &reference_matches) != napi_ok ||
+      !reference_matches ||
+      napi_create_int32(env, 7, &number) != napi_ok ||
+      napi_is_date(env, number, &number_is_date) != napi_ok || number_is_date ||
+      napi_get_global(env, &global) != napi_ok ||
+      napi_get_named_property(env, global, "Date", &date_constructor) != napi_ok ||
+      napi_instanceof(env, date, date_constructor, &napi_instance) != napi_ok ||
+      !napi_instance)
+    return NULL;
+  invalid_date_status = napi_get_date_value(env, number, &date_value);
+  if (invalid_date_status != napi_date_expected ||
+      napi_create_object(env, &result) != napi_ok ||
+      napi_set_named_property(env, result, "date", date) != napi_ok ||
+      napi_create_double(env, 1700000000123.0, &field) != napi_ok ||
+      napi_set_named_property(env, result, "value", field) != napi_ok ||
+      napi_get_boolean(env, is_date, &field) != napi_ok ||
+      napi_set_named_property(env, result, "isDate", field) != napi_ok ||
+      napi_get_boolean(env, reference_matches, &field) != napi_ok ||
+      napi_set_named_property(env, result, "referenceMatches", field) != napi_ok ||
+      napi_get_boolean(env, napi_instance, &field) != napi_ok ||
+      napi_set_named_property(env, result, "napiInstance", field) != napi_ok ||
+      napi_get_boolean(env, number_is_date, &field) != napi_ok ||
+      napi_set_named_property(env, result, "numberIsDate", field) != napi_ok ||
+      napi_create_int32(env, invalid_date_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "invalidDateStatus", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
 int napi_vm_test_cleanup_hook_count(void) {
   return cleanup_hook_count;
 }
@@ -6950,6 +7143,10 @@ int napi_vm_test_cleanup_before_wrap_finalizer(void) {
 
 int napi_vm_test_wrapped_finalizer_calls(void) {
   return wrapped_finalizer_calls;
+}
+
+int napi_vm_test_added_finalizer_calls(void) {
+  return added_finalizer_calls;
 }
 
 int napi_vm_test_removed_finalizer_calls(void) {
@@ -8215,7 +8412,7 @@ NAPI_MODULE_INIT() {
       supported_api_version < NAPI_VERSION ||
       napi_get_version(env, NULL) != napi_invalid_arg ||
       napi_get_boolean(env, supported_api_version >= NAPI_VERSION, &field) != napi_ok ||
-      napi_set_named_property(env, exports, "supportsNapiV4", field) != napi_ok)
+      napi_set_named_property(env, exports, "supportsNapiV5", field) != napi_ok)
     return NULL;
   if (napi_create_external(env, external_native_data, finalize_external_probe,
                            &external_finalize_hint, &external) != napi_ok ||
@@ -8287,6 +8484,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "asyncContextProbe", NAPI_AUTO_LENGTH,
                            async_context_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "asyncContextProbe", function) != napi_ok ||
+      napi_create_function(env, "dateProbe", NAPI_AUTO_LENGTH,
+                           date_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "dateProbe", function) != napi_ok ||
       napi_create_function(env, "externalPropertyProbe", NAPI_AUTO_LENGTH,
                            external_property_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "externalPropertyProbe", function) != napi_ok ||
@@ -8449,7 +8649,7 @@ NAPI_MODULE_INIT() {
         #[cfg(target_os = "macos")]
         build.args(["-dynamiclib", "-undefined", "dynamic_lookup"]);
         let built = build
-            .args(["-pthread", "-DNAPI_VERSION=4", "-I"])
+            .args(["-pthread", "-DNAPI_VERSION=5", "-I"])
             .arg(include)
             .arg(&source)
             .arg("-o")
@@ -8567,6 +8767,12 @@ const secondClosure = makeClosure();
 const buffers = addon.bufferProbe();
 const typedArrays = addon.typedArrayProbe();
 const stringEncodings = addon.stringEncodingProbe('Aé€😀');
+const dates = addon.dateProbe();
+const dateConstructorAlias = Date;
+const guestDate = new Date(17);
+globalThis.Date = function ReplacementDate() {};
+const aliasedDateInstance = guestDate instanceof dateConstructorAlias;
+globalThis.Date = dateConstructorAlias;
 const utf16 = addon.utf16Probe('Aé😀\0Z');
 const elementDeleteTarget = [10, 20, 30];
 const elementDelete = addon.deleteElementProbe(elementDeleteTarget, 1);
@@ -8676,7 +8882,19 @@ module.exports = {
   childNewTargetInfo,
   childCounterValue: childCounter.value,
   instanceChecks,
-  supportsNapiV4: addon.supportsNapiV4,
+  supportsNapiV5: addon.supportsNapiV5,
+  dateApi: {
+    value: dates.value,
+    guestValue: dates.date.getTime(),
+    isDate: dates.isDate,
+    guestInstance: dates.date instanceof Date,
+    guestConstructedInstance: guestDate instanceof Date,
+    aliasedDateInstance,
+    referenceMatches: dates.referenceMatches,
+    napiInstance: dates.napiInstance,
+    numberIsDate: dates.numberIsDate,
+    invalidDateStatus: dates.invalidDateStatus,
+  },
   definedConstant: addon.definedConstant,
   definedSymbolValue: addon[addon.descriptorSymbol],
   definedMethodEnumerable: definedMethodDescriptor.enumerable,
@@ -8833,6 +9051,11 @@ module.exports = {
                 .get(b"napi_vm_test_wrapped_finalizer_calls\0")
                 .unwrap()
         };
+        let added_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
+            *observer
+                .get(b"napi_vm_test_added_finalizer_calls\0")
+                .unwrap()
+        };
         let removed_finalizer_calls: unsafe extern "C" fn() -> i32 = unsafe {
             *observer
                 .get(b"napi_vm_test_removed_finalizer_calls\0")
@@ -8888,6 +9111,7 @@ module.exports = {
                 .unwrap()
         };
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 0);
+        assert_eq!(unsafe { added_finalizer_calls() }, 0);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { external_finalizer_calls() }, 0);
         assert_eq!(unsafe { external_arraybuffer_finalizer_calls() }, 0);
@@ -9192,8 +9416,49 @@ module.exports = {
             ));
         }
         assert!(matches!(
-            result.get_prop("supportsNapiV4"),
+            result.get_prop("supportsNapiV5"),
             Some(Value::Bool(true))
+        ));
+        let date_api = result.get_prop("dateApi").unwrap();
+        assert!(matches!(
+            date_api.get_prop("value"),
+            Some(Value::Number(1_700_000_000_123.0))
+        ));
+        assert!(matches!(
+            date_api.get_prop("guestValue"),
+            Some(Value::Number(1_700_000_000_123.0))
+        ));
+        assert!(matches!(
+            date_api.get_prop("isDate"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            date_api.get_prop("guestInstance"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            date_api.get_prop("guestConstructedInstance"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            date_api.get_prop("aliasedDateInstance"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            date_api.get_prop("referenceMatches"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            date_api.get_prop("napiInstance"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            date_api.get_prop("numberIsDate"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            date_api.get_prop("invalidDateStatus"),
+            Some(Value::Number(18.0))
         ));
         assert!(matches!(
             result.get_prop("externalProbe"),
@@ -10258,6 +10523,7 @@ module.exports = {
         drop(invalid_env);
         drop(interpreter);
         assert_eq!(unsafe { wrapped_finalizer_calls() }, 1);
+        assert_eq!(unsafe { added_finalizer_calls() }, 1);
         assert_eq!(unsafe { removed_finalizer_calls() }, 0);
         assert_eq!(unsafe { external_finalizer_calls() }, 1);
         assert_eq!(unsafe { external_arraybuffer_finalizer_calls() }, 1);

@@ -10,10 +10,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::Value;
+use crate::value::{BuiltinConstructor, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(d) = e.get("Date") {
+        if let Value::Object { props } = &d {
+            props.meta.borrow_mut().builtin_constructor = Some(BuiltinConstructor::Date);
+        }
         d.set_prop("now".to_string(), super::nf("now", date_now))
             .expect("built-in Date property");
         d.set_prop("parse".to_string(), super::nf("parse", date_parse))

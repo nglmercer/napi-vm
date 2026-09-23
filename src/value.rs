@@ -58,6 +58,13 @@ pub struct PropAttrs {
     pub configurable: bool,
 }
 
+/// Runtime identity for built-in constructor objects whose instances use a
+/// dedicated `Value` representation instead of an ordinary prototype link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BuiltinConstructor {
+    Date,
+}
+
 /// Primitive payload retained by an ECMAScript wrapper object created through
 /// `Object(value)` or Node-API's `napi_coerce_to_object`.
 #[derive(Debug, Clone)]
@@ -115,6 +122,10 @@ pub struct ObjectMeta {
     /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
     /// BigInt object. Ordinary objects leave this empty.
     pub boxed_primitive: Option<BoxedPrimitive>,
+    /// Some built-in instances (currently Date) have dedicated VM value
+    /// variants, so their constructor identity cannot be recovered by walking
+    /// an ordinary `[[Prototype]]` chain.
+    pub(crate) builtin_constructor: Option<BuiltinConstructor>,
 }
 
 impl ObjectMeta {

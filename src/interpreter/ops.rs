@@ -235,6 +235,14 @@ impl Interpreter {
                         class.name == "Error" || class.name == error.name,
                     ));
                 }
+                // Date instances use a dedicated VM value, and their built-in
+                // constructor identity lives in object metadata instead of an
+                // ordinary prototype link.
+                if matches!(l, Value::Date(_))
+                    && matches!(r, Value::Object { props } if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
+                {
+                    return Ok(Value::Bool(true));
+                }
                 // `l instanceof r`: walk l's prototype chain looking for r's
                 // prototype object (compared by shared Rc identity).
                 let target_proto = match r {
