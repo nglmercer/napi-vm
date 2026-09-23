@@ -161,6 +161,7 @@ typedef struct napi_vm_node_api_table {
   napi_status (*remove_env_cleanup_hook)(napi_env, napi_cleanup_hook, void*);
   napi_status (*get_last_error_info)(
       napi_env, const napi_extended_error_info**);
+  napi_status (*get_new_target)(napi_env, napi_callback_info, napi_value*);
 } napi_vm_node_api_table;
 
 #if defined(_WIN32)
@@ -819,4 +820,11 @@ NAPI_VM_EXPORT napi_status napi_get_last_error_info(
     napi_env env, const napi_extended_error_info** result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_last_error_info(env, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_new_target(napi_env env,
+                                                napi_callback_info info,
+                                                napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_new_target(env, info, result) : 9;
 }

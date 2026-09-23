@@ -98,6 +98,36 @@ pub trait HostBridge {
         self.construct_host(id, args)
     }
 
+    /// Construct a host function with an explicit receiver and `new.target`.
+    /// Bridges that do not expose constructor callback metadata can retain
+    /// their existing construction behavior through the default.
+    fn construct_host_with_callback_handler_and_target(
+        &self,
+        id: usize,
+        _this_value: Value,
+        args: Vec<Value>,
+        _new_target: Value,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.construct_host_with_callback_handler(id, args, callback_handler)
+    }
+
+    /// Invoke a host-backed superclass constructor against an already-created
+    /// guest receiver. This differs from constructing a bare host function:
+    /// bridges that model imported classes as host functions can preserve
+    /// their existing call behavior, while native ABI bridges can attach the
+    /// inherited `new.target` to the callback frame.
+    fn call_host_constructor_with_callback_handler_and_target(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        _new_target: Value,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.call_host_with_callback_handler(id, this_value, args, callback_handler)
+    }
+
     /// Whether the function registered under `id` is async (registered via
     /// `exposeAsyncFunction`). Async functions return `HostPending` when
     /// called, and the interpreter parks at `await` until resolved.

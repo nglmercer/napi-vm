@@ -164,6 +164,10 @@ pub struct Interpreter {
     pub jobs: Jobs,
     /// Call stack for error reporting. Pushed on function entry, popped on exit.
     call_stack: Vec<StackFrame>,
+    /// Active JavaScript constructor targets. A derived guest constructor
+    /// inherits the original `new.target` when it calls a host constructor
+    /// through `super()`.
+    pub(crate) new_target_stack: Vec<Value>,
     /// The source code for the current module/script, used to extract
     /// source lines for error context. Stored as lines for efficient lookup.
     source_lines: Vec<String>,
@@ -229,6 +233,7 @@ impl Interpreter {
             yield_sink: None,
             jobs: Jobs::default(),
             call_stack: Vec::new(),
+            new_target_stack: Vec::new(),
             source_lines: Vec::new(),
             gen_depth: 0,
             loop_budget: DEFAULT_LOOP_BUDGET,

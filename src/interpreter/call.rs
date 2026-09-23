@@ -41,6 +41,28 @@ pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
         })
 }
 
+fn is_js_object(value: &Value) -> bool {
+    if matches!(
+        value,
+        Value::Undefined
+            | Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::BigInt(_)
+            | Value::Symbol(_)
+            | Value::HostPending { .. }
+            | Value::Binding(_)
+    ) {
+        return false;
+    }
+    #[cfg(stackful_coroutines)]
+    if matches!(value, Value::AsyncTask(_)) {
+        return false;
+    }
+    true
+}
+
 impl Interpreter {
     pub(super) fn destructure(&mut self, pat: &Pattern, val: &Value) -> Result<Value, VmErr> {
         match pat {
@@ -728,21 +750,44 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        let new_target = self
+            .new_target_stack
+            .last()
+            .cloned()
+            .unwrap_or_else(|| f.clone());
+        self.invoke_constructor_with_new_target(f, this_val.clone(), args, new_target)?;
+        Ok(this_val)
+    }
+
+    fn invoke_constructor_with_new_target(
+        &mut self,
+        f: &Value,
+        this_val: Value,
+        args: Vec<Value>,
+        new_target: Value,
+    ) -> Result<Value, VmErr> {
         match f {
-            Value::Class(c) => {
-                let ctor = c.constructor.as_ref().clone();
-                self.call_this(&ctor, this_val.clone(), args)?;
-                Ok(this_val)
-            }
-            Value::Function(_) => {
-                self.call_this(f, this_val.clone(), args)?;
-                Ok(this_val)
-            }
+            Value::Class(c) => self.invoke_constructor_with_new_target(
+                c.constructor.as_ref(),
+                this_val,
+                args,
+                new_target,
+            ),
+            Value::Function(_) => self.call_this(f, this_val, args),
             // The built-in error types have native constructors, so
             // `class E extends Error {}` reaches `super(…)` here.
-            Value::NativeFunction { .. } | Value::HostFunction { .. } => {
-                self.call_this(f, this_val.clone(), args)?;
-                Ok(this_val)
+            Value::NativeFunction { .. } => self.call_this(f, this_val, args),
+            Value::HostFunction { id, .. } => {
+                let bridge = self.host.clone().ok_or_else(|| {
+                    VmErr::Msg("cannot construct host function: no bridge attached".to_string())
+                })?;
+                bridge.call_host_constructor_with_callback_handler_and_target(
+                    *id,
+                    this_val,
+                    args,
+                    new_target,
+                    &mut |callback| self.run_host_callback(callback),
+                )
             }
             _ => {
                 let type_name = match f {
@@ -761,6 +806,19 @@ impl Interpreter {
     }
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
+        let new_target = f.clone();
+        self.new_target_stack.push(new_target.clone());
+        let result = self.ctor_with_new_target(f, args, new_target);
+        self.new_target_stack.pop();
+        result
+    }
+
+    fn ctor_with_new_target(
+        &mut self,
+        f: &Value,
+        args: Vec<Value>,
+        new_target: Value,
+    ) -> Result<Value, VmErr> {
         // A built-in namespace object constructs through its internal slot:
         // `new Map()` and `Map()` reach the same implementation unless the
         // built-in installs a separate one.
@@ -779,30 +837,41 @@ impl Interpreter {
                 Some(trap) => {
                     let handler = proxy.handler.clone();
                     let arg_list = Value::checked_array(args)?;
-                    self.call_this(&trap, handler, vec![target.clone(), arg_list, target])
+                    self.call_this(&trap, handler, vec![target, arg_list, new_target])
                 }
-                None => self.ctor(&target, args),
+                None => self.ctor_with_new_target(&target, args, new_target),
             };
         }
         match f {
             Value::HostFunction { id, .. } => {
+                let instance = Value::object(vec![]);
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;
-                bridge.construct_host_with_callback_handler(*id, args, &mut |callback| {
-                    self.run_host_callback(callback)
-                })
+                let result = bridge.construct_host_with_callback_handler_and_target(
+                    *id,
+                    instance.clone(),
+                    args,
+                    new_target,
+                    &mut |callback| self.run_host_callback(callback),
+                )?;
+                if is_js_object(&result) {
+                    Ok(result)
+                } else {
+                    Ok(instance)
+                }
             }
             Value::Class(c) => {
                 // The instance's prototype is the class prototype (shared Rc, so
                 // `instanceof` can compare identity).
                 let inst = Value::object_with_proto(vec![], Some(c.prototype.clone()));
-                let ctor = c.constructor.as_ref().clone();
-                let r = self.call_this(&ctor, inst.clone(), args)?;
-                match r {
-                    Value::Object { .. } => Ok(r),
-                    _ => Ok(inst),
-                }
+                let r = self.invoke_constructor_with_new_target(
+                    c.constructor.as_ref(),
+                    inst.clone(),
+                    args,
+                    new_target,
+                )?;
+                if is_js_object(&r) { Ok(r) } else { Ok(inst) }
             }
             Value::Function(fd) => {
                 let inst = Value::object(vec![]);
@@ -871,10 +940,8 @@ impl Interpreter {
                 let r = self.run_program_body(&fd.body);
                 self.global = s;
                 match r {
-                    Err(VmErr::Ret(v)) => match v {
-                        Value::Object { .. } => Ok(v),
-                        _ => Ok(inst),
-                    },
+                    Err(VmErr::Ret(v)) if is_js_object(&v) => Ok(v),
+                    Err(VmErr::Ret(_)) => Ok(inst),
                     _ => Ok(inst),
                 }
             }

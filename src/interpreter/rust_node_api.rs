@@ -204,6 +204,7 @@ impl Drop for RustNodeApiHost {
                     id,
                     Value::Undefined,
                     Vec::new(),
+                    None,
                     &mut reject_guest_callback,
                 );
             }
@@ -466,6 +467,7 @@ thread_local! {
 struct CallbackFrame {
     args: Vec<NapiValue>,
     this_arg: NapiValue,
+    new_target: NapiValue,
     data: *mut c_void,
 }
 
@@ -806,6 +808,7 @@ struct NapiVmApiTable {
     remove_env_cleanup_hook:
         unsafe extern "C" fn(NapiEnv, Option<NapiCleanupHook>, *mut c_void) -> i32,
     get_last_error_info: unsafe extern "C" fn(NapiEnv, *mut *const NapiExtendedErrorInfo) -> i32,
+    get_new_target: unsafe extern "C" fn(NapiEnv, NapiCallbackInfo, *mut NapiValue) -> i32,
 }
 
 #[repr(C)]
@@ -913,6 +916,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     add_env_cleanup_hook: api_add_env_cleanup_hook,
     remove_env_cleanup_hook: api_remove_env_cleanup_hook,
     get_last_error_info: api_get_last_error_info,
+    get_new_target: api_get_new_target,
 };
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
@@ -4384,6 +4388,27 @@ unsafe extern "C" fn api_get_cb_info(
     })
 }
 
+unsafe extern "C" fn api_get_new_target(
+    env: NapiEnv,
+    info: NapiCallbackInfo,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if info.is_null() || result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let frame = environment
+            .active_callbacks
+            .borrow()
+            .get(&(info as usize))
+            .cloned()
+            .ok_or(NAPI_INVALID_ARG)?;
+        unsafe { result.write(frame.new_target) };
+        Ok(())
+    })
+}
+
 unsafe extern "C" fn api_open_handle_scope(env: NapiEnv, result: *mut NapiHandleScope) -> i32 {
     with_ffi_status(env, || {
         if result.is_null() {
@@ -4603,6 +4628,7 @@ impl RustNodeApiHost {
         id: usize,
         this_value: Value,
         args: Vec<Value>,
+        new_target: Option<Value>,
         mut callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
         let callback = {
@@ -4643,6 +4669,15 @@ impl RustNodeApiHost {
                         .map_err(|status| {
                             napi_error("creating callback receiver handle", status)
                         })?;
+                    let new_target = match new_target {
+                        Some(new_target) => callback
+                            .env
+                            .handles
+                            .borrow_mut()
+                            .create(new_target)
+                            .map_err(|status| napi_error("creating new.target handle", status))?,
+                        None => std::ptr::null_mut(),
+                    };
                     let arg_handles = args
                         .into_iter()
                         .map(|value| {
@@ -4659,6 +4694,7 @@ impl RustNodeApiHost {
                     let frame = CallbackFrame {
                         args: arg_handles,
                         this_arg,
+                        new_target,
                         data: callback.data,
                     };
                     let callback_info =
@@ -5115,7 +5151,7 @@ impl NativeAddonLoader for RustNodeApiHost {
 
 impl HostBridge for RustNodeApiHost {
     fn call_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
-        self.invoke_native(id, Value::Undefined, args, &mut reject_guest_callback)
+        self.invoke_native(id, Value::Undefined, args, None, &mut reject_guest_callback)
     }
 
     fn call_host_with_this(
@@ -5124,7 +5160,7 @@ impl HostBridge for RustNodeApiHost {
         this_value: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
-        self.invoke_native(id, this_value, args, &mut reject_guest_callback)
+        self.invoke_native(id, this_value, args, None, &mut reject_guest_callback)
     }
 
     fn call_host_with_callback_handler(
@@ -5134,7 +5170,7 @@ impl HostBridge for RustNodeApiHost {
         args: Vec<Value>,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
-        self.invoke_native(id, this_value, args, callback_handler)
+        self.invoke_native(id, this_value, args, None, callback_handler)
     }
 
     fn construct_host_with_callback_handler(
@@ -5143,7 +5179,29 @@ impl HostBridge for RustNodeApiHost {
         args: Vec<Value>,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
-        self.invoke_native(id, Value::Undefined, args, callback_handler)
+        self.invoke_native(id, Value::Undefined, args, None, callback_handler)
+    }
+
+    fn construct_host_with_callback_handler_and_target(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        new_target: Value,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.invoke_native(id, this_value, args, Some(new_target), callback_handler)
+    }
+
+    fn call_host_constructor_with_callback_handler_and_target(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        new_target: Value,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.invoke_native(id, this_value, args, Some(new_target), callback_handler)
     }
 
     fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
@@ -5463,6 +5521,10 @@ static napi_env cleanup_env;
 static int descriptor_setter_value = 5;
 static int class_constructor_offset = 1;
 static int counter_static_offset = 8;
+static int target_call_count;
+static int target_construct_count;
+static bool counter_new_target_seen;
+static bool counter_child_new_target_seen;
 static int threadsafe_finalizer_calls;
 static int threadsafe_worker_context_ok;
 static int threadsafe_worker_call_status = -1;
@@ -6045,16 +6107,62 @@ static napi_value defined_setter(napi_env env, napi_callback_info info) {
 }
 
 static napi_value counter_constructor(napi_env env, napi_callback_info info) {
-  napi_value argument, this_arg, initial_value;
+  napi_value argument, this_arg, initial_value, new_target, target_name;
   size_t argc = 1;
   void* data = NULL;
   int32_t value = 0;
+  char target_name_text[64] = {0};
   if (napi_get_cb_info(env, info, &argc, &argument, &this_arg, &data) != napi_ok ||
-      this_arg == NULL || data != &class_constructor_offset) return NULL;
+      this_arg == NULL || data != &class_constructor_offset ||
+      napi_get_new_target(env, info, &new_target) != napi_ok) return NULL;
+  counter_new_target_seen = new_target != NULL;
+  counter_child_new_target_seen = false;
+  if (new_target != NULL &&
+      napi_get_named_property(env, new_target, "name", &target_name) == napi_ok) {
+    size_t target_name_length = 0;
+    if (napi_get_value_string_utf8(env, target_name, target_name_text,
+                                   sizeof(target_name_text),
+                                   &target_name_length) == napi_ok) {
+      counter_child_new_target_seen =
+          strcmp(target_name_text, "CounterChild") == 0;
+    }
+  }
   if (argc > 0 && napi_get_value_int32(env, argument, &value) != napi_ok) return NULL;
   if (napi_create_int32(env, value + *(int*)data, &initial_value) != napi_ok ||
       napi_set_named_property(env, this_arg, "value", initial_value) != napi_ok) return NULL;
   return NULL;
+}
+
+static napi_value target_probe(napi_env env, napi_callback_info info) {
+  napi_value new_target;
+  if (napi_get_new_target(env, info, &new_target) != napi_ok) return NULL;
+  if (new_target == NULL) target_call_count++;
+  else target_construct_count++;
+  return NULL;
+}
+
+static napi_value target_counts(napi_env env, napi_callback_info info) {
+  napi_value result, field;
+  (void)info;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_create_int32(env, target_call_count, &field) != napi_ok ||
+      napi_set_named_property(env, result, "calls", field) != napi_ok ||
+      napi_create_int32(env, target_construct_count, &field) != napi_ok ||
+      napi_set_named_property(env, result, "constructs", field) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value counter_new_target_info(napi_env env, napi_callback_info info) {
+  napi_value result, field;
+  (void)info;
+  if (napi_create_object(env, &result) != napi_ok ||
+      napi_get_boolean(env, counter_new_target_seen, &field) != napi_ok ||
+      napi_set_named_property(env, result, "seen", field) != napi_ok ||
+      napi_get_boolean(env, counter_child_new_target_seen, &field) != napi_ok ||
+      napi_set_named_property(env, result, "child", field) != napi_ok)
+    return NULL;
+  return result;
 }
 
 static napi_value counter_increment(napi_env env, napi_callback_info info) {
@@ -6422,6 +6530,16 @@ NAPI_MODULE_INIT() {
       napi_get_value_int32(env, field, &checked_version) != napi_ok ||
       checked_version != 1 ||
       napi_set_named_property(env, exports, "metadata", metadata) != napi_ok) return NULL;
+  if (napi_create_function(env, "targetProbe", NAPI_AUTO_LENGTH, target_probe,
+                           NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "targetProbe", function) != napi_ok ||
+      napi_create_function(env, "targetCounts", NAPI_AUTO_LENGTH, target_counts,
+                           NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "targetCounts", function) != napi_ok ||
+      napi_create_function(env, "counterNewTargetInfo", NAPI_AUTO_LENGTH,
+                           counter_new_target_info, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "counterNewTargetInfo", function) != napi_ok)
+    return NULL;
   if (napi_create_object(env, &values) != napi_ok ||
       napi_get_boolean(env, true, &field) != napi_ok ||
       napi_set_named_property(env, values, "truth", field) != napi_ok ||
@@ -6545,7 +6663,12 @@ const definedValueAfter = addon.definedValue;
 const definedMethodDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedMethod');
 const definedValueDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedValue');
 const definedConstantDescriptor = Object.getOwnPropertyDescriptor(addon, 'definedConstant');
+addon.targetProbe();
+const targetCallCounts = addon.targetCounts();
+new addon.targetProbe();
+const targetConstructCounts = addon.targetCounts();
 const counter = new addon.Counter(40);
+const counterNewTargetInfo = addon.counterNewTargetInfo();
 const counterIncremented = counter.increment();
 const counterStaticDescriptor = Object.getOwnPropertyDescriptor(addon.Counter, 'offset');
 const counterStaticMethodDescriptor = Object.getOwnPropertyDescriptor(addon.Counter, 'constant');
@@ -6563,6 +6686,8 @@ const counterInheritedStatic = CounterChild.inheritedStatic;
 const counterHasInheritedStatic = 'inheritedStatic' in CounterChild;
 const counterInheritedBaseValue = CounterChild.baseValue;
 const counterInheritedStaticMethod = CounterChild.constant();
+const childCounter = new CounterChild(5);
+const childNewTargetInfo = addon.counterNewTargetInfo();
 const errors = addon.createErrors();
 let typeError;
 let rangeError;
@@ -6640,6 +6765,11 @@ module.exports = {
   definedMethod,
   definedValueBefore,
   definedValueAfter,
+  targetCallCounts,
+  targetConstructCounts,
+  counterNewTargetInfo,
+  childNewTargetInfo,
+  childCounterValue: childCounter.value,
   definedConstant: addon.definedConstant,
   definedSymbolValue: addon[addon.descriptorSymbol],
   definedMethodEnumerable: definedMethodDescriptor.enumerable,
@@ -7002,6 +7132,46 @@ module.exports = {
         assert!(matches!(
             result.get_prop("definedValueAfter"),
             Some(Value::Number(23.0))
+        ));
+        let target_call_counts = result.get_prop("targetCallCounts").unwrap();
+        assert!(matches!(
+            target_call_counts.get_prop("calls"),
+            Some(Value::Number(1.0))
+        ));
+        assert!(matches!(
+            target_call_counts.get_prop("constructs"),
+            Some(Value::Number(0.0))
+        ));
+        let target_construct_counts = result.get_prop("targetConstructCounts").unwrap();
+        assert!(matches!(
+            target_construct_counts.get_prop("calls"),
+            Some(Value::Number(1.0))
+        ));
+        assert!(matches!(
+            target_construct_counts.get_prop("constructs"),
+            Some(Value::Number(1.0))
+        ));
+        let counter_new_target_info = result.get_prop("counterNewTargetInfo").unwrap();
+        assert!(matches!(
+            counter_new_target_info.get_prop("seen"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            counter_new_target_info.get_prop("child"),
+            Some(Value::Bool(false))
+        ));
+        let child_new_target_info = result.get_prop("childNewTargetInfo").unwrap();
+        assert!(matches!(
+            child_new_target_info.get_prop("seen"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            child_new_target_info.get_prop("child"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            result.get_prop("childCounterValue"),
+            Some(Value::Number(6.0))
         ));
         assert!(matches!(
             result.get_prop("definedConstant"),
