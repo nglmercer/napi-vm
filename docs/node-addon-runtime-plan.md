@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (planned) | Addons using the supported Node-API versions only | `napi-vm` plus a platform dynamic library loader |
+| Rust Node-API host (experimental) | A small Node-API v1 subset on Linux | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -58,6 +58,14 @@ The exact Rust names can follow the existing `NodeAddonOptions`; the important
 parts are backend choice, allowed filesystem roots, integrity pins, supported
 Node-API version, and a stable compatibility report. A guest `require()` call
 still goes through the VM's CommonJS resolver and module cache.
+
+The first implementation is available behind Cargo feature `node-api-host`:
+`Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
+existing CommonJS resolver and allowlist. Its Linux prototype loads real
+Node-API v1 shared libraries and currently covers scoped handles, callback
+info, C callbacks, int32 values, and basic object properties. Treat this as an
+incomplete compatibility backend; unimplemented imported symbols fail at
+load time.
 
 ## Implementation phases
 

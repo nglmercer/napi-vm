@@ -14,6 +14,10 @@ default = ["napi"]
 # pure-Rust core alone — for the language server, native GUI frontends, or the
 # `wasm32` target.
 napi = ["dep:napi", "dep:napi-derive"]
+# Experimental in-process loader for addons that use only the Node-API C ABI.
+# The first implementation is Linux-only; the Node sidecar remains the
+# cross-platform backend for other addon ABIs and targets.
+node-api-host = ["dep:libloading"]
 # The browser layer: a `#[wasm_bindgen]` `WasmVm` that runs the VM in-page and
 # exposes the shared language services (completion/diagnostics/symbols). Build
 # with `--no-default-features --features wasm --target wasm32-unknown-unknown`.
@@ -22,6 +26,7 @@ wasm = ["dep:wasm-bindgen"]
 [dependencies]
 napi = { version = "3.12.2", features = ["napi8"], optional = true }
 napi-derive = { version = "3.6.3", optional = true }
+libloading = { version = "0.9", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

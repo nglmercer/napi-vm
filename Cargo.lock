@@ -634,6 +634,7 @@ dependencies = [
  "corosensei",
  "criterion",
  "js-sys",
+ "libloading",
  "napi",
  "napi-derive",
  "regex-syntax",

@@ -17,7 +17,35 @@
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=native/node_api_shim.c");
     println!("cargo::rustc-check-cfg=cfg(stackful_coroutines)");
+    println!("cargo::rustc-check-cfg=cfg(node_api_host_unavailable)");
+
+    if std::env::var_os("CARGO_FEATURE_NODE_API_HOST").is_some() {
+        let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if target_os == "linux" {
+            let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+            let library = out_dir.join("libnapi_vm_node_api_shim.so");
+            let compiler = std::env::var_os("CC").unwrap_or_else(|| "cc".into());
+            let status = std::process::Command::new(compiler)
+                .args(["-std=c11", "-O2", "-fPIC", "-fvisibility=hidden", "-shared"])
+                .arg("native/node_api_shim.c")
+                .arg("-o")
+                .arg(&library)
+                .status()
+                .expect("node-api-host requires a C compiler");
+            assert!(
+                status.success(),
+                "failed to compile the Node-API symbol shim"
+            );
+            println!(
+                "cargo::rustc-env=NAPI_VM_NODE_API_SHIM_PATH={}",
+                library.display()
+            );
+        } else {
+            println!("cargo::rustc-cfg=node_api_host_unavailable");
+        }
+    }
 
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let windows = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default() == "windows";

@@ -35,6 +35,8 @@ pub use interpreter::{
 pub use interpreter::{Environment, Interpreter, Module};
 #[cfg(not(target_arch = "wasm32"))]
 pub use interpreter::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
+#[cfg(all(feature = "node-api-host", target_os = "linux"))]
+pub use interpreter::{RustNodeApiHost, RustNodeApiOptions};
 pub use lexer::{Lexer, Token};
 pub use parser::{Expr, Parser, Statement};
 pub use value::Value;

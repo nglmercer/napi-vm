@@ -9,6 +9,8 @@ pub mod node_addon;
 mod ops;
 mod promise;
 mod resolve;
+#[cfg(all(feature = "node-api-host", target_os = "linux"))]
+pub mod rust_node_api;
 
 #[cfg(stackful_coroutines)]
 pub use async_fn::AsyncTask;
@@ -19,6 +21,8 @@ pub use commonjs::{
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
+#[cfg(all(feature = "node-api-host", target_os = "linux"))]
+pub use rust_node_api::{RustNodeApiHost, RustNodeApiOptions};
 
 /// The state a generator or async body must share with the interpreter that
 /// started it: the one event loop, and the one module registry.

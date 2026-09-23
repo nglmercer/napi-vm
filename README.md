@@ -141,6 +141,39 @@ behavior still differs across the VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 
+### Experimental Rust Node-API host
+
+Linux desktop builds can enable the `node-api-host` Cargo feature to load a
+small Node-API v1 addon directly into the Rust process, without a Node
+executable. It uses the same guest `require()` resolver, root restrictions,
+and hash allowlist:
+
+```rust
+use napi_vm::{Interpreter, RustNodeApiOptions};
+use std::path::PathBuf;
+
+let app_root = PathBuf::from("./app").canonicalize().unwrap();
+let addon = app_root.join("native/example.node");
+let digest: [u8; 32] = trusted_manifest_digest();
+let mut runtime = Interpreter::with_builtins();
+runtime
+    .enable_rust_node_api_addons(
+        RustNodeApiOptions::new([app_root.clone()])
+            .allow_native_addon_with_sha256(addon, digest)
+            .entry(app_root.join("main.cjs")),
+    )
+    .unwrap();
+let result = runtime.eval_source("require('./native/example.node').run();").unwrap();
+```
+
+This is an early compatibility slice, not a general Node replacement. It
+currently supports Node-API version 1 modules using `napi_create_function`,
+`napi_get_cb_info`, `napi_create_object`, named property access, int32 values,
+and handle scopes. Unimplemented imports fail when the library is loaded.
+Direct V8/NAN/Node C++/libuv addons must use the Node sidecar. The feature
+requires a C compiler at build time, and native addons have the desktop
+process's full privileges in either backend.
+
 ## Useful examples
 
 ```bash

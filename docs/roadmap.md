@@ -165,7 +165,12 @@ Every claim below was checked against the current build.
   addon calls, including further synchronous callbacks. The bridge still
   requires a Node executable and has reflection gaps; array prototype
   mutation is not supported. It is not an in-process Rust implementation of
-  Node-API.
+  Node-API. An experimental Linux-only `node-api-host` Cargo feature now loads
+  a real Node-API v1 ELF fixture in process and supports a first synchronous
+  API slice: opaque scoped handles, callback info, native functions, int32 and
+  object properties. It does not yet support guest callbacks, references,
+  pending exceptions, async work, or the complete Node-API surface
+  (`src/interpreter/rust_node_api.rs`).
 
 - **Generators on `wasm32`** — the browser target has no stack switching, so a
   body cannot be suspended. It runs once to completion on the first `next()`
