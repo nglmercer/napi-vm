@@ -132,11 +132,12 @@ those values fail clearly.
 Accessor and symbol-keyed properties on plain objects cross the native addon
 bridge. Accessors invoke guest getter and setter callbacks, and symbol keys
 retain identity in both directions. Explicit guest object prototypes preserve
-inherited property reads and method calls through the bridge. Prototype
-mutation and built-in prototype fidelity remain incomplete. Accessors or
-symbol keys on arrays, sparse arrays, and array descriptor changes are not
-fully compatible yet. Some reflection behavior still differs across the
-VM/Node boundary.
+inherited property reads and method calls through the bridge, and prototype
+changes on plain guest objects roundtrip through native calls, including null
+and the default prototype. Array prototype mutation and built-in prototype
+fidelity remain incomplete. Accessors or symbol keys on arrays, sparse arrays,
+and array descriptor changes are not fully compatible yet. Some reflection
+behavior still differs across the VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 

@@ -77,8 +77,14 @@ impl Default for PropAttrs {
 /// one binding they were applied to.
 #[derive(Debug, Default)]
 pub struct ObjectMeta {
-    /// Prototype link. `None` means a null prototype.
+    /// Prototype link. `None` means either a null prototype or the runtime's
+    /// default prototype, distinguished by `uses_default_prototype`.
     pub proto: Option<Rc<Value>>,
+    /// Whether `proto == None` represents the default JavaScript object
+    /// prototype. The interpreter does not currently materialize that built-in
+    /// prototype, but bridges need to distinguish it from an explicit null
+    /// prototype.
+    pub uses_default_prototype: bool,
     /// Non-default property attributes, keyed by property name.
     pub attrs: Vec<(String, PropAttrs)>,
     /// Original identities for symbol-keyed property slots. The slot key keeps
@@ -355,12 +361,24 @@ impl ObjectCell {
         }
     }
 
+    pub fn new_with_default_proto(props: Vec<(String, Value)>) -> Self {
+        Self {
+            slots: RefCell::new(props),
+            meta: RefCell::new(ObjectMeta {
+                uses_default_prototype: true,
+                ..ObjectMeta::default()
+            }),
+        }
+    }
+
     pub fn proto(&self) -> Option<Rc<Value>> {
         self.meta.borrow().proto.clone()
     }
 
     pub fn set_proto(&self, proto: Option<Rc<Value>>) {
-        self.meta.borrow_mut().proto = proto;
+        let mut meta = self.meta.borrow_mut();
+        meta.proto = proto;
+        meta.uses_default_prototype = false;
     }
 
     /// Uncontended access to the slots, for the iterative `Drop`.
@@ -955,7 +973,7 @@ impl Value {
 
     pub fn object(props: Vec<(String, Value)>) -> Self {
         Value::Object {
-            props: Rc::new(ObjectCell::new(props, None)),
+            props: Rc::new(ObjectCell::new_with_default_proto(props)),
         }
     }
 
