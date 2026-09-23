@@ -72,6 +72,7 @@ typedef struct napi_vm_node_api_table {
   napi_status (*create_array_with_length)(napi_env, size_t, napi_value*);
   napi_status (*is_array)(napi_env, napi_value, bool*);
   napi_status (*get_array_length)(napi_env, napi_value, uint32_t*);
+  napi_status (*get_prototype)(napi_env, napi_value, napi_value*);
   napi_status (*get_element)(napi_env, napi_value, uint32_t, napi_value*);
   napi_status (*set_element)(napi_env, napi_value, uint32_t, napi_value);
   napi_status (*has_element)(napi_env, napi_value, uint32_t, bool*);
@@ -370,6 +371,12 @@ NAPI_VM_EXPORT napi_status napi_get_array_length(napi_env env,
                                                   uint32_t* result) {
   const napi_vm_node_api_table* table = get_api_table();
   return table ? table->get_array_length(env, value, result) : 9;
+}
+
+NAPI_VM_EXPORT napi_status napi_get_prototype(napi_env env, napi_value object,
+                                               napi_value* result) {
+  const napi_vm_node_api_table* table = get_api_table();
+  return table ? table->get_prototype(env, object, result) : 9;
 }
 
 NAPI_VM_EXPORT napi_status napi_get_element(napi_env env, napi_value value,

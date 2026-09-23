@@ -74,6 +74,11 @@ operations. Class static properties share object descriptor metadata and
 accessor behavior.
 `napi_get_value_int64` truncates finite Numbers toward zero, clamps values
 outside the signed 64-bit range, and converts NaN and infinities to zero.
+`napi_get_prototype` preserves explicit prototypes and the realm's
+`Object.prototype` identity for ordinary objects. Prototype queries for VM
+values whose built-in prototype is not materialized (such as arrays and
+proxies) return a generic Node-API failure until that prototype model is
+implemented.
 `napi_call_function` and `napi_new_instance` enter guest code through the
 interpreter's paused host-call callback handler; nested native calls and
 pending guest exceptions stay on that controlled call path.

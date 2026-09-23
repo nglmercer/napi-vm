@@ -245,6 +245,7 @@ impl Drop for RustNodeApiHost {
 
 struct HostState {
     global: Env,
+    object_prototype: Option<Value>,
     next_callback_id: usize,
     callbacks: HashMap<usize, NativeCallbackRecord>,
     environments: Vec<Rc<NapiEnvironment>>,
@@ -662,6 +663,7 @@ struct NapiVmApiTable {
     create_array_with_length: unsafe extern "C" fn(NapiEnv, usize, *mut NapiValue) -> i32,
     is_array: unsafe extern "C" fn(NapiEnv, NapiValue, *mut bool) -> i32,
     get_array_length: unsafe extern "C" fn(NapiEnv, NapiValue, *mut u32) -> i32,
+    get_prototype: unsafe extern "C" fn(NapiEnv, NapiValue, *mut NapiValue) -> i32,
     get_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut NapiValue) -> i32,
     set_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, NapiValue) -> i32,
     has_element: unsafe extern "C" fn(NapiEnv, NapiValue, u32, *mut bool) -> i32,
@@ -864,6 +866,7 @@ static NAPI_VM_API_TABLE: NapiVmApiTable = NapiVmApiTable {
     create_array_with_length: api_create_array_with_length,
     is_array: api_is_array,
     get_array_length: api_get_array_length,
+    get_prototype: api_get_prototype,
     get_element: api_get_element,
     set_element: api_set_element,
     has_element: api_has_element,
@@ -2358,6 +2361,58 @@ unsafe extern "C" fn api_get_array_length(env: NapiEnv, value: NapiValue, result
         unsafe { result.write(length as u32) };
         Ok(())
     })
+}
+
+unsafe extern "C" fn api_get_prototype(
+    env: NapiEnv,
+    object: NapiValue,
+    result: *mut NapiValue,
+) -> i32 {
+    with_ffi_status(env, || {
+        if result.is_null() {
+            return Err(NAPI_INVALID_ARG);
+        }
+        let environment = environment(env)?;
+        let object = environment.handles.borrow().get(object)?;
+        let prototype = match &object {
+            Value::Object { props } => {
+                let (prototype, uses_default_prototype) = {
+                    let meta = props.meta.borrow();
+                    (meta.proto.clone(), meta.uses_default_prototype)
+                };
+                match (prototype, uses_default_prototype) {
+                    (Some(prototype), _) => prototype.as_ref().clone(),
+                    (None, true) => {
+                        let default_prototype = napi_default_object_prototype(&environment)?;
+                        if super::strict_equals(&object, &default_prototype) {
+                            Value::Null
+                        } else {
+                            default_prototype
+                        }
+                    }
+                    (None, false) => Value::Null,
+                }
+            }
+            Value::GlobalObject => napi_default_object_prototype(&environment)?,
+            value if !is_napi_property_object(value) => return Err(NAPI_OBJECT_EXPECTED),
+            // The VM does not yet materialize several built-in and proxy
+            // prototypes. Failing clearly is safer than returning a plausible
+            // but incorrect prototype object.
+            _ => return Err(NAPI_GENERIC_FAILURE),
+        };
+        let handle = environment.handles.borrow_mut().create(prototype)?;
+        unsafe { result.write(handle) };
+        Ok(())
+    })
+}
+
+fn napi_default_object_prototype(environment: &NapiEnvironment) -> Result<Value, i32> {
+    let owner = environment.owner.upgrade().ok_or(NAPI_INVALID_ARG)?;
+    owner
+        .borrow()
+        .object_prototype
+        .clone()
+        .ok_or(NAPI_GENERIC_FAILURE)
 }
 
 unsafe extern "C" fn api_get_element(
@@ -4873,6 +4928,10 @@ fn create_async_work_pool(
 
 impl RustNodeApiHost {
     fn new(global: Env) -> Result<Self, VmErr> {
+        let object_prototype = global
+            .borrow()
+            .get("Object")
+            .and_then(|object| object.get_prop("prototype"));
         let shim = Rc::new(NodeApiShim::load()?);
         let (runtime_notification_sender, runtime_notifications) = mpsc::channel();
         let (async_work_sender, async_workers) =
@@ -4880,6 +4939,7 @@ impl RustNodeApiHost {
         Ok(Self {
             state: Rc::new(RefCell::new(HostState {
                 global,
+                object_prototype,
                 next_callback_id: 1,
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
@@ -6764,6 +6824,14 @@ static napi_value array_probe(napi_env env, napi_callback_info info) {
   return result;
 }
 
+static napi_value get_prototype_probe(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value object, prototype;
+  if (napi_get_cb_info(env, info, &argc, &object, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_get_prototype(env, object, &prototype) != napi_ok) return NULL;
+  return prototype;
+}
+
 static napi_value returns_undefined(napi_env env, napi_callback_info info) {
   (void)env;
   (void)info;
@@ -7021,6 +7089,9 @@ NAPI_MODULE_INIT() {
       napi_create_function(env, "int64ConversionProbe", NAPI_AUTO_LENGTH,
                            int64_conversion_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "int64ConversionProbe", function) != napi_ok ||
+      napi_create_function(env, "getPrototype", NAPI_AUTO_LENGTH,
+                           get_prototype_probe, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "getPrototype", function) != napi_ok ||
       napi_create_function(env, "arrayProbe", NAPI_AUTO_LENGTH, array_probe, NULL, &function) != napi_ok ||
       napi_set_named_property(env, exports, "arrayProbe", function) != napi_ok ||
       napi_create_function(env, "returnsUndefined", NAPI_AUTO_LENGTH, returns_undefined, NULL, &function) != napi_ok ||
@@ -7227,6 +7298,9 @@ Object.defineProperty(propertyTarget, 'assigned', {
 propertyTarget.removeMe = true;
 const properties = addon.propertyProbe(propertyTarget);
 const backingBytes = new Uint8Array(typedArrays.buffer);
+const customPrototype = {marker: 'prototype'};
+const customPrototypeTarget = Object.create(customPrototype);
+const nullPrototypeTarget = Object.create(null);
 module.exports = {
   same: addon === require('./fixture.node'),
   global: addon.globalProbe(),
@@ -7281,6 +7355,11 @@ module.exports = {
   roundTrip: addon.roundTrip(true, 4.25, 'native ✓', 4294967295, -2.5),
   int64Conversions: [NaN, Infinity, -Infinity, -0, 3.9, -3.9, 1e20, -1e20]
     .map(value => addon.int64ConversionProbe(value)),
+  prototypes: {
+    defaultMatches: addon.getPrototype({}) === Object.prototype,
+    customMatches: addon.getPrototype(customPrototypeTarget) === customPrototype,
+    nullMatches: addon.getPrototype(nullPrototypeTarget) === null,
+  },
   array: addon.arrayProbe(),
   wrapped,
   removedWrap,
@@ -7949,6 +8028,19 @@ module.exports = {
                 i64::MIN as f64
             ]
         );
+        let prototypes = result.get_prop("prototypes").unwrap();
+        assert!(matches!(
+            prototypes.get_prop("defaultMatches"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            prototypes.get_prop("customMatches"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(
+            prototypes.get_prop("nullMatches"),
+            Some(Value::Bool(true))
+        ));
         let round_trip = result.get_prop("roundTrip").unwrap();
         assert!(matches!(
             round_trip.get_prop("flag"),
