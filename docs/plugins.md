@@ -210,7 +210,7 @@ Choose the smallest runtime path that covers the plugin:
 | Plugin need | Rust host setup | Guest API |
 | --- | --- | --- |
 | JavaScript plugin, files, and path helpers | Build with `--no-default-features` | Checked `node:fs` and `node:path` modules |
-| napi-rs or another Node-API addon | Build with `--no-default-features --features node-api-host`; pin each trusted `.node` file by SHA-256 | Ordinary `require("./native/addon.node")` |
+| napi-rs or another Node-API addon | Build with `--no-default-features --features node-api-host`; pin each trusted `.node` file by SHA-256 | Ordinary `require("package.node")` or `require("./native/addon.node")` |
 | V8, NAN, Node C++ APIs, or direct libuv integration | Configure the Node sidecar and its Node executable | Node's native addon ABI |
 
 The in-process Rust backend needs a C compiler at build time but does not
@@ -272,9 +272,10 @@ host.load(plugin_directory)?;
 ```
 
 The VM exposes `require()` for the configured plugin entry, so its module can
-call `require("./native/addon.node")`. The addon still must be inside that
-plugin's root and match the pinned digest. Native code runs with the desktop
-process's OS privileges; the VM cannot sandbox it.
+call `require("package.node")` for an installed package or
+`require("./native/addon.node")` for a direct file. The addon still must be
+inside that plugin's root and match the pinned digest. Native code runs with
+the desktop process's OS privileges; the VM cannot sandbox it.
 
 Native extensions are an optional second path. A Rust plugin can be authored
 with `napi-rs`, compiled to a Node-API `.node` library, and loaded by the
@@ -305,9 +306,10 @@ application metadata to the host example:
 
 ```bash
 cargo build --release --manifest-path examples/plugins/rust-napi-plugin/native/Cargo.toml
-cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.so examples/plugins/rust-napi-plugin/native/addon.node
-sha256sum examples/plugins/rust-napi-plugin/native/addon.node
-cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- "$(sha256sum examples/plugins/rust-napi-plugin/native/addon.node | cut -d ' ' -f1)"
+mkdir -p examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release
+cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.so examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node
+sha256sum examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node
+cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- "$(sha256sum examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node | cut -d ' ' -f1)"
 ```
 
 The `.node` copy step uses the cdylib filename produced for the target OS and

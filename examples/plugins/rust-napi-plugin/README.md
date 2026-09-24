@@ -9,21 +9,35 @@ From the repository root, build the native crate:
 cargo build --release --manifest-path examples/plugins/rust-napi-plugin/native/Cargo.toml
 ```
 
-Copy the platform cdylib to the `.node` path used by the guest and calculate
-its SHA-256 digest:
+Copy the platform cdylib to the `.node` path declared by the package's
+`node-addons` export and calculate its SHA-256 digest:
 
-| Build host | cdylib | Copy and digest |
+| Build host | cdylib | Destination |
 | --- | --- | --- |
-| Linux | `native/target/release/librust_napi_plugin_native.so` | `cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.so examples/plugins/rust-napi-plugin/native/addon.node` then `sha256sum examples/plugins/rust-napi-plugin/native/addon.node` |
-| macOS | `native/target/release/librust_napi_plugin_native.dylib` | `cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.dylib examples/plugins/rust-napi-plugin/native/addon.node` then `shasum -a 256 examples/plugins/rust-napi-plugin/native/addon.node` |
-| Windows PowerShell | `native/target/release/rust_napi_plugin_native.dll` | `Copy-Item examples/plugins/rust-napi-plugin/native/target/release/rust_napi_plugin_native.dll examples/plugins/rust-napi-plugin/native/addon.node` then `(Get-FileHash examples/plugins/rust-napi-plugin/native/addon.node -Algorithm SHA256).Hash.ToLowerInvariant()` |
+| Linux | `native/target/release/librust_napi_plugin_native.so` | `node_modules/rust-napi-plugin.node/build/Release/addon.node` |
+| macOS | `native/target/release/librust_napi_plugin_native.dylib` | `node_modules/rust-napi-plugin.node/build/Release/addon.node` |
+| Windows PowerShell | `native/target/release/rust_napi_plugin_native.dll` | `node_modules/rust-napi-plugin.node/build/Release/addon.node` |
+
+For Linux, from the repository root:
+
+```bash
+destination=examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node
+mkdir -p "$(dirname "$destination")"
+cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.so "$destination"
+sha256sum "$destination"
+```
+
+For macOS, use the `.dylib` output in the same copy command and calculate the
+digest with `shasum -a 256`. In Windows PowerShell, create the destination
+directory with `New-Item -ItemType Directory -Force`, copy the `.dll` there,
+and use `Get-FileHash -Algorithm SHA256`.
 
 Pass the digest as the final argument to the Rust host:
 
 ```bash
 cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- \
   examples/plugins/rust-napi-plugin \
-  "$(sha256sum examples/plugins/rust-napi-plugin/native/addon.node | cut -d ' ' -f1)"
+  "$(sha256sum examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node | cut -d ' ' -f1)"
 ```
 
 The host example reads the plugin name from `plugin.json`. An optional second
@@ -34,14 +48,15 @@ keep artifacts elsewhere. The supplied digest must match that selected file.
 On Windows PowerShell, store the digest and pass it as the last argument:
 
 ```powershell
-$digest = (Get-FileHash examples/plugins/rust-napi-plugin/native/addon.node -Algorithm SHA256).Hash.ToLowerInvariant()
+$digest = (Get-FileHash examples/plugins/rust-napi-plugin/node_modules/rust-napi-plugin.node/build/Release/addon.node -Algorithm SHA256).Hash.ToLowerInvariant()
 cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- examples/plugins/rust-napi-plugin $digest
 ```
 
 The plugin imports `node:fs` and `node:path` from Rust host facades. Its
 manifest requests read access to `config.json`, write access to `cache/**`,
-and path helpers; host policy grants those same operations. It loads the
-allowlisted addon with `require("./native/addon.node")` and awaits an
+and path helpers; host policy grants those same operations. Its bare
+`require("rust-napi-plugin.node")` resolves the package's `node-addons` export
+to the allowlisted file and awaits an
 `AsyncTask` from napi-rs. The Rust host runs load, reload, and unload hooks and
 prints their JSON results.
 

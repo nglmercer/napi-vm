@@ -1,6 +1,7 @@
 //! Run an ESM plugin that uses a napi-rs addon without embedding Node.
 //!
-//! Build the addon's cdylib, copy it into the plugin's `native/addon.node`,
+//! Build the addon's cdylib, copy it into the plugin's
+//! `node_modules/rust-napi-plugin.node/build/Release/addon.node`,
 //! calculate its trusted SHA-256, then run:
 //! `cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- <sha256>`
 
@@ -24,12 +25,13 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (plugin_dir, addon, digest) = match args.as_slice() {
         [digest] => (
             default_plugin_dir.clone(),
-            PathBuf::from("native/addon.node"),
+            PathBuf::from("node_modules/rust-napi-plugin.node/build/Release/addon.node"),
             digest,
         ),
         [plugin_dir, digest] => {
             let plugin_dir = PathBuf::from(plugin_dir);
-            let addon = PathBuf::from("native/addon.node");
+            let addon =
+                PathBuf::from("node_modules/rust-napi-plugin.node/build/Release/addon.node");
             (plugin_dir, addon, digest)
         }
         [plugin_dir, addon, digest] => (PathBuf::from(plugin_dir), PathBuf::from(addon), digest),

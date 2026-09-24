@@ -3172,9 +3172,20 @@ export default { onLoad() {
         };
         let compiled_addon = target_dir.join("release").join(cdylib_name);
         assert!(compiled_addon.is_file(), "napi-rs fixture was not built");
-        let addon = dir.0.join("fixture.node");
+        let addon = dir
+            .0
+            .join("node_modules/fixture.node/build/Release/fixture.node");
+        fs::create_dir_all(addon.parent().unwrap()).unwrap();
         fs::copy(&compiled_addon, &addon).unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+        dir.write(
+            "node_modules/fixture.node/package.json",
+            r#"{"name":"fixture.node","version":"1.0.0","exports":{".":{"node-addons":"./build/Release/fixture.node","default":"./fallback.cjs"}}}"#,
+        );
+        dir.write(
+            "node_modules/fixture.node/fallback.cjs",
+            "module.exports = { hostFallbackWasUsed: true };",
+        );
 
         dir.write("data.txt", "checked");
         dir.write("cache/.keep", "");
@@ -3183,7 +3194,7 @@ export default { onLoad() {
             r#"
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-const addon = require("./fixture.node");
+const addon = require("fixture.node");
 export default {
 async onLoad() {
   const counter = new addon.Counter(40);

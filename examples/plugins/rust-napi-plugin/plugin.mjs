@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const native = require("./native/addon.node");
+const native = require("rust-napi-plugin.node");
 
 export default {
   async onLoad(context) {
