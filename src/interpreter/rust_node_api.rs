@@ -4258,7 +4258,15 @@ unsafe extern "C" fn api_get_prototype(
         }
         let environment = environment(env)?;
         let object = environment.handles.borrow().get(object)?;
-        let prototype = napi_effective_prototype(&environment, &object)?;
+        let prototype = if matches!(object, Value::Proxy(_)) {
+            // Node's current Node-API implementation reports null for Proxy
+            // values without invoking `getPrototypeOf` traps. Keep this
+            // native API behavior separate from guest Object.getPrototypeOf,
+            // which uses the full Proxy internal method.
+            Value::Null
+        } else {
+            napi_effective_prototype(&environment, &object)?
+        };
         let handle = environment.handles.borrow_mut().create(prototype)?;
         unsafe { result.write(handle) };
         Ok(())
@@ -14356,8 +14364,15 @@ const ordinaryNameDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'name')
 const ordinaryLengthDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'length');
 const ordinaryPrototypeDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'prototype');
 let proxyObjectGetPrototypeCalls = 0;
+let napiProxyPrototypeTrapCalls = 0;
+let readingNapiPrototype = false;
+const napiReportedPrototype = {};
 const proxyOrdinary = new Proxy(ordinary, {
   getPrototypeOf(target) {
+    if (readingNapiPrototype) {
+      napiProxyPrototypeTrapCalls++;
+      return napiReportedPrototype;
+    }
     proxyObjectGetPrototypeCalls++;
     return Reflect.getPrototypeOf(target);
   },
@@ -14389,6 +14404,12 @@ try {
 } catch (error) {
   invalidGetPrototypeTrapThrows = error.name === 'TypeError';
 }
+readingNapiPrototype = true;
+const napiProxyPrototype = addon.getPrototype(proxyOrdinary);
+const napiTransparentProxyPrototype = addon.getPrototype(
+  new Proxy(ordinary, {}),
+);
+readingNapiPrototype = false;
 module.exports = {
   matched: addon.instanceofProbe({marked: true}, Marked),
   rejected: addon.instanceofProbe({marked: false}, Marked),
@@ -14419,6 +14440,12 @@ module.exports = {
   proxyObjectIsInstance: addon.instanceofProbe(proxyOrdinary, Ordinary),
   proxyObjectPrototypeMatches:
     Object.getPrototypeOf(proxyOrdinary) === Ordinary.prototype,
+  napiProxyObjectPrototypeMatches:
+    napiProxyPrototype === Ordinary.prototype,
+  napiProxyObjectPrototypeMatchesTrapResult:
+    napiProxyPrototype === napiReportedPrototype,
+  napiProxyObjectPrototypeIsNull: napiProxyPrototype === null,
+  napiTransparentProxyPrototypeIsNull: napiTransparentProxyPrototype === null,
   proxyObjectIsPrototypeOf: Ordinary.prototype.isPrototypeOf(proxyOrdinary),
   proxyConstructorIsInstance:
     addon.instanceofProbe(ordinary, proxyOrdinaryConstructor),
@@ -14427,6 +14454,7 @@ module.exports = {
   invalidGetPrototypeTrapThrows,
   proxyTrapCalls: {
     objectGetPrototype: proxyObjectGetPrototypeCalls,
+    napiGetPrototype: napiProxyPrototypeTrapCalls,
     constructorHasInstance: proxyConstructorHasInstanceReads,
     constructorMissingHasInstance: proxyConstructorMissingHasInstanceReads,
   },
@@ -14983,12 +15011,17 @@ module.exports = {
         );
         let expected_proxy_trap_calls = serde_json::json!({
             "objectGetPrototype": 3,
+            "napiGetPrototype": 0,
             "constructorHasInstance": 1,
             "constructorMissingHasInstance": 1
         });
         let expected_proxy_results = serde_json::json!({
             "proxyObjectIsInstance": true,
             "proxyObjectPrototypeMatches": true,
+            "napiProxyObjectPrototypeMatches": false,
+            "napiProxyObjectPrototypeMatchesTrapResult": false,
+            "napiProxyObjectPrototypeIsNull": true,
+            "napiTransparentProxyPrototypeIsNull": true,
             "proxyObjectIsPrototypeOf": true,
             "proxyConstructorIsInstance": true,
             "proxyConstructorWithoutHasInstanceIsInstance": true,
@@ -15059,7 +15092,41 @@ module.exports = {
                 );
                 let reference_result: serde_json::Value =
                     serde_json::from_slice(&reference.stdout).unwrap();
-                assert_eq!(vm_result, reference_result, "{runtime} results differ");
+                if runtime == "bun" {
+                    // Bun's napi_get_prototype currently invokes a Proxy
+                    // getPrototypeOf trap; Node returns null without invoking
+                    // it. Assert and document that difference, then compare
+                    // the shared observables.
+                    assert_eq!(reference_result["napiProxyObjectPrototypeMatches"], false);
+                    assert_eq!(
+                        reference_result["napiProxyObjectPrototypeMatchesTrapResult"],
+                        true
+                    );
+                    assert_eq!(reference_result["napiProxyObjectPrototypeIsNull"], false);
+                    assert_eq!(
+                        reference_result["napiTransparentProxyPrototypeIsNull"],
+                        false
+                    );
+                    assert_eq!(reference_result["proxyTrapCalls"]["napiGetPrototype"], 1);
+                    let mut vm_shared = vm_result.clone();
+                    let mut bun_shared = reference_result;
+                    for result in [&mut vm_shared, &mut bun_shared] {
+                        let object = result.as_object_mut().unwrap();
+                        object.remove("napiProxyObjectPrototypeMatches");
+                        object.remove("napiProxyObjectPrototypeMatchesTrapResult");
+                        object.remove("napiProxyObjectPrototypeIsNull");
+                        object.remove("napiTransparentProxyPrototypeIsNull");
+                        object
+                            .get_mut("proxyTrapCalls")
+                            .unwrap()
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("napiGetPrototype");
+                    }
+                    assert_eq!(vm_shared, bun_shared, "{runtime} shared results differ");
+                } else {
+                    assert_eq!(vm_result, reference_result, "{runtime} results differ");
+                }
             }
         }
         assert!(matches!(

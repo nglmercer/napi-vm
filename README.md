@@ -286,9 +286,13 @@ Guest `Proxy` values support `getPrototypeOf` traps. `Object.getPrototypeOf`,
 follow those traps and enforce the non-extensible-target invariant.
 `napi_instanceof` uses the same guest `instanceof` behavior, including custom
 `Symbol.hasInstance` methods and Proxy traps on constructor and prototype
-chains. Traps that call guest code require an active paused-callback
-dispatcher; re-entry is unavailable during addon initialization and shutdown.
-A compiled addon fixture compares these cases with Node and Bun.
+chains. A compiled addon fixture found that Node's current N-API implementation
+returns `null` for a Proxy without calling its `getPrototypeOf` trap, while Bun
+1.4 calls the trap. This differs from the Node-API documentation, which
+describes the operation as equivalent to `Object.getPrototypeOf`
+([`napi_get_prototype`](https://nodejs.org/api/n-api.html#napi_get_prototype)).
+The Rust host follows the observed Node behavior, and the fixture asserts
+Bun's difference explicitly.
 The selected Node-API v8 slice adds object type tags, freeze/seal for ordinary
 guest objects, arrays, functions, and class constructors, and asynchronous
 cleanup hooks. Type tags are shared across addon environments and remain
