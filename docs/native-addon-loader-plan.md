@@ -41,8 +41,9 @@ returning plausible but incorrect results.
   point. It accepts the existing `NodeAddonOptions` or `RustNodeApiOptions` and
   returns a `NativeAddonRuntime` identifying the selected backend. Backend
   installation now uses one helper, and `NativeAddonBackendHost` combines the
-  existing addon loader and host event bridge. Backend options still differ;
-  shutdown remains owned by each backend's `Drop` implementation.
+  existing addon loader and host event bridge. `NativeAddonRuntime::shutdown`
+  now provides owner-thread, idempotent teardown for either backend. Backend
+  options and preflight still differ.
 
 ## Public host configuration
 
@@ -60,7 +61,7 @@ runtime.enable_native_addons(
 
 `NodeAddonOptions` selects `NodeSidecar`; `RustNodeApiOptions` selects
 `RustNodeApi`. This preserves all existing backend-specific configuration
-while shared preflight and explicit lifecycle methods are implemented.
+while shared backend preflight is implemented.
 
 The backend choices should be:
 
@@ -96,9 +97,9 @@ surface each backend accepts before running guest code.
 
 ### 2. Make backend selection and module loading one host feature
 
-- Extend `NativeAddonBackendHost` with shared binary preflight and explicit
-  shutdown behavior. Its current supertraits cover addon initialization,
-  host calls, and event polling; shutdown still relies on backend `Drop`.
+- Extend `NativeAddonBackendHost` with shared binary preflight. Its current
+  supertraits cover addon initialization, host calls, and event polling, and
+  its idempotent shutdown is explicit through `NativeAddonRuntime`.
 - Converge `NodeAddonOptions` and `RustNodeApiOptions` into common host options
   while preserving backend-specific settings.
 - Route `.node` requests through that host feature while leaving JavaScript and

@@ -25,11 +25,29 @@ use super::rust_node_api::{RustNodeApiHost, RustNodeApiOptions};
 pub trait NativeAddonBackendHost: NativeAddonLoader + HostBridge {
     /// Stable identifier for diagnostics and backend reporting.
     fn backend_name(&self) -> &'static str;
+
+    /// Stop accepting addon work and release backend resources.
+    ///
+    /// Implementations must make this operation idempotent. Call it on the
+    /// interpreter's owner thread so pending callbacks and finalizers can be
+    /// drained safely.
+    fn shutdown(&self) -> Result<(), crate::error::VmErr>;
+
+    /// Whether [`Self::shutdown`] has completed.
+    fn is_shutdown(&self) -> bool;
 }
 
 impl NativeAddonBackendHost for NodeAddonSidecar {
     fn backend_name(&self) -> &'static str {
         "node-sidecar"
+    }
+
+    fn shutdown(&self) -> Result<(), crate::error::VmErr> {
+        NodeAddonSidecar::shutdown(self)
+    }
+
+    fn is_shutdown(&self) -> bool {
+        NodeAddonSidecar::is_shutdown(self)
     }
 }
 
@@ -40,6 +58,14 @@ impl NativeAddonBackendHost for NodeAddonSidecar {
 impl NativeAddonBackendHost for RustNodeApiHost {
     fn backend_name(&self) -> &'static str {
         "rust-node-api"
+    }
+
+    fn shutdown(&self) -> Result<(), crate::error::VmErr> {
+        RustNodeApiHost::shutdown(self)
+    }
+
+    fn is_shutdown(&self) -> bool {
+        RustNodeApiHost::is_shutdown(self)
     }
 }
 
@@ -110,6 +136,16 @@ impl NativeAddonRuntime {
     /// Name of the backend selected for this interpreter.
     pub fn backend_name(&self) -> &'static str {
         self.host().backend_name()
+    }
+
+    /// Shut down the selected backend. Repeated calls are safe.
+    pub fn shutdown(&self) -> Result<(), crate::error::VmErr> {
+        self.host().shutdown()
+    }
+
+    /// Whether the selected backend has been shut down.
+    pub fn is_shutdown(&self) -> bool {
+        self.host().is_shutdown()
     }
 
     /// Return the Node sidecar when that backend is selected.

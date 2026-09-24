@@ -91,6 +91,7 @@ fn main() {
     println!("Node-API v{}", sidecar.runtime_info().napi_version);
     let result = runtime.eval_source("require('example').run();").unwrap();
     println!("{result:?}");
+    addon_runtime.shutdown().unwrap();
 }
 ```
 
@@ -157,6 +158,11 @@ behavior still differs across the VM/Node boundary.
 A compatible Node executable must be installed or bundled with the desktop
 application.
 
+Keep the returned `NativeAddonRuntime` and call `shutdown()` on the
+interpreter's owner thread when the application closes. Shutdown stops new
+addon calls, asks the sidecar worker to exit cleanly, then terminates it if it
+does not exit before the deadline. Repeated calls are safe.
+
 ### Experimental Rust Node-API host
 
 Linux, macOS, and Windows desktop builds can enable the `node-api-host` Cargo
@@ -210,6 +216,11 @@ runtime.enable_native_addons(
         .allow_native_package_prebuild_with_sha256(&package_root, digest),
 )?;
 ```
+
+The returned `NativeAddonRuntime` also supports explicit owner-thread
+shutdown. The Rust backend stops async work, runs cleanup hooks and finalizers,
+then releases addon libraries when no native thread still depends on them. It
+rejects new addon loads and calls after shutdown.
 
 The Rust host provides the common `node-gyp-build(dir)`, `.path(dir)`, and
 `.resolve(dir)` calls, plus the package's `parseTags`, `matchTags`,

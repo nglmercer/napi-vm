@@ -24,6 +24,7 @@ use crate::value::{
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WIRE_DEPTH: usize = 128;
 const MAX_NATIVE_HANDLES: usize = 262_144;
+const SIDECAR_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 static NEXT_GUEST_GRAPH_NODE_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -62,6 +63,7 @@ const socket = net.connect({host:'127.0.0.1',port:Number(process.env.NAPI_VM_BRI
 let input = Buffer.alloc(0);
 let connected = false;
 let workerReady = false;
+let shuttingDown = false;
 const pendingSyncCallbacks = new Map();
 function send(message) {
   const body = Buffer.from(JSON.stringify(message));
@@ -97,6 +99,10 @@ function consume() {
     if(input.length<n+4)return;
     const body=input.subarray(4,n+4);input=input.subarray(n+4);
     let message;try{message=JSON.parse(body.toString('utf8'));}catch(e){socket.destroy(e);return;}
+    if(message.shutdown===true){
+      if(!shuttingDown){shuttingDown=true;worker.postMessage({kind:'shutdown'});}
+      return;
+    }
     if(message.event==='syncGuestCallbackResult') finishSyncCallback(message);
     else if(message.requestId!==undefined){
       if(!workerReady){
@@ -420,7 +426,10 @@ function addonWorkerMain() {
     finally{dispatchDepth--;}
   }
   parentPort.on('message',message=>{
-    if(message.kind==='request'){
+    if(message.kind==='shutdown'){
+      parentPort.close();
+      process.exit(0);
+    }else if(message.kind==='request'){
       try{parentPort.postMessage({kind:'response',message:dispatch(message.request)});}
       catch(error){parentPort.postMessage({kind:'response',message:{requestId:message.request.requestId,ok:false,error:{name:'Error',message:String(error)}}});}
     }
@@ -437,7 +446,7 @@ worker.on('message',message=>{
   }
 });
 worker.on('error',error=>socket.destroy(error));
-worker.on('exit',code=>{if(code!==0)socket.destroy(new Error('Node addon worker exited with code '+code));});
+worker.on('exit',code=>{if(shuttingDown){socket.end();return;}if(code!==0)socket.destroy(new Error('Node addon worker exited with code '+code));});
 socket.on('connect',()=>{connected=true;maybeSendHello();});
 socket.on('data',c=>{input=Buffer.concat([input,c]);consume();});
 socket.on('error',e=>process.stderr.write('napi-vm sidecar: '+e.message+'\n'));
@@ -452,6 +461,9 @@ struct State {
     pending_events: VecDeque<JsonValue>,
     request_id: u64,
     failed: bool,
+    shutdown_requested: bool,
+    shutdown_complete: bool,
+    process_reaped: bool,
     next_local_handle: usize,
     local_handles: HashMap<usize, LocalObjectTrap>,
     object_proxies: HashMap<u64, Value>,
@@ -589,12 +601,82 @@ fn guest_callback_identity(value: &Value) -> Option<(usize, usize)> {
 
 impl Drop for State {
     fn drop(&mut self) {
-        let _ = self.stream.shutdown(Shutdown::Both);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+        let _ = self.shutdown();
+    }
+}
+
+impl State {
+    fn shutdown(&mut self) -> Result<(), VmErr> {
+        if self.shutdown_complete {
+            return Ok(());
         }
+
+        let mut shutdown_error = None;
+        if !self.failed && !self.shutdown_requested {
+            self.shutdown_requested = true;
+            if let Err(error) = write_frame(&mut self.stream, &json!({"shutdown": true})) {
+                self.failed = true;
+                shutdown_error = Some(error);
+            } else if let Err(error) = self.stream.shutdown(Shutdown::Write) {
+                self.failed = true;
+                shutdown_error = Some(VmErr::Msg(format!(
+                    "cannot finish Node sidecar shutdown request: {error}"
+                )));
+            }
+        }
+
+        let deadline = Instant::now() + SIDECAR_SHUTDOWN_TIMEOUT;
+        while !self.process_reaped && Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(status)) => {
+                    self.process_reaped = true;
+                    if !status.success() && shutdown_error.is_none() {
+                        shutdown_error = Some(VmErr::Msg(format!(
+                            "Node sidecar exited with status {status} during shutdown"
+                        )));
+                    }
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+                Err(error) => {
+                    shutdown_error.get_or_insert_with(|| {
+                        VmErr::Msg(format!(
+                            "cannot inspect Node sidecar during shutdown: {error}"
+                        ))
+                    });
+                    break;
+                }
+            }
+        }
+
+        if !self.process_reaped {
+            self.failed = true;
+            let _ = self.stream.shutdown(Shutdown::Both);
+            let _ = self.child.kill();
+            match self.child.wait() {
+                Ok(_) => self.process_reaped = true,
+                Err(error) => {
+                    shutdown_error.get_or_insert_with(|| {
+                        VmErr::Msg(format!("cannot stop Node sidecar: {error}"))
+                    });
+                }
+            }
+            shutdown_error.get_or_insert_with(|| {
+                VmErr::Msg(
+                    "Node sidecar shutdown timed out; the child process was terminated".into(),
+                )
+            });
+        }
+
+        let _ = self.stream.shutdown(Shutdown::Both);
+        if let Some(reader) = self.reader.take()
+            && reader.join().is_err()
+        {
+            shutdown_error.get_or_insert_with(|| {
+                VmErr::Msg("Node sidecar event reader panicked during shutdown".into())
+            });
+        }
+        self.shutdown_complete = true;
+        shutdown_error.map_or(Ok(()), Err)
     }
 }
 
@@ -828,6 +910,9 @@ impl NodeAddonSidecar {
                 pending_events: VecDeque::new(),
                 request_id: 1,
                 failed: false,
+                shutdown_requested: false,
+                shutdown_complete: false,
+                process_reaped: false,
                 next_local_handle: 0,
                 local_handles: HashMap::new(),
                 object_proxies: HashMap::new(),
@@ -848,6 +933,17 @@ impl NodeAddonSidecar {
     /// Return the Node and Node-API versions supplied by the hosting process.
     pub fn runtime_info(&self) -> &NodeAddonRuntimeInfo {
         &self.runtime_info
+    }
+
+    /// Gracefully stop the Node sidecar, falling back to terminating the child
+    /// if its worker does not close within the shutdown deadline.
+    pub fn shutdown(&self) -> Result<(), VmErr> {
+        self.state.borrow_mut().shutdown()
+    }
+
+    /// Whether the sidecar shutdown sequence has completed.
+    pub fn is_shutdown(&self) -> bool {
+        self.state.borrow().shutdown_complete
     }
 
     fn request(&self, message: JsonValue) -> Result<JsonValue, VmErr> {
@@ -965,6 +1061,9 @@ impl NodeAddonSidecar {
         self.persist_guest_graph(guest_graph, None)?;
         let id = {
             let mut state = self.state.borrow_mut();
+            if state.shutdown_requested || state.shutdown_complete {
+                return Err(VmErr::Msg("Node sidecar has been shut down".into()));
+            }
             if state.failed {
                 return Err(VmErr::Msg(
                     "Node addon bridge is unavailable after a transport failure".into(),
@@ -1342,9 +1441,12 @@ impl NodeAddonSidecar {
 
 fn fail_state(state: &mut State) {
     state.failed = true;
+    state.shutdown_requested = true;
     let _ = state.stream.shutdown(Shutdown::Both);
     let _ = state.child.kill();
-    let _ = state.child.wait();
+    if state.child.wait().is_ok() {
+        state.process_reaped = true;
+    }
 }
 
 impl NativeAddonLoader for NodeAddonSidecar {
@@ -1358,6 +1460,9 @@ impl NativeAddonLoader for NodeAddonSidecar {
 
 impl HostBridge for NodeAddonSidecar {
     fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
+        if self.is_shutdown() {
+            return Ok(Vec::new());
+        }
         let events = {
             let mut state = self.state.borrow_mut();
             let mut events = Vec::new();
@@ -4682,6 +4787,18 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             )
             .unwrap();
         assert!(matches!(roundtrip, Value::Bool(true)));
+
+        runtime.shutdown().unwrap();
+        assert!(runtime.is_shutdown());
+        runtime.shutdown().unwrap();
+        let after_shutdown = interpreter
+            .eval_source("require('fixture').add(1, 2);")
+            .unwrap_err();
+        assert!(
+            after_shutdown
+                .to_string()
+                .contains("Node sidecar has been shut down")
+        );
 
         drop(interpreter);
         drop(runtime);

@@ -312,10 +312,21 @@ pub struct RustNodeApiHost {
     _shim: Rc<NodeApiShim>,
     allowed_roots: Vec<PathBuf>,
     allowed_addons: HashMap<PathBuf, [u8; 32]>,
+    shutdown_started: Cell<bool>,
 }
 
 impl Drop for RustNodeApiHost {
     fn drop(&mut self) {
+        let _ = self.shutdown_inner();
+    }
+}
+
+impl RustNodeApiHost {
+    fn shutdown_inner(&self) -> Result<(), VmErr> {
+        if self.shutdown_started.replace(true) {
+            return Ok(());
+        }
+
         let (async_work_sender, workers, environments) = {
             let mut state = self.state.borrow_mut();
             let environments = state.environments.clone();
@@ -457,6 +468,11 @@ impl Drop for RustNodeApiHost {
         for environment in &environments {
             finalize_environment_wraps(environment);
         }
+
+        if !active_threadsafe_workers {
+            self.state.borrow_mut().libraries.clear();
+        }
+        Ok(())
     }
 }
 
@@ -8646,7 +8662,27 @@ impl RustNodeApiHost {
             _shim: shim,
             allowed_roots,
             allowed_addons,
+            shutdown_started: Cell::new(false),
         })
+    }
+
+    /// Stop native workers and run addon cleanup hooks and finalizers.
+    /// Repeated calls are safe.
+    pub fn shutdown(&self) -> Result<(), VmErr> {
+        self.shutdown_inner()
+    }
+
+    /// Whether this host has completed shutdown.
+    pub fn is_shutdown(&self) -> bool {
+        self.shutdown_started.get()
+    }
+
+    fn ensure_running(&self) -> Result<(), VmErr> {
+        if self.is_shutdown() {
+            Err(VmErr::Msg("Rust Node-API host has been shut down".into()))
+        } else {
+            Ok(())
+        }
     }
 
     fn invoke_native(
@@ -9517,6 +9553,7 @@ impl NativeAddonLoader for RustNodeApiHost {
         exports: Value,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         let filename = fs::canonicalize(filename).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot resolve native addon {}: {error}",
@@ -9747,6 +9784,7 @@ impl NativeAddonLoader for RustNodeApiHost {
 
 impl HostBridge for RustNodeApiHost {
     fn call_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         self.invoke_native(id, Value::Undefined, args, None, &mut reject_guest_callback)
     }
 
@@ -9756,6 +9794,7 @@ impl HostBridge for RustNodeApiHost {
         this_value: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         self.invoke_native(id, this_value, args, None, &mut reject_guest_callback)
     }
 
@@ -9766,6 +9805,7 @@ impl HostBridge for RustNodeApiHost {
         args: Vec<Value>,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         self.invoke_native(id, this_value, args, None, callback_handler)
     }
 
@@ -9775,6 +9815,7 @@ impl HostBridge for RustNodeApiHost {
         args: Vec<Value>,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         self.invoke_native(id, Value::Undefined, args, None, callback_handler)
     }
 
@@ -9786,6 +9827,7 @@ impl HostBridge for RustNodeApiHost {
         new_target: Value,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         self.invoke_native(id, this_value, args, Some(new_target), callback_handler)
     }
 
@@ -9797,10 +9839,14 @@ impl HostBridge for RustNodeApiHost {
         new_target: Value,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
+        self.ensure_running()?;
         self.invoke_native(id, this_value, args, Some(new_target), callback_handler)
     }
 
     fn poll_host_events(&self, timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
+        if self.is_shutdown() {
+            return Ok(Vec::new());
+        }
         let mut events = {
             let state = self.state.borrow();
             state
@@ -9898,7 +9944,7 @@ impl HostBridge for RustNodeApiHost {
     }
 
     fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {
-        promise.borrow().external_pending
+        !self.is_shutdown() && promise.borrow().external_pending
     }
 }
 
@@ -10426,7 +10472,7 @@ __attribute__((constructor)) static void register_module(void) {
             )
             .unwrap();
         assert_eq!(runtime.backend_name(), "rust-node-api");
-        assert!(matches!(runtime, NativeAddonRuntime::RustNodeApi(_)));
+        assert!(matches!(&runtime, NativeAddonRuntime::RustNodeApi(_)));
         let value = interpreter
             .eval_source("JSON.stringify(require('./main.cjs'))")
             .unwrap();
@@ -10479,6 +10525,17 @@ __attribute__((constructor)) static void register_module(void) {
                 );
             }
         }
+
+        runtime.shutdown().unwrap();
+        assert!(runtime.is_shutdown());
+        runtime.shutdown().unwrap();
+        let host = runtime.rust_node_api().expect("Rust Node-API backend");
+        let after_shutdown = crate::interpreter::NativeAddonLoader::load(host, &addon).unwrap_err();
+        assert!(
+            after_shutdown
+                .to_string()
+                .contains("Rust Node-API host has been shut down")
+        );
 
         drop(interpreter);
         fs::remove_dir_all(&root).unwrap();
