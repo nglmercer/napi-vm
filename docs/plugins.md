@@ -196,6 +196,22 @@ that do not embed Node. It validates plugin manifests, creates an isolated
 directory, manages a host capability registry, and implements load/reload/
 unload with fresh interpreters and JSON-serializable state transfer.
 
+Choose the smallest runtime path that covers the plugin:
+
+| Plugin need | Rust host setup | Guest API |
+| --- | --- | --- |
+| JavaScript plugin, files, and path helpers | Build with `--no-default-features` | Checked `node:fs` and `node:path` modules |
+| napi-rs or another Node-API addon | Build with `--no-default-features --features node-api-host`; pin each trusted `.node` file by SHA-256 | Ordinary `require("./native/addon.node")` |
+| V8, NAN, Node C++ APIs, or direct libuv integration | Configure the Node sidecar and its Node executable | Node's native addon ABI |
+
+The in-process Rust backend needs a C compiler at build time but does not
+require a Node executable at runtime. It implements a selected Node-API
+surface, not the complete Node runtime or every function in Node-API v1-v10.
+Native libraries execute with the desktop
+process's OS privileges, so filesystem plugin permissions do not sandbox
+addon code. See the [native addon compatibility plan](native-addon-loader-plan.md)
+before enabling native addons in a distributable app.
+
 [`examples/rust_plugin_host.rs`](../examples/rust_plugin_host.rs) runs the
 existing `example-plugin` fixture through that public API. Its guest source is
 unchanged and uses the same `node:fs`, `node:path`, and lifecycle hooks as the
