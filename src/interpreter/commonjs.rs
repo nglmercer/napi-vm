@@ -966,6 +966,39 @@ pub(crate) fn require_with_parent_builtin(
     interp.require_commonjs(&request, parent.as_deref())
 }
 
+pub(crate) fn resolve_with_parent_builtin(
+    interp: &mut crate::interpreter::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let parent = match args.first() {
+        Some(Value::String(parent)) => Some(parent.as_str()),
+        Some(Value::Undefined) | None => interp.commonjs_entry.as_deref(),
+        Some(_) => {
+            return Err(VmErr::Msg(
+                "TypeError: invalid internal require parent".into(),
+            ));
+        }
+    };
+    let request = match args.get(1) {
+        Some(Value::String(request)) => request,
+        Some(_) => {
+            return Err(VmErr::Msg(
+                "TypeError: require.resolve module specifier must be a string".into(),
+            ));
+        }
+        None => {
+            return Err(VmErr::Msg(
+                "TypeError: require.resolve expects a module specifier".into(),
+            ));
+        }
+    };
+    let loader = interp.commonjs_loader.clone().ok_or_else(|| {
+        VmErr::Msg("require is disabled: configure a host CommonJS module loader first".to_string())
+    })?;
+    let module = loader.resolve(request, parent)?;
+    Ok(Value::String(module.filename))
+}
+
 pub(super) fn require_module(
     interp: &mut crate::interpreter::Interpreter,
     request: &str,
@@ -1120,6 +1153,7 @@ pub(super) fn make_require(
     parent: Option<&str>,
 ) -> Result<Value, VmErr> {
     const SOURCE: &str = "(function require(specifier) { return __napi_vm_require_with_parent(__napi_vm_require_parent, specifier); })";
+    const RESOLVE_SOURCE: &str = "(function resolve(specifier) { return __napi_vm_resolve_with_parent(__napi_vm_require_parent, specifier); })";
     let outer = interp.push_scope();
     let old_source_lines = std::mem::take(&mut interp.source_lines);
     let result = (|| {
@@ -1136,13 +1170,30 @@ pub(super) fn make_require(
                 callable: |interp, _this, args| require_with_parent_builtin(interp, args),
             },
         )?;
+        interp.set_binding(
+            "__napi_vm_resolve_with_parent",
+            Value::NativeFunction {
+                name: "resolve".into(),
+                callable: |interp, _this, args| resolve_with_parent_builtin(interp, args),
+            },
+        )?;
         interp.set_source(SOURCE);
         let tokens = crate::lexer::Lexer::new(SOURCE).tokenize_with_spans();
         let mut parser = crate::parser::Parser::new_with_spans(tokens);
         let statements = parser
             .parse_program()
             .map_err(|error| VmErr::Msg(error.to_string()))?;
-        interp.run_program_body(&statements)
+        let require = interp.run_program_body(&statements)?;
+
+        interp.set_source(RESOLVE_SOURCE);
+        let tokens = crate::lexer::Lexer::new(RESOLVE_SOURCE).tokenize_with_spans();
+        let mut parser = crate::parser::Parser::new_with_spans(tokens);
+        let statements = parser
+            .parse_program()
+            .map_err(|error| VmErr::Msg(error.to_string()))?;
+        let resolve = interp.run_program_body(&statements)?;
+        require.set_prop("resolve".to_string(), resolve)?;
+        Ok(require)
     })();
     interp.pop_scope(outer);
     interp.source_lines = old_source_lines;
@@ -1270,6 +1321,116 @@ mod tests {
             result.get_prop("requireType"),
             Some(Value::String(ref kind)) if kind == "function"
         ));
+    }
+
+    #[test]
+    fn require_resolve_uses_the_configured_loader_without_evaluating_modules() {
+        let mut loader = MemoryLoader::default();
+        loader.0.insert(
+            "/virtual/side-effect.cjs".into(),
+            MemoryLoader::module(
+                "/virtual/side-effect.cjs",
+                CommonJsModuleFormat::JavaScript,
+                Some("globalThis.resolveLoads = (globalThis.resolveLoads || 0) + 1; module.exports = 'loaded';"),
+            ),
+        );
+        loader.0.insert(
+            "/virtual/native-addon.node".into(),
+            MemoryLoader::module(
+                "/virtual/native-addon.node",
+                CommonJsModuleFormat::NativeAddon,
+                None,
+            ),
+        );
+
+        let result = interpreter(loader)
+            .eval_source(
+                "const sourcePath = require.resolve('./side-effect'); const addonPath = require.resolve('./native-addon'); const before = globalThis.resolveLoads || 0; const loaded = require('./side-effect'); ({sourcePath, addonPath, before, after: globalThis.resolveLoads, loaded});",
+            )
+            .unwrap();
+
+        assert!(matches!(
+            result.get_prop("sourcePath"),
+            Some(Value::String(ref path)) if path == "/virtual/side-effect.cjs"
+        ));
+        assert!(matches!(
+            result.get_prop("addonPath"),
+            Some(Value::String(ref path)) if path == "/virtual/native-addon.node"
+        ));
+        assert!(matches!(
+            result.get_prop("before"),
+            Some(Value::Number(0.0))
+        ));
+        assert!(matches!(result.get_prop("after"), Some(Value::Number(1.0))));
+        assert!(matches!(
+            result.get_prop("loaded"),
+            Some(Value::String(ref value)) if value == "loaded"
+        ));
+    }
+
+    #[test]
+    fn require_resolve_native_path_matches_node_and_bun() {
+        use std::process::Command;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-require-resolve-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("main.cjs"), "").unwrap();
+        fs::write(
+            root.join("side-effect.js"),
+            "globalThis.resolveSideEffect = true; module.exports = true;",
+        )
+        .unwrap();
+        fs::write(root.join("fixture.node"), "not loaded by resolve").unwrap();
+        fs::write(
+            root.join("probe.cjs"),
+            "module.exports = { source: require.resolve('./side-effect'), addon: require.resolve('./fixture'), sideEffect: typeof globalThis.resolveSideEffect };",
+        )
+        .unwrap();
+
+        let mut interpreter = crate::interpreter::Interpreter::with_builtins();
+        interpreter
+            .set_commonjs_loader(Rc::new(FileCommonJsLoader::new([&root]).unwrap()))
+            .unwrap();
+        interpreter.set_commonjs_entry(root.join("main.cjs").to_string_lossy());
+        let vm_value = interpreter
+            .eval_source("JSON.stringify(require('./probe.cjs'));")
+            .unwrap();
+        let Value::String(vm_json) = &vm_value else {
+            panic!("require.resolve fixture did not return JSON: {vm_value:?}");
+        };
+        let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
+
+        let runner = "process.stdout.write(JSON.stringify(require('./probe.cjs')))";
+        for runtime in ["node", "bun"] {
+            let available = Command::new(runtime).arg("--version").output();
+            let Ok(version) = available else {
+                continue;
+            };
+            if !version.status.success() {
+                continue;
+            }
+            let reference = Command::new(runtime)
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "{runtime} require.resolve reference failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let reference: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(vm_result, reference, "{runtime} and napi-vm differ");
+        }
+
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

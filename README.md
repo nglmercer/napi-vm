@@ -42,6 +42,11 @@ console.log(vm.run("answer;")); // 42
 Rust applications can opt into guest `require()` with a filesystem resolver
 restricted to application roots. The resolver reads JavaScript and JSON as
 guest source; it never executes them through the host's `require()`.
+Guest CommonJS functions also expose `require.resolve(specifier)`, which uses
+the same configured resolver to return a module filename without loading or
+initializing it. This works for `.node` paths too, so a package wrapper can
+select a native binary before the host's addon allowlist and integrity checks
+run at the eventual `require()` call.
 
 ```rust
 use napi_vm::{FileCommonJsLoader, Interpreter};

@@ -57,7 +57,9 @@ Vm::builder()
 The exact Rust names can follow the existing `NodeAddonOptions`; the important
 parts are backend choice, allowed filesystem roots, integrity pins, supported
 Node-API version, and a stable compatibility report. A guest `require()` call
-still goes through the VM's CommonJS resolver and module cache.
+still goes through the VM's CommonJS resolver and module cache. Module-local
+`require.resolve(specifier)` uses that same resolver to return a filename
+without executing JavaScript or initializing a native addon.
 
 The current implementation is available behind Cargo feature `node-api-host`:
 `Interpreter::enable_rust_node_api_addons(RustNodeApiOptions)` uses the
