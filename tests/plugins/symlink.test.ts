@@ -22,7 +22,7 @@ function escapingPlugin(permissions: unknown) {
   mkdirSync(target, { recursive: true });
   writeFileSync(join(target, "secret.txt"), "outside secret");
 
-  // Created after makePlugin so the target directory already exists.
+  // Created after makePlugin so the target directory already existsSync.
   symlinkSync(target, join(dir, "cache", "outside"));
 
   return { dir, target, plugin: makeHost().load(dir) };
@@ -43,7 +43,7 @@ test("a symlinked directory cannot be written through", () => {
   expect(() => readFileSync(join(target, "planted.txt"), "utf8")).toThrow();
 });
 
-test("a symlinked directory cannot be probed with exists", () => {
+test("a symlinked directory cannot be probed with existsSync", () => {
   const { plugin } = escapingPlugin({ fs: { read: "./cache/**" } });
   expect(() =>
     plugin.vm.callFunction("__cap_fs_exists", ["./cache/outside/secret.txt"]),

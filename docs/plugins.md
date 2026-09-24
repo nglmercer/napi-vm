@@ -109,19 +109,19 @@ performs I/O.
 ## Guest API
 
 ```js
-import { readText, writeText, exists } from "napi:fs";
-import { join, normalize, dirname, basename, extname } from "napi:path";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join, normalize, dirname, basename, extname } from "node:path";
 ```
 
-`napi:fs` is always registered — registering it grants nothing, since each
-function checks its own path. `napi:path` is pure computation and is registered
+`node:fs` is always available as a sandboxed facade — registering it grants nothing, since each
+function checks its own path. `node:path` is pure computation and is registered
 only when the manifest asks for `"path": true`.
 
 Denied calls raise a catchable error carrying no host paths:
 
 ```js
 try {
-  readText("./secret.txt");
+  readFileSync("./secret.txt", "utf8");
 } catch (error) {
   error.name;    // "PermissionDenied"
   error.message; // 'fs.read is not permitted for "./secret.txt"'
@@ -136,13 +136,13 @@ The default export may be an object or a class; both are normalized to a single
 instance.
 
 ```js
-import { readText, writeText } from "napi:fs";
-import { join } from "napi:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export default class ExamplePlugin {
   onLoad(context) {
-    this.config = JSON.parse(readText("./config.json"));
-    writeText(join("./cache", "status.json"), JSON.stringify({ plugin: context.name }));
+    this.config = JSON.parse(readFileSync("./config.json", "utf8"));
+    writeFileSync(join("./cache", "status.json"), JSON.stringify({ plugin: context.name }));
   }
 
   onUnload(context) {
@@ -150,7 +150,7 @@ export default class ExamplePlugin {
   }
 
   onReload(context, previousState) {
-    this.config = previousState ? previousState.config : JSON.parse(readText("./config.json"));
+    this.config = previousState ? previousState.config : JSON.parse(readFileSync("./config.json", "utf8"));
   }
 }
 ```
@@ -183,7 +183,7 @@ edited permissions both take effect.
 
 Unload calls `onUnload`, then detaches the capabilities: the modules and the
 bridge globals are removed from the VM. A lifecycle hook that throws revokes
-them immediately as well — an errored plugin never keeps a live `napi:fs` — and
+them immediately as well — an errored plugin never keeps a live `node:fs` — and
 a failed `onUnload` still unloads the plugin. The registry keeps the errored
 entry so `reload()` can rebuild it from disk.
 
@@ -277,12 +277,12 @@ plugins/
   capabilities/             guest modules (portable; one defineCapability each)
     capability-registry.ts  the single registry (validate/resolve/compile/
                             allows/schema/install per capability)
-    filesystem-capability.ts  napi:fs
-    path-capability.ts      napi:path
-    crypto-capability.ts    napi:crypto (primitives from platform.crypto)
-    timers-capability.ts    napi:timers
+    filesystem-capability.ts  node:fs
+    path-capability.ts      node:path
+    crypto-capability.ts    node:crypto (primitives from platform.crypto)
+    timers-capability.ts    node:perf_hooks
     fetch-capability.ts     standard fetch(), installed by the fetch capability
-    audio-capability.ts     napi:audio (player via grant or requireNative)
+    audio-capability.ts     miniaudio_node (player via grant or requireNative)
   npm/                      pure guest source loader (portable)
     resolver.ts             package exports and ESM entry resolution
     module-graph.ts          dependency scanning and canonical linking
@@ -315,12 +315,12 @@ symlink escapes, policy intersection, lifecycle and reload.
 
 | Module | Grants | Manifest | Host policy |
 |--------|--------|----------|-------------|
-| `napi:fs` | Reading and writing inside the granted patterns | `fs.read`, `fs.write` | — (always confined to the plugin root) |
-| `napi:path` | POSIX path manipulation (no I/O) | `path: true` | — |
-| `napi:crypto` | Random bytes, UUIDs, digests | `crypto: true` | `crypto: true` |
-| `napi:timers` | The host clock | `timers: true` | `timers: true` or `{ resolutionMs }` |
+| `node:fs` | UTF-8 reads and string writes inside the granted patterns | `fs.read`, `fs.write` | — (always confined to the plugin root) |
+| `node:path` | Host path manipulation (no I/O) | `path: true` | — |
+| `node:crypto` | Random bytes, UUIDs, and SHA digests | `crypto: true` | `crypto: true` |
+| `node:perf_hooks` | Monotonic `performance.now()` | `timers: true` | `timers: true` or `{ resolutionMs }` |
 | `fetch()` | HTTP to named origins | `fetch: [...]` | `fetch: { allow, deny, ... }` |
-| `napi:audio` | Native playback (`miniaudio_node`) | `capabilities: { audio: true }` | `capabilities: { audio: true }` |
+| `miniaudio_node` | Native playback (`miniaudio_node`) | `capabilities: { audio: true }` | `capabilities: { audio: true }` |
 
 Every one of them is installed only when the manifest asks *and* the host
 policy permits. Neither side can widen the other, and the default policy
@@ -347,7 +347,7 @@ host.setCapabilityEnabled("audio", false); // runtime kill-switch
 
 Request ∩ policy ∩ runtime switch = installed. Unknown names fail the load
 (a typo never becomes a silent grant); requested-but-ungranted names stay
-absent. `napi:audio` is the first registry entry — playback through
+absent. `miniaudio_node` is the first registry entry — playback through
 `miniaudio_node`, with every `loadFile` path resolved through the plugin's
 own `fs.read` permission first. Its player comes from the grant
 (`policy.capabilities.audio.createPlayer`, or `createMiniaudioPlayer` from
@@ -376,10 +376,10 @@ defineCapability({
     // Already schema-validated with defaults by the host; the cast only
     // recovers the static type.
     const { voice } = options as { voice: string };
-    const globals = vm.registerHostModule("napi:greet", {
+    const globals = vm.registerHostModule("greet", {
       hello: (name) => `${voice}: hi ${name}`,
     });
-    return () => unbindCapabilityModule(vm, "napi:greet", globals);
+    return () => unbindCapabilityModule(vm, "greet", globals);
   },
 });
 ```
@@ -392,7 +392,7 @@ precision, fetch allowlists, player factories) arrive via the `grant`, never
 the manifest — guest-requested privilege would let the plugin choose its
 own limits.
 
-`napi:fs` and `napi:path` are the exception: they are substrate, not
+`node:fs` and `node:path` are the exception: they are substrate, not
 registry entries — installed unconditionally (`fs`) or by boolean flag
 (`path`) — because the permission checker itself stands on them.
 
@@ -454,9 +454,9 @@ tarball entries that escape their directory refused, and anything outside
 the `allow` list is refused before any network happens. Verified installs
 are cached on disk (`.verified.json`), so repeat loads need no network.
 
-### `napi:crypto`
+### `node:crypto`
 
-`randomBytes`, `getRandomValues`, `randomUUID` and `digest`. Nothing here
+`randomBytes`, `randomUUID` and `createHash`. Nothing here
 reaches outside the process or observes anything about it, so there is no path
 or origin to check — but it is still a capability, because a host may want to
 withhold a cryptographic source (a deterministic replay harness, or a plugin
@@ -464,12 +464,12 @@ that has no business generating keys). One `randomBytes` call is capped, so a
 plugin cannot ask for a gigabyte of entropy. The primitives come from
 `platform.crypto`: the Node platform uses `node:crypto` (sync digests
 included), the portable default uses WebCrypto randomness and UUIDs while
-`digest()` reports itself unavailable — a host that needs digests off Node
+`createHash().digest()` reports itself unavailable — a host that needs digests off Node
 supplies its own `HostCrypto`.
 
-### `napi:timers`
+### `node:perf_hooks`
 
-`now()`, `monotonic()` and `since(start)`. The VM's own `setTimeout` has no
+`performance.now()`. The VM's own `setTimeout` has no
 wall clock — it orders callbacks without letting guest code observe or wait on
 real time — and this capability is the opposite choice, granted explicitly. A
 host that grants time at all can still deny *precise* time:

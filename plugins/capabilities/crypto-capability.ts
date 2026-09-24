@@ -1,5 +1,5 @@
 /**
- * The `napi:crypto` capability: random bytes, UUIDs and digests.
+ * The `node:crypto` compatibility facade: random bytes, UUIDs and hashes.
  *
  * Randomness and hashing reach nothing outside the process and observe
  * nothing about it, so there is no path or origin to check — but the module
@@ -27,7 +27,7 @@ const CRYPTO_GLOBALS = [
   "__cap_crypto_digest",
 ] as const;
 
-export const CRYPTO_MODULE_NAME = "napi:crypto";
+export const CRYPTO_MODULE_NAME = "node:crypto";
 
 /** Digest algorithms the capability will compute. */
 const ALGORITHMS = new Set(["sha256", "sha384", "sha512", "sha1", "md5"]);
@@ -43,18 +43,30 @@ export function randomBytes(size) {
   return __cap_crypto_random_bytes(size);
 }
 
-export function getRandomValues(target) {
-  const bytes = __cap_crypto_random_bytes(target.length);
-  for (let i = 0; i < target.length; i++) target[i] = bytes[i];
-  return target;
-}
-
 export function randomUUID() {
   return __cap_crypto_random_uuid();
 }
 
-export function digest(algorithm, data) {
-  return __cap_crypto_digest(algorithm, data);
+export function createHash(algorithm) {
+  const chunks = [];
+  return {
+    update(data, encoding) {
+      if (typeof data !== "string" && !(data instanceof Uint8Array)) {
+        throw new TypeError("Hash.update(data) expects a string or Uint8Array");
+      }
+      if (typeof data === "string" && encoding !== undefined && encoding !== "utf8" && encoding !== "utf-8") {
+        throw new TypeError("the sandboxed node:crypto facade supports UTF-8 text only");
+      }
+      chunks.push(data);
+      return this;
+    },
+    digest(encoding) {
+      if (encoding !== "hex") {
+        throw new TypeError("the sandboxed node:crypto facade supports hex digests only");
+      }
+      return __cap_crypto_digest(algorithm, chunks);
+    },
+  };
 }
 `;
 
@@ -87,10 +99,18 @@ export const CRYPTO_CAPABILITY: CapabilityDefinition = {
       if (!ALGORITHMS.has(name)) {
         throw new PermissionDeniedError(`unsupported digest algorithm: ${String(algorithm)}`);
       }
-      const bytes =
-        data instanceof Uint8Array
-          ? data
-          : new TextEncoder().encode(typeof data === "string" ? data : String(data));
+      const chunks = Array.isArray(data) ? data : [data];
+      const encoded = chunks.map((chunk) => {
+        if (chunk instanceof Uint8Array) return chunk;
+        if (typeof chunk === "string") return new TextEncoder().encode(chunk);
+        throw new TypeError("Hash.update(data) expects a string or Uint8Array");
+      });
+      const bytes = new Uint8Array(encoded.reduce((size, chunk) => size + chunk.length, 0));
+      let offset = 0;
+      for (const chunk of encoded) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
       return crypto.digest(name, bytes);
     });
 

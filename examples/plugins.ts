@@ -3,7 +3,7 @@
  *
  * The plugin in `examples/plugins/example-plugin` declares its filesystem
  * permissions in `plugin.json`; the host intersects them with its own policy
- * and installs `napi:fs` / `napi:path` into a sealed VM.
+ * and installs permission-checked `node:fs` / `node:path` facades into the VM.
  *
  * Run:  bun examples/plugins.ts
  */

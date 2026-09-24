@@ -1,6 +1,6 @@
 /**
- * The `napi:audio` capability: playback of local audio files through the
- * `miniaudio_node` npm package (native rodio backend).
+ * The `miniaudio_node` package capability: playback of local audio files
+ * through its native rodio backend.
  *
  * The native library is loaded on the HOST, never inside the interpreter
  * (see `native-bridge.ts` for why). Each VM gets its own `AudioPlayer`, so
@@ -15,7 +15,7 @@
  * `AudioPassthrough` stay host-side until a plugin demonstrates it needs
  * them; each one is a new native sink and gets its own review.
  *
- * Guest API (`import ... from "napi:audio"`):
+ * Guest API (`import { AudioPlayer } from "miniaudio_node"`):
  *
  *   getDevices()        device list (no paths involved, always safe)
  *   loadFile(path)      guest path, checked against `fs.read` permission
@@ -39,7 +39,7 @@ import {
   type CapabilityOptionsSchema,
 } from "./capability-registry";
 
-export const AUDIO_MODULE_NAME = "napi:audio";
+export const AUDIO_MODULE_NAME = "miniaudio_node";
 
 /** Default ceiling on a base64/buffer payload, in bytes. */
 export const DEFAULT_MAX_AUDIO_BYTES = 8 * 1024 * 1024;
@@ -86,7 +86,7 @@ export interface AudioPolicyOptions {
 function defaultCreatePlayer(platform: HostPlatform): AudioPlayerLike {
   if (!platform.requireNative) {
     throw new PluginLoadError(
-      'napi:audio needs a player: grant { createPlayer } (or createMiniaudioPlayer ' +
+      'miniaudio_node needs a player: grant { createPlayer } (or createMiniaudioPlayer ' +
         'from "napi-vm/plugins/node") — this platform has no native module loader',
     );
   }
@@ -99,11 +99,11 @@ function defaultCreatePlayer(platform: HostPlatform): AudioPlayerLike {
     ).AudioPlayer;
   } catch {
     throw new PluginLoadError(
-      'napi:audio needs the "miniaudio_node" package: npm install miniaudio_node',
+      'miniaudio_node package is unavailable: npm install miniaudio_node',
     );
   }
   if (typeof AudioPlayerCtor !== "function") {
-    throw new PluginLoadError('napi:audio: "miniaudio_node" did not export AudioPlayer');
+    throw new PluginLoadError('miniaudio_node did not export AudioPlayer');
   }
   return new AudioPlayerCtor();
 }
@@ -115,11 +115,22 @@ function isFiniteNumber(value: unknown): value is number {
 /** Exposure policy: closed allowlist, path sink declared for `loadFile`. */
 export const AUDIO_DEFINITION = {
   moduleName: AUDIO_MODULE_NAME,
+  moduleSource: (globals: Readonly<Record<string, string>>) => `
+const __audioPlayerId = Symbol("AudioPlayer.id");
+export class AudioPlayer {
+  constructor() { this[__audioPlayerId] = ${globals.createAudioPlayer}(); }
+${Object.entries(globals)
+  .filter(([name]) => name !== "createAudioPlayer")
+  .map(([name, global]) => `  ${name}(...args) { return ${global}(this[__audioPlayerId], ...args); }`)
+  .join("\n")}
+}
+`,
   methods: {
+    createAudioPlayer: {},
     getDevices: {},
-    loadFile: { pathArgs: [0] },
+    loadFile: { pathArgs: [1] },
     loadBuffer: {
-      validate: ([samples]: unknown[]) => {
+      validate: ([, samples]: unknown[]) => {
         if (!Array.isArray(samples)) {
           throw new TypeError("loadBuffer(samples): samples must be an array");
         }
@@ -130,7 +141,7 @@ export const AUDIO_DEFINITION = {
     pause: {},
     stop: {},
     setVolume: {
-      validate: ([volume]: unknown[]) => {
+      validate: ([, volume]: unknown[]) => {
         if (!isFiniteNumber(volume) || volume < 0 || volume > 1) {
           throw new RangeError("setVolume(v): v must be a number in 0..1");
         }
@@ -143,7 +154,7 @@ export const AUDIO_DEFINITION = {
     getCurrentTime: {},
     getCurrentFile: {},
     seekTo: {
-      validate: ([position]: unknown[]) => {
+      validate: ([, position]: unknown[]) => {
         if (!isFiniteNumber(position) || position < 0) {
           throw new RangeError("seekTo(s): s must be a non-negative number");
         }
@@ -179,13 +190,34 @@ export const AUDIO_CAPABILITY: CapabilityDefinition = {
       // widen its own payload ceiling.
       maxAudioBytes = Math.floor(policy.maxAudioBytes);
     }
-    const player = (policy.createPlayer ?? (() => defaultCreatePlayer(platform)))();
+    const players = new Map<number, AudioPlayerLike>();
+    let nextPlayerId = 1;
+    const target: Record<string, unknown> = {
+      createAudioPlayer: () => {
+        const id = nextPlayerId++;
+        players.set(id, (policy.createPlayer ?? (() => defaultCreatePlayer(platform)))());
+        return id;
+      },
+    };
+    for (const name of Object.keys(AUDIO_DEFINITION.methods)) {
+      if (name === "createAudioPlayer") continue;
+      target[name] = (id: unknown, ...args: unknown[]) => {
+        const player = typeof id === "number" ? players.get(id) : undefined;
+        if (!player) throw new TypeError("AudioPlayer method called with an invalid receiver");
+        const method = player[name as keyof AudioPlayerLike];
+        if (typeof method !== "function") throw new TypeError(`AudioPlayer.${name} is unavailable`);
+        return (method as (...args: unknown[]) => unknown).apply(player, args);
+      };
+    }
     const installed = installNativeModule(
       vm,
       { ...AUDIO_DEFINITION, maxStringBytes: maxAudioBytes },
-      { target: player as unknown as Record<string, unknown>, checker },
+      { target, checker },
     );
-    return () => installed.uninstall(vm);
+    return () => {
+      installed.uninstall(vm);
+      players.clear();
+    };
   },
 };
 

@@ -13,8 +13,8 @@
  *   name: "greet",
  *   schema: { voice: { type: "string", default: "alto", enum: ["alto", "bass"] } },
  *   install: ({ vm, options }) => {
- *     const globals = vm.registerHostModule("napi:greet", { ... });
- *     return () => unbindCapabilityModule(vm, "napi:greet", globals);
+ *     const globals = vm.registerHostModule("greet", { ... });
+ *     return () => unbindCapabilityModule(vm, "greet", globals);
  *   },
  * });
  * ```

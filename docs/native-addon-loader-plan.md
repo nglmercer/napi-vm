@@ -223,6 +223,7 @@ process privileges; root restrictions and hashes identify the code that may
 load, but do not sandbox it. Applications that need isolation must put native
 addons in a separately restricted process.
 
-The guest-facing `napi:*` namespace is a separate concern from loading native
-`.node` files. Portable application APIs should remain standard JavaScript or
-Web APIs where those exist; Node-API loader internals belong to the Rust host.
+Portable guest APIs and native addon loading are separate concerns. Guests use
+standard JavaScript, Web APIs, or Node built-ins such as `node:fs` where needed.
+Native `.node` packages use ordinary CommonJS `require()` through the Rust
+loader; the guest does not import a VM-specific module specifier to reach them.

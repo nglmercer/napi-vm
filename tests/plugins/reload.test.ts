@@ -7,11 +7,11 @@ import { cleanup, makeHost, makePlugin, manifestWith } from "./helpers";
 afterEach(cleanup);
 
 const JOURNAL_ENTRY = `
-import { readText, writeText, exists } from "napi:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 function append(line) {
-  const previous = exists("./cache/log.txt") ? readText("./cache/log.txt") : "";
-  writeText("./cache/log.txt", previous + line + "\\n");
+  const previous = existsSync("./cache/log.txt") ? readFileSync("./cache/log.txt", "utf8") : "";
+  writeFileSync("./cache/log.txt", previous + line + "\\n");
 }
 
 export default class Journal {
@@ -71,10 +71,10 @@ test("reload picks up edited source and permissions", () => {
   writeFileSync(
     join(dir, "plugin.js"),
     `
-import { readText } from "napi:fs";
+import { readFileSync } from "node:fs";
 export default {
-  onLoad() { return "v2:" + readText("./config.json"); },
-  onReload() { return "v2:" + readText("./config.json"); }
+  onLoad() { return "v2:" + readFileSync("./config.json", "utf8"); },
+  onReload() { return "v2:" + readFileSync("./config.json", "utf8"); }
 };
 `,
   );
@@ -90,10 +90,10 @@ test("reload re-reads the manifest, so tightened permissions take effect", () =>
   writeFileSync(
     join(dir, "plugin.js"),
     `
-import { readText } from "napi:fs";
+import { readFileSync } from "node:fs";
 export default {
-  onLoad() { return readText("./config.json"); },
-  onReload() { return readText("./config.json"); }
+  onLoad() { return readFileSync("./config.json", "utf8"); },
+  onReload() { return readFileSync("./config.json", "utf8"); }
 };
 `,
   );

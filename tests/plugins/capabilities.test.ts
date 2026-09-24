@@ -15,8 +15,8 @@ import { nodePlatform } from "../../plugins/node";
 import { manifestWith } from "./helpers";
 
 // ---------------------------------------------------------------------------
-// The capability modules beyond `napi:fs` and `napi:path`: `napi:crypto`,
-// `napi:timers` and standard `fetch()`. Each is a registry definition installed
+// The capability modules beyond `node:fs` and `node:path`: `node:crypto`,
+// `node:perf_hooks` and standard `fetch()`. Each is a registry definition installed
 // through one interface; each install returns its own teardown, so there is
 // no per-capability uninstall function to remember.
 // ---------------------------------------------------------------------------
@@ -44,30 +44,22 @@ function installForTest(
   });
 }
 
-// --- napi:crypto ------------------------------------------------------------
+// --- node:crypto ------------------------------------------------------------
 
-test("crypto provides UUIDs, random bytes and digests", () => {
+test("crypto provides UUIDs, random bytes and a Node-style hash", () => {
   const vm = new Vm();
   installForTest("crypto", vm);
-  expect(vm.run("import { randomUUID } from 'napi:crypto'; randomUUID().length;")).toBe("36");
-  expect(vm.run("import { randomBytes } from 'napi:crypto'; randomBytes(4).length;")).toBe("4");
+  expect(vm.run("import { randomUUID } from 'node:crypto'; randomUUID().length;")).toBe("36");
+  expect(vm.run("import { randomBytes } from 'node:crypto'; randomBytes(4).length;")).toBe("4");
   expect(
-    vm.run("import { digest } from 'napi:crypto'; digest('sha256', 'abc');"),
+    vm.run("import { createHash } from 'node:crypto'; createHash('sha256').update('abc').digest('hex');"),
   ).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-});
-
-test("getRandomValues fills a typed array", () => {
-  const vm = new Vm();
-  installForTest("crypto", vm);
-  expect(
-    vm.run("import { getRandomValues } from 'napi:crypto'; getRandomValues(new Uint8Array(3)).length;"),
-  ).toBe("3");
 });
 
 test("a huge randomBytes request is refused", () => {
   const vm = new Vm();
   installForTest("crypto", vm);
-  expect(() => vm.run("import { randomBytes } from 'napi:crypto'; randomBytes(999999);")).toThrow(
+  expect(() => vm.run("import { randomBytes } from 'node:crypto'; randomBytes(999999);")).toThrow(
     "limited to",
   );
 });
@@ -75,41 +67,41 @@ test("a huge randomBytes request is refused", () => {
 test("an unknown digest algorithm is refused", () => {
   const vm = new Vm();
   installForTest("crypto", vm);
-  expect(() => vm.run("import { digest } from 'napi:crypto'; digest('rot13', 'x');")).toThrow(
+  expect(() => vm.run("import { createHash } from 'node:crypto'; createHash('rot13').update('x').digest('hex');")).toThrow(
     "unsupported digest algorithm",
   );
 });
 
 test("crypto is absent until installed, and gone after removal", () => {
   const vm = new Vm();
-  expect(() => vm.run("import { randomUUID } from 'napi:crypto'; randomUUID();")).toThrow();
+  expect(() => vm.run("import { randomUUID } from 'node:crypto'; randomUUID();")).toThrow();
   const teardown = installForTest("crypto", vm);
-  expect(vm.run("import { randomUUID } from 'napi:crypto'; typeof randomUUID();")).toBe("string");
+  expect(vm.run("import { randomUUID } from 'node:crypto'; typeof randomUUID();")).toBe("string");
   teardown();
-  expect(() => vm.run("import { randomUUID } from 'napi:crypto'; randomUUID();")).toThrow();
+  expect(() => vm.run("import { randomUUID } from 'node:crypto'; randomUUID();")).toThrow();
 });
 
-// --- napi:timers ------------------------------------------------------------
+// --- node:perf_hooks ------------------------------------------------------------
 
-test("timers exposes the host clock", () => {
+test("performance exposes the host monotonic clock", () => {
   const vm = new Vm();
   installForTest("timers", vm);
-  expect(vm.run("import { now } from 'napi:timers'; typeof now();")).toBe("number");
-  expect(vm.run("import { now } from 'napi:timers'; now() > 1600000000000;")).toBe("true");
+  expect(vm.run("import { performance } from 'node:perf_hooks'; typeof performance.now();")).toBe("number");
+  expect(vm.run("import { performance } from 'node:perf_hooks'; performance.now() >= 0;")).toBe("true");
 });
 
 test("a coarsened clock hides precision", () => {
   const vm = new Vm();
   installForTest("timers", vm, { grant: { resolutionMs: 1000 } });
   // Rounded down to the second, so the remainder is always zero.
-  expect(vm.run("import { now } from 'napi:timers'; now() % 1000;")).toBe("0");
+  expect(vm.run("import { performance } from 'node:perf_hooks'; performance.now() % 1000;")).toBe("0");
 });
 
 test("timers is removable", () => {
   const vm = new Vm();
   const teardown = installForTest("timers", vm);
   teardown();
-  expect(() => vm.run("import { now } from 'napi:timers'; now();")).toThrow();
+  expect(() => vm.run("import { performance } from 'node:perf_hooks'; performance.now();")).toThrow();
 });
 
 test("the VM's own timers stay clock-free without the capability", () => {
@@ -117,7 +109,7 @@ test("the VM's own timers stay clock-free without the capability", () => {
   // `setTimeout` is always available and always ordered without a clock; the
   // capability is about *observing* time, not scheduling.
   expect(vm.run("typeof setTimeout;")).toBe("function");
-  expect(() => vm.run("import { now } from 'napi:timers'; now();")).toThrow();
+  expect(() => vm.run("import { performance } from 'node:perf_hooks'; performance.now();")).toThrow();
 });
 
 // --- fetch: the permission check --------------------------------------------

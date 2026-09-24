@@ -1,6 +1,6 @@
 /**
  * Generic npm → VM bridge: load any host library once, expose an allowlisted
- * subset of its methods as a `napi:*` guest module.
+ * subset of its methods as a host module.
  *
  * This is the sanctioned answer to "load an arbitrary npm / `.node` package
  * inside the VM": the native code NEVER runs inside the interpreter. It is
@@ -40,10 +40,12 @@ export interface NativeMethodPolicy {
 
 /** What to expose, and under which guest module name. */
 export interface NativeModuleDefinition {
-  /** Guest module name, e.g. `"napi:audio"`. */
+  /** Guest module name, usually a `node:` builtin or installed package name. */
   moduleName: string;
   /** Allowed methods and their per-method policy. Closed: nothing else leaks. */
   methods: Record<string, NativeMethodPolicy>;
+  /** Optional module body that wraps the approved methods in a package shape. */
+  moduleSource?: (globals: Readonly<Record<string, string>>) => string;
   /** Largest string argument accepted, in bytes. Defaults to 8 MiB. */
   maxStringBytes?: number;
 }
@@ -135,6 +137,11 @@ export function installNativeModule(
     };
   }
   const globals = vm.registerHostModule(definition.moduleName, exports);
+  if (definition.moduleSource) {
+    const names = Object.keys(exports);
+    const bridgeGlobals = Object.fromEntries(names.map((name, index) => [name, globals[index]]));
+    vm.registerModule(definition.moduleName, definition.moduleSource(bridgeGlobals));
+  }
   const moduleName = definition.moduleName;
   return {
     moduleName,

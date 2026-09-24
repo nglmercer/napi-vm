@@ -135,7 +135,7 @@ Every claim below was checked against the current build.
   callable that re-enters the interpreter, keeping its closure
   (`tests/bridge-values.test.js`)
 - Plugin capability host: manifests, permissions, and the capability APIs
-  — `napi:fs`, `napi:path`, `napi:crypto`, `napi:timers` and standard `fetch()`,
+  — `node:fs`, `node:path`, `node:crypto`, `node:perf_hooks` and standard `fetch()`,
   each installed only when the manifest asks *and* the host policy permits
   (`tests/plugins/capabilities.test.ts`, `docs/plugins.md`)
 - **LSP**: synchronization, completion, hover, document symbols, definition,

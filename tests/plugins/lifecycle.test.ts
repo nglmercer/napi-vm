@@ -8,11 +8,11 @@ afterEach(cleanup);
 
 /** Records hook calls into ./cache/log.txt so the host can read the order. */
 const JOURNAL_ENTRY = `
-import { readText, writeText, exists } from "napi:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 function append(line) {
-  const previous = exists("./cache/log.txt") ? readText("./cache/log.txt") : "";
-  writeText("./cache/log.txt", previous + line + "\\n");
+  const previous = existsSync("./cache/log.txt") ? readFileSync("./cache/log.txt", "utf8") : "";
+  writeFileSync("./cache/log.txt", previous + line + "\\n");
 }
 
 export default {
@@ -162,12 +162,12 @@ test("unload detaches the capabilities from the VM", () => {
   });
   const host = makeHost();
   const plugin = host.load(dir);
-  expect(plugin.vm.hasModule("napi:fs")).toBe(true);
-  expect(plugin.vm.hasModule("napi:path")).toBe(true);
+  expect(plugin.vm.hasModule("node:fs")).toBe(true);
+  expect(plugin.vm.hasModule("node:path")).toBe(true);
 
   host.unload("test-plugin");
-  expect(plugin.vm.hasModule("napi:fs")).toBe(false);
-  expect(plugin.vm.hasModule("napi:path")).toBe(false);
+  expect(plugin.vm.hasModule("node:fs")).toBe(false);
+  expect(plugin.vm.hasModule("node:path")).toBe(false);
   expect(plugin.vm.hasModule("plugin:test-plugin")).toBe(false);
   expect(plugin.vm.hasGlobal("__cap_fs_readText")).toBe(false);
   expect(plugin.vm.hasGlobal("__cap_path_join")).toBe(false);
@@ -196,8 +196,8 @@ test("a throwing onLoad revokes the capabilities immediately", () => {
   const plugin = host.get("test-plugin");
   expect(plugin?.status).toBe("error");
   const vm = plugin!.vm;
-  expect(vm.hasModule("napi:fs")).toBe(false);
-  expect(vm.hasModule("napi:path")).toBe(false);
+  expect(vm.hasModule("node:fs")).toBe(false);
+  expect(vm.hasModule("node:path")).toBe(false);
   expect(vm.hasModule("plugin:test-plugin")).toBe(false);
   expect(vm.hasGlobal("__cap_fs_readText")).toBe(false);
   expect(vm.hasGlobal("__cap_fs_writeText")).toBe(false);
@@ -218,10 +218,10 @@ test("a throwing onReload revokes the new VM's capabilities", () => {
   const plugin = host.get("test-plugin");
   expect(plugin?.status).toBe("error");
   expect(plugin?.vm).not.toBe(first.vm);
-  expect(plugin!.vm.hasModule("napi:fs")).toBe(false);
+  expect(plugin!.vm.hasModule("node:fs")).toBe(false);
   expect(plugin!.vm.hasGlobal("__cap_fs_readText")).toBe(false);
   // The VM replaced by the reload is gone too.
-  expect(first.vm.hasModule("napi:fs")).toBe(false);
+  expect(first.vm.hasModule("node:fs")).toBe(false);
 });
 
 test("a throwing onUnload still unloads the plugin", () => {
@@ -234,7 +234,7 @@ test("a throwing onUnload still unloads the plugin", () => {
   expect(() => host.unload("test-plugin")).toThrow(/boom/);
 
   expect(host.get("test-plugin")).toBeUndefined();
-  expect(plugin.vm.hasModule("napi:fs")).toBe(false);
+  expect(plugin.vm.hasModule("node:fs")).toBe(false);
   expect(plugin.vm.hasGlobal("__cap_fs_readText")).toBe(false);
 });
 
@@ -248,7 +248,7 @@ test("an errored plugin can still be reloaded after a fix", () => {
 
   writeFileSync(join(dir, "plugin.js"), `export default { onReload() { return "fixed"; } };`);
   expect(host.reload("test-plugin").loadResult).toBe("fixed");
-  expect(host.get("test-plugin")?.vm.hasModule("napi:fs")).toBe(true);
+  expect(host.get("test-plugin")?.vm.hasModule("node:fs")).toBe(true);
 });
 
 test("a directory without plugin.json is refused", () => {
@@ -268,11 +268,11 @@ test("a missing entry file is refused", () => {
 
 // ── capabilities are opt-in ──────────────────────────────────────────
 
-test("napi:path is only registered when the manifest asks for it", () => {
+test("node:path is only registered when the manifest asks for it", () => {
   const withPath = makePlugin({
     manifest: manifestWith({ path: true }),
     entry: `
-import { join, basename, dirname, extname, normalize } from "napi:path";
+import { join, basename, dirname, extname, normalize } from "node:path";
 export default {
   onLoad() {
     return [
@@ -296,7 +296,7 @@ export default {
 
   const withoutPath = makePlugin({
     manifest: manifestWith({}),
-    entry: `import { join } from "napi:path";\nexport default { onLoad() { return join("a", "b"); } };`,
+    entry: `import { join } from "node:path";\nexport default { onLoad() { return join("a", "b"); } };`,
   });
   expect(() => makeHost().load(withoutPath)).toThrow();
 });

@@ -1,9 +1,9 @@
 /**
- * The `napi:fs` capability: a deliberately tiny, fully-checked filesystem API.
+ * The `node:fs` compatibility facade: a deliberately small, fully-checked
+ * subset of Node's synchronous filesystem API.
  *
- * The guest never sees `node:fs`. It sees three functions, and every one of
- * them resolves and authorizes its path *itself* — registering the module
- * grants nothing on its own.
+ * The guest sees familiar `node:fs` names. Every path resolves and authorizes
+ * itself — registering the module grants nothing on its own.
  */
 
 import type { Vm } from "../../index";
@@ -90,25 +90,28 @@ export function compileFsPermission(
   throw new PluginManifestError(`${field} must be boolean, string, or string[]`);
 }
 
-/** Host globals backing `napi:fs`. Names are convention, never security. */
+/** Host globals backing the checked `node:fs` facade. Names are convention, never security. */
 const FS_GLOBALS = [
   "__cap_fs_readText",
   "__cap_fs_writeText",
   "__cap_fs_exists",
 ] as const;
 
-export const FS_MODULE_NAME = "napi:fs";
+export const FS_MODULE_NAME = "node:fs";
 
 const FS_MODULE_SOURCE = `
-export function readText(path) {
+export function readFileSync(path, encoding) {
+  if (encoding !== "utf8" && encoding !== "utf-8") {
+    throw new TypeError("the sandboxed node:fs facade supports UTF-8 text reads only");
+  }
   return __cap_fs_readText(path);
 }
 
-export function writeText(path, contents) {
-  return __cap_fs_writeText(path, contents);
+export function writeFileSync(path, contents) {
+  __cap_fs_writeText(path, contents);
 }
 
-export function exists(path) {
+export function existsSync(path) {
   return __cap_fs_exists(path);
 }
 `;
@@ -119,7 +122,7 @@ export interface FsCapabilityOptions {
 }
 
 /**
- * Expose the checked filesystem functions and register `napi:fs`.
+ * Expose the checked filesystem functions and register the `node:fs` facade.
  * Returns its own teardown — the host runs it on unload, no separate
  * `uninstallFsCapability` to remember.
  */
@@ -139,7 +142,6 @@ export function installFsCapability(vm: Vm, options: FsCapabilityOptions): Capab
       }
       const { native } = checker.resolve(requestedPath, "write");
       fs.writeText(native, contents);
-      return true;
     },
   );
 

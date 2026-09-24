@@ -1,10 +1,9 @@
 /**
  * A capability-based plugin system for `napi-vm`.
  *
- * The VM stays sealed: plugins never see `require`, `process`, `node:fs`,
- * `Bun` or `Deno`. They see `napi:*` host modules whose every privileged
- * call is checked against the plugin's manifest *and* the host policy before
- * it touches the outside world.
+ * The VM stays sealed: plugins do not receive `process`, `Bun` or `Deno`.
+ * Standard module facades such as `node:fs` are installed by the host and
+ * check each privileged call against the plugin manifest and host policy.
  *
  * This barrel is portable: nothing in its import graph touches `node:*` or
  * any npm package at runtime (type-only imports are erased). Hosts running

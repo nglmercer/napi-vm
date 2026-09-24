@@ -338,9 +338,9 @@ export class PluginHost {
     };
 
     try {
-      // Substrate: `napi:fs` is installed unconditionally because the
+      // Substrate: `node:fs` is installed unconditionally because the
       // checker itself needs no grant to exist — every call through it is
-      // still authorized per path. Everything else, including `napi:path`,
+      // still authorized per path. Everything else, including `node:path`,
       // flows through the capability loop below.
       const teardowns: CapabilityTeardown[] = [
         installFsCapability(vm, { checker, fs: this.platform.fs }),
@@ -386,7 +386,7 @@ export class PluginHost {
    * Call a lifecycle wrapper, recording failures on the plugin entry.
    *
    * A hook that throws leaves the VM in an unknown state, so its capabilities
-   * are revoked immediately — an errored plugin must not keep a live `napi:fs`
+   * are revoked immediately — an errored plugin must not keep a live `node:fs`
    * around waiting for some later cleanup. The registry entry survives (with
    * `status: "error"`) so the plugin can still be reloaded.
    */

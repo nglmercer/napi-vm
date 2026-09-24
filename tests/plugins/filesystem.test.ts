@@ -7,19 +7,19 @@ import { cleanup, makeHost, makePlugin, manifestWith, outsideDir } from "./helpe
 afterEach(cleanup);
 
 const readEntry = (path: string) => `
-import { readText } from "napi:fs";
+import { readFileSync } from "node:fs";
 export default {
   onLoad() {
-    return readText(${JSON.stringify(path)});
+    return readFileSync(${JSON.stringify(path)}, "utf8");
   }
 };
 `;
 
 const writeEntry = (path: string, contents: string) => `
-import { writeText } from "napi:fs";
+import { writeFileSync } from "node:fs";
 export default {
   onLoad() {
-    return writeText(${JSON.stringify(path)}, ${JSON.stringify(contents)});
+    return writeFileSync(${JSON.stringify(path)}, ${JSON.stringify(contents)});
   }
 };
 `;
@@ -88,7 +88,7 @@ test("write allowed inside ./cache/**", () => {
     entry: writeEntry("./cache/test.json", '{"written":true}'),
     dirs: ["cache"],
   });
-  expect(makeHost().load(dir).loadResult).toBe(true);
+  expect(makeHost().load(dir).loadResult).toBeUndefined();
   expect(readFileSync(join(dir, "cache/test.json"), "utf8")).toBe('{"written":true}');
 });
 
@@ -112,26 +112,26 @@ test("read permission does not imply write permission", () => {
   expect(() => makeHost().load(dir)).toThrow(/fs.write is not permitted/);
 });
 
-test("writeText rejects non-string contents", () => {
+test("writeFileSync rejects non-string contents", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { write: "./**" } }),
     entry: `
-import { writeText } from "napi:fs";
-export default { onLoad() { return writeText("./a.txt", 42); } };
+import { writeFileSync } from "node:fs";
+export default { onLoad() { return writeFileSync("./a.txt", 42); } };
 `,
   });
   expect(() => makeHost().load(dir)).toThrow(/contents must be a string/);
 });
 
-// ── exists ───────────────────────────────────────────────────────────
+// ── existsSync ───────────────────────────────────────────────────────────
 
-test("exists reports presence for permitted paths", () => {
+test("existsSync reports presence for permitted paths", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "./**" } }),
     entry: `
-import { exists } from "napi:fs";
+import { existsSync } from "node:fs";
 export default {
-  onLoad() { return [exists("./config.json"), exists("./nope.json")]; }
+  onLoad() { return [existsSync("./config.json"), existsSync("./nope.json")]; }
 };
 `,
     files: { "config.json": "{}" },
@@ -139,12 +139,12 @@ export default {
   expect(makeHost().load(dir).loadResult).toEqual([true, false]);
 });
 
-test("exists is itself permission-checked", () => {
+test("existsSync is itself permission-checked", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "./assets/**" } }),
     entry: `
-import { exists } from "napi:fs";
-export default { onLoad() { return exists("./config.json"); } };
+import { existsSync } from "node:fs";
+export default { onLoad() { return existsSync("./config.json"); } };
 `,
     files: { "config.json": "{}" },
   });
@@ -285,11 +285,11 @@ test("a guest sees a typed PermissionDenied error it can catch", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: "./assets/**" } }),
     entry: `
-import { readText } from "napi:fs";
+import { readFileSync } from "node:fs";
 export default {
   onLoad() {
     try {
-      readText("./secret.txt");
+      readFileSync("./secret.txt", "utf8");
       return "unexpectedly allowed";
     } catch (error) {
       return error.name + " | " + error.message;

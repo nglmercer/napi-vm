@@ -1,18 +1,15 @@
 /**
- * The `napi:path` capability: pure POSIX path manipulation.
+ * The `node:path` compatibility facade: path manipulation without I/O.
  *
- * Guest paths are POSIX on every host, so a plugin built on Linux behaves
- * identically on Windows. The host converts guest paths to native paths when
- * it actually performs I/O (see `permissions.ts`).
+ * Guest path behavior follows the configured host platform, matching Node's
+ * `node:path` module on that platform.
  *
- * Nothing here touches the filesystem, so nothing here needs a permission
- * check — but the module is only registered when the manifest asks for it.
- * The helpers run on the portable POSIX implementation, never on the host's
- * native `node:path`, so no host import is needed.
+ * Nothing here touches the filesystem, so the helpers need no filesystem
+ * grant. The module is registered only when the manifest asks for it.
  */
 
 import type { Vm } from "../../index";
-import { posixPath } from "../platform";
+import { posixPath, type HostPath } from "../platform";
 import {
   booleanPermissionValue,
   defineCapability,
@@ -27,7 +24,7 @@ export const PATH_CAPABILITY: CapabilityDefinition = {
   // Manifest-only gate: `path: true` installs with no host grant.
   // The grant is ignored on purpose — path helpers cannot reach the host fs.
   allows: (request) => request === true,
-  install: ({ vm }) => installPathCapability(vm),
+  install: ({ vm, platform }) => installPathCapability(vm, platform.path),
 };
 
 defineCapability(PATH_CAPABILITY);
@@ -38,9 +35,13 @@ const PATH_GLOBALS = [
   "__cap_path_dirname",
   "__cap_path_basename",
   "__cap_path_extname",
+  "__cap_path_resolve",
+  "__cap_path_relative",
+  "__cap_path_isAbsolute",
+  "__cap_path_sep",
 ] as const;
 
-export const PATH_MODULE_NAME = "napi:path";
+export const PATH_MODULE_NAME = "node:path";
 
 const PATH_MODULE_SOURCE = `
 export function join(...parts) {
@@ -62,27 +63,54 @@ export function basename(path, ext) {
 export function extname(path) {
   return __cap_path_extname(path);
 }
+
+export function resolve(...parts) {
+  return __cap_path_resolve(...parts);
+}
+
+export function relative(from, to) {
+  return __cap_path_relative(from, to);
+}
+
+export function isAbsolute(path) {
+  return __cap_path_isAbsolute(path);
+}
+
+export const sep = __cap_path_sep();
 `;
 
-/** Expose the POSIX path helpers and register `napi:path`; returns its teardown. */
-export function installPathCapability(vm: Vm): CapabilityTeardown {
+/** Expose the configured host path helpers and register `node:path`. */
+export function installPathCapability(
+  vm: Vm,
+  hostPath: HostPath = posixPath,
+): CapabilityTeardown {
   vm.exposeFunction("__cap_path_join", (...parts: unknown[]) =>
-    posixPath.join(...parts.map((part) => String(part))),
+    hostPath.join(...parts.map((part) => String(part))),
   );
-  vm.exposeFunction("__cap_path_normalize", (path: unknown) =>
-    posixPath.normalize(String(path)),
+  vm.exposeFunction("__cap_path_normalize", (requestedPath: unknown) =>
+    hostPath.normalize(String(requestedPath)),
   );
-  vm.exposeFunction("__cap_path_dirname", (path: unknown) =>
-    posixPath.dirname(String(path)),
+  vm.exposeFunction("__cap_path_dirname", (requestedPath: unknown) =>
+    hostPath.dirname(String(requestedPath)),
   );
-  vm.exposeFunction("__cap_path_basename", (path: unknown, ext: unknown) =>
+  vm.exposeFunction("__cap_path_basename", (requestedPath: unknown, ext: unknown) =>
     ext === undefined || ext === null
-      ? posixPath.basename(String(path))
-      : posixPath.basename(String(path), String(ext)),
+      ? hostPath.basename(String(requestedPath))
+      : hostPath.basename(String(requestedPath), String(ext)),
   );
-  vm.exposeFunction("__cap_path_extname", (path: unknown) =>
-    posixPath.extname(String(path)),
+  vm.exposeFunction("__cap_path_extname", (requestedPath: unknown) =>
+    hostPath.extname(String(requestedPath)),
   );
+  vm.exposeFunction("__cap_path_resolve", (...parts: unknown[]) =>
+    hostPath.resolve(...parts.map((part) => String(part))),
+  );
+  vm.exposeFunction("__cap_path_relative", (from: unknown, to: unknown) =>
+    hostPath.relative(String(from), String(to)),
+  );
+  vm.exposeFunction("__cap_path_isAbsolute", (value: unknown) =>
+    hostPath.isAbsolute(String(value)),
+  );
+  vm.exposeFunction("__cap_path_sep", () => hostPath.sep);
 
   vm.registerModule(PATH_MODULE_NAME, PATH_MODULE_SOURCE);
   return () => unbindCapabilityModule(vm, PATH_MODULE_NAME, PATH_GLOBALS);

@@ -33,8 +33,8 @@ export interface HostFileSystem {
 /**
  * Path helpers in one flavor. The checker and the host resolve *native* paths
  * through this, so a Node host passes its native `node:path` wrapper while a
- * portable host passes {@link posixPath}. Guest-visible helpers (`napi:path`)
- * always use {@link posixPath} directly: guest paths are POSIX on every host.
+ * portable host passes {@link posixPath}. Guest-visible `node:path` follows
+ * this configured path flavor, matching the host's Node behavior.
  */
 export interface HostPath {
   /** Native segment separator (`"/"` on POSIX, `"\\"` on Windows). */
@@ -55,11 +55,11 @@ export interface HostPath {
   extname(path: string): string;
   /** Like `node:path.relative`. */
   relative(from: string, to: string): string;
-  /** True for `/abs` paths (POSIX flavor; the node wrapper covers the rest). */
+  /** True for absolute paths in this path flavor. */
   isAbsolute(path: string): boolean;
 }
 
-/** Synchronous cryptographic source for `napi:crypto`. */
+/** Synchronous cryptographic source for `node:crypto`. */
 export interface HostCrypto {
   /** `count` cryptographically random bytes. */
   randomBytes(count: number): Uint8Array;
@@ -263,7 +263,7 @@ export function portableCrypto(): HostCrypto {
     digest(): string {
       throw new Error(
         "digest() is not available on this platform: supply a HostCrypto " +
-          "(e.g. nodeCrypto from \"napi-vm/plugins/node\") or withhold napi:crypto",
+          "(e.g. nodeCrypto from \"napi-vm/plugins/node\") or withhold node:crypto",
       );
     },
   };

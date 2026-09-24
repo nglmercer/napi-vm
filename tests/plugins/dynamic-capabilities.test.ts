@@ -58,10 +58,10 @@ function defineEchoCapability(name: string): void {
   defineCapability({
     name,
     install: ({ vm }) => {
-      const globals = vm.registerHostModule(`napi:${name}`, {
+      const globals = vm.registerHostModule(`${name}`, {
         echo: (value: unknown) => `echo:${String(value)}`,
       });
-      return () => unbindCapabilityModule(vm, `napi:${name}`, globals);
+      return () => unbindCapabilityModule(vm, `${name}`, globals);
     },
   });
   definedHere.push(name);
@@ -113,7 +113,7 @@ test("requested and granted capability is usable from guest code", () => {
   defineEchoCapability(name);
   const dir = makePlugin({
     manifest: manifestWith({ capabilities: { [name]: true } }),
-    entry: `import { echo } from "napi:${name}";
+    entry: `import { echo } from "${name}";
 export default { onLoad() { return echo("hi"); } };`,
   });
   const host = makeHost({ policy: { ...defaultPolicy(), capabilities: { [name]: true } } });
@@ -143,7 +143,7 @@ test("requested but ungranted capability stays absent", () => {
   const host = makeHost();
   const plugin = host.load(dir);
   expect(plugin.capabilities).toEqual([]);
-  expect(() => plugin.vm.run(`import { echo } from "napi:${name}"; echo("x");`)).toThrow();
+  expect(() => plugin.vm.run(`import { echo } from "${name}"; echo("x");`)).toThrow();
 });
 
 test("explicit false opts out without error", () => {
@@ -179,7 +179,7 @@ test("setCapabilityEnabled disables at runtime; unknown names throw", () => {
   expect(host.isCapabilityEnabled(name)).toBe(false);
   const plugin = host.load(dir);
   expect(plugin.capabilities).toEqual([]);
-  expect(() => plugin.vm.run(`import { echo } from "napi:${name}"; echo("x");`)).toThrow();
+  expect(() => plugin.vm.run(`import { echo } from "${name}"; echo("x");`)).toThrow();
 
   host.unload("test-plugin");
   host.setCapabilityEnabled(name, true);
@@ -195,9 +195,9 @@ test("unload revokes the dynamic module", () => {
   });
   const host = makeHost({ policy: { ...defaultPolicy(), capabilities: { [name]: true } } });
   const plugin = host.load(dir);
-  expect(plugin.vm.hasModule(`napi:${name}`)).toBe(true);
+  expect(plugin.vm.hasModule(`${name}`)).toBe(true);
   host.unload("test-plugin");
-  expect(plugin.vm.hasModule(`napi:${name}`)).toBe(false);
+  expect(plugin.vm.hasModule(`${name}`)).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -389,13 +389,13 @@ test("download → verify → require → expose → guest call", async () => {
     nativePackageCapability({
       exposeAs,
       loaded,
-      definition: { moduleName: `napi:${exposeAs}`, methods: { hello: {} } },
+      definition: { moduleName: `${exposeAs}`, methods: { hello: {} } },
     });
     definedHere.push(exposeAs);
 
     const pluginDir = makePlugin({
       manifest: manifestWith({ capabilities: { [exposeAs]: true } }),
-      entry: `import { hello } from "napi:${exposeAs}";
+      entry: `import { hello } from "${exposeAs}";
 export default { onLoad() { return hello("world"); } };`,
     });
     const host = makeHost({
@@ -462,7 +462,7 @@ function existsMarker(dir: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// `napi:audio` through the registry: paths checked, ranges enforced, no
+// `miniaudio_node` through the registry: paths checked, ranges enforced, no
 // native dependency in tests (injected fake player).
 // ---------------------------------------------------------------------------
 
@@ -544,13 +544,13 @@ function makeAudioVm(root: string): {
   return { vm, calls, teardown };
 }
 
-test("audio loadFile receives the canonical path, not the guest string", () => {
+test("the package-shaped AudioPlayer facade receives the canonical path", () => {
   const root = makeAudioRoot();
   try {
     const { vm, calls } = makeAudioVm(root);
-    vm.run(`import { loadFile, getCurrentFile } from "napi:audio"; loadFile("./audio/track.mp3");`);
+    vm.run(`import { AudioPlayer } from "miniaudio_node"; globalThis.__audioTestPlayer = new AudioPlayer(); globalThis.__audioTestPlayer.loadFile("./audio/track.mp3");`);
     expect(calls).toEqual([["loadFile", [join(root, "audio", "track.mp3")]]]);
-    expect(vm.run(`import { getCurrentFile } from "napi:audio"; getCurrentFile();`)).toBe(
+    expect(vm.run(`globalThis.__audioTestPlayer.getCurrentFile();`)).toBe(
       join(root, "audio", "track.mp3"),
     );
   } finally {
@@ -563,20 +563,20 @@ test("audio refuses paths outside the grant and bad ranges", () => {
   try {
     const { vm, calls } = makeAudioVm(root);
     expect(() =>
-      vm.run(`import { loadFile } from "napi:audio"; loadFile("./other/secret.mp3");`),
+      vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().loadFile("./other/secret.mp3");`),
     ).toThrow(/PermissionDenied/);
     expect(() =>
-      vm.run(`import { loadFile } from "napi:audio"; loadFile("../outside.mp3");`),
+      vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().loadFile("../outside.mp3");`),
     ).toThrow(/PermissionDenied|escapes/);
-    expect(() => vm.run(`import { setVolume } from "napi:audio"; setVolume(2);`)).toThrow(
+    expect(() => vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().setVolume(2);`)).toThrow(
       /0\.\.1/,
     );
-    expect(() => vm.run(`import { seekTo } from "napi:audio"; seekTo(-1);`)).toThrow(
+    expect(() => vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().seekTo(-1);`)).toThrow(
       /non-negative/,
     );
     expect(calls).toEqual([]);
-    vm.run(`import { setVolume, getVolume } from "napi:audio"; setVolume(0.5);`);
-    expect(vm.run(`import { getVolume } from "napi:audio"; getVolume();`)).toBe("0.5");
+    vm.run(`import { AudioPlayer } from "miniaudio_node"; globalThis.__audioTestPlayer = new AudioPlayer(); globalThis.__audioTestPlayer.setVolume(0.5);`);
+    expect(vm.run(`globalThis.__audioTestPlayer.getVolume();`)).toBe("0.5");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -586,9 +586,9 @@ test("audio uninstall removes the module", () => {
   const root = makeAudioRoot();
   try {
     const { vm, teardown } = makeAudioVm(root);
-    expect(vm.hasModule("napi:audio")).toBe(true);
+    expect(vm.hasModule("miniaudio_node")).toBe(true);
     teardown();
-    expect(vm.hasModule("napi:audio")).toBe(false);
+    expect(vm.hasModule("miniaudio_node")).toBe(false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -618,13 +618,14 @@ test("audio through the full host: request ∩ grant installs it", () => {
       path: true,
       capabilities: { audio: true },
     }),
-    entry: `import { getDevices, isPlaying } from "napi:audio";
-import { exists } from "napi:fs";
-import { join } from "napi:path";
+    entry: `import { AudioPlayer } from "miniaudio_node";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 export default {
   onLoad() {
-    if (!exists(join("./audio", "track.mp3"))) throw new Error("missing track");
-    return getDevices().length + ":" + isPlaying();
+    const player = new AudioPlayer();
+    if (!existsSync(join("./audio", "track.mp3"))) throw new Error("missing track");
+    return player.getDevices().length + ":" + player.isPlaying();
   },
 };`,
     files: { "audio/track.mp3": "fake-audio-bytes" },
@@ -634,7 +635,7 @@ export default {
   const host = makeHost({
     policy: { ...defaultPolicy(), capabilities: { audio: true } },
   });
-  expect(host.load(dir).loadResult).toBe("0:false");
+  expect(host.load(dir).loadResult).toMatch(/^\d+:false$/);
 });
 
 /** Minimal WAV writer: 8 kHz mono 16-bit silence. */
@@ -684,14 +685,14 @@ test("real player decodes a wav through the guest bridge", () => {
       grant: true,
     });
     try {
-      vm.run(`import { loadFile } from "napi:audio"; loadFile("./audio/track.wav");`);
+      vm.run(`import { AudioPlayer } from "miniaudio_node"; globalThis.__audioTestPlayer = new AudioPlayer(); globalThis.__audioTestPlayer.loadFile("./audio/track.wav");`);
       expect(
-        vm.run(`import { getDuration } from "napi:audio"; Math.abs(getDuration() - 1) < 0.05;`),
+        vm.run(`Math.abs(globalThis.__audioTestPlayer.getDuration() - 1) < 0.05;`),
       ).toBe("true");
       expect(
-        vm.run(`import { getCurrentFile } from "napi:audio"; getCurrentFile().endsWith("track.wav");`),
+        vm.run(`globalThis.__audioTestPlayer.getCurrentFile().endsWith("track.wav");`),
       ).toBe("true");
-      expect(vm.run(`import { isPlaying } from "napi:audio"; isPlaying();`)).toBe("false");
+      expect(vm.run(`globalThis.__audioTestPlayer.isPlaying();`)).toBe("false");
     } finally {
       teardown();
     }

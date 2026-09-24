@@ -10,8 +10,7 @@ import {
 
 // ---------------------------------------------------------------------------
 // Portable platform: pure POSIX paths, WebCrypto randomness, explicit wiring.
-// These pin the guest-visible `napi:path` behavior (previously `node:path`),
-// so any drift from Node's posix semantics fails here, not in a plugin.
+// These pin the host platform's path behavior against the Node path module.
 // ---------------------------------------------------------------------------
 
 test("normalize resolves segments like node posix", () => {

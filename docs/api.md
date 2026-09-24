@@ -73,14 +73,14 @@ created so the host can remove them alongside the module.
 
 ```javascript
 const globals = vm.registerHostModule(
-  "napi:fs",
-  { readText: restrictedReadText, writeText: restrictedWriteText },
+  "node:fs",
+  { readFileSync: restrictedReadFileSync, writeFileSync: restrictedWriteFileSync },
   { async: [] },              // export names the guest may `await`
 );
 
-vm.run(`import { readText } from "napi:fs"; readText("./config.json");`);
+vm.run(`import { readFileSync } from "node:fs"; readFileSync("./config.json", "utf8");`);
 
-vm.removeModule("napi:fs");   // also revokes the module's bridge globals
+vm.removeModule("node:fs");   // also revokes the module's bridge globals
 ```
 
 Revocation is tracked per module: `removeModule` revokes the globals the

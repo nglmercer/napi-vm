@@ -8,12 +8,12 @@ afterEach(cleanup);
 
 /** A plugin that reads whatever path the host hands it at call time. */
 const PROBE_ENTRY = `
-import { readText, writeText, exists } from "napi:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 export default {
   onLoad() {},
-  read(path) { return readText(path); },
-  write(path, contents) { return writeText(path, contents); },
-  check(path) { return exists(path); }
+  read(path) { return readFileSync(path, "utf8"); },
+  write(path, contents) { return writeFileSync(path, contents); },
+  check(path) { return existsSync(path); }
 };
 `;
 
@@ -71,7 +71,7 @@ test("traversal is refused for writes too", () => {
   expect(readFileSync(outside, "utf8")).toBe("outside data");
 });
 
-test("traversal is refused for exists too", () => {
+test("traversal is refused for existsSync too", () => {
   const { plugin } = probe({ fs: { read: "./cache/**" } });
   expect(() => plugin.vm.callFunction("__cap_fs_exists", ["../outside.txt"])).toThrow(
     /path escapes plugin root/,

@@ -24,7 +24,7 @@ afterEach(() => {
 
 // ── read/write byte limits ───────────────────────────────────────────
 
-test("readText refuses a file above the limit", () => {
+test("readFileSync refuses a file above the limit", () => {
   const dir = tempDir();
   const path = join(dir, "big.txt");
   writeFileSync(path, "x".repeat(2048));
@@ -34,7 +34,7 @@ test("readText refuses a file above the limit", () => {
   expect(() => fs.readText(path)).toThrow(/1024 byte read limit/);
 });
 
-test("readText allows a file exactly at the limit", () => {
+test("readFileSync allows a file exactly at the limit", () => {
   const dir = tempDir();
   const path = join(dir, "exact.txt");
   writeFileSync(path, "x".repeat(1024));
@@ -43,7 +43,7 @@ test("readText allows a file exactly at the limit", () => {
   expect(fs.readText(path)).toHaveLength(1024);
 });
 
-test("writeText refuses contents above the limit and writes nothing", () => {
+test("writeFileSync refuses contents above the limit and writes nothing", () => {
   const dir = tempDir();
   const path = join(dir, "out.txt");
 
@@ -75,7 +75,7 @@ test("a ResourceLimit error reaches the guest as a catchable error", () => {
   const dir = makePlugin({
     manifest: manifestWith({ fs: { read: ["*"] } }),
     entry: `
-import { readText } from "napi:fs";
+import { readFileSync } from "node:fs";
 export default { onLoad() {} };
 `,
     files: { "big.txt": "x".repeat(4096) },
@@ -90,7 +90,7 @@ export default { onLoad() {} };
 
 // ── non-regular files ────────────────────────────────────────────────
 
-test("readText refuses a directory rather than reporting a permission problem", () => {
+test("readFileSync refuses a directory rather than reporting a permission problem", () => {
   const dir = tempDir();
   const fs = createNodeFileSystem();
   expect(() => fs.readText(dir)).toThrow(/not a regular file|EISDIR/);
@@ -99,7 +99,7 @@ test("readText refuses a directory rather than reporting a permission problem", 
 // ── symlink hardening ────────────────────────────────────────────────
 
 test.if(process.platform !== "win32")(
-  "readText refuses to follow a symlink at the final component",
+  "readFileSync refuses to follow a symlink at the final component",
   () => {
     const dir = tempDir();
     const secret = join(dir, "secret.txt");
@@ -115,7 +115,7 @@ test.if(process.platform !== "win32")(
 );
 
 test.if(process.platform !== "win32")(
-  "writeText refuses to follow a symlink at the final component",
+  "writeFileSync refuses to follow a symlink at the final component",
   () => {
     const dir = tempDir();
     const outside = join(dir, "outside");

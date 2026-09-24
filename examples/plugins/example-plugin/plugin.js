@@ -1,12 +1,12 @@
-import { readText, writeText } from "napi:fs";
-import { join } from "napi:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 export default class ExamplePlugin {
   onLoad(context) {
-    this.config = JSON.parse(readText("./config.json"));
-    this.banner = readText("./assets/banner.txt");
+    this.config = JSON.parse(readFileSync("./config.json", "utf8"));
+    this.banner = readFileSync("./assets/banner.txt", "utf8");
 
-    writeText(
+    writeFileSync(
       join("./cache", "status.json"),
       JSON.stringify({
         loaded: true,
@@ -27,9 +27,9 @@ export default class ExamplePlugin {
     if (previousState && previousState.config) {
       this.config = previousState.config;
     } else {
-      this.config = JSON.parse(readText("./config.json"));
+      this.config = JSON.parse(readFileSync("./config.json", "utf8"));
     }
-    writeText(
+    writeFileSync(
       join("./cache", "status.json"),
       JSON.stringify({ reloaded: true, plugin: context.name })
     );

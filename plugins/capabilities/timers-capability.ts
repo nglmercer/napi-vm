@@ -1,5 +1,5 @@
 /**
- * The `napi:timers` capability: the host's clock.
+ * The `node:perf_hooks` compatibility facade: the host's monotonic clock.
  *
  * The VM has its own timer queue with no wall clock — `setTimeout` there
  * orders callbacks without letting guest code observe or wait on real time.
@@ -18,22 +18,12 @@ import {
   type CapabilityDefinition,
 } from "./capability-registry";
 
-const TIMERS_GLOBALS = ["__cap_timers_now", "__cap_timers_hrtime"] as const;
+const TIMERS_GLOBALS = ["__cap_timers_hrtime"] as const;
 
-export const TIMERS_MODULE_NAME = "napi:timers";
+export const TIMERS_MODULE_NAME = "node:perf_hooks";
 
 const TIMERS_MODULE_SOURCE = `
-export function now() {
-  return __cap_timers_now();
-}
-
-export function monotonic() {
-  return __cap_timers_hrtime();
-}
-
-export function since(start) {
-  return __cap_timers_hrtime() - start;
-}
+export const performance = { now: () => __cap_timers_hrtime() };
 `;
 
 export interface TimersCapabilityOptions {
@@ -64,7 +54,6 @@ export const TIMERS_CAPABILITY: CapabilityDefinition = {
     const coarsen = (value: number) =>
       resolution > 0 ? Math.floor(value / resolution) * resolution : value;
 
-    vm.exposeFunction("__cap_timers_now", () => coarsen(Date.now()));
     vm.exposeFunction("__cap_timers_hrtime", () => coarsen(performance.now()));
 
     vm.registerModule(TIMERS_MODULE_NAME, TIMERS_MODULE_SOURCE);

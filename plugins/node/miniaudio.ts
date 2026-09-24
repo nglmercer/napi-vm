@@ -1,6 +1,6 @@
 /**
  * Explicit `miniaudio_node` player factory for operators who want to wire
- * `napi:audio` by hand — e.g. a grant built far from the `PluginHost`, or a
+ * `miniaudio_node` by hand — e.g. a grant built far from the `PluginHost`, or a
  * test double swapped per environment.
  *
  * On Node/Bun hosts you usually need none of this: the audio capability's
@@ -39,11 +39,11 @@ export function createMiniaudioPlayer(
     ).AudioPlayer;
   } catch {
     throw new PluginLoadError(
-      'napi:audio needs the "miniaudio_node" package: npm install miniaudio_node',
+      'miniaudio_node needs the "miniaudio_node" package: npm install miniaudio_node',
     );
   }
   if (typeof AudioPlayerCtor !== "function") {
-    throw new PluginLoadError('napi:audio: "miniaudio_node" did not export AudioPlayer');
+    throw new PluginLoadError('miniaudio_node package did not export AudioPlayer');
   }
   return new AudioPlayerCtor();
 }
