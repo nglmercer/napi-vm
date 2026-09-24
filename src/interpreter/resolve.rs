@@ -229,6 +229,10 @@ impl Interpreter {
     /// Apply ECMAScript ToString for Node-API. This deliberately differs from
     /// the `String(Symbol())` function special case: abstract ToString throws
     /// for Symbols, as does `napi_coerce_to_string`.
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
     pub(crate) fn napi_to_string(&mut self, value: &Value) -> Result<String, VmErr> {
         let primitive = self.coerce_object_to_primitive(value, "string")?;
         match &primitive {

@@ -896,6 +896,10 @@ impl Buffer {
         Rc::as_ptr(&self.0) as usize
     }
 
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
     pub(crate) fn strong_count(&self) -> usize {
         Rc::strong_count(&self.0)
     }

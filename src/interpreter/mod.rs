@@ -464,6 +464,10 @@ impl Interpreter {
     /// its Promise jobs must wait until the host returns to the VM event loop.
     /// It also preserves the active source context and loop budget so a nested
     /// native call cannot reset execution limits or replace outer diagnostics.
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
     pub(crate) fn run_script_source(&mut self, source: &str) -> Result<Value, VmErr> {
         let previous_source = self.source_lines.clone();
         let result = self.eval_script_body(source);

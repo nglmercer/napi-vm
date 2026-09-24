@@ -138,6 +138,10 @@ pub(crate) fn function_method(name: &str) -> Option<Value> {
     })
 }
 
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
 pub(crate) fn is_default_has_instance_method(value: &Value) -> bool {
     let expected: super::NativeFn = function_has_instance;
     matches!(value, Value::NativeFunction { callable, .. }

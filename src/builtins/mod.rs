@@ -18,7 +18,12 @@ mod symbol;
 mod typedarray;
 mod web;
 
-pub(crate) use function::{function_method, is_default_has_instance_method};
+pub(crate) use function::function_method;
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+pub(crate) use function::is_default_has_instance_method;
 pub(crate) use promise::promise_method;
 
 pub use array::array_method;
@@ -31,10 +36,13 @@ pub(crate) use regexp::compile as compile_regex;
 pub use regexp::regexp_member;
 pub use string::string_method;
 pub use symbol::new_symbol;
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+pub(crate) use symbol::symbol_for_key;
 pub use symbol::symbol_method;
-pub(crate) use symbol::{
-    is_iterator_symbol, symbol_for, symbol_for_key, symbol_key_for, well_known,
-};
+pub(crate) use symbol::{is_iterator_symbol, symbol_for, symbol_key_for, well_known};
 pub use typedarray::{
     array_buffer_member, data_view_member, read_element, shared_array_buffer_member, typed_member,
     write_element,
