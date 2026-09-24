@@ -51,6 +51,7 @@ pub struct Realm {
     jobs: Jobs,
     modules: Rc<RefCell<HashMap<String, Module>>>,
     module_sources: Rc<RefCell<HashMap<String, String>>>,
+    module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
     commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
@@ -63,6 +64,7 @@ impl Realm {
             jobs: interp.jobs.clone(),
             modules: interp.modules.clone(),
             module_sources: interp.module_sources.clone(),
+            module_aliases: interp.module_aliases.clone(),
             evaluating: interp.evaluating.clone(),
             commonjs_loader: interp.commonjs_loader.clone(),
             commonjs_cache: interp.commonjs_cache.clone(),
@@ -74,6 +76,7 @@ impl Realm {
         interp.jobs = self.jobs;
         interp.modules = self.modules;
         interp.module_sources = self.module_sources;
+        interp.module_aliases = self.module_aliases;
         interp.evaluating = self.evaluating;
         interp.commonjs_loader = self.commonjs_loader;
         interp.commonjs_cache = self.commonjs_cache;
@@ -139,6 +142,10 @@ pub struct Interpreter {
     /// the partner runs that one, whose import back is already in flight and
     /// so returns the partially-populated record.
     pub module_sources: Rc<RefCell<HashMap<String, String>>>,
+    /// Import aliases scoped to the importing module. Package aliases need
+    /// this context so two npm dependencies can use different versions of the
+    /// same bare specifier without sharing a global name.
+    pub(crate) module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
     /// Host-selected CommonJS source/native module resolver. No filesystem or
     /// native addon access is enabled unless an embedding host installs one.
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
@@ -243,6 +250,7 @@ impl Interpreter {
             persistent_global: global,
             modules: Rc::new(RefCell::new(HashMap::new())),
             module_sources: Rc::new(RefCell::new(HashMap::new())),
+            module_aliases: Rc::new(RefCell::new(HashMap::new())),
             commonjs_loader: None,
             commonjs_cache: Rc::new(RefCell::new(HashMap::new())),
             commonjs_entry: None,
@@ -925,6 +933,16 @@ impl Interpreter {
             .insert(name.to_string(), source);
     }
 
+    /// Resolve `specifier` to `target` only when it is imported by `importer`.
+    /// This supports package graphs where the same bare npm specifier may
+    /// resolve to different nested dependency versions.
+    pub fn define_module_alias(&mut self, importer: &str, specifier: &str, target: &str) {
+        self.module_aliases.borrow_mut().insert(
+            (importer.to_string(), specifier.to_string()),
+            target.to_string(),
+        );
+    }
+
     /// Make sure `name` has an export record, evaluating its deferred source
     /// if that is what it takes.
     ///
@@ -987,7 +1005,11 @@ impl Interpreter {
     /// API reports.
     pub fn remove_module(&mut self, name: &str) -> bool {
         let had_source = self.module_sources.borrow_mut().remove(name).is_some();
-        self.modules.borrow_mut().remove(name).is_some() || had_source
+        let had_module = self.modules.borrow_mut().remove(name).is_some();
+        self.module_aliases
+            .borrow_mut()
+            .retain(|(importer, _), target| importer != name && target != name);
+        had_module || had_source
     }
 
     /// Whether `name` has an export record that `import` would resolve.
@@ -999,6 +1021,14 @@ impl Interpreter {
     /// Module names use browser-style POSIX paths so the same source behaves
     /// consistently in the native VM and in the browser playground.
     pub(crate) fn resolve_module_name(&self, module: &str) -> Option<String> {
+        if let Some(importer) = self.cur_mod.as_deref()
+            && let Some(target) = self
+                .module_aliases
+                .borrow()
+                .get(&(importer.to_string(), module.to_string()))
+        {
+            return Some(target.clone());
+        }
         if !module.starts_with('.') {
             return Some(module.to_string());
         }

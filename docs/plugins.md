@@ -192,9 +192,18 @@ entry so `reload()` can rebuild it from disk.
 The crate now exposes `RustPluginHost`, a Rust API for desktop applications
 that do not embed Node. It validates plugin manifests, creates an isolated
 `Interpreter` per plugin, installs permission-checked `node:fs` and optional
-`node:path` modules, loads relative ESM dependencies from inside the plugin
-directory, manages a host capability registry, and implements load/reload/
-unload with fresh interpreters and JSON-serializable state transfer.
+`node:path` modules, loads relative ESM dependencies and packages already
+present under the plugin's `node_modules`, manages a host capability registry,
+and implements load/reload/unload with fresh interpreters and JSON-serializable
+state transfer.
+
+The Rust host resolves static bare ESM imports inside the plugin root, including
+conditional `exports` for `import`/`node`/`default`, exported subpaths, nested
+dependencies, and `module`/`main` entry fields. It registers guest source under
+canonical virtual module IDs and never evaluates package JavaScript with host
+`require()`. This is a JavaScript ESM subset: CommonJS package source, package
+`imports` maps, and computed dynamic imports are not loaded by this graph yet.
+Install or vendor packages into the plugin root before calling `load()`.
 
 Choose the smallest runtime path that covers the plugin:
 

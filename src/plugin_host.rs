@@ -225,6 +225,9 @@ struct FsPermissions {
     write: Vec<PermissionRule>,
 }
 
+type GuestModuleSources = Vec<(String, String)>;
+type GuestModuleAliases = Vec<(String, String, String)>;
+
 struct PreparedPlugin {
     manifest: RustPluginManifest,
     root: PathBuf,
@@ -234,7 +237,8 @@ struct PreparedPlugin {
     ))]
     entry_path: PathBuf,
     entry_id: String,
-    sources: Vec<(String, String)>,
+    sources: GuestModuleSources,
+    module_aliases: GuestModuleAliases,
     fs_permissions: FsPermissions,
     path_enabled: bool,
     capability_requests: BTreeMap<String, JsonValue>,
@@ -580,6 +584,9 @@ impl RustPluginHost {
             interpreter.define_module(name, source.clone());
             module_ids.push(name.clone());
         }
+        for (importer, specifier, target) in &prepared.module_aliases {
+            interpreter.define_module_alias(importer, specifier, target);
+        }
 
         // Force facades to capture their host functions, then remove bootstrap
         // globals before any plugin source executes.
@@ -813,21 +820,27 @@ fn prepare_plugin(
             "entry must be a file inside the plugin directory".into(),
         ));
     }
-    let mut sources =
+    let (mut sources, module_aliases) =
         collect_guest_module_graph(&root, &entry_path, &manifest.name, max_file_bytes)?;
     let relative_entry_id = module_id(&root, &entry_path, &manifest.name)?;
-    let entry_source = sources
-        .iter()
-        .find(|(module, _)| module == &relative_entry_id)
-        .map(|(_, source)| source.clone())
-        .ok_or_else(|| PluginHostError::Load("plugin entry module was not registered".into()))?;
     let entry_id = relative_entry_id
         .strip_prefix("./")
         .expect("module ids have a relative alias")
         .to_owned();
     // The host bootstrap has no importing module, so it uses a bare virtual
-    // entry ID. The relative alias remains available for dependency imports.
-    sources.push((entry_id.clone(), entry_source));
+    // entry ID. A re-export wrapper keeps the actual entry in its canonical
+    // path module, where package aliases remain scoped to that source file.
+    let entry_filename = entry_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| PluginHostError::Load("entry filename must be UTF-8".into()))?;
+    sources.push((
+        entry_id.clone(),
+        format!(
+            "export {{ default }} from {:?};",
+            format!("./{entry_filename}")
+        ),
+    ));
     Ok(PreparedPlugin {
         manifest,
         root,
@@ -838,6 +851,7 @@ fn prepare_plugin(
         entry_path,
         entry_id,
         sources,
+        module_aliases,
         fs_permissions,
         path_enabled,
         capability_requests,
@@ -1073,11 +1087,12 @@ fn collect_guest_module_graph(
     entry: &Path,
     name: &str,
     max_file_bytes: u64,
-) -> Result<Vec<(String, String)>, PluginHostError> {
-    let mut pending = vec![entry.to_path_buf()];
+) -> Result<(GuestModuleSources, GuestModuleAliases), PluginHostError> {
+    let mut pending = vec![(entry.to_path_buf(), None)];
     let mut seen = HashSet::new();
     let mut sources = BTreeMap::new();
-    while let Some(path) = pending.pop() {
+    let mut aliases = BTreeMap::new();
+    while let Some((path, imported_by)) = pending.pop() {
         let canonical = fs::canonicalize(&path).map_err(|error| {
             PluginHostError::Load(format!("cannot resolve guest module: {error}"))
         })?;
@@ -1085,6 +1100,10 @@ fn collect_guest_module_graph(
             return Err(PluginHostError::Load(
                 "relative module import escapes the plugin directory".into(),
             ));
+        }
+        let id = module_id(root, &canonical, name)?;
+        if let Some((importer, specifier)) = imported_by {
+            aliases.insert((importer, specifier), id.clone());
         }
         if !seen.insert(canonical.clone()) {
             continue;
@@ -1109,19 +1128,296 @@ fn collect_guest_module_graph(
         } else {
             source.to_owned()
         };
-        let id = module_id(root, &canonical, name)?;
-        sources.insert(id, guest_source);
+        sources.insert(id.clone(), guest_source);
         if extension == "json" {
             continue;
         }
         for specifier in static_module_specifiers(source)? {
-            if !specifier.starts_with('.') {
+            if specifier.starts_with("node:") {
+                // These names are resolved from host-installed capability
+                // modules such as node:fs and node:path.
                 continue;
             }
-            pending.push(resolve_relative_module(root, &canonical, &specifier)?);
+            let target = if specifier.starts_with('.') {
+                Some(resolve_relative_module(root, &canonical, &specifier)?)
+            } else {
+                resolve_plugin_package(root, &canonical, &specifier, max_file_bytes)?
+            };
+            if let Some(target) = target {
+                pending.push((target, Some((id.clone(), specifier))));
+            }
         }
     }
-    Ok(sources.into_iter().collect())
+    Ok((
+        sources.into_iter().collect(),
+        aliases
+            .into_iter()
+            .map(|((importer, specifier), target)| (importer, specifier, target))
+            .collect(),
+    ))
+}
+
+fn resolve_plugin_package(
+    root: &Path,
+    importer: &Path,
+    request: &str,
+    max_file_bytes: u64,
+) -> Result<Option<PathBuf>, PluginHostError> {
+    let (package_name, subpath) = split_plugin_package_request(request)?;
+    let mut directory = importer.parent().unwrap_or(root);
+    loop {
+        if directory.starts_with(root)
+            && directory
+                .file_name()
+                .is_none_or(|name| name != "node_modules")
+        {
+            let candidate = directory.join("node_modules").join(&package_name);
+            if candidate.is_dir() {
+                let package_root = fs::canonicalize(&candidate).map_err(|error| {
+                    PluginHostError::Load(format!("cannot resolve package {package_name}: {error}"))
+                })?;
+                if !package_root.starts_with(root) {
+                    return Err(PluginHostError::Load(format!(
+                        "package {package_name} escapes the plugin directory"
+                    )));
+                }
+                return resolve_plugin_package_entry(
+                    root,
+                    &package_root,
+                    &package_name,
+                    &subpath,
+                    max_file_bytes,
+                )
+                .map(Some);
+            }
+        }
+        if directory == root {
+            break;
+        }
+        let Some(parent) = directory.parent() else {
+            break;
+        };
+        if !parent.starts_with(root) {
+            break;
+        }
+        directory = parent;
+    }
+    Ok(None)
+}
+
+fn split_plugin_package_request(request: &str) -> Result<(String, String), PluginHostError> {
+    if request.is_empty()
+        || request.starts_with('.')
+        || request.starts_with('/')
+        || request.starts_with('#')
+        || request.contains('\\')
+        || request.contains(':')
+        || request.contains('\0')
+        || request.chars().any(char::is_whitespace)
+    {
+        return Err(PluginHostError::Load(format!(
+            "unsupported guest package import '{request}'"
+        )));
+    }
+    let parts: Vec<_> = request.split('/').collect();
+    let package_end = if request.starts_with('@') { 2 } else { 1 };
+    if parts.len() < package_end || parts[..package_end].iter().any(|part| part.is_empty()) {
+        return Err(PluginHostError::Load(format!(
+            "invalid guest package import '{request}'"
+        )));
+    }
+    let package_name = parts[..package_end].join("/");
+    let subpath = parts[package_end..].join("/");
+    if package_name == "@" || parts.iter().any(|part| matches!(*part, "." | "..")) {
+        return Err(PluginHostError::Load(format!(
+            "invalid guest package import '{request}'"
+        )));
+    }
+    Ok((package_name, subpath))
+}
+
+fn resolve_plugin_package_entry(
+    root: &Path,
+    package_root: &Path,
+    package_name: &str,
+    subpath: &str,
+    max_file_bytes: u64,
+) -> Result<PathBuf, PluginHostError> {
+    let manifest_path = package_root.join("package.json");
+    let manifest = if manifest_path.is_file() {
+        let bytes = read_limited(&manifest_path, max_file_bytes)?;
+        serde_json::from_slice::<JsonValue>(&bytes).map_err(|error| {
+            PluginHostError::Load(format!(
+                "package {package_name} has invalid package.json: {error}"
+            ))
+        })?
+    } else {
+        JsonValue::Null
+    };
+    let target = if let Some(exports) = manifest.get("exports") {
+        let export_key = if subpath.is_empty() {
+            ".".to_string()
+        } else {
+            format!("./{subpath}")
+        };
+        let target = plugin_exports_target(exports, &export_key)?.ok_or_else(|| {
+            PluginHostError::Load(format!(
+                "package {package_name} does not export subpath {export_key} for ESM import"
+            ))
+        })?;
+        package_root.join(target)
+    } else if subpath.is_empty() {
+        let entry = manifest
+            .get("module")
+            .and_then(JsonValue::as_str)
+            .or_else(|| manifest.get("main").and_then(JsonValue::as_str))
+            .unwrap_or("index");
+        package_root.join(entry)
+    } else {
+        package_root.join(subpath)
+    };
+    resolve_plugin_package_file(root, package_root, &target).map_err(|error| {
+        PluginHostError::Load(format!(
+            "cannot resolve ESM entry for package {package_name}: {error}"
+        ))
+    })
+}
+
+fn plugin_exports_target(
+    exports: &JsonValue,
+    key: &str,
+) -> Result<Option<String>, PluginHostError> {
+    let selected = match exports {
+        JsonValue::String(_) | JsonValue::Array(_) | JsonValue::Null if key == "." => {
+            select_plugin_export_condition(exports)?
+        }
+        JsonValue::Object(entries) if entries.keys().any(|entry| entry.starts_with('.')) => {
+            if let Some(target) = entries.get(key) {
+                select_plugin_export_condition(target)?
+            } else {
+                let mut best: Option<(usize, usize, String, &JsonValue)> = None;
+                for (pattern, target) in entries {
+                    let Some(capture) = match_plugin_export_pattern(pattern, key) else {
+                        continue;
+                    };
+                    let Some(star) = pattern.find('*') else {
+                        continue;
+                    };
+                    let specificity = (star, pattern.len());
+                    if best
+                        .as_ref()
+                        .is_none_or(|(prefix, length, _, _)| specificity > (*prefix, *length))
+                    {
+                        best = Some((star, pattern.len(), capture, target));
+                    }
+                }
+                if let Some((_, _, capture, target)) = best {
+                    select_plugin_export_condition(target)?
+                        .map(|target| target.replace('*', &capture))
+                } else {
+                    None
+                }
+            }
+        }
+        JsonValue::Object(_) if key == "." => select_plugin_export_condition(exports)?,
+        _ => None,
+    };
+    if let Some(target) = selected {
+        let Some(relative) = target.strip_prefix("./") else {
+            return Err(PluginHostError::Load(format!(
+                "unsupported package exports target '{target}'"
+            )));
+        };
+        if relative.is_empty()
+            || relative.contains('\\')
+            || relative.split('/').any(|part| matches!(part, "." | ".."))
+        {
+            return Err(PluginHostError::Load(format!(
+                "unsupported package exports target '{target}'"
+            )));
+        }
+        Ok(Some(target))
+    } else {
+        Ok(None)
+    }
+}
+
+fn select_plugin_export_condition(value: &JsonValue) -> Result<Option<String>, PluginHostError> {
+    match value {
+        JsonValue::String(target) => Ok(Some(target.clone())),
+        JsonValue::Array(targets) => {
+            for target in targets {
+                if let Some(selected) = select_plugin_export_condition(target)? {
+                    return Ok(Some(selected));
+                }
+            }
+            Ok(None)
+        }
+        JsonValue::Object(conditions) => {
+            for (condition, value) in conditions {
+                if matches!(condition.as_str(), "import" | "node" | "default")
+                    && let Some(target) = select_plugin_export_condition(value)?
+                {
+                    return Ok(Some(target));
+                }
+            }
+            Ok(None)
+        }
+        JsonValue::Null => Ok(None),
+        _ => Err(PluginHostError::Load(
+            "package exports entry must be a string, array, condition object, or null".into(),
+        )),
+    }
+}
+
+fn match_plugin_export_pattern(pattern: &str, key: &str) -> Option<String> {
+    let star = pattern.find('*')?;
+    let prefix = &pattern[..star];
+    let suffix = &pattern[star + 1..];
+    let capture = key.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    (!capture.is_empty()).then(|| capture.to_string())
+}
+
+fn resolve_plugin_package_file(
+    root: &Path,
+    package_root: &Path,
+    target: &Path,
+) -> Result<PathBuf, String> {
+    let candidates = if target.extension().is_some() {
+        vec![target.to_path_buf()]
+    } else {
+        vec![
+            target.with_extension("mjs"),
+            target.with_extension("js"),
+            target.with_extension("json"),
+            target.join("index.mjs"),
+            target.join("index.js"),
+            target.join("index.json"),
+        ]
+    };
+    for candidate in candidates {
+        let Ok(canonical) = fs::canonicalize(&candidate) else {
+            continue;
+        };
+        if !canonical.starts_with(root) || !canonical.starts_with(package_root) {
+            return Err("package target escapes its plugin or package root".into());
+        }
+        if !canonical.is_file() {
+            continue;
+        }
+        let extension = canonical
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        if !matches!(extension, "js" | "mjs" | "json") {
+            return Err(format!("unsupported package module extension .{extension}"));
+        }
+        return Ok(canonical);
+    }
+    Err(format!(
+        "package target does not exist: {}",
+        target.display()
+    ))
 }
 
 fn static_module_specifiers(source: &str) -> Result<Vec<String>, PluginHostError> {
@@ -2501,6 +2797,91 @@ export default class Example {
             Some(serde_json::json!({"value":"Ada","reason":"unload"}))
         );
         assert!(host.list().next().is_none());
+    }
+
+    #[test]
+    fn rust_host_resolves_in_root_esm_packages_with_exports_and_nested_dependencies() {
+        let dir = TestPluginDir::new("npm-esm");
+        dir.write(
+            "main.mjs",
+            r#"
+import { value } from "tiny-lib";
+import { nested as rootDependency } from "nested-dep";
+export default class Example {
+  onLoad() { return { value: value(), rootDependency }; }
+}
+"#,
+        );
+        dir.write(
+            "node_modules/tiny-lib/package.json",
+            r#"{"name":"tiny-lib","version":"1.0.0","exports":{".":{"import":"./esm/index.mjs","require":"./cjs/index.cjs","default":"./fallback.mjs"},"./feature":{"import":"./esm/feature.mjs"}}}"#,
+        );
+        dir.write(
+            "node_modules/tiny-lib/esm/index.mjs",
+            r#"
+import { base } from "./helper";
+import { nested } from "nested-dep";
+import { extra } from "tiny-lib/feature";
+export const value = () => base + nested + extra;
+"#,
+        );
+        dir.write(
+            "node_modules/tiny-lib/esm/helper.mjs",
+            "export const base = 20;",
+        );
+        dir.write(
+            "node_modules/tiny-lib/esm/feature.mjs",
+            "export const extra = 2;",
+        );
+        dir.write(
+            "node_modules/tiny-lib/node_modules/nested-dep/package.json",
+            r#"{"name":"nested-dep","version":"1.0.0","module":"index.mjs"}"#,
+        );
+        dir.write(
+            "node_modules/tiny-lib/node_modules/nested-dep/index.mjs",
+            "export const nested = 20;",
+        );
+        dir.write(
+            "node_modules/nested-dep/package.json",
+            r#"{"name":"nested-dep","version":"2.0.0","module":"index.mjs"}"#,
+        );
+        dir.write(
+            "node_modules/nested-dep/index.mjs",
+            "export const nested = 100;",
+        );
+        dir.manifest("npm-plugin", "main.mjs", "{}");
+
+        let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+        let plugin = host.load(&dir.0).unwrap();
+        assert_eq!(
+            plugin.load_result,
+            Some(serde_json::json!({"value":42,"rootDependency":100}))
+        );
+    }
+
+    #[test]
+    fn rust_host_rejects_package_exports_that_escape_the_plugin_root() {
+        let dir = TestPluginDir::new("npm-escape");
+        dir.write(
+            "main.mjs",
+            r#"import { value } from "unsafe-pkg"; export default { value };"#,
+        );
+        dir.write(
+            "node_modules/unsafe-pkg/package.json",
+            r#"{"name":"unsafe-pkg","exports":"../../outside.mjs"}"#,
+        );
+        dir.manifest("npm-escape", "main.mjs", "{}");
+
+        let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+        let error = match host.load(&dir.0) {
+            Ok(_) => panic!("package export escaping the plugin root must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported package exports target")
+        );
     }
 
     #[test]
