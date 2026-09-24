@@ -98,12 +98,10 @@ use crate::span::Span;
 use crate::value::Value;
 
 /// Maximum number of VM call frames (guest-visible recursion depth). Each VM
-/// call maps onto several native Rust frames in the tree-walker, so unbounded
-/// guest recursion would overflow the *native* stack — a SIGSEGV that no
-/// try/catch can intercept. Checking the depth here turns that into a
-/// catchable `RangeError`, the way V8 does. 256 keeps a wide margin under the
-/// native limit on both the main thread (8MB typical) and generator coroutine
-/// stacks (8MB, see `GENERATOR_STACK_SIZE`).
+/// call maps onto several native Rust frames in the tree-walker. Recursive
+/// calls grow the native stack in guarded segments before exhausting the
+/// host-provided stack, while this cap bounds total guest recursion and turns
+/// runaway calls into a catchable `RangeError`.
 pub const MAX_CALL_DEPTH: usize = 256;
 
 /// Maximum depth of *nested generator bodies* currently executing.

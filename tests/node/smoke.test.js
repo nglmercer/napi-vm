@@ -158,6 +158,14 @@ test("the loop budget interrupts an infinite loop", () => {
 test("recursion depth is capped rather than crashing the process", () => {
   const { Vm } = require(path.join(root, "index.js"));
   const vm = new Vm();
+  const nodeVm = require("node:vm");
+  const boundedSource = "function c(n) { return n <= 0 ? 0 : 1 + c(n - 1); } c(200);";
+  assert.strictEqual(
+    vm.run(boundedSource),
+    String(nodeVm.runInNewContext(boundedSource)),
+  );
+  const caughtOverflowSource = "function f() { return f(); } try { f(); } catch (e) { e.name; }";
+  assert.strictEqual(vm.run(caughtOverflowSource), nodeVm.runInNewContext(caughtOverflowSource));
   assert.throws(() => vm.run("function f() { return f(); } f();"), /RangeError/);
 });
 

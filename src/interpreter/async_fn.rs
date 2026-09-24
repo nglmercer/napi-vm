@@ -136,8 +136,8 @@ impl Interpreter {
     }
 }
 
-/// Stack size for an async body's coroutine. Matches the generator stack for
-/// the same reason: `MAX_CALL_DEPTH` is calibrated against an 8MB stack.
+/// Initial stack size for an async body's coroutine. Recursive guest calls
+/// can grow additional guarded segments; `MAX_CALL_DEPTH` bounds total depth.
 #[cfg(stackful_coroutines)]
 const ASYNC_STACK_SIZE: usize = 8 * 1024 * 1024;
 

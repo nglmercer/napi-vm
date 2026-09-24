@@ -16,6 +16,9 @@ use crate::value::{GeneratorInner, ObjectCell, PromiseState, Value};
 
 type Key = Rc<str>;
 
+const RECURSION_STACK_RED_ZONE: usize = 1024 * 1024;
+const RECURSION_STACK_SEGMENT: usize = 8 * 1024 * 1024;
+
 /// Internal slot naming the function a built-in namespace object runs when it
 /// is *called*: `String(x)`, `Number(x)`, `Map(…)`.
 pub(crate) const CALL_SLOT: &str = "__symbol_call__";
@@ -1037,7 +1040,15 @@ impl Interpreter {
                 self.push_frame(fname, Span::unknown());
                 // A function body is a fresh variable scope: `var` and
                 // function declarations hoist to it, lexical ones dead-zone.
-                let r = self.run_program_body(&fd.body);
+                // The host stack can be much smaller than a typical Rust
+                // main-thread stack (for example, Node's addon/test workers).
+                // Keep the guest call-depth limit while switching to a
+                // guarded stack segment before the tree walker exhausts that
+                // host-provided stack.
+                let r =
+                    stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
+                        self.run_program_body(&fd.body)
+                    });
                 // Convert a bare message into a located runtime error *before*
                 // popping the frame, so the snapshot carries the full call
                 // chain. Only the error path pays for the snapshot — the
@@ -1463,13 +1474,9 @@ impl Interpreter {
     }
 }
 
-/// Stack size for a generator coroutine.
-///
-/// Matched to the main thread's typical 8MB: `MAX_CALL_DEPTH` is calibrated
-/// against that, and a smaller stack would overflow before the guest-visible
-/// recursion limit could turn it into a catchable `RangeError`. The stack is
-/// allocated with a guard page, so an overflow faults rather than corrupting
-/// neighbouring memory.
+/// Initial stack size for a generator coroutine. Recursive guest calls can
+/// grow additional segments with `stacker`; the guest call-depth limit bounds
+/// total recursion. The coroutine's initial allocation has a guard page.
 #[cfg(stackful_coroutines)]
 const GENERATOR_STACK_SIZE: usize = 8 * 1024 * 1024;
 

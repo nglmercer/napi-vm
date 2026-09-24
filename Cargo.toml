@@ -31,6 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 smallvec = "1"
+stacker = "0.1.25"
 regex-syntax = "0.8"
 # Browser ↔ Rust bindings for the `wasm` feature. `js-sys` (below, target-scoped)
 # provides the typed wrappers over JS built-ins used by the marshalling layer.
