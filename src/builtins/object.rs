@@ -271,13 +271,6 @@ fn name_callable(value: &Value, name: &str) -> Option<Value> {
     })
 }
 
-fn desc_bool(desc: &Value, key: &str, default: bool) -> bool {
-    match own_slot(desc, key) {
-        Some(v) => v.is_truthy(),
-        None => default,
-    }
-}
-
 // --- Enumeration ------------------------------------------------------------
 
 fn object_keys(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -954,9 +947,97 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
         return Err(type_err("Property description must be an object"));
     }
 
-    let existing = c.borrow().iter().any(|(k, _)| k == key);
-    if existing && !c.meta.borrow().attrs_of(key).configurable {
-        return Err(type_err(&format!("Cannot redefine property: {}", key)));
+    let old_value = own_slot(target, key);
+    let existing = old_value.is_some();
+    let old_attributes = c.meta.borrow().attrs_of(key);
+    let getter = own_slot(descriptor, "get");
+    let setter = own_slot(descriptor, "set");
+    let value = own_slot(descriptor, "value");
+    let writable = own_slot(descriptor, "writable");
+    let enumerable = own_slot(descriptor, "enumerable");
+    let configurable = own_slot(descriptor, "configurable");
+    let accessor_fields = getter.is_some() || setter.is_some();
+    if accessor_fields && (value.is_some() || writable.is_some()) {
+        return Err(type_err("Invalid property descriptor"));
+    }
+
+    let old_accessor_kind = old_value
+        .as_ref()
+        .and_then(|value| accessor_kind(key, value));
+    let old_is_accessor = old_accessor_kind.is_some();
+    let old_is_data = existing && !old_is_accessor;
+    let new_is_accessor =
+        accessor_fields || (!value.is_some() && !writable.is_some() && old_is_accessor);
+
+    // Omitted attributes preserve the current ones on redefine (and default
+    // to `false` on first definition — which is why `defineProperty`
+    // produces a non-enumerable property by default while plain assignment
+    // produces an enumerable one). An accessor has no `writable` attribute:
+    // assignment dispatches a setter before checking this flag, so accessors
+    // stay non-writable here and getter-only properties cannot be
+    // overwritten as data.
+    let attrs = PropAttrs {
+        writable: if new_is_accessor {
+            false
+        } else {
+            writable
+                .as_ref()
+                .map(Value::is_truthy)
+                .unwrap_or(existing && old_is_data && old_attributes.writable)
+        },
+        enumerable: enumerable
+            .as_ref()
+            .map(Value::is_truthy)
+            .unwrap_or(existing && old_attributes.enumerable),
+        configurable: configurable
+            .as_ref()
+            .map(Value::is_truthy)
+            .unwrap_or(existing && old_attributes.configurable),
+    };
+
+    // ValidateAndApplyPropertyDescriptor for a non-configurable property:
+    // same value, same attributes, same kind — except `writable` may narrow
+    // from `true` to `false`, which is what class transpiler output relies on.
+    if existing && !old_attributes.configurable {
+        if attrs.configurable
+            || attrs.enumerable != old_attributes.enumerable
+            || old_is_accessor != new_is_accessor
+        {
+            return Err(type_err(&format!("Cannot redefine property: {key}")));
+        }
+        if old_is_data
+            && !old_attributes.writable
+            && (attrs.writable
+                || value.as_ref().is_some_and(|new_value| {
+                    old_value.as_ref().is_some_and(|old_value| {
+                        !crate::interpreter::strict_equals(old_value, new_value)
+                    })
+                }))
+        {
+            return Err(type_err(&format!("Cannot redefine property: {key}")));
+        }
+        if old_is_accessor {
+            let old_getter = (old_accessor_kind == Some("get"))
+                .then(|| old_value.as_ref().cloned())
+                .flatten()
+                .unwrap_or(Value::Undefined);
+            let old_setter = if old_accessor_kind == Some("set") {
+                old_value.clone()
+            } else {
+                own_slot(target, &format!("__setter:{}__", key))
+            };
+            if getter
+                .as_ref()
+                .is_some_and(|new| !crate::interpreter::strict_equals(&old_getter, new))
+                || setter.as_ref().is_some_and(|new| {
+                    old_setter
+                        .as_ref()
+                        .is_none_or(|old| !crate::interpreter::strict_equals(old, new))
+                })
+            {
+                return Err(type_err(&format!("Cannot redefine property: {key}")));
+            }
+        }
     }
     if !existing && c.meta.borrow().non_extensible {
         return Err(type_err(&format!(
@@ -965,34 +1046,39 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
         )));
     }
 
-    let getter = own_slot(descriptor, "get");
-    let setter = own_slot(descriptor, "set");
-    let is_accessor =
-        getter.as_ref().is_some_and(is_callable) || setter.as_ref().is_some_and(is_callable);
-
-    let attrs = PropAttrs {
-        // An accessor has no `writable` attribute. Assignment dispatches a
-        // setter before checking this flag, so accessors can stay non-writable
-        // here and getter-only properties cannot be overwritten as data.
-        writable: if is_accessor {
-            false
-        } else {
-            desc_bool(descriptor, "writable", false)
-        },
-        enumerable: desc_bool(descriptor, "enumerable", false),
-        configurable: desc_bool(descriptor, "configurable", false),
-    };
-
     let mut values: Vec<(String, Value)> = Vec::new();
-    if is_accessor {
-        if let Some(getter) = getter.as_ref().filter(|value| is_callable(value)) {
-            let getter = name_callable(getter, &format!("get {}", key))
-                .expect("callable getter can retain its value type");
+    // Converting an accessor back to data drops the setter companion slot.
+    let mut drop_companion = false;
+    if new_is_accessor {
+        for accessor in [getter.as_ref(), setter.as_ref()].into_iter().flatten() {
+            if !matches!(accessor, Value::Undefined) && !is_callable(accessor) {
+                return Err(type_err("Getter and setter must be callable"));
+            }
+        }
+        let old_getter = (old_accessor_kind == Some("get"))
+            .then(|| old_value.clone())
+            .flatten();
+        let old_setter = if old_accessor_kind == Some("set") {
+            old_value.clone()
+        } else if old_is_accessor {
+            own_slot(target, &format!("__setter:{}__", key))
+        } else {
+            None
+        };
+        let getter = getter.or(old_getter).unwrap_or(Value::Undefined);
+        let setter = setter.or(old_setter).unwrap_or(Value::Undefined);
+        let getter = getter
+            .is_truthy()
+            .then(|| name_callable(&getter, &format!("get {key}")))
+            .flatten();
+        let setter = setter
+            .is_truthy()
+            .then(|| name_callable(&setter, &format!("set {key}")))
+            .flatten();
+        if let Some(getter) = getter {
             values.push((key.to_string(), getter));
         }
-        if let Some(setter) = setter.as_ref().filter(|value| is_callable(value)) {
-            let setter = name_callable(setter, &format!("set {}", key))
-                .expect("callable setter can retain its value type");
+        if let Some(setter) = setter {
             // A setter lives in the same slot when there is no getter; with a
             // getter present it is stored under a companion slot the assign
             // path looks up.
@@ -1003,15 +1089,24 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
             };
             values.push((slot, setter));
         }
+        if values.is_empty() {
+            // `{ get: undefined, set: undefined }` still converts the slot.
+            values.push((key.to_string(), Value::Undefined));
+        }
     } else {
-        values.push((
-            key.to_string(),
-            own_slot(descriptor, "value").unwrap_or(Value::Undefined),
-        ));
+        let property_value = value
+            .or_else(|| old_is_data.then(|| old_value.clone()).flatten())
+            .unwrap_or(Value::Undefined);
+        values.push((key.to_string(), property_value));
+        drop_companion = old_is_accessor;
     }
 
     {
         let mut slots = c.borrow_mut();
+        if drop_companion {
+            let companion = format!("__setter:{}__", key);
+            slots.retain(|(slot, _)| *slot != companion);
+        }
         for (slot, value) in values {
             match slots.iter_mut().find(|(k, _)| *k == slot) {
                 Some((_, existing)) => *existing = value,
@@ -1028,7 +1123,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     }
     let mut meta = c.meta.borrow_mut();
     meta.set_attrs(key, attrs);
-    if is_accessor {
+    if new_is_accessor {
         meta.has_accessors = true;
     }
     Ok(())

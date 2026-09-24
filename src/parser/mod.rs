@@ -485,8 +485,20 @@ mod tests {
         let Statement::ClassDecl { body, .. } = &stmts[0] else {
             panic!("expected a class declaration");
         };
-        assert!(matches!(&body[0], ClassMember::Getter { name, .. } if name == "value"));
-        assert!(matches!(&body[1], ClassMember::Setter { name, .. } if name == "value"));
+        assert!(matches!(
+            &body[0],
+            ClassMember::Getter {
+                name: MemberName::Static(name),
+                ..
+            } if name == "value"
+        ));
+        assert!(matches!(
+            &body[1],
+            ClassMember::Setter {
+                name: MemberName::Static(name),
+                ..
+            } if name == "value"
+        ));
     }
 
     #[test]

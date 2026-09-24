@@ -182,6 +182,60 @@ fn string_trim_end(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Resu
     ))
 }
 
+/// Byte offset of the `index`-th character; `s.len()` when `index` is past
+/// the end. All string indices here are characters, never bytes or UTF-16
+/// units, so forward searches convert the character position to bytes once
+/// and let the byte searcher run at full speed.
+fn char_byte_offset(s: &str, index: usize) -> usize {
+    s.char_indices()
+        .nth(index)
+        .map(|(byte, _)| byte)
+        .unwrap_or(s.len())
+}
+
+/// `ToIntegerOrInfinity`, clamped into `[0, len]`, for positions that never
+/// wrap (`startsWith`, `endsWith`): negatives and `NaN` mean `0`.
+fn clamp_position(raw: Option<f64>, len: usize) -> usize {
+    let n = raw.unwrap_or(0.0);
+    if n.is_nan() || n <= 0.0 {
+        0
+    } else {
+        // `as` saturates `+Infinity`; the `min` bounds finite values.
+        (n as usize).min(len)
+    }
+}
+
+/// `ToIntegerOrInfinity`, clamped into `[0, len]`, for the forward searches
+/// (`indexOf`, `includes`): negatives count back from the end, `NaN` and
+/// missing mean `0`.
+fn forward_from_index(raw: Option<f64>, len: usize) -> usize {
+    let n = raw.unwrap_or(0.0);
+    if n.is_nan() {
+        return 0;
+    }
+    // `as` saturates infinities and truncates toward zero, matching
+    // `ToIntegerOrInfinity`; `saturating_add` keeps `-Infinity` from
+    // overflowing.
+    let i = n as i64;
+    if i < 0 {
+        (len as i64).saturating_add(i).max(0) as usize
+    } else {
+        (i as usize).min(len)
+    }
+}
+
+/// First occurrence of `needle` at or after character `from`, as a character
+/// index. Empty needles match at `from` itself.
+fn search_from(s: &str, needle: &str, from: usize) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(from);
+    }
+    let start = char_byte_offset(s, from);
+    s[start..]
+        .find(needle)
+        .map(|rel| from + s[start..start + rel].chars().count())
+}
+
 fn string_last_index_of(
     interp: &mut Interpreter,
     this: Value,
@@ -193,8 +247,37 @@ fn string_last_index_of(
         Some(v) => interp.vs(v)?,
         None => String::new(),
     };
+    let len = text.chars().count();
+    // Unlike `Array.prototype.lastIndexOf`, `NaN` (and a missing position)
+    // means "the whole string", and negatives clamp to 0 instead of wrapping.
+    let pos = match a.get(1) {
+        None => len,
+        Some(v) => {
+            let n = v.to_number();
+            if n.is_nan() {
+                len
+            } else if n < 0.0 {
+                0
+            } else {
+                (n as usize).min(len)
+            }
+        }
+    };
+    if needle.is_empty() {
+        return Ok(Value::Number(pos as f64));
+    }
+    let needle_len = needle.chars().count();
+    if needle_len > len {
+        return Ok(Value::Number(-1.0));
+    }
+    // Occurrences may start anywhere at or before `pos`. Bound the haystack
+    // at the byte where a match starting at the last valid start would end:
+    // anything `rfind` returns past that bound could not fit, and anything
+    // starting later cannot end inside it, so the last hit is the answer.
+    let last_start = pos.min(len - needle_len);
+    let end = char_byte_offset(&text, last_start + needle_len);
     // Reported in characters, not bytes, like every other string index here.
-    Ok(Value::Number(match text.rfind(&needle) {
+    Ok(Value::Number(match text[..end].rfind(&needle) {
         Some(byte) => text[..byte].chars().count() as f64,
         None => -1.0,
     }))
@@ -380,7 +463,8 @@ fn string_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
         Some(v) => interp.vs(v)?,
         None => String::new(),
     };
-    Ok(Value::Bool(s.contains(&needle)))
+    let from = forward_from_index(a.get(1).map(|v| v.to_number()), s.chars().count());
+    Ok(Value::Bool(search_from(&s, &needle, from).is_some()))
 }
 fn string_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let s = str_this(interp, &this)?;
@@ -389,8 +473,12 @@ fn string_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
         Some(v) => interp.vs(v)?,
         None => String::new(),
     };
+    let from = forward_from_index(a.get(1).map(|v| v.to_number()), s.chars().count());
+    // Reported in characters, not bytes, like every other string index here.
     Ok(Value::Number(
-        s.find(&needle).map(|i| i as f64).unwrap_or(-1.0),
+        search_from(&s, &needle, from)
+            .map(|i| i as f64)
+            .unwrap_or(-1.0),
     ))
 }
 fn string_char_at(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -414,7 +502,10 @@ fn string_starts_with(
         Some(v) => interp.vs(v)?,
         None => String::new(),
     };
-    Ok(Value::Bool(s.starts_with(&needle)))
+    // Positions clamp into range; unlike `indexOf` they never wrap.
+    let pos = clamp_position(a.get(1).map(|v| v.to_number()), s.chars().count());
+    let start = char_byte_offset(&s, pos);
+    Ok(Value::Bool(s[start..].starts_with(&needle)))
 }
 fn string_ends_with(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let s = str_this(interp, &this)?;
@@ -423,7 +514,15 @@ fn string_ends_with(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
         Some(v) => interp.vs(v)?,
         None => String::new(),
     };
-    Ok(Value::Bool(s.ends_with(&needle)))
+    let len = s.chars().count();
+    // A missing length means the whole string; an explicit `NaN` means 0.
+    let end = match a.get(1) {
+        None => len,
+        Some(v) => clamp_position(Some(v.to_number()), len),
+    };
+    Ok(Value::Bool(
+        s[..char_byte_offset(&s, end)].ends_with(&needle),
+    ))
 }
 fn string_repeat(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let s = str_this(interp, &this)?;

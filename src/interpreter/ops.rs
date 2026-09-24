@@ -525,10 +525,13 @@ impl Interpreter {
     }
 
     pub fn leq(&self, a: &Value, b: &Value) -> bool {
+        // Same type: `==` is `===` (Abstract Equality Comparison step 1).
+        // This also covers `null == null`, `undefined == undefined`, and
+        // same-reference objects, which the arms below never matched.
+        if std::mem::discriminant(a) == std::mem::discriminant(b) {
+            return strict_equals(a, b);
+        }
         match (a, b) {
-            (Value::Number(a), Value::Number(b)) => a == b,
-            (Value::String(a), Value::String(b)) => a == b,
-            (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => true,
             (Value::GlobalObject, Value::GlobalObject) => true,
             (Value::Number(a), Value::String(b)) => {

@@ -7,7 +7,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::lexer::Token;
-use crate::parser::{BinOp, ClassMember, Expr, ExprOrBlock, ObjectProp, Statement, VarKind};
+use crate::parser::{
+    BinOp, ClassMember, Expr, ExprOrBlock, MemberName, ObjectProp, Statement, VarKind,
+};
 use crate::span::SpannedToken;
 
 use super::catalog::{self, BuiltinType};
@@ -1124,7 +1126,7 @@ impl Builder<'_> {
         for member in members {
             match member {
                 ClassMember::Method {
-                    name: member_name,
+                    name: MemberName::Static(member_name),
                     is_static,
                     params,
                     body,
@@ -1137,8 +1139,9 @@ impl Builder<'_> {
                     }
                     self.collect_instance_fields(body, &mut env, &mut fields);
                 }
+                // Computed names contribute no static type entry.
                 ClassMember::Method {
-                    name: member_name,
+                    name: MemberName::Static(member_name),
                     is_static,
                     params,
                     body,
@@ -1156,7 +1159,7 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Field {
-                    name: field_name,
+                    name: MemberName::Static(field_name),
                     is_static,
                     init,
                 } if !is_static => {
@@ -1168,14 +1171,14 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Getter {
-                    name: field_name,
+                    name: MemberName::Static(field_name),
                     is_static,
                     body,
                 } if !is_static => {
                     fields.insert(field_name.clone(), self.function_result(&[], body, outer));
                 }
                 ClassMember::Setter {
-                    name: field_name,
+                    name: MemberName::Static(field_name),
                     is_static,
                     param,
                     body,

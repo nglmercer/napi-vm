@@ -1,7 +1,7 @@
 //! Compound statement parsers: classes, `import` / `export`, and the shared
 //! block-body / default-guard helpers used across the parser.
 
-use super::{AssignOp, BinOp, ClassMember, Expr, Parser, Statement, VarKind};
+use super::{AssignOp, BinOp, ClassMember, Expr, MemberName, Parser, Statement, VarKind};
 use crate::lexer::Token;
 
 /// Binding name synthesized for an anonymous `export default class`/`function`.
@@ -94,59 +94,82 @@ impl Parser {
             let is_getter = self.eat_modifier(&Token::KwGet);
             let is_setter = self.eat_modifier(&Token::KwSet);
             let member_span = self.cur_span();
-            let mn = match self.cur() {
-                Token::Identifier(x) => {
-                    let v = x.clone();
-                    self.adv();
-                    v
-                }
-                Token::KwConstructor => {
-                    self.adv();
-                    "constructor".to_string()
-                }
-                Token::KwStatic => {
-                    self.adv();
-                    "static".to_string()
-                }
-                Token::KwGet => {
-                    self.adv();
-                    "get".to_string()
-                }
-                Token::KwSet => {
-                    self.adv();
-                    "set".to_string()
-                }
-                Token::KwAsync => {
-                    self.adv();
-                    "async".to_string()
-                }
-                // `#x`: a private field or method. The `#` is part of the
-                // name, which is what keeps it out of reach of ordinary
-                // property access — there is no way to write the name from
-                // outside the class body.
-                Token::Hash => {
-                    self.adv();
-                    match self.cur() {
-                        Token::Identifier(x) => {
-                            let v = format!("#{}", x);
-                            self.adv();
-                            v
-                        }
-                        _ => return None,
+            // `[expr]` evaluates when the class is defined; string and
+            // numeric spellings name the same property as their bare form.
+            let mn = if self.eat(&Token::LBracket) {
+                let expr = self.assign()?;
+                self.expect(&Token::RBracket);
+                MemberName::Computed(expr)
+            } else {
+                let name = match self.cur() {
+                    Token::Identifier(x) => {
+                        let v = x.clone();
+                        self.adv();
+                        v
                     }
-                }
-                _ => return None,
+                    Token::String(s) => {
+                        let v = s.clone();
+                        self.adv();
+                        v
+                    }
+                    Token::Number(n) => {
+                        let v = crate::format::number_string(*n);
+                        self.adv();
+                        v
+                    }
+                    Token::KwConstructor => {
+                        self.adv();
+                        "constructor".to_string()
+                    }
+                    Token::KwStatic => {
+                        self.adv();
+                        "static".to_string()
+                    }
+                    Token::KwGet => {
+                        self.adv();
+                        "get".to_string()
+                    }
+                    Token::KwSet => {
+                        self.adv();
+                        "set".to_string()
+                    }
+                    Token::KwAsync => {
+                        self.adv();
+                        "async".to_string()
+                    }
+                    // `#x`: a private field or method. The `#` is part of the
+                    // name, which is what keeps it out of reach of ordinary
+                    // property access — there is no way to write the name from
+                    // outside the class body.
+                    Token::Hash => {
+                        self.adv();
+                        match self.cur() {
+                            Token::Identifier(x) => {
+                                let v = format!("#{}", x);
+                                self.adv();
+                                v
+                            }
+                            _ => return None,
+                        }
+                    }
+                    _ => return None,
+                };
+                MemberName::Static(name)
             };
-            self.record(
-                &mn,
-                member_span,
-                crate::parser::Occurrence::Declaration(if matches!(self.cur(), Token::LParen) {
-                    crate::parser::DeclKind::Method
-                } else {
-                    crate::parser::DeclKind::Property
-                }),
-                None,
-            );
+            if let MemberName::Static(name) = &mn {
+                self.record(
+                    name,
+                    member_span,
+                    crate::parser::Occurrence::Declaration(
+                        if matches!(self.cur(), Token::LParen) {
+                            crate::parser::DeclKind::Method
+                        } else {
+                            crate::parser::DeclKind::Property
+                        },
+                    ),
+                    None,
+                );
+            }
             if self.eat(&Token::LParen) {
                 let method_scope = self.push_scope(true);
                 let (p, defaults) = self.params();

@@ -7,8 +7,8 @@ use std::rc::Rc;
 use super::{BindKind, Env, Environment, Interpreter, Lookup, ModifyOutcome};
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
-    AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Statement,
-    UnOp, VarKind, arrow_body_references, stmts_reference,
+    AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName, ObjectProp,
+    Statement, UnOp, VarKind, arrow_body_references, stmts_reference,
 };
 use crate::value::{ClassData, FunctionData, ObjectCell, PromiseState, PropAttrs, Value};
 
@@ -175,7 +175,7 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 /// reached, so the parser produces a literal and this converts it. Anything
 /// that is not a valid target yields `None`, which the caller reports.
 fn expr_to_pattern(expr: &Expr) -> Option<crate::parser::Pattern> {
-    use crate::parser::Pattern;
+    use crate::parser::{Pattern, PatternKey};
     Some(match expr {
         Expr::Identifier(name) => Pattern::Ident(name.clone()),
         Expr::Member {
@@ -201,13 +201,17 @@ fn expr_to_pattern(expr: &Expr) -> Option<crate::parser::Pattern> {
             props
                 .iter()
                 .map(|prop| match prop {
-                    ObjectProp::Shorthand(name) => Some((name.clone(), None)),
+                    ObjectProp::Shorthand(name) => Some((PatternKey::Name(name.clone()), None)),
                     ObjectProp::KeyValue(key, value) => {
-                        Some((key.clone(), Some(expr_to_pattern(value)?)))
+                        Some((PatternKey::Name(key.clone()), Some(expr_to_pattern(value)?)))
                     }
                     ObjectProp::Spread(inner) => Some((
-                        "...".to_string(),
+                        PatternKey::Name("...".to_string()),
                         Some(Pattern::Rest(Box::new(expr_to_pattern(inner)?))),
+                    )),
+                    ObjectProp::Computed(key, value) => Some((
+                        PatternKey::Computed(key.clone()),
+                        Some(expr_to_pattern(value)?),
                     )),
                     _ => None,
                 })
@@ -247,6 +251,18 @@ impl Interpreter {
     ///
     /// Shared by the declaration and the class *expression*, which differ
     /// only in whether the result is bound to a name.
+    /// Resolve a class member name: static names as written, computed keys
+    /// evaluated once, in definition order, when the class is defined.
+    fn member_name(&mut self, name: &MemberName) -> Result<String, VmErr> {
+        match name {
+            MemberName::Static(name) => Ok(name.clone()),
+            MemberName::Computed(expr) => {
+                let value = self.eval_expr(expr)?;
+                self.property_key(&value)
+            }
+        }
+    }
+
     fn build_class(
         &mut self,
         name: &str,
@@ -262,7 +278,16 @@ impl Interpreter {
         // prototype so inherited methods resolve.
         let super_proto = match &super_cls {
             Some(Value::Class(c)) => Some(c.prototype.clone()),
-            _ => None,
+            Some(other) => {
+                // Native constructors (`Map`, `Set`, `Array`, ...) expose
+                // `.prototype` as an ordinary property; inherit from it like
+                // a class heritage would.
+                match self.get_prop_value(other, &Value::String("prototype".to_string())) {
+                    Ok(proto @ (Value::Object { .. } | Value::Array(_))) => Some(Rc::new(proto)),
+                    _ => None,
+                }
+            }
+            None => None,
         };
 
         // Methods, getters and setters close over a scope carrying the
@@ -299,13 +324,18 @@ impl Interpreter {
         for member in body {
             match member {
                 ClassMember::Method {
-                    name: mname,
+                    name,
                     is_static: st,
                     params: mp,
                     body: mb,
                     is_async,
                     is_generator,
                 } => {
+                    let mname = self.member_name(name)?;
+                    // Only a written-out `constructor` is the constructor; a
+                    // computed key that happens to evaluate to it stays an
+                    // ordinary method.
+                    let is_ctor_name = matches!(name, MemberName::Static(n) if n == "constructor");
                     let fn_val = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
@@ -333,7 +363,7 @@ impl Interpreter {
                                 configurable: true,
                             },
                         ));
-                    } else if mname == "constructor" {
+                    } else if is_ctor_name {
                         has_own_constructor = true;
                         ctor_params = mp.clone();
                         ctor_body = mb.clone();
@@ -347,10 +377,11 @@ impl Interpreter {
                     static_blocks.push(body.clone());
                 }
                 ClassMember::Field {
-                    name: fname,
+                    name,
                     is_static: st,
                     init,
                 } => {
+                    let fname = self.member_name(name)?;
                     if *st {
                         let init_val = match init {
                             Some(e) => self.eval_expr(e)?,
@@ -363,10 +394,11 @@ impl Interpreter {
                     }
                 }
                 ClassMember::Getter {
-                    name: gname,
+                    name,
                     is_static: st,
                     body: gb,
                 } => {
+                    let gname = self.member_name(name)?;
                     let getter_fn = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
@@ -385,7 +417,7 @@ impl Interpreter {
                         bound: None,
                     }));
                     if *st {
-                        insert_class_accessor(&mut statics, gname, getter_fn);
+                        insert_class_accessor(&mut statics, &gname, getter_fn);
                         static_attrs.push((
                             gname.clone(),
                             PropAttrs {
@@ -400,11 +432,12 @@ impl Interpreter {
                     }
                 }
                 ClassMember::Setter {
-                    name: sname,
+                    name,
                     param,
                     is_static: st,
                     body: sb,
                 } => {
+                    let sname = self.member_name(name)?;
                     let setter_fn = Value::Function(Box::new(FunctionData {
                         identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
@@ -423,7 +456,7 @@ impl Interpreter {
                         bound: None,
                     }));
                     if *st {
-                        insert_class_accessor(&mut statics, sname, setter_fn);
+                        insert_class_accessor(&mut statics, &sname, setter_fn);
                         static_attrs.push((
                             sname.clone(),
                             PropAttrs {
@@ -470,15 +503,20 @@ impl Interpreter {
         full_ctor_body.extend(ctor_body);
 
         // For a derived class, expose the superclass constructor to the
-        // constructor body as `__super_ctor` so `super(...)` can call it.
-        let ctor_closure = match &super_cls {
-            Some(Value::Class(sc)) => {
+        // constructor body as `__super_ctor` so `super(...)` can call it. A
+        // native heritage is its own `super(...)` target.
+        let super_ctor_value = match &super_cls {
+            Some(Value::Class(sc)) => Some(sc.constructor.as_ref().clone()),
+            Some(other) if super::call::is_callable_value(other) => Some(other.clone()),
+            _ => None,
+        };
+        let ctor_closure = match super_ctor_value {
+            Some(target) => {
                 let env = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-                env.borrow_mut()
-                    .set("__super_ctor", sc.constructor.as_ref().clone());
+                env.borrow_mut().set("__super_ctor", target);
                 env
             }
-            _ => self.global.clone(),
+            None => self.global.clone(),
         };
 
         let constructor_length = ctor_params
@@ -1201,6 +1239,72 @@ impl Interpreter {
                             }
                             VarKind::Const => {
                                 self.declare_binding(name, v, BindKind::Const, true)?
+                            }
+                        }
+                    }
+                }
+                ForInit::Pattern {
+                    kind,
+                    pattern,
+                    init,
+                    trailing,
+                } => {
+                    // Mirrors `VarDecl`: every name exists (with the right
+                    // kind) before the pattern binds, then the trailing
+                    // declarators run in order.
+                    let v = self.eval_expr(init)?;
+                    let mut names = crate::parser::pattern_names(pattern);
+                    names.extend(trailing.iter().map(|(name, _)| name.clone()));
+                    match kind {
+                        // Hoisted to the function scope already.
+                        VarKind::Var => {
+                            // Destructure into a detached scope, then publish
+                            // each name outward: `assign_or_set_binding`
+                            // walks past the loop scope to the hoisted
+                            // function-scope bindings, like a plain
+                            // `for (var i …)` — writing in place would strand
+                            // the values on the loop scope, which is popped.
+                            let loop_scope = self.global.clone();
+                            self.global =
+                                Rc::new(RefCell::new(Environment::child(loop_scope.clone())));
+                            let destructured = self.destructure(pattern, &v);
+                            let temp = self.global.clone();
+                            self.global = loop_scope;
+                            destructured?;
+                            for name in crate::parser::pattern_names(pattern) {
+                                // Each lookup ends before its write: the
+                                // borrow guard must not outlive the statement.
+                                let value = temp.borrow().get(&name);
+                                if let Some(value) = value {
+                                    self.assign_or_set_binding(&name, value)?;
+                                }
+                            }
+                            for (name, init) in trailing {
+                                let value = match init {
+                                    Some(e) => self.eval_expr(e)?,
+                                    None => Value::Undefined,
+                                };
+                                self.assign_or_set_binding(name, value)?;
+                            }
+                        }
+                        VarKind::Let | VarKind::Const => {
+                            let bind_kind = if matches!(kind, VarKind::Const) {
+                                BindKind::Const
+                            } else {
+                                BindKind::Let
+                            };
+                            for name in &names {
+                                self.declare_binding(name, Value::Undefined, bind_kind, true)?;
+                                if matches!(kind, VarKind::Let) {
+                                    per_iteration.push(name.clone());
+                                }
+                            }
+                            self.destructure(pattern, &v)?;
+                            for (name, init) in trailing {
+                                if let Some(e) = init {
+                                    let value = self.eval_expr(e)?;
+                                    self.assign_or_set_binding(name, value)?;
+                                }
                             }
                         }
                     }

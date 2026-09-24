@@ -1,7 +1,7 @@
 //! Core statement parsing. Classes and `import` / `export` live in
 //! `compound.rs`.
 
-use super::{Expr, ForInit, Parser, Pattern, Statement, SwitchCase, VarKind};
+use super::{Expr, ForInit, Parser, Pattern, PatternKey, Statement, SwitchCase, VarKind};
 use crate::lexer::Token;
 
 impl Parser {
@@ -219,23 +219,67 @@ impl Parser {
                     // `{ ...rest }` collects the remaining properties.
                     if self.eat(&Token::DotDotDot) {
                         let rest = self.pattern()?;
-                        props.push(("...".to_string(), Some(Pattern::Rest(Box::new(rest)))));
+                        props.push((
+                            PatternKey::Name("...".to_string()),
+                            Some(Pattern::Rest(Box::new(rest))),
+                        ));
                         if !matches!(self.cur(), Token::RBrace) {
                             self.eat(&Token::Comma);
                         }
                         continue;
                     }
-                    let key = self.ident()?;
+                    // `{ [expr]: target }` evaluates the key; string and
+                    // numeric keys behave like their object-literal forms.
+                    let mut keyword_only = false;
+                    let key = if self.eat(&Token::LBracket) {
+                        let expr = self.assign()?;
+                        self.expect(&Token::RBracket);
+                        PatternKey::Computed(expr)
+                    } else {
+                        match self.cur() {
+                            Token::String(s) => {
+                                let key = PatternKey::Name(s.clone());
+                                self.adv();
+                                key
+                            }
+                            Token::Number(n) => {
+                                let key = PatternKey::Name(crate::format::number_string(*n));
+                                self.adv();
+                                key
+                            }
+                            _ => {
+                                if let Some(name) = self.ident() {
+                                    PatternKey::Name(name)
+                                } else {
+                                    let name = self.ident_or_keyword()?;
+                                    // Reserved words work as keys only with
+                                    // `: target`; they can never bind shorthand.
+                                    keyword_only = true;
+                                    PatternKey::Name(name)
+                                }
+                            }
+                        }
+                    };
                     let mut pat = None;
+                    let mut saw_colon = false;
                     if self.eat(&Token::Colon) {
+                        saw_colon = true;
                         pat = Some(self.pattern()?);
                     }
                     // `{ a = 1 }` and `{ a: b = 1 }` supply a default for a
-                    // property that is absent or `undefined`.
+                    // property that is absent or `undefined`. A computed key
+                    // without a colon (`{ [k] }`, `{ [k] = 1 }`) is invalid.
                     if self.eat(&Token::Equal) {
                         let default = self.assign()?;
-                        let target = pat.unwrap_or(Pattern::Ident(key.clone()));
+                        let target = match (pat, &key) {
+                            (Some(target), _) => target,
+                            (None, PatternKey::Name(name)) => Pattern::Ident(name.clone()),
+                            (None, PatternKey::Computed(_)) => return None,
+                        };
                         pat = Some(Pattern::Default(Box::new(target), Box::new(default)));
+                    }
+                    if (matches!(key, PatternKey::Computed(_)) || keyword_only) && !saw_colon {
+                        return None;
                     }
                     props.push((key, pat));
                     if !matches!(self.cur(), Token::RBrace) {
@@ -393,9 +437,32 @@ impl Parser {
             self.adv();
             if matches!(self.cur(), Token::LBracket | Token::LBrace) {
                 let pattern = self.pattern()?;
-                head_pattern = Some(Box::new(pattern));
-                let decls = vec![("*pattern*".to_string(), None)];
-                Some(Box::new(ForInit::Var { kind, decls }))
+                // `for (… in …)` / `for (… of …)` heads carry no initializer;
+                // a `=` here means a C-style head with optional trailing
+                // `, name = init` declarators.
+                if self.eat(&Token::Equal) {
+                    let init_expr = self.assign()?;
+                    let mut trailing = Vec::new();
+                    while self.eat(&Token::Comma) {
+                        let n = self.ident()?;
+                        let i = if self.eat(&Token::Equal) {
+                            Some(self.assign()?)
+                        } else {
+                            None
+                        };
+                        trailing.push((n, i));
+                    }
+                    Some(Box::new(ForInit::Pattern {
+                        kind,
+                        pattern,
+                        init: init_expr,
+                        trailing,
+                    }))
+                } else {
+                    head_pattern = Some(Box::new(pattern));
+                    let decls = vec![("*pattern*".to_string(), None)];
+                    Some(Box::new(ForInit::Var { kind, decls }))
+                }
             } else {
                 let mut decls = Vec::new();
                 loop {

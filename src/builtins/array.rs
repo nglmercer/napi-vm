@@ -413,7 +413,29 @@ fn array_last_index_of(
     let items = arr_items(&this);
     let presence = arr_presence(&this);
     let needle = a.first().cloned().unwrap_or(Value::Undefined);
-    for index in (0..items.len()).rev() {
+    if items.is_empty() {
+        return Ok(Value::Number(-1.0));
+    }
+    // Unlike the string version, an explicit `undefined` converts to 0 (only
+    // a missing argument means "the whole array"), and negatives wrap.
+    let start = match a.get(1) {
+        None => items.len() - 1,
+        Some(v) => {
+            let n = v.to_number();
+            if n.is_nan() {
+                0
+            } else if n >= 0.0 {
+                (n as usize).min(items.len() - 1)
+            } else {
+                let k = (items.len() as i64).saturating_add(n as i64);
+                if k < 0 {
+                    return Ok(Value::Number(-1.0));
+                }
+                k as usize
+            }
+        }
+    };
+    for index in (0..=start).rev() {
         if presence.get(index).copied().unwrap_or(true) && interp.seq(&items[index], &needle) {
             return Ok(Value::Number(index as f64));
         }
@@ -675,7 +697,18 @@ fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
     Ok(Value::Bool(true))
 }
 
-fn array_push(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+/// `LengthOfArrayLike`: `ToLength(Get(O, "length"))`, clamped to the VM's
+/// array bound so a hostile `length` cannot drive an unbounded loop.
+fn array_like_length(interp: &mut Interpreter, this: &Value) -> Result<usize, VmErr> {
+    let len_val = interp.get_prop_value(this, &Value::String("length".to_string()))?;
+    let n = interp.tn(&len_val);
+    if !n.is_finite() || n <= 0.0 {
+        return Ok(0);
+    }
+    Ok((n.trunc() as usize).min(crate::value::MAX_ARRAY_LEN))
+}
+
+fn array_push(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
         reject_frozen_array_mutation(items)?;
         let added = a.len();
@@ -691,10 +724,30 @@ fn array_push(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
         items.append_present(added);
         return Ok(Value::Number(length as f64));
     }
-    Ok(Value::Undefined)
+    // `push` is generic: `class NodeList extends Array` instances (plain
+    // objects in this VM) and other array-likes push through `length`.
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".to_string(),
+        ));
+    }
+    let mut len = array_like_length(interp, &this)?;
+    if len.saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    for x in a {
+        interp.assign_member(&this, &Value::String(len.to_string()), x)?;
+        len += 1;
+    }
+    interp.assign_member(
+        &this,
+        &Value::String("length".to_string()),
+        Value::Number(len as f64),
+    )?;
+    Ok(Value::Number(len as f64))
 }
 
-fn array_pop(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+fn array_pop(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
         reject_frozen_array_mutation(items)?;
         let result = items.borrow_mut().pop().unwrap_or(Value::Undefined);
@@ -702,7 +755,30 @@ fn array_pop(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, V
         items.truncate_presence(length);
         return Ok(result);
     }
-    Ok(Value::Undefined)
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".to_string(),
+        ));
+    }
+    let len = array_like_length(interp, &this)?;
+    if len == 0 {
+        interp.assign_member(
+            &this,
+            &Value::String("length".to_string()),
+            Value::Number(0.0),
+        )?;
+        return Ok(Value::Undefined);
+    }
+    let new_len = len - 1;
+    let key = Value::String(new_len.to_string());
+    let result = interp.get_prop_value(&this, &key)?;
+    interp.delete_member(&this, &key)?;
+    interp.assign_member(
+        &this,
+        &Value::String("length".to_string()),
+        Value::Number(new_len as f64),
+    )?;
+    Ok(result)
 }
 
 fn array_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -729,11 +805,31 @@ fn array_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
     Value::checked_string(out)
 }
 
+/// `ToIntegerOrInfinity`, clamped into `[0, len]`, for the forward searches
+/// (`indexOf`, `includes`): negatives count back from the end, `NaN` and
+/// missing mean `0`.
+fn forward_from_index(raw: Option<f64>, len: usize) -> usize {
+    let n = raw.unwrap_or(0.0);
+    if n.is_nan() {
+        return 0;
+    }
+    // `as` saturates infinities and truncates toward zero, matching
+    // `ToIntegerOrInfinity`; `saturating_add` keeps `-Infinity` from
+    // overflowing.
+    let i = n as i64;
+    if i < 0 {
+        (len as i64).saturating_add(i).max(0) as usize
+    } else {
+        (i as usize).min(len)
+    }
+}
+
 fn array_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
     let presence = arr_presence(&this);
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    for (i, it) in items.iter().enumerate() {
+    let from = forward_from_index(a.get(1).map(|v| v.to_number()), items.len());
+    for (i, it) in items.iter().enumerate().skip(from) {
         if presence.get(i).copied().unwrap_or(true) && interp.seq(it, &target) {
             return Ok(Value::Number(i as f64));
         }
@@ -744,8 +840,14 @@ fn array_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
 fn array_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let items = arr_items(&this);
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    for it in &items {
-        if interp.seq(it, &target) {
+    let from = forward_from_index(a.get(1).map(|v| v.to_number()), items.len());
+    // Holes read as `undefined` here (no presence check), and comparison is
+    // `SameValueZero`: unlike `indexOf`, `NaN` matches itself.
+    let target_is_nan = matches!(&target, Value::Number(n) if n.is_nan());
+    for it in items.iter().skip(from) {
+        if interp.seq(it, &target)
+            || (target_is_nan && matches!(it, Value::Number(n) if n.is_nan()))
+        {
             return Ok(Value::Bool(true));
         }
     }

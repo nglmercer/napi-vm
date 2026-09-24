@@ -993,7 +993,10 @@ impl Interpreter {
             }
             Err(error) => return Err(VmErr::Msg(error.to_string())),
         };
-        self.run(&statements)?;
+        // Modules hoist exactly like scripts: `var` and eagerly-defined
+        // function declarations first, then lexical dead zones. Without this,
+        // a module-level call above its function declaration fails to resolve.
+        self.run_program_body(&statements)?;
         Ok(())
     }
 

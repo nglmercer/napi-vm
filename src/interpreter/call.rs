@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 
 use super::{Environment, Interpreter};
 use crate::error::{RuntimeErrorData, VmErr, vm_err};
-use crate::parser::{Pattern, Statement};
+use crate::parser::{Pattern, PatternKey, Statement};
 use crate::span::Span;
 #[cfg(stackful_coroutines)]
 use crate::value::{GenOutcome, GenResume};
@@ -277,40 +277,70 @@ impl Interpreter {
                 Ok(val.clone())
             }
             Pattern::Object(props) => {
-                let obj: Vec<(String, Value)> = match val {
-                    Value::Object { props: oprops, .. } => oprops.borrow().clone(),
-                    _ => vec![],
-                };
-                let mut taken: Vec<&str> = Vec::new();
-                for (key, pat) in props {
-                    // `{ ...rest }` takes whatever the named keys did not.
-                    if key == "..."
-                        && let Some(Pattern::Rest(target)) = pat
-                    {
-                        let remaining: Vec<(String, Value)> = obj
+                // Named properties read through the normal member path, so
+                // getters run, the prototype chain applies, and proxies are
+                // honored. Reading only own data slots broke real-world code
+                // such as `const { document } = parseHTML(...)`.
+                if matches!(val, Value::Null | Value::Undefined) {
+                    return Err(VmErr::Msg(format!(
+                        "TypeError: Cannot destructure properties of {}",
+                        if matches!(val, Value::Null) {
+                            "null"
+                        } else {
+                            "undefined"
+                        }
+                    )));
+                }
+                // Own enumerable keys for `{ ...rest }`; named keys above
+                // read via Get instead.
+                let own_keys: Vec<String> = match val {
+                    Value::Object { props: oprops, .. } => {
+                        let slots = oprops.borrow();
+                        let meta = oprops.meta.borrow();
+                        slots
                             .iter()
                             .filter(|(k, _)| {
-                                !taken.contains(&k.as_str())
+                                meta.attrs_of(k).enumerable
                                     && !crate::interpreter::is_internal_key(k)
                             })
-                            .cloned()
-                            .collect();
+                            .map(|(k, _)| k.clone())
+                            .collect()
+                    }
+                    _ => vec![],
+                };
+                let mut taken: Vec<String> = Vec::new();
+                for (key, pat) in props {
+                    // `{ ...rest }` takes whatever the named keys did not.
+                    if matches!(key, PatternKey::Name(k) if k == "...")
+                        && let Some(Pattern::Rest(target)) = pat
+                    {
+                        let mut remaining: Vec<(String, Value)> = Vec::new();
+                        for k in &own_keys {
+                            if taken.iter().any(|t| t == k) {
+                                continue;
+                            }
+                            let v = self.get_prop_value(val, &Value::String(k.clone()))?;
+                            remaining.push((k.clone(), v));
+                        }
                         let rest = Value::checked_object(remaining)?;
                         self.destructure(target, &rest)?;
                         continue;
                     }
-                    taken.push(key);
-                    let mut found = Value::Undefined;
-                    for (k, v) in &obj {
-                        if k == key {
-                            found = v.clone();
-                            break;
+                    let key_str = match key {
+                        PatternKey::Name(name) => name.clone(),
+                        // Computed keys evaluate left to right, like member
+                        // reads, and count as taken for `{ ...rest }`.
+                        PatternKey::Computed(expr) => {
+                            let value = self.eval_expr(expr)?;
+                            self.property_key(&value)?
                         }
-                    }
+                    };
+                    taken.push(key_str.clone());
+                    let found = self.get_prop_value(val, &Value::String(key_str.clone()))?;
                     if let Some(p) = pat {
                         self.destructure(p, &found)?;
                     } else {
-                        self.set_binding(key, found)?;
+                        self.set_binding(&key_str, found)?;
                     }
                 }
                 Ok(val.clone())
@@ -1057,6 +1087,12 @@ impl Interpreter {
                 // largest per-call cost: O(depth) String clones per call.)
                 let result = match r {
                     Err(VmErr::Ret(v)) => Ok(v),
+                    // Falling off the end of a body returns `undefined` —
+                    // never the last statement's value. Leaking that value
+                    // broke `new` on classes whose constructor ends with an
+                    // assignment of an object (`new Tokenizer(...)` returned
+                    // the inner EntityDecoder).
+                    Ok(_) => Ok(Value::Undefined),
                     Err(VmErr::Msg(msg)) => Err(VmErr::RuntimeError(Box::new(RuntimeErrorData {
                         message: msg,
                         span: None,
@@ -1245,6 +1281,20 @@ impl Interpreter {
             // The built-in error types have native constructors, so
             // `class E extends Error {}` reaches `super(…)` here.
             Value::NativeFunction { .. } => self.call_this(f, this_val, args),
+            // A native namespace heritage (`class S extends Set`) constructs
+            // through its internal slot. Unlike the direct `new` path, the
+            // receiver is the derived `this`, so implementations that can
+            // initialize it in place (collections) do; the rest behave as if
+            // called directly and their fresh result is discarded by the
+            // caller, matching the pre-existing `super()` contract.
+            Value::Object { .. } => {
+                if let Some(target) =
+                    callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
+                {
+                    return self.call_this(&target, this_val, args);
+                }
+                vm_err("TypeError: object is not a constructor".to_string())
+            }
             Value::HostFunction { properties, .. } => {
                 let id = properties
                     .meta

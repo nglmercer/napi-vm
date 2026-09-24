@@ -28,6 +28,9 @@ fn new_proxy(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmEr
             | Value::Function(_)
             | Value::Class(_)
             | Value::Proxy(_)
+            // The global scope is an ordinary object to every member and
+            // prototype path; only this allowlist excluded it.
+            | Value::GlobalObject
     ) {
         return Err(VmErr::Msg(
             "TypeError: Cannot create proxy with a non-object as target".to_string(),

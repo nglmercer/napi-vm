@@ -142,11 +142,24 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             walk_stmts(body, scope, runtime_handlers);
         }
         Statement::For { init, body, .. } => {
-            if let Some(fi) = init
-                && let ForInit::Var { decls, .. } = fi.as_ref()
-            {
-                for (n, e) in decls {
-                    push(scope, n, CompletionKind::Variable, init_shape(e.as_ref()));
+            if let Some(fi) = init {
+                match fi.as_ref() {
+                    ForInit::Var { decls, .. } => {
+                        for (n, e) in decls {
+                            push(scope, n, CompletionKind::Variable, init_shape(e.as_ref()));
+                        }
+                    }
+                    ForInit::Pattern {
+                        pattern, trailing, ..
+                    } => {
+                        for n in crate::parser::pattern_names(pattern) {
+                            push(scope, &n, CompletionKind::Variable, None);
+                        }
+                        for (n, e) in trailing {
+                            push(scope, n, CompletionKind::Variable, init_shape(e.as_ref()));
+                        }
+                    }
+                    ForInit::Expr(_) => {}
                 }
             }
             walk_stmts(body, scope, runtime_handlers);

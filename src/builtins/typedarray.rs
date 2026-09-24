@@ -200,6 +200,7 @@ fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
         "find",
         "findIndex",
         "indexOf",
+        "lastIndexOf",
         "includes",
         "reverse",
         "sort",
@@ -1107,6 +1108,7 @@ typed_delegate_method!(typed_every, "every");
 typed_delegate_method!(typed_find, "find");
 typed_delegate_method!(typed_find_index, "findIndex");
 typed_delegate_method!(typed_index_of, "indexOf");
+typed_delegate_method!(typed_last_index_of, "lastIndexOf");
 typed_delegate_method!(typed_includes, "includes");
 typed_delegate_method!(typed_reverse, "reverse");
 typed_delegate_method!(typed_sort, "sort");
@@ -1131,6 +1133,7 @@ fn typed_prototype_method(name: &str) -> Value {
         "find" => typed_find,
         "findIndex" => typed_find_index,
         "indexOf" => typed_index_of,
+        "lastIndexOf" => typed_last_index_of,
         "includes" => typed_includes,
         "reverse" => typed_reverse,
         "sort" => typed_sort,

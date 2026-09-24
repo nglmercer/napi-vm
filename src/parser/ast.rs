@@ -349,6 +349,15 @@ pub enum ForInit {
         kind: VarKind,
         decls: Vec<(String, Option<Expr>)>,
     },
+    /// `for (let {a} = x, i = 0; …)`: a pattern head with optional
+    /// trailing identifier declarators. (A second pattern in the same head
+    /// stays a syntax error.)
+    Pattern {
+        kind: VarKind,
+        pattern: Pattern,
+        init: Expr,
+        trailing: Vec<(String, Option<Expr>)>,
+    },
     Expr(Expr),
 }
 
@@ -358,10 +367,18 @@ pub struct SwitchCase {
     pub body: Vec<Statement>,
 }
 
+/// A class member name: written out, or `[expr]` evaluated once when the
+/// class is defined.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemberName {
+    Static(String),
+    Computed(Expr),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassMember {
     Method {
-        name: String,
+        name: MemberName,
         is_static: bool,
         params: Vec<String>,
         body: Vec<Statement>,
@@ -369,7 +386,7 @@ pub enum ClassMember {
         is_generator: bool,
     },
     Field {
-        name: String,
+        name: MemberName,
         is_static: bool,
         init: Option<Expr>,
     },
@@ -377,23 +394,30 @@ pub enum ClassMember {
     /// are installed, with `this` bound to the class.
     StaticBlock { body: Vec<Statement> },
     Getter {
-        name: String,
+        name: MemberName,
         is_static: bool,
         body: Vec<Statement>,
     },
     Setter {
-        name: String,
+        name: MemberName,
         param: String,
         is_static: bool,
         body: Vec<Statement>,
     },
 }
 
+/// An object-pattern key: a static name, or `[expr]` evaluated at bind time.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PatternKey {
+    Name(String),
+    Computed(Expr),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Ident(String),
     Array(Vec<Pattern>),
-    Object(Vec<(String, Option<Pattern>)>),
+    Object(Vec<(PatternKey, Option<Pattern>)>),
     Rest(Box<Pattern>),
     Default(Box<Pattern>, Box<Expr>),
     /// A property as a destructuring target: `[o.p] = [1]`. Only reachable
@@ -435,8 +459,13 @@ fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
             for (key, sub) in props {
                 match sub {
                     Some(sub) => collect_pattern_names(sub, out),
-                    // Shorthand `{ a }` binds the key itself.
-                    None => out.push(key.clone()),
+                    // Shorthand `{ a }` binds the key itself. A computed key
+                    // always carries a target (`{ [k] }` is a syntax error).
+                    None => {
+                        if let PatternKey::Name(name) = key {
+                            out.push(name.clone());
+                        }
+                    }
                 }
             }
         }
@@ -486,13 +515,25 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
         | Statement::ForIn { body, .. }
         | Statement::ForOf { body, .. } => collect_var_names(body, out),
         Statement::For { init, body, .. } => {
-            if let Some(init) = init
-                && let ForInit::Var {
-                    kind: VarKind::Var,
-                    decls,
-                } = &**init
-            {
-                out.extend(decls.iter().map(|(name, _)| name.clone()));
+            if let Some(init) = init {
+                match &**init {
+                    ForInit::Var {
+                        kind: VarKind::Var,
+                        decls,
+                    } => {
+                        out.extend(decls.iter().map(|(name, _)| name.clone()));
+                    }
+                    ForInit::Pattern {
+                        kind: VarKind::Var,
+                        pattern,
+                        trailing,
+                        ..
+                    } => {
+                        out.extend(pattern_names(pattern));
+                        out.extend(trailing.iter().map(|(name, _)| name.clone()));
+                    }
+                    _ => {}
+                }
             }
             collect_var_names(body, out);
         }
@@ -537,6 +578,18 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
 /// included in the scan even though their `name` references bind to their own
 /// frame. That only causes an unneeded object to be built — never a missing
 /// one — so callers remain correct.
+/// Whether a member's *computed name* (not its body) references `name`.
+fn member_name_references(member: &ClassMember, name: &str) -> bool {
+    let key = match member {
+        ClassMember::Method { name, .. }
+        | ClassMember::Field { name, .. }
+        | ClassMember::Getter { name, .. }
+        | ClassMember::Setter { name, .. } => name,
+        ClassMember::StaticBlock { .. } => return false,
+    };
+    matches!(key, MemberName::Computed(e) if expr_references(e, name))
+}
+
 pub fn stmts_reference(stmts: &[Statement], name: &str) -> bool {
     stmts.iter().any(|s| stmt_references(s, name))
 }
@@ -573,15 +626,18 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                 .as_ref()
                 .map(|e| expr_references(e, name))
                 .unwrap_or(false)
-                || body.iter().any(|m| match m {
-                    ClassMember::Method { body, .. } => stmts_reference(body, name),
-                    ClassMember::Field { init, .. } => init
-                        .as_ref()
-                        .map(|e| expr_references(e, name))
-                        .unwrap_or(false),
-                    ClassMember::Getter { body, .. } => stmts_reference(body, name),
-                    ClassMember::Setter { body, .. } => stmts_reference(body, name),
-                    ClassMember::StaticBlock { body } => stmts_reference(body, name),
+                || body.iter().any(|m| {
+                    member_name_references(m, name)
+                        || match m {
+                            ClassMember::Method { body, .. } => stmts_reference(body, name),
+                            ClassMember::Field { init, .. } => init
+                                .as_ref()
+                                .map(|e| expr_references(e, name))
+                                .unwrap_or(false),
+                            ClassMember::Getter { body, .. } => stmts_reference(body, name),
+                            ClassMember::Setter { body, .. } => stmts_reference(body, name),
+                            ClassMember::StaticBlock { body } => stmts_reference(body, name),
+                        }
                 })
         }
         Statement::Return(e) => e
@@ -612,6 +668,20 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                             .map(|e| expr_references(e, name))
                             .unwrap_or(false)
                     }),
+                    ForInit::Pattern {
+                        pattern,
+                        init,
+                        trailing,
+                        ..
+                    } => {
+                        pattern_references(pattern, name)
+                            || expr_references(init, name)
+                            || trailing.iter().any(|(_, e)| {
+                                e.as_ref()
+                                    .map(|e| expr_references(e, name))
+                                    .unwrap_or(false)
+                            })
+                    }
                     ForInit::Expr(e) => expr_references(e, name),
                 })
                 .unwrap_or(false)
@@ -696,15 +766,18 @@ fn expr_references(e: &Expr, name: &str) -> bool {
                 .as_ref()
                 .map(|e| expr_references(e, name))
                 .unwrap_or(false)
-                || body.iter().any(|m| match m {
-                    ClassMember::Method { body, .. } => stmts_reference(body, name),
-                    ClassMember::Field { init, .. } => init
-                        .as_ref()
-                        .map(|e| expr_references(e, name))
-                        .unwrap_or(false),
-                    ClassMember::Getter { body, .. } => stmts_reference(body, name),
-                    ClassMember::Setter { body, .. } => stmts_reference(body, name),
-                    ClassMember::StaticBlock { body } => stmts_reference(body, name),
+                || body.iter().any(|m| {
+                    member_name_references(m, name)
+                        || match m {
+                            ClassMember::Method { body, .. } => stmts_reference(body, name),
+                            ClassMember::Field { init, .. } => init
+                                .as_ref()
+                                .map(|e| expr_references(e, name))
+                                .unwrap_or(false),
+                            ClassMember::Getter { body, .. } => stmts_reference(body, name),
+                            ClassMember::Setter { body, .. } => stmts_reference(body, name),
+                            ClassMember::StaticBlock { body } => stmts_reference(body, name),
+                        }
                 })
         }
         Expr::LogicalAssignment { target, value, .. } => {
@@ -769,10 +842,11 @@ fn pattern_references(p: &Pattern, name: &str) -> bool {
             expr_references(object, name) || expr_references(property, name)
         }
         Pattern::Array(elems) => elems.iter().any(|e| pattern_references(e, name)),
-        Pattern::Object(props) => props.iter().any(|(_, p)| {
-            p.as_ref()
-                .map(|p| pattern_references(p, name))
-                .unwrap_or(false)
+        Pattern::Object(props) => props.iter().any(|(key, p)| {
+            matches!(key, PatternKey::Computed(e) if expr_references(e, name))
+                || p.as_ref()
+                    .map(|p| pattern_references(p, name))
+                    .unwrap_or(false)
         }),
         Pattern::Default(inner, default) => {
             pattern_references(inner, name) || expr_references(default, name)

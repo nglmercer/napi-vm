@@ -35,6 +35,36 @@ pub(super) fn install(e: &mut Environment) {
             continue;
         };
         super::make_callable(&namespace, kind.constructor(), None);
+        // Each VM gets its own prototype object: instances inherit from the
+        // namespace's live `.prototype` (identity matters for `instanceof`),
+        // and the `constructor` back-link must point at this VM's namespace,
+        // not a cross-VM shared object.
+        let proto = build_prototype(kind).expect("collection prototype");
+        proto
+            .set_prop("constructor".to_string(), namespace.clone())
+            .expect("collection prototype constructor");
+        if let Value::Object { props } = &proto {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..crate::value::PropAttrs::default()
+                },
+            );
+        }
+        namespace
+            .set_prop("prototype".to_string(), proto)
+            .expect("collection prototype link");
+        if let Value::Object { props } = &namespace {
+            props.meta.borrow_mut().set_attrs(
+                "prototype",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
     }
 }
 
@@ -135,16 +165,9 @@ thread_local! {
     static PROTOTYPES: RefCell<Vec<(&'static str, Rc<Value>)>> = const { RefCell::new(Vec::new()) };
 }
 
-fn prototype_for(kind: Kind) -> Result<Rc<Value>, VmErr> {
-    if let Some(existing) = PROTOTYPES.with(|protos| {
-        protos
-            .borrow()
-            .iter()
-            .find(|(tag, _)| *tag == kind.tag())
-            .map(|(_, proto)| proto.clone())
-    }) {
-        return Ok(existing);
-    }
+/// A fresh prototype object: methods, the `size` getter and the iterator.
+/// The caller decides whether it is cached or installed per-VM.
+fn build_prototype(kind: Kind) -> Result<Value, VmErr> {
     let proto = Value::object(vec![]);
     for (name, callable) in methods(kind) {
         proto.set_prop(name.to_string(), super::nf(name, callable))?;
@@ -159,20 +182,98 @@ fn prototype_for(kind: Kind) -> Result<Rc<Value>, VmErr> {
             super::nf("[Symbol.iterator]", collection_iterator),
         )?;
     }
-    let proto = Rc::new(proto);
+    Ok(proto)
+}
+
+fn prototype_for(kind: Kind) -> Result<Rc<Value>, VmErr> {
+    if let Some(existing) = PROTOTYPES.with(|protos| {
+        protos
+            .borrow()
+            .iter()
+            .find(|(tag, _)| *tag == kind.tag())
+            .map(|(_, proto)| proto.clone())
+    }) {
+        return Ok(existing);
+    }
+    let proto = Rc::new(build_prototype(kind)?);
     PROTOTYPES.with(|protos| protos.borrow_mut().push((kind.tag(), proto.clone())));
     Ok(proto)
 }
 
+/// The `[[Prototype]]` for a new instance: the namespace's live `.prototype`
+/// (OrdinaryCreateFromConstructor), falling back to the intrinsic default
+/// when a guest replaced it with a non-object.
+fn instance_proto(interp: &mut Interpreter, kind: Kind) -> Result<Rc<Value>, VmErr> {
+    // The global lookup ends before `member` runs: the member read can
+    // execute guest getters, which need the interpreter mutably.
+    let namespace = interp.global.borrow().get(kind.tag());
+    if let Some(namespace) = namespace
+        && let Ok(proto) = interp.member(&namespace, "prototype")
+        && matches!(proto, Value::Object { .. })
+    {
+        return Ok(Rc::new(proto));
+    }
+    prototype_for(kind)
+}
+
+/// A `super()` receiver that is already a subclass instance — an ordinary
+/// object, not yet a collection, whose chain reaches the namespace's live
+/// `.prototype` — is initialized in place, so `class S extends Set` keeps its
+/// more-derived prototype. Anything else (the namespace itself on a direct
+/// call, the global object, an unrelated receiver) keeps the historical
+/// fresh object.
+fn in_place_target(
+    interp: &mut Interpreter,
+    kind: Kind,
+    this: &Value,
+) -> Result<Option<Value>, VmErr> {
+    if !matches!(this, Value::Object { .. }) || entries_of(this).is_some() {
+        return Ok(None);
+    }
+    let namespace = interp.global.borrow().get(kind.tag());
+    let Some(namespace) = namespace else {
+        return Ok(None);
+    };
+    let Ok(proto) = interp.member(&namespace, "prototype") else {
+        return Ok(None);
+    };
+    if !matches!(proto, Value::Object { .. }) {
+        return Ok(None);
+    }
+    let mut current = interp.get_prototype_of(this)?;
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        if matches!(current, Value::Null) {
+            return Ok(None);
+        }
+        if strict_equals(&current, &proto) {
+            return Ok(Some(this.clone()));
+        }
+        current = interp.get_prototype_of(&current)?;
+    }
+    Ok(None)
+}
+
 /// Build one collection, seeded from an optional iterable argument.
-fn construct(interp: &mut Interpreter, kind: Kind, args: Vec<Value>) -> Result<Value, VmErr> {
-    let collection = Value::object_with_proto(
-        vec![
-            (ENTRIES_SLOT.to_string(), Value::array(vec![])),
-            (KIND_SLOT.to_string(), Value::String(kind.tag().to_string())),
-        ],
-        Some(prototype_for(kind)?),
-    );
+fn construct(
+    interp: &mut Interpreter,
+    kind: Kind,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let collection = match in_place_target(interp, kind, &this)? {
+        Some(target) => {
+            target.set_prop(ENTRIES_SLOT.to_string(), Value::array(vec![]))?;
+            target.set_prop(KIND_SLOT.to_string(), Value::String(kind.tag().to_string()))?;
+            target
+        }
+        None => Value::object_with_proto(
+            vec![
+                (ENTRIES_SLOT.to_string(), Value::array(vec![])),
+                (KIND_SLOT.to_string(), Value::String(kind.tag().to_string())),
+            ],
+            Some(instance_proto(interp, kind)?),
+        ),
+    };
 
     if let Some(source) = args.first()
         && !matches!(source, Value::Undefined | Value::Null)
@@ -215,17 +316,17 @@ fn methods(kind: Kind) -> Vec<(&'static str, super::NativeFn)> {
     out
 }
 
-fn new_map(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    construct(interp, Kind::Map, a)
+fn new_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    construct(interp, Kind::Map, this, a)
 }
-fn new_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    construct(interp, Kind::Set, a)
+fn new_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    construct(interp, Kind::Set, this, a)
 }
-fn new_weak_map(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    construct(interp, Kind::WeakMap, a)
+fn new_weak_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    construct(interp, Kind::WeakMap, this, a)
 }
-fn new_weak_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    construct(interp, Kind::WeakSet, a)
+fn new_weak_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    construct(interp, Kind::WeakSet, this, a)
 }
 
 // --- Instance methods -------------------------------------------------------
