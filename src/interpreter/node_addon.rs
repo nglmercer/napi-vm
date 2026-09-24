@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value as JsonValue, json};
 
+use super::native_addon::NativeAddonPolicy;
 use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::NativeAddonLoader;
@@ -737,9 +738,7 @@ pub struct NodeAddonRuntimeInfo {
 #[derive(Clone, Debug)]
 pub struct NodeAddonOptions {
     pub(crate) node_executable: OsString,
-    pub(crate) roots: Vec<PathBuf>,
-    pub(crate) allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
-    pub(crate) entry: Option<PathBuf>,
+    pub(crate) policy: NativeAddonPolicy,
     pub(crate) minimum_napi_version: Option<u32>,
 }
 
@@ -753,11 +752,14 @@ impl NodeAddonOptions {
         I: IntoIterator<Item = P>,
         P: Into<PathBuf>,
     {
+        Self::with_policy(node_executable, NativeAddonPolicy::new(roots))
+    }
+
+    /// Configure the Node executable and reuse a shared addon policy.
+    pub fn with_policy(node_executable: impl AsRef<OsStr>, policy: NativeAddonPolicy) -> Self {
         Self {
             node_executable: node_executable.as_ref().to_owned(),
-            roots: roots.into_iter().map(Into::into).collect(),
-            allowed_addons: Vec::new(),
-            entry: None,
+            policy,
             minimum_napi_version: None,
         }
     }
@@ -767,7 +769,7 @@ impl NodeAddonOptions {
     /// Use [`Self::allow_native_addon_with_sha256`] when the host has an
     /// expected digest from a trusted build manifest.
     pub fn allow_native_addon(mut self, path: impl Into<PathBuf>) -> Self {
-        self.allowed_addons.push((path.into(), None));
+        self.policy = self.policy.allow_native_addon(path);
         self
     }
 
@@ -779,8 +781,9 @@ impl NodeAddonOptions {
         path: impl Into<PathBuf>,
         expected_sha256: [u8; 32],
     ) -> Self {
-        self.allowed_addons
-            .push((path.into(), Some(expected_sha256)));
+        self.policy = self
+            .policy
+            .allow_native_addon_with_sha256(path, expected_sha256);
         self
     }
 
@@ -796,7 +799,7 @@ impl NodeAddonOptions {
     /// Set the application entry path used to resolve top-level `require()`.
     /// The path must exist and be inside one of `roots`.
     pub fn entry(mut self, path: impl Into<PathBuf>) -> Self {
-        self.entry = Some(path.into());
+        self.policy = self.policy.entry(path);
         self
     }
 }

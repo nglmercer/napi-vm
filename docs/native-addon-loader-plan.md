@@ -57,9 +57,10 @@ returning plausible but incorrect results.
 
 ## Public host configuration
 
-Keep current APIs working and converge on a small backend choice in a future
-builder API. The first dispatcher accepts the existing backend-specific
-options directly:
+Keep current APIs working. `NativeAddonPolicy` shares filesystem roots, the
+native addon integrity allowlist, and the application entry across backend
+options; each backend wrapper retains its own runtime-specific settings. The
+dispatcher accepts the existing backend-specific options directly:
 
 ```rust
 runtime.enable_native_addons(
@@ -71,7 +72,9 @@ runtime.enable_native_addons(
 
 `NodeAddonOptions` selects `NodeSidecar`; `RustNodeApiOptions` selects
 `RustNodeApi`. This preserves all existing backend-specific configuration
-while shared backend preflight is implemented.
+while using the same common filesystem and integrity policy. A policy can be
+passed to `NodeAddonOptions::with_policy(node_executable, policy)` or
+`RustNodeApiOptions::with_policy(policy)`.
 
 The backend choices should be:
 
@@ -112,8 +115,8 @@ surface each backend accepts before running guest code.
   before initialization. Its current supertraits cover addon initialization,
   host calls, and event polling, and its idempotent shutdown is explicit
   through `NativeAddonRuntime`.
-- Converge `NodeAddonOptions` and `RustNodeApiOptions` into common host options
-  while preserving backend-specific settings.
+- Share roots, the addon allowlist, and entry selection through
+  `NativeAddonPolicy`; retain backend-specific settings on each options type.
 - Route `.node` requests through that host feature while leaving JavaScript and
   JSON modules in the existing guest loader and cache.
 - Preserve provisional CommonJS exports, failed-initialization rollback,

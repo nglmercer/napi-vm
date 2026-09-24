@@ -39,6 +39,7 @@ static WINDOWS_NODE_API_SHIM_DIRECTORIES: OnceLock<Mutex<Vec<PathBuf>>> = OnceLo
 use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
+use crate::interpreter::native_addon::NativeAddonPolicy;
 use crate::interpreter::native_addon_binary::validate_native_addon_binary;
 #[cfg(all(test, target_os = "windows"))]
 use crate::interpreter::native_addon_binary::validate_native_addon_header;
@@ -121,13 +122,11 @@ type NapiGuestOperation = fn(&mut Interpreter, Value, Vec<Value>) -> Result<Valu
 /// allowlisted, preferably with a digest from trusted application metadata.
 #[derive(Clone, Debug)]
 pub struct RustNodeApiOptions {
-    roots: Vec<PathBuf>,
-    allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
+    pub(crate) policy: NativeAddonPolicy,
     native_prebuild_aliases: Vec<NativePrebuildAlias>,
     native_package_prebuilds: Vec<NativePackagePrebuild>,
     node_gyp_build_prebuilds_only: Option<bool>,
     node_gyp_build_exec_path: Option<PathBuf>,
-    entry: Option<PathBuf>,
     reported_node_version: ReportedNodeVersion,
     max_napi_version: u32,
 }
@@ -178,21 +177,24 @@ impl RustNodeApiOptions {
         I: IntoIterator<Item = P>,
         P: Into<PathBuf>,
     {
+        Self::with_policy(NativeAddonPolicy::new(roots))
+    }
+
+    /// Configure the in-process backend with a shared addon policy.
+    pub fn with_policy(policy: NativeAddonPolicy) -> Self {
         Self {
-            roots: roots.into_iter().map(Into::into).collect(),
-            allowed_addons: Vec::new(),
+            policy,
             native_prebuild_aliases: Vec::new(),
             native_package_prebuilds: Vec::new(),
             node_gyp_build_prebuilds_only: None,
             node_gyp_build_exec_path: None,
-            entry: None,
             reported_node_version: ReportedNodeVersion::NAPI_VM,
             max_napi_version: MAX_NODE_API_VERSION as u32,
         }
     }
 
     pub fn allow_native_addon(mut self, path: impl Into<PathBuf>) -> Self {
-        self.allowed_addons.push((path.into(), None));
+        self.policy = self.policy.allow_native_addon(path);
         self
     }
 
@@ -201,8 +203,9 @@ impl RustNodeApiOptions {
         path: impl Into<PathBuf>,
         expected_sha256: [u8; 32],
     ) -> Self {
-        self.allowed_addons
-            .push((path.into(), Some(expected_sha256)));
+        self.policy = self
+            .policy
+            .allow_native_addon_with_sha256(path, expected_sha256);
         self
     }
 
@@ -283,7 +286,7 @@ impl RustNodeApiOptions {
     }
 
     pub fn entry(mut self, path: impl Into<PathBuf>) -> Self {
-        self.entry = Some(path.into());
+        self.policy = self.policy.entry(path);
         self
     }
 
@@ -9563,14 +9566,14 @@ impl Interpreter {
                 options.max_napi_version
             )));
         }
-        let mut loader = FileCommonJsLoader::new(options.roots.iter())?;
+        let mut loader = FileCommonJsLoader::new(options.policy.roots().iter())?;
         if let Some(enabled) = options.node_gyp_build_prebuilds_only {
             loader = loader.with_node_gyp_build_prebuilds_only(enabled);
         }
         if let Some(exec_path) = &options.node_gyp_build_exec_path {
             loader = loader.with_node_gyp_build_exec_path(exec_path.clone());
         }
-        for (addon, expected_sha256) in &options.allowed_addons {
+        for (addon, expected_sha256) in options.policy.allowed_addons() {
             loader = match expected_sha256 {
                 Some(expected_sha256) => {
                     loader.allow_native_addon_with_sha256(addon, *expected_sha256)?
@@ -9602,7 +9605,7 @@ impl Interpreter {
         if !options.native_package_prebuilds.is_empty() {
             loader = loader.with_node_gyp_build_compat();
         }
-        let entry = validate_entry(&loader, options.entry)?;
+        let entry = validate_entry(&loader, options.policy.entry_path().map(PathBuf::from))?;
         let host = Rc::new(RustNodeApiHost::new(
             self.persistent_global.clone(),
             options.reported_node_version,

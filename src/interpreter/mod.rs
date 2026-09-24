@@ -27,7 +27,9 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
-pub use native_addon::{NativeAddonBackendHost, NativeAddonOptions, NativeAddonRuntime};
+pub use native_addon::{
+    NativeAddonBackendHost, NativeAddonOptions, NativeAddonPolicy, NativeAddonRuntime,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 pub(crate) use resolve::array_iter;
@@ -86,7 +88,7 @@ pub use ops::{
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 #[cfg(not(target_arch = "wasm32"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::error::{StackFrame, VmErr};
@@ -338,8 +340,8 @@ impl Interpreter {
         &mut self,
         options: NodeAddonOptions,
     ) -> Result<Rc<NodeAddonSidecar>, VmErr> {
-        let mut loader = FileCommonJsLoader::new(options.roots.iter())?;
-        for (addon, expected_sha256) in &options.allowed_addons {
+        let mut loader = FileCommonJsLoader::new(options.policy.roots().iter())?;
+        for (addon, expected_sha256) in options.policy.allowed_addons() {
             loader = match expected_sha256 {
                 Some(expected_sha256) => {
                     loader.allow_native_addon_with_sha256(addon, *expected_sha256)?
@@ -349,7 +351,9 @@ impl Interpreter {
         }
 
         let entry = options
-            .entry
+            .policy
+            .entry_path()
+            .map(Path::to_path_buf)
             .map(|entry| {
                 let canonical = std::fs::canonicalize(&entry).map_err(|error| {
                     VmErr::Msg(format!(

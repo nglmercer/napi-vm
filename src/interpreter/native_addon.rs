@@ -5,7 +5,7 @@
 //! backend-specific controls. This enum gives embedders one entry point for
 //! installing either backend on an interpreter.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::host::HostBridge;
@@ -17,6 +17,108 @@ use super::node_addon::{NodeAddonOptions, NodeAddonSidecar};
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 use super::rust_node_api::{RustNodeApiHost, RustNodeApiOptions};
+
+/// Shared filesystem, integrity, and entry policy for native addon backends.
+///
+/// Build one policy and pass it to [`NodeAddonOptions::with_policy`] or,
+/// when `node-api-host` is enabled, [`RustNodeApiOptions::with_policy`].
+#[derive(Clone, Debug)]
+pub struct NativeAddonPolicy {
+    roots: Vec<PathBuf>,
+    allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
+    entry: Option<PathBuf>,
+}
+
+impl NativeAddonPolicy {
+    /// Create a shared policy restricted to the given filesystem roots.
+    pub fn new<I, P>(roots: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<PathBuf>,
+    {
+        Self {
+            roots: roots.into_iter().map(Into::into).collect(),
+            allowed_addons: Vec::new(),
+            entry: None,
+        }
+    }
+
+    /// Trust one specific `.node` binary and pin its current digest at setup.
+    pub fn allow_native_addon(mut self, path: impl Into<PathBuf>) -> Self {
+        self.allowed_addons.push((path.into(), None));
+        self
+    }
+
+    /// Trust one specific `.node` binary only if it matches a host-provided
+    /// digest, such as a value from a signed application manifest.
+    pub fn allow_native_addon_with_sha256(
+        mut self,
+        path: impl Into<PathBuf>,
+        expected_sha256: [u8; 32],
+    ) -> Self {
+        self.allowed_addons
+            .push((path.into(), Some(expected_sha256)));
+        self
+    }
+
+    /// Set the application entry used to resolve top-level `require()`.
+    pub fn entry(mut self, path: impl Into<PathBuf>) -> Self {
+        self.entry = Some(path.into());
+        self
+    }
+
+    pub(super) fn roots(&self) -> &[PathBuf] {
+        &self.roots
+    }
+
+    pub(super) fn allowed_addons(&self) -> &[(PathBuf, Option<[u8; 32]>)] {
+        &self.allowed_addons
+    }
+
+    pub(super) fn entry_path(&self) -> Option<&Path> {
+        self.entry.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_policy_configures_each_available_backend() {
+        let policy = NativeAddonPolicy::new(["/app"])
+            .allow_native_addon_with_sha256("/app/native/example.node", [7; 32])
+            .entry("/app/main.cjs");
+
+        let node_options = NodeAddonOptions::with_policy("node", policy.clone());
+        assert_eq!(node_options.policy.roots(), &[PathBuf::from("/app")]);
+        assert_eq!(
+            node_options.policy.allowed_addons(),
+            &[(PathBuf::from("/app/native/example.node"), Some([7; 32]))]
+        );
+        assert_eq!(
+            node_options.policy.entry_path(),
+            Some(Path::new("/app/main.cjs"))
+        );
+
+        #[cfg(all(
+            feature = "node-api-host",
+            any(target_os = "linux", target_os = "macos", target_os = "windows")
+        ))]
+        {
+            let rust_options = RustNodeApiOptions::with_policy(policy);
+            assert_eq!(rust_options.policy.roots(), &[PathBuf::from("/app")]);
+            assert_eq!(
+                rust_options.policy.allowed_addons(),
+                &[(PathBuf::from("/app/native/example.node"), Some([7; 32]))]
+            );
+            assert_eq!(
+                rust_options.policy.entry_path(),
+                Some(Path::new("/app/main.cjs"))
+            );
+        }
+    }
+}
 
 /// Shared runtime interface implemented by each native addon backend.
 ///

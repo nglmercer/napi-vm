@@ -117,6 +117,20 @@ backends also reject malformed or wrong-architecture ELF, Mach-O, and PE files
 before loading them. Hosts can call `NativeAddonRuntime::preflight_addon(path)`
 to run these checks without invoking the addon initializer; missing dynamic
 dependencies can still fail when the addon is loaded.
+`NativeAddonPolicy` lets a desktop host share the same filesystem roots, addon
+integrity allowlist, and application entry between backends while keeping
+backend-specific settings separate:
+
+```rust
+use napi_vm::{NativeAddonPolicy, NodeAddonOptions};
+
+let policy = NativeAddonPolicy::new([app_root.clone()])
+    .allow_native_addon_with_sha256(addon.clone(), trusted_manifest_digest())
+    .entry(app_root.join("main.cjs"));
+let sidecar_options = NodeAddonOptions::with_policy("node", policy.clone());
+// With `node-api-host`, use `RustNodeApiOptions::with_policy(policy)` instead.
+```
+
 Native module exports enter the CommonJS cache before the Rust Node-API
 initializer runs. If initialization fails, the cache entry is removed so a
 later `require()` can retry it. During initialization, synchronous guest entry
