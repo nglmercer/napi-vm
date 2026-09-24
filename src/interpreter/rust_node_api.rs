@@ -11337,17 +11337,24 @@ static napi_value probe(napi_env env, napi_callback_info info) {
 
 NAPI_MODULE_INIT() {
   napi_value function, marker, status_value;
-  napi_status marker_status, freeze_status;
+  napi_property_descriptor defined_descriptor = {0};
+  napi_status marker_status, define_status, freeze_status;
   if (napi_add_env_cleanup_hook(env, sync_cleanup, NULL) != napi_ok ||
       napi_add_async_cleanup_hook(env, async_cleanup, NULL, NULL) != napi_ok ||
       napi_create_function(env, "probe", NAPI_AUTO_LENGTH, probe, NULL, &function) != napi_ok ||
       napi_create_int32(env, 64, &marker) != napi_ok)
     return NULL;
   marker_status = napi_set_named_property(env, function, "nativeMarker", marker);
+  defined_descriptor.utf8name = "definedMarker";
+  defined_descriptor.value = marker;
+  defined_descriptor.attributes = napi_writable | napi_enumerable | napi_configurable;
+  define_status = napi_define_properties(env, function, 1, &defined_descriptor);
   freeze_status = napi_object_freeze(env, function);
   if (napi_set_named_property(env, exports, "probe", function) != napi_ok ||
       napi_create_int32(env, marker_status, &status_value) != napi_ok ||
       napi_set_named_property(env, exports, "markerStatus", status_value) != napi_ok ||
+      napi_create_int32(env, define_status, &status_value) != napi_ok ||
+      napi_set_named_property(env, exports, "defineStatus", status_value) != napi_ok ||
       napi_create_int32(env, freeze_status, &status_value) != napi_ok ||
       napi_set_named_property(env, exports, "functionFreezeStatus", status_value) != napi_ok)
     return NULL;
@@ -11383,6 +11390,7 @@ NAPI_MODULE_INIT() {
 const addon = require('./fixture.node');
 const nativeFunction = addon.probe;
 const nativeFunctionMarker = Object.getOwnPropertyDescriptor(nativeFunction, 'nativeMarker') || {};
+const nativeFunctionDefinedMarker = Object.getOwnPropertyDescriptor(nativeFunction, 'definedMarker') || {};
 const nativeFunctionName = Object.getOwnPropertyDescriptor(nativeFunction, 'name') || {};
 const nativeFunctionLength = Object.getOwnPropertyDescriptor(nativeFunction, 'length') || {};
 const nativeFunctionPrototype = Object.getOwnPropertyDescriptor(nativeFunction, 'prototype') || {};
@@ -11455,19 +11463,24 @@ const guestDefinedIndexDescriptor = Object.getOwnPropertyDescriptor(guestDefined
 module.exports = {
   ...native,
   hostMarkerStatus: addon.markerStatus,
+  hostDefineStatus: addon.defineStatus,
   hostFunctionFreezeStatus: addon.functionFreezeStatus,
   nativeFunctionFrozen: Object.isFrozen(nativeFunction),
   nativeFunctionName: nativeFunction.name,
   nativeFunctionLength: nativeFunction.length,
   nativeFunctionMarker: nativeFunction.nativeMarker,
+  nativeFunctionDefinedMarker: nativeFunction.definedMarker,
   nativeFunctionPrototype: typeof nativeFunction.prototype,
   nativeFunctionPrototypeConstructorMatches: nativeFunction.prototype.constructor === nativeFunction,
   nativeFunctionEnumerableKeys: Object.keys(nativeFunction),
   nativeFunctionOwnProperties: Object.getOwnPropertyNames(nativeFunction)
-    .filter((name) => ['length', 'name', 'nativeMarker', 'prototype'].includes(name)).sort(),
+    .filter((name) => ['definedMarker', 'length', 'name', 'nativeMarker', 'prototype'].includes(name)).sort(),
   nativeFunctionMarkerWritable: nativeFunctionMarker.writable,
   nativeFunctionMarkerEnumerable: nativeFunctionMarker.enumerable,
   nativeFunctionMarkerConfigurable: nativeFunctionMarker.configurable,
+  nativeFunctionDefinedMarkerWritable: nativeFunctionDefinedMarker.writable,
+  nativeFunctionDefinedMarkerEnumerable: nativeFunctionDefinedMarker.enumerable,
+  nativeFunctionDefinedMarkerConfigurable: nativeFunctionDefinedMarker.configurable,
   nativeFunctionNameWritable: nativeFunctionName.writable,
   nativeFunctionLengthValue: nativeFunctionLength.value,
   nativeFunctionPrototypeWritable: nativeFunctionPrototype.writable,
@@ -11598,25 +11611,36 @@ module.exports = {
         assert_eq!(vm_report["sealStatus"], NAPI_OK);
         assert_eq!(vm_report["functionFreezeStatus"], NAPI_OK);
         assert_eq!(vm_report["hostMarkerStatus"], NAPI_OK);
+        assert_eq!(vm_report["hostDefineStatus"], NAPI_OK);
         assert_eq!(vm_report["hostFunctionFreezeStatus"], NAPI_OK);
         assert_eq!(vm_report["nativeFunctionFrozen"], true);
         assert_eq!(vm_report["nativeFunctionName"], "probe");
         assert_eq!(vm_report["nativeFunctionLength"], 0);
         assert_eq!(vm_report["nativeFunctionLengthValue"], 0);
         assert_eq!(vm_report["nativeFunctionMarker"], 64);
+        assert_eq!(vm_report["nativeFunctionDefinedMarker"], 64);
         assert_eq!(vm_report["nativeFunctionPrototype"], "object");
         assert_eq!(vm_report["nativeFunctionPrototypeConstructorMatches"], true);
         assert_eq!(
             vm_report["nativeFunctionEnumerableKeys"],
-            serde_json::json!(["nativeMarker"])
+            serde_json::json!(["nativeMarker", "definedMarker"])
         );
         assert_eq!(
             vm_report["nativeFunctionOwnProperties"],
-            serde_json::json!(["length", "name", "nativeMarker", "prototype"])
+            serde_json::json!([
+                "definedMarker",
+                "length",
+                "name",
+                "nativeMarker",
+                "prototype"
+            ])
         );
         assert_eq!(vm_report["nativeFunctionMarkerWritable"], false);
         assert_eq!(vm_report["nativeFunctionMarkerEnumerable"], true);
         assert_eq!(vm_report["nativeFunctionMarkerConfigurable"], false);
+        assert_eq!(vm_report["nativeFunctionDefinedMarkerWritable"], false);
+        assert_eq!(vm_report["nativeFunctionDefinedMarkerEnumerable"], true);
+        assert_eq!(vm_report["nativeFunctionDefinedMarkerConfigurable"], false);
         assert_eq!(vm_report["nativeFunctionNameWritable"], false);
         assert_eq!(vm_report["nativeFunctionPrototypeWritable"], false);
         assert_eq!(vm_report["nativeFunctionPrototypeEnumerable"], false);
