@@ -356,6 +356,7 @@ impl RustPluginHost {
             ));
         }
         if options.allowed_addons.is_empty()
+            && options.native_addon_aliases.is_empty()
             && options.native_prebuild_aliases.is_empty()
             && options.native_package_prebuilds.is_empty()
         {
@@ -679,8 +680,27 @@ impl RustPluginHost {
                         "native addon path is outside plugin root".into(),
                     ));
                 }
-                options = options.allow_native_addon_with_sha256(&canonical, *digest);
+                options = match digest {
+                    Some(digest) => options.allow_native_addon_with_sha256(&canonical, *digest),
+                    None => options.allow_native_addon(&canonical),
+                };
                 canonical_addons.push(canonical);
+            }
+            for alias in &config.native_addon_aliases {
+                let candidate = if alias.addon.is_absolute() {
+                    alias.addon.clone()
+                } else {
+                    prepared.root.join(&alias.addon)
+                };
+                let canonical = fs::canonicalize(&candidate).map_err(|error| {
+                    PluginHostError::Load(format!("cannot resolve aliased native addon: {error}"))
+                })?;
+                if !canonical.starts_with(&prepared.root) {
+                    return Err(PluginHostError::Load(
+                        "native addon alias target is outside plugin root".into(),
+                    ));
+                }
+                options = options.allow_native_addon_alias(&alias.request, &canonical);
             }
             for alias in &config.native_prebuild_aliases {
                 let package_root = plugin_napi_package_root(&prepared.root, &alias.package_root)?;
@@ -807,8 +827,10 @@ impl RustPluginHost {
     }
 }
 
-/// Per-plugin explicit Node-API addon allowlist. Each digest must come from
-/// trusted desktop application metadata; native code is not sandboxed.
+/// Per-plugin explicit Node-API addon allowlist. Digests are optional:
+/// without one the selected binary is pinned to its contents at setup,
+/// with one it must additionally match trusted host metadata. Either way
+/// native code is not sandboxed.
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -816,11 +838,22 @@ impl RustPluginHost {
 #[derive(Clone, Debug)]
 pub struct RustPluginNapiOptions {
     max_napi_version: u32,
-    allowed_addons: Vec<(PathBuf, [u8; 32])>,
+    allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
+    native_addon_aliases: Vec<RustPluginNapiAddonAlias>,
     native_prebuild_aliases: Vec<RustPluginNapiPrebuildAlias>,
     native_package_prebuilds: Vec<RustPluginNapiPackagePrebuild>,
     node_gyp_build_prebuilds_only: Option<bool>,
     node_gyp_build_exec_path: Option<PathBuf>,
+}
+
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+#[derive(Clone, Debug)]
+struct RustPluginNapiAddonAlias {
+    request: String,
+    addon: PathBuf,
 }
 
 #[cfg(all(
@@ -853,6 +886,7 @@ impl Default for RustPluginNapiOptions {
         Self {
             max_napi_version: 10,
             allowed_addons: Vec::new(),
+            native_addon_aliases: Vec::new(),
             native_prebuild_aliases: Vec::new(),
             native_package_prebuilds: Vec::new(),
             node_gyp_build_prebuilds_only: None,
@@ -866,8 +900,36 @@ impl Default for RustPluginNapiOptions {
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 impl RustPluginNapiOptions {
+    /// Allowlist one `.node` binary, pinning its contents at setup. The
+    /// path may be absolute or relative to the plugin root; it is
+    /// canonicalized and contained before anything loads.
+    pub fn allow_addon(mut self, path: impl Into<PathBuf>) -> Self {
+        self.allowed_addons.push((path.into(), None));
+        self
+    }
+
+    /// Allowlist one `.node` binary only when it matches a digest from
+    /// trusted host metadata, checked at setup and again before loading.
     pub fn allow_addon_with_sha256(mut self, path: impl Into<PathBuf>, digest: [u8; 32]) -> Self {
-        self.allowed_addons.push((path.into(), digest));
+        self.allowed_addons.push((path.into(), Some(digest)));
+        self
+    }
+
+    /// Expose an allowlisted `.node` binary through a bare guest
+    /// `require()` request. The target must have been added with
+    /// [`Self::allow_addon`] or [`Self::allow_addon_with_sha256`]; the
+    /// alias replaces any JavaScript entry for that request, so guests
+    /// load the addon without executing package loader code. Only bare
+    /// package names are accepted.
+    pub fn allow_addon_alias(
+        mut self,
+        request: impl Into<String>,
+        addon: impl Into<PathBuf>,
+    ) -> Self {
+        self.native_addon_aliases.push(RustPluginNapiAddonAlias {
+            request: request.into(),
+            addon: addon.into(),
+        });
         self
     }
 

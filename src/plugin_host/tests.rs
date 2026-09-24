@@ -740,3 +740,181 @@ async onReload(context, previousState) {
         Some(serde_json::json!({ "reason": "unload", "asyncSum": 3 }))
     );
 }
+
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows"),
+    any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[test]
+fn plugin_host_authorizes_addon_without_digest_and_aliases_bare_name() {
+    use sha2::{Digest, Sha256};
+
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/node-api/napi-rs/Cargo.toml");
+    // Dedicated output directory: parallel tests build the same fixture
+    // into their own trees so Cargo never rebuilds under a copy.
+    let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/node-api-fixtures/napi-alias-plugin-host");
+    let temp_dir = target_dir.join("tmp");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let built = Command::new("cargo")
+        .args(["build", "--offline", "--release", "--manifest-path"])
+        .arg(&manifest)
+        .arg("--target-dir")
+        .arg(&target_dir)
+        .env("TMPDIR", &temp_dir)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "napi-rs plugin fixture build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let cdylib_name = if cfg!(target_os = "windows") {
+        "napi_vm_napi_rs_fixture.dll"
+    } else if cfg!(target_os = "macos") {
+        "libnapi_vm_napi_rs_fixture.dylib"
+    } else {
+        "libnapi_vm_napi_rs_fixture.so"
+    };
+    let compiled_addon = target_dir.join("release").join(cdylib_name);
+    assert!(compiled_addon.is_file(), "napi-rs fixture was not built");
+    let addon_bytes = fs::read(&compiled_addon).unwrap();
+
+    // One staged plugin per case, all sharing the built bytes. The
+    // package ships a throwing `index.cjs` behind its `main` entry:
+    // loading through the alias must never execute it.
+    let stage = |label: &str| {
+        let dir = TestPluginDir::new(label);
+        let addon = dir.0.join("node_modules/bare-native/bare-native.node");
+        fs::create_dir_all(addon.parent().unwrap()).unwrap();
+        fs::write(&addon, &addon_bytes).unwrap();
+        dir.write(
+            "node_modules/bare-native/package.json",
+            r#"{"name":"bare-native","version":"1.0.0","main":"index.cjs"}"#,
+        );
+        dir.write(
+            "node_modules/bare-native/index.cjs",
+            "throw new Error('package loader must not execute');",
+        );
+        dir.write(
+            "main.mjs",
+            r#"
+import { createRequire } from "node:module";
+const localRequire = createRequire(import.meta.url);
+const addon = localRequire("bare-native");
+const again = localRequire(localRequire.resolve("bare-native"));
+const globalAddon = require("bare-native");
+export default {
+  async onLoad() {
+    return {
+      sum: addon.add(19, 23),
+      cacheIdentity: addon === again,
+      globalIdentity: addon === globalAddon,
+    };
+  },
+};
+"#,
+        );
+        dir.manifest("napi-alias-plugin", "main.mjs", "{}");
+        (dir, addon)
+    };
+
+    let expected = serde_json::json!({ "sum": 42, "cacheIdentity": true, "globalIdentity": true });
+
+    // Digest-optional allowlist plus bare-name alias: the guest loads
+    // the addon through `createRequire` without touching `index.cjs`.
+    let (dir, addon) = stage("napi-alias-happy");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.configure_napi_addons(
+        "napi-alias-plugin",
+        RustPluginNapiOptions::default()
+            .allow_addon(&addon)
+            .allow_addon_alias("bare-native", &addon),
+    )
+    .unwrap();
+    let plugin = host.load(&dir.0).unwrap();
+    assert_eq!(plugin.load_result, Some(expected.clone()));
+
+    // Explicit digests keep working through the same alias path.
+    let (dir, addon) = stage("napi-alias-digest");
+    let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.configure_napi_addons(
+        "napi-alias-plugin",
+        RustPluginNapiOptions::default()
+            .allow_addon_with_sha256(&addon, digest)
+            .allow_addon_alias("bare-native", &addon),
+    )
+    .unwrap();
+    let plugin = host.load(&dir.0).unwrap();
+    assert_eq!(plugin.load_result, Some(expected.clone()));
+
+    // An alias without an allowlisted target fails closed at load.
+    let (dir, addon) = stage("napi-alias-unlisted");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.configure_napi_addons(
+        "napi-alias-plugin",
+        RustPluginNapiOptions::default().allow_addon_alias("bare-native", &addon),
+    )
+    .unwrap();
+    let error = match host.load(&dir.0) {
+        Ok(_) => panic!("alias without an allowlisted target must fail"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("not allowlisted"), "{error}");
+
+    // Duplicate aliases fail instead of shadowing each other.
+    let (dir, addon) = stage("napi-alias-duplicate");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.configure_napi_addons(
+        "napi-alias-plugin",
+        RustPluginNapiOptions::default()
+            .allow_addon(&addon)
+            .allow_addon_alias("bare-native", &addon)
+            .allow_addon_alias("bare-native", &addon),
+    )
+    .unwrap();
+    let error = match host.load(&dir.0) {
+        Ok(_) => panic!("duplicate alias must fail"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("already configured"), "{error}");
+
+    // Only bare package names alias; subpaths keep package semantics.
+    let (dir, addon) = stage("napi-alias-subpath");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.configure_napi_addons(
+        "napi-alias-plugin",
+        RustPluginNapiOptions::default()
+            .allow_addon(&addon)
+            .allow_addon_alias("bare-native/sub", &addon),
+    )
+    .unwrap();
+    let error = match host.load(&dir.0) {
+        Ok(_) => panic!("non-bare alias request must fail"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("bare package request"), "{error}");
+
+    // Alias targets outside the plugin root never load, even when an
+    // inside file is allowlisted.
+    let (dir, addon) = stage("napi-alias-outside");
+    let outside = TestPluginDir::new("napi-alias-outside-addon");
+    let escaped = outside.0.join("escaped.node");
+    fs::write(&escaped, &addon_bytes).unwrap();
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.configure_napi_addons(
+        "napi-alias-plugin",
+        RustPluginNapiOptions::default()
+            .allow_addon(&addon)
+            .allow_addon_alias("bare-native", &escaped),
+    )
+    .unwrap();
+    let error = match host.load(&dir.0) {
+        Ok(_) => panic!("alias target outside the plugin root must fail"),
+        Err(error) => error.to_string(),
+    };
+    assert!(error.contains("outside plugin root"), "{error}");
+}

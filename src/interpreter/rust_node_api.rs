@@ -136,12 +136,19 @@ type NapiGuestOperation = fn(&mut Interpreter, Value, Vec<Value>) -> Result<Valu
 #[derive(Clone, Debug)]
 pub struct RustNodeApiOptions {
     pub(crate) policy: NativeAddonPolicy,
+    native_addon_aliases: Vec<NativeAddonAlias>,
     native_prebuild_aliases: Vec<NativePrebuildAlias>,
     native_package_prebuilds: Vec<NativePackagePrebuild>,
     node_gyp_build_prebuilds_only: Option<bool>,
     node_gyp_build_exec_path: Option<PathBuf>,
     reported_node_version: ReportedNodeVersion,
     max_napi_version: u32,
+}
+
+#[derive(Clone, Debug)]
+struct NativeAddonAlias {
+    request: String,
+    addon: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -197,6 +204,7 @@ impl RustNodeApiOptions {
     pub fn with_policy(policy: NativeAddonPolicy) -> Self {
         Self {
             policy,
+            native_addon_aliases: Vec::new(),
             native_prebuild_aliases: Vec::new(),
             native_package_prebuilds: Vec::new(),
             node_gyp_build_prebuilds_only: None,
@@ -219,6 +227,24 @@ impl RustNodeApiOptions {
         self.policy = self
             .policy
             .allow_native_addon_with_sha256(path, expected_sha256);
+        self
+    }
+
+    /// Expose an already allowlisted `.node` binary through a bare guest
+    /// `require()` request. The target must have been added with
+    /// [`Self::allow_native_addon`] or
+    /// [`Self::allow_native_addon_with_sha256`]; the alias replaces any
+    /// JavaScript entry for that request, so guests load the addon without
+    /// executing package loader code. Only bare package names are accepted.
+    pub fn allow_native_addon_alias(
+        mut self,
+        request: impl Into<String>,
+        addon: impl Into<PathBuf>,
+    ) -> Self {
+        self.native_addon_aliases.push(NativeAddonAlias {
+            request: request.into(),
+            addon: addon.into(),
+        });
         self
     }
 
@@ -1305,6 +1331,9 @@ impl Interpreter {
                 }
                 None => loader.allow_native_addon(addon)?,
             };
+        }
+        for alias in &options.native_addon_aliases {
+            loader = loader.with_native_addon_alias(&alias.request, &alias.addon)?;
         }
         for alias in &options.native_prebuild_aliases {
             let addon = loader.resolve_node_api_prebuild(&alias.package_root)?;
