@@ -8160,7 +8160,7 @@ unsafe extern "C" fn api_get_node_version(
 }
 
 unsafe extern "C" fn api_get_uv_event_loop(env: NapiEnv, loop_result: *mut *mut c_void) -> i32 {
-    with_ffi_status(env, || {
+    let status = with_ffi_status(env, || {
         if loop_result.is_null() {
             return Err(NAPI_INVALID_ARG);
         }
@@ -8169,7 +8169,16 @@ unsafe extern "C" fn api_get_uv_event_loop(env: NapiEnv, loop_result: *mut *mut 
         // null output instead of fabricating an ABI-compatible-looking ptr.
         unsafe { loop_result.write(std::ptr::null_mut()) };
         Err(NAPI_GENERIC_FAILURE)
-    })
+    });
+    if status == NAPI_GENERIC_FAILURE
+        && let Ok(environment) = environment(env)
+    {
+        environment.last_error.set(napi_extended_error_info_with_message(
+            status,
+            b"napi_get_uv_event_loop is unsupported by the Rust Node-API backend: libuv is not embedded\0",
+        ));
+    }
+    status
 }
 
 unsafe extern "C" fn api_module_register(module: *mut c_void) {
@@ -10606,15 +10615,29 @@ static napi_value node_version_probe(napi_env env, napi_callback_info info) {
 
 static napi_value uv_loop_probe(napi_env env, napi_callback_info info) {
   struct uv_loop_s* loop = NULL;
+  const napi_extended_error_info* error_info = NULL;
   napi_status status;
-  napi_value result, field;
+  napi_status invalid_status;
+  napi_value result, field, error_message;
+  const char* message = "napi_get_uv_event_loop succeeded";
   (void)info;
+  invalid_status = napi_get_uv_event_loop(env, NULL);
   status = napi_get_uv_event_loop(env, &loop);
+  if (status != napi_ok) {
+    if (napi_get_last_error_info(env, &error_info) != napi_ok ||
+        error_info == NULL || error_info->error_message == NULL)
+      return NULL;
+    message = error_info->error_message;
+  }
   if (napi_create_object(env, &result) != napi_ok ||
       napi_create_int32(env, status, &field) != napi_ok ||
       napi_set_named_property(env, result, "status", field) != napi_ok ||
       napi_get_boolean(env, loop == NULL, &field) != napi_ok ||
-      napi_set_named_property(env, result, "isNull", field) != napi_ok)
+      napi_set_named_property(env, result, "isNull", field) != napi_ok ||
+      napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &error_message) != napi_ok ||
+      napi_set_named_property(env, result, "errorMessage", error_message) != napi_ok ||
+      napi_create_int32(env, invalid_status, &field) != napi_ok ||
+      napi_set_named_property(env, result, "invalidStatus", field) != napi_ok)
     return NULL;
   return result;
 }
@@ -10741,7 +10764,12 @@ module.exports = {
         );
         assert_eq!(
             vm_report["uvLoop"],
-            serde_json::json!({"status": NAPI_GENERIC_FAILURE, "isNull": true})
+            serde_json::json!({
+                "status": NAPI_GENERIC_FAILURE,
+                "isNull": true,
+                "errorMessage": "napi_get_uv_event_loop is unsupported by the Rust Node-API backend: libuv is not embedded",
+                "invalidStatus": NAPI_INVALID_ARG
+            })
         );
         assert_eq!(vm_report["propertyKeys"].as_array().unwrap().len(), 3);
         assert_eq!(

@@ -283,6 +283,8 @@ Both symbol-based `NAPI_MODULE` registration and the deprecated
 `napi_module_register` static-constructor path load through the same allowlisted
 CommonJS route. `napi_get_uv_event_loop` resolves at link time but returns
 `napi_generic_failure` and a null output because this host does not embed libuv.
+Its `napi_get_last_error_info` message identifies libuv as unavailable; invalid
+arguments continue to report `napi_invalid_arg`.
 The deprecated registration descriptor has no Node-API version field, so its
 single-module registration path is conservatively treated as v1. The stable
 `napi_fatal_exception` path uses the VM's existing external-event queue, offers
