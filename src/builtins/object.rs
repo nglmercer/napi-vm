@@ -563,7 +563,9 @@ fn object_to_string_tag(value: &Value) -> String {
             Some(BoxedPrimitive::String(_)) => "String".into(),
             Some(BoxedPrimitive::Symbol(_)) => "Symbol".into(),
             Some(BoxedPrimitive::BigInt(_)) => "BigInt".into(),
-            None => "Object".into(),
+            None => crate::builtins::collection_tag(value)
+                .unwrap_or("Object")
+                .into(),
         },
         Value::Array(_) => "Array".into(),
         Value::Function(_)

@@ -1,4 +1,5 @@
 import { test, expect } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { runCode } from "../index.js";
 
 // ---------------------------------------------------------------------------
@@ -87,8 +88,36 @@ test("a map has no JSON representation of its entries", () => {
   expect(runCode("JSON.stringify(new Map([['a', 1]]));")).toBe("{}");
 });
 
-test("a map renders with its size", () => {
-  expect(runCode("String(new Map([[1, 2]]));")).toBe("Map(1)");
+test("collection String tags match Node and Bun", () => {
+  const source = `JSON.stringify([
+    String(new Map([[1, 2]])),
+    String(new Set([1])),
+    String(new WeakMap()),
+    String(new WeakSet()),
+    Object.prototype.toString.call(new Map()),
+    String({ [Symbol.toStringTag]: 'Cache' }),
+  ])`;
+  const result = runCode(`${source};`);
+  const expected = JSON.stringify([
+    "[object Map]",
+    "[object Set]",
+    "[object WeakMap]",
+    "[object WeakSet]",
+    "[object Map]",
+    "[object Cache]",
+  ]);
+
+  expect(result).toBe(expected);
+  for (const runtime of ["node", "bun"]) {
+    const reference = spawnSync(
+      runtime,
+      ["-e", `process.stdout.write(${source})`],
+      { encoding: "utf8" },
+    );
+    if (reference.error?.code === "ENOENT") continue;
+    expect(reference.status).toBe(0);
+    expect(reference.stdout).toBe(result);
+  }
 });
 
 // --- Set --------------------------------------------------------------------

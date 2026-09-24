@@ -23,7 +23,7 @@ pub(crate) use promise::promise_method;
 
 pub use array::array_method;
 pub use bigint::bigint_method;
-pub use collections::{collection_entries_of, describe_collection};
+pub use collections::{collection_entries_of, collection_tag, describe_collection};
 pub use date::{date_member, iso_string};
 pub use error::error_to_string;
 pub use number::number_method;

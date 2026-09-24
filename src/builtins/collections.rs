@@ -101,6 +101,11 @@ fn kind_of(this: &Value) -> Option<Kind> {
     }
 }
 
+/// The ECMAScript `Object.prototype.toString` brand for guest collections.
+pub fn collection_tag(value: &Value) -> Option<&'static str> {
+    kind_of(value).map(Kind::tag)
+}
+
 fn require(this: &Value, method: &str) -> Result<Rc<ArrayCell>, VmErr> {
     entries_of(this).ok_or_else(|| {
         VmErr::Msg(format!(
@@ -380,8 +385,9 @@ pub fn collection_entries_of(value: &Value) -> Option<(&'static str, Vec<(Value,
     Some((kind.tag(), pairs))
 }
 
-/// How a collection renders: `Map(2)`, `Set(3)`. `None` for anything that is
-/// not one, so the formatter can fall through to its object handling.
+/// How a collection renders in the VM's inspection formatter: `Map(2)`,
+/// `Set(3)`. `None` for anything that is not one, so the formatter can fall
+/// through to its object handling.
 pub fn describe_collection(value: &Value) -> Option<String> {
     let kind = kind_of(value)?;
     let entries = entries_of(value)?;
