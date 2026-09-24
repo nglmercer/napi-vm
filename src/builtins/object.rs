@@ -536,13 +536,14 @@ fn object_is_prototype_of(
         return Ok(Value::Bool(false));
     }
     for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-        let Some(prototype) = interp.prototype_of(&current) else {
+        let prototype = interp.get_prototype_of(&current)?;
+        if matches!(prototype, Value::Null) {
             return Ok(Value::Bool(false));
-        };
+        }
         if crate::interpreter::strict_equals(&receiver, &prototype) {
             return Ok(Value::Bool(true));
         }
-        current = prototype.as_ref().clone();
+        current = prototype;
     }
     Err(crate::value::limit_err("Maximum prototype depth exceeded"))
 }
@@ -743,9 +744,7 @@ fn object_get_prototype(
     _: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let receiver = to_object_receiver(&this)?;
-    Ok(interp
-        .prototype_of(&receiver)
-        .map_or(Value::Null, |prototype| prototype.as_ref().clone()))
+    interp.get_prototype_of(&receiver)
 }
 
 fn object_set_prototype(
@@ -836,10 +835,7 @@ fn object_get_prototype_of(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(match interp.prototype_of(&v) {
-        Some(prototype) => prototype.as_ref().clone(),
-        None => Value::Null,
-    })
+    interp.get_prototype_of(&v)
 }
 
 fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

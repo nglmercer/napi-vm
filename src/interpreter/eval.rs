@@ -1618,7 +1618,7 @@ impl Interpreter {
                     let target = proxy.target.clone();
                     return match self.proxy_trap(&proxy, "has") {
                         Some(trap) => {
-                            let key = Value::String(self.property_key(&l)?);
+                            let key = self.proxy_property_key(&l)?;
                             let handler = proxy.handler.clone();
                             let result = self.call_this(&trap, handler, vec![target, key])?;
                             Ok(Value::Bool(result.is_truthy()))

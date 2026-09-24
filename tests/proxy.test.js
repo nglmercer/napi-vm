@@ -57,6 +57,41 @@ test("the deleteProperty trap intercepts delete", () => {
   ).toBe("{}");
 });
 
+test("property traps preserve symbol keys", () => {
+  const source = `
+    const key = Symbol('key');
+    const target = { [key]: 1 };
+    const seen = [];
+    const proxy = new Proxy(target, {
+      get(target, property) {
+        seen.push(property === key);
+        return Reflect.get(target, property);
+      },
+      set(target, property, value) {
+        seen.push(property === key);
+        return Reflect.set(target, property, value);
+      },
+      has(target, property) {
+        seen.push(property === key);
+        return Reflect.has(target, property);
+      },
+      deleteProperty(target, property) {
+        seen.push(property === key);
+        return Reflect.deleteProperty(target, property);
+      },
+    });
+    const initial = proxy[key];
+    proxy[key] = 2;
+    const present = key in proxy;
+    delete proxy[key];
+    JSON.stringify({ initial, present, seen });
+  `;
+
+  expect(runCode(source)).toBe(
+    '{"initial":1,"present":true,"seen":[true,true,true,true]}',
+  );
+});
+
 test("the ownKeys trap answers Object.keys", () => {
   expect(runCode("Object.keys(new Proxy({ a: 1 }, { ownKeys: () => ['x'] })).join();")).toBe("x");
 });

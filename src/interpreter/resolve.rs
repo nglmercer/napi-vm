@@ -381,8 +381,8 @@ impl Interpreter {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "has") {
                 let handler = proxy.handler.clone();
-                let result =
-                    self.call_this(&trap, handler, vec![target, Value::String(property)])?;
+                let trap_key = self.proxy_property_key(key)?;
+                let result = self.call_this(&trap, handler, vec![target, trap_key])?;
                 return Ok(result.is_truthy());
             }
             return self.has_property(&target, &Value::String(property));
@@ -405,7 +405,7 @@ impl Interpreter {
         if let Some(proxy) = o.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "get") {
-                let key = Value::String(self.property_key(p)?);
+                let key = self.proxy_property_key(p)?;
                 let handler = proxy.handler.clone();
                 return self.call_this(&trap, handler, vec![target, key, o.clone()]);
             }

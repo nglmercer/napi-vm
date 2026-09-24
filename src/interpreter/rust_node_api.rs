@@ -7698,11 +7698,14 @@ unsafe extern "C" fn api_instanceof(
         if !is_napi_function(&constructor) {
             return Err(NAPI_FUNCTION_EXPECTED);
         }
-        if napi_constructor_has_custom_has_instance(&constructor)? {
+        let proxy_in_prototype_chain = napi_prototype_chain_contains_proxy(&object)
+            || napi_prototype_chain_contains_proxy(&constructor);
+        if proxy_in_prototype_chain || napi_constructor_has_custom_has_instance(&constructor)? {
             if !has_guest_callback_dispatcher(&environment) {
-                // A custom @@hasInstance method can run guest code. Keep it
-                // on the interpreter's paused callback path; addon
-                // initialization and shutdown do not have that dispatcher.
+                // A custom @@hasInstance method or Proxy trap can run guest
+                // code. Keep it on the interpreter's paused callback path;
+                // addon initialization and shutdown do not have that
+                // dispatcher.
                 return Err(NAPI_GENERIC_FAILURE);
             }
             let value = run_napi_guest_operation(
@@ -7726,6 +7729,22 @@ unsafe extern "C" fn api_instanceof(
         unsafe { result.write(is_instance) };
         Ok(())
     })
+}
+
+fn napi_prototype_chain_contains_proxy(value: &Value) -> bool {
+    let mut current = value.clone();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        if matches!(current, Value::Proxy(_)) {
+            return true;
+        }
+        let Some(prototype) = current.proto_of() else {
+            return false;
+        };
+        current = prototype.as_ref().clone();
+    }
+    // Let the interpreter's ordinary instanceof path report a prototype
+    // depth or cycle error instead of silently using the direct fast path.
+    true
 }
 
 fn napi_constructor_has_custom_has_instance(constructor: &Value) -> Result<bool, i32> {
@@ -7777,32 +7796,8 @@ fn napi_guest_instanceof(
     constructor: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let symbol = crate::builtins::well_known("hasInstance")
-        .expect("Symbol.hasInstance is a well-known symbol");
-    let method = interpreter.get_prop_value(&constructor, &symbol)?;
-    if matches!(method, Value::Undefined | Value::Null) {
-        let value = args.first().cloned().unwrap_or(Value::Undefined);
-        if let Value::Function(function) = &constructor
-            && let Some(bound) = &function.bound
-        {
-            return napi_guest_instanceof(interpreter, bound.target.clone(), vec![value]);
-        }
-        let result = match &constructor {
-            Value::Class(class) => napi_class_instanceof(&value, class),
-            Value::Function(function) => napi_function_instanceof(&value, &constructor, function),
-            _ => Err(NAPI_GENERIC_FAILURE),
-        };
-        return result
-            .map(Value::Bool)
-            .map_err(|_| VmErr::Msg("Node-API instanceof is unsupported for this value".into()));
-    }
-    if !is_napi_function(&method) {
-        return Err(VmErr::Msg(
-            "TypeError: Symbol.hasInstance is not callable".into(),
-        ));
-    }
     let value = args.first().cloned().unwrap_or(Value::Undefined);
-    let result = interpreter.call_this(&method, constructor, vec![value])?;
+    let result = interpreter.instance_of(&value, &constructor)?;
     Ok(Value::Bool(interpreter.truthy(&result)))
 }
 
@@ -14360,6 +14355,40 @@ const ordinaryNames = Object.getOwnPropertyNames(Ordinary);
 const ordinaryNameDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'name');
 const ordinaryLengthDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'length');
 const ordinaryPrototypeDescriptor = Object.getOwnPropertyDescriptor(Ordinary, 'prototype');
+let proxyObjectGetPrototypeCalls = 0;
+const proxyOrdinary = new Proxy(ordinary, {
+  getPrototypeOf(target) {
+    proxyObjectGetPrototypeCalls++;
+    return Reflect.getPrototypeOf(target);
+  },
+});
+let proxyConstructorHasInstanceReads = 0;
+const proxyOrdinaryConstructor = new Proxy(Ordinary, {
+  get(target, key, receiver) {
+    if (key === Symbol.hasInstance) proxyConstructorHasInstanceReads++;
+    return Reflect.get(target, key, receiver);
+  },
+});
+let proxyConstructorMissingHasInstanceReads = 0;
+const proxyConstructorWithoutHasInstance = new Proxy(Ordinary, {
+  get(target, key, receiver) {
+    if (key === Symbol.hasInstance) {
+      proxyConstructorMissingHasInstanceReads++;
+      return undefined;
+    }
+    return Reflect.get(target, key, receiver);
+  },
+});
+const nonExtensibleProxyTarget = Object.preventExtensions({});
+const invalidGetPrototypeProxy = new Proxy(nonExtensibleProxyTarget, {
+  getPrototypeOf() { return {}; },
+});
+let invalidGetPrototypeTrapThrows = false;
+try {
+  Object.getPrototypeOf(invalidGetPrototypeProxy);
+} catch (error) {
+  invalidGetPrototypeTrapThrows = error.name === 'TypeError';
+}
 module.exports = {
   matched: addon.instanceofProbe({marked: true}, Marked),
   rejected: addon.instanceofProbe({marked: false}, Marked),
@@ -14387,6 +14416,20 @@ module.exports = {
   boundOwnGuestSymbolHasInstance: ({own: true}) instanceof BoundOwnMarkedFunction,
   boundOwnSymbolReceiverWasBound: boundOwnReceiverWasBound,
   ordinaryIsInstance: addon.instanceofProbe(ordinary, Ordinary),
+  proxyObjectIsInstance: addon.instanceofProbe(proxyOrdinary, Ordinary),
+  proxyObjectPrototypeMatches:
+    Object.getPrototypeOf(proxyOrdinary) === Ordinary.prototype,
+  proxyObjectIsPrototypeOf: Ordinary.prototype.isPrototypeOf(proxyOrdinary),
+  proxyConstructorIsInstance:
+    addon.instanceofProbe(ordinary, proxyOrdinaryConstructor),
+  proxyConstructorWithoutHasInstanceIsInstance:
+    addon.instanceofProbe(ordinary, proxyConstructorWithoutHasInstance),
+  invalidGetPrototypeTrapThrows,
+  proxyTrapCalls: {
+    objectGetPrototype: proxyObjectGetPrototypeCalls,
+    constructorHasInstance: proxyConstructorHasInstanceReads,
+    constructorMissingHasInstance: proxyConstructorMissingHasInstanceReads,
+  },
   ordinaryGuestInstanceof: ordinary instanceof Ordinary,
   boundOrdinaryGuestInstanceof: boundOrdinary instanceof BoundOrdinary,
   boundOrdinaryTargetInstanceof: boundOrdinary instanceof Ordinary,
@@ -14938,48 +14981,64 @@ module.exports = {
                 "boundArrowConstructThrows": true
             })
         );
-        assert_eq!(
-            expected_vm_result,
-            serde_json::json!({
-                "matched": true,
-                "rejected": false,
-                "inherited": true,
-                "guestMatched": true,
-                "guestInherited": true,
-                "receiverWasConstructor": true,
-                "functionMatched": true,
-                "functionRejected": false,
-                "functionInherited": true,
-                "guestFunctionMatched": true,
-                "guestFunctionInherited": true,
-                "functionReceiverWasConstructor": true,
-                "ordinaryIsInstance": true,
-                "ordinaryGuestInstanceof": true,
-                "ordinaryIsObject": true,
-                "ordinaryIsFunction": true,
-                "ordinaryPrototypeIsObject": true,
-                "ordinaryPrototypeShared": true,
-                "ordinaryConstructorShared": true,
-                "ordinaryDefaultFunctionPrototype": true,
-                "functionConstructorPrototype": true,
-                "functionPrototypeIsCallable": true,
-                "functionPrototypeObjectPrototype": true,
-                "functionPrototypeConstructorShared": true,
-                "functionCallIsInherited": true,
-                "functionApplyIsInherited": true,
-                "functionApplyUsesReceiverAndArguments": true,
-                "functionApplyReadsArrayLike": true,
-                "functionPrototypeNapiIdentity": true,
-                "functionPrototypeObjectNapiIdentity": true,
-                "functionConstructorNapiIdentity": true,
-                "ordinaryName": "Ordinary",
-                "ordinaryLength": 1,
-                "ordinaryStandardProperties": true,
-                "ordinaryDescriptors": true,
-                "nameDeleted": true,
-                "ordinaryValue": 17
-            })
-        );
+        let expected_proxy_trap_calls = serde_json::json!({
+            "objectGetPrototype": 3,
+            "constructorHasInstance": 1,
+            "constructorMissingHasInstance": 1
+        });
+        let expected_proxy_results = serde_json::json!({
+            "proxyObjectIsInstance": true,
+            "proxyObjectPrototypeMatches": true,
+            "proxyObjectIsPrototypeOf": true,
+            "proxyConstructorIsInstance": true,
+            "proxyConstructorWithoutHasInstanceIsInstance": true,
+            "invalidGetPrototypeTrapThrows": true,
+            "proxyTrapCalls": expected_proxy_trap_calls
+        });
+        let mut expected_compatibility_result = serde_json::json!({
+            "matched": true,
+            "rejected": false,
+            "inherited": true,
+            "guestMatched": true,
+            "guestInherited": true,
+            "receiverWasConstructor": true,
+            "functionMatched": true,
+            "functionRejected": false,
+            "functionInherited": true,
+            "guestFunctionMatched": true,
+            "guestFunctionInherited": true,
+            "functionReceiverWasConstructor": true,
+            "ordinaryIsInstance": true,
+            "ordinaryGuestInstanceof": true,
+            "ordinaryIsObject": true,
+            "ordinaryIsFunction": true,
+            "ordinaryPrototypeIsObject": true,
+            "ordinaryPrototypeShared": true,
+            "ordinaryConstructorShared": true,
+            "ordinaryDefaultFunctionPrototype": true,
+            "functionConstructorPrototype": true,
+            "functionPrototypeIsCallable": true,
+            "functionPrototypeObjectPrototype": true,
+            "functionPrototypeConstructorShared": true,
+            "functionCallIsInherited": true,
+            "functionApplyIsInherited": true,
+            "functionApplyUsesReceiverAndArguments": true,
+            "functionApplyReadsArrayLike": true,
+            "functionPrototypeNapiIdentity": true,
+            "functionPrototypeObjectNapiIdentity": true,
+            "functionConstructorNapiIdentity": true,
+            "ordinaryName": "Ordinary",
+            "ordinaryLength": 1,
+            "ordinaryStandardProperties": true,
+            "ordinaryDescriptors": true,
+            "nameDeleted": true,
+            "ordinaryValue": 17
+        });
+        expected_compatibility_result
+            .as_object_mut()
+            .unwrap()
+            .extend(expected_proxy_results.as_object().unwrap().clone());
+        assert_eq!(expected_vm_result, expected_compatibility_result);
         let custom_instance_runner =
             "process.stdout.write(JSON.stringify(require('./instanceof.cjs')));";
         for runtime in ["node", "bun"] {

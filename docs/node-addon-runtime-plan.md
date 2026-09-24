@@ -113,12 +113,20 @@ use a shared `Promise.prototype` with the standard constructor and non-enumerabl
 `Date.prototype` with the implemented date methods and standard non-enumerable
 descriptors. Queries for values whose built-in prototype is not represented
 (including proxies) return a generic Node-API failure.
+Guest JavaScript has separate prototype behavior: `Object.getPrototypeOf`,
+`Object.prototype.__proto__`, `Object.prototype.isPrototypeOf`, and
+`instanceof` invoke a Proxy's `getPrototypeOf` trap and enforce its
+non-extensible-target invariant. `napi_get_prototype` still reports a generic
+failure for Proxy values because that Node-API operation has not yet been
+routed through guest callback dispatch.
 `napi_instanceof` handles VM class constructors and ordinary function
 constructors, inherited prototypes, VM error classes, and the shared
 `Function.prototype[Symbol.hasInstance]` intrinsic. Guest-defined
-`Symbol.hasInstance` methods run through the active paused-callback dispatcher;
-they receive the constructor as `this`, and their results follow JavaScript
-truthiness. Ordinary functions share a lazily created own
+`Symbol.hasInstance` methods and Proxy traps on constructor or prototype chains
+run through the active paused-callback dispatcher; they receive the expected
+receiver and their results follow JavaScript truthiness. Such callback
+re-entry is unavailable during addon initialization or shutdown. Ordinary
+functions share a lazily created own
 `prototype` object with constructed instances and inherit from a shared
 callable `Function.prototype`; function `name`, `length`, and `prototype`
 descriptors participate in guest and Node-API property reflection. The current

@@ -187,17 +187,18 @@ impl Interpreter {
             return Ok(Value::Bool(false));
         }
 
-        let mut current = self.prototype_of(object);
+        let mut current = self.get_prototype_of(object)?;
         let mut visited = std::collections::HashSet::new();
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-            let Some(link) = current else {
+            if matches!(current, Value::Null) {
                 return Ok(Value::Bool(false));
-            };
-            if crate::interpreter::strict_equals(link.as_ref(), &prototype) {
+            }
+            if crate::interpreter::strict_equals(&current, &prototype) {
                 return Ok(Value::Bool(true));
             }
-            let identity = match link.as_ref() {
+            let identity = match &current {
                 Value::Object { props } => Rc::as_ptr(props) as usize,
+                Value::Array(array) => Rc::as_ptr(array) as usize,
                 Value::Class(class) => Rc::as_ptr(&class.statics) as usize,
                 Value::Function(function) => Rc::as_ptr(&function.properties) as usize,
                 Value::Proxy(proxy) => Rc::as_ptr(proxy) as usize,
@@ -208,7 +209,7 @@ impl Interpreter {
                     "Maximum prototype chain depth exceeded",
                 ));
             }
-            current = self.prototype_of(link.as_ref());
+            current = self.get_prototype_of(&current)?;
         }
         Err(crate::value::limit_err(
             "Maximum prototype chain depth exceeded",
@@ -354,7 +355,7 @@ impl Interpreter {
         if let Some(proxy) = obj.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "deleteProperty") {
-                let name = Value::String(self.property_key(key)?);
+                let name = self.proxy_property_key(key)?;
                 let handler = proxy.handler.clone();
                 let result = self.call_this(&trap, handler, vec![target, name])?;
                 return Ok(Value::Bool(result.is_truthy()));
@@ -648,7 +649,7 @@ impl Interpreter {
         if let Some(proxy) = obj.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "set") {
-                let key = Value::String(self.property_key(prop)?);
+                let key = self.proxy_property_key(prop)?;
                 let handler = proxy.handler.clone();
                 self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
                 return Ok(());

@@ -281,6 +281,14 @@ and follows Node's `napi_is_detached_arraybuffer` result for non-ArrayBuffer
 values (`napi_ok` with `false`). Bun 1.4.0 returns
 `napi_arraybuffer_expected` for that same input; the differential fixture keeps
 this runtime difference explicit while checking all shared behavior.
+Guest `Proxy` values support `getPrototypeOf` traps. `Object.getPrototypeOf`,
+`Object.prototype.__proto__`, `Object.prototype.isPrototypeOf`, and `instanceof`
+follow those traps and enforce the non-extensible-target invariant.
+`napi_instanceof` uses the same guest `instanceof` behavior, including custom
+`Symbol.hasInstance` methods and Proxy traps on constructor and prototype
+chains. Traps that call guest code require an active paused-callback
+dispatcher; re-entry is unavailable during addon initialization and shutdown.
+A compiled addon fixture compares these cases with Node and Bun.
 The selected Node-API v8 slice adds object type tags, freeze/seal for ordinary
 guest objects, arrays, functions, and class constructors, and asynchronous
 cleanup hooks. Type tags are shared across addon environments and remain
