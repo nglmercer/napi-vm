@@ -937,14 +937,14 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             )
             .unwrap();
         let result = interpreter
-            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .eval_source("JSON.stringify(await require('./main.cjs'));")
             .unwrap();
         let Value::String(vm_json) = &result else {
             panic!("napi-rs fixture did not return JSON text: {result:?}");
         };
         let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
 
-        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        let runner = "(async () => { process.stdout.write(JSON.stringify(await require('./main.cjs'))); })().catch(error => { console.error(error); process.exitCode = 1; });";
         if let Ok(node_version) = Command::new("node").arg("--version").output()
             && node_version.status.success()
         {

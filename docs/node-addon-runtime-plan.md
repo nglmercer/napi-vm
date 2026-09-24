@@ -407,6 +407,10 @@ not return success with a partial or fabricated result.
 - [x] Implement `napi_async_work` using a bounded host worker pool. Run execute
   work off the interpreter thread and completion callbacks as queued VM
   external events.
+- [x] Accept the `undefined` async resource name emitted by napi-rs 3.12
+  `AsyncTask`; it is diagnostic metadata for `async_hooks`, which this runtime
+  does not expose. A compiled Rust napi-rs fixture verifies the behavior
+  against Node and Bun.
 - [x] Implement `napi_threadsafe_function` with queue limits, acquire/release
   accounting, abort/close behavior, and delivery on the VM owner thread.
 - [x] Deliver async-work completion and deferred Promise settlement through the
@@ -463,6 +467,11 @@ not return success with a partial or fabricated result.
 - [x] A Node-API prebuild fixture uses the same package wrapper source under
   Node, Bun, and napi-vm. The wrapper loads through `node-gyp-build(dir)`, and
   `.path()` / `.resolve()` return the selected trusted prebuild.
+- [x] A compiled napi-rs fixture uses identical CommonJS source under Node,
+  Bun, and napi-vm to compare generated functions, a class with accessors,
+  Buffer conversion, thrown errors, and an `AsyncTask` Promise. The Rust plugin
+  host also loads an allowlisted napi-rs `.node` file through plain
+  `require("./fixture.node")` and exercises the same synchronous exports.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.

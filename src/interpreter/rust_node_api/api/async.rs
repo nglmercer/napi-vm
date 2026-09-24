@@ -91,7 +91,12 @@ pub(super) unsafe extern "C" fn api_create_async_work(
             environment.handles.borrow().get(async_resource)?;
         }
         let resource_name = environment.handles.borrow().get(async_resource_name)?;
-        if !matches!(resource_name, Value::String(_)) {
+        // Some Node-API consumers, including napi-rs AsyncTask, pass
+        // `undefined` because the resource name is only used for async_hooks
+        // diagnostics. Node and Bun accept that form. napi-vm does not expose
+        // async_hooks, so retain validation for other values while allowing
+        // this widely used no-name case.
+        if !matches!(resource_name, Value::String(_) | Value::Undefined) {
             return Err(NAPI_STRING_EXPECTED);
         }
         let mut works = environment.async_works.borrow_mut();

@@ -2748,4 +2748,106 @@ export default { onLoad() {
         );
         host.unload("native-plugin").unwrap();
     }
+
+    #[cfg(all(
+        feature = "node-api-host",
+        target_os = "linux",
+        any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    #[test]
+    fn plugin_host_loads_rust_authored_napi_rs_addon() {
+        use sha2::{Digest, Sha256};
+
+        let dir = TestPluginDir::new("napi-rs-plugin");
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/node-api/napi-rs/Cargo.toml");
+        let target_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/node-api-fixtures/napi-rs");
+        let temp_dir = target_dir.join("tmp");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let built = Command::new("cargo")
+            .args(["build", "--offline", "--release", "--manifest-path"])
+            .arg(&manifest)
+            .arg("--target-dir")
+            .arg(&target_dir)
+            .env("TMPDIR", &temp_dir)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "napi-rs plugin fixture build failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+        let compiled_addon = target_dir
+            .join("release")
+            .join("libnapi_vm_napi_rs_fixture.so");
+        assert!(compiled_addon.is_file(), "napi-rs fixture was not built");
+        let addon = dir.0.join("fixture.node");
+        fs::copy(&compiled_addon, &addon).unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        dir.write("data.txt", "checked");
+        dir.write("cache/.keep", "");
+        dir.write(
+            "main.mjs",
+            r#"
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const addon = require("./fixture.node");
+export default { onLoad() {
+  const counter = new addon.Counter(40);
+  let failure;
+  try { addon.fail(); }
+  catch (error) { failure = { name: error.name, message: error.message }; }
+  const result = {
+    sum: addon.add(19, 23),
+    text: addon.concatenate("rust", "-napi"),
+    counter: { initial: counter.value, incremented: counter.increment(), value: counter.value },
+    bytes: Array.from(addon.reverseBytes(Buffer.from([1, 2, 3, 4]))),
+    failure,
+    file: readFileSync("./data.txt", "utf8"),
+  };
+  writeFileSync(join("./cache", "napi-rs.json"), JSON.stringify(result));
+  return result;
+} };
+"#,
+        );
+        dir.manifest(
+            "napi-rs-plugin",
+            "main.mjs",
+            r#"{"fs":{"read":"data.txt","write":"cache/**"},"path":true}"#,
+        );
+
+        let policy = RustPluginPolicy::default()
+            .grant_fs_read("data.txt")
+            .grant_fs_write("cache/**")
+            .grant_path();
+        let mut host = RustPluginHost::new(RustPluginHostOptions {
+            policy,
+            ..RustPluginHostOptions::default()
+        });
+        host.configure_napi_addons(
+            "napi-rs-plugin",
+            RustPluginNapiOptions::default().allow_addon_with_sha256(&addon, digest),
+        )
+        .unwrap();
+        let plugin = host.load(&dir.0).unwrap();
+        let expected = serde_json::json!({
+            "sum": 42,
+            "text": "rust-napi",
+            "counter": { "initial": 40, "incremented": 41, "value": 41 },
+            "bytes": [4, 3, 2, 1],
+            "failure": { "name": "Error", "message": "fixture failure" },
+            "file": "checked"
+        });
+        assert_eq!(plugin.load_result, Some(expected.clone()));
+        assert_eq!(
+            serde_json::from_str::<JsonValue>(
+                &fs::read_to_string(dir.0.join("cache/napi-rs.json")).unwrap()
+            )
+            .unwrap(),
+            expected
+        );
+        host.unload("napi-rs-plugin").unwrap();
+    }
 }
