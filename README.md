@@ -210,10 +210,24 @@ runtime.enable_rust_node_api_addons(
 ```
 
 The Rust host provides the common `node-gyp-build(dir)`, `.path(dir)`, and
-`.resolve(dir)` calls. The selected `.node` file still passes through the
-configured root and digest allowlist.
+`.resolve(dir)` calls, plus the package's `parseTags`, `matchTags`,
+`compareTags`, `parseTuple`, `matchTuple`, and `compareTuples` helpers. Package
+selection honors `PREBUILDS_ONLY`, the package-specific `<NAME>_PREBUILD`
+environment variable (package name uppercased with hyphens changed to
+underscores), and the nearby-prebuild fallback based on the embedding
+application’s executable path. Rust hosts can override the first and last
+settings with `node_gyp_build_prebuilds_only()` and
+`node_gyp_build_exec_path()` on `RustNodeApiOptions`.
+The package prebuild override and executable-neighbor fallback must remain
+inside the configured CommonJS roots.
 
-The resolver checks `build/Release`, `build/Debug`, and
+The Rust backend loads Node-API-compatible `.node` files only. It rejects
+Node-ABI-only files and libuv-tagged builds because this backend does not
+provide V8, NAN, or libuv ABI compatibility. The selected `.node` file still
+passes through the configured root and digest allowlist.
+
+Unless `PREBUILDS_ONLY` is set, the resolver checks `build/Release` and
+`build/Debug` before
 `prebuilds/<platform>-<arch>`. Within `prebuilds`, it selects N-API-tagged
 files for the current platform and architecture. On Linux it also matches
 `glibc` or `musl`; it honors `ARM_VERSION` where an arm-version tag is present.

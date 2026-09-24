@@ -121,6 +121,8 @@ pub struct RustNodeApiOptions {
     allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
     native_prebuild_aliases: Vec<NativePrebuildAlias>,
     native_package_prebuilds: Vec<NativePackagePrebuild>,
+    node_gyp_build_prebuilds_only: Option<bool>,
+    node_gyp_build_exec_path: Option<PathBuf>,
     entry: Option<PathBuf>,
     reported_node_version: ReportedNodeVersion,
     max_napi_version: u32,
@@ -177,6 +179,8 @@ impl RustNodeApiOptions {
             allowed_addons: Vec::new(),
             native_prebuild_aliases: Vec::new(),
             native_package_prebuilds: Vec::new(),
+            node_gyp_build_prebuilds_only: None,
+            node_gyp_build_exec_path: None,
             entry: None,
             reported_node_version: ReportedNodeVersion::NAPI_VM,
             max_napi_version: MAX_NODE_API_VERSION as u32,
@@ -256,6 +260,21 @@ impl RustNodeApiOptions {
             package_root: package_root.into(),
             expected_sha256: Some(expected_sha256),
         });
+        self
+    }
+
+    /// Restrict package prebuild lookup to `prebuilds/<platform>-<arch>`,
+    /// following the `PREBUILDS_ONLY` behavior from `node-gyp-build`. If this
+    /// option is unset, the host process environment variable is used.
+    pub fn node_gyp_build_prebuilds_only(mut self, enabled: bool) -> Self {
+        self.node_gyp_build_prebuilds_only = Some(enabled);
+        self
+    }
+
+    /// Set the executable path used by the nearby-prebuild fallback in
+    /// `node-gyp-build`. The default is the Rust embedding process executable.
+    pub fn node_gyp_build_exec_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.node_gyp_build_exec_path = Some(path.into());
         self
     }
 
@@ -9774,6 +9793,12 @@ impl Interpreter {
             )));
         }
         let mut loader = FileCommonJsLoader::new(options.roots.iter())?;
+        if let Some(enabled) = options.node_gyp_build_prebuilds_only {
+            loader = loader.with_node_gyp_build_prebuilds_only(enabled);
+        }
+        if let Some(exec_path) = &options.node_gyp_build_exec_path {
+            loader = loader.with_node_gyp_build_exec_path(exec_path.clone());
+        }
         for (addon, expected_sha256) in &options.allowed_addons {
             loader = match expected_sha256 {
                 Some(expected_sha256) => {

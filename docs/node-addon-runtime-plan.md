@@ -415,9 +415,12 @@ not return success with a partial or fabricated result.
 - [x] Provide the common `node-gyp-build(dir)`, `.path(dir)`, and `.resolve(dir)`
   calls to Rust Node-API package wrappers while preserving their JavaScript
   entry point and the binary allowlist.
-- [ ] Complete the `node-gyp-build` helper surface, including `parseTags` /
-  `matchTags`, `EXEC_PATH`, `PREBUILDS_ONLY`, and runtime-specific Node ABI/uv
-  selection behavior.
+- [x] Complete the compatible `node-gyp-build` helper surface: expose
+  `parseTags`, `matchTags`, `compareTags`, `parseTuple`, `matchTuple`, and
+  `compareTuples`; honor `PREBUILDS_ONLY`, package-specific `<NAME>_PREBUILD`,
+  and the nearby-prebuild fallback based on the embedding executable path.
+  The Rust backend reports Node-ABI-only and libuv-tagged candidates as
+  incompatible because it implements Node-API rather than those runtime ABIs.
 - Keep native path resolution in the Rust package loader. Support common
   package export conditions and platform prebuild layouts without running
   package install scripts.

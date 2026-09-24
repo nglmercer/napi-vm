@@ -143,6 +143,8 @@ pub struct FileCommonJsLoader {
     allowed_native_addons: HashMap<PathBuf, [u8; 32]>,
     native_addon_aliases: HashMap<String, PathBuf>,
     node_gyp_build_compat: bool,
+    node_gyp_build_prebuilds_only: Option<bool>,
+    node_gyp_build_exec_path: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for FileCommonJsLoader {
@@ -153,6 +155,11 @@ impl std::fmt::Debug for FileCommonJsLoader {
             .field("allowed_native_addons", &self.allowed_native_addons)
             .field("native_addon_aliases", &self.native_addon_aliases)
             .field("node_gyp_build_compat", &self.node_gyp_build_compat)
+            .field(
+                "node_gyp_build_prebuilds_only",
+                &self.node_gyp_build_prebuilds_only,
+            )
+            .field("node_gyp_build_exec_path", &self.node_gyp_build_exec_path)
             .finish()
     }
 }
@@ -194,6 +201,8 @@ impl FileCommonJsLoader {
             allowed_native_addons: HashMap::new(),
             native_addon_aliases: HashMap::new(),
             node_gyp_build_compat: false,
+            node_gyp_build_prebuilds_only: None,
+            node_gyp_build_exec_path: None,
         })
     }
 
@@ -209,6 +218,21 @@ impl FileCommonJsLoader {
     /// Binary loading still passes through the normal root and digest policy.
     pub fn with_node_gyp_build_compat(mut self) -> Self {
         self.node_gyp_build_compat = true;
+        self
+    }
+
+    /// Match `PREBUILDS_ONLY` when choosing a package prebuild. When unset,
+    /// the loader follows the host process environment variable.
+    pub fn with_node_gyp_build_prebuilds_only(mut self, enabled: bool) -> Self {
+        self.node_gyp_build_prebuilds_only = Some(enabled);
+        self
+    }
+
+    /// Set the executable path used for `node-gyp-build`'s nearby-prebuild
+    /// fallback. By default, the embedding process's current executable is
+    /// used, matching `process.execPath` in a runtime embedded in that app.
+    pub fn with_node_gyp_build_exec_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.node_gyp_build_exec_path = Some(path.into());
         self
     }
 
@@ -297,14 +321,34 @@ impl FileCommonJsLoader {
                 package_root.display()
             )));
         }
-        let candidate = select_node_api_prebuild(&package_root, &NodeApiPrebuildTarget::current())
+        let package_root = self.node_gyp_build_package_root(&package_root)?;
+        let target = NodeApiPrebuildTarget::current();
+        let prebuilds_only = self.node_gyp_build_prebuilds_only.unwrap_or_else(|| {
+            std::env::var("PREBUILDS_ONLY").is_ok_and(|value| !value.is_empty())
+        });
+        let nearby_root = self
+            .node_gyp_build_exec_path
+            .clone()
+            .or_else(|| std::env::current_exe().ok())
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        let candidate = select_node_api_prebuild(&package_root, &target, prebuilds_only)
+            .or_else(|| {
+                nearby_root
+                    .as_deref()
+                    .filter(|root| *root != package_root.as_path())
+                    .and_then(|root| select_node_api_prebuild(root, &target, prebuilds_only))
+            })
             .ok_or_else(|| {
-                let target = NodeApiPrebuildTarget::current();
                 VmErr::Msg(format!(
-                    "no compatible Node-API prebuild found for {}-{} in {}",
+                    "no compatible Node-API prebuild found for {}-{} in {}{}",
                     target.platform,
                     target.architecture,
-                    package_root.display()
+                    package_root.display(),
+                    nearby_root
+                        .as_deref()
+                        .filter(|root| *root != package_root.as_path())
+                        .map(|root| format!(" or {}", root.display()))
+                        .unwrap_or_default()
                 ))
             })?;
         let candidate = self.canonical_file(&candidate)?.ok_or_else(|| {
@@ -314,6 +358,50 @@ impl FileCommonJsLoader {
             ))
         })?;
         self.resolved_file(candidate)
+    }
+
+    fn node_gyp_build_package_root(&self, package_root: &Path) -> Result<PathBuf, VmErr> {
+        let manifest = fs::read(package_root.join("package.json"));
+        let package_name = manifest
+            .ok()
+            .and_then(|source| serde_json::from_slice::<JsonValue>(&source).ok())
+            .and_then(|manifest| manifest.get("name")?.as_str().map(str::to_owned));
+        let override_path = package_name
+            .as_deref()
+            .map(node_gyp_build_prebuild_override_variable)
+            .and_then(std::env::var_os)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        self.node_gyp_build_package_root_with_override(
+            package_root,
+            package_name.as_deref(),
+            override_path,
+        )
+    }
+
+    fn node_gyp_build_package_root_with_override(
+        &self,
+        package_root: &Path,
+        package_name: Option<&str>,
+        override_path: Option<PathBuf>,
+    ) -> Result<PathBuf, VmErr> {
+        let Some(override_path) = override_path else {
+            return Ok(package_root.to_path_buf());
+        };
+        let override_path = fs::canonicalize(&override_path).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve node-gyp-build prebuild override for {}: {error}",
+                package_name.unwrap_or("unknown package")
+            ))
+        })?;
+        if !override_path.is_dir() || !self.in_roots(&override_path) {
+            return Err(VmErr::Msg(format!(
+                "node-gyp-build prebuild override for {} is not a directory inside configured roots: {}",
+                package_name.unwrap_or("unknown package"),
+                override_path.display()
+            )));
+        }
+        Ok(override_path)
     }
 
     /// Map a bare package request to a prebuild already selected and added to
@@ -739,18 +827,24 @@ impl NodeApiPrebuildTarget {
         }
         .to_string();
         let libc = if platform == "linux" {
-            Some(std::env::var("LIBC").unwrap_or_else(|_| {
-                if cfg!(target_env = "musl") {
-                    "musl".into()
-                } else {
-                    "glibc".into()
-                }
-            }))
+            Some(
+                std::env::var("LIBC")
+                    .ok()
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| {
+                        if cfg!(target_env = "musl") || Path::new("/etc/alpine-release").is_file() {
+                            "musl".into()
+                        } else {
+                            "glibc".into()
+                        }
+                    }),
+            )
         } else {
             None
         };
         let armv = std::env::var("ARM_VERSION")
             .ok()
+            .filter(|value| !value.is_empty())
             .or_else(|| (architecture == "arm64").then(|| "8".into()));
         Self {
             platform,
@@ -768,7 +862,17 @@ struct PrebuildTuple {
     architectures: Vec<String>,
 }
 
+fn node_gyp_build_prebuild_override_variable(package_name: &str) -> String {
+    format!(
+        "{}_PREBUILD",
+        package_name.to_ascii_uppercase().replace('-', "_")
+    )
+}
+
 fn parse_prebuild_tuple(name: &str) -> Option<PrebuildTuple> {
+    if name.split('-').count() != 2 {
+        return None;
+    }
     let (platform, architectures) = name.split_once('-')?;
     let architectures = architectures
         .split('+')
@@ -787,10 +891,12 @@ fn parse_prebuild_tuple(name: &str) -> Option<PrebuildTuple> {
 
 #[derive(Default)]
 struct PrebuildTags {
+    file: String,
+    field_order: Vec<String>,
     runtime: Option<String>,
     napi: bool,
-    abi: bool,
-    uv: bool,
+    abi: Option<String>,
+    uv: Option<String>,
     libc: Option<String>,
     armv: Option<String>,
     specificity: usize,
@@ -798,16 +904,40 @@ struct PrebuildTags {
 
 fn parse_prebuild_tags(filename: &str) -> Option<PrebuildTags> {
     let stem = filename.strip_suffix(".node")?;
-    let mut tags = PrebuildTags::default();
+    let mut tags = PrebuildTags {
+        file: filename.to_string(),
+        ..PrebuildTags::default()
+    };
     for tag in stem.split('.') {
-        match tag {
-            "node" | "electron" | "node-webkit" => tags.runtime = Some(tag.to_string()),
-            "napi" => tags.napi = true,
-            "glibc" | "musl" => tags.libc = Some(tag.to_string()),
-            _ if tag.starts_with("abi") => tags.abi = true,
-            _ if tag.starts_with("uv") => tags.uv = true,
-            _ if tag.starts_with("armv") => tags.armv = Some(tag[4..].to_string()),
+        let field = match tag {
+            "node" | "electron" | "node-webkit" => {
+                tags.runtime = Some(tag.to_string());
+                "runtime"
+            }
+            "napi" => {
+                tags.napi = true;
+                "napi"
+            }
+            "glibc" | "musl" => {
+                tags.libc = Some(tag.to_string());
+                "libc"
+            }
+            _ if tag.starts_with("abi") => {
+                tags.abi = Some(tag[3..].to_string());
+                "abi"
+            }
+            _ if tag.starts_with("uv") => {
+                tags.uv = Some(tag[2..].to_string());
+                "uv"
+            }
+            _ if tag.starts_with("armv") => {
+                tags.armv = Some(tag[4..].to_string());
+                "armv"
+            }
             _ => continue,
+        };
+        if !tags.field_order.iter().any(|existing| existing == field) {
+            tags.field_order.push(field.to_string());
         }
         tags.specificity += 1;
     }
@@ -817,11 +947,14 @@ fn parse_prebuild_tags(filename: &str) -> Option<PrebuildTags> {
 fn select_node_api_prebuild(
     package_root: &Path,
     target: &NodeApiPrebuildTarget,
+    prebuilds_only: bool,
 ) -> Option<PathBuf> {
-    for build_dir in ["build/Release", "build/Debug"] {
-        let mut candidates = read_node_addon_files(&package_root.join(build_dir));
-        if let Some(candidate) = candidates.drain(..).next() {
-            return Some(candidate);
+    if !prebuilds_only {
+        for build_dir in ["build/Release", "build/Debug"] {
+            let mut candidates = read_node_addon_files(&package_root.join(build_dir));
+            if let Some(candidate) = candidates.drain(..).next() {
+                return Some(candidate);
+            }
         }
     }
 
@@ -855,8 +988,7 @@ fn select_node_api_prebuild(
             let filename = path.file_name()?.to_str()?;
             let tags = parse_prebuild_tags(filename)?;
             if !tags.napi
-                || tags.abi
-                || tags.uv
+                || tags.uv.as_deref().is_some_and(|uv| !uv.is_empty())
                 || tags
                     .runtime
                     .as_deref()
@@ -879,8 +1011,11 @@ fn select_node_api_prebuild(
     candidates.sort_by(|(left_path, left_tags), (right_path, right_tags)| {
         let left_runtime = usize::from(left_tags.runtime.as_deref() == Some("node"));
         let right_runtime = usize::from(right_tags.runtime.as_deref() == Some("node"));
+        let left_abi = usize::from(left_tags.abi.as_deref().is_some_and(|abi| !abi.is_empty()));
+        let right_abi = usize::from(right_tags.abi.as_deref().is_some_and(|abi| !abi.is_empty()));
         right_runtime
             .cmp(&left_runtime)
+            .then_with(|| right_abi.cmp(&left_abi))
             .then_with(|| right_tags.specificity.cmp(&left_tags.specificity))
             .then_with(|| left_path.cmp(right_path))
     });
@@ -1657,6 +1792,15 @@ fn make_node_gyp_build(interp: &mut crate::interpreter::Interpreter) -> Result<V
     const LOAD_SOURCE: &str =
         "(function nodeGypBuild(directory) { return __napi_vm_node_gyp_build_load(directory); })";
     const RESOLVE_SOURCE: &str = "(function nodeGypBuildResolve(directory) { return __napi_vm_node_gyp_build_resolve(directory); })";
+    const PARSE_TAGS_SOURCE: &str =
+        "(function parseTags(file) { return __napi_vm_node_gyp_build_parse_tags(file); })";
+    const MATCH_TAGS_SOURCE: &str = "(function matchTags(runtime, abi) { return function match(tags) { return __napi_vm_node_gyp_build_match_tags(runtime, abi, tags); }; })";
+    const COMPARE_TAGS_SOURCE: &str = "(function compareTags(runtime) { return function compare(a, b) { return __napi_vm_node_gyp_build_compare_tags(runtime, a, b); }; })";
+    const PARSE_TUPLE_SOURCE: &str =
+        "(function parseTuple(name) { return __napi_vm_node_gyp_build_parse_tuple(name); })";
+    const MATCH_TUPLE_SOURCE: &str = "(function matchTuple(platform, architecture) { return function match(tuple) { return __napi_vm_node_gyp_build_match_tuple(platform, architecture, tuple); }; })";
+    const COMPARE_TUPLES_SOURCE: &str =
+        "(function compareTuples(a, b) { return __napi_vm_node_gyp_build_compare_tuples(a, b); })";
 
     let outer = interp.push_scope();
     let old_source_lines = std::mem::take(&mut interp.source_lines);
@@ -1675,15 +1819,308 @@ fn make_node_gyp_build(interp: &mut crate::interpreter::Interpreter) -> Result<V
                 callable: node_gyp_build_resolve,
             },
         )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_parse_tags",
+            Value::NativeFunction {
+                name: "node-gyp-build.parseTags".into(),
+                callable: node_gyp_build_parse_tags,
+            },
+        )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_match_tags",
+            Value::NativeFunction {
+                name: "node-gyp-build.matchTags".into(),
+                callable: node_gyp_build_match_tags,
+            },
+        )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_compare_tags",
+            Value::NativeFunction {
+                name: "node-gyp-build.compareTags".into(),
+                callable: node_gyp_build_compare_tags,
+            },
+        )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_parse_tuple",
+            Value::NativeFunction {
+                name: "node-gyp-build.parseTuple".into(),
+                callable: node_gyp_build_parse_tuple,
+            },
+        )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_match_tuple",
+            Value::NativeFunction {
+                name: "node-gyp-build.matchTuple".into(),
+                callable: node_gyp_build_match_tuple,
+            },
+        )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_compare_tuples",
+            Value::NativeFunction {
+                name: "node-gyp-build.compareTuples".into(),
+                callable: node_gyp_build_compare_tuples,
+            },
+        )?;
         let load = compile_guest_function(interp, LOAD_SOURCE)?;
         let resolve = compile_guest_function(interp, RESOLVE_SOURCE)?;
+        let parse_tags = compile_guest_function(interp, PARSE_TAGS_SOURCE)?;
+        let match_tags = compile_guest_function(interp, MATCH_TAGS_SOURCE)?;
+        let compare_tags = compile_guest_function(interp, COMPARE_TAGS_SOURCE)?;
+        let parse_tuple = compile_guest_function(interp, PARSE_TUPLE_SOURCE)?;
+        let match_tuple = compile_guest_function(interp, MATCH_TUPLE_SOURCE)?;
+        let compare_tuples = compile_guest_function(interp, COMPARE_TUPLES_SOURCE)?;
         load.set_prop("path".into(), resolve.clone())?;
         load.set_prop("resolve".into(), resolve)?;
+        load.set_prop("parseTags".into(), parse_tags)?;
+        load.set_prop("matchTags".into(), match_tags)?;
+        load.set_prop("compareTags".into(), compare_tags)?;
+        load.set_prop("parseTuple".into(), parse_tuple)?;
+        load.set_prop("matchTuple".into(), match_tuple)?;
+        load.set_prop("compareTuples".into(), compare_tuples)?;
         Ok(load)
     })();
     interp.pop_scope(outer);
     interp.source_lines = old_source_lines;
     result
+}
+
+fn node_gyp_build_parse_tags(
+    _interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Some(Value::String(filename)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: node-gyp-build.parseTags expects a filename string".into(),
+        ));
+    };
+    let Some(tags) = parse_prebuild_tags(filename) else {
+        return Ok(Value::Undefined);
+    };
+    prebuild_tags_to_value(tags)
+}
+
+fn prebuild_tags_to_value(tags: PrebuildTags) -> Result<Value, VmErr> {
+    let mut entries = vec![
+        ("file".to_string(), Value::String(tags.file)),
+        (
+            "specificity".to_string(),
+            Value::Number(tags.specificity as f64),
+        ),
+    ];
+    for field in tags.field_order {
+        match field.as_str() {
+            "runtime" => {
+                if let Some(value) = &tags.runtime {
+                    entries.push((field, Value::String(value.clone())));
+                }
+            }
+            "napi" if tags.napi => entries.push((field, Value::Bool(true))),
+            "abi" => {
+                if let Some(value) = &tags.abi {
+                    entries.push((field, Value::String(value.clone())));
+                }
+            }
+            "uv" => {
+                if let Some(value) = &tags.uv {
+                    entries.push((field, Value::String(value.clone())));
+                }
+            }
+            "armv" => {
+                if let Some(value) = &tags.armv {
+                    entries.push((field, Value::String(value.clone())));
+                }
+            }
+            "libc" => {
+                if let Some(value) = &tags.libc {
+                    entries.push((field, Value::String(value.clone())));
+                }
+            }
+            _ => {}
+        }
+    }
+    Value::checked_object(entries)
+}
+
+fn node_gyp_build_match_tags(
+    _interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let runtime = args.first().and_then(value_string).unwrap_or_default();
+    let Some(tags) = args.get(2) else {
+        return Ok(Value::Bool(false));
+    };
+    match_tags_for_rust_node_api(runtime, tags)
+}
+
+fn match_tags_for_rust_node_api(runtime: &str, tags: &Value) -> Result<Value, VmErr> {
+    let napi = matches!(tags.get_prop("napi"), Some(Value::Bool(true)));
+    if !napi {
+        // The Rust backend implements Node-API. A matching Node ABI tag alone
+        // cannot make a V8/NAN addon safe to load in this runtime.
+        return Ok(Value::Bool(false));
+    }
+    if let Some(tag_runtime) = property_string(tags, "runtime")
+        && tag_runtime != runtime
+        && !(tag_runtime == "node" && napi)
+    {
+        return Ok(Value::Bool(false));
+    }
+    if tags
+        .get_prop("uv")
+        .and_then(|value| value_string(&value).map(str::to_owned))
+        .is_some_and(|uv| !uv.is_empty())
+    {
+        // A uv-tagged addon depends on libuv's ABI, which this host does not
+        // provide as part of Node-API compatibility.
+        return Ok(Value::Bool(false));
+    }
+    let target = NodeApiPrebuildTarget::current();
+    if let Some(libc) = property_string(tags, "libc")
+        && !libc.is_empty()
+        && target.libc.as_deref() != Some(libc.as_str())
+    {
+        return Ok(Value::Bool(false));
+    }
+    if let Some(armv) = property_string(tags, "armv")
+        && !armv.is_empty()
+        && target.armv.as_deref() != Some(armv.as_str())
+    {
+        return Ok(Value::Bool(false));
+    }
+    Ok(Value::Bool(true))
+}
+
+fn value_string(value: &Value) -> Option<&str> {
+    match value {
+        Value::String(value) => Some(value),
+        _ => None,
+    }
+}
+
+fn node_gyp_build_compare_tags(
+    _interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let runtime = args.first().and_then(value_string).unwrap_or_default();
+    let left = args.get(1).cloned().unwrap_or(Value::Undefined);
+    let right = args.get(2).cloned().unwrap_or(Value::Undefined);
+    let left_runtime = property_string(&left, "runtime");
+    let right_runtime = property_string(&right, "runtime");
+    if left_runtime != right_runtime {
+        return Ok(Value::Number(if left_runtime.as_deref() == Some(runtime) {
+            -1.0
+        } else {
+            1.0
+        }));
+    }
+    let left_abi = property_string(&left, "abi");
+    let right_abi = property_string(&right, "abi");
+    if left_abi != right_abi {
+        return Ok(Value::Number(
+            if left_abi.as_deref().is_some_and(|abi| !abi.is_empty()) {
+                -1.0
+            } else {
+                1.0
+            },
+        ));
+    }
+    let left_specificity = left
+        .get_prop("specificity")
+        .and_then(|value| match value {
+            Value::Number(value) => Some(value),
+            _ => None,
+        })
+        .unwrap_or(0.0);
+    let right_specificity = right
+        .get_prop("specificity")
+        .and_then(|value| match value {
+            Value::Number(value) => Some(value),
+            _ => None,
+        })
+        .unwrap_or(0.0);
+    Ok(Value::Number(if left_specificity > right_specificity {
+        -1.0
+    } else if right_specificity > left_specificity {
+        1.0
+    } else {
+        0.0
+    }))
+}
+
+fn property_string(value: &Value, key: &str) -> Option<String> {
+    value
+        .get_prop(key)
+        .and_then(|value| value_string(&value).map(str::to_owned))
+}
+
+fn node_gyp_build_parse_tuple(
+    _interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Some(Value::String(name)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: node-gyp-build.parseTuple expects a tuple name string".into(),
+        ));
+    };
+    let Some(tuple) = parse_prebuild_tuple(name) else {
+        return Ok(Value::Undefined);
+    };
+    Value::checked_object(vec![
+        ("name".to_string(), Value::String(tuple.name)),
+        ("platform".to_string(), Value::String(tuple.platform)),
+        (
+            "architectures".to_string(),
+            Value::checked_array(tuple.architectures.into_iter().map(Value::String).collect())?,
+        ),
+    ])
+}
+
+fn node_gyp_build_match_tuple(
+    _interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let platform = args.first().and_then(value_string).unwrap_or_default();
+    let architecture = args.get(1).and_then(value_string).unwrap_or_default();
+    let Some(tuple) = args.get(2) else {
+        return Ok(Value::Bool(false));
+    };
+    let matches_platform = tuple
+        .get_prop("platform")
+        .and_then(|value| value_string(&value).map(str::to_owned))
+        .as_deref()
+        == Some(platform);
+    let matches_architecture = tuple
+        .get_prop("architectures")
+        .and_then(|value| value.as_array())
+        .is_some_and(|values| {
+            values
+                .borrow()
+                .iter()
+                .any(|value| value_string(value) == Some(architecture))
+        });
+    Ok(Value::Bool(matches_platform && matches_architecture))
+}
+
+fn node_gyp_build_compare_tuples(
+    _interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let architecture_count = |value: Option<&Value>| {
+        value
+            .and_then(|value| value.get_prop("architectures"))
+            .and_then(|value| value.as_array())
+            .map(|array| array.borrow().len())
+            .unwrap_or(0)
+    };
+    let left = architecture_count(args.first());
+    let right = architecture_count(args.get(1));
+    Ok(Value::Number(left as f64 - right as f64))
 }
 
 fn compile_guest_function(
@@ -2240,6 +2677,255 @@ mod tests {
             Some(Value::Number(17.0))
         ));
         assert!(matches!(result.get_prop("cached"), Some(Value::Bool(true))));
+
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn node_api_prebuild_lookup_honors_prebuilds_only() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-api-prebuilds-only-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join("node_modules/fixture");
+        let target = NodeApiPrebuildTarget::current();
+        let prebuild_dir = package_root
+            .join("prebuilds")
+            .join(format!("{}-{}", target.platform, target.architecture));
+        let release_dir = package_root.join("build/Release");
+        fs::create_dir_all(&prebuild_dir).unwrap();
+        fs::create_dir_all(&release_dir).unwrap();
+        let release_addon = release_dir.join("fixture.node");
+        let prebuild_addon = prebuild_dir.join("node.napi.node");
+        fs::write(&release_addon, b"release addon").unwrap();
+        fs::write(&prebuild_addon, b"prebuild addon").unwrap();
+
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        assert_eq!(
+            PathBuf::from(
+                loader
+                    .resolve_node_api_prebuild(&package_root)
+                    .unwrap()
+                    .filename
+            ),
+            release_addon.canonicalize().unwrap()
+        );
+        let prebuilds_only = loader.with_node_gyp_build_prebuilds_only(true);
+        assert_eq!(
+            PathBuf::from(
+                prebuilds_only
+                    .resolve_node_api_prebuild(&package_root)
+                    .unwrap()
+                    .filename
+            ),
+            prebuild_addon.canonicalize().unwrap()
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn node_api_prebuild_selection_uses_node_gyp_tag_precedence() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-api-prebuild-tag-precedence-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join("node_modules/fixture");
+        let target = NodeApiPrebuildTarget::current();
+        let prebuild_dir = package_root
+            .join("prebuilds")
+            .join(format!("{}-{}", target.platform, target.architecture));
+        fs::create_dir_all(&prebuild_dir).unwrap();
+        fs::write(
+            prebuild_dir.join("node.napi.node.napi.node"),
+            b"more specific generic N-API build",
+        )
+        .unwrap();
+        fs::write(
+            prebuild_dir.join("node.abi999.napi.node"),
+            b"ABI-tagged N-API build",
+        )
+        .unwrap();
+
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let selected = loader.resolve_node_api_prebuild(&package_root).unwrap();
+        assert_eq!(
+            Path::new(&selected.filename).file_name().unwrap(),
+            "node.abi999.napi.node"
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn node_api_prebuild_lookup_uses_exec_path_neighbor_as_fallback() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-api-prebuild-exec-path-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join("node_modules/fixture");
+        let executable_directory = root.join("application");
+        let target = NodeApiPrebuildTarget::current();
+        let prebuild_dir = executable_directory
+            .join("prebuilds")
+            .join(format!("{}-{}", target.platform, target.architecture));
+        fs::create_dir_all(&package_root).unwrap();
+        fs::create_dir_all(&prebuild_dir).unwrap();
+        let addon = prebuild_dir.join("node.napi.node");
+        fs::write(&addon, b"nearby prebuild").unwrap();
+
+        let loader = FileCommonJsLoader::new([&root])
+            .unwrap()
+            .with_node_gyp_build_exec_path(executable_directory.join("desktop-app"));
+        assert_eq!(
+            PathBuf::from(
+                loader
+                    .resolve_node_api_prebuild(&package_root)
+                    .unwrap()
+                    .filename
+            ),
+            addon.canonicalize().unwrap()
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn node_gyp_build_package_prebuild_override_is_canonical_and_root_checked() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-gyp-build-prebuild-override-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join("node_modules/sample-addon");
+        let override_root = root.join("app/prebuilt-addon");
+        fs::create_dir_all(&package_root).unwrap();
+        fs::create_dir_all(&override_root).unwrap();
+        fs::write(
+            package_root.join("package.json"),
+            r#"{"name":"sample-addon"}"#,
+        )
+        .unwrap();
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        assert_eq!(
+            node_gyp_build_prebuild_override_variable("sample-addon"),
+            "SAMPLE_ADDON_PREBUILD"
+        );
+        assert_eq!(
+            loader
+                .node_gyp_build_package_root_with_override(
+                    &package_root,
+                    Some("sample-addon"),
+                    Some(override_root.clone()),
+                )
+                .unwrap(),
+            override_root.canonicalize().unwrap()
+        );
+        let outside = std::env::temp_dir().join(format!(
+            "napi-vm-outside-node-gyp-prebuild-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&outside).unwrap();
+        let error = loader
+            .node_gyp_build_package_root_with_override(
+                &package_root,
+                Some("sample-addon"),
+                Some(outside.clone()),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("inside configured roots"));
+
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn node_gyp_build_runtime_builtin_exposes_tag_and_tuple_helpers() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-gyp-build-helpers-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("main.cjs"), "").unwrap();
+        let loader = FileCommonJsLoader::new([&root])
+            .unwrap()
+            .with_node_gyp_build_compat();
+        let mut interpreter = crate::interpreter::Interpreter::with_builtins();
+        interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
+        interpreter.set_commonjs_entry(root.join("main.cjs").to_string_lossy().into_owned());
+        let value = interpreter
+            .eval_source(
+                r#"
+const helper = require('node-gyp-build');
+const napi = helper.parseTags('node.abi115.napi.node');
+const abiOnly = helper.parseTags('node.abi115.node');
+const uv = helper.parseTags('node.napi.uv1.node');
+const tuple = helper.parseTuple('darwin-x64+arm64');
+JSON.stringify({
+  file: napi.file,
+  runtime: napi.runtime,
+  abi: napi.abi,
+  napi: napi.napi,
+  specificity: napi.specificity,
+  napiMatches: helper.matchTags('node', '115')(napi),
+  abiOnlyMatches: helper.matchTags('node', '115')(abiOnly),
+  uvMatches: helper.matchTags('node', '115')(uv),
+  tupleName: tuple.name,
+  tuplePlatform: tuple.platform,
+  tupleArchitectures: tuple.architectures,
+  tupleMatches: helper.matchTuple('darwin', 'arm64')(tuple),
+  tupleComparison: helper.compareTuples(tuple, helper.parseTuple('darwin-x64')),
+  tagComparison: helper.compareTags('node')(helper.parseTags('node.napi.node'), abiOnly),
+  invalidTuple: helper.parseTuple('linux-x64-debug') === undefined,
+  pathAlias: helper.path === helper.resolve
+});
+"#,
+            )
+            .unwrap();
+        let Value::String(ref json) = value else {
+            panic!("node-gyp-build helper fixture did not return JSON: {value:?}");
+        };
+        let result: JsonValue = serde_json::from_str(json).unwrap();
+        assert_eq!(result["file"], "node.abi115.napi.node");
+        assert_eq!(result["runtime"], "node");
+        assert_eq!(result["abi"], "115");
+        assert_eq!(result["napi"], true);
+        assert_eq!(result["specificity"], 3);
+        assert_eq!(result["napiMatches"], true);
+        assert_eq!(result["abiOnlyMatches"], false);
+        assert_eq!(result["uvMatches"], false);
+        assert_eq!(result["tupleName"], "darwin-x64+arm64");
+        assert_eq!(result["tuplePlatform"], "darwin");
+        assert_eq!(
+            result["tupleArchitectures"],
+            serde_json::json!(["x64", "arm64"])
+        );
+        assert_eq!(result["tupleMatches"], true);
+        assert_eq!(result["tupleComparison"], 1);
+        assert_eq!(result["tagComparison"], 1);
+        assert_eq!(result["invalidTuple"], true);
+        assert_eq!(result["pathAlias"], true);
 
         drop(interpreter);
         fs::remove_dir_all(root).unwrap();
