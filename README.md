@@ -109,7 +109,9 @@ the Node and Node-API versions that were actually started. Hosts can set
 that does not provide the required Node-API version during setup.
 Native module exports enter the CommonJS cache before the Rust Node-API
 initializer runs. If initialization fails, the cache entry is removed so a
-later `require()` can retry it.
+later `require()` can retry it. During initialization, synchronous guest entry
+uses the interpreter's paused-call checkpoint; `napi_run_script` can re-require
+the same addon and observe its provisional exports object.
 The bridge supports synchronous function calls and constructors, Promise
 settlement, primitive values, arrays, byte buffers, BigInts, Dates, regular
 expressions, symbol identity, and identity-preserving native object proxies.

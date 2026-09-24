@@ -71,6 +71,18 @@ pub trait CommonJsModuleLoader {
     ) -> Result<Value, VmErr> {
         self.load_native_addon(module)
     }
+
+    /// Load a native addon while allowing the host to request guest callbacks
+    /// through the interpreter's paused-call checkpoint. Providers without
+    /// synchronous callback support keep their existing behavior.
+    fn load_native_addon_with_callback_handler(
+        &self,
+        module: &ResolvedCommonJsModule,
+        exports: Value,
+        _callback_handler: &mut dyn FnMut(crate::host::HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.load_native_addon_with_exports(module, exports)
+    }
 }
 
 /// Allowlisted native addon provider hook.
@@ -88,6 +100,17 @@ pub trait NativeAddonLoader {
     /// this method to preserve Node's initialization and cycle semantics.
     fn load_with_exports(&self, filename: &Path, _exports: Value) -> Result<Value, VmErr> {
         self.load(filename)
+    }
+
+    /// Initialize an addon with access to the active interpreter callback
+    /// checkpoint. The default path does not request guest callbacks.
+    fn load_with_callback_handler(
+        &self,
+        filename: &Path,
+        exports: Value,
+        _callback_handler: &mut dyn FnMut(crate::host::HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.load_with_exports(filename, exports)
     }
 }
 
@@ -872,6 +895,26 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
         module: &ResolvedCommonJsModule,
         exports: Value,
     ) -> Result<Value, VmErr> {
+        self.load_native_addon_impl(module, exports, None)
+    }
+
+    fn load_native_addon_with_callback_handler(
+        &self,
+        module: &ResolvedCommonJsModule,
+        exports: Value,
+        callback_handler: &mut dyn FnMut(crate::host::HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        self.load_native_addon_impl(module, exports, Some(callback_handler))
+    }
+}
+
+impl FileCommonJsLoader {
+    fn load_native_addon_impl(
+        &self,
+        module: &ResolvedCommonJsModule,
+        exports: Value,
+        callback_handler: Option<&mut dyn FnMut(crate::host::HostCallback) -> Result<Value, VmErr>>,
+    ) -> Result<Value, VmErr> {
         let path = fs::canonicalize(&module.filename).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot verify native addon {}: {error}",
@@ -902,7 +945,12 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
                 module.filename
             ))
         })?;
-        loader.load_with_exports(&path, exports)
+        match callback_handler {
+            Some(callback_handler) => {
+                loader.load_with_callback_handler(&path, exports, callback_handler)
+            }
+            None => loader.load_with_exports(&path, exports),
+        }
     }
 }
 
@@ -1358,7 +1406,12 @@ pub(super) fn require_module(
                     module: None,
                 },
             );
-            match loader.load_native_addon_with_exports(&module, initial_exports) {
+            let loaded = loader.load_native_addon_with_callback_handler(
+                &module,
+                initial_exports,
+                &mut |callback| interp.run_host_callback(callback),
+            );
+            match loaded {
                 Ok(exports) => {
                     if let Some(entry) = interp.commonjs_cache.borrow_mut().get_mut(&module.id) {
                         entry.exports = exports.clone();

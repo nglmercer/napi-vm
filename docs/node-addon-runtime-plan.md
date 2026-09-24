@@ -376,6 +376,9 @@ not return success with a partial or fabricated result.
 - Add re-entrancy guards and tests for nested addon calls from guest callbacks.
 - Native worker threads may enqueue completion records only. They must never
   execute guest code directly.
+- [x] Use the same paused-call callback checkpoint while a native module is
+  initializing. `napi_run_script` re-entry stays on the interpreter thread,
+  and a self-require observes the provisional exports object.
 
 ### 5. Integrate asynchronous Node-API APIs with the VM event loop
 
@@ -418,12 +421,17 @@ not return success with a partial or fabricated result.
 - Require OS, architecture, and binary-format matches. Report the exact reason
   for a rejected file: missing allowlist entry, digest mismatch, wrong
   architecture, unsupported ABI, missing symbol, or initialization failure.
-- Cache native exports by canonical module ID. Full circular initialization
-  behavior still depends on a safe guest callback entry point during addon
-  initialization.
+- [x] Cache native exports by canonical module ID, publish provisional exports
+  before initialization, and evict failed initializations. A C fixture verifies
+  self-require from `napi_run_script` against Node.
 
 ### 7. Prove compatibility differentially
 
+- [x] A Node-API v1 C fixture runs `napi_run_script` from its initializer and
+  self-requires through the package export. Node and napi-vm return the same
+  structured result. Bun 1.4.0 rejects this initializer path with a module
+  error; the fixture reports it as `HOST_BRIDGE` and continues the Node/VM
+  comparison.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.

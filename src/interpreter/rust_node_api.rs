@@ -9305,6 +9305,15 @@ impl NativeAddonLoader for RustNodeApiHost {
     }
 
     fn load_with_exports(&self, filename: &Path, exports: Value) -> Result<Value, VmErr> {
+        self.load_with_callback_handler(filename, exports, &mut reject_guest_callback)
+    }
+
+    fn load_with_callback_handler(
+        &self,
+        filename: &Path,
+        exports: Value,
+        callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
         let filename = fs::canonicalize(filename).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot resolve native addon {}: {error}",
@@ -9470,7 +9479,17 @@ impl NativeAddonLoader for RustNodeApiHost {
             .borrow_mut()
             .create(exports)
             .map_err(|status| napi_error("creating addon exports handle", status))?;
+        let mut callback_handler = callback_handler;
+        let callback_handler_pointer: *mut &mut (
+                 dyn FnMut(HostCallback) -> Result<Value, VmErr> + '_
+             ) = &mut callback_handler;
+        let dispatcher = GuestCallbackDispatcher {
+            context: callback_handler_pointer.cast(),
+            invoke: dispatch_guest_callback,
+        };
+        let dispatcher_scope = GuestCallbackDispatcherScope::push(environment.clone(), dispatcher);
         let returned = unsafe { initialize(environment.raw(), exports_handle) };
+        drop(dispatcher_scope);
         let pending_exception = environment.pending_exception.borrow_mut().take();
         let result = if let Some(exception) = pending_exception {
             Err(VmErr::Throw(exception))
@@ -10121,10 +10140,20 @@ NAPI_MODULE_INIT() {
 #include <node_api.h>
 
 static napi_value initialize(napi_env env, napi_value exports) {
-  napi_value value;
+  napi_value value, global, script, ignored;
+  napi_status run_script_status;
   if (napi_create_string_utf8(env, "legacy registration", NAPI_AUTO_LENGTH,
                               &value) != napi_ok ||
-      napi_set_named_property(env, exports, "kind", value) != napi_ok)
+      napi_set_named_property(env, exports, "kind", value) != napi_ok ||
+      napi_get_global(env, &global) != napi_ok ||
+      napi_set_named_property(env, global, "expectedAddonExports", exports) != napi_ok ||
+      napi_create_string_utf8(env,
+        "globalThis.partialAddon = globalThis.reenterAddonRequire()",
+        NAPI_AUTO_LENGTH, &script) != napi_ok)
+    return NULL;
+  run_script_status = napi_run_script(env, script, &ignored);
+  if (napi_create_int32(env, run_script_status, &value) != napi_ok ||
+      napi_set_named_property(env, exports, "runScriptStatus", value) != napi_ok)
     return NULL;
   return exports;
 }
@@ -10165,7 +10194,7 @@ __attribute__((constructor)) static void register_module(void) {
         let main = root.join("main.cjs");
         fs::write(
             &main,
-            "const addon = require('module.node'); module.exports = {kind: addon.kind, cached: addon === require('module.node'), sameByPath: addon === require('./node_modules/module.node/build/Release/fixture.node')};",
+            "globalThis.reenterAddonRequire = () => require('module.node'); const addon = require('module.node'); module.exports = {kind: addon.kind, cached: addon === require('module.node'), sameByPath: addon === require('./node_modules/module.node/build/Release/fixture.node'), reentrant: globalThis.partialAddon === addon, expectedExports: globalThis.expectedAddonExports === addon, runScriptStatus: addon.runScriptStatus};",
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
@@ -10182,7 +10211,7 @@ __attribute__((constructor)) static void register_module(void) {
             .eval_source("JSON.stringify(require('./main.cjs'))")
             .unwrap();
         assert!(
-            matches!(value, Value::String(ref value) if value == r#"{"kind":"legacy registration","cached":true,"sameByPath":true}"#)
+            matches!(value, Value::String(ref value) if value == r#"{"kind":"legacy registration","cached":true,"sameByPath":true,"reentrant":true,"expectedExports":true,"runScriptStatus":0}"#)
         );
 
         let node = Command::new("node")
@@ -10198,16 +10227,14 @@ __attribute__((constructor)) static void register_module(void) {
             "Node bare-package fixture failed: {}",
             String::from_utf8_lossy(&node.stderr)
         );
-        assert_eq!(
-            node.stdout,
-            br#"{"kind":"legacy registration","cached":true,"sameByPath":true}"#
-        );
+        assert_eq!(node.stdout, br#"{"kind":"legacy registration","cached":true,"sameByPath":true,"reentrant":true,"expectedExports":true,"runScriptStatus":0}"#);
 
-        if Command::new("bun")
+        let bun_version = Command::new("bun")
             .arg("--version")
             .output()
-            .is_ok_and(|version| version.status.success())
-        {
+            .ok()
+            .filter(|version| version.status.success());
+        if let Some(version) = bun_version {
             let bun = Command::new("bun")
                 .current_dir(&root)
                 .args([
@@ -10216,12 +10243,21 @@ __attribute__((constructor)) static void register_module(void) {
                 ])
                 .output()
                 .unwrap();
-            assert!(
-                bun.status.success(),
-                "Bun bare-package fixture failed: {}",
-                String::from_utf8_lossy(&bun.stderr)
-            );
-            assert_eq!(bun.stdout, node.stdout, "Node and Bun results differ");
+            if bun.status.success() {
+                let bun_value: serde_json::Value = serde_json::from_slice(&bun.stdout).unwrap();
+                assert_eq!(bun_value["runScriptStatus"].as_i64(), Some(0));
+                assert_eq!(bun.stdout, node.stdout, "Node and Bun results differ");
+            } else {
+                let stderr = String::from_utf8_lossy(&bun.stderr);
+                assert!(
+                    stderr.contains("Node-API module \"legacy_fixture\" returned an error"),
+                    "unexpected Bun failure for reentrant initializer fixture: {stderr}"
+                );
+                eprintln!(
+                    "HOST_BRIDGE: Bun {} rejected guest re-entry from a native initializer; Node and napi-vm were compared for this fixture",
+                    String::from_utf8_lossy(&version.stdout).trim()
+                );
+            }
         }
 
         drop(interpreter);
