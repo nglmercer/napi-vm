@@ -210,6 +210,8 @@ impl RustNodeApiOptions {
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
     _shim: Rc<NodeApiShim>,
+    allowed_roots: Vec<PathBuf>,
+    allowed_addons: HashMap<PathBuf, [u8; 32]>,
 }
 
 impl Drop for RustNodeApiHost {
@@ -8367,6 +8369,8 @@ impl RustNodeApiHost {
         global: Env,
         reported_node_version: ReportedNodeVersion,
         max_napi_version: u32,
+        allowed_roots: Vec<PathBuf>,
+        allowed_addons: HashMap<PathBuf, [u8; 32]>,
     ) -> Result<Self, VmErr> {
         let object_prototype = global
             .borrow()
@@ -8394,6 +8398,8 @@ impl RustNodeApiHost {
                 _shim: shim.clone(),
             })),
             _shim: shim,
+            allowed_roots,
+            allowed_addons,
         })
     }
 
@@ -9251,6 +9257,51 @@ fn macho_architecture_name(cpu_type: u32) -> String {
 
 impl NativeAddonLoader for RustNodeApiHost {
     fn load(&self, filename: &Path) -> Result<Value, VmErr> {
+        let filename = fs::canonicalize(filename).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve native addon {}: {error}",
+                filename.display()
+            ))
+        })?;
+        if !self
+            .allowed_roots
+            .iter()
+            .any(|root| filename.starts_with(root))
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon escapes configured roots: {}",
+                filename.display()
+            )));
+        }
+        if filename
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("node")
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon path must use the .node extension: {}",
+                filename.display()
+            )));
+        }
+        let expected_digest = self.allowed_addons.get(&filename).ok_or_else(|| {
+            VmErr::Msg(format!(
+                "native addon is not allowlisted: {}",
+                filename.display()
+            ))
+        })?;
+        let actual_digest =
+            crate::interpreter::commonjs::sha256_file(&filename).map_err(|error| {
+                VmErr::Msg(format!(
+                    "cannot verify native addon {}: {error}",
+                    filename.display()
+                ))
+            })?;
+        if &actual_digest != expected_digest {
+            return Err(VmErr::Msg(format!(
+                "native addon integrity check failed before loading: {}",
+                filename.display()
+            )));
+        }
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
@@ -9636,6 +9687,8 @@ impl Interpreter {
             self.persistent_global.clone(),
             options.reported_node_version,
             options.max_napi_version,
+            loader.roots().to_vec(),
+            loader.allowed_native_addon_digests().clone(),
         )?);
         let loader = loader.with_native_addon_loader(host.clone());
         self.set_commonjs_loader(Rc::new(loader))?;
@@ -16575,6 +16628,46 @@ process.stdout.write(JSON.stringify({
             "external shared buffer finalizer runs once"
         );
         drop(finalizer_library);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rust_node_api_host_enforces_allowlist_and_digest_when_called_directly() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-addon-policy-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let pinned_addon = root.join("pinned.node");
+        let untrusted_addon = root.join("untrusted.node");
+        let original = b"configured addon bytes";
+        fs::write(&pinned_addon, original).unwrap();
+        fs::write(&untrusted_addon, b"untrusted addon bytes").unwrap();
+        let digest: [u8; 32] = Sha256::digest(original).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        let host = interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&pinned_addon, digest),
+            )
+            .unwrap();
+
+        let untrusted_error = NativeAddonLoader::load(host.as_ref(), &untrusted_addon).unwrap_err();
+        assert!(untrusted_error.to_string().contains("not allowlisted"));
+
+        fs::write(&pinned_addon, b"changed after host configuration").unwrap();
+        let integrity_error = NativeAddonLoader::load(host.as_ref(), &pinned_addon).unwrap_err();
+        assert!(
+            integrity_error
+                .to_string()
+                .contains("integrity check failed")
+        );
+
+        drop(host);
+        drop(interpreter);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -206,6 +206,10 @@ impl FileCommonJsLoader {
         &self.roots
     }
 
+    pub(super) fn allowed_native_addon_digests(&self) -> &HashMap<PathBuf, [u8; 32]> {
+        &self.allowed_native_addons
+    }
+
     fn in_roots(&self, path: &Path) -> bool {
         self.roots.iter().any(|root| path.starts_with(root))
     }
@@ -584,7 +588,7 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
     }
 }
 
-fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
+pub(super) fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {
     let mut file = File::open(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0; 64 * 1024];
