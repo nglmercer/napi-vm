@@ -128,7 +128,7 @@ notes and known behavior differences are tracked in
 | Node sidecar | Uses a configured Node executable and provides the broadest addon compatibility. | Package and ship the selected Node runtime for desktop apps; keep this backend explicit. |
 | Rust Node-API host | Opt-in `node-api-host`; broad but partial Node-API v1-v10 behavior. Missing imported symbols fail during load. | Complete the advertised stable API surface. A max-version setting is not a completeness claim. |
 | Backend selection | The host explicitly chooses `NodeSidecar` or `RustNodeApi`. | Add `Auto` only after preflight can prove backend suitability without running addon initialization. |
-| Platforms | Linux runtime tests pass; Windows GNU has cross-build/Wine coverage. | Add native macOS, Windows MSVC, and Windows GNU CI before advertising those targets as verified. |
+| Platforms | Linux runtime tests pass; Windows GNU has cross-build/Wine coverage. CI now runs native Node-API smoke tests plus the napi-rs addon differential on macOS x64/arm64 and Windows MSVC. | Confirm those native CI jobs pass; add Windows GNU runtime CI before advertising that target as verified. |
 | Guest module names | Plugin APIs use standard `node:` facades or package names. | Keep guest fixtures and docs free of VM-specific module specifiers. |
 
 ## Public host configuration
@@ -291,8 +291,11 @@ every claimed supported API family has a passing Node differential fixture.
 
 ### 6. Verify desktop targets and packaging
 
-- Add native CI jobs for Linux, macOS, Windows MSVC, and Windows GNU. Keep
-  cross-compilation separate from runtime validation.
+- [x] Add native CI jobs for macOS x64/arm64 and Windows MSVC, including the
+  compiled napi-rs addon differential. Keep cross-compilation separate from
+  runtime validation.
+- [ ] Add or retain native/Wine runtime CI for Windows GNU; cross-compilation
+  alone does not verify dynamic loading.
 - Test the C ABI shim, dynamic library loading, symbol visibility, unload and
   shutdown behavior, and architecture checks on every supported target.
 - Document build-time C compiler requirements, required runtime files, Node

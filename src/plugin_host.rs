@@ -2380,7 +2380,7 @@ mod tests {
     use super::*;
     #[cfg(all(
         feature = "node-api-host",
-        target_os = "linux",
+        any(target_os = "linux", target_os = "macos", target_os = "windows"),
         any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
     ))]
     use std::process::Command;
@@ -2755,7 +2755,7 @@ export default { onLoad() {
 
     #[cfg(all(
         feature = "node-api-host",
-        target_os = "linux",
+        any(target_os = "linux", target_os = "macos", target_os = "windows"),
         any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")
     ))]
     #[test]
@@ -2782,9 +2782,14 @@ export default { onLoad() {
             "napi-rs plugin fixture build failed: {}",
             String::from_utf8_lossy(&built.stderr)
         );
-        let compiled_addon = target_dir
-            .join("release")
-            .join("libnapi_vm_napi_rs_fixture.so");
+        let cdylib_name = if cfg!(target_os = "windows") {
+            "napi_vm_napi_rs_fixture.dll"
+        } else if cfg!(target_os = "macos") {
+            "libnapi_vm_napi_rs_fixture.dylib"
+        } else {
+            "libnapi_vm_napi_rs_fixture.so"
+        };
+        let compiled_addon = target_dir.join("release").join(cdylib_name);
         assert!(compiled_addon.is_file(), "napi-rs fixture was not built");
         let addon = dir.0.join("fixture.node");
         fs::copy(&compiled_addon, &addon).unwrap();

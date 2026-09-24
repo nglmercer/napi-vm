@@ -29,7 +29,7 @@ Keep these backend choices distinct:
 | Backend | Compatibility target | Runtime dependency |
 | --- | --- | --- |
 | Node sidecar (current) | Addons accepted by the selected Node installation | Bundled or configured Node executable |
-| Rust Node-API host (experimental) | Selected Node-API v1-v10 calls; Linux runtime-tested, Windows GNU path cross-compiled and Wine-tested, macOS and native Windows verification pending | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
+| Rust Node-API host (experimental) | Selected Node-API v1-v10 calls; Linux runtime-tested and Windows GNU cross-compiled/Wine-tested. CI runs native macOS x64/arm64 and Windows MSVC smoke tests plus napi-rs addon differentials; their CI results remain the platform verification gate. | `napi-vm`, a C compiler at build time, and the platform dynamic loader |
 
 Direct V8/NAN/Node C++ addons stay on the sidecar backend. If users require
 those addons without a child process, evaluate embedding Node itself as a
@@ -72,7 +72,9 @@ on Linux, Mach-O headers on macOS, and PE headers on Windows for library type,
 class, and host architecture. The Windows backend builds a DLL image named
 `node.exe` to satisfy Node-API import libraries and adds its private directory
 only to flagged addon loads. Its GNU target compiled and loaded a fixture under
-Wine; native Windows and MSVC execution remain unverified. On Linux it currently
+Wine. Native macOS x64/arm64 and Windows MSVC CI jobs run both C smoke tests and
+the compiled napi-rs differential; their passing CI results remain required
+before claiming those targets verified. On Linux it currently
 covers scoped handles, callback
 info, synchronous C callbacks, global-object access, named and general property
 operations, inherited enumerable property-name enumeration, primitive values,

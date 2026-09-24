@@ -604,6 +604,14 @@ jobs:
           cc -std=c11 -O2 -fPIC -dynamiclib -undefined dynamic_lookup tests/fixtures/node-api/node-api-smoke.c -o "$fixture"
           NAPI_VM_MACOS_NODE_API_FIXTURE="$fixture" cargo test --target "$NODE_API_TARGET" --release --no-default-features --features node-api-host --lib macos_tests:: -- --test-threads=1
 
+      - name: Fetch napi-rs fixture dependencies
+        run: cargo fetch --locked --manifest-path tests/fixtures/node-api/napi-rs/Cargo.toml
+
+      - name: Differential-test Rust napi-rs plugins
+        env:
+          NODE_API_TARGET: ${{ matrix.target }}
+        run: cargo test --target "$NODE_API_TARGET" --release --no-default-features --features node-api-host --lib napi_rs -- --test-threads=1
+
   # ── Windows in-process Node-API host ──────────────────────────────────
   windows-node-api-host:
     name: Windows Node-API host (MSVC)
@@ -666,6 +674,16 @@ jobs:
           cargo test --release --no-default-features --features node-api-host --lib windows_tests:: -- --test-threads=1
           if ($LASTEXITCODE -ne 0) {
             throw 'The in-process Node-API host tests failed under MSVC.'
+          }
+
+          cargo fetch --locked --manifest-path tests/fixtures/node-api/napi-rs/Cargo.toml
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Could not fetch the napi-rs compatibility fixture dependencies.'
+          }
+
+          cargo test --release --no-default-features --features node-api-host --lib napi_rs -- --test-threads=1
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The Rust napi-rs addon compatibility tests failed under MSVC.'
           }
 
   # ── Node.js compatibility matrix ──────────────────────────────────────

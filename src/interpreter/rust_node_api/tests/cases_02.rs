@@ -883,7 +883,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
     #[test]
     fn loads_napi_rs_addon_with_the_same_commonjs_entry_on_node_bun_and_vm() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -914,9 +914,14 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             String::from_utf8_lossy(&built.stderr)
         );
 
-        let compiled_addon = target_dir
-            .join("release")
-            .join("libnapi_vm_napi_rs_fixture.so");
+        let cdylib_name = if cfg!(target_os = "windows") {
+            "napi_vm_napi_rs_fixture.dll"
+        } else if cfg!(target_os = "macos") {
+            "libnapi_vm_napi_rs_fixture.dylib"
+        } else {
+            "libnapi_vm_napi_rs_fixture.so"
+        };
+        let compiled_addon = target_dir.join("release").join(cdylib_name);
         assert!(
             compiled_addon.is_file(),
             "napi-rs fixture was not produced at {}",
