@@ -612,6 +612,9 @@ jobs:
           NODE_API_TARGET: ${{ matrix.target }}
         run: cargo test --target "$NODE_API_TARGET" --release --no-default-features --features node-api-host --lib napi_rs -- --test-threads=1
 
+      - name: Run the Rust plugin host with a Rust napi-rs addon
+        run: examples/plugins/rust-napi-plugin/build-and-run.sh
+
   # ── Windows in-process Node-API host ──────────────────────────────────
   windows-node-api-host:
     name: Windows Node-API host (MSVC)
@@ -684,6 +687,11 @@ jobs:
           cargo test --release --no-default-features --features node-api-host --lib napi_rs -- --test-threads=1
           if ($LASTEXITCODE -ne 0) {
             throw 'The Rust napi-rs addon compatibility tests failed under MSVC.'
+          }
+
+          & examples/plugins/rust-napi-plugin/build-and-run.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The Rust plugin host example failed under MSVC.'
           }
 
   # ── Node.js compatibility matrix ──────────────────────────────────────

@@ -16,8 +16,13 @@ workflow with one command from any directory:
 examples/plugins/rust-napi-plugin/build-and-run.sh
 ```
 
-The script supports Windows Bash environments as well. Windows PowerShell
-users can follow the manual copy and hash commands below.
+On Windows PowerShell, run the matching script:
+
+```powershell
+examples/plugins/rust-napi-plugin/build-and-run.ps1
+```
+
+The Bash script also supports Windows Bash environments.
 
 Copy the platform cdylib to the `.node` path declared by the package's
 `node-addons` export and calculate its SHA-256 digest:
