@@ -255,6 +255,14 @@ test("Array.isArray", () => {
   expect(runCode("Array.isArray([1,2]);")).toBe("true");
 });
 
+test("Array.isArray follows nested proxies", () => {
+  expect(runCode(
+    "[Array.isArray(new Proxy([], {})), " +
+    "Array.isArray(new Proxy(new Proxy([], {}), {})), " +
+    "Array.isArray(new Proxy({}, {}))].join(',');",
+  )).toBe("true,true,false");
+});
+
 // --- Standard library: String -----------------------------------------------
 
 test("string index access", () => {

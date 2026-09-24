@@ -507,7 +507,16 @@ module.exports = {
     napiBufferJson: JSON.stringify(buffers.copy) ===
       '{"type":"Buffer","data":[65,120,67,68]}',
   },
-  array: addon.arrayProbe(),
+  array: (() => {
+    const proxyArray = new Proxy([], {});
+    const probe = addon.arrayProbe(
+      proxyArray,
+      new Proxy(new Proxy([], {}), {}),
+      new Proxy({}, {}),
+    );
+    probe.jsIsArray = Array.isArray(proxyArray);
+    return probe;
+  })(),
   wrapped,
   removedWrap,
   duplicateWrapStatus,

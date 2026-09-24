@@ -143,7 +143,13 @@ const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
 // --- Array statics ----------------------------------------------------------
 
 fn array_is_array(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Bool(matches!(a.first(), Some(Value::Array(_)))))
+    let mut value = a.first().cloned().unwrap_or(Value::Undefined);
+    // ECMAScript's IsArray operation follows Proxy [[ProxyTarget]] links.
+    // Iterate so deeply nested proxies do not consume the Rust call stack.
+    while let Value::Proxy(proxy) = &value {
+        value = proxy.target.clone();
+    }
+    Ok(Value::Bool(matches!(value, Value::Array(_))))
 }
 
 /// `Array(n)` allocates `n` holes; `Array(a, b, …)` collects its arguments.

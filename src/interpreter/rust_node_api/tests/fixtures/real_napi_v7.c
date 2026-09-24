@@ -1608,12 +1608,14 @@ static napi_value typedarray_probe(napi_env env, napi_callback_info info) {
 }
 
 static napi_value array_probe(napi_env env, napi_callback_info info) {
-  napi_value array, empty, result, value, field;
+  size_t argc = 3;
+  napi_value argv[3], array, empty, result, value, field;
   uint32_t length = 0, empty_length = 0;
   bool is_array = false, first_present = true, second_present = false;
+  bool proxy_array = false, nested_proxy_array = false, proxy_object = true;
   bool hole_present = true, read_value = false;
-  (void)info;
-  if (napi_create_array_with_length(env, 3, &array) != napi_ok ||
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != napi_ok || argc != 3 ||
+      napi_create_array_with_length(env, 3, &array) != napi_ok ||
       napi_create_array(env, &empty) != napi_ok ||
       napi_get_boolean(env, true, &value) != napi_ok ||
       napi_set_element(env, array, 1, value) != napi_ok ||
@@ -1621,6 +1623,9 @@ static napi_value array_probe(napi_env env, napi_callback_info info) {
       napi_get_array_length(env, array, &length) != napi_ok ||
       napi_get_array_length(env, empty, &empty_length) != napi_ok ||
       napi_is_array(env, array, &is_array) != napi_ok ||
+      napi_is_array(env, argv[0], &proxy_array) != napi_ok ||
+      napi_is_array(env, argv[1], &nested_proxy_array) != napi_ok ||
+      napi_is_array(env, argv[2], &proxy_object) != napi_ok ||
       napi_has_element(env, array, 0, &first_present) != napi_ok ||
       napi_has_element(env, array, 1, &second_present) != napi_ok ||
       napi_has_element(env, array, 2, &hole_present) != napi_ok ||
@@ -1629,6 +1634,12 @@ static napi_value array_probe(napi_env env, napi_callback_info info) {
       napi_create_object(env, &result) != napi_ok ||
       napi_get_boolean(env, is_array, &field) != napi_ok ||
       napi_set_named_property(env, result, "isArray", field) != napi_ok ||
+      napi_get_boolean(env, proxy_array, &field) != napi_ok ||
+      napi_set_named_property(env, result, "proxyArray", field) != napi_ok ||
+      napi_get_boolean(env, nested_proxy_array, &field) != napi_ok ||
+      napi_set_named_property(env, result, "nestedProxyArray", field) != napi_ok ||
+      napi_get_boolean(env, proxy_object, &field) != napi_ok ||
+      napi_set_named_property(env, result, "proxyObjectIsArray", field) != napi_ok ||
       napi_create_uint32(env, length, &field) != napi_ok ||
       napi_set_named_property(env, result, "length", field) != napi_ok ||
       napi_create_uint32(env, empty_length, &field) != napi_ok ||

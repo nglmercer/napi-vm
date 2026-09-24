@@ -40,6 +40,9 @@ pub(super) unsafe extern "C" fn api_is_array(env: NapiEnv, value: NapiValue, res
         }
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(value)?;
+        // Node and Bun currently report false for Proxy-wrapped arrays here,
+        // even though the guest Array.isArray builtin follows Proxy targets.
+        // Keep this native bridge behavior isolated from the ECMAScript builtin.
         unsafe { result.write(matches!(value, Value::Array(_))) };
         Ok(())
     })

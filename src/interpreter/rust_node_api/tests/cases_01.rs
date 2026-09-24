@@ -3559,6 +3559,16 @@ module.exports = {
         ));
         let array = result.get_prop("array").unwrap();
         assert!(matches!(array.get_prop("isArray"), Some(Value::Bool(true))));
+        assert!(matches!(array.get_prop("proxyArray"), Some(Value::Bool(false))));
+        assert!(matches!(
+            array.get_prop("nestedProxyArray"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(
+            array.get_prop("proxyObjectIsArray"),
+            Some(Value::Bool(false))
+        ));
+        assert!(matches!(array.get_prop("jsIsArray"), Some(Value::Bool(true))));
         assert!(matches!(array.get_prop("length"), Some(Value::Number(5.0))));
         assert!(matches!(
             array.get_prop("emptyLength"),
@@ -3577,6 +3587,45 @@ module.exports = {
             Some(Value::Bool(false))
         ));
         assert!(matches!(array.get_prop("value"), Some(Value::Bool(true))));
+        let vm_array_json = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs').array);")
+            .unwrap();
+        let Value::String(ref vm_array_json) = vm_array_json else {
+            panic!("Node-API array probe did not return JSON");
+        };
+        let vm_array: serde_json::Value = serde_json::from_str(vm_array_json).unwrap();
+        let array_probe_runner = r#"
+            const addon = require('./fixture.node');
+            const proxyArray = new Proxy([], {});
+            const probe = addon.arrayProbe(
+                proxyArray,
+                new Proxy(new Proxy([], {}), {}),
+                new Proxy({}, {}),
+            );
+            probe.jsIsArray = Array.isArray(proxyArray);
+            process.stdout.write(JSON.stringify(probe));
+        "#;
+        for runtime in ["node", "bun"] {
+            if Command::new(runtime)
+                .arg("--version")
+                .output()
+                .is_ok_and(|output| output.status.success())
+            {
+                let reference = Command::new(runtime)
+                    .current_dir(&root)
+                    .args(["-e", array_probe_runner])
+                    .output()
+                    .unwrap();
+                assert!(
+                    reference.status.success(),
+                    "{runtime} Node-API array reference failed: {}",
+                    String::from_utf8_lossy(&reference.stderr)
+                );
+                let reference_array: serde_json::Value =
+                    serde_json::from_slice(&reference.stdout).unwrap();
+                assert_eq!(vm_array, reference_array, "{runtime} array probe differs");
+            }
+        }
         assert!(
             matches!(result.get_prop("wrapped"), Some(Value::String(ref value)) if value == "wrapped-native-data")
         );
