@@ -123,6 +123,7 @@ pub(super) fn napi_effective_prototype(environment: &NapiEnvironment, object: &V
         }
         Value::Promise(_) => return napi_default_builtin_prototype(environment, "Promise"),
         Value::Date(_) => return napi_default_builtin_prototype(environment, "Date"),
+        Value::RegExp(_) => return napi_default_builtin_prototype(environment, "RegExp"),
         Value::ArrayBuffer(_) => {
             return napi_default_builtin_prototype(environment, "ArrayBuffer");
         }

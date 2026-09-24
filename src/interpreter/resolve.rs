@@ -39,6 +39,7 @@ impl Interpreter {
             ),
             Value::Promise(_) => ("Promise", true),
             Value::Date(_) => ("Date", true),
+            Value::RegExp(_) => ("RegExp", true),
             Value::ArrayBuffer(_) => ("ArrayBuffer", true),
             Value::SharedArrayBuffer(_) => ("SharedArrayBuffer", true),
             Value::TypedArray(view) if view.is_buffer => ("Buffer", true),
@@ -773,7 +774,13 @@ impl Interpreter {
                 Ok(crate::builtins::bigint_method(k).unwrap_or(Value::Undefined))
             }
             (Value::RegExp(data), Value::String(k)) => {
-                Ok(crate::builtins::regexp_member(data, k).unwrap_or(Value::Undefined))
+                if let Some(value) = crate::builtins::regexp_member(data, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop(&prototype, p);
+                }
+                Ok(Value::Undefined)
             }
             (Value::Symbol(symbol), Value::String(k)) => match k.as_str() {
                 "description" => Ok(symbol
@@ -817,6 +824,13 @@ impl Interpreter {
                     name: "[Symbol.iterator]".into(),
                     callable: string_iter,
                 })
+            }
+            (Value::RegExp(_), Value::Symbol(_)) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    self.prop(&prototype, p)
+                } else {
+                    Ok(Value::Undefined)
+                }
             }
             (Value::Generator { .. }, Value::Symbol(_))
                 if crate::builtins::is_iterator_symbol(p) =>

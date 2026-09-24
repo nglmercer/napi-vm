@@ -116,8 +116,9 @@ which is itself an array and inherits from `Object.prototype`. Promise values
 use a shared `Promise.prototype` with the standard constructor and non-enumerable
 `then`, `catch`, and `finally` methods. Date values use a shared
 `Date.prototype` with the implemented date methods and standard non-enumerable
-descriptors. Queries for values whose built-in prototype is not represented
-(such as unsupported specialized values) return a generic Node-API failure.
+descriptors. RegExp values use the shared `RegExp.prototype`. Queries for
+values whose built-in prototype is not represented (such as unsupported
+specialized values) return a generic Node-API failure.
 Guest JavaScript has separate prototype behavior: `Object.getPrototypeOf`,
 `Object.prototype.__proto__`, `Object.prototype.isPrototypeOf`, and
 `instanceof` invoke a Proxy's `getPrototypeOf` trap and enforce its

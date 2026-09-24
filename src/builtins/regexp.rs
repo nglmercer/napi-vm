@@ -13,6 +13,32 @@ use crate::value::{RegExpData, Value};
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("RegExp") {
         super::make_callable(&namespace, regexp_construct, None);
+
+        let object_prototype = e
+            .get("Object")
+            .and_then(|object| object.get_prop("prototype"));
+        let prototype = Value::object_with_proto(
+            vec![
+                ("constructor".into(), namespace.clone()),
+                ("exec".into(), super::nf("exec", regexp_exec)),
+                ("test".into(), super::nf("test", regexp_test)),
+                ("toString".into(), super::nf("toString", regexp_to_string)),
+            ],
+            object_prototype.map(Rc::new),
+        );
+        if let Value::Object { props } = &prototype {
+            let mut metadata = props.meta.borrow_mut();
+            for name in ["constructor", "exec", "test", "toString"] {
+                metadata.set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..crate::value::PropAttrs::default()
+                    },
+                );
+            }
+        }
+        super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
 }
 
@@ -58,9 +84,6 @@ pub fn regexp_member(data: &Rc<RegExpData>, key: &str) -> Option<Value> {
         "sticky" => Value::Bool(regex.sticky),
         "unicode" => Value::Bool(regex.unicode),
         "lastIndex" => Value::Number(data.last_index.get() as f64),
-        "exec" => super::nf("exec", regexp_exec),
-        "test" => super::nf("test", regexp_test),
-        "toString" => super::nf("toString", regexp_to_string),
         _ => return None,
     })
 }

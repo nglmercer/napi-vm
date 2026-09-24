@@ -431,6 +431,13 @@ module.exports = {
     customMatches: addon.getPrototype(customPrototypeTarget) === customPrototype,
     nullMatches: addon.getPrototype(nullPrototypeTarget) === null,
   },
+  regexpPrototypes: {
+    guestPrototypeMatches: Object.getPrototypeOf(/fixture/gi) === RegExp.prototype,
+    nativeApiPrototypeMatches: addon.getPrototype(/fixture/gi) === RegExp.prototype,
+    methodIdentityMatches: /fixture/.exec === RegExp.prototype.exec,
+    objectPrototypeMethodWorks: /fixture/.hasOwnProperty('lastIndex'),
+    prototypeParentMatches: Object.getPrototypeOf(RegExp.prototype) === Object.prototype,
+  },
   arrayPrototypes: {
     defaultMatches: Object.getPrototypeOf([]) === Array.prototype,
     prototypeParentMatches: Object.getPrototypeOf(Array.prototype) === Object.prototype,

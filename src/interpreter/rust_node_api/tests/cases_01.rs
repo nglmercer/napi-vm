@@ -3977,6 +3977,11 @@ module.exports = {
                 guest_result.get("arrayBufferDetachment"),
                 "Node-API v7 detachment mismatch"
             );
+            assert_eq!(
+                node_result.get("regexpPrototypes"),
+                guest_result.get("regexpPrototypes"),
+                "Node-API RegExp prototype mismatch"
+            );
             assert_eq!(node_result, guest_result);
         }
 
@@ -4057,6 +4062,11 @@ module.exports = {
                 proxy_names.remove("writable");
                 proxy_names.remove("configurable");
             }
+            assert_eq!(
+                bun_result.get("regexpPrototypes"),
+                normalized_guest_result.get("regexpPrototypes"),
+                "Bun/N-API RegExp prototype mismatch"
+            );
             assert_eq!(bun_result, normalized_guest_result);
         }
 
