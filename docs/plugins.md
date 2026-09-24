@@ -271,6 +271,31 @@ host.configure_napi_addons(
 host.load(plugin_directory)?;
 ```
 
+For packages that publish platform prebuilds, the Rust host can select the
+current OS/architecture and still verify the selected file against trusted
+metadata. Use a bare alias when the package has no JavaScript wrapper, or the
+`node-gyp-build` option when its CommonJS entry calls that helper:
+
+```rust
+RustPluginNapiOptions::default()
+    .allow_native_prebuild_with_sha256(
+        "example-addon",
+        "node_modules/example-addon",
+        trusted_sha256,
+    );
+
+RustPluginNapiOptions::default()
+    .allow_native_package_prebuild_with_sha256(
+        "node_modules/example-addon",
+        trusted_sha256,
+    );
+```
+
+The package root is relative to the plugin directory unless it is absolute;
+the host rejects roots outside that directory. `node_gyp_build_prebuilds_only`
+can restrict selection to `prebuilds/<platform>-<arch>` when an application
+does not want the `build/Release` fallback.
+
 The VM exposes `require()` for the configured plugin entry, so its module can
 call `require("package.node")` for an installed package or
 `require("./native/addon.node")` for a direct file. The addon still must be

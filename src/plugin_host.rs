@@ -24,6 +24,11 @@ use crate::host::HostBridge;
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 use crate::host::{HostCallback, HostEvent};
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+use crate::interpreter::FileCommonJsLoader;
 use crate::interpreter::Interpreter;
 use crate::parser::Statement;
 #[cfg(all(
@@ -350,7 +355,10 @@ impl RustPluginHost {
                 "max Node-API version must be at least 1".into(),
             ));
         }
-        if options.allowed_addons.is_empty() {
+        if options.allowed_addons.is_empty()
+            && options.native_prebuild_aliases.is_empty()
+            && options.native_package_prebuilds.is_empty()
+        {
             return Err(PluginHostError::Load(
                 "Node-API configuration requires at least one trusted addon".into(),
             ));
@@ -619,6 +627,23 @@ impl RustPluginHost {
             let mut options = RustNodeApiOptions::new([prepared.root.clone()])
                 .max_napi_version(config.max_napi_version)
                 .entry(prepared.entry_path.clone());
+            if let Some(enabled) = config.node_gyp_build_prebuilds_only {
+                options = options.node_gyp_build_prebuilds_only(enabled);
+            }
+            if let Some(exec_path) = &config.node_gyp_build_exec_path {
+                options = options.node_gyp_build_exec_path(exec_path.clone());
+            }
+
+            let mut prebuild_resolver =
+                FileCommonJsLoader::new([prepared.root.clone()]).map_err(PluginHostError::Vm)?;
+            if let Some(enabled) = config.node_gyp_build_prebuilds_only {
+                prebuild_resolver = prebuild_resolver.with_node_gyp_build_prebuilds_only(enabled);
+            }
+            if let Some(exec_path) = &config.node_gyp_build_exec_path {
+                prebuild_resolver =
+                    prebuild_resolver.with_node_gyp_build_exec_path(exec_path.clone());
+            }
+
             let mut canonical_addons = Vec::with_capacity(config.allowed_addons.len());
             for (addon, digest) in &config.allowed_addons {
                 let candidate = if addon.is_absolute() {
@@ -638,6 +663,29 @@ impl RustPluginHost {
                 }
                 options = options.allow_native_addon_with_sha256(&canonical, *digest);
                 canonical_addons.push(canonical);
+            }
+            for alias in &config.native_prebuild_aliases {
+                let package_root = plugin_napi_package_root(&prepared.root, &alias.package_root)?;
+                let selected = prebuild_resolver
+                    .resolve_node_api_prebuild(&package_root)
+                    .map_err(PluginHostError::Vm)?;
+                options = options.allow_native_prebuild_with_sha256(
+                    &alias.request,
+                    &package_root,
+                    alias.expected_sha256,
+                );
+                canonical_addons.push(PathBuf::from(selected.filename));
+            }
+            for package in &config.native_package_prebuilds {
+                let package_root = plugin_napi_package_root(&prepared.root, &package.package_root)?;
+                let selected = prebuild_resolver
+                    .resolve_node_api_prebuild(&package_root)
+                    .map_err(PluginHostError::Vm)?;
+                options = options.allow_native_package_prebuild_with_sha256(
+                    &package_root,
+                    package.expected_sha256,
+                );
+                canonical_addons.push(PathBuf::from(selected.filename));
             }
             let runtime = interpreter
                 .enable_native_addons(options)
@@ -751,6 +799,31 @@ impl RustPluginHost {
 pub struct RustPluginNapiOptions {
     max_napi_version: u32,
     allowed_addons: Vec<(PathBuf, [u8; 32])>,
+    native_prebuild_aliases: Vec<RustPluginNapiPrebuildAlias>,
+    native_package_prebuilds: Vec<RustPluginNapiPackagePrebuild>,
+    node_gyp_build_prebuilds_only: Option<bool>,
+    node_gyp_build_exec_path: Option<PathBuf>,
+}
+
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+#[derive(Clone, Debug)]
+struct RustPluginNapiPrebuildAlias {
+    request: String,
+    package_root: PathBuf,
+    expected_sha256: [u8; 32],
+}
+
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+#[derive(Clone, Debug)]
+struct RustPluginNapiPackagePrebuild {
+    package_root: PathBuf,
+    expected_sha256: [u8; 32],
 }
 
 #[cfg(all(
@@ -762,6 +835,10 @@ impl Default for RustPluginNapiOptions {
         Self {
             max_napi_version: 10,
             allowed_addons: Vec::new(),
+            native_prebuild_aliases: Vec::new(),
+            native_package_prebuilds: Vec::new(),
+            node_gyp_build_prebuilds_only: None,
+            node_gyp_build_exec_path: None,
         }
     }
 }
@@ -776,10 +853,80 @@ impl RustPluginNapiOptions {
         self
     }
 
+    /// Resolve an N-API prebuild for this platform and expose it through a
+    /// bare `require()` request. The digest must come from trusted host
+    /// metadata and is checked against the selected binary before loading.
+    pub fn allow_native_prebuild_with_sha256(
+        mut self,
+        request: impl Into<String>,
+        package_root: impl Into<PathBuf>,
+        expected_sha256: [u8; 32],
+    ) -> Self {
+        self.native_prebuild_aliases
+            .push(RustPluginNapiPrebuildAlias {
+                request: request.into(),
+                package_root: package_root.into(),
+                expected_sha256,
+            });
+        self
+    }
+
+    /// Allow a package wrapper that calls
+    /// `require("node-gyp-build")(__dirname)` to load its selected N-API
+    /// prebuild. The selected binary must match the trusted digest.
+    pub fn allow_native_package_prebuild_with_sha256(
+        mut self,
+        package_root: impl Into<PathBuf>,
+        expected_sha256: [u8; 32],
+    ) -> Self {
+        self.native_package_prebuilds
+            .push(RustPluginNapiPackagePrebuild {
+                package_root: package_root.into(),
+                expected_sha256,
+            });
+        self
+    }
+
+    /// Restrict package prebuild lookup to `prebuilds/<platform>-<arch>`.
+    pub fn node_gyp_build_prebuilds_only(mut self, enabled: bool) -> Self {
+        self.node_gyp_build_prebuilds_only = Some(enabled);
+        self
+    }
+
+    /// Set the executable path used by the nearby-prebuild fallback.
+    pub fn node_gyp_build_exec_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.node_gyp_build_exec_path = Some(path.into());
+        self
+    }
+
     pub fn max_napi_version(mut self, version: u32) -> Self {
         self.max_napi_version = version;
         self
     }
+}
+
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+fn plugin_napi_package_root(
+    plugin_root: &Path,
+    package_root: &Path,
+) -> Result<PathBuf, PluginHostError> {
+    let candidate = if package_root.is_absolute() {
+        package_root.to_path_buf()
+    } else {
+        plugin_root.join(package_root)
+    };
+    let canonical = fs::canonicalize(&candidate).map_err(|error| {
+        PluginHostError::Load(format!("cannot resolve configured native package: {error}"))
+    })?;
+    if !canonical.is_dir() || !canonical.starts_with(plugin_root) {
+        return Err(PluginHostError::Load(
+            "configured native package root is outside the plugin directory".into(),
+        ));
+    }
+    Ok(canonical)
 }
 
 fn prepare_plugin(
@@ -2721,6 +2868,24 @@ mod tests {
         }
     }
 
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
+    #[test]
+    fn napi_prebuild_package_roots_stay_inside_the_plugin_directory() {
+        let plugin = TestPluginDir::new("napi-package-root");
+        let outside = TestPluginDir::new("napi-package-outside");
+        fs::create_dir_all(plugin.0.join("node_modules/example-addon")).unwrap();
+
+        let inside =
+            plugin_napi_package_root(&plugin.0, Path::new("node_modules/example-addon")).unwrap();
+        assert_eq!(inside, plugin.0.join("node_modules/example-addon"));
+
+        let error = plugin_napi_package_root(&plugin.0, &outside.0).unwrap_err();
+        assert!(error.to_string().contains("outside the plugin directory"));
+    }
+
     fn string_value(args: Vec<Value>) -> Result<Value, VmErr> {
         match args.first() {
             Some(Value::String(value)) => Ok(Value::String(format!("hello {value}"))),
@@ -3183,11 +3348,11 @@ export default { onLoad() {
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
         dir.write(
             "node_modules/fixture.node/package.json",
-            r#"{"name":"fixture.node","version":"1.0.0","exports":{".":{"node-addons":"./build/Release/fixture.node","default":"./fallback.cjs"}}}"#,
+            r#"{"name":"fixture.node","version":"1.0.0","main":"index.cjs"}"#,
         );
         dir.write(
-            "node_modules/fixture.node/fallback.cjs",
-            "module.exports = { hostFallbackWasUsed: true };",
+            "node_modules/fixture.node/index.cjs",
+            "module.exports = require('node-gyp-build')(__dirname);",
         );
 
         dir.write("data.txt", "checked");
@@ -3197,6 +3362,7 @@ export default { onLoad() {
             r#"
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+const aliasedAddon = require("fixture-native");
 const addon = require("fixture.node");
 export default {
 async onLoad() {
@@ -3205,6 +3371,7 @@ async onLoad() {
   try { addon.fail(); }
   catch (error) { failure = { name: error.name, message: error.message }; }
   const result = {
+    sameExports: aliasedAddon === addon,
     sum: addon.add(19, 23),
     text: addon.concatenate("rust", "-napi"),
     counter: { initial: counter.value, incremented: counter.increment(), value: counter.value },
@@ -3239,12 +3406,16 @@ async onReload(context, previousState) {
             policy,
             ..RustPluginHostOptions::default()
         });
+        let package_root = dir.0.join("node_modules/fixture.node");
         host.configure_napi_addons(
             "napi-rs-plugin",
-            RustPluginNapiOptions::default().allow_addon_with_sha256(&addon, digest),
+            RustPluginNapiOptions::default()
+                .allow_native_prebuild_with_sha256("fixture-native", &package_root, digest)
+                .allow_native_package_prebuild_with_sha256(&package_root, digest),
         )
         .unwrap();
         let expected = serde_json::json!({
+            "sameExports": true,
             "sum": 42,
             "text": "rust-napi",
             "counter": { "initial": 40, "incremented": 41, "value": 41 },
