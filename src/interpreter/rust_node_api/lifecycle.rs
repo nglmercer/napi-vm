@@ -1,6 +1,18 @@
 //! Environment registration, weak references, cleanup hooks, and finalizers.
 
-use super::*;
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::rc::Rc;
+
+use crate::value::Value;
+
+use super::api::napi_reference_uses_weak_semantics;
+use super::state::{
+    AsyncCleanupHookPhase, NAPI_ENVIRONMENTS, NapiAsyncCleanupHookRecord, NapiCleanupHookRecord,
+    NapiEnvironment, NapiExternalBufferFinalizer, NapiObjectIdentity, NapiReference,
+    NapiReferenceIdentity, post_finalizer_senders,
+};
+use super::{NAPI_GENERIC_FAILURE, NAPI_OBJECT_EXPECTED, NapiAsyncCleanupHookHandle};
 
 pub(super) fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
     match value {

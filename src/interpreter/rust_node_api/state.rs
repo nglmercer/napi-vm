@@ -1,6 +1,33 @@
 //! Node-API environment state, handle arena, and callback scopes.
 
-use super::*;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, VecDeque};
+use std::ffi::{CString, c_char, c_void};
+use std::path::PathBuf;
+use std::rc::{Rc, Weak};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
+
+#[cfg(unix)]
+use libloading::os::unix::Library;
+#[cfg(target_os = "windows")]
+use libloading::os::windows::Library;
+
+use crate::error::VmErr;
+use crate::host::HostCallback;
+use crate::interpreter::Env;
+use crate::value::{PromiseInner, Value};
+
+use super::shim::NodeApiShim;
+use super::{
+    MAX_LOCAL_HANDLES, NAPI_ESCAPE_CALLED_TWICE, NAPI_GENERIC_FAILURE, NAPI_HANDLE_SCOPE_MISMATCH,
+    NAPI_INVALID_ARG, NEXT_OPAQUE_HANDLE_ID, NapiAsyncCleanupHook, NapiAsyncCleanupHookHandle,
+    NapiAsyncCompleteCallback, NapiAsyncExecuteCallback, NapiCallback, NapiCleanupHook, NapiEnv,
+    NapiFinalize, NapiHandleScope, NapiThreadsafeFunctionCallJs, NapiValue, NodeApiNoEnvFinalize,
+    ReportedNodeVersion,
+};
 
 pub(super) struct HostState {
     pub(super) global: Env,

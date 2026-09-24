@@ -1,6 +1,37 @@
 //! Async work pools and threadsafe function plumbing.
 
-use super::*;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+
+use crate::error::VmErr;
+use crate::host::{HostCallback, HostCallbackKind, HostEvent};
+use crate::interpreter::Env;
+use crate::interpreter::native_addon_binary::validate_native_addon_binary;
+use crate::value::Value;
+
+use super::api::threadsafe_function_registry;
+use super::guest::create_native_callback_value_with_kind;
+use super::lifecycle::napi_collect_weak_references;
+use super::shim::NodeApiShim;
+use super::state::{
+    AsyncWorkCompletion, AsyncWorkPool, AsyncWorkTaskMessage, CallbackFrame,
+    GuestCallbackDispatcher, GuestCallbackDispatcherScope, HostRuntimeNotification, HostState,
+    NapiEnvironment, NapiThreadsafeFunctionShared, NativeCallback,
+};
+use super::{
+    ASYNC_WORK_CANCELLED, ASYNC_WORK_FINISHED, ASYNC_WORK_QUEUE_CAPACITY, ASYNC_WORK_QUEUED,
+    ASYNC_WORK_RUNNING, ASYNC_WORKER_COUNT, NAPI_CANCELLED, NAPI_GENERIC_FAILURE, NAPI_OK, NapiEnv,
+    ReportedNodeVersion, RustNodeApiHost, call_guest_callback, dispatch_guest_callback,
+    environment, napi_error,
+};
 
 pub(super) fn create_async_work_pool(
     runtime_notification_sender: Sender<HostRuntimeNotification>,

@@ -1,6 +1,61 @@
 //! The Node-API function table and its property descriptor layout.
 
-use super::*;
+use std::ffi::{c_char, c_void};
+
+use super::api::{
+    api_acquire_threadsafe_function, api_add_async_cleanup_hook, api_add_env_cleanup_hook,
+    api_add_finalizer, api_adjust_external_memory, api_async_destroy, api_async_init,
+    api_call_function, api_call_threadsafe_function, api_cancel_async_work,
+    api_check_object_type_tag, api_close_callback_scope, api_close_escapable_handle_scope,
+    api_close_handle_scope, api_coerce_to_bool, api_coerce_to_number, api_coerce_to_object,
+    api_coerce_to_string, api_create_array, api_create_array_with_length, api_create_arraybuffer,
+    api_create_async_work, api_create_bigint_int64, api_create_bigint_uint64,
+    api_create_bigint_words, api_create_buffer, api_create_buffer_copy,
+    api_create_buffer_from_arraybuffer, api_create_dataview, api_create_date, api_create_double,
+    api_create_error, api_create_external, api_create_external_arraybuffer,
+    api_create_external_buffer, api_create_external_sharedarraybuffer,
+    api_create_external_string_latin1, api_create_external_string_utf16, api_create_function,
+    api_create_int32, api_create_int64, api_create_object, api_create_object_with_properties,
+    api_create_promise, api_create_property_key_latin1, api_create_property_key_utf8,
+    api_create_property_key_utf16, api_create_range_error, api_create_reference,
+    api_create_sharedarraybuffer, api_create_string_latin1, api_create_string_utf8,
+    api_create_string_utf16, api_create_symbol, api_create_syntax_error,
+    api_create_threadsafe_function, api_create_type_error, api_create_typedarray,
+    api_create_uint32, api_define_class, api_define_properties, api_delete_async_work,
+    api_delete_element, api_delete_property, api_delete_reference, api_detach_arraybuffer,
+    api_escape_handle, api_fatal_error, api_fatal_exception, api_get_all_property_names,
+    api_get_and_clear_last_exception, api_get_array_length, api_get_arraybuffer_info,
+    api_get_boolean, api_get_buffer_info, api_get_cb_info, api_get_dataview_info,
+    api_get_date_value, api_get_element, api_get_global, api_get_instance_data,
+    api_get_module_file_name, api_get_named_property, api_get_new_target, api_get_node_version,
+    api_get_null, api_get_property, api_get_property_names, api_get_prototype,
+    api_get_reference_value, api_get_threadsafe_function_context, api_get_typedarray_info,
+    api_get_undefined, api_get_uv_event_loop, api_get_value_bigint_int64,
+    api_get_value_bigint_uint64, api_get_value_bigint_words, api_get_value_bool,
+    api_get_value_double, api_get_value_external, api_get_value_int32, api_get_value_int64,
+    api_get_value_string_latin1, api_get_value_string_utf8, api_get_value_string_utf16,
+    api_get_value_uint32, api_get_version, api_has_element, api_has_named_property,
+    api_has_own_property, api_has_property, api_instanceof, api_is_array, api_is_arraybuffer,
+    api_is_buffer, api_is_dataview, api_is_date, api_is_detached_arraybuffer, api_is_error,
+    api_is_exception_pending, api_is_promise, api_is_sharedarraybuffer, api_is_typedarray,
+    api_make_callback, api_module_register, api_new_instance, api_node_symbol_for,
+    api_object_freeze, api_object_seal, api_open_callback_scope, api_open_escapable_handle_scope,
+    api_open_handle_scope, api_post_finalizer, api_queue_async_work, api_ref_threadsafe_function,
+    api_reference_ref, api_reference_unref, api_reject_deferred, api_release_threadsafe_function,
+    api_remove_async_cleanup_hook, api_remove_env_cleanup_hook, api_remove_wrap,
+    api_resolve_deferred, api_run_script, api_set_element, api_set_instance_data,
+    api_set_named_property, api_set_property, api_set_prototype, api_strict_equals, api_throw,
+    api_throw_error, api_throw_range_error, api_throw_syntax_error, api_throw_type_error,
+    api_type_tag_object, api_typeof, api_unref_threadsafe_function, api_unwrap, api_wrap,
+};
+use super::state::{NapiExtendedErrorInfo, NapiNodeVersion, NapiTypeTag};
+use super::{
+    NapiAsyncCleanupHook, NapiAsyncCleanupHookHandle, NapiAsyncCompleteCallback, NapiAsyncContext,
+    NapiAsyncExecuteCallback, NapiAsyncWork, NapiCallback, NapiCallbackInfo, NapiCallbackScope,
+    NapiCleanupHook, NapiDeferred, NapiEnv, NapiFinalize, NapiHandleScope, NapiRef,
+    NapiThreadsafeFunction, NapiThreadsafeFunctionCallJs, NapiValue, NodeApiNoEnvFinalize,
+    api_get_last_error_info,
+};
 
 #[repr(C)]
 pub(super) struct NapiVmApiTable {

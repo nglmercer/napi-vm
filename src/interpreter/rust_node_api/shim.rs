@@ -1,6 +1,34 @@
 //! Dynamic loading of the host Node-API shim library.
 
-use super::*;
+use std::collections::HashMap;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak as SyncWeak};
+
+#[cfg(unix)]
+use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
+#[cfg(target_os = "windows")]
+use libloading::os::windows::{
+    LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+    LOAD_LIBRARY_SEARCH_USER_DIRS, Library,
+};
+#[cfg(target_os = "windows")]
+use std::collections::HashSet;
+#[cfg(target_os = "windows")]
+use std::ffi::{OsStr, c_void};
+
+use crate::error::VmErr;
+
+use super::api_table::{NAPI_VM_API_TABLE, NapiVmApiTable};
+#[cfg(target_os = "windows")]
+use super::{
+    AddDllDirectory, GetModuleHandleW, RemoveDllDirectory, WINDOWS_NODE_API_SHIM_DIRECTORIES,
+};
+use super::{
+    PINNED_NODE_API_ADDON_LIBRARIES, PROCESS_NODE_API_ADDON_LIBRARIES, PROCESS_NODE_API_SHIM,
+};
 
 pub(super) struct NodeApiShim {
     pub(super) _library: Option<Library>,

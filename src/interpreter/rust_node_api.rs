@@ -9,18 +9,18 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(target_os = "windows")]
 use std::ffi::OsStr;
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+use std::sync::mpsc::TrySendError;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak as SyncWeak};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::Duration;
 
 #[cfg(unix)]
-use libloading::os::unix::{Library, RTLD_GLOBAL, RTLD_NOW};
+use libloading::os::unix::Library;
 #[cfg(target_os = "windows")]
 use libloading::os::windows::{
     LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
@@ -51,10 +51,9 @@ use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::native_addon::NativeAddonPolicy;
-use crate::interpreter::native_addon_binary::validate_native_addon_binary;
 #[cfg(all(test, target_os = "windows"))]
 use crate::interpreter::native_addon_binary::validate_native_addon_header;
-use crate::interpreter::{Env, FileCommonJsLoader, Interpreter};
+use crate::interpreter::{FileCommonJsLoader, Interpreter};
 use crate::value::{
     BoxedPrimitive, Buffer, ClassData, ErrorData, PromiseInner, PromiseState, PropAttrs,
     SharedBuffer, TypedArrayData, TypedKind, Value,
@@ -506,21 +505,28 @@ impl RustNodeApiHost {
 }
 
 mod api;
-#[allow(unused_imports)]
-use api::*;
-
-mod state;
-use state::*;
 mod api_table;
-use api_table::*;
-mod guest;
-use guest::*;
-mod lifecycle;
-use lifecycle::*;
-mod shim;
-use shim::*;
 mod async_work;
-use async_work::*;
+mod guest;
+mod lifecycle;
+mod shim;
+mod state;
+
+use api::{get_threadsafe_function, set_pending_exception};
+use async_work::{shutdown_threadsafe_functions, thread_safe_function_events};
+use guest::{create_native_async_complete_value, create_posted_finalizer_value};
+use lifecycle::{
+    close_post_finalizer_senders, finalize_environment_wraps, napi_collect_weak_references,
+    register_environment, run_environment_cleanup_hooks,
+};
+use shim::NodeApiShim;
+use state::{
+    AsyncWorkTaskMessage, GuestCallbackDispatcher, GuestCallbackDispatcherScope,
+    HostRuntimeNotification, HostState, NAPI_ENVIRONMENTS, NAPI_VM_RELEASE, NapiAddonRegister,
+    NapiEnvironment, NapiExtendedErrorInfo, NapiHandleArena, NapiModule,
+    NapiModuleRegistrationScope, NapiNodeVersion, NativeCallback, post_finalizer_senders,
+    remove_async_cleanup_hook_handle,
+};
 
 fn napi_extended_error_info(status: i32) -> NapiExtendedErrorInfo {
     let message: &'static [u8] = match status {

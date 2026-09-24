@@ -1,5 +1,7 @@
+use super::api::{settle_deferred_without_interpreter, to_int32};
 use super::*;
 use crate::interpreter::{Interpreter, NativeAddonRuntime};
+use libloading::os::unix::{RTLD_GLOBAL, RTLD_NOW};
 use sha2::{Digest, Sha256};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};

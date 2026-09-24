@@ -1,6 +1,20 @@
 //! Guest-side property, prototype, and callback helpers backing the N-API surface.
 
-use super::*;
+use std::collections::HashSet;
+use std::ffi::c_void;
+use std::rc::Rc;
+
+use crate::error::VmErr;
+use crate::host::{HostCallback, HostCallbackKind};
+use crate::interpreter::{Env, Interpreter};
+use crate::value::{PropAttrs, Value};
+
+use super::api::napi_effective_prototype;
+use super::state::{NapiEnvironment, NativeCallback, NativeCallbackRecord};
+use super::{
+    NAPI_GENERIC_FAILURE, NAPI_INVALID_ARG, NAPI_OBJECT_EXPECTED, NapiAsyncCompleteCallback,
+    NapiCallback, NapiFinalize, NapiValue, call_guest_callback, exception_from_callback_error,
+};
 
 pub(super) fn napi_global_scope(environment: &NapiEnvironment) -> Result<Env, i32> {
     environment
