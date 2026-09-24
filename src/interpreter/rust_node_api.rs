@@ -9182,11 +9182,9 @@ impl NativeAddonLoader for RustNodeApiHost {
         let registration_scope = NapiModuleRegistrationScope::new();
         let library_result = self._shim.load_addon(Path::new(filename).as_os_str());
         let registered_modules = registration_scope.finish();
-        let library = library_result.map_err(|error| {
-            VmErr::Msg(format!(
-                "cannot load Node-API addon {filename}: {error}; the binary may require an unavailable symbol or dependency"
-            ))
-        })?;
+        let max_napi_version = self.state.borrow().max_napi_version as i32;
+        let library = library_result
+            .map_err(|error| native_addon_loader_error(filename, &error, max_napi_version))?;
         let symbol_api_version = unsafe {
             library
                 .get::<unsafe extern "C" fn() -> i32>(b"node_api_module_get_api_version_v1\0")
@@ -9236,7 +9234,6 @@ impl NativeAddonLoader for RustNodeApiHost {
                 }
             }
         };
-        let max_napi_version = self.state.borrow().max_napi_version as i32;
         if !(1..=max_napi_version).contains(&version) {
             return Err(VmErr::Msg(format!(
                 "Node-API addon {filename} requests version {version}; this host is configured for Node-API versions 1 through {max_napi_version}"
@@ -9552,6 +9549,52 @@ fn napi_error(action: &str, status: i32) -> VmErr {
     ))
 }
 
+fn missing_node_api_import_from_loader_error(error: &str) -> Option<&str> {
+    let symbol_start = [
+        "undefined symbol:",
+        "Symbol not found:",
+        "procedure entry point ",
+    ]
+    .into_iter()
+    .find_map(|marker| error.find(marker).map(|index| index + marker.len()))?;
+
+    error[symbol_start..]
+        .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
+        .map(|token| token.trim_start_matches('_'))
+        .find(|token| token.starts_with("napi_") || token.starts_with("node_api_"))
+}
+
+fn native_addon_loader_error(
+    filename: &str,
+    error: &libloading::Error,
+    max_napi_version: i32,
+) -> VmErr {
+    let detail = std::error::Error::source(error)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| error.to_string());
+    VmErr::Msg(native_addon_loader_error_message(
+        filename,
+        &detail,
+        max_napi_version,
+    ))
+}
+
+fn native_addon_loader_error_message(
+    filename: &str,
+    detail: &str,
+    max_napi_version: i32,
+) -> String {
+    if let Some(symbol) = missing_node_api_import_from_loader_error(detail) {
+        return format!(
+            "[UNSUPPORTED_NODE_API] cannot load Node-API addon {filename}: imported symbol `{symbol}` is not provided by the Rust Node-API backend, configured for Node-API versions 1 through {max_napi_version}. The addon's declared version could not be read because symbol resolution failed before initialization. Use the Node sidecar backend with a compatible Node runtime if it supplies this API. Loader detail: {detail}"
+        );
+    }
+
+    format!(
+        "cannot load Node-API addon {filename}: {detail}; the binary may require an unavailable symbol or dependency"
+    )
+}
+
 /// Install the experimental Node-API host as this interpreter's CommonJS
 /// addon loader and host bridge. The sidecar API remains the cross-platform
 /// option for addons that require Node/V8-specific symbols.
@@ -9717,6 +9760,137 @@ mod tests {
         assert_eq!(to_int32(-1.0), -1);
         assert_eq!(to_int32(f64::NAN), 0);
         assert_eq!(to_int32(f64::INFINITY), 0);
+    }
+
+    #[test]
+    fn missing_node_api_imports_have_a_specific_loader_diagnostic() {
+        assert_eq!(
+            missing_node_api_import_from_loader_error(
+                "dlopen failed: undefined symbol: napi_vm_missing_test_import"
+            ),
+            Some("napi_vm_missing_test_import")
+        );
+        assert_eq!(
+            missing_node_api_import_from_loader_error(
+                "dlopen failed: Symbol not found: _node_api_missing_test_import"
+            ),
+            Some("node_api_missing_test_import")
+        );
+        assert_eq!(
+            missing_node_api_import_from_loader_error("cannot open dependency libnapi-helper.so"),
+            None
+        );
+        assert_eq!(
+            missing_node_api_import_from_loader_error("undefined symbol: _Z12napi_helperv"),
+            None
+        );
+
+        let message = native_addon_loader_error_message(
+            "fixture.node",
+            "undefined symbol: napi_vm_missing_test_import",
+            10,
+        );
+        assert!(message.contains("[UNSUPPORTED_NODE_API]"));
+        assert!(message.contains("`napi_vm_missing_test_import`"));
+        assert!(message.contains("versions 1 through 10"));
+        assert!(message.contains("declared version could not be read"));
+        assert!(message.contains("Node sidecar backend"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn unresolved_node_api_import_fails_before_addon_initialization() {
+        const ROOT_ENV: &str = "NAPI_VM_MISSING_NODE_API_FIXTURE_ROOT";
+        if let Some(root) = std::env::var_os(ROOT_ENV).map(PathBuf::from) {
+            let addon = root.join("missing.node");
+            let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+            let mut interpreter = Interpreter::with_builtins();
+            interpreter
+                .enable_rust_node_api_addons(
+                    RustNodeApiOptions::new([root]).allow_native_addon_with_sha256(&addon, digest),
+                )
+                .unwrap();
+            let error = interpreter
+                .eval_source("require('./missing.node')")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("[UNSUPPORTED_NODE_API]"), "{error}");
+            assert!(error.contains("napi_vm_missing_test_import"), "{error}");
+            assert!(error.contains("versions 1 through 10"), "{error}");
+            return;
+        }
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-missing-import-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let compiler = Command::new("cc").arg("--version").output();
+        let include = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping missing-symbol fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("missing.c");
+        let addon = root.join("missing.node");
+        fs::write(
+            &source,
+            r#"
+#define NAPI_VERSION 1
+#include <node_api.h>
+
+extern napi_status napi_vm_missing_test_import(napi_env env);
+
+NAPI_MODULE_INIT() {
+  (void)napi_vm_missing_test_import(env);
+  return exports;
+}
+"#,
+        )
+        .unwrap();
+        let built = Command::new("cc")
+            .args(["-std=c11", "-O2", "-fPIC", "-shared", "-I"])
+            .arg(include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "missing-symbol fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest),
+            )
+            .unwrap();
+        let error = interpreter
+            .eval_source("require('./missing.node')")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("[UNSUPPORTED_NODE_API]"), "{error}");
+        assert!(error.contains("napi_vm_missing_test_import"), "{error}");
+        assert!(error.contains("versions 1 through 10"), "{error}");
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

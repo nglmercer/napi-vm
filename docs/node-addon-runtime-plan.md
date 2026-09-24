@@ -307,9 +307,15 @@ queue. Node-API v3 environment cleanup hooks run in reverse registration order
 on the owner thread before thread-safe function and wrap finalizers. Duplicate
 hook registrations and unmatched removals return `napi_invalid_arg` rather than
 aborting the embedding process. This remains an incomplete compatibility
-backend, and unimplemented imported symbols fail at load time. The macOS Mach-O
-build and loading path uses the same shim and fixture, but needs execution on a
-macOS host before it is claimed as verified. Windows addons that import
+backend, and unimplemented imported symbols fail at load time. When the Unix
+dynamic loader identifies an unresolved `napi_*` or `node_api_*` import, the
+Rust backend reports `[UNSUPPORTED_NODE_API]`, names the missing symbol and
+configured Node-API ceiling, and points to the Node sidecar as an alternative.
+The addon's declared API version cannot be read when loading fails before its
+registration function can run. Other missing dependencies retain the generic
+loader diagnostic. The macOS Mach-O build and loading path uses the same shim
+and fixture, but needs execution on a macOS host before it is claimed as
+verified. Windows addons that import
 `node.exe` use the generated PE DLL provider and Windows DLL search flags; the
 GNU target was cross-compiled and exercised under Wine, while native Windows
 and MSVC execution still need CI verification. The checked-in
