@@ -136,6 +136,25 @@ initializer runs. If initialization fails, the cache entry is removed so a
 later `require()` can retry it. During initialization, synchronous guest entry
 uses the interpreter's paused-call checkpoint; `napi_run_script` can re-require
 the same addon and observe its provisional exports object.
+
+For a Rust desktop host, `examples/rust_native_addon.rs` shows the in-process
+Node-API setup. Build with `node-api-host`, provide the application's CommonJS
+entry, and pass the addon's digest from trusted host metadata:
+
+```bash
+cargo run --features node-api-host --example rust-native-addon -- \
+  ./app ./app/main.cjs ./app/native/example.node "$TRUSTED_SHA256"
+```
+
+The guest entry keeps using ordinary `require('./native/example.node')` or a
+package's normal JavaScript wrapper. The example checks the binary before
+running the entry and shuts the backend down afterward. A long-lived desktop
+application should instead retain the returned runtime and call
+`vm.run_event_loop_once(std::time::Duration::from_millis(16))` from its event
+loop, then call `runtime.shutdown()` during application teardown. This Rust
+backend supports a selected Node-API surface; use `NodeAddonOptions` when an
+addon needs Node's broader ABI compatibility.
+
 The bridge supports synchronous function calls and constructors, Promise
 settlement, primitive values, arrays, byte buffers, BigInts, Dates, regular
 expressions, symbol identity, and identity-preserving native object proxies.

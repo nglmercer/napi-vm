@@ -85,6 +85,11 @@ required-features = []
 name = "vm"
 harness = false
 
+[[example]]
+name = "rust-native-addon"
+path = "examples/rust_native_addon.rs"
+required-features = ["node-api-host"]
+
 # Interpreter hot paths benefit from whole-program optimization and a single
 # codegen unit. `panic` stays at the default (unwind) because the NAPI layer
 # catches panics across the boundary.
