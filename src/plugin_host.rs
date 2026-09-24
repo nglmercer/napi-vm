@@ -3352,10 +3352,19 @@ export default { onLoad() {
         );
         dir.write(
             "node_modules/fixture.node/index.cjs",
-            "module.exports = require('node-gyp-build')(__dirname);",
+            r#"
+const fs = require("fs");
+const path = require("node:path");
+if (fs.readFileSync("./data.txt", "utf8") !== "checked" ||
+    path.basename(__dirname) !== "fixture.node") {
+  throw new Error("CommonJS facades were not installed");
+}
+module.exports = require("node-gyp-build")(__dirname);
+"#,
         );
 
         dir.write("data.txt", "checked");
+        dir.write("secret.txt", "not granted");
         dir.write("cache/.keep", "");
         dir.write(
             "main.mjs",
@@ -3364,14 +3373,28 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const aliasedAddon = require("fixture-native");
 const addon = require("fixture.node");
+const cjsFs = require("node:fs");
+const cjsFsAlias = require("fs");
+const cjsPath = require("path");
+const cjsPathAlias = require("node:path");
 export default {
 async onLoad() {
   const counter = new addon.Counter(40);
   let failure;
   try { addon.fail(); }
   catch (error) { failure = { name: error.name, message: error.message }; }
+  let deniedRead;
+  try { cjsFs.readFileSync("./secret.txt", "utf8"); }
+  catch (error) { deniedRead = error.name; }
   const result = {
     sameExports: aliasedAddon === addon,
+    commonJsFacades: cjsFs === cjsFsAlias && cjsPath === cjsPathAlias &&
+      cjsFs.readFileSync === readFileSync &&
+      cjsFsAlias.writeFileSync === writeFileSync &&
+      cjsPath.join === join && cjsPathAlias.sep === cjsPath.sep,
+    commonJsBuiltinResolve: require.resolve("fs") === "fs" &&
+      require.resolve("node:path") === "node:path",
+    deniedRead,
     sum: addon.add(19, 23),
     text: addon.concatenate("rust", "-napi"),
     counter: { initial: counter.value, incremented: counter.increment(), value: counter.value },
@@ -3416,6 +3439,9 @@ async onReload(context, previousState) {
         .unwrap();
         let expected = serde_json::json!({
             "sameExports": true,
+            "commonJsFacades": true,
+            "commonJsBuiltinResolve": true,
+            "deniedRead": "PermissionDenied",
             "sum": 42,
             "text": "rust-napi",
             "counter": { "initial": 40, "incremented": 41, "value": 41 },

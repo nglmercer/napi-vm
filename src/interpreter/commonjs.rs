@@ -26,7 +26,8 @@ pub enum CommonJsModuleFormat {
     JavaScript,
     Json,
     NativeAddon,
-    /// A runtime-provided CommonJS helper with no filesystem source file.
+    /// A runtime-provided helper or installed guest-module namespace without
+    /// a filesystem source file.
     RuntimeBuiltin,
 }
 
@@ -1560,8 +1561,30 @@ pub(crate) fn resolve_with_parent_builtin(
     let loader = interp.commonjs_loader.clone().ok_or_else(|| {
         VmErr::Msg("require is disabled: configure a host CommonJS module loader first".to_string())
     })?;
+    if let Some(module) = resolve_guest_module_builtin(interp, request) {
+        return Ok(Value::String(module.filename));
+    }
     let module = loader.resolve(request, parent)?;
     Ok(Value::String(module.filename))
+}
+
+fn resolve_guest_module_builtin(
+    interp: &crate::interpreter::Interpreter,
+    request: &str,
+) -> Option<ResolvedCommonJsModule> {
+    let module_name = match request {
+        "fs" | "node:fs" => "node:fs",
+        "path" | "node:path" => "node:path",
+        _ => return None,
+    };
+    let registered = interp.module_sources.borrow().contains_key(module_name)
+        || interp.modules.borrow().contains_key(module_name);
+    registered.then(|| ResolvedCommonJsModule {
+        id: format!("napi-vm:guest-module:{module_name}"),
+        filename: request.to_owned(),
+        format: CommonJsModuleFormat::RuntimeBuiltin,
+        source: None,
+    })
 }
 
 pub(super) fn require_module(
@@ -1572,7 +1595,9 @@ pub(super) fn require_module(
     let loader = interp.commonjs_loader.clone().ok_or_else(|| {
         VmErr::Msg("require is disabled: configure a host CommonJS module loader first".to_string())
     })?;
-    let module = loader.resolve(request, parent)?;
+    let module = resolve_guest_module_builtin(interp, request)
+        .map(Ok)
+        .unwrap_or_else(|| loader.resolve(request, parent))?;
     let cached = interp
         .commonjs_cache
         .borrow()
@@ -1640,7 +1665,24 @@ pub(super) fn require_module(
         }
         CommonJsModuleFormat::JavaScript => evaluate_commonjs_source(interp, module),
         CommonJsModuleFormat::RuntimeBuiltin => {
-            let exports = make_node_gyp_build(interp)?;
+            let exports = if let Some(module_name) = module.id.strip_prefix("napi-vm:guest-module:")
+            {
+                if !interp.ensure_module(module_name)? {
+                    return Err(VmErr::Msg(format!(
+                        "CommonJS builtin module is not installed: {}",
+                        module.filename
+                    )));
+                }
+                let module_record = interp.module(module_name).ok_or_else(|| {
+                    VmErr::Msg(format!(
+                        "CommonJS builtin module has no exports: {}",
+                        module.filename
+                    ))
+                })?;
+                crate::interpreter::Interpreter::namespace_object(&module_record)?
+            } else {
+                make_node_gyp_build(interp)?
+            };
             interp.commonjs_cache.borrow_mut().insert(
                 module.id,
                 CommonJsCacheEntry {

@@ -117,6 +117,12 @@ import { join, normalize, dirname, basename, extname } from "node:path";
 function checks its own path. `node:path` is pure computation and is registered
 only when the manifest asks for `"path": true`.
 
+When the Rust plugin host's CommonJS loader is enabled for native addons,
+`require("fs")` and `require("node:fs")` return the same checked `node:fs`
+facade, and the matching `path` requests resolve to the installed `node:path`
+facade. The CommonJS form keeps the same manifest and host permission checks;
+it does not expose the desktop process's filesystem directly.
+
 Denied calls raise a catchable error carrying no host paths:
 
 ```js
