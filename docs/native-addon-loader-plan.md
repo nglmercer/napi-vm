@@ -44,6 +44,10 @@ returning plausible but incorrect results.
   existing addon loader and host event bridge. `NativeAddonRuntime::shutdown`
   now provides owner-thread, idempotent teardown for either backend. Backend
   options and preflight still differ.
+- Both native backends now enforce canonical roots, the `.node` extension, and
+  the configured SHA-256 pin inside their own loader methods as well as in the
+  CommonJS path. Direct calls through the public backend interface therefore
+  cannot bypass the addon allowlist.
 
 ## Public host configuration
 

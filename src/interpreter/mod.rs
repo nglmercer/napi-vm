@@ -375,7 +375,11 @@ impl Interpreter {
             })
             .transpose()?;
 
-        let bridge = Rc::new(NodeAddonSidecar::new(&options.node_executable)?);
+        let bridge = Rc::new(NodeAddonSidecar::new_with_policy(
+            &options.node_executable,
+            loader.roots().to_vec(),
+            loader.allowed_native_addon_digests().clone(),
+        )?);
         if let Some(required_version) = options.minimum_napi_version
             && bridge.runtime_info().napi_version < required_version
         {

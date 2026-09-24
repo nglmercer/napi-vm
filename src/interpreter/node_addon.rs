@@ -711,6 +711,8 @@ impl Drop for StartupChild {
 pub struct NodeAddonSidecar {
     state: Rc<RefCell<State>>,
     runtime_info: NodeAddonRuntimeInfo,
+    allowed_roots: Vec<PathBuf>,
+    allowed_addons: HashMap<PathBuf, [u8; 32]>,
 }
 
 /// Runtime versions reported by the Node process hosting native addons.
@@ -807,6 +809,14 @@ impl std::fmt::Debug for NodeAddonSidecar {
 
 impl NodeAddonSidecar {
     pub fn new(node_executable: impl AsRef<OsStr>) -> Result<Self, VmErr> {
+        Self::new_with_policy(node_executable, Vec::new(), HashMap::new())
+    }
+
+    pub(super) fn new_with_policy(
+        node_executable: impl AsRef<OsStr>,
+        allowed_roots: Vec<PathBuf>,
+        allowed_addons: HashMap<PathBuf, [u8; 32]>,
+    ) -> Result<Self, VmErr> {
         let listener = TcpListener::bind(("127.0.0.1", 0))
             .map_err(|e| VmErr::Msg(format!("cannot bind Node bridge: {e}")))?;
         listener
@@ -927,6 +937,8 @@ impl NodeAddonSidecar {
                 native_promises: HashMap::new(),
             })),
             runtime_info,
+            allowed_roots,
+            allowed_addons,
         })
     }
 
@@ -1451,6 +1463,51 @@ fn fail_state(state: &mut State) {
 
 impl NativeAddonLoader for NodeAddonSidecar {
     fn load(&self, filename: &Path) -> Result<Value, VmErr> {
+        let filename = std::fs::canonicalize(filename).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve native addon {}: {error}",
+                filename.display()
+            ))
+        })?;
+        if !self
+            .allowed_roots
+            .iter()
+            .any(|root| filename.starts_with(root))
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon escapes configured roots: {}",
+                filename.display()
+            )));
+        }
+        if filename
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("node")
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon path must use the .node extension: {}",
+                filename.display()
+            )));
+        }
+        let expected_digest = self.allowed_addons.get(&filename).ok_or_else(|| {
+            VmErr::Msg(format!(
+                "native addon is not allowlisted: {}",
+                filename.display()
+            ))
+        })?;
+        let actual_digest =
+            crate::interpreter::commonjs::sha256_file(&filename).map_err(|error| {
+                VmErr::Msg(format!(
+                    "cannot verify native addon {}: {error}",
+                    filename.display()
+                ))
+            })?;
+        if &actual_digest != expected_digest {
+            return Err(VmErr::Msg(format!(
+                "native addon integrity check failed before loading: {}",
+                filename.display()
+            )));
+        }
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
@@ -3232,6 +3289,88 @@ mod tests {
                 .contains("configure a host CommonJS module loader")
         );
 
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn node_addon_sidecar_enforces_allowlist_and_digest_on_direct_loads() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let base = std::env::temp_dir().join(format!(
+            "napi-vm-node-addon-policy-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let root = base.join("root");
+        let outside = base.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+
+        let node = ProcessCommand::new("node").arg("--version").output();
+        let Ok(node) = node else {
+            eprintln!("skipping direct sidecar policy test: Node.js is unavailable");
+            fs::remove_dir_all(base).unwrap();
+            return;
+        };
+        if !node.status.success() {
+            eprintln!("skipping direct sidecar policy test: node --version failed");
+            fs::remove_dir_all(base).unwrap();
+            return;
+        }
+
+        let pinned_addon = root.join("pinned.node");
+        let untrusted_addon = root.join("untrusted.node");
+        let outside_addon = outside.join("outside.node");
+        let original = b"configured addon bytes";
+        fs::write(&pinned_addon, original).unwrap();
+        fs::write(&untrusted_addon, b"untrusted addon bytes").unwrap();
+        fs::write(&outside_addon, b"outside addon bytes").unwrap();
+        let digest: [u8; 32] = Sha256::digest(original).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        let sidecar = interpreter
+            .enable_node_addons(
+                NodeAddonOptions::new("node", [root.clone()])
+                    .allow_native_addon_with_sha256(&pinned_addon, digest),
+            )
+            .unwrap();
+
+        let untrusted_error =
+            crate::interpreter::NativeAddonLoader::load(sidecar.as_ref(), &untrusted_addon)
+                .unwrap_err();
+        assert!(untrusted_error.to_string().contains("not allowlisted"));
+
+        let outside_error =
+            crate::interpreter::NativeAddonLoader::load(sidecar.as_ref(), &outside_addon)
+                .unwrap_err();
+        assert!(
+            outside_error
+                .to_string()
+                .contains("escapes configured roots")
+        );
+
+        let wrong_extension = root.join("wrong-extension.so");
+        fs::write(&wrong_extension, b"not a .node file").unwrap();
+        let extension_error =
+            crate::interpreter::NativeAddonLoader::load(sidecar.as_ref(), &wrong_extension)
+                .unwrap_err();
+        assert!(
+            extension_error
+                .to_string()
+                .contains("must use the .node extension")
+        );
+
+        fs::write(&pinned_addon, b"changed after host configuration").unwrap();
+        let integrity_error =
+            crate::interpreter::NativeAddonLoader::load(sidecar.as_ref(), &pinned_addon)
+                .unwrap_err();
+        assert!(
+            integrity_error
+                .to_string()
+                .contains("integrity check failed")
+        );
+
+        sidecar.shutdown().unwrap();
+        drop(interpreter);
         fs::remove_dir_all(base).unwrap();
     }
 
