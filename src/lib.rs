@@ -52,9 +52,9 @@ pub use parser::{Expr, Parser, Statement};
 ))]
 pub use plugin_host::RustPluginNapiOptions;
 pub use plugin_host::{
-    DEFAULT_MAX_PLUGIN_FILE_BYTES, PLUGIN_MANIFEST_FILENAME, PluginHostError, RustLoadedPlugin,
-    RustPluginCapability, RustPluginFunction, RustPluginHost, RustPluginHostOptions,
-    RustPluginManifest, RustPluginPolicy, RustPluginStatus,
+    DEFAULT_MAX_PLUGIN_FILE_BYTES, GuestLibc, GuestTargetInfo, PLUGIN_MANIFEST_FILENAME,
+    PluginHostError, RustLoadedPlugin, RustPluginCapability, RustPluginFunction, RustPluginHost,
+    RustPluginHostOptions, RustPluginManifest, RustPluginPolicy, RustPluginStatus,
 };
 pub use value::Value;
 pub mod bigint;
