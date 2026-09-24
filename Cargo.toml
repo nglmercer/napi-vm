@@ -96,6 +96,10 @@ path = "examples/rust_native_addon.rs"
 required-features = ["node-api-host"]
 
 [[example]]
+name = "rdev-node-vendor"
+path = "examples/rdev_node_vendor.rs"
+
+[[example]]
 name = "rust-plugin-host"
 path = "examples/rust_plugin_host.rs"
 
