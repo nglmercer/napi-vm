@@ -7154,7 +7154,11 @@ unsafe extern "C" fn api_create_function(
         let callback = callback.ok_or(NAPI_FUNCTION_EXPECTED)?;
         let environment = environment(env)?;
         let function_name = if name_length == usize::MAX {
-            unsafe { read_c_string(name)? }
+            if name.is_null() {
+                String::new()
+            } else {
+                unsafe { read_c_string(name)? }
+            }
         } else if name_length == 0 {
             String::new()
         } else {
@@ -9633,7 +9637,28 @@ impl HostBridge for RustNodeApiHost {
     }
 
     fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {
-        !self.is_shutdown() && promise.borrow().external_pending
+        if self.is_shutdown() {
+            return false;
+        }
+        if promise.borrow().external_pending {
+            return true;
+        }
+
+        // A Node-API callback can settle an ordinary guest Promise rather
+        // than a Promise created by napi_create_promise. Keep top-level await
+        // pumping while an async-work completion can still enter JavaScript
+        // and settle that Promise (for example, node-addon-api AsyncWorker).
+        self.state.borrow().environments.iter().any(|environment| {
+            environment.async_works.borrow().values().any(|work| {
+                matches!(
+                    work.state.load(Ordering::Acquire),
+                    ASYNC_WORK_QUEUED
+                        | ASYNC_WORK_RUNNING
+                        | ASYNC_WORK_FINISHED
+                        | ASYNC_WORK_CANCELLED
+                )
+            })
+        })
     }
 }
 
@@ -17625,6 +17650,8 @@ module.exports = {collected, refStatus, remainsCollected};
             r#"
 #define NAPI_VERSION 8
 #include <napi.h>
+#include <string>
+#include <utility>
 
 class Counter : public Napi::ObjectWrap<Counter> {
  public:
@@ -17658,8 +17685,31 @@ class Counter : public Napi::ObjectWrap<Counter> {
   int32_t value_;
 };
 
+class EchoWorker : public Napi::AsyncWorker {
+ public:
+  EchoWorker(Napi::Function callback, std::string value)
+      : Napi::AsyncWorker(callback), value_(std::move(value)) {}
+
+  void Execute() override { result_ = value_; }
+
+  void OnOK() override {
+    Callback().Call({Env().Undefined(), Napi::String::New(Env(), result_)});
+  }
+
+ private:
+  std::string value_;
+  std::string result_;
+};
+
+Napi::Value AsyncEcho(const Napi::CallbackInfo& info) {
+  auto worker = new EchoWorker(info[0].As<Napi::Function>(), "async-cpp");
+  worker->Queue();
+  return info.Env().Undefined();
+}
+
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   Counter::Init(env, exports);
+  exports.Set("asyncEcho", Napi::Function::New(env, AsyncEcho));
   return exports;
 }
 
@@ -17693,7 +17743,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
         let main = root.join("main.cjs");
         fs::write(
             &main,
-            "const { Counter } = require('./fixture.node');\nconst counter = new Counter(4);\nconst before = counter.value;\ncounter.value = 10;\nmodule.exports = { before, incremented: counter.increment(), value: counter.value };\n",
+            "const { Counter, asyncEcho } = require('./fixture.node');\nconst counter = new Counter(4);\nconst before = counter.value;\ncounter.value = 10;\nglobalThis.asyncEchoCallbackCalled = false;\nmodule.exports = new Promise((resolve, reject) => {\n  asyncEcho((error, echoed) => {\n    globalThis.asyncEchoCallbackCalled = true;\n    if (error) return reject(error);\n    resolve({ before, incremented: counter.increment(), value: counter.value, echoed, asyncEchoName: asyncEcho.name });\n  });\n});\n",
         )
         .unwrap();
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
@@ -17707,7 +17757,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             )
             .unwrap();
         let result = interpreter
-            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .eval_source("let cxxResult = await require('./main.cjs'); JSON.stringify({result: cxxResult, callbackCalled: globalThis.asyncEchoCallbackCalled});")
             .unwrap();
         let Value::String(vm_json) = &result else {
             panic!("C++ addon fixture did not return JSON text: {result:?}");
@@ -17715,10 +17765,10 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
         let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
         assert_eq!(
             vm_result,
-            serde_json::json!({"before": 4, "incremented": 11, "value": 11})
+            serde_json::json!({"result": {"before": 4, "incremented": 11, "value": 11, "echoed": "async-cpp", "asyncEchoName": ""}, "callbackCalled": true})
         );
 
-        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        let runner = "(async () => process.stdout.write(JSON.stringify({result: await require('./main.cjs'), callbackCalled: globalThis.asyncEchoCallbackCalled})))().catch(error => { console.error(error); process.exitCode = 1; })";
         if let Ok(node_version) = Command::new("node").arg("--version").output()
             && node_version.status.success()
         {

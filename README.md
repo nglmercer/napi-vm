@@ -171,7 +171,9 @@ Node worker waits for that callback. Nested addon calls and nested synchronous
 guest callbacks therefore preserve their nested call order without entering
 the interpreter from a native thread. Shared and cyclic plain object/array
 graphs preserve identity within each native call, including Node-created
-return graphs.
+return graphs. Top-level `await` keeps pumping while Rust Node-API async work
+is outstanding, so a `node-addon-api` `AsyncWorker` can settle an ordinary
+guest-created Promise through its callback.
 Guest classes cross into addons as constructable functions; native addons can
 construct instances, call inherited guest methods, and read or update static
 data. Guest-created proxies with object, array, function, or class targets
