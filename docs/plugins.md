@@ -205,11 +205,13 @@ state transfer.
 
 The Rust host resolves static bare ESM imports inside the plugin root, including
 conditional `exports` for `import`/`node`/`default`, exported subpaths, nested
-dependencies, and `module`/`main` entry fields. It registers guest source under
-canonical virtual module IDs and never evaluates package JavaScript with host
-`require()`. This is a JavaScript ESM subset: CommonJS package source, package
-`imports` maps, and computed dynamic imports are not loaded by this graph yet.
-Install or vendor packages into the plugin root before calling `load()`.
+dependencies, and `module`/`main` entry fields. Guest code can also use the VM's
+CommonJS `require()` to load in-root JavaScript and JSON packages, even when no
+native addon backend is configured. Both paths register guest source under
+canonical module IDs and evaluate it inside napi-vm; neither delegates package
+execution to host `require()`. Package `imports` maps and computed dynamic ESM
+imports are not loaded by the static ESM graph yet. Install or vendor packages
+inside the plugin root before calling `load()`.
 
 Choose the smallest runtime path that covers the plugin:
 
@@ -234,6 +236,16 @@ TypeScript host.
 
 ```bash
 cargo run --no-default-features --example rust-plugin-host -- examples/plugins/example-plugin
+```
+
+[`examples/plugins/rust-commonjs-plugin`](../examples/plugins/rust-commonjs-plugin)
+shows a Rust-hosted plugin that uses `require()` to load an in-root CommonJS
+package without configuring or embedding Node. The guest package calls the
+permission-checked `node:fs` and `node:path` facades; guest JavaScript still
+runs in napi-vm.
+
+```bash
+cargo run --no-default-features --example rust-plugin-host -- examples/plugins/rust-commonjs-plugin
 ```
 
 Expose filesystem and path operations through checked Rust host functions and

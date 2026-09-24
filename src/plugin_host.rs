@@ -24,10 +24,6 @@ use crate::host::HostBridge;
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 use crate::host::{HostCallback, HostEvent};
-#[cfg(all(
-    feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
 use crate::interpreter::FileCommonJsLoader;
 use crate::interpreter::Interpreter;
 use crate::parser::Statement;
@@ -236,10 +232,6 @@ type GuestModuleAliases = Vec<(String, String, String)>;
 struct PreparedPlugin {
     manifest: RustPluginManifest,
     root: PathBuf,
-    #[cfg(all(
-        feature = "node-api-host",
-        any(target_os = "linux", target_os = "macos", target_os = "windows")
-    ))]
     entry_path: PathBuf,
     entry_id: String,
     sources: GuestModuleSources,
@@ -619,6 +611,17 @@ impl RustPluginHost {
             interpreter.global.borrow_mut().remove(name);
         }
 
+        // Keep JavaScript package loading inside the VM even when this plugin
+        // has no native addons. If the plugin opts into napi, the backend
+        // below replaces this resolver with the same root plus its trusted
+        // native-addon provider.
+        let commonjs_loader =
+            FileCommonJsLoader::new([prepared.root.clone()]).map_err(PluginHostError::Vm)?;
+        interpreter.set_commonjs_entry(prepared.entry_path.to_string_lossy().into_owned());
+        interpreter
+            .set_commonjs_loader(Rc::new(commonjs_loader))
+            .map_err(PluginHostError::Vm)?;
+
         #[cfg(all(
             feature = "node-api-host",
             any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -991,10 +994,6 @@ fn prepare_plugin(
     Ok(PreparedPlugin {
         manifest,
         root,
-        #[cfg(all(
-            feature = "node-api-host",
-            any(target_os = "linux", target_os = "macos", target_os = "windows")
-        ))]
         entry_path,
         entry_id,
         sources,
@@ -3021,6 +3020,88 @@ export const value = () => base + nested + extra;
         assert_eq!(
             plugin.load_result,
             Some(serde_json::json!({"value":42,"rootDependency":100}))
+        );
+    }
+
+    #[test]
+    fn rust_host_loads_commonjs_packages_without_native_addons() {
+        let dir = TestPluginDir::new("npm-commonjs");
+        dir.write("config.txt", "checked");
+        dir.write(
+            "main.mjs",
+            r#"
+const pkg = require("fixture-cjs");
+export default {
+  onLoad() {
+    let nativeDenied = false;
+    try { require("./native/fixture.node"); }
+    catch (error) { nativeDenied = error.message.includes("not allowlisted"); }
+    return {
+      answer: pkg.answer,
+      text: pkg.text,
+      metadata: pkg.metadata,
+      basename: pkg.basename,
+      cached: pkg === require("fixture-cjs"),
+      nestedCache: pkg.nested === require("fixture-cjs/nested"),
+      nativeDenied,
+    };
+  }
+};
+"#,
+        );
+        dir.write(
+            "node_modules/fixture-cjs/package.json",
+            r#"{"name":"fixture-cjs","version":"1.0.0","exports":{".":{"require":"./index.cjs","default":"./index.cjs"},"./nested":"./nested.cjs"}}"#,
+        );
+        dir.write(
+            "node_modules/fixture-cjs/index.cjs",
+            r#"
+const fs = require("node:fs");
+const path = require("node:path");
+const nested = require("./nested.cjs");
+const metadata = require("./metadata.json");
+module.exports = {
+  answer: nested.answer,
+  text: fs.readFileSync("./config.txt", "utf8"),
+  metadata: metadata.kind,
+  basename: path.basename(__dirname),
+  nested,
+};
+"#,
+        );
+        dir.write(
+            "node_modules/fixture-cjs/nested.cjs",
+            "module.exports = { answer: 42 };\n",
+        );
+        dir.write(
+            "node_modules/fixture-cjs/metadata.json",
+            r#"{"kind":"json-module"}"#,
+        );
+        dir.write("native/fixture.node", "not a native library");
+        dir.manifest(
+            "commonjs-plugin",
+            "main.mjs",
+            r#"{"fs":{"read":"config.txt"},"path":true}"#,
+        );
+
+        let mut host = RustPluginHost::new(RustPluginHostOptions {
+            policy: RustPluginPolicy::default()
+                .grant_fs_read("config.txt")
+                .grant_path(),
+            ..RustPluginHostOptions::default()
+        });
+        let plugin = host.load(&dir.0).unwrap();
+        assert_eq!(
+            plugin.load_result,
+            Some(serde_json::json!({
+                "answer": 42,
+                "text": "checked",
+                "metadata": "json-module",
+                "basename": "fixture-cjs",
+                "cached": true,
+                "nestedCache": true,
+                "nativeDenied": true
+            }))
         );
     }
 
