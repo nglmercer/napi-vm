@@ -26,6 +26,11 @@ cargo run --no-default-features --features node-api-host --example rust-plugin-n
   "$(sha256sum examples/plugins/rust-napi-plugin/native/addon.node | cut -d ' ' -f1)"
 ```
 
+The host example reads the plugin name from `plugin.json`. An optional second
+path argument selects the addon; a relative addon path is resolved from the
+plugin directory, while an absolute path is accepted for build layouts that
+keep artifacts elsewhere. The supplied digest must match that selected file.
+
 On Windows PowerShell, store the digest and pass it as the last argument:
 
 ```powershell
@@ -39,6 +44,10 @@ and path helpers; host policy grants those same operations. It loads the
 allowlisted addon with `require("./native/addon.node")` and awaits an
 `AsyncTask` from napi-rs. The Rust host runs load, reload, and unload hooks and
 prints their JSON results.
+
+Use the Rust facades for ordinary file and path operations. Add a napi-rs
+module when a plugin needs native code or an existing package already ships a
+Node-API addon; those native calls still require the host's digest allowlist.
 
 Native addons execute with the desktop process's OS privileges. Keep the
 trusted digest in signed or otherwise trusted application metadata. This

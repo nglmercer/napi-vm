@@ -24,12 +24,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (plugin_dir, addon, digest) = match args.as_slice() {
         [digest] => (
             default_plugin_dir.clone(),
-            default_plugin_dir.join("native/addon.node"),
+            PathBuf::from("native/addon.node"),
             digest,
         ),
         [plugin_dir, digest] => {
             let plugin_dir = PathBuf::from(plugin_dir);
-            let addon = plugin_dir.join("native/addon.node");
+            let addon = PathBuf::from("native/addon.node");
             (plugin_dir, addon, digest)
         }
         [plugin_dir, addon, digest] => (PathBuf::from(plugin_dir), PathBuf::from(addon), digest),
@@ -42,7 +42,18 @@ fn run() -> Result<(), Box<dyn Error>> {
     let digest = digest.to_str().ok_or("SHA-256 must be valid UTF-8")?;
     let digest = parse_sha256(digest)?;
     let plugin_dir = fs::canonicalize(plugin_dir)?;
+    let addon = if addon.is_absolute() {
+        addon
+    } else {
+        plugin_dir.join(addon)
+    };
     let addon = fs::canonicalize(addon)?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(plugin_dir.join("plugin.json"))?)?;
+    let plugin_name = manifest
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("plugin.json must contain a string name")?;
 
     let policy = RustPluginPolicy::default()
         .grant_fs_read("config.json")
@@ -53,7 +64,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         ..RustPluginHostOptions::default()
     });
     host.configure_napi_addons(
-        "rust-napi-plugin",
+        plugin_name,
         RustPluginNapiOptions::default().allow_addon_with_sha256(&addon, digest),
     )?;
 
