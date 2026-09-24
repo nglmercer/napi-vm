@@ -10037,7 +10037,7 @@ fn validate_entry(
 #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 mod tests {
     use super::*;
-    use crate::interpreter::Interpreter;
+    use crate::interpreter::{Interpreter, NativeAddonRuntime};
     use sha2::{Digest, Sha256};
     use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -10424,13 +10424,15 @@ __attribute__((constructor)) static void register_module(void) {
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
 
         let mut interpreter = Interpreter::with_builtins();
-        interpreter
-            .enable_rust_node_api_addons(
+        let runtime = interpreter
+            .enable_native_addons(
                 RustNodeApiOptions::new([root.clone()])
                     .allow_native_addon_with_sha256(&addon, digest)
                     .entry(&main),
             )
             .unwrap();
+        assert_eq!(runtime.backend_name(), "rust-node-api");
+        assert!(matches!(runtime, NativeAddonRuntime::RustNodeApi(_)));
         let value = interpreter
             .eval_source("JSON.stringify(require('./main.cjs'))")
             .unwrap();

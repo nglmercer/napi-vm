@@ -4048,16 +4048,18 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
 
         let mut interpreter = Interpreter::with_builtins();
         let expected_sha256: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
-        let _bridge = interpreter
-            .enable_node_addons(
+        let runtime = interpreter
+            .enable_native_addons(
                 NodeAddonOptions::new("node", [root.clone()])
                     .allow_native_addon_with_sha256(addon.clone(), expected_sha256)
                     .minimum_napi_version(1)
                     .entry(root.join("main.cjs")),
             )
             .unwrap();
-        assert!(!_bridge.runtime_info().node_version.is_empty());
-        assert!(_bridge.runtime_info().napi_version >= 1);
+        assert_eq!(runtime.backend_name(), "node-sidecar");
+        let bridge = runtime.node_sidecar().expect("Node sidecar backend");
+        assert!(!bridge.runtime_info().node_version.is_empty());
+        assert!(bridge.runtime_info().napi_version >= 1);
         let mut incompatible_interpreter = Interpreter::with_builtins();
         let version_error = incompatible_interpreter
             .enable_node_addons(
@@ -4682,7 +4684,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         assert!(matches!(roundtrip, Value::Bool(true)));
 
         drop(interpreter);
-        drop(_bridge);
+        drop(runtime);
         let mut sparse_interpreter = Interpreter::with_builtins();
         let _sparse_bridge = sparse_interpreter
             .enable_node_addons(

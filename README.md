@@ -80,14 +80,15 @@ fn main() {
     let app_root = PathBuf::from("./app").canonicalize().unwrap();
     let addon = app_root.join("node_modules/example/build/Release/example.node");
     let mut runtime = Interpreter::with_builtins();
-    let addon_bridge = runtime
-        .enable_node_addons(
+    let addon_runtime = runtime
+        .enable_native_addons(
             NodeAddonOptions::new("node", [app_root.clone()])
                 .allow_native_addon(addon)
                 .entry(app_root.join("main.cjs")),
         )
         .unwrap();
-    println!("Node-API v{}", addon_bridge.runtime_info().napi_version);
+    let sidecar = addon_runtime.node_sidecar().expect("Node sidecar backend");
+    println!("Node-API v{}", sidecar.runtime_info().napi_version);
     let result = runtime.eval_source("require('example').run();").unwrap();
     println!("{result:?}");
 }
@@ -174,7 +175,7 @@ let addon = app_root.join("native/example.node");
 let digest: [u8; 32] = trusted_manifest_digest();
 let mut runtime = Interpreter::with_builtins();
 runtime
-    .enable_rust_node_api_addons(
+    .enable_native_addons(
         RustNodeApiOptions::new([app_root.clone()])
             .allow_native_addon_with_sha256(addon, digest)
             .max_napi_version(10)
@@ -190,7 +191,7 @@ a platform prebuild and expose it under the package's bare name:
 
 ```rust
 let package_root = app_root.join("node_modules/example");
-runtime.enable_rust_node_api_addons(
+runtime.enable_native_addons(
     RustNodeApiOptions::new([app_root.clone()])
         .allow_native_prebuild("example", &package_root),
 )?;
@@ -204,7 +205,7 @@ selected prebuild without aliasing over the package entry:
 ```rust
 let package_root = app_root.join("node_modules/example");
 let digest: [u8; 32] = trusted_manifest_digest();
-runtime.enable_rust_node_api_addons(
+runtime.enable_native_addons(
     RustNodeApiOptions::new([app_root.clone()])
         .allow_native_package_prebuild_with_sha256(&package_root, digest),
 )?;

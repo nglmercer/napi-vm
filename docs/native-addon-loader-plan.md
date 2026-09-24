@@ -37,20 +37,28 @@ returning plausible but incorrect results.
   mean its contract is implemented.
 - Native callbacks use the existing VM event queue and interpreter-thread
   checkpoints. The runtime exposes `run_event_loop_once` to desktop hosts.
+- `Interpreter::enable_native_addons` is the first shared configuration entry
+  point. It accepts the existing `NodeAddonOptions` or `RustNodeApiOptions` and
+  returns a `NativeAddonRuntime` identifying the selected backend. Backend
+  configuration and lifecycle interfaces are still separate internally.
 
 ## Public host configuration
 
 Keep current APIs working and converge on a small backend choice in a future
-builder API. For example:
+builder API. The first dispatcher accepts the existing backend-specific
+options directly:
 
 ```rust
-let options = NativeAddonOptions::new([app_root.clone()])
-    .backend(NativeAddonBackend::RustNodeApi)
-    .allow_native_addon_with_sha256(addon_path, trusted_digest)
-    .entry(app_root.join("main.cjs"));
-
-runtime.enable_native_addons(options)?;
+runtime.enable_native_addons(
+    RustNodeApiOptions::new([app_root.clone()])
+        .allow_native_addon_with_sha256(addon_path, trusted_digest)
+        .entry(app_root.join("main.cjs")),
+)?;
 ```
+
+`NodeAddonOptions` selects `NodeSidecar`; `RustNodeApiOptions` selects
+`RustNodeApi`. This preserves all existing backend-specific configuration
+while the shared builder and host lifecycle interface are implemented.
 
 The backend choices should be:
 
@@ -86,7 +94,8 @@ surface each backend accepts before running guest code.
 
 ### 2. Make backend selection and module loading one host feature
 
-- Introduce a backend trait around load, initialize, call, event pump, and
+- Replace the initial `enable_native_addons` dispatcher with shared host
+  options and a backend trait around load, initialize, call, event pump, and
   shutdown. Adapt `NodeAddonSidecar` and the Rust Node-API host behind it.
 - Route `.node` requests through that host feature while leaving JavaScript and
   JSON modules in the existing guest loader and cache.

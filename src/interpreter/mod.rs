@@ -5,6 +5,8 @@ mod env;
 mod eval;
 pub mod jobs;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod native_addon;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod node_addon;
 mod ops;
 mod promise;
@@ -22,6 +24,8 @@ pub use commonjs::{
     ResolvedCommonJsModule,
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_addon::{NativeAddonOptions, NativeAddonRuntime};
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 pub(crate) use resolve::array_iter;
@@ -367,6 +371,33 @@ impl Interpreter {
             self.set_commonjs_entry(entry.to_string_lossy().into_owned());
         }
         Ok(bridge)
+    }
+
+    /// Configure one native addon backend while keeping guest `require()` and
+    /// package resolution inside napi-vm.
+    ///
+    /// Pass [`NodeAddonOptions`] for a Node child process, or
+    /// `RustNodeApiOptions` when the `node-api-host` feature is enabled.
+    /// The returned handle reports which backend was selected. In both cases
+    /// native loading remains explicit and every `.node` file must pass the
+    /// selected backend's allowlist and integrity checks.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_native_addons(
+        &mut self,
+        options: impl Into<NativeAddonOptions>,
+    ) -> Result<NativeAddonRuntime, VmErr> {
+        match options.into() {
+            NativeAddonOptions::NodeSidecar(options) => self
+                .enable_node_addons(options)
+                .map(NativeAddonRuntime::NodeSidecar),
+            #[cfg(all(
+                feature = "node-api-host",
+                any(target_os = "linux", target_os = "macos", target_os = "windows")
+            ))]
+            NativeAddonOptions::RustNodeApi(options) => self
+                .enable_rust_node_api_addons(options)
+                .map(NativeAddonRuntime::RustNodeApi),
+        }
     }
 
     /// Set the filename used to resolve `require()` in top-level source.
