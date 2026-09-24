@@ -71,6 +71,7 @@ corosensei = "0.3.4"
 
 [dev-dependencies]
 criterion = "0.5"
+tokio = { version = "1", features = ["rt", "time"] }
 
 # `tests/coroutine_backend.rs` drives `corosensei` directly, with no
 # interpreter in the way, so a fault in the coroutine machinery can be told
