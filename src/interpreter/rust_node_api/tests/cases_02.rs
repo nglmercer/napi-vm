@@ -959,6 +959,16 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
                 ],
                 "callback": { "value": "HELLO" },
                 "json": { "value": { "nested": [1, "two", null], "enabled": true } },
+                "enumValues": [
+                    { "value": "Fast" },
+                    { "value": "Safe" },
+                    { "error": "value `\"Unknown\"` does not match any variant of enum `PluginMode`", "name": "Error", "code": "InvalidArg" }
+                ],
+                "bigints": [
+                    { "value": "123456789012345678901234567890" },
+                    { "value": "-98765432109876543210987654321" }
+                ],
+                "typedArray": { "value": [255, 2, 1] },
                 "failure": { "name": "Error", "message": "fixture failure" },
                 "asyncSum": 42
             }),

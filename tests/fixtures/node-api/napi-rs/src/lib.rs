@@ -1,6 +1,12 @@
-use napi::bindgen_prelude::{AsyncTask, Buffer, FnArgs, Function};
+use napi::bindgen_prelude::{AsyncTask, BigInt, Buffer, FnArgs, Function, Uint8Array};
 use napi::{Env, Error, Task};
 use napi_derive::napi;
+
+#[napi(string_enum)]
+pub enum PluginMode {
+    Fast,
+    Safe,
+}
 
 #[napi]
 pub fn add(left: i32, right: i32) -> i32 {
@@ -46,6 +52,21 @@ pub fn apply_callback(
 #[napi]
 pub fn json_round_trip(value: serde_json::Value) -> serde_json::Value {
     value
+}
+
+#[napi]
+pub fn echo_mode(mode: PluginMode) -> PluginMode {
+    mode
+}
+
+#[napi]
+pub fn round_trip_bigint(value: BigInt) -> BigInt {
+    value
+}
+
+#[napi]
+pub fn reverse_typed_array(input: Uint8Array) -> Uint8Array {
+    Uint8Array::new(input.iter().rev().copied().collect())
 }
 
 #[napi]

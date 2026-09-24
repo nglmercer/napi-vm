@@ -33,6 +33,16 @@ module.exports = (async () => ({
   ],
   callback: attempt(() => addon.applyCallback("hello", value => value.toUpperCase())),
   json: attempt(() => addon.jsonRoundTrip({ nested: [1, "two", null], enabled: true })),
+  enumValues: [
+    attempt(() => addon.echoMode("Fast")),
+    attempt(() => addon.echoMode("Safe")),
+    attempt(() => addon.echoMode("Unknown")),
+  ],
+  bigints: [
+    attempt(() => addon.roundTripBigint(123456789012345678901234567890n).toString()),
+    attempt(() => addon.roundTripBigint(-98765432109876543210987654321n).toString()),
+  ],
+  typedArray: attempt(() => Array.from(addon.reverseTypedArray(new Uint8Array([1, 2, 255])))),
   failure,
   asyncSum: await addon.addAsync(20, 22),
 }))();

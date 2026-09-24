@@ -90,7 +90,9 @@ notes and known behavior differences are tracked in
   values and callbacks, handles, classes, binary data, Promises, async work,
   thread-safe functions, cleanup, and selected APIs through v10.
 - A compiled napi-rs addon now runs the same CommonJS entry under Node, Bun,
-  and napi-vm. Its fixture exercises exported Rust functions and verifies the
+  and napi-vm. Its fixture covers Rust functions, classes, structured objects,
+  optional arguments, callbacks, JSON values, string enums, multiword BigInts,
+  typed arrays, Buffers, thrown errors, and async tasks. It verifies the
   optional module API-version getter behavior: when that getter is absent,
   napi-vm uses Node's default Node-API module version (v8) for
   `napi_register_module_v1`.

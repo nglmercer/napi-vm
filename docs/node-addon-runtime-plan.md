@@ -473,11 +473,12 @@ not return success with a partial or fabricated result.
 - [x] A compiled napi-rs fixture uses identical CommonJS source under Node,
   Bun, and napi-vm to compare generated functions, a class with accessors,
   structured `#[napi(object)]` conversion, vectors, optional arguments,
-  callback invocation, serde JSON values, Buffer conversion, thrown errors,
-  and an `AsyncTask` Promise. The Rust plugin host also loads an allowlisted
-  napi-rs `.node` file through plain `require("./fixture.node")`; async load,
-  reload, and unload hooks await its `AsyncTask` using the existing VM event
-  loop.
+  callback invocation, serde JSON values, string-enum success and invalid
+  input, signed multiword BigInt round trips, `Uint8Array` input/output,
+  Buffer conversion, thrown errors, and an `AsyncTask` Promise. The Rust plugin
+  host also loads an allowlisted napi-rs `.node` file through plain
+  `require("./fixture.node")`; async load, reload, and unload hooks await its
+  `AsyncTask` using the existing VM event loop.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.
