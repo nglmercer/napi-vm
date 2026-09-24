@@ -2234,8 +2234,13 @@ impl Interpreter {
                 }
             }
             Expr::ImportMeta => {
+                let url = self
+                    .cur_mod
+                    .as_ref()
+                    .and_then(|module| self.module_file_urls.borrow().get(module).cloned())
+                    .unwrap_or_else(|| "vm://module".into());
                 let o = vec![
-                    ("url".to_string(), Value::String("vm://module".to_string())),
+                    ("url".to_string(), Value::String(url)),
                     ("main".to_string(), Value::Bool(self.is_main)),
                 ];
                 Ok(Value::object(o))

@@ -631,8 +631,10 @@ module.exports = require("node-gyp-build")(__dirname);
         r#"
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-const aliasedAddon = require("fixture-native");
-const addon = require("fixture.node");
+import { createRequire, isBuiltin } from "node:module";
+const localRequire = createRequire(import.meta.url);
+const aliasedAddon = localRequire("fixture-native");
+const addon = localRequire("fixture.node");
 const cjsFs = require("node:fs");
 const cjsFsAlias = require("fs");
 const cjsPath = require("path");
@@ -648,6 +650,9 @@ async onLoad() {
   catch (error) { deniedRead = error.name; }
   const result = {
     sameExports: aliasedAddon === addon,
+    moduleFacade: isBuiltin("node:module") &&
+      localRequire("fixture.node") === addon &&
+      localRequire.resolve("fixture.node") === require.resolve("fixture.node"),
     commonJsFacades: cjsFs === cjsFsAlias && cjsPath === cjsPathAlias &&
       cjsFs.readFileSync === readFileSync &&
       cjsFsAlias.writeFileSync === writeFileSync &&
@@ -699,6 +704,7 @@ async onReload(context, previousState) {
     .unwrap();
     let expected = serde_json::json!({
         "sameExports": true,
+        "moduleFacade": true,
         "commonJsFacades": true,
         "commonJsBuiltinResolve": true,
         "deniedRead": "PermissionDenied",

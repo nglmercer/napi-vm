@@ -1192,3 +1192,54 @@ pub(super) fn make_require(
     interp.source_lines = old_source_lines;
     result
 }
+
+pub(super) fn create_require_builtin(
+    interp: &mut crate::interpreter::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = args.first().ok_or_else(|| {
+        VmErr::Msg("TypeError: createRequire requires an absolute filename or file URL".into())
+    })?;
+    let filename = match value {
+        Value::String(value) => value.clone(),
+        other => match other.get_prop("href") {
+            Some(Value::String(ref value)) => value.clone(),
+            _ => {
+                return Err(VmErr::Msg(
+                    "TypeError: createRequire requires an absolute filename or file URL".into(),
+                ));
+            }
+        },
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let filename = if filename.starts_with("file:") {
+        url::Url::parse(&filename)
+            .ok()
+            .filter(|url| url.scheme() == "file")
+            .and_then(|url| url.to_file_path().ok())
+            .ok_or_else(|| VmErr::Msg("TypeError: createRequire requires a valid file URL".into()))?
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        filename
+    };
+    if !Path::new(&filename).is_absolute() {
+        return Err(VmErr::Msg(
+            "TypeError: createRequire requires an absolute filename or file URL".into(),
+        ));
+    }
+    make_require(interp, Some(&filename))
+}
+
+pub(super) fn is_builtin_builtin(
+    _interp: &mut crate::interpreter::Interpreter,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Some(Value::String(name)) = args.first() else {
+        return Err(VmErr::Msg("TypeError: isBuiltin requires a string".into()));
+    };
+    Ok(Value::Bool(matches!(
+        name.as_str(),
+        "module" | "node:module" | "fs" | "node:fs" | "path" | "node:path"
+    )))
+}

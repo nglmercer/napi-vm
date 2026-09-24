@@ -1,6 +1,21 @@
 //! Applying wire mutations onto guest objects, accessors, and prototypes.
 
-use super::*;
+use std::collections::HashSet;
+use std::rc::Rc;
+
+use serde_json::Value as JsonValue;
+
+use crate::error::VmErr;
+use crate::value::{
+    Buffer, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PropAttrs, SymbolData, TypedArrayData,
+    TypedKind, Value,
+};
+
+use super::wire::{
+    callable_value, is_reserved_guest_property_key, mutation_property, named_accessor, typed_kind,
+    wire_bytes, wire_graph_id, wire_property_slot,
+};
+use super::{MAX_NATIVE_HANDLES, MAX_WIRE_DEPTH, NodeAddonSidecar, WireDecodeContext};
 
 #[derive(Clone)]
 pub(super) enum GuestPrototypeState {

@@ -49,6 +49,22 @@ initializing it. This works for `.node` paths too, so a package wrapper can
 select a native binary before the host's addon allowlist and integrity checks
 run at the eventual `require()` call.
 
+With a CommonJS loader configured, file-backed guest ES modules can import `node:module`
+and use `createRequire` to load CommonJS packages or approved Node-API addons:
+
+```js
+import { createRequire, isBuiltin } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const addon = require('./build/Release/addon.node');
+```
+
+`node:module` also exports `builtinModules` and a default object with the same
+members. The facade lists `fs`, `path`, and `module`; access to `fs` and `path`
+still depends on the host configuration. It does not provide loader
+registration APIs. Native addon loading requires the host to configure an
+addon backend and allowlist.
+
 ```rust
 use napi_vm::{FileCommonJsLoader, Interpreter};
 use std::{path::PathBuf, rc::Rc};

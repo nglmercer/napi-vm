@@ -410,6 +410,7 @@ pub(super) fn resolve_guest_module_builtin(
     let module_name = match request {
         "fs" | "node:fs" => "node:fs",
         "path" | "node:path" => "node:path",
+        "module" | "node:module" => "node:module",
         _ => return None,
     };
     let registered = interp.module_sources.borrow().contains_key(module_name)

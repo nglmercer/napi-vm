@@ -17,10 +17,7 @@ use super::native_addon::NativeAddonPolicy;
 use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
 use crate::interpreter::NativeAddonLoader;
-use crate::value::{
-    Buffer, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PromiseInner, PromiseState, PropAttrs,
-    SymbolData, TypedArrayData, TypedKind, Value,
-};
+use crate::value::{PromiseInner, PromiseState, Value};
 
 mod bridge_script;
 #[cfg(all(test, target_os = "linux"))]
@@ -28,9 +25,12 @@ mod tests;
 mod wire;
 mod wire_apply;
 
-use bridge_script::*;
-use wire::*;
-use wire_apply::*;
+use bridge_script::NODE_BRIDGE;
+use wire::{
+    guest_call_result_to_value, guest_graph_node_snapshot, guest_to_wire, required_string_arg,
+    wire_to_guest,
+};
+use wire_apply::{apply_guest_mutation, wire_to_guest_with_context};
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WIRE_DEPTH: usize = 128;
 const MAX_NATIVE_HANDLES: usize = 262_144;

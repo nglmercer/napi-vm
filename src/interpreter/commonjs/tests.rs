@@ -73,6 +73,85 @@ fn interpreter(loader: MemoryLoader) -> crate::interpreter::Interpreter {
 }
 
 #[test]
+fn node_module_create_require_resolves_from_esm_and_shares_commonjs_cache() {
+    let mut loader = MemoryLoader::default();
+    loader.0.insert(
+        "/virtual/package/addon.cjs".into(),
+        MemoryLoader::module(
+            "/virtual/package/addon.cjs",
+            CommonJsModuleFormat::JavaScript,
+            Some("globalThis.addonLoads = (globalThis.addonLoads || 0) + 1; module.exports = { answer: 42 };"),
+        ),
+    );
+    let mut interp = interpreter(loader);
+    interp.define_module(
+        "entry",
+        r#"
+import module, { createRequire, isBuiltin, builtinModules } from 'node:module';
+const localRequire = createRequire('file:///virtual/package/main.mjs');
+const addon = localRequire('./addon.cjs');
+export const result = {
+  answer: addon.answer,
+  cached: addon === localRequire('./addon.cjs'),
+  resolved: localRequire.resolve('./addon.cjs'),
+  loads: globalThis.addonLoads,
+  sameFactory: module.createRequire === createRequire,
+  commonJsAlias: localRequire('module') === localRequire('node:module'),
+  moduleBuiltin: isBuiltin('node:module'),
+  fsBuiltin: isBuiltin('fs'),
+  unknownBuiltin: isBuiltin('not-a-builtin'),
+  listed: builtinModules.includes('module'),
+  noRegister: typeof module.register === 'undefined'
+};
+"#
+        .into(),
+    );
+    interp.ensure_module("entry").unwrap();
+    let result = interp
+        .module("entry")
+        .unwrap()
+        .exports
+        .get("result")
+        .unwrap()
+        .deref_binding();
+    assert!(matches!(
+        result.get_prop("answer"),
+        Some(Value::Number(42.0))
+    ));
+    assert!(matches!(result.get_prop("cached"), Some(Value::Bool(true))));
+    assert!(
+        matches!(result.get_prop("resolved"), Some(Value::String(ref path)) if path == "/virtual/package/addon.cjs")
+    );
+    assert!(matches!(result.get_prop("loads"), Some(Value::Number(1.0))));
+    for name in [
+        "sameFactory",
+        "commonJsAlias",
+        "moduleBuiltin",
+        "fsBuiltin",
+        "listed",
+        "noRegister",
+    ] {
+        assert!(
+            matches!(result.get_prop(name), Some(Value::Bool(true))),
+            "{name}"
+        );
+    }
+    assert!(matches!(
+        result.get_prop("unknownBuiltin"),
+        Some(Value::Bool(false))
+    ));
+}
+
+#[test]
+fn node_module_create_require_rejects_invalid_parents() {
+    let mut interp = interpreter(MemoryLoader::default());
+    for argument in ["'relative.mjs'", "'https://example.com/main.mjs'", "42"] {
+        let source = format!("require('node:module').createRequire({argument})");
+        assert!(interp.eval_source(&source).is_err(), "{argument}");
+    }
+}
+
+#[test]
 fn require_executes_and_caches_commonjs_source() {
     let mut loader = MemoryLoader::default();
     loader.0.insert(

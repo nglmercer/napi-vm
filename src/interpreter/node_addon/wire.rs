@@ -1,6 +1,17 @@
 //! Guest value encoding, graph snapshots, and wire mutation decoding.
 
-use super::*;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use serde_json::{Value as JsonValue, json};
+
+use crate::error::VmErr;
+use crate::value::{
+    MAX_ARRAY_LEN, MAX_OBJECT_PROPS, MAX_STRING_LEN, PropAttrs, SymbolData, TypedKind, Value,
+};
+
+use super::wire_apply::{apply_guest_mutation, wire_to_guest_with_context};
+use super::{MAX_WIRE_DEPTH, NodeAddonSidecar, WireDecodeContext, WireEncodeContext};
 
 pub(super) fn required_string_arg(args: &[Value], index: usize) -> Result<String, VmErr> {
     match args.get(index) {

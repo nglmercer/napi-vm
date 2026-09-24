@@ -52,6 +52,7 @@ pub struct Realm {
     modules: Rc<RefCell<HashMap<String, Module>>>,
     module_sources: Rc<RefCell<HashMap<String, String>>>,
     module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
+    module_file_urls: Rc<RefCell<HashMap<String, String>>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
     commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
@@ -65,6 +66,7 @@ impl Realm {
             modules: interp.modules.clone(),
             module_sources: interp.module_sources.clone(),
             module_aliases: interp.module_aliases.clone(),
+            module_file_urls: interp.module_file_urls.clone(),
             evaluating: interp.evaluating.clone(),
             commonjs_loader: interp.commonjs_loader.clone(),
             commonjs_cache: interp.commonjs_cache.clone(),
@@ -77,6 +79,7 @@ impl Realm {
         interp.modules = self.modules;
         interp.module_sources = self.module_sources;
         interp.module_aliases = self.module_aliases;
+        interp.module_file_urls = self.module_file_urls;
         interp.evaluating = self.evaluating;
         interp.commonjs_loader = self.commonjs_loader;
         interp.commonjs_cache = self.commonjs_cache;
@@ -146,6 +149,7 @@ pub struct Interpreter {
     /// this context so two npm dependencies can use different versions of the
     /// same bare specifier without sharing a global name.
     pub(crate) module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
+    module_file_urls: Rc<RefCell<HashMap<String, String>>>,
     /// Host-selected CommonJS source/native module resolver. No filesystem or
     /// native addon access is enabled unless an embedding host installs one.
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
@@ -271,6 +275,7 @@ impl Interpreter {
             modules: Rc::new(RefCell::new(HashMap::new())),
             module_sources: Rc::new(RefCell::new(HashMap::new())),
             module_aliases: Rc::new(RefCell::new(HashMap::new())),
+            module_file_urls: Rc::new(RefCell::new(HashMap::new())),
             commonjs_loader: None,
             commonjs_cache: Rc::new(RefCell::new(HashMap::new())),
             commonjs_entry: None,
@@ -347,6 +352,39 @@ impl Interpreter {
         self.set_global_checked("require", require)?;
         self.commonjs_loader = Some(loader);
         self.commonjs_cache.borrow_mut().clear();
+        self.define_module(
+            "node:module",
+            r#"
+const createRequire = __napi_vm_module_create_require;
+const isBuiltin = __napi_vm_module_is_builtin;
+const builtinModules = ["fs", "module", "path"];
+export { createRequire, isBuiltin, builtinModules };
+export default { createRequire, isBuiltin, builtinModules };
+"#
+            .into(),
+        );
+        self.set_global_checked(
+            "__napi_vm_module_create_require",
+            Value::NativeFunction {
+                name: "createRequire".into(),
+                callable: |interp, _this, args| commonjs::create_require_builtin(interp, args),
+            },
+        )?;
+        self.set_global_checked(
+            "__napi_vm_module_is_builtin",
+            Value::NativeFunction {
+                name: "isBuiltin".into(),
+                callable: |interp, _this, args| commonjs::is_builtin_builtin(interp, args),
+            },
+        )?;
+        let installed = self.ensure_module("node:module");
+        self.global
+            .borrow_mut()
+            .remove("__napi_vm_module_create_require");
+        self.global
+            .borrow_mut()
+            .remove("__napi_vm_module_is_builtin");
+        installed?;
         Ok(())
     }
 
@@ -969,6 +1007,11 @@ impl Interpreter {
             .insert(name.to_string(), source);
     }
 
+    /// Associate a file-backed ES module with its URL for `import.meta.url`.
+    pub fn define_module_file_url(&mut self, name: &str, url: String) {
+        self.module_file_urls.borrow_mut().insert(name.into(), url);
+    }
+
     /// Resolve `specifier` to `target` only when it is imported by `importer`.
     /// This supports package graphs where the same bare npm specifier may
     /// resolve to different nested dependency versions.
@@ -1043,6 +1086,7 @@ impl Interpreter {
     /// map, so a module left here stays importable no matter what the public
     /// API reports.
     pub fn remove_module(&mut self, name: &str) -> bool {
+        self.module_file_urls.borrow_mut().remove(name);
         let had_source = self.module_sources.borrow_mut().remove(name).is_some();
         let had_module = self.modules.borrow_mut().remove(name).is_some();
         self.module_aliases

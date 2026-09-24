@@ -1,5 +1,6 @@
 use super::*;
 use crate::interpreter::{Interpreter, NodeAddonOptions};
+use crate::value::TypedKind;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
