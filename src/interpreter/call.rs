@@ -1311,7 +1311,13 @@ impl Interpreter {
                     .borrow()
                     .host_function_id
                     .expect("host function identity is initialized");
-                let instance = Value::object(vec![]);
+                let prototype =
+                    self.get_prop_value(&new_target, &Value::String("prototype".to_string()))?;
+                let instance = if is_js_object(&prototype) {
+                    Value::object_with_proto(vec![], Some(Rc::new(prototype)))
+                } else {
+                    Value::object(vec![])
+                };
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;

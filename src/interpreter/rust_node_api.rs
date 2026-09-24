@@ -7964,6 +7964,7 @@ unsafe extern "C" fn api_instanceof(
         let is_instance = match &constructor {
             Value::Class(class) => napi_class_instanceof(&object, class)?,
             Value::Function(function) => napi_function_instanceof(&object, &constructor, function)?,
+            Value::HostFunction { .. } => napi_host_function_instanceof(&object, &constructor)?,
             _ => return Err(NAPI_GENERIC_FAILURE),
         };
         unsafe { result.write(is_instance) };
@@ -8061,6 +8062,44 @@ fn napi_function_instanceof(
         };
     }
     let prototype = function.prototype_value(constructor);
+    if !is_napi_property_object(&prototype) {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    let mut current = object.proto_of();
+    let mut visited = HashSet::new();
+    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+        let Some(prototype_link) = current else {
+            return Ok(false);
+        };
+        if super::strict_equals(prototype_link.as_ref(), &prototype) {
+            return Ok(true);
+        }
+        let identity = match prototype_link.as_ref() {
+            Value::Object { props } => Rc::as_ptr(props) as usize,
+            Value::Class(class) => Rc::as_ptr(&class.statics) as usize,
+            Value::Function(function) => Rc::as_ptr(&function.properties) as usize,
+            Value::HostFunction { properties, .. } => Rc::as_ptr(properties) as usize,
+            Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
+            _ => return Ok(false),
+        };
+        if !visited.insert(identity) {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
+        current = prototype_link.proto_of();
+    }
+    Err(NAPI_GENERIC_FAILURE)
+}
+
+fn napi_host_function_instanceof(object: &Value, constructor: &Value) -> Result<bool, i32> {
+    if matches!(object, Value::Proxy(_)) {
+        return Err(NAPI_GENERIC_FAILURE);
+    }
+    if !is_napi_property_object(object) {
+        return Ok(false);
+    }
+    let prototype = constructor
+        .get_prop("prototype")
+        .unwrap_or(Value::Undefined);
     if !is_napi_property_object(&prototype) {
         return Err(NAPI_GENERIC_FAILURE);
     }
@@ -11229,6 +11268,28 @@ static napi_value get_array_accessor(napi_env env, napi_callback_info info) {
   return value;
 }
 
+static napi_value constructor_callback(napi_env env, napi_callback_info info) {
+  napi_value this_value, constructed_value;
+  size_t argc = 0;
+  if (napi_get_cb_info(env, info, &argc, NULL, &this_value, NULL) != napi_ok ||
+      napi_create_int32(env, 73, &constructed_value) != napi_ok ||
+      napi_set_named_property(env, this_value, "constructed", constructed_value) != napi_ok)
+    return NULL;
+  return NULL;
+}
+
+static napi_value construct_and_check(napi_env env, napi_callback_info info) {
+  napi_value args[1], instance, result;
+  bool is_instance = false;
+  size_t argc = 1;
+  if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok || argc != 1 ||
+      napi_new_instance(env, args[0], 0, NULL, &instance) != napi_ok ||
+      napi_instanceof(env, instance, args[0], &is_instance) != napi_ok ||
+      napi_get_boolean(env, is_instance, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
 static void append_cleanup_event(const char* event) {
   FILE* file = fopen("__MARKER_PATH__", "a");
   if (file != NULL) { fputs(event, file); fclose(file); }
@@ -11336,7 +11397,7 @@ static napi_value probe(napi_env env, napi_callback_info info) {
 }
 
 NAPI_MODULE_INIT() {
-  napi_value function, marker, status_value;
+  napi_value function, marker, status_value, constructor, construct_check;
   napi_property_descriptor defined_descriptor = {0};
   napi_status marker_status, define_status, freeze_status;
   if (napi_add_env_cleanup_hook(env, sync_cleanup, NULL) != napi_ok ||
@@ -11356,7 +11417,13 @@ NAPI_MODULE_INIT() {
       napi_create_int32(env, define_status, &status_value) != napi_ok ||
       napi_set_named_property(env, exports, "defineStatus", status_value) != napi_ok ||
       napi_create_int32(env, freeze_status, &status_value) != napi_ok ||
-      napi_set_named_property(env, exports, "functionFreezeStatus", status_value) != napi_ok)
+      napi_set_named_property(env, exports, "functionFreezeStatus", status_value) != napi_ok ||
+      napi_create_function(env, "ProbeConstructor", NAPI_AUTO_LENGTH,
+                           constructor_callback, NULL, &constructor) != napi_ok ||
+      napi_set_named_property(env, exports, "ProbeConstructor", constructor) != napi_ok ||
+      napi_create_function(env, "constructAndCheck", NAPI_AUTO_LENGTH,
+                           construct_and_check, NULL, &construct_check) != napi_ok ||
+      napi_set_named_property(env, exports, "constructAndCheck", construct_check) != napi_ok)
     return NULL;
   return exports;
 }
@@ -11388,6 +11455,7 @@ NAPI_MODULE_INIT() {
             root.join("main.cjs"),
             r#"
 const addon = require('./fixture.node');
+const constructed = new addon.ProbeConstructor();
 const nativeFunction = addon.probe;
 const nativeFunctionMarker = Object.getOwnPropertyDescriptor(nativeFunction, 'nativeMarker') || {};
 const nativeFunctionDefinedMarker = Object.getOwnPropertyDescriptor(nativeFunction, 'definedMarker') || {};
@@ -11465,6 +11533,11 @@ module.exports = {
   hostMarkerStatus: addon.markerStatus,
   hostDefineStatus: addon.defineStatus,
   hostFunctionFreezeStatus: addon.functionFreezeStatus,
+  constructorResult: constructed.constructed,
+  constructorInstanceof: constructed instanceof addon.ProbeConstructor,
+  constructorPrototypeMatches: Object.getPrototypeOf(constructed) === addon.ProbeConstructor.prototype,
+  constructorBackReferenceMatches: constructed.constructor === addon.ProbeConstructor,
+  napiNewInstanceInstanceof: addon.constructAndCheck(addon.ProbeConstructor),
   nativeFunctionFrozen: Object.isFrozen(nativeFunction),
   nativeFunctionName: nativeFunction.name,
   nativeFunctionLength: nativeFunction.length,
@@ -11613,6 +11686,11 @@ module.exports = {
         assert_eq!(vm_report["hostMarkerStatus"], NAPI_OK);
         assert_eq!(vm_report["hostDefineStatus"], NAPI_OK);
         assert_eq!(vm_report["hostFunctionFreezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["constructorResult"], 73);
+        assert_eq!(vm_report["constructorInstanceof"], true);
+        assert_eq!(vm_report["constructorPrototypeMatches"], true);
+        assert_eq!(vm_report["constructorBackReferenceMatches"], true);
+        assert_eq!(vm_report["napiNewInstanceInstanceof"], true);
         assert_eq!(vm_report["nativeFunctionFrozen"], true);
         assert_eq!(vm_report["nativeFunctionName"], "probe");
         assert_eq!(vm_report["nativeFunctionLength"], 0);
