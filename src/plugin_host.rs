@@ -3146,8 +3146,11 @@ export default { onLoad() {
         let dir = TestPluginDir::new("napi-rs-plugin");
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/node-api/napi-rs/Cargo.toml");
-        let target_dir =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/node-api-fixtures/napi-rs");
+        // This fixture is also built by a Node-API integration test in
+        // `rust_node_api::tests`. Keep the outputs separate so parallel test
+        // runs cannot copy the shared cdylib while Cargo is rebuilding it.
+        let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/node-api-fixtures/napi-rs-plugin-host");
         let temp_dir = target_dir.join("tmp");
         fs::create_dir_all(&temp_dir).unwrap();
         let built = Command::new("cargo")

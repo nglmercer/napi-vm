@@ -434,6 +434,16 @@ not return success with a partial or fabricated result.
   producers still hold a function, keep addon libraries and the ABI shim mapped
   because this backend cannot join arbitrary addon-owned threads safely.
 
+**Known napi-rs teardown limit:** napi-rs 3.x creates an unreferenced
+`CustomGC` thread-safe function with one remaining thread-count reference per
+environment. The Rust host cannot currently distinguish that runtime-owned
+reference from a live addon producer, so it conservatively retains the addon
+and ABI shim after unload. Repeated plugin reloads can therefore retain one
+shim mapping and temporary directory per generation. Do not force-release this
+reference: the napi-rs addon image can remain loaded across reloads and still
+call through its original shim. A process-shared shim plus explicit
+environment-teardown semantics is needed to reclaim these mappings safely.
+
 ### 6. Add package and native binary support
 
 - [x] Resolve a package's `build/Release`, `build/Debug`, or
