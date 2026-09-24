@@ -943,6 +943,27 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             panic!("napi-rs fixture did not return JSON text: {result:?}");
         };
         let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
+        assert_eq!(
+            vm_result,
+            serde_json::json!({
+                "sum": 42,
+                "text": "rust-napi",
+                "counter": { "initial": 40, "incremented": 41, "value": 41 },
+                "bytes": [4, 3, 2, 1],
+                "profile": { "value": { "name": "Ada", "scores": [30, 37, 1], "active": true } },
+                "sumValues": { "value": 6 },
+                "optionalValues": [
+                    { "value": "label:ready" },
+                    { "value": null },
+                    { "value": null }
+                ],
+                "callback": { "value": "HELLO" },
+                "json": { "value": { "nested": [1, "two", null], "enabled": true } },
+                "failure": { "name": "Error", "message": "fixture failure" },
+                "asyncSum": 42
+            }),
+            "napi-rs conversion fixture returned an unexpected result"
+        );
 
         let runner = "(async () => { process.stdout.write(JSON.stringify(await require('./main.cjs'))); })().catch(error => { console.error(error); process.exitCode = 1; });";
         if let Ok(node_version) = Command::new("node").arg("--version").output()

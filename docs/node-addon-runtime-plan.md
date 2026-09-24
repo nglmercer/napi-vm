@@ -83,8 +83,11 @@ named array properties, data values, symbol keys, native methods, and
 accessors),
 `napi_define_class` with native constructors, static descriptors, and
 prototype descriptors, `napi_typeof`, and array creation/index/length
-operations including `napi_delete_element`. Escapable handle scopes can
-promote one local handle into the parent scope. Class static properties share
+operations including `napi_delete_element`. Callback argument arrays fill
+unused declared slots with valid `undefined` handles while preserving the
+actual argument count; a napi-rs fixture verifies `Option<T>` when an argument
+is omitted. Escapable handle scopes can promote one local handle into the
+parent scope. Class static properties share
 object descriptor metadata and accessor behavior.
 `napi_get_value_int64` truncates finite Numbers toward zero, clamps values
 outside the signed 64-bit range, and converts NaN and infinities to zero.
@@ -469,10 +472,12 @@ not return success with a partial or fabricated result.
   `.path()` / `.resolve()` return the selected trusted prebuild.
 - [x] A compiled napi-rs fixture uses identical CommonJS source under Node,
   Bun, and napi-vm to compare generated functions, a class with accessors,
-  Buffer conversion, thrown errors, and an `AsyncTask` Promise. The Rust plugin
-  host also loads an allowlisted napi-rs `.node` file through plain
-  `require("./fixture.node")`; async load, reload, and unload hooks await its
-  `AsyncTask` using the existing VM event loop.
+  structured `#[napi(object)]` conversion, vectors, optional arguments,
+  callback invocation, serde JSON values, Buffer conversion, thrown errors,
+  and an `AsyncTask` Promise. The Rust plugin host also loads an allowlisted
+  napi-rs `.node` file through plain `require("./fixture.node")`; async load,
+  reload, and unload hooks await its `AsyncTask` using the existing VM event
+  loop.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.

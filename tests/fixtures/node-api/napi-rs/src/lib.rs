@@ -1,4 +1,4 @@
-use napi::bindgen_prelude::{AsyncTask, Buffer};
+use napi::bindgen_prelude::{AsyncTask, Buffer, FnArgs, Function};
 use napi::{Env, Error, Task};
 use napi_derive::napi;
 
@@ -10,6 +10,42 @@ pub fn add(left: i32, right: i32) -> i32 {
 #[napi]
 pub fn concatenate(left: String, right: String) -> String {
     format!("{left}{right}")
+}
+
+#[napi(object)]
+pub struct Profile {
+    pub name: String,
+    pub scores: Vec<i32>,
+    pub active: bool,
+}
+
+#[napi]
+pub fn update_profile(mut profile: Profile) -> Profile {
+    profile.scores.push(1);
+    profile
+}
+
+#[napi]
+pub fn sum_values(values: Vec<i32>) -> i32 {
+    values.into_iter().sum()
+}
+
+#[napi]
+pub fn optional_label(value: Option<String>) -> Option<String> {
+    value.map(|value| format!("label:{value}"))
+}
+
+#[napi]
+pub fn apply_callback(
+    value: String,
+    callback: Function<'_, FnArgs<(String,)>, String>,
+) -> napi::Result<String> {
+    callback.call(FnArgs { data: (value,) })
+}
+
+#[napi]
+pub fn json_round_trip(value: serde_json::Value) -> serde_json::Value {
+    value
 }
 
 #[napi]

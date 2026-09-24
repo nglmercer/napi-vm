@@ -498,8 +498,28 @@ pub(super) unsafe extern "C" fn api_get_cb_info(
             unsafe { argc.write(frame.args.len()) };
         } else {
             let count = capacity.min(frame.args.len());
-            for (index, handle) in frame.args.iter().take(count).enumerate() {
-                unsafe { argv.add(index).write(*handle) };
+            // napi-rs initializes its fixed-size callback argument arrays
+            // with null pointers, then converts every declared parameter,
+            // including omitted optional parameters. Node-API callers expect
+            // those unused slots to contain a valid `undefined` value handle.
+            let missing_argument = if capacity > count {
+                Some(
+                    environment
+                        .handles
+                        .borrow_mut()
+                        .create(Value::Undefined)?,
+                )
+            } else {
+                None
+            };
+            for index in 0..capacity {
+                let handle = frame
+                    .args
+                    .get(index)
+                    .copied()
+                    .or(missing_argument)
+                    .ok_or(NAPI_INVALID_ARG)?;
+                unsafe { argv.add(index).write(handle) };
             }
             unsafe { argc.write(count) };
         }
