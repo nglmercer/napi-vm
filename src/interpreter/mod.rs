@@ -1323,6 +1323,19 @@ mod tests {
     }
 
     #[test]
+    fn top_level_await_reports_a_promise_with_no_pending_work() {
+        let mut interpreter = Interpreter::with_builtins();
+        let error = interpreter
+            .eval_source("await new Promise(() => {});")
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot synchronously await a pending Promise")
+        );
+    }
+
+    #[test]
     fn test_increment() {
         assert_eq!(eval_str("let i = 0; i++;"), "0");
         assert_eq!(eval_str("let i = 0; ++i;"), "1");

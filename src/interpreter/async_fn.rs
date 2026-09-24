@@ -78,7 +78,8 @@ impl Interpreter {
     /// The queue is drained even for a non-promise, because `await` always
     /// yields to the microtask queue. Skipping that would let code after a
     /// top-level `await 0` observe reactions that a real engine has already
-    /// run.
+    /// run. If a promise remains pending with no timer or host work able to
+    /// settle it, fail clearly instead of returning its placeholder value.
     fn await_synchronously(&mut self, value: Value) -> Result<Value, VmErr> {
         let Some(promise) = value.as_promise() else {
             self.drain_microtasks()?;
@@ -130,8 +131,12 @@ impl Interpreter {
         }
         let inner = promise.borrow();
         match inner.state {
+            PromiseState::Pending => Err(VmErr::Msg(
+                "cannot synchronously await a pending Promise: no VM or host event can settle it"
+                    .into(),
+            )),
             PromiseState::Rejected => Err(VmErr::Throw(inner.value.clone())),
-            _ => Ok(inner.value.clone()),
+            PromiseState::Fulfilled => Ok(inner.value.clone()),
         }
     }
 }

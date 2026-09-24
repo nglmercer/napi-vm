@@ -356,6 +356,9 @@ impl RustPluginHost {
     }
 
     /// Load a plugin directory and run its `onLoad` hook.
+    ///
+    /// Lifecycle hooks may return a Promise; the host drives this plugin's VM
+    /// event loop until it settles before returning to Rust.
     pub fn load(
         &mut self,
         plugin_directory: impl AsRef<Path>,
@@ -392,7 +395,8 @@ impl RustPluginHost {
     }
 
     /// Tear down the current instance, create a fresh interpreter from disk,
-    /// and pass JSON-serializable unload state to `onReload`.
+    /// and pass JSON-serializable unload state to `onReload`. Promise-returning
+    /// hooks are driven to settlement on the VM's existing event loop.
     pub fn reload(&mut self, name: &str) -> Result<&mut RustLoadedPlugin, PluginHostError> {
         let Some(mut current) = self.plugins.remove(name) else {
             return Err(PluginHostError::Load(format!(
@@ -454,7 +458,8 @@ impl RustPluginHost {
         Ok(self.plugins.get_mut(name).expect("plugin inserted above"))
     }
 
-    /// Run `onUnload`, revoke the plugin runtime, and forget it.
+    /// Run `onUnload`, revoke the plugin runtime, and forget it. If the hook
+    /// returns a Promise, drive the VM event loop until it settles.
     pub fn unload(&mut self, name: &str) -> Result<Option<JsonValue>, PluginHostError> {
         let Some(mut plugin) = self.plugins.remove(name) else {
             return Err(PluginHostError::Load(format!(
@@ -2090,9 +2095,8 @@ fn invoke_json(
     expression: &str,
 ) -> Result<Option<JsonValue>, PluginHostError> {
     let source = format!(
-        r#"(() => {{
-  const value = {expression};
-  if (value && typeof value.then === "function") throw new TypeError("asynchronous plugin lifecycle hooks are not supported by this host");
+        r#"await (async () => {{
+  const value = await ({expression});
   if (value === undefined) return JSON.stringify({{ defined: false }});
   const serialized = JSON.stringify(value);
   if (typeof serialized !== "string") throw new TypeError("plugin lifecycle state must be JSON serializable");
@@ -2794,7 +2798,8 @@ export default { onLoad() {
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 const addon = require("./fixture.node");
-export default { onLoad() {
+export default {
+async onLoad() {
   const counter = new addon.Counter(40);
   let failure;
   try { addon.fail(); }
@@ -2806,10 +2811,18 @@ export default { onLoad() {
     bytes: Array.from(addon.reverseBytes(Buffer.from([1, 2, 3, 4]))),
     failure,
     file: readFileSync("./data.txt", "utf8"),
+    asyncSum: await addon.addAsync(20, 22),
   };
   writeFileSync(join("./cache", "napi-rs.json"), JSON.stringify(result));
   return result;
-} };
+},
+async onUnload(context) {
+  return { reason: context.reason, asyncSum: await addon.addAsync(1, 2) };
+},
+async onReload(context, previousState) {
+  return { previousState, asyncSum: await addon.addAsync(20, 22) };
+}
+};
 "#,
         );
         dir.manifest(
@@ -2831,16 +2844,19 @@ export default { onLoad() {
             RustPluginNapiOptions::default().allow_addon_with_sha256(&addon, digest),
         )
         .unwrap();
-        let plugin = host.load(&dir.0).unwrap();
         let expected = serde_json::json!({
             "sum": 42,
             "text": "rust-napi",
             "counter": { "initial": 40, "incremented": 41, "value": 41 },
             "bytes": [4, 3, 2, 1],
             "failure": { "name": "Error", "message": "fixture failure" },
-            "file": "checked"
+            "file": "checked",
+            "asyncSum": 42
         });
-        assert_eq!(plugin.load_result, Some(expected.clone()));
+        {
+            let plugin = host.load(&dir.0).unwrap();
+            assert_eq!(plugin.load_result, Some(expected.clone()));
+        }
         assert_eq!(
             serde_json::from_str::<JsonValue>(
                 &fs::read_to_string(dir.0.join("cache/napi-rs.json")).unwrap()
@@ -2848,6 +2864,17 @@ export default { onLoad() {
             .unwrap(),
             expected
         );
-        host.unload("napi-rs-plugin").unwrap();
+        let reloaded = host.reload("napi-rs-plugin").unwrap();
+        assert_eq!(
+            reloaded.load_result,
+            Some(serde_json::json!({
+                "previousState": { "reason": "reload", "asyncSum": 3 },
+                "asyncSum": 42
+            }))
+        );
+        assert_eq!(
+            host.unload("napi-rs-plugin").unwrap(),
+            Some(serde_json::json!({ "reason": "unload", "asyncSum": 3 }))
+        );
     }
 }

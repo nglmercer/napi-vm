@@ -99,6 +99,11 @@ required-features = ["node-api-host"]
 name = "rust-plugin-host"
 path = "examples/rust_plugin_host.rs"
 
+[[example]]
+name = "rust-plugin-napi"
+path = "examples/rust_plugin_napi.rs"
+required-features = ["node-api-host"]
+
 # Interpreter hot paths benefit from whole-program optimization and a single
 # codegen unit. `panic` stays at the default (unwind) because the NAPI layer
 # catches panics across the boundary.

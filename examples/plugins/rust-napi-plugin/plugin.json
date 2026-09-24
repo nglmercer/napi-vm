@@ -1,0 +1,13 @@
+{
+  "name": "rust-napi-plugin",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "entry": "./plugin.mjs",
+  "permissions": {
+    "fs": {
+      "read": "config.json",
+      "write": "cache/**"
+    },
+    "path": true
+  }
+}

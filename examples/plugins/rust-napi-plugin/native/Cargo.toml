@@ -1,0 +1,15 @@
+[package]
+name = "rust-napi-plugin-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rust_napi_plugin_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "=3.12.2", features = ["napi8"] }
+napi-derive = "=3.6.3"
+
+[build-dependencies]
+napi-build = "=2.4.1"

@@ -263,6 +263,34 @@ libuv ABI compatibility need the Node sidecar. See the
 [Rust desktop native addon loader plan](native-addon-loader-plan.md) for the
 current compatibility matrix and remaining implementation work.
 
+[`examples/rust_plugin_napi.rs`](../examples/rust_plugin_napi.rs) runs a
+complete Rust-hosted plugin whose native module is itself written in Rust
+with napi-rs. The plugin imports checked `node:fs` and `node:path` facades,
+loads its allowlisted addon using ordinary `require()`, and awaits an
+`AsyncTask` from its asynchronous lifecycle hook. `RustPluginHost::load`,
+`reload`, and `unload` remain synchronous Rust calls; when a hook returns a
+Promise, the host drives the VM's existing event loop until that Promise
+settles. These calls wait for the hook before returning, so invoke them on a
+host thread where that wait is acceptable. If a hook awaits a Promise with no
+queued VM work or host event that can settle it, the VM returns an explicit
+error instead of treating the pending value as a completed result.
+
+On Linux, build and copy the native addon, then pass the digest from trusted
+application metadata to the host example:
+
+```bash
+cargo build --release --manifest-path examples/plugins/rust-napi-plugin/native/Cargo.toml
+cp examples/plugins/rust-napi-plugin/native/target/release/librust_napi_plugin_native.so examples/plugins/rust-napi-plugin/native/addon.node
+sha256sum examples/plugins/rust-napi-plugin/native/addon.node
+cargo run --no-default-features --features node-api-host --example rust-plugin-napi -- "$(sha256sum examples/plugins/rust-napi-plugin/native/addon.node | cut -d ' ' -f1)"
+```
+
+The `.node` copy step uses the cdylib filename produced for the target OS and
+architecture. The digest must come from trusted build or signing metadata;
+the plugin cannot authorize its own native code. `node:fs` and `node:path` are
+implemented by the Rust host, so ordinary filesystem and path use does not
+require a native addon.
+
 ## Platforms: bringing your own outside world
 
 Everything the host touches goes through one injected `HostPlatform`

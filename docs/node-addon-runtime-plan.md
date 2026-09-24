@@ -471,7 +471,8 @@ not return success with a partial or fabricated result.
   Bun, and napi-vm to compare generated functions, a class with accessors,
   Buffer conversion, thrown errors, and an `AsyncTask` Promise. The Rust plugin
   host also loads an allowlisted napi-rs `.node` file through plain
-  `require("./fixture.node")` and exercises the same synchronous exports.
+  `require("./fixture.node")`; async load, reload, and unload hooks await its
+  `AsyncTask` using the existing VM event loop.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.
