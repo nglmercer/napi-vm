@@ -9,6 +9,16 @@ From the repository root, build the native crate:
 cargo build --release --manifest-path examples/plugins/rust-napi-plugin/native/Cargo.toml
 ```
 
+On Linux or macOS, run the complete build, copy, integrity-pin, and Rust-host
+workflow with one command from any directory:
+
+```bash
+examples/plugins/rust-napi-plugin/build-and-run.sh
+```
+
+The script supports Windows Bash environments as well. Windows PowerShell
+users can follow the manual copy and hash commands below.
+
 Copy the platform cdylib to the `.node` path declared by the package's
 `node-addons` export and calculate its SHA-256 digest:
 
