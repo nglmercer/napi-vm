@@ -36,6 +36,7 @@ console.log(vm.run("answer;")); // 42
 - [Sandbox safety](docs/safety.md) — containment guards and operational limits
 - [Development](docs/development.md) — quality gate, scripts, benchmarks, and project structure
 - [Roadmap](docs/roadmap.md) — implemented features and known boundaries
+- [Native addon loader plan](docs/native-addon-loader-plan.md) — roadmap for Node-API and `.node` compatibility in Rust desktop hosts
 
 ## Rust embedding and CommonJS
 
