@@ -1432,10 +1432,7 @@ impl NodeAddonSidecar {
             );
             traps.push((
                 operation.guest_name().to_string(),
-                Value::HostFunction {
-                    name: operation.guest_name().into(),
-                    id: local_id,
-                },
+                Value::host_function(operation.guest_name(), local_id),
             ));
         }
         let handler = Value::object(traps);
@@ -2117,8 +2114,13 @@ fn guest_to_wire(
             graph.callbacks.insert(callback_id, v.clone());
             json!({"t":"guestCallback","v":callback_id,"constructable":false})
         }
-        Value::HostFunction { id, .. } => {
-            if sidecar.state.borrow().local_handles.contains_key(id) {
+        Value::HostFunction { properties, .. } => {
+            let id = properties
+                .meta
+                .borrow()
+                .host_function_id
+                .expect("host function identity is initialized");
+            if sidecar.state.borrow().local_handles.contains_key(&id) {
                 return Err(VmErr::Msg(
                     "native object proxy traps cannot be passed as callbacks".into(),
                 ));
@@ -2435,10 +2437,9 @@ fn named_accessor(value: Value, name: String) -> Result<Value, VmErr> {
             name: name.into(),
             callable: *callable,
         },
-        Value::HostFunction { id, .. } => Value::HostFunction {
-            name: name.into(),
-            id: *id,
-        },
+        Value::HostFunction { .. } => value
+            .host_function_named(name)
+            .ok_or_else(|| VmErr::Msg("Node accessor value is not callable".into()))?,
         _ => {
             return Err(VmErr::Msg("Node accessor value is not callable".into()));
         }
@@ -3067,14 +3068,12 @@ fn wire_to_guest_with_context(
                 .and_then(JsonValue::as_u64)
                 .and_then(|n| usize::try_from(n).ok())
                 .ok_or_else(|| VmErr::Msg("invalid Node function id".into()))?;
-            Ok(Value::HostFunction {
-                name: v
-                    .get("n")
+            Ok(Value::host_function(
+                v.get("n")
                     .and_then(JsonValue::as_str)
-                    .unwrap_or("nodeAddon")
-                    .into(),
+                    .unwrap_or("nodeAddon"),
                 id,
-            })
+            ))
         }
         "array" => {
             let a = v

@@ -44,7 +44,9 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         (Value::NativeFunction { callable: x, .. }, Value::NativeFunction { callable: y, .. }) => {
             std::ptr::fn_addr_eq(*x, *y)
         }
-        (Value::HostFunction { id: x, .. }, Value::HostFunction { id: y, .. }) => x == y,
+        (Value::HostFunction { properties: x, .. }, Value::HostFunction { properties: y, .. }) => {
+            x.meta.borrow().host_function_id == y.meta.borrow().host_function_id
+        }
         (Value::HostPending { id: x }, Value::HostPending { id: y }) => x == y,
         (Value::Symbol(x), Value::Symbol(y)) => x.id == y.id,
         (Value::BigInt(x), Value::BigInt(y)) => x.compare(y).is_eq(),

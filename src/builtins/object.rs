@@ -130,6 +130,7 @@ fn cell(v: &Value) -> Option<&Rc<ObjectCell>> {
             function.prototype_value(v);
             Some(&function.properties)
         }
+        Value::HostFunction { properties, .. } => Some(properties),
         _ => None,
     }
 }
@@ -149,6 +150,7 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
             function.prototype_value(v);
             own_object_names(&function.properties, enumerable_only)
         }
+        Value::HostFunction { properties, .. } => own_object_names(properties, enumerable_only),
         Value::Array(items) => {
             let mut names: Vec<String> = (0..items.borrow().len())
                 .filter(|index| items.has_index(*index))
@@ -264,10 +266,7 @@ fn name_callable(value: &Value, name: &str) -> Option<Value> {
             name: name.into(),
             callable: *callable,
         },
-        Value::HostFunction { id, .. } => Value::HostFunction {
-            name: name.into(),
-            id: *id,
-        },
+        Value::HostFunction { .. } => value.host_function_named(name)?,
         _ => return None,
     })
 }

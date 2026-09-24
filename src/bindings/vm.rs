@@ -253,7 +253,7 @@ impl VM {
         let old = runtime.interp.global_value(name);
         let removed = runtime.interp.persistent_global.borrow_mut().remove(name);
         if removed
-            && let Some(Value::HostFunction { id, .. }) = old
+            && let Some(id) = old.as_ref().and_then(Value::host_function_id)
             && let Some(bridge) = Self::current_bridge(runtime)
         {
             bridge.unregister(id);
@@ -484,13 +484,10 @@ impl VM {
                 // Phase 2 — install the globals.
                 if outcome.is_ok() {
                     for ((global, _, _), id) in bindings.iter().zip(&new_ids) {
-                        if let Err(error) = runtime.interp.set_global_checked(
-                            global,
-                            Value::HostFunction {
-                                name: global.as_str().into(),
-                                id: *id,
-                            },
-                        ) {
+                        if let Err(error) = runtime
+                            .interp
+                            .set_global_checked(global, Value::host_function(global.as_str(), *id))
+                        {
                             outcome = Err(napi::Error::from_reason(error.to_string()));
                             break;
                         }
@@ -544,8 +541,8 @@ impl VM {
 
                 // Committed: retire the handles the replaced globals owned.
                 for (_, prior) in &prior_values {
-                    if let Some(Value::HostFunction { id, .. }) = prior {
-                        bridge.unregister(*id);
+                    if let Some(id) = prior.as_ref().and_then(Value::host_function_id) {
+                        bridge.unregister(id);
                     }
                 }
 
@@ -636,7 +633,10 @@ impl VM {
         let value = from_napi(env.raw(), value.raw())
             .map_err(|error| napi::Error::from_reason(error.to_string()))?;
         self.state.runtime.with_mut(|runtime| -> napi::Result<()> {
-            if let Some(Value::HostFunction { id, .. }) = runtime.interp.global_value(&name)
+            if let Some(id) = runtime
+                .interp
+                .global_value(&name)
+                .and_then(|value| value.host_function_id())
                 && let Some(bridge) = Self::current_bridge(runtime)
             {
                 bridge.unregister(id);
@@ -706,7 +706,10 @@ impl VM {
         raw: sys::napi_value,
         async_fn: bool,
     ) -> napi::Result<()> {
-        if let Some(Value::HostFunction { id, .. }) = runtime.interp.global_value(name)
+        if let Some(id) = runtime
+            .interp
+            .global_value(name)
+            .and_then(|value| value.host_function_id())
             && let Some(bridge) = Self::current_bridge(runtime)
         {
             bridge.unregister(id);
@@ -721,13 +724,7 @@ impl VM {
         .map_err(|error| napi::Error::from_reason(error.to_string()))?;
         runtime
             .interp
-            .set_global_checked(
-                name,
-                Value::HostFunction {
-                    name: name.into(),
-                    id,
-                },
-            )
+            .set_global_checked(name, Value::host_function(name, id))
             .map_err(|error| napi::Error::from_reason(error.to_string()))?;
         Ok(())
     }

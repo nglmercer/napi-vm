@@ -391,13 +391,16 @@ impl RustNodeApiHost {
                         } if *callback_work_id == work_id
                     )
                 });
-                let Ok(Value::HostFunction { id, .. }) = create_native_async_complete_value(
+                let Ok(callback) = create_native_async_complete_value(
                     environment,
                     work.complete,
                     status,
                     work.data,
                     work_id,
                 ) else {
+                    continue;
+                };
+                let Some(id) = callback.host_function_id() else {
                     continue;
                 };
                 let _ = self.invoke_native(
@@ -439,12 +442,15 @@ impl RustNodeApiHost {
             else {
                 continue;
             };
-            let Ok(Value::HostFunction { id, .. }) = create_posted_finalizer_value(
+            let Ok(callback) = create_posted_finalizer_value(
                 environment,
                 finalizer.finalize,
                 finalizer.data as *mut c_void,
                 finalizer.hint as *mut c_void,
             ) else {
+                continue;
+            };
+            let Some(id) = callback.host_function_id() else {
                 continue;
             };
             let _ = self.invoke_native(
@@ -2017,10 +2023,7 @@ fn create_native_callback_value_with_kind(
         );
         id
     };
-    Ok(Value::HostFunction {
-        name: Rc::from(function_name),
-        id,
-    })
+    Ok(Value::napi_callback_function(Rc::from(function_name), id))
 }
 
 fn napi_property_key(value: &Value) -> Result<String, i32> {
@@ -2093,6 +2096,15 @@ fn napi_direct_set_property(object: &Value, key: &Value, value: Value) -> Result
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&key, symbol);
+            }
+            Ok(())
+        }
+        Value::HostFunction { properties, .. } => {
+            object
+                .set_prop(key.clone(), value)
+                .map_err(|_| NAPI_GENERIC_FAILURE)?;
+            if let Some(symbol) = symbol {
+                properties.meta.borrow_mut().set_symbol_key(&key, symbol);
             }
             Ok(())
         }
@@ -2172,6 +2184,9 @@ fn napi_direct_has_own_property(object: &Value, key: &Value) -> Result<bool, i32
             .borrow()
             .iter()
             .any(|(name, _)| name == &key),
+        Value::HostFunction { properties, .. } => {
+            properties.borrow().iter().any(|(name, _)| name == &key)
+        }
         Value::Class(class) => class.statics.borrow().iter().any(|(name, _)| name == &key),
         Value::Array(array) => {
             key == "length"
@@ -2251,6 +2266,20 @@ fn napi_direct_delete_property(object: &Value, key: &Value) -> Result<bool, i32>
             function.properties.meta.borrow_mut().forget(&companion);
             Ok(true)
         }
+        Value::HostFunction { properties, .. } => {
+            if !properties.meta.borrow().attrs_of(&key).configurable
+                && properties.borrow().iter().any(|(name, _)| name == &key)
+            {
+                return Ok(false);
+            }
+            let companion = format!("__setter:{}__", key);
+            properties
+                .borrow_mut()
+                .retain(|(name, _)| name != &key && name != &companion);
+            properties.meta.borrow_mut().forget(&key);
+            properties.meta.borrow_mut().forget(&companion);
+            Ok(true)
+        }
         Value::Array(array) => {
             if key == "length" {
                 return Ok(false);
@@ -2288,6 +2317,11 @@ fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
         Value::Object { props } => props.borrow().iter().map(|(key, _)| key.clone()).collect(),
         Value::Function(function) => function
             .properties
+            .borrow()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect(),
+        Value::HostFunction { properties, .. } => properties
             .borrow()
             .iter()
             .map(|(key, _)| key.clone())
@@ -2337,6 +2371,10 @@ fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> bool {
                 .iter()
                 .any(|(name, _)| name == key)
                 && function.properties.meta.borrow().attrs_of(key).enumerable
+        }
+        Value::HostFunction { properties, .. } => {
+            properties.borrow().iter().any(|(name, _)| name == key)
+                && properties.meta.borrow().attrs_of(key).enumerable
         }
         Value::Array(array) => {
             key != "length"
@@ -2476,6 +2514,7 @@ fn napi_guest_object_is_extensible(object: &Value) -> bool {
         Value::Object { props } => !props.meta.borrow().non_extensible,
         Value::Array(array) => !array.meta.borrow().non_extensible,
         Value::Function(function) => !function.properties.meta.borrow().non_extensible,
+        Value::HostFunction { properties, .. } => !properties.meta.borrow().non_extensible,
         Value::Class(class) => !class.statics.meta.borrow().non_extensible,
         Value::Proxy(proxy) => napi_guest_object_is_extensible(&proxy.target),
         _ => true,
@@ -2608,6 +2647,18 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
                 );
             }
         }
+        Value::HostFunction { properties, .. } => {
+            let slots = properties.borrow();
+            let metadata = properties.meta.borrow();
+            for (key, _) in slots.iter() {
+                napi_push_direct_property_key(
+                    &mut keys,
+                    key,
+                    metadata.symbol_key(key),
+                    metadata.attrs_of(key),
+                );
+            }
+        }
         Value::Class(class) => {
             let slots = class.statics.borrow();
             let metadata = class.statics.meta.borrow();
@@ -2707,10 +2758,9 @@ fn napi_direct_all_property_keys(object: &Value) -> Result<Vec<(NapiPropertyKey,
         | Value::DataView(_)
         | Value::StringIterator { .. }
         | Value::Generator { .. } => {}
-        Value::Proxy(_)
-        | Value::NativeFunction { .. }
-        | Value::HostFunction { .. }
-        | Value::GlobalObject => return Err(NAPI_GENERIC_FAILURE),
+        Value::Proxy(_) | Value::NativeFunction { .. } | Value::GlobalObject => {
+            return Err(NAPI_GENERIC_FAILURE);
+        }
         Value::Undefined
         | Value::Null
         | Value::Bool(_)
@@ -2928,7 +2978,12 @@ fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
         Value::NativeFunction { name, .. } => Ok(NapiObjectIdentity::NativeFunction(
             Rc::as_ptr(name) as *const () as usize,
         )),
-        Value::HostFunction { id, .. } => Ok(NapiObjectIdentity::HostFunction(*id)),
+        Value::HostFunction { properties, .. } => properties
+            .meta
+            .borrow()
+            .host_function_id
+            .map(NapiObjectIdentity::HostFunction)
+            .ok_or(NAPI_GENERIC_FAILURE),
         Value::Class(class) => Ok(NapiObjectIdentity::Class(
             Rc::as_ptr(&class.prototype) as usize
         )),
@@ -4434,6 +4489,10 @@ fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Re
             let meta = function.properties.meta.borrow();
             (meta.proto.clone(), meta.uses_default_prototype, "Function")
         }
+        Value::HostFunction { properties, .. } => {
+            let meta = properties.meta.borrow();
+            (meta.proto.clone(), meta.uses_default_prototype, "Function")
+        }
         Value::Class(class) => {
             let meta = class.statics.meta.borrow();
             (meta.proto.clone(), meta.uses_default_prototype, "Function")
@@ -4460,7 +4519,7 @@ fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Re
         }
         Value::DataView(_) => return napi_default_builtin_prototype(environment, "DataView"),
         Value::GlobalObject => return napi_default_object_prototype(environment),
-        Value::NativeFunction { .. } | Value::HostFunction { .. } => {
+        Value::NativeFunction { .. } => {
             return napi_default_function_prototype(environment);
         }
         value if !is_napi_property_object(value) => return Err(NAPI_OBJECT_EXPECTED),
@@ -4504,9 +4563,11 @@ unsafe extern "C" fn api_set_prototype(
         }
         let prototype = match &prototype {
             Value::Null => None,
-            Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_) => {
-                Some(Rc::new(prototype))
-            }
+            Value::Object { .. }
+            | Value::Array(_)
+            | Value::Function(_)
+            | Value::HostFunction { .. }
+            | Value::Class(_) => Some(Rc::new(prototype)),
             other if !is_napi_property_object(other) => return Err(NAPI_OBJECT_EXPECTED),
             // Proxies and specialized built-ins do not expose a mutable
             // ordinary [[Prototype]] slot in the current VM model.
@@ -4516,6 +4577,7 @@ unsafe extern "C" fn api_set_prototype(
             Value::Object { props } => &props.meta,
             Value::Array(array) => &array.meta,
             Value::Function(function) => &function.properties.meta,
+            Value::HostFunction { properties, .. } => &properties.meta,
             Value::Class(class) => &class.statics.meta,
             // Be explicit when the input is a genuine JS object that the
             // current VM data model cannot mutate as an ordinary object.
@@ -4559,6 +4621,7 @@ unsafe extern "C" fn api_set_prototype(
             Value::Object { props } => props.set_proto(prototype),
             Value::Array(array) => array.set_proto(prototype),
             Value::Function(function) => function.properties.set_proto(prototype),
+            Value::HostFunction { properties, .. } => properties.set_proto(prototype),
             Value::Class(class) => class.statics.set_proto(prototype),
             _ => unreachable!("target metadata was validated above"),
         }
@@ -5397,6 +5460,7 @@ fn napi_set_object_integrity(value: &Value, freeze: bool) -> Result<(), i32> {
     let cell = match value {
         Value::Object { props } => props,
         Value::Function(function) => &function.properties,
+        Value::HostFunction { properties, .. } => properties,
         Value::Class(class) => &class.statics,
         _ => {
             return Err(if napi_object_identity(value).is_ok() {
@@ -6872,6 +6936,7 @@ unsafe extern "C" fn api_define_properties(
             Value::Object { props } => &props.meta,
             Value::Class(class) => &class.statics.meta,
             Value::Function(function) => &function.properties.meta,
+            Value::HostFunction { properties, .. } => &properties.meta,
             Value::Array(array) => &array.meta,
             _ => return Err(NAPI_OBJECT_EXPECTED),
         };
@@ -7129,6 +7194,7 @@ unsafe extern "C" fn api_set_named_property(
                 | Value::Array(_)
                 | Value::Class(_)
                 | Value::Function(_)
+                | Value::HostFunction { .. }
                 | Value::GlobalObject
         ) {
             return Err(NAPI_OBJECT_EXPECTED);
@@ -7928,6 +7994,7 @@ fn napi_constructor_has_custom_has_instance(constructor: &Value) -> Result<bool,
         let properties = match &current {
             Value::Class(class) => class.statics.clone(),
             Value::Function(function) => function.properties.clone(),
+            Value::HostFunction { properties, .. } => properties.clone(),
             Value::Object { props } => props.clone(),
             Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
             _ => return Ok(false),
@@ -8010,6 +8077,7 @@ fn napi_function_instanceof(
             Value::Object { props } => Rc::as_ptr(props) as usize,
             Value::Class(class) => Rc::as_ptr(&class.statics) as usize,
             Value::Function(function) => Rc::as_ptr(&function.properties) as usize,
+            Value::HostFunction { properties, .. } => Rc::as_ptr(properties) as usize,
             Value::Proxy(_) => return Err(NAPI_GENERIC_FAILURE),
             _ => return Ok(false),
         };
@@ -11268,11 +11336,20 @@ static napi_value probe(napi_env env, napi_callback_info info) {
 }
 
 NAPI_MODULE_INIT() {
-  napi_value function;
+  napi_value function, marker, status_value;
+  napi_status marker_status, freeze_status;
   if (napi_add_env_cleanup_hook(env, sync_cleanup, NULL) != napi_ok ||
       napi_add_async_cleanup_hook(env, async_cleanup, NULL, NULL) != napi_ok ||
       napi_create_function(env, "probe", NAPI_AUTO_LENGTH, probe, NULL, &function) != napi_ok ||
-      napi_set_named_property(env, exports, "probe", function) != napi_ok)
+      napi_create_int32(env, 64, &marker) != napi_ok)
+    return NULL;
+  marker_status = napi_set_named_property(env, function, "nativeMarker", marker);
+  freeze_status = napi_object_freeze(env, function);
+  if (napi_set_named_property(env, exports, "probe", function) != napi_ok ||
+      napi_create_int32(env, marker_status, &status_value) != napi_ok ||
+      napi_set_named_property(env, exports, "markerStatus", status_value) != napi_ok ||
+      napi_create_int32(env, freeze_status, &status_value) != napi_ok ||
+      napi_set_named_property(env, exports, "functionFreezeStatus", status_value) != napi_ok)
     return NULL;
   return exports;
 }
@@ -11304,6 +11381,12 @@ NAPI_MODULE_INIT() {
             root.join("main.cjs"),
             r#"
 const addon = require('./fixture.node');
+const nativeFunction = addon.probe;
+const nativeFunctionMarker = Object.getOwnPropertyDescriptor(nativeFunction, 'nativeMarker') || {};
+const nativeFunctionName = Object.getOwnPropertyDescriptor(nativeFunction, 'name') || {};
+const nativeFunctionLength = Object.getOwnPropertyDescriptor(nativeFunction, 'length') || {};
+const nativeFunctionPrototype = Object.getOwnPropertyDescriptor(nativeFunction, 'prototype') || {};
+nativeFunction.nativeMarker = 99;
 const target = {value: 41};
 const sealedTarget = {value: 9};
 const frozenArray = [13];
@@ -11371,6 +11454,25 @@ const sealedArrayIndexDescriptor = Object.getOwnPropertyDescriptor(sealedArray, 
 const guestDefinedIndexDescriptor = Object.getOwnPropertyDescriptor(guestDefined, '2');
 module.exports = {
   ...native,
+  hostMarkerStatus: addon.markerStatus,
+  hostFunctionFreezeStatus: addon.functionFreezeStatus,
+  nativeFunctionFrozen: Object.isFrozen(nativeFunction),
+  nativeFunctionName: nativeFunction.name,
+  nativeFunctionLength: nativeFunction.length,
+  nativeFunctionMarker: nativeFunction.nativeMarker,
+  nativeFunctionPrototype: typeof nativeFunction.prototype,
+  nativeFunctionPrototypeConstructorMatches: nativeFunction.prototype.constructor === nativeFunction,
+  nativeFunctionEnumerableKeys: Object.keys(nativeFunction),
+  nativeFunctionOwnProperties: Object.getOwnPropertyNames(nativeFunction)
+    .filter((name) => ['length', 'name', 'nativeMarker', 'prototype'].includes(name)).sort(),
+  nativeFunctionMarkerWritable: nativeFunctionMarker.writable,
+  nativeFunctionMarkerEnumerable: nativeFunctionMarker.enumerable,
+  nativeFunctionMarkerConfigurable: nativeFunctionMarker.configurable,
+  nativeFunctionNameWritable: nativeFunctionName.writable,
+  nativeFunctionLengthValue: nativeFunctionLength.value,
+  nativeFunctionPrototypeWritable: nativeFunctionPrototype.writable,
+  nativeFunctionPrototypeEnumerable: nativeFunctionPrototype.enumerable,
+  nativeFunctionPrototypeConfigurable: nativeFunctionPrototype.configurable,
   frozen: Object.isFrozen(target),
   sealed: Object.isSealed(sealedTarget),
   functionFrozen: Object.isFrozen(FrozenFunction),
@@ -11495,6 +11597,30 @@ module.exports = {
         assert_eq!(vm_report["freezeStatus"], NAPI_OK);
         assert_eq!(vm_report["sealStatus"], NAPI_OK);
         assert_eq!(vm_report["functionFreezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["hostMarkerStatus"], NAPI_OK);
+        assert_eq!(vm_report["hostFunctionFreezeStatus"], NAPI_OK);
+        assert_eq!(vm_report["nativeFunctionFrozen"], true);
+        assert_eq!(vm_report["nativeFunctionName"], "probe");
+        assert_eq!(vm_report["nativeFunctionLength"], 0);
+        assert_eq!(vm_report["nativeFunctionLengthValue"], 0);
+        assert_eq!(vm_report["nativeFunctionMarker"], 64);
+        assert_eq!(vm_report["nativeFunctionPrototype"], "object");
+        assert_eq!(vm_report["nativeFunctionPrototypeConstructorMatches"], true);
+        assert_eq!(
+            vm_report["nativeFunctionEnumerableKeys"],
+            serde_json::json!(["nativeMarker"])
+        );
+        assert_eq!(
+            vm_report["nativeFunctionOwnProperties"],
+            serde_json::json!(["length", "name", "nativeMarker", "prototype"])
+        );
+        assert_eq!(vm_report["nativeFunctionMarkerWritable"], false);
+        assert_eq!(vm_report["nativeFunctionMarkerEnumerable"], true);
+        assert_eq!(vm_report["nativeFunctionMarkerConfigurable"], false);
+        assert_eq!(vm_report["nativeFunctionNameWritable"], false);
+        assert_eq!(vm_report["nativeFunctionPrototypeWritable"], false);
+        assert_eq!(vm_report["nativeFunctionPrototypeEnumerable"], false);
+        assert_eq!(vm_report["nativeFunctionPrototypeConfigurable"], false);
         assert_eq!(vm_report["arrayDefineStatus"], NAPI_OK);
         assert_eq!(vm_report["arrayFreezeStatus"], NAPI_OK);
         assert_eq!(vm_report["frozenArraySetStatus"], NAPI_OK);

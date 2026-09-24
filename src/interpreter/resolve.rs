@@ -671,7 +671,19 @@ impl Interpreter {
                     Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
                 }
             }
-            (Value::NativeFunction { .. } | Value::HostFunction { .. }, Value::Symbol(symbol)) => {
+            (Value::HostFunction { .. }, Value::Symbol(symbol)) => {
+                let key = super::symbol_slot_key(symbol);
+                if let Some(value) = lookup_chain_found(self, o, &key)? {
+                    return Ok(value);
+                }
+                let Some(prototype) =
+                    FunctionData::default_function_prototype(&self.persistent_global)
+                else {
+                    return Ok(Value::Undefined);
+                };
+                lookup_chain(self, &prototype, &key)
+            }
+            (Value::NativeFunction { .. }, Value::Symbol(symbol)) => {
                 let Some(prototype) =
                     FunctionData::default_function_prototype(&self.persistent_global)
                 else {
@@ -771,12 +783,15 @@ impl Interpreter {
                     .unwrap_or(Value::Undefined)),
                 other => Ok(crate::builtins::symbol_method(other).unwrap_or(Value::Undefined)),
             },
-            (Value::HostFunction { name, .. }, Value::String(k)) => {
-                if k == "name" {
-                    Ok(Value::String(name.to_string()))
-                } else {
-                    Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
+            (Value::HostFunction { .. }, Value::String(k)) => {
+                if let Some(value) = lookup_chain_found(self, o, k)? {
+                    return Ok(value);
                 }
+                Ok(match k.as_str() {
+                    "name" => Value::String(String::new()),
+                    "length" => Value::Number(0.0),
+                    _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
+                })
             }
             // Symbol-keyed property access: `arr[Symbol.iterator]`,
             // `str[Symbol.iterator]`, `gen[Symbol.iterator]`.
@@ -882,6 +897,7 @@ fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Opti
             }
             Value::Class(class) => &class.statics,
             Value::Function(function) => &function.properties,
+            Value::HostFunction { properties, .. } => properties,
             _ => return Ok(None),
         };
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {

@@ -403,13 +403,10 @@ impl WasmVm {
 
         // Wire the console sink as a callable VM global before overriding console.
         let id = bridge.register(out_fn.clone());
-        interp.global.borrow_mut().set(
-            "__out",
-            Value::HostFunction {
-                name: "__out".into(),
-                id,
-            },
-        );
+        interp
+            .global
+            .borrow_mut()
+            .set("__out", Value::host_function("__out", id));
         run_setup(&mut interp);
 
         Self {
@@ -487,13 +484,10 @@ impl WasmVm {
         info: HostFunctionInfo,
     ) -> Result<(), JsValue> {
         let id = self.bridge.register(func);
-        if let Err(error) = self.interp.set_global_checked(
-            name,
-            Value::HostFunction {
-                name: name.into(),
-                id,
-            },
-        ) {
+        if let Err(error) = self
+            .interp
+            .set_global_checked(name, Value::host_function(name, id))
+        {
             return Err(JsValue::from_str(&error.to_string()));
         }
         if let Some(existing) = self
@@ -571,13 +565,10 @@ impl WasmVm {
         let mut interp = Interpreter::with_builtins();
         interp.host = Some(bridge.clone());
         let id = bridge.register(self.out_fn.clone());
-        interp.global.borrow_mut().set(
-            "__out",
-            Value::HostFunction {
-                name: "__out".into(),
-                id,
-            },
-        );
+        interp
+            .global
+            .borrow_mut()
+            .set("__out", Value::host_function("__out", id));
         run_setup(&mut interp);
 
         self.interp = interp;

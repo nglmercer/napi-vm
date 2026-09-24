@@ -421,6 +421,21 @@ impl Interpreter {
                 function.properties.meta.borrow_mut().forget(&companion);
                 Ok(Value::Bool(true))
             }
+            Value::HostFunction { properties, .. } => {
+                let slot = self.property_key(key)?;
+                if !properties.meta.borrow().attrs_of(&slot).configurable
+                    && properties.borrow().iter().any(|(name, _)| name == &slot)
+                {
+                    return Ok(Value::Bool(false));
+                }
+                let companion = format!("__setter:{}__", slot);
+                properties
+                    .borrow_mut()
+                    .retain(|(name, _)| name != &slot && name != &companion);
+                properties.meta.borrow_mut().forget(&slot);
+                properties.meta.borrow_mut().forget(&companion);
+                Ok(Value::Bool(true))
+            }
             // Deleting an array element leaves an absent slot while reads
             // continue to produce `undefined`.
             Value::Array(items) => {
@@ -675,6 +690,22 @@ impl Interpreter {
                 self.assign_cell_property(obj, &function.properties, key, val)
             }
             (Value::Function(_), _) => {
+                let slot = self.property_key(prop)?;
+                self.assign_member(obj, &Value::String(slot), val)
+            }
+            (Value::HostFunction { properties, .. }, Value::Symbol(symbol)) => {
+                let slot = crate::interpreter::symbol_slot_key(symbol);
+                self.assign_cell_property(obj, properties, &slot, val)?;
+                properties
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
+                Ok(())
+            }
+            (Value::HostFunction { properties, .. }, Value::String(key)) => {
+                self.assign_cell_property(obj, properties, key, val)
+            }
+            (Value::HostFunction { .. }, _) => {
                 let slot = self.property_key(prop)?;
                 self.assign_member(obj, &Value::String(slot), val)
             }
@@ -1042,18 +1073,23 @@ impl Interpreter {
                 }
             }
             Value::NativeFunction { callable, .. } => callable(self, this_val, args),
-            Value::HostFunction { id, .. } => {
+            Value::HostFunction { properties, .. } => {
+                let id = properties
+                    .meta
+                    .borrow()
+                    .host_function_id
+                    .expect("host function identity is initialized");
                 // Clone the bridge out so we don't hold a borrow on `self`
                 // across the host call (which may re-enter the VM).
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot call host function: no bridge attached".to_string())
                 })?;
-                if bridge.is_async_fn(*id) {
+                if bridge.is_async_fn(id) {
                     // Async host function: dispatch the call and return a
                     // pending sentinel. The interpreter parks at `await`.
-                    bridge.call_host_async_with_this(*id, this_val, args)
+                    bridge.call_host_async_with_this(id, this_val, args)
                 } else {
-                    bridge.call_host_with_callback_handler(*id, this_val, args, &mut |callback| {
+                    bridge.call_host_with_callback_handler(id, this_val, args, &mut |callback| {
                         self.run_host_callback(callback)
                     })
                 }
@@ -1198,12 +1234,17 @@ impl Interpreter {
             // The built-in error types have native constructors, so
             // `class E extends Error {}` reaches `super(…)` here.
             Value::NativeFunction { .. } => self.call_this(f, this_val, args),
-            Value::HostFunction { id, .. } => {
+            Value::HostFunction { properties, .. } => {
+                let id = properties
+                    .meta
+                    .borrow()
+                    .host_function_id
+                    .expect("host function identity is initialized");
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;
                 bridge.call_host_constructor_with_callback_handler_and_target(
-                    *id,
+                    id,
                     this_val,
                     args,
                     new_target,
@@ -1264,13 +1305,18 @@ impl Interpreter {
             };
         }
         match f {
-            Value::HostFunction { id, .. } => {
+            Value::HostFunction { properties, .. } => {
+                let id = properties
+                    .meta
+                    .borrow()
+                    .host_function_id
+                    .expect("host function identity is initialized");
                 let instance = Value::object(vec![]);
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;
                 let result = bridge.construct_host_with_callback_handler_and_target(
-                    *id,
+                    id,
                     instance.clone(),
                     args,
                     new_target,

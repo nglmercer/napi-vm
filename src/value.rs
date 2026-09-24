@@ -135,6 +135,9 @@ pub struct ObjectMeta {
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
+    /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
+    /// property cell so that value remains compact.
+    pub(crate) host_function_id: Option<usize>,
 }
 
 impl ObjectMeta {
@@ -1531,7 +1534,11 @@ pub enum Value {
     /// which the bridge maps to a persisted JavaScript function reference.
     HostFunction {
         name: Rc<str>,
-        id: usize,
+        /// Own properties of this host-backed function object. Node-API
+        /// callbacks are ordinary JavaScript functions from the guest's
+        /// point of view, so they need shared property descriptors and
+        /// integrity metadata like interpreter-created functions.
+        properties: Rc<ObjectCell>,
     },
     /// A handle to the global scope itself. Bound to `globalThis`, `self` and
     /// `window`; member access on it reads and writes real globals (handled in
@@ -1909,6 +1916,85 @@ impl std::fmt::Debug for GeneratorInner {
 }
 
 impl Value {
+    /// Construct a host-backed callable with JavaScript function own
+    /// properties. `name` and `length` are non-enumerable, non-writable,
+    /// configurable data properties, as for a native JavaScript function.
+    pub fn host_function(name: impl Into<Rc<str>>, id: usize) -> Self {
+        let name = name.into();
+        let properties = Rc::new(ObjectCell::new_with_default_proto(vec![
+            ("length".to_string(), Value::Number(0.0)),
+            ("name".to_string(), Value::String(name.to_string())),
+        ]));
+        let intrinsic_attributes = PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        };
+        properties
+            .meta
+            .borrow_mut()
+            .set_attrs("length", intrinsic_attributes);
+        properties
+            .meta
+            .borrow_mut()
+            .set_attrs("name", intrinsic_attributes);
+        properties.meta.borrow_mut().host_function_id = Some(id);
+        Value::HostFunction { name, properties }
+    }
+
+    /// Construct a Node-API callback function. `napi_create_function` yields
+    /// an ordinary constructable function, including its own `prototype`
+    /// property and the prototype object's `constructor` back-reference.
+    pub fn napi_callback_function(name: impl Into<Rc<str>>, id: usize) -> Self {
+        let function = Self::host_function(name, id);
+        let Value::HostFunction { properties, .. } = &function else {
+            unreachable!("host_function returns a host-backed function")
+        };
+        let prototype = Value::object(vec![("constructor".to_string(), function.clone())]);
+        if let Value::Object { props } = &prototype {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                PropAttrs {
+                    writable: true,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        properties
+            .borrow_mut()
+            .push(("prototype".to_string(), prototype));
+        properties.meta.borrow_mut().set_attrs(
+            "prototype",
+            PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+        function
+    }
+
+    pub fn host_function_id(&self) -> Option<usize> {
+        match self {
+            Value::HostFunction { properties, .. } => properties.meta.borrow().host_function_id,
+            _ => None,
+        }
+    }
+
+    /// Apply an inferred property name to a host-backed function while
+    /// retaining its bridge identity and shared own-property cell.
+    pub fn host_function_named(&self, name: impl Into<Rc<str>>) -> Option<Self> {
+        let Value::HostFunction { properties, .. } = self else {
+            return None;
+        };
+        let name = name.into();
+        Some(Value::HostFunction {
+            name,
+            properties: properties.clone(),
+        })
+    }
+
     pub fn checked_object(props: Vec<(String, Value)>) -> Result<Self, VmErr> {
         if props.len() > MAX_OBJECT_PROPS {
             return Err(limit_err("Maximum object property count exceeded"));
@@ -1954,6 +2040,7 @@ impl Value {
             Value::Array(array) => array.proto(),
             Value::Class(class) => class.statics.proto(),
             Value::Function(function) => function.properties.proto(),
+            Value::HostFunction { properties, .. } => properties.proto(),
             _ => None,
         }
     }
@@ -2065,13 +2152,17 @@ impl Value {
             function.ensure_name_length_properties();
         }
         match self {
-            Value::Object { .. } | Value::Class(_) | Value::Function(_) => {
+            Value::Object { .. }
+            | Value::Class(_)
+            | Value::Function(_)
+            | Value::HostFunction { .. } => {
                 let mut current = self.clone();
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
                     let props = match &current {
                         Value::Object { props } => props,
                         Value::Class(class) => &class.statics,
                         Value::Function(function) => &function.properties,
+                        Value::HostFunction { properties, .. } => properties,
                         _ => return None,
                     };
                     if let Some((_, value)) = props.borrow().iter().find(|(name, _)| name == key) {
@@ -2083,7 +2174,7 @@ impl Value {
                     current = next.as_ref().clone();
                 }
                 match self {
-                    Value::Function(_) => match key {
+                    Value::Function(_) | Value::HostFunction { .. } => match key {
                         // Function.prototype supplies these after an own
                         // configurable name/length property is deleted.
                         "name" => Some(Value::String(String::new())),
@@ -2140,6 +2231,7 @@ impl Value {
                 function.ensure_name_length_properties();
                 set_cell_prop(&function.properties, key, val)
             }
+            Value::HostFunction { properties, .. } => set_cell_prop(properties, key, val),
             _ => Ok(()),
         }
     }
@@ -2158,13 +2250,17 @@ impl Value {
             }
         }
         match self {
-            Value::Object { .. } | Value::Class(_) | Value::Function(_) => {
+            Value::Object { .. }
+            | Value::Class(_)
+            | Value::Function(_)
+            | Value::HostFunction { .. } => {
                 let mut current = self.clone();
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
                     let props = match &current {
                         Value::Object { props } => props,
                         Value::Class(class) => &class.statics,
                         Value::Function(function) => &function.properties,
+                        Value::HostFunction { properties, .. } => properties,
                         _ => return false,
                     };
                     if props.borrow().iter().any(|(name, _)| name == key) {
@@ -2176,7 +2272,7 @@ impl Value {
                     current = next.as_ref().clone();
                 }
                 match self {
-                    Value::Function(_) => {
+                    Value::Function(_) | Value::HostFunction { .. } => {
                         matches!(key, "name" | "length")
                             || crate::builtins::function_method(key).is_some()
                     }
