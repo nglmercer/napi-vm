@@ -132,6 +132,11 @@ impl RustPluginPolicy {
 pub struct RustPluginHostOptions {
     pub policy: RustPluginPolicy,
     pub max_file_bytes: u64,
+    /// Minimal host target facts exposed to guests as `process`. The host
+    /// supplies real values in Node.js `process` vocabulary; `None` (the
+    /// default) keeps the inert `process` stub, whose members are all
+    /// `undefined`.
+    pub guest_target: Option<GuestTargetInfo>,
 }
 
 impl Default for RustPluginHostOptions {
@@ -139,8 +144,34 @@ impl Default for RustPluginHostOptions {
         Self {
             policy: RustPluginPolicy::default(),
             max_file_bytes: DEFAULT_MAX_PLUGIN_FILE_BYTES,
+            guest_target: None,
         }
     }
+}
+
+/// Linux libc identity for guest target reporting: the only libc signal
+/// generated native binding loaders consult (musl vs gnu).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuestLibc {
+    Gnu,
+    Musl,
+}
+
+/// Minimal host target facts a host may expose to guests.
+///
+/// Values use Node.js `process` vocabulary (`platform` like `"linux"`,
+/// `"darwin"`, `"win32"`; `arch` like `"x64"`, `"arm64"`). This exists so
+/// generated native binding loaders — which resolve their exact `.node`
+/// file from `process.platform`/`process.arch` plus a libc check — can run
+/// without a full Node.js `process` emulation. Only these facts are
+/// exposed: no env vars, no argv, no versions, no I/O handles. The host is
+/// responsible for reporting true values; guests must treat them as
+/// untrusted hints for file selection, never as a security boundary.
+#[derive(Clone, Debug)]
+pub struct GuestTargetInfo {
+    pub platform: String,
+    pub arch: String,
+    pub libc: GuestLibc,
 }
 
 /// A trusted Rust host callback exposed through one capability module.
@@ -195,6 +226,10 @@ pub struct RustLoadedPlugin {
     plugin_bridge: Rc<PluginHostBridge>,
     module_ids: Vec<String>,
     bridge_globals: Vec<String>,
+    /// Host-installed globals that live for the whole plugin lifetime
+    /// (unlike `bridge_globals`, which are removed before plugin sources
+    /// execute). Drained by `dispose`.
+    guest_globals: Vec<String>,
     #[cfg(all(
         feature = "node-api-host",
         any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -525,6 +560,7 @@ impl RustPluginHost {
         ));
         let mut module_ids = Vec::new();
         let mut bridge_globals = Vec::new();
+        let mut guest_globals = Vec::new();
         let mut active_capabilities = Vec::new();
 
         install_fs_module(
@@ -609,6 +645,12 @@ impl RustPluginHost {
         }
         for name in &bridge_globals {
             interpreter.global.borrow_mut().remove(name);
+        }
+
+        // Minimal host target facts, when the host opts in. Installed after
+        // the bootstrap cleanup so the global survives until `dispose`.
+        if let Some(target) = &self.options.guest_target {
+            install_guest_target(&mut interpreter, &bridge, target, &mut guest_globals)?;
         }
 
         // Keep JavaScript package loading inside the VM even when this plugin
@@ -764,6 +806,7 @@ impl RustPluginHost {
             plugin_bridge: bridge,
             module_ids,
             bridge_globals,
+            guest_globals,
             #[cfg(all(
                 feature = "node-api-host",
                 any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -777,6 +820,9 @@ impl RustPluginHost {
             plugin.interpreter.remove_module(&module);
         }
         for global in plugin.bridge_globals.drain(..) {
+            plugin.interpreter.global.borrow_mut().remove(&global);
+        }
+        for global in plugin.guest_globals.drain(..) {
             plugin.interpreter.global.borrow_mut().remove(&global);
         }
         plugin.interpreter.global.borrow_mut().remove("require");
@@ -2484,6 +2530,59 @@ fn sanitize_global(value: &str) -> String {
     value.bytes().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// Installs the host-supplied target facts as a minimal `process` global.
+///
+/// Only `platform`, `arch`, and `report.getReport()` exist: exactly what
+/// generated native binding loaders read to resolve their `.node` file.
+/// `getReport` returns a fresh object per call shaped so the standard
+/// musl detector answers truthfully — a musl shared-object marker on musl
+/// Linux, an empty report elsewhere (which also resolves to gnu, matching
+/// the detector's own fallthrough). The host is responsible for reporting
+/// true values; selection mistakes fail closed at the native allowlist.
+fn install_guest_target(
+    interpreter: &mut Interpreter,
+    bridge: &PluginHostBridge,
+    target: &GuestTargetInfo,
+    guest_globals: &mut Vec<String>,
+) -> Result<(), PluginHostError> {
+    let musl = target.libc == GuestLibc::Musl && target.platform == "linux";
+    let machine = match target.arch.as_str() {
+        "x64" => "x86_64".to_owned(),
+        "arm64" => "aarch64".to_owned(),
+        "ia32" => "i386".to_owned(),
+        other => other.to_owned(),
+    };
+    let report = move || {
+        let shared_objects = if musl {
+            vec![Value::String(format!("ld-musl-{machine}.so.1"))]
+        } else {
+            Vec::new()
+        };
+        Value::object(vec![
+            ("header".to_owned(), Value::object(Vec::new())),
+            ("sharedObjects".to_owned(), Value::array(shared_objects)),
+        ])
+    };
+    let get_report = bridge.register(Rc::new(move |_args: Vec<Value>| Ok(report())))?;
+    let process = Value::object(vec![
+        (
+            "platform".to_owned(),
+            Value::String(target.platform.clone()),
+        ),
+        ("arch".to_owned(), Value::String(target.arch.clone())),
+        (
+            "report".to_owned(),
+            Value::object(vec![(
+                "getReport".to_owned(),
+                Value::host_function("getReport", get_report),
+            )]),
+        ),
+    ]);
+    interpreter.global.borrow_mut().set("process", process);
+    guest_globals.push("process".to_owned());
+    Ok(())
+}
+
 fn value_to_guest_string(value: &Value) -> String {
     match value {
         Value::String(value) => value.clone(),
@@ -3230,6 +3329,7 @@ export default { onLoad() {
         let mut host = RustPluginHost::new(RustPluginHostOptions {
             policy: RustPluginPolicy::default().grant_fs_read("data.txt"),
             max_file_bytes: 1024,
+            guest_target: None,
         });
         let plugin = host.load(&dir.0).unwrap();
         assert_eq!(
@@ -3553,6 +3653,142 @@ async onReload(context, previousState) {
         assert_eq!(
             host.unload("napi-rs-plugin").unwrap(),
             Some(serde_json::json!({ "reason": "unload", "asyncSum": 3 }))
+        );
+    }
+
+    fn guest_target_plugin(dir: &TestPluginDir, name: &str, probe: &str) {
+        dir.write(
+            "main.mjs",
+            &format!(
+                "export default {{\n  onLoad() {{\n    return {{\n{probe}\n    }};\n  }}\n}};\n"
+            ),
+        );
+        dir.manifest(name, "main.mjs", "{}");
+    }
+
+    fn guest_target_host(platform: &str, arch: &str, libc: GuestLibc) -> RustPluginHost {
+        RustPluginHost::new(RustPluginHostOptions {
+            guest_target: Some(GuestTargetInfo {
+                platform: platform.to_owned(),
+                arch: arch.to_owned(),
+                libc,
+            }),
+            ..RustPluginHostOptions::default()
+        })
+    }
+
+    #[test]
+    fn guest_target_installs_minimal_process_global() {
+        let dir = TestPluginDir::new("guest-target");
+        guest_target_plugin(
+            &dir,
+            "guest-target",
+            r#"      platform: process.platform,
+      arch: process.arch,
+      keys: Object.keys(process),
+      reportType: typeof process.report.getReport,
+      sharedObjects: process.report.getReport().sharedObjects,
+      headerKeys: Object.keys(process.report.getReport().header),
+      env: typeof process.env,
+      argv: typeof process.argv,
+      versions: typeof process.versions,"#,
+        );
+        let mut host = guest_target_host("linux", "x64", GuestLibc::Gnu);
+        let plugin = host.load(&dir.0).unwrap();
+        let result = plugin.load_result.clone().unwrap();
+        assert_eq!(result["platform"], serde_json::json!("linux"));
+        assert_eq!(result["arch"], serde_json::json!("x64"));
+        let mut keys: Vec<String> = result["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|key| key.as_str().unwrap().to_owned())
+            .collect();
+        keys.sort();
+        assert_eq!(keys, ["arch", "platform", "report"]);
+        assert_eq!(result["reportType"], serde_json::json!("function"));
+        assert_eq!(result["sharedObjects"], serde_json::json!([]));
+        assert_eq!(result["headerKeys"], serde_json::json!([]));
+        assert_eq!(result["env"], serde_json::json!("undefined"));
+        assert_eq!(result["argv"], serde_json::json!("undefined"));
+        assert_eq!(result["versions"], serde_json::json!("undefined"));
+    }
+
+    /// The libc detector generated native loaders emit, verbatim: the fs
+    /// tier cannot succeed inside the VM, so the `process.report` tier
+    /// decides.
+    const GUEST_MUSL_DETECTOR: &str = r#"
+function __napiIsMusl() {
+  try {
+    return require('fs').readFileSync('/usr/bin/ldd', 'utf8').includes('musl')
+  } catch {}
+  let report = null
+  if (process.report && typeof process.report.getReport === 'function') {
+    process.report.excludeNetwork = true
+    report = process.report.getReport()
+  }
+  if (report && report.header && report.header.glibcVersionRuntime) {
+    return false
+  }
+  if (report && Array.isArray(report.sharedObjects)) {
+    return report.sharedObjects.some((file) => file.includes('libc.musl-') || file.includes('ld-musl-'))
+  }
+  return false
+}
+"#;
+
+    #[test]
+    fn guest_target_report_answers_libc_detector_truthfully() {
+        for (libc, expected, marker) in [
+            (GuestLibc::Gnu, false, None),
+            (GuestLibc::Musl, true, Some("ld-musl-x86_64.so.1")),
+        ] {
+            let dir = TestPluginDir::new("guest-libc");
+            dir.write(
+                "main.mjs",
+                &format!(
+                    "{GUEST_MUSL_DETECTOR}\nexport default {{\n  onLoad() {{\n    return {{ musl: __napiIsMusl(), marker: process.report.getReport().sharedObjects }};\n  }}\n}};\n"
+                ),
+            );
+            dir.manifest("guest-libc", "main.mjs", "{}");
+            let mut host = guest_target_host("linux", "x64", libc);
+            let plugin = host.load(&dir.0).unwrap();
+            let result = plugin.load_result.clone().unwrap();
+            assert_eq!(result["musl"], serde_json::json!(expected), "{libc:?}");
+            let shared = result["marker"].as_array().unwrap();
+            match marker {
+                Some(name) => assert_eq!(
+                    shared
+                        .iter()
+                        .map(|value| value.as_str().unwrap())
+                        .collect::<Vec<_>>(),
+                    [name],
+                    "{libc:?}"
+                ),
+                None => assert!(shared.is_empty(), "{libc:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn guest_target_absent_keeps_process_stub_inert() {
+        let dir = TestPluginDir::new("no-guest-target");
+        guest_target_plugin(
+            &dir,
+            "no-guest-target",
+            r#"      platform: typeof process.platform,
+      arch: typeof process.arch,
+      report: typeof process.report,"#,
+        );
+        let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+        let plugin = host.load(&dir.0).unwrap();
+        assert_eq!(
+            plugin.load_result,
+            Some(serde_json::json!({
+                "platform": "undefined",
+                "arch": "undefined",
+                "report": "undefined",
+            }))
         );
     }
 }
