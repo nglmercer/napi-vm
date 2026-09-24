@@ -4,7 +4,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::{BindKind, Env, Environment, Interpreter, Lookup, ModifyOutcome};
+use super::{
+    BindKind, Env, Environment, Interpreter, Lookup, ModifyOutcome, block_needs_lexical_scope,
+};
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
     AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName, ObjectProp,
@@ -740,6 +742,7 @@ impl Interpreter {
                 }
             }
             Statement::While { test, body } => {
+                let body_needs_scope = block_needs_lexical_scope(body);
                 let label = self.active_label.take();
                 let mut r = Value::Undefined;
                 loop {
@@ -748,7 +751,7 @@ impl Interpreter {
                     if !self.truthy(&t) {
                         break;
                     }
-                    match self.run_block(body) {
+                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
                         Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
                         Err(VmErr::Continue(None)) => continue,
@@ -759,11 +762,12 @@ impl Interpreter {
                 Ok(r)
             }
             Statement::DoWhile { test, body } => {
+                let body_needs_scope = block_needs_lexical_scope(body);
                 let label = self.active_label.take();
                 let mut r = Value::Undefined;
                 loop {
                     self.consume_loop()?;
-                    match self.run_block(body) {
+                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
                         Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
                         Err(VmErr::Continue(None)) => {}
@@ -794,12 +798,13 @@ impl Interpreter {
             Statement::ForIn { name, obj, body } => {
                 let o = self.eval_expr(obj)?;
                 let ks = self.keys_with_proxy_trap(&o)?;
+                let body_needs_scope = block_needs_lexical_scope(body);
                 let mut r = Value::Undefined;
                 let label = self.active_label.take();
                 for k in ks {
                     self.consume_loop()?;
                     self.set_binding(name, Value::String(k))?;
-                    match self.run_block(body) {
+                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
                         Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
                         Err(VmErr::Continue(None)) => continue,
@@ -817,6 +822,7 @@ impl Interpreter {
                 is_await,
             } => {
                 let source = self.eval_expr(iter)?;
+                let body_needs_scope = block_needs_lexical_scope(body);
                 let iterator = if *is_await {
                     self.async_iterator_for(&source)?
                 } else {
@@ -879,7 +885,7 @@ impl Interpreter {
                         }
                         None => self.set_binding(name, value)?,
                     }
-                    match self.run_block(body) {
+                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
                         Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
                         Err(VmErr::Continue(None)) => continue,
@@ -1315,7 +1321,11 @@ impl Interpreter {
             }
         }
 
-        if !per_iteration.is_empty() {
+        let needs_per_iteration_environment = !per_iteration.is_empty()
+            && crate::parser::for_loop_captures_bindings(init, test, update, body, &per_iteration);
+        let body_needs_scope = block_needs_lexical_scope(body);
+
+        if needs_per_iteration_environment {
             self.global = self.copy_iteration_scope(&loop_scope, &per_iteration);
         }
 
@@ -1329,14 +1339,14 @@ impl Interpreter {
                     break;
                 }
             }
-            match self.run_block(body) {
+            match self.run_block_with_lexical_scope(body, body_needs_scope) {
                 Err(VmErr::Break(None)) => break,
                 Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
                 Err(VmErr::Continue(None)) => {}
                 Err(VmErr::Continue(l)) if label_matches(&label, &l) => {}
                 other => r = other?,
             }
-            if !per_iteration.is_empty() {
+            if needs_per_iteration_environment {
                 let current = self.global.clone();
                 self.global = self.copy_iteration_scope(&current, &per_iteration);
             }

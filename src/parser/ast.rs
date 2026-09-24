@@ -602,6 +602,293 @@ pub fn arrow_body_references(body: &ExprOrBlock, name: &str) -> bool {
     }
 }
 
+/// Whether a classic `for` loop creates a callable that may retain one of its
+/// `let` bindings after the iteration. Such loops need a fresh environment per
+/// iteration; loops without a capturing function can update the binding in
+/// place.
+///
+/// This deliberately over-approximates shadowing inside nested functions. A
+/// false positive only keeps the slower environment-copy path; a false
+/// negative would change the values observed by closures.
+pub fn for_loop_captures_bindings(
+    init: Option<&ForInit>,
+    test: Option<&Expr>,
+    update: Option<&Expr>,
+    body: &[Statement],
+    names: &[String],
+) -> bool {
+    names.iter().any(|name| {
+        init.is_some_and(|init| for_init_captures(init, name))
+            || test.is_some_and(|expr| expr_captures_identifier(expr, name))
+            || update.is_some_and(|expr| expr_captures_identifier(expr, name))
+            || statements_capture_identifier(body, name)
+    })
+}
+
+fn for_init_captures(init: &ForInit, name: &str) -> bool {
+    match init {
+        ForInit::Var { decls, .. } => decls.iter().any(|(_, expr)| {
+            expr.as_ref()
+                .is_some_and(|expr| expr_captures_identifier(expr, name))
+        }),
+        ForInit::Pattern {
+            pattern,
+            init,
+            trailing,
+            ..
+        } => {
+            pattern_captures_identifier(pattern, name)
+                || expr_captures_identifier(init, name)
+                || trailing.iter().any(|(_, expr)| {
+                    expr.as_ref()
+                        .is_some_and(|expr| expr_captures_identifier(expr, name))
+                })
+        }
+        ForInit::Expr(expr) => expr_captures_identifier(expr, name),
+    }
+}
+
+fn statements_capture_identifier(stmts: &[Statement], name: &str) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::Expr(expr) => expr_captures_identifier(expr, name),
+        Statement::VarDecl {
+            init,
+            destructuring,
+            ..
+        } => {
+            init.as_ref()
+                .is_some_and(|expr| expr_captures_identifier(expr, name))
+                || destructuring
+                    .as_ref()
+                    .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
+        }
+        Statement::FnDecl { body, .. } => stmts_reference(body, name),
+        Statement::ClassDecl {
+            superclass, body, ..
+        } => {
+            superclass
+                .as_ref()
+                .is_some_and(|expr| expr_captures_identifier(expr, name))
+                || class_members_capture_identifier(body, name)
+        }
+        Statement::Return(expr) => expr
+            .as_ref()
+            .is_some_and(|expr| expr_captures_identifier(expr, name)),
+        Statement::If { test, then, else_ } => {
+            expr_captures_identifier(test, name)
+                || statements_capture_identifier(then, name)
+                || else_
+                    .as_ref()
+                    .is_some_and(|stmts| statements_capture_identifier(stmts, name))
+        }
+        Statement::While { test, body } | Statement::DoWhile { test, body } => {
+            expr_captures_identifier(test, name) || statements_capture_identifier(body, name)
+        }
+        Statement::For {
+            init,
+            test,
+            update,
+            body,
+        } => {
+            init.as_deref()
+                .is_some_and(|init| for_init_captures(init, name))
+                || test
+                    .as_deref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
+                || update
+                    .as_deref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
+                || statements_capture_identifier(body, name)
+        }
+        Statement::ForIn { obj, body, .. } => {
+            expr_captures_identifier(obj, name) || statements_capture_identifier(body, name)
+        }
+        Statement::ForOf {
+            iter,
+            pattern,
+            body,
+            ..
+        } => {
+            expr_captures_identifier(iter, name)
+                || pattern
+                    .as_deref()
+                    .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
+                || statements_capture_identifier(body, name)
+        }
+        Statement::Block(stmts) | Statement::Declarations(stmts) => {
+            statements_capture_identifier(stmts, name)
+        }
+        Statement::Labeled { body, .. } => {
+            statements_capture_identifier(std::slice::from_ref(body.as_ref()), name)
+        }
+        Statement::Throw(expr) | Statement::ExportDefault(expr) => {
+            expr_captures_identifier(expr, name)
+        }
+        Statement::Try {
+            body,
+            catch,
+            finally,
+        } => {
+            statements_capture_identifier(body, name)
+                || catch
+                    .as_ref()
+                    .is_some_and(|(_, stmts)| statements_capture_identifier(stmts, name))
+                || finally
+                    .as_ref()
+                    .is_some_and(|stmts| statements_capture_identifier(stmts, name))
+        }
+        Statement::Switch { disc, cases } => {
+            expr_captures_identifier(disc, name)
+                || cases.iter().any(|case| {
+                    case.test
+                        .as_ref()
+                        .is_some_and(|expr| expr_captures_identifier(expr, name))
+                        || statements_capture_identifier(&case.body, name)
+                })
+        }
+        Statement::Break
+        | Statement::Continue
+        | Statement::LabeledBreak(_)
+        | Statement::LabeledContinue(_)
+        | Statement::ExportNamed { .. }
+        | Statement::ExportAll { .. }
+        | Statement::Import { .. }
+        | Statement::Empty => false,
+    })
+}
+
+fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
+    match expr {
+        Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
+        Expr::FnExpr { body, .. } => stmts_reference(body, name),
+        Expr::ClassExpr {
+            superclass, body, ..
+        } => {
+            superclass
+                .as_deref()
+                .is_some_and(|expr| expr_captures_identifier(expr, name))
+                || class_members_capture_identifier(body, name)
+        }
+        Expr::Array(items) => items
+            .iter()
+            .any(|expr| expr_captures_identifier(expr, name)),
+        Expr::Object(props) => props.iter().any(|prop| match prop {
+            ObjectProp::Shorthand(_) => false,
+            ObjectProp::KeyValue(_, value) | ObjectProp::Spread(value) => {
+                expr_captures_identifier(value, name)
+            }
+            ObjectProp::Computed(key, value) => {
+                expr_captures_identifier(key, name) || expr_captures_identifier(value, name)
+            }
+            ObjectProp::Method { body, .. }
+            | ObjectProp::Getter { body, .. }
+            | ObjectProp::Setter { body, .. } => stmts_reference(body, name),
+        }),
+        Expr::Binary { left, right, .. } => {
+            expr_captures_identifier(left, name) || expr_captures_identifier(right, name)
+        }
+        Expr::Unary { operand, .. } | Expr::Spread(operand) | Expr::Await(operand) => {
+            expr_captures_identifier(operand, name)
+        }
+        Expr::Call { callee, args } | Expr::New { callee, args } => {
+            expr_captures_identifier(callee, name)
+                || args.iter().any(|arg| expr_captures_identifier(arg, name))
+        }
+        Expr::Member {
+            object, property, ..
+        }
+        | Expr::OptionalChain {
+            object, property, ..
+        } => expr_captures_identifier(object, name) || expr_captures_identifier(property, name),
+        Expr::TaggedTemplate { tag, exprs, .. } => {
+            expr_captures_identifier(tag, name)
+                || exprs
+                    .iter()
+                    .any(|expr| expr_captures_identifier(expr, name))
+        }
+        Expr::Assignment { target, value, .. } | Expr::LogicalAssignment { target, value, .. } => {
+            expr_captures_identifier(target, name) || expr_captures_identifier(value, name)
+        }
+        Expr::Conditional {
+            test,
+            consequent,
+            alternate,
+        } => {
+            expr_captures_identifier(test, name)
+                || expr_captures_identifier(consequent, name)
+                || expr_captures_identifier(alternate, name)
+        }
+        Expr::DynamicImport(specifier) | Expr::YieldFrom(specifier) => {
+            expr_captures_identifier(specifier, name)
+        }
+        Expr::Template { exprs, .. } => exprs
+            .iter()
+            .any(|expr| expr_captures_identifier(expr, name)),
+        Expr::Yield(expr) => expr
+            .as_deref()
+            .is_some_and(|expr| expr_captures_identifier(expr, name)),
+        Expr::Number(_)
+        | Expr::BigIntLiteral(_)
+        | Expr::String(_)
+        | Expr::Regex(_, _)
+        | Expr::Bool(_)
+        | Expr::Null
+        | Expr::Undefined
+        | Expr::Identifier(_)
+        | Expr::This
+        | Expr::Super
+        | Expr::ImportMeta => false,
+    }
+}
+
+fn class_members_capture_identifier(members: &[ClassMember], name: &str) -> bool {
+    members.iter().any(|member| match member {
+        ClassMember::Method {
+            body, name: key, ..
+        }
+        | ClassMember::Getter {
+            body, name: key, ..
+        }
+        | ClassMember::Setter {
+            body, name: key, ..
+        } => {
+            matches!(key, MemberName::Computed(expr) if expr_captures_identifier(expr, name))
+                || stmts_reference(body, name)
+        }
+        ClassMember::Field {
+            name: key, init, ..
+        } => {
+            matches!(key, MemberName::Computed(expr) if expr_captures_identifier(expr, name))
+                || init
+                    .as_ref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
+        }
+        ClassMember::StaticBlock { body } => statements_capture_identifier(body, name),
+    })
+}
+
+fn pattern_captures_identifier(pattern: &Pattern, name: &str) -> bool {
+    match pattern {
+        Pattern::Ident(_) => false,
+        Pattern::Array(items) => items
+            .iter()
+            .any(|item| pattern_captures_identifier(item, name)),
+        Pattern::Object(items) => items.iter().any(|(key, value)| {
+            matches!(key, PatternKey::Computed(expr) if expr_captures_identifier(expr, name))
+                || value
+                    .as_ref()
+                    .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
+        }),
+        Pattern::Rest(inner) => pattern_captures_identifier(inner, name),
+        Pattern::Default(inner, default) => {
+            pattern_captures_identifier(inner, name) || expr_captures_identifier(default, name)
+        }
+        Pattern::Member { object, property } => {
+            expr_captures_identifier(object, name) || expr_captures_identifier(property, name)
+        }
+    }
+}
+
 fn stmt_references(s: &Statement, name: &str) -> bool {
     match s {
         Statement::Expr(e) => expr_references(e, name),

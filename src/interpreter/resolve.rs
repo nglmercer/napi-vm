@@ -433,25 +433,29 @@ impl Interpreter {
             )));
         }
         let v = self.prop(o, p)?;
-        let property_name = self.property_key(p)?;
-        let getter_name = format!("get {property_name}");
-        let setter_name = format!("set {property_name}");
-        let is_getter = match &v {
-            Value::Function(f) => f.name.as_deref() == Some(getter_name.as_str()),
-            // A native accessor — `Map.prototype.size` — is recognized the
-            // same way, by its name matching this property's getter slot.
+        // Accessors are represented by specially named functions. Most
+        // property reads return ordinary methods or data, so avoid converting
+        // the key and allocating both candidate names on that hot path.
+        let accessor_name = match &v {
+            Value::Function(function) => function.name.as_deref(),
+            // Native accessors such as `Map.prototype.size` use the same
+            // representation as guest getters.
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.as_ref() == getter_name
+                Some(name.as_ref())
             }
-            _ => false,
+            _ => None,
         };
-        let is_setter_only = match &v {
-            Value::Function(f) => f.name.as_deref() == Some(setter_name.as_str()),
-            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.as_ref() == setter_name
+        let name_matches = |prefix: &str| -> Result<bool, VmErr> {
+            let Some(name) = accessor_name.and_then(|name| name.strip_prefix(prefix)) else {
+                return Ok(false);
+            };
+            match p {
+                Value::String(key) => Ok(name == key),
+                _ => Ok(name == self.property_key(p)?),
             }
-            _ => false,
         };
+        let is_getter = name_matches("get ")?;
+        let is_setter_only = !is_getter && name_matches("set ")?;
         if is_getter {
             return self.call_this(&v, o.clone(), vec![]);
         }

@@ -56,11 +56,6 @@ const WORKLOADS: &[(&str, &str)] = &[
          parts.join(',').split(',').length;",
     ),
     (
-        "class_methods",
-        "class P { constructor(x, y) { this.x = x; this.y = y; } sum() { return this.x + this.y; } } \
-         let t = 0; for (let i = 0; i < 1000; i++) { t += new P(i, i + 1).sum(); } t;",
-    ),
-    (
         "closures",
         "function counter() { let n = 0; return () => ++n; } \
          const c = counter(); for (let i = 0; i < 10000; i++) { c(); } c();",
@@ -100,5 +95,38 @@ fn bench_frontend(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_run, bench_frontend);
+/// Reuse a prepared VM for class calls. Defining a fresh class in each
+/// Criterion iteration creates the constructor/prototype cycle that napi-vm's
+/// ref-counted heap intentionally cannot collect; benchmarking that cold
+/// source repeatedly grows memory instead of measuring execution throughput.
+fn bench_class_methods(c: &mut Criterion) {
+    let setup = parse(
+        "class P { constructor(x, y) { this.x = x; this.y = y; } \
+         sum() { return this.x + this.y; } } \
+         function class_methods() { let t = 0; \
+         for (let i = 0; i < 1000; i++) { t += new P(i, i + 1).sum(); } \
+         return t; }",
+    );
+    let invocation = parse("class_methods();");
+    let mut interp = Interpreter::new();
+    setup_builtins(&interp.global);
+    interp
+        .run_program_body(&setup)
+        .expect("class benchmark setup should execute");
+
+    let mut group = c.benchmark_group("warm");
+    group.bench_function("class_methods_reused_vm", |b| {
+        b.iter(|| {
+            interp.begin_execution();
+            black_box(
+                interp
+                    .run(black_box(&invocation))
+                    .expect("class benchmark invocation should execute"),
+            )
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench_run, bench_frontend, bench_class_methods);
 criterion_main!(benches);

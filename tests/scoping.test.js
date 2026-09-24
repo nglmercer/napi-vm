@@ -37,6 +37,13 @@ test("let inside a function block does not escape it", () => {
   expect(run(`function f(){ { let m = 1; } return typeof m; } f();`)).toBe("undefined");
 });
 
+test("block function declarations remain hoisted and block-scoped", () => {
+  expect(run(`let result; { result = local(); function local(){ return 4; } } result;`)).toBe("4");
+  expect(run(`function outer(){ { function local(){ return 4; } } return typeof local; } outer();`)).toBe(
+    "undefined",
+  );
+});
+
 test("an inner block shadows rather than overwrites", () => {
   expect(run(`let s = 1; { let s = 2; } s;`)).toBe("1");
   expect(run(`let d = 1; { let d = 2; { let d = 3; } } d;`)).toBe("1");
@@ -144,6 +151,19 @@ test("for(let) gives each iteration its own binding", () => {
   expect(
     run(`const fs = []; for (let i = 0; i < 3; i++) fs.push(() => i); fs.map(f => f()).join(",");`),
   ).toBe("0,1,2");
+});
+
+test("for(let) captures from the initializer and update keep their iteration bindings", () => {
+  expect(
+    run(
+      `let first; for (let i = 0, capture = () => i; i < 2; i++) { if (i === 0) first = capture; } first();`,
+    ),
+  ).toBe("0");
+  expect(
+    run(
+      `const captures = []; for (let i = 0; i < 2; captures.push(() => i), i++) {} captures.map(f => f()).join(",");`,
+    ),
+  ).toBe("1,2");
 });
 
 test("for(var) keeps one shared binding", () => {

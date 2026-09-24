@@ -236,6 +236,23 @@ fn produces_completion_value(statement: &Statement) -> bool {
     )
 }
 
+/// Whether a block introduces bindings that need a distinct environment.
+///
+/// `run_block` is used for every loop body and conditional branch. Most of
+/// those bodies only contain expressions and `var` declarations, so allocating
+/// and hoisting an otherwise empty scope on each iteration is unnecessary.
+/// Keep this walk aligned with `hoist_lexical`: declarator groups are
+/// transparent, while nested statements establish their own scopes when they
+/// execute.
+pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
+        Statement::FnDecl { .. } | Statement::ClassDecl { .. } => true,
+        Statement::Declarations(inner) => block_needs_lexical_scope(inner),
+        _ => false,
+    })
+}
+
 impl Default for Interpreter {
     fn default() -> Self {
         Self::new()
@@ -675,6 +692,20 @@ impl Interpreter {
     /// first statement runs so a reference above the declaration reports a
     /// temporal dead zone rather than reaching an outer binding.
     pub fn run_block(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
+        self.run_block_with_lexical_scope(stmts, block_needs_lexical_scope(stmts))
+    }
+
+    /// Execute a block using a lexical-scope decision already computed by a
+    /// surrounding loop. Loop bodies are immutable AST, so the check only
+    /// needs to run once rather than on every iteration.
+    pub(crate) fn run_block_with_lexical_scope(
+        &mut self,
+        stmts: &[Statement],
+        needs_scope: bool,
+    ) -> Result<Value, VmErr> {
+        if !needs_scope {
+            return self.run(stmts);
+        }
         let outer = self.push_scope();
         let result = self.hoist_lexical(stmts).and_then(|()| self.run(stmts));
         self.pop_scope(outer);
