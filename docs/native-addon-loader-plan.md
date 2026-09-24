@@ -89,6 +89,11 @@ notes and known behavior differences are tracked in
 - The Rust backend already covers substantial Node-API behavior, including
   values and callbacks, handles, classes, binary data, Promises, async work,
   thread-safe functions, cleanup, and selected APIs through v10.
+- A compiled napi-rs addon now runs the same CommonJS entry under Node, Bun,
+  and napi-vm. Its fixture exercises exported Rust functions and verifies the
+  optional module API-version getter behavior: when that getter is absent,
+  napi-vm uses Node's default Node-API module version (v8) for
+  `napi_register_module_v1`.
 - A source audit found shim symbols for the functions in the local Node v26
   headers. Semantic support is still a subset: exporting a symbol does not
   mean its contract is implemented.

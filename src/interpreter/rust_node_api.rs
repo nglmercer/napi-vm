@@ -73,6 +73,9 @@ const NAPI_SYMBOL_TYPE: i32 = 5;
 const NAPI_OBJECT_TYPE: i32 = 6;
 const NAPI_FUNCTION_TYPE: i32 = 7;
 const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
+// Node uses Node-API v8 for symbol-registered addons that omit the optional
+// node_api_module_get_api_version_v1 export.
+const DEFAULT_NODE_API_MODULE_VERSION: i32 = 8;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
 const ASYNC_WORKER_COUNT: usize = 4;
@@ -4236,18 +4239,29 @@ impl NativeAddonLoader for RustNodeApiHost {
         let symbol_api_version = unsafe {
             library
                 .get::<unsafe extern "C" fn() -> i32>(b"node_api_module_get_api_version_v1\0")
+                .ok()
                 .map(|symbol| *symbol)
         };
-        let (version, initialize) = if let Ok(api_version) = symbol_api_version {
-            let initialize = unsafe {
-                *library.get(b"napi_register_module_v1\0").map_err(|error| {
-                    VmErr::Msg(format!(
-                        "{} has no Node-API v1 module initializer: {error}",
-                        filename
-                    ))
-                })?
-            };
+        let symbol_initializer = unsafe {
+            library
+                .get::<NapiAddonRegister>(b"napi_register_module_v1\0")
+                .ok()
+                .map(|symbol| *symbol)
+        };
+        let (version, initialize) = if let Some(api_version) = symbol_api_version {
+            let initialize = symbol_initializer.ok_or_else(|| {
+                VmErr::Msg(format!(
+                    "{filename} exports a Node-API version getter but no napi_register_module_v1 initializer"
+                ))
+            })?;
             (unsafe { api_version() }, initialize)
+        } else if registered_modules.is_empty()
+            && let Some(initialize) = symbol_initializer
+        {
+            // Node-API's module version getter is optional. Node uses its
+            // default Node-API module version (currently 8) for modules that
+            // export only napi_register_module_v1, including napi-rs addons.
+            (DEFAULT_NODE_API_MODULE_VERSION, initialize)
         } else {
             match registered_modules.as_slice() {
                 [module] => {

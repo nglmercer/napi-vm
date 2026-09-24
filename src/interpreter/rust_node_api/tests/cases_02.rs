@@ -883,6 +883,110 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn loads_napi_rs_addon_with_the_same_commonjs_entry_on_node_bun_and_vm() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-napi-rs-fixture-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/node-api/napi-rs/Cargo.toml");
+        let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/node-api-fixtures/napi-rs");
+        let temp_dir = target_dir.join("tmp");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let built = Command::new("cargo")
+            .args(["build", "--offline", "--release", "--manifest-path"])
+            .arg(&manifest)
+            .arg("--target-dir")
+            .arg(&target_dir)
+            .env("TMPDIR", &temp_dir)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "napi-rs fixture build failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        let compiled_addon = target_dir
+            .join("release")
+            .join("libnapi_vm_napi_rs_fixture.so");
+        assert!(
+            compiled_addon.is_file(),
+            "napi-rs fixture was not produced at {}",
+            compiled_addon.display()
+        );
+        let addon = root.join("fixture.node");
+        fs::copy(&compiled_addon, &addon).unwrap();
+        let guest_entry = include_str!("../../../../tests/fixtures/node-api/napi-rs-main.cjs");
+        fs::write(root.join("main.cjs"), guest_entry).unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
+        let result = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'));")
+            .unwrap();
+        let Value::String(vm_json) = &result else {
+            panic!("napi-rs fixture did not return JSON text: {result:?}");
+        };
+        let vm_result: serde_json::Value = serde_json::from_str(&vm_json).unwrap();
+
+        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        if let Ok(node_version) = Command::new("node").arg("--version").output()
+            && node_version.status.success()
+        {
+            let reference = Command::new("node")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Node napi-rs fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let node_result: serde_json::Value =
+                serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(vm_result, node_result, "Node and napi-vm differ for napi-rs");
+        } else {
+            eprintln!("skipping Node napi-rs differential: Node.js is unavailable");
+        }
+
+        if let Ok(bun_version) = Command::new("bun").arg("--version").output()
+            && bun_version.status.success()
+        {
+            let reference = Command::new("bun")
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "Bun napi-rs fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let bun_result: serde_json::Value =
+                serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(vm_result, bun_result, "Bun and napi-vm differ for napi-rs");
+        }
+
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn experimental_node_api_object_and_finalizer_apis_match_reference_runtimes() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
