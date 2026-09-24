@@ -290,6 +290,11 @@ CommonJS route. `napi_get_uv_event_loop` resolves at link time but returns
 `napi_generic_failure` and a null output because this host does not embed libuv.
 Its `napi_get_last_error_info` message identifies libuv as unavailable; invalid
 arguments continue to report `napi_invalid_arg`.
+The Node-API shim has a symbol-surface test that compares its exports with the
+installed Node headers compiled at `NAPI_VERSION=10`, including experimental
+declarations. This checks that declared v10 imports resolve; it does not claim
+that every API has complete Node semantics. The behavior gaps below remain
+explicit and should use the Node sidecar when an addon depends on them.
 The deprecated registration descriptor has no Node-API version field, so its
 single-module registration path is conservatively treated as v1. The stable
 `napi_fatal_exception` path uses the VM's existing external-event queue, offers

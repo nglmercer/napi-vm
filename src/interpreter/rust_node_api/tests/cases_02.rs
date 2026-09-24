@@ -1,4 +1,138 @@
     #[test]
+    fn node_api_v10_header_symbols_are_exported_by_the_shim() {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let Some(include) = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file())
+        else {
+            eprintln!("skipping Node-API symbol audit: Node headers are unavailable");
+            return;
+        };
+        if !Command::new("cc")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
+            eprintln!("skipping Node-API symbol audit: C compiler is unavailable");
+            return;
+        }
+
+        let mut preprocessor = Command::new("cc")
+            .args([
+                "-E",
+                "-x",
+                "c",
+                "-DNAPI_VERSION=10",
+                "-DNAPI_EXPERIMENTAL",
+                "-I",
+            ])
+            .arg(&include)
+            .arg("-")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("C compiler was available above");
+        preprocessor
+            .stdin
+            .take()
+            .expect("preprocessor stdin is piped")
+            .write_all(b"#include <node_api.h>\n#include <js_native_api.h>\n")
+            .unwrap();
+        let headers = preprocessor.wait_with_output().unwrap();
+        assert!(
+            headers.status.success(),
+            "could not preprocess Node-API headers: {}",
+            String::from_utf8_lossy(&headers.stderr)
+        );
+
+        fn tokens(source: &str) -> Vec<&str> {
+            let mut tokens = Vec::new();
+            let mut token_start = None;
+            for (index, character) in source.char_indices() {
+                if character.is_ascii_alphanumeric() || character == '_' {
+                    token_start.get_or_insert(index);
+                } else {
+                    if let Some(start) = token_start.take() {
+                        tokens.push(&source[start..index]);
+                    }
+                    if character == '(' {
+                        tokens.push("(");
+                    }
+                }
+            }
+            if let Some(start) = token_start {
+                tokens.push(&source[start..]);
+            }
+            tokens
+        }
+        let is_node_api_symbol = |name: &str| {
+            name.starts_with("napi_") || name.starts_with("node_api_")
+        };
+        let preprocessed_headers = String::from_utf8_lossy(&headers.stdout);
+        let header_tokens = tokens(&preprocessed_headers);
+        let declared_symbols = header_tokens
+            .windows(3)
+            .filter(|window| {
+                matches!(window[0], "napi_status" | "void")
+                    && is_node_api_symbol(window[1])
+                    && window[2] == "("
+            })
+            .map(|window| window[1].to_owned())
+            .collect::<HashSet<_>>();
+        let shim_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("native")
+            .join("node_api_shim.c");
+        let shim = fs::read_to_string(shim_path).unwrap();
+        let shim_tokens = tokens(&shim);
+        let exported_symbols = shim_tokens
+            .windows(4)
+            .filter(|window| {
+                window[0] == "NAPI_VM_EXPORT"
+                    && matches!(window[1], "napi_status" | "void")
+                    && is_node_api_symbol(window[2])
+                    && window[3] == "("
+            })
+            .map(|window| window[2].to_owned())
+            .chain(
+                shim_tokens
+                    .windows(5)
+                    .filter(|window| {
+                        window[0] == "NAPI_VM_EXPORT"
+                            && window[1] == "NAPI_VM_NO_RETURN"
+                            && window[2] == "void"
+                            && is_node_api_symbol(window[3])
+                            && window[4] == "("
+                    })
+                    .map(|window| window[3].to_owned()),
+            )
+            .collect::<HashSet<_>>();
+        let missing = declared_symbols
+            .difference(&exported_symbols)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        assert!(!declared_symbols.is_empty(), "no Node-API symbols found");
+        assert!(
+            declared_symbols.len() > 100,
+            "the Node-API symbol audit found only {} declarations",
+            declared_symbols.len()
+        );
+        assert!(
+            missing.is_empty(),
+            "Node-API v10 header symbols are missing from the Rust host shim: {missing:?}"
+        );
+    }
+
+    #[test]
     fn configured_node_api_ceiling_is_reported_and_enforced() {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
