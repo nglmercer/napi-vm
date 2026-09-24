@@ -4588,10 +4588,10 @@ impl HostBridge for RustNodeApiHost {
 
         // A Node-API callback can settle an ordinary guest Promise rather
         // than a Promise created by napi_create_promise. Keep top-level await
-        // pumping while an async-work completion can still enter JavaScript
-        // and settle that Promise (for example, node-addon-api AsyncWorker).
+        // pumping while async work or queued thread-safe-function calls can
+        // still enter JavaScript and settle that Promise.
         self.state.borrow().environments.iter().any(|environment| {
-            environment.async_works.borrow().values().any(|work| {
+            let has_async_work = environment.async_works.borrow().values().any(|work| {
                 matches!(
                     work.state.load(Ordering::Acquire),
                     ASYNC_WORK_QUEUED
@@ -4599,7 +4599,20 @@ impl HostBridge for RustNodeApiHost {
                         | ASYNC_WORK_FINISHED
                         | ASYNC_WORK_CANCELLED
                 )
-            })
+            });
+            let has_threadsafe_work =
+                environment
+                    .threadsafe_functions
+                    .borrow()
+                    .values()
+                    .any(|function| {
+                        function
+                            .shared
+                            .state
+                            .lock()
+                            .is_ok_and(|queue| !queue.values.is_empty() || queue.in_flight > 0)
+                    });
+            has_async_work || has_threadsafe_work
         })
     }
 }

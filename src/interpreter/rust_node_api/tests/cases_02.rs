@@ -969,6 +969,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
                     { "value": "-98765432109876543210987654321" }
                 ],
                 "typedArray": { "value": [255, 2, 1] },
+                "threadsafe": { "status": 0, "value": "from-napi-rs-tsfn" },
                 "failure": { "name": "Error", "message": "fixture failure" },
                 "asyncSum": 42
             }),

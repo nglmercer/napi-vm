@@ -43,6 +43,10 @@ module.exports = (async () => ({
     attempt(() => addon.roundTripBigint(-98765432109876543210987654321n).toString()),
   ],
   typedArray: attempt(() => Array.from(addon.reverseTypedArray(new Uint8Array([1, 2, 255])))),
+  threadsafe: await new Promise((resolve, reject) => {
+    const status = addon.emitThreadsafe(value => resolve({ status, value }));
+    if (status !== 0) reject(new Error(`thread-safe call failed: ${status}`));
+  }),
   failure,
   asyncSum: await addon.addAsync(20, 22),
 }))();

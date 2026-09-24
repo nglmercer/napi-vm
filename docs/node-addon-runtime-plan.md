@@ -475,10 +475,12 @@ not return success with a partial or fabricated result.
   structured `#[napi(object)]` conversion, vectors, optional arguments,
   callback invocation, serde JSON values, string-enum success and invalid
   input, signed multiword BigInt round trips, `Uint8Array` input/output,
-  Buffer conversion, thrown errors, and an `AsyncTask` Promise. The Rust plugin
-  host also loads an allowlisted napi-rs `.node` file through plain
-  `require("./fixture.node")`; async load, reload, and unload hooks await its
-  `AsyncTask` using the existing VM event loop.
+  Buffer conversion, thrown errors, an `AsyncTask` Promise, and a napi-rs
+  `ThreadsafeFunction` callback that settles an ordinary guest Promise. This
+  verifies queued TSFN calls keep top-level `await` pumping the existing host
+  event queue. The Rust plugin host also loads an allowlisted napi-rs `.node`
+  file through plain `require("./fixture.node")`; async load, reload, and
+  unload hooks await its `AsyncTask` using the same VM event loop.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.

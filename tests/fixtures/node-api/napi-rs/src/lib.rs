@@ -1,4 +1,5 @@
 use napi::bindgen_prelude::{AsyncTask, BigInt, Buffer, FnArgs, Function, Uint8Array};
+use napi::threadsafe_function::ThreadsafeFunctionCallMode;
 use napi::{Env, Error, Task};
 use napi_derive::napi;
 
@@ -67,6 +68,19 @@ pub fn round_trip_bigint(value: BigInt) -> BigInt {
 #[napi]
 pub fn reverse_typed_array(input: Uint8Array) -> Uint8Array {
     Uint8Array::new(input.iter().rev().copied().collect())
+}
+
+#[napi]
+pub fn emit_threadsafe(callback: Function<'_, FnArgs<(String,)>, ()>) -> napi::Result<i32> {
+    let callback = callback
+        .build_threadsafe_function::<FnArgs<(String,)>>()
+        .build()?;
+    Ok(callback.call(
+        FnArgs {
+            data: ("from-napi-rs-tsfn".to_owned(),),
+        },
+        ThreadsafeFunctionCallMode::NonBlocking,
+    ) as i32)
 }
 
 #[napi]

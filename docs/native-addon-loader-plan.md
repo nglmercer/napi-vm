@@ -92,8 +92,9 @@ notes and known behavior differences are tracked in
 - A compiled napi-rs addon now runs the same CommonJS entry under Node, Bun,
   and napi-vm. Its fixture covers Rust functions, classes, structured objects,
   optional arguments, callbacks, JSON values, string enums, multiword BigInts,
-  typed arrays, Buffers, thrown errors, and async tasks. It verifies the
-  optional module API-version getter behavior: when that getter is absent,
+  typed arrays, Buffers, thrown errors, async tasks, and thread-safe callback
+  delivery that settles a guest Promise. It verifies the optional module
+  API-version getter behavior: when that getter is absent,
   napi-vm uses Node's default Node-API module version (v8) for
   `napi_register_module_v1`.
 - A source audit found shim symbols for the functions in the local Node v26
