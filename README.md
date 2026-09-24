@@ -345,10 +345,13 @@ Imports outside that subset fail when the library is loaded. Strong `napi_ref`
 creation, lookup, count changes, and deletion are supported. For addons
 requesting Node-API v10, references can also hold primitive values; those values
 are released when the count reaches zero, and later lookup returns `NULL`.
-Zero-count references to objects, externals, functions, and symbols remain
-retained because the VM has no tracing GC, so weak-reference collection is not
-implemented. `napi_wrap`, `napi_unwrap`, and `napi_remove_wrap` work for VM
-values with stable object identity. Wrap finalizers run once on the runtime's
+Zero-count references to objects, externals, functions, and symbols are cleared
+when runtime ownership shows no other roots at Node-API callback and reference
+checkpoints. This is an ownership-count approximation, not tracing collection:
+cyclic values, shared-buffer wrappers, and values held by wrap/finalizer records
+can remain retained.
+`napi_wrap`, `napi_unwrap`, and `napi_remove_wrap` work for VM values with
+stable object identity. Wrap finalizers run once on the runtime's
 owning thread when the Rust Node-API host shuts down; removing a wrap does not
 call its finalizer.
 There is no guest-object garbage collector, so wrap finalizers do not run at

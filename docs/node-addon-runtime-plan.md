@@ -156,8 +156,10 @@ apiece. N-API references support creation, lookup, count changes, and deletion.
 For addons requesting Node-API v10, newly referenceable primitive values are
 released when their reference count reaches zero and lookups then return
 `NULL`. Zero-count references to objects, externals, functions, and symbols
-remain retained because the VM has no tracing garbage collector, so weak
-reference collection is not implemented. `napi_wrap`, `napi_unwrap`, and
+are cleared at Node-API checkpoints when runtime ownership shows no other
+roots. This is an ownership-count approximation, not tracing collection;
+cycles, shared-buffer wrappers, and values retained by wrap/finalizer records
+can remain alive. `napi_wrap`, `napi_unwrap`, and
 `napi_remove_wrap` work for values with stable VM object identity. Finalizers
 run once on the owning thread during Rust host shutdown, before addon libraries
 unload; removing a wrap skips its finalizer. Without guest-object collection,

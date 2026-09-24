@@ -1,5 +1,7 @@
 #include <node_api.h>
 
+static napi_ref weak_object_reference;
+
 static napi_status set_int32(napi_env env, napi_value target, const char* name,
                              int32_t value) {
   napi_value result;
@@ -93,11 +95,75 @@ static napi_value reference_probe(napi_env env, napi_callback_info info) {
   return report;
 }
 
+static napi_value create_weak_reference(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value value;
+  napi_value result;
+  if (napi_get_cb_info(env, info, &argc, &value, NULL, NULL) != napi_ok ||
+      argc != 1)
+    return NULL;
+  if (weak_object_reference != NULL) {
+    napi_delete_reference(env, weak_object_reference);
+    weak_object_reference = NULL;
+  }
+  if (napi_create_reference(env, value, 0, &weak_object_reference) != napi_ok ||
+      napi_get_undefined(env, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value weak_reference_is_null(napi_env env,
+                                         napi_callback_info info) {
+  napi_value value = NULL;
+  napi_value result;
+  (void)info;
+  if (weak_object_reference == NULL ||
+      napi_get_reference_value(env, weak_object_reference, &value) != napi_ok ||
+      napi_get_boolean(env, value == NULL, &result) != napi_ok)
+    return NULL;
+  return result;
+}
+
+static napi_value weak_reference_ref_status(napi_env env,
+                                            napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  napi_status status = weak_object_reference == NULL
+                           ? napi_invalid_arg
+                           : napi_reference_ref(env, weak_object_reference, NULL);
+  if (napi_create_int32(env, status, &result) != napi_ok) return NULL;
+  return result;
+}
+
+static napi_value delete_weak_reference(napi_env env,
+                                        napi_callback_info info) {
+  napi_value result;
+  (void)info;
+  if (weak_object_reference == NULL ||
+      napi_delete_reference(env, weak_object_reference) != napi_ok ||
+      napi_get_undefined(env, &result) != napi_ok)
+    return NULL;
+  weak_object_reference = NULL;
+  return result;
+}
+
 NAPI_MODULE_INIT() {
   napi_value function;
   if (napi_create_function(env, "referenceProbe", NAPI_AUTO_LENGTH,
                            reference_probe, NULL, &function) != napi_ok ||
-      napi_set_named_property(env, exports, "referenceProbe", function) != napi_ok)
+      napi_set_named_property(env, exports, "referenceProbe", function) != napi_ok ||
+      napi_create_function(env, "createWeakReference", NAPI_AUTO_LENGTH,
+                           create_weak_reference, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "createWeakReference", function) != napi_ok ||
+      napi_create_function(env, "weakReferenceIsNull", NAPI_AUTO_LENGTH,
+                           weak_reference_is_null, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "weakReferenceIsNull", function) != napi_ok ||
+      napi_create_function(env, "weakReferenceRefStatus", NAPI_AUTO_LENGTH,
+                           weak_reference_ref_status, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "weakReferenceRefStatus", function) != napi_ok ||
+      napi_create_function(env, "deleteWeakReference", NAPI_AUTO_LENGTH,
+                           delete_weak_reference, NULL, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "deleteWeakReference", function) != napi_ok)
     return NULL;
   return exports;
 }

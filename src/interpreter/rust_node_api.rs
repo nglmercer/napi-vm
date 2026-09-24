@@ -853,6 +853,12 @@ enum NapiObjectIdentity {
     Error(usize),
 }
 
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+enum NapiReferenceIdentity {
+    Object(NapiObjectIdentity),
+    Symbol(u64),
+}
+
 thread_local! {
     /// Only environments created on this thread may enter the synchronous
     /// Node-API surface. Looking up the opaque pointer before dereferencing it
@@ -2941,6 +2947,115 @@ fn napi_is_external_value(environment: &NapiEnvironment, value: &Value) -> bool 
     napi_object_identity(value)
         .ok()
         .is_some_and(|identity| environment.externals.borrow().contains_key(&identity))
+}
+
+fn napi_reference_identity(
+    value: &Value,
+    environment: &NapiEnvironment,
+) -> Option<NapiReferenceIdentity> {
+    if let Value::Symbol(symbol) = value {
+        return Some(NapiReferenceIdentity::Symbol(symbol.id));
+    }
+    napi_object_identity(value)
+        .ok()
+        .map(NapiReferenceIdentity::Object)
+        .filter(|_| napi_reference_uses_weak_semantics(environment, value))
+}
+
+fn napi_reference_value_strong_count(value: &Value) -> Option<usize> {
+    match value {
+        Value::Object { props } => Some(Rc::strong_count(props)),
+        Value::Array(array) => Some(Rc::strong_count(array)),
+        Value::Function(function) => Some(Rc::strong_count(&function.identity)),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            Some(Rc::strong_count(name))
+        }
+        Value::Class(class) => Some(Rc::strong_count(&class.statics)),
+        Value::Promise(promise) => Some(Rc::strong_count(promise)),
+        Value::Generator { inner } => Some(Rc::strong_count(inner)),
+        Value::StringIterator { inner } => Some(Rc::strong_count(inner)),
+        Value::Symbol(symbol) if symbol.id >= crate::value::FIRST_USER_SYMBOL => {
+            Some(Rc::strong_count(symbol))
+        }
+        Value::Date(date) => Some(Rc::strong_count(date)),
+        Value::Proxy(proxy) => Some(Rc::strong_count(proxy)),
+        Value::ArrayBuffer(buffer) => Some(buffer.strong_count()),
+        // Typed views keep the shared byte store, not the SharedArrayBuffer
+        // wrapper allocation, alive in the current value model. Without a
+        // tracing heap that wrapper cannot be collected safely here.
+        Value::SharedArrayBuffer(_) => None,
+        Value::TypedArray(view) | Value::DataView(view) => Some(Rc::strong_count(view)),
+        Value::RegExp(regexp) => Some(Rc::strong_count(regexp)),
+        Value::Error(error) => Some(Rc::strong_count(&error.identity)),
+        // GlobalObject is a permanent runtime root. Well-known symbols are
+        // immortal, and all remaining variants either use v10 primitive
+        // lifetime rules or are internal sentinels rather than guest objects.
+        Value::GlobalObject
+        | Value::Symbol(_)
+        | Value::Undefined
+        | Value::Null
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::HostPending { .. }
+        | Value::BigInt(_)
+        | Value::Binding(_) => None,
+        #[cfg(stackful_coroutines)]
+        Value::AsyncTask(_) => None,
+    }
+}
+
+fn napi_collect_weak_reference(
+    environment: &NapiEnvironment,
+    references: &mut HashMap<usize, NapiReference>,
+    reference_id: usize,
+) {
+    let Some(reference) = references.get(&reference_id) else {
+        return;
+    };
+    if reference.ref_count != 0 {
+        return;
+    }
+    let Some(value) = reference.value.as_ref() else {
+        return;
+    };
+    let Some(identity) = napi_reference_identity(value, environment) else {
+        return;
+    };
+    let Some(strong_count) = napi_reference_value_strong_count(value) else {
+        return;
+    };
+    let weak_references = references
+        .values()
+        .filter(|candidate| candidate.ref_count == 0)
+        .filter_map(|candidate| candidate.value.as_ref())
+        .filter(|candidate| napi_reference_identity(candidate, environment) == Some(identity))
+        .count();
+    if strong_count <= weak_references {
+        for candidate in references
+            .values_mut()
+            .filter(|candidate| candidate.ref_count == 0)
+        {
+            if candidate.value.as_ref().is_some_and(|candidate| {
+                napi_reference_identity(candidate, environment) == Some(identity)
+            }) {
+                candidate.value = None;
+            }
+        }
+    }
+}
+
+fn napi_collect_weak_references(environment: &NapiEnvironment) {
+    let reference_ids = environment
+        .references
+        .borrow()
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    let mut references = environment.references.borrow_mut();
+    for reference_id in reference_ids {
+        napi_collect_weak_reference(environment, &mut references, reference_id);
+    }
 }
 
 fn finalize_environment_wraps(environment: &Rc<NapiEnvironment>) {
@@ -5822,6 +5937,7 @@ unsafe extern "C" fn api_reference_ref(env: NapiEnv, reference: NapiRef, result:
     with_ffi_status(env, || {
         let environment = environment(env)?;
         let mut references = environment.references.borrow_mut();
+        napi_collect_weak_reference(&environment, &mut references, reference as usize);
         let reference = references
             .get_mut(&(reference as usize))
             .ok_or(NAPI_INVALID_ARG)?;
@@ -5873,12 +5989,14 @@ unsafe extern "C" fn api_get_reference_value(
             return Err(NAPI_INVALID_ARG);
         }
         let environment = environment(env)?;
-        let value = environment
-            .references
-            .borrow()
-            .get(&(reference as usize))
-            .map(|reference| reference.value.clone())
-            .ok_or(NAPI_INVALID_ARG)?;
+        let value = {
+            let mut references = environment.references.borrow_mut();
+            napi_collect_weak_reference(&environment, &mut references, reference as usize);
+            references
+                .get(&(reference as usize))
+                .map(|reference| reference.value.clone())
+                .ok_or(NAPI_INVALID_ARG)?
+        };
         let Some(value) = value else {
             unsafe { result.write(std::ptr::null_mut()) };
             return Ok(());
@@ -8704,6 +8822,7 @@ impl RustNodeApiHost {
             .borrow_mut()
             .close_scope(scope)
             .map_err(|status| napi_error("closing callback handle scope", status));
+        napi_collect_weak_references(&callback.env);
         let threadsafe_result = if let Some(shared) = threadsafe_call {
             finish_threadsafe_call(&callback.env, &shared)
         } else {
@@ -9594,6 +9713,7 @@ impl NativeAddonLoader for RustNodeApiHost {
             .borrow_mut()
             .close_scope(scope)
             .map_err(|status| napi_error("closing addon initialization scope", status));
+        napi_collect_weak_references(&environment);
         let exports = match (result, close_result) {
             (Ok(exports), Ok(())) => exports,
             (Err(error), _) | (_, Err(error)) => {
@@ -17287,6 +17407,7 @@ process.stdout.write(JSON.stringify({
         let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/node-api/reference-v10.c");
         let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        let lifetime_runner = "process.stdout.write(JSON.stringify(require('./lifetime.cjs')))";
         let mut node_reports = Vec::new();
         for api_version in [9, 10] {
             let version_root = root.join(format!("v{api_version}"));
@@ -17317,6 +17438,29 @@ process.stdout.write(JSON.stringify({
                 "module.exports = require('./fixture.node').referenceProbe();\n",
             )
             .unwrap();
+            fs::write(
+                version_root.join("lifetime.cjs"),
+                r#"
+const addon = require('./fixture.node');
+function makeWeakTargetUnreachable() {
+  const target = {};
+  addon.createWeakReference(target);
+}
+makeWeakTargetUnreachable();
+if (typeof globalThis.gc === 'function') {
+  for (let i = 0; i < 8; i++) {
+    globalThis.gc();
+    const pressure = new Array(100000).fill({});
+  }
+}
+const collected = addon.weakReferenceIsNull();
+const refStatus = addon.weakReferenceRefStatus();
+const remainsCollected = addon.weakReferenceIsNull();
+addon.deleteWeakReference();
+module.exports = {collected, refStatus, remainsCollected};
+"#,
+            )
+            .unwrap();
 
             let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
             let mut interpreter = Interpreter::with_builtins();
@@ -17334,6 +17478,13 @@ process.stdout.write(JSON.stringify({
                 panic!("Node-API v{api_version} fixture did not return JSON text");
             };
             let vm_report: serde_json::Value = serde_json::from_str(&vm_json).unwrap();
+            let vm_lifetime_value = interpreter
+                .eval_source("JSON.stringify(require('./lifetime.cjs'));")
+                .unwrap();
+            let Value::String(ref vm_lifetime_json) = vm_lifetime_value else {
+                panic!("Node-API v{api_version} lifetime fixture did not return JSON text");
+            };
+            let vm_lifetime: serde_json::Value = serde_json::from_str(vm_lifetime_json).unwrap();
 
             let node = Command::new("node")
                 .current_dir(&version_root)
@@ -17352,6 +17503,27 @@ process.stdout.write(JSON.stringify({
                 vm_report, node_report,
                 "Node-API v{api_version} primitive reference behavior differs from Node"
             );
+            let node_lifetime = Command::new("node")
+                .current_dir(&version_root)
+                .args(["--expose-gc", "-e", lifetime_runner])
+                .output()
+                .unwrap_or_else(|error| {
+                    panic!("Node with --expose-gc is required for weak refs: {error}")
+                });
+            assert!(
+                node_lifetime.status.success(),
+                "Node-API v{api_version} weak-reference Node fixture failed: {}",
+                String::from_utf8_lossy(&node_lifetime.stderr)
+            );
+            let node_lifetime: serde_json::Value =
+                serde_json::from_slice(&node_lifetime.stdout).unwrap();
+            assert_eq!(
+                vm_lifetime, node_lifetime,
+                "Node-API v{api_version} weak object references differ from Node after GC"
+            );
+            assert_eq!(vm_lifetime["collected"], true);
+            assert_eq!(vm_lifetime["refStatus"], NAPI_OK);
+            assert_eq!(vm_lifetime["remainsCollected"], true);
             if api_version == 9 {
                 assert_eq!(vm_report["createStrongStatus"], NAPI_INVALID_ARG);
                 assert_eq!(vm_report["createZeroStatus"], NAPI_INVALID_ARG);

@@ -134,12 +134,15 @@ relevant teardown paths.
   drain the VM's existing microtask queue.
 - Exercise nested synchronous callbacks and addon re-entry without mutably
   re-entering an executing interpreter.
-- Decide the heap strategy required for weak references and collection-time
-  finalizers. The current VM retains values and can run finalizers at shutdown,
-  which is not equivalent to Node garbage collection. If full N-API lifecycle
-  compatibility is required, implement tracing/collection or an equivalent
-  lifetime model before claiming weak refs and ordinary finalizers are
-  compatible.
+- Keep the current checkpoint-based `Rc` ownership approximation for
+  zero-count weak references clearly marked as partial. It can clear acyclic
+  values with no other runtime roots, but does not collect cycles, all wrapper
+  records, or shared-buffer wrappers. Do not claim full weak-reference or
+  collection-time finalizer compatibility until a tracing collector or
+  equivalent lifetime model can prove those cases.
+- Keep finalizers deterministic at host shutdown while ordinary guest-object
+  collection is unavailable, and test callback timing against Node before
+  advertising stronger lifecycle compatibility.
 - Define shutdown behavior when native threads retain thread-safe functions or
   handles, and keep addon libraries mapped until callbacks and finalizers can
   no longer enter them.

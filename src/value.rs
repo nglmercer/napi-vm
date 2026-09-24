@@ -893,6 +893,10 @@ impl Buffer {
         Rc::as_ptr(&self.0) as usize
     }
 
+    pub(crate) fn strong_count(&self) -> usize {
+        Rc::strong_count(&self.0)
+    }
+
     pub fn is_detached(&self) -> bool {
         matches!(*self.0.borrow(), BufferStorage::Detached)
     }
