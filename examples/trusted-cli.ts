@@ -6,12 +6,12 @@
  *
  *   # pin, verify and extract into the modules folder
  *   bun examples/trusted-cli.ts install \
- *     --package miniaudio_node --version 1.6.3 \
- *     --integrity sha512-… --allow miniaudio_node
+ *     --package my-native-pkg --version 1.2.3 \
+ *     --integrity sha512-… --allow my-native-pkg
  *
  *   # load a plugin directory (request ∩ policy ∩ kill-switch applies)
  *   bun examples/trusted-cli.ts run ./examples/plugins/example-plugin
- *   bun examples/trusted-cli.ts run ./my-plugin --grant audio
+ *   bun examples/trusted-cli.ts run ./my-plugin --grant greet
  *
  *   # registry inspection
  *   bun examples/trusted-cli.ts caps

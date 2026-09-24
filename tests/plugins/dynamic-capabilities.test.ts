@@ -1,38 +1,28 @@
 import { afterEach, test, expect } from "bun:test";
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 
-import type { PlaybackState } from "miniaudio_node";
-
-import { Vm } from "../../index.js";
 import {
   applyCapabilityOptions,
-  AUDIO_CAPABILITY,
-  compilePermissions,
   defaultPolicy,
-  type CompiledFsPermissions,
   defineCapability,
-  FsPermissionChecker,
   getCapability,
   hasCapability,
   listCapabilities,
   unbindCapabilityModule,
   unregisterCapability,
   validateManifest,
-  type AudioPlayerLike,
 } from "../../plugins";
 import {
   assertTrustedSpec,
-  createNodeFileSystem,
   ensureModulesDir,
   extractTarball,
   installTrustedPackage,
   nativePackageCapability,
-  nodePlatform,
   packageTarballUrl,
   verifyIntegrity,
   type TrustedModulesPolicy,
@@ -91,11 +81,11 @@ test("unregistering removes the capability", () => {
 
 test("manifest validates the capabilities shape, not the names", () => {
   const ok = validateManifest(
-    manifestWith({ capabilities: { audio: true, greet: { voice: "alto" } } }),
+    manifestWith({ capabilities: { chime: true, greet: { voice: "alto" } } }),
   );
-  expect(ok.permissions?.capabilities).toEqual({ audio: true, greet: { voice: "alto" } });
+  expect(ok.permissions?.capabilities).toEqual({ chime: true, greet: { voice: "alto" } });
 
-  for (const bad of ["audio", 1, ["audio"], null]) {
+  for (const bad of ["chime", 1, ["chime"], null]) {
     expect(() => validateManifest(manifestWith({ capabilities: bad }))).toThrow(
       /must be an object/,
     );
@@ -241,8 +231,8 @@ test("assertTrustedSpec fails closed", () => {
 });
 
 test("packageTarballUrl builds scoped URLs and refuses plain http", () => {
-  expect(packageTarballUrl("https://registry.npmjs.org/", "miniaudio_node", "1.6.3")).toBe(
-    "https://registry.npmjs.org/miniaudio_node/-/miniaudio_node-1.6.3.tgz",
+  expect(packageTarballUrl("https://registry.npmjs.org/", "my-native-pkg", "1.2.3")).toBe(
+    "https://registry.npmjs.org/my-native-pkg/-/my-native-pkg-1.2.3.tgz",
   );
   expect(packageTarballUrl("https://r.example", "@myorg/voice", "0.0.1")).toBe(
     "https://r.example/@myorg/voice/-/voice-0.0.1.tgz",
@@ -462,241 +452,23 @@ function existsMarker(dir: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// `miniaudio_node` through the registry: paths checked, ranges enforced, no
-// native dependency in tests (injected fake player).
+// Capability options: schema defaults and fail-closed unknown keys.
 // ---------------------------------------------------------------------------
 
-function makeFakePlayer() {
-  const calls: Array<[string, unknown[]]> = [];
-  const state = { volume: 1, file: null as string | null };
-  const player: AudioPlayerLike = {
-    getDevices: () => [],
-    loadFile: (filePath: string) => {
-      calls.push(["loadFile", [filePath]]);
-      state.file = filePath;
-    },
-    loadBuffer: (audioData: number[]) => {
-      calls.push(["loadBuffer", [audioData.length]]);
-    },
-    loadBase64: (base64Data: string) => {
-      calls.push(["loadBase64", [base64Data.length]]);
-    },
-    play: () => {
-      calls.push(["play", []]);
-    },
-    pause: () => {
-      calls.push(["pause", []]);
-    },
-    stop: () => {
-      calls.push(["stop", []]);
-    },
-    setVolume: (volume: number) => {
-      calls.push(["setVolume", [volume]]);
-      state.volume = volume;
-    },
-    getVolume: () => state.volume,
-    isPlaying: () => false,
-    // The runtime enum export is empty headless; the type still checks.
-    getState: () => "Stopped" as PlaybackState,
-    getDuration: () => 180,
-    getCurrentTime: () => 0,
-    getCurrentFile: () => state.file,
-    seekTo: (position: number) => {
-      calls.push(["seekTo", [position]]);
-    },
-  };
-  return { calls, player };
-}
-
-function makeAudioRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "napi-vm-audio-"));
-  mkdirSync(join(root, "audio"), { recursive: true });
-  writeFileSync(join(root, "audio", "track.mp3"), "fake-audio-bytes");
-  return root;
-}
-
-function makeAudioVm(root: string): {
-  vm: Vm;
-  calls: Array<[string, unknown[]]>;
-  teardown: () => void;
-} {
-  const { calls, player } = makeFakePlayer();
-  const manifest = validateManifest(
-    manifestWith({ fs: { read: ["./audio/**"] }, capabilities: { audio: true } }),
-  );
-  const permissions = compilePermissions(manifest);
-  const checker = new FsPermissionChecker(
-    root,
-    // Sound cast: the `fs` binding compiled these rules at load.
-    permissions.fs as CompiledFsPermissions,
-    createNodeFileSystem(),
-  );
-  const vm = new Vm();
-  const teardown = AUDIO_CAPABILITY.install!({
-    vm,
-    manifest,
-    permissions,
-    checker,
-    platform: nodePlatform(),
-    options: true,
-    grant: { createPlayer: () => player },
+test("capability options take defaults and refuse unknown keys", () => {
+  const schema = {
+    voice: { type: "string", default: "alto", enum: ["alto", "bass"] },
+    maxItems: { type: "number", default: 10, min: 1, integer: true },
+  } as const;
+  expect(applyCapabilityOptions("greet", schema, true)).toEqual({ voice: "alto", maxItems: 10 });
+  expect(applyCapabilityOptions("greet", schema, { voice: "bass" })).toEqual({
+    voice: "bass",
+    maxItems: 10,
   });
-  return { vm, calls, teardown };
-}
-
-test("the package-shaped AudioPlayer facade receives the canonical path", () => {
-  const root = makeAudioRoot();
-  try {
-    const { vm, calls } = makeAudioVm(root);
-    vm.run(`import { AudioPlayer } from "miniaudio_node"; globalThis.__audioTestPlayer = new AudioPlayer(); globalThis.__audioTestPlayer.loadFile("./audio/track.mp3");`);
-    expect(calls).toEqual([["loadFile", [join(root, "audio", "track.mp3")]]]);
-    expect(vm.run(`globalThis.__audioTestPlayer.getCurrentFile();`)).toBe(
-      join(root, "audio", "track.mp3"),
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("audio refuses paths outside the grant and bad ranges", () => {
-  const root = makeAudioRoot();
-  try {
-    const { vm, calls } = makeAudioVm(root);
-    expect(() =>
-      vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().loadFile("./other/secret.mp3");`),
-    ).toThrow(/PermissionDenied/);
-    expect(() =>
-      vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().loadFile("../outside.mp3");`),
-    ).toThrow(/PermissionDenied|escapes/);
-    expect(() => vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().setVolume(2);`)).toThrow(
-      /0\.\.1/,
-    );
-    expect(() => vm.run(`import { AudioPlayer } from "miniaudio_node"; new AudioPlayer().seekTo(-1);`)).toThrow(
-      /non-negative/,
-    );
-    expect(calls).toEqual([]);
-    vm.run(`import { AudioPlayer } from "miniaudio_node"; globalThis.__audioTestPlayer = new AudioPlayer(); globalThis.__audioTestPlayer.setVolume(0.5);`);
-    expect(vm.run(`globalThis.__audioTestPlayer.getVolume();`)).toBe("0.5");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("audio uninstall removes the module", () => {
-  const root = makeAudioRoot();
-  try {
-    const { vm, teardown } = makeAudioVm(root);
-    expect(vm.hasModule("miniaudio_node")).toBe(true);
-    teardown();
-    expect(vm.hasModule("miniaudio_node")).toBe(false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("audio options take defaults and refuse unknown keys", () => {
-  expect(applyCapabilityOptions("audio", AUDIO_CAPABILITY.schema, true)).toEqual({
-    maxAudioBytes: 8 * 1024 * 1024,
-  });
-  expect(
-    applyCapabilityOptions("audio", AUDIO_CAPABILITY.schema, { maxAudioBytes: 1024 }),
-  ).toEqual({ maxAudioBytes: 1024 });
-  expect(() =>
-    applyCapabilityOptions("audio", AUDIO_CAPABILITY.schema, { voice: "alto" }),
-  ).toThrow(/unknown option "voice"/);
-  expect(() =>
-    applyCapabilityOptions("audio", AUDIO_CAPABILITY.schema, { maxAudioBytes: 0 }),
-  ).toThrow(/>= 1/);
+  expect(() => applyCapabilityOptions("greet", schema, { pitch: "high" })).toThrow(
+    /unknown option "pitch"/,
+  );
+  expect(() => applyCapabilityOptions("greet", schema, { maxItems: 0 })).toThrow(/>= 1/);
   expect(() => applyCapabilityOptions("crypto", undefined, { x: 1 })).toThrow(/takes no options/);
   expect(applyCapabilityOptions("crypto", undefined, true)).toEqual({});
-});
-
-test("audio through the full host: request ∩ grant installs it", () => {
-  const dir = makePlugin({
-    manifest: manifestWith({
-      fs: { read: ["./audio/**"] },
-      path: true,
-      capabilities: { audio: true },
-    }),
-    entry: `import { AudioPlayer } from "miniaudio_node";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-export default {
-  onLoad() {
-    const player = new AudioPlayer();
-    if (!existsSync(join("./audio", "track.mp3"))) throw new Error("missing track");
-    return player.getDevices().length + ":" + player.isPlaying();
-  },
-};`,
-    files: { "audio/track.mp3": "fake-audio-bytes" },
-  });
-  // The real native player answers through the guest bridge (headless: no
-  // devices, nothing playing).
-  const host = makeHost({
-    policy: { ...defaultPolicy(), capabilities: { audio: true } },
-  });
-  expect(host.load(dir).loadResult).toMatch(/^\d+:false$/);
-});
-
-/** Minimal WAV writer: 8 kHz mono 16-bit silence. */
-function writeWav(path: string, seconds: number): void {
-  const sampleRate = 8000;
-  const samples = Math.floor(sampleRate * seconds);
-  const data = Buffer.alloc(44 + samples * 2);
-  data.write("RIFF", 0);
-  data.writeUInt32LE(36 + samples * 2, 4);
-  data.write("WAVE", 8);
-  data.write("fmt ", 12);
-  data.writeUInt32LE(16, 16);
-  data.writeUInt16LE(1, 20);
-  data.writeUInt16LE(1, 22);
-  data.writeUInt32LE(sampleRate, 24);
-  data.writeUInt32LE(sampleRate * 2, 28);
-  data.writeUInt16LE(2, 32);
-  data.writeUInt16LE(16, 34);
-  data.write("data", 36);
-  data.writeUInt32LE(samples * 2, 40);
-  writeFileSync(path, data);
-}
-
-test("real player decodes a wav through the guest bridge", () => {
-  const root = makeAudioRoot();
-  writeWav(join(root, "audio", "track.wav"), 1);
-  try {
-    const manifest = validateManifest(
-      manifestWith({ fs: { read: ["./audio/**"] }, capabilities: { audio: true } }),
-    );
-    const permissions = compilePermissions(manifest);
-    const checker = new FsPermissionChecker(
-      root,
-      // Sound cast: the `fs` binding compiled these rules at load.
-      permissions.fs as CompiledFsPermissions,
-      createNodeFileSystem(),
-    );
-    const vm = new Vm();
-    // No factory injected: the default `require("miniaudio_node")` runs.
-    const teardown = AUDIO_CAPABILITY.install!({
-      vm,
-      manifest,
-      permissions,
-      checker,
-      platform: nodePlatform(),
-      options: true,
-      grant: true,
-    });
-    try {
-      vm.run(`import { AudioPlayer } from "miniaudio_node"; globalThis.__audioTestPlayer = new AudioPlayer(); globalThis.__audioTestPlayer.loadFile("./audio/track.wav");`);
-      expect(
-        vm.run(`Math.abs(globalThis.__audioTestPlayer.getDuration() - 1) < 0.05;`),
-      ).toBe("true");
-      expect(
-        vm.run(`globalThis.__audioTestPlayer.getCurrentFile().endsWith("track.wav");`),
-      ).toBe("true");
-      expect(vm.run(`globalThis.__audioTestPlayer.isPlaying();`)).toBe("false");
-    } finally {
-      teardown();
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
 });

@@ -41,7 +41,6 @@ import { FsPermissionChecker, type CompiledFsPermissions } from "../fs/checker";
 import { PATH_CAPABILITY } from "../capabilities/path-capability";
 import { CRYPTO_CAPABILITY } from "../capabilities/crypto-capability";
 import { TIMERS_CAPABILITY } from "../capabilities/timers-capability";
-import { AUDIO_CAPABILITY } from "../capabilities/audio-capability";
 import {
   applyCapabilityOptions,
   defineCapability,
@@ -83,7 +82,6 @@ function ensureBuiltinCapabilities(): void {
     CRYPTO_CAPABILITY,
     TIMERS_CAPABILITY,
     FETCH_CAPABILITY,
-    AUDIO_CAPABILITY,
   ]) {
     if (!hasCapability(definition.name)) defineCapability(definition);
   }

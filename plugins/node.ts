@@ -27,8 +27,6 @@ export {
   type NodeFileSystemOptions,
 } from "./node/node-filesystem";
 
-export { createMiniaudioPlayer } from "./node/miniaudio";
-
 // ── native: npm / `.node` bridging (host-side, operator-gated) ─────
 
 export {

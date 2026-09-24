@@ -282,7 +282,6 @@ plugins/
     crypto-capability.ts    node:crypto (primitives from platform.crypto)
     timers-capability.ts    node:perf_hooks
     fetch-capability.ts     standard fetch(), installed by the fetch capability
-    audio-capability.ts     miniaudio_node (player via grant or requireNative)
   npm/                      pure guest source loader (portable)
     resolver.ts             package exports and ESM entry resolution
     module-graph.ts          dependency scanning and canonical linking
@@ -291,7 +290,6 @@ plugins/
   node/                     Node-only platform pieces
     node-platform.ts        nodePlatform (node:fs/path/crypto/module)
     node-filesystem.ts      createNodeFileSystem
-    miniaudio.ts            createMiniaudioPlayer
   native/                   npm/`.node` downloading (Node-only, operator-gated)
     trusted-modules.ts      pinned download + verify + require
   fs/                       path support (portable)
@@ -320,7 +318,6 @@ symlink escapes, policy intersection, lifecycle and reload.
 | `node:crypto` | Random bytes, UUIDs, and SHA digests | `crypto: true` | `crypto: true` |
 | `node:perf_hooks` | Monotonic `performance.now()` | `timers: true` | `timers: true` or `{ resolutionMs }` |
 | `fetch()` | HTTP to named origins | `fetch: [...]` | `fetch: { allow, deny, ... }` |
-| `miniaudio_node` | Native playback (`miniaudio_node`) | `capabilities: { audio: true }` | `capabilities: { audio: true }` |
 
 Every one of them is installed only when the manifest asks *and* the host
 policy permits. Neither side can widen the other, and the default policy
@@ -334,26 +331,20 @@ Beyond the built-ins, a plugin requests `capabilities: { "<name>": true }`
 registry — there is no manifest enum to extend:
 
 ```json
-{ "permissions": { "capabilities": { "audio": true } } }
+{ "permissions": { "capabilities": { "greet": true } } }
 ```
 
 ```ts
 const host = new PluginHost({
-  policy: { capabilities: { audio: true } },
+  policy: { capabilities: { greet: true } },
 });
 host.defineCapability(myCapability);   // trusted-operator API
-host.setCapabilityEnabled("audio", false); // runtime kill-switch
+host.setCapabilityEnabled("greet", false); // runtime kill-switch
 ```
 
 Request ∩ policy ∩ runtime switch = installed. Unknown names fail the load
 (a typo never becomes a silent grant); requested-but-ungranted names stay
-absent. `miniaudio_node` is the first registry entry — playback through
-`miniaudio_node`, with every `loadFile` path resolved through the plugin's
-own `fs.read` permission first. Its player comes from the grant
-(`policy.capabilities.audio.createPlayer`, or `createMiniaudioPlayer` from
-`napi-vm/plugins/node`); on Node the default loads `miniaudio_node`
-through the platform, while platforms without a module loader must pass an
-explicit factory.
+absent.
 
 ### Authoring a capability (subplugin shape)
 
@@ -388,7 +379,7 @@ Schema rules: `true` in the manifest means "defaults" (`{}` when no schema
 exists); unknown or mistyped options fail the load; numeric `min`/`max`,
 `integer`, string `enum` and string arrays are enforced. A definition
 without a schema takes no options at all. Policy-side extras (clock
-precision, fetch allowlists, player factories) arrive via the `grant`, never
+precision, fetch allowlists) arrive via the `grant`, never
 the manifest — guest-requested privilege would let the plugin choose its
 own limits.
 
@@ -441,11 +432,11 @@ only ever sees wrapped functions through `registerHostModule`:
 import { installTrustedPackage, nativePackageCapability } from "napi-vm/plugins/node";
 
 const loaded = await installTrustedPackage(
-  { dir: ".napi-vm/modules", allow: ["miniaudio_node"] },
-  { package: "miniaudio_node", version: "1.6.3",
+  { dir: ".napi-vm/modules", allow: ["my-native-pkg"] },
+  { package: "my-native-pkg", version: "1.2.3",
     integrity: "sha512-…" },   // pinned, verified before extraction
 );
-nativePackageCapability({ exposeAs: "audio", loaded, definition: {...} });
+nativePackageCapability({ exposeAs: "greet", loaded, definition: {...} });
 ```
 
 Fail-closed rules: exact pinned versions only (no ranges, no `latest`),

@@ -79,10 +79,9 @@ export interface HostPlatform {
   path: HostPath;
   crypto: HostCrypto;
   /**
-   * Load a host-side module by specifier (e.g. `"miniaudio_node"`). Absent on
-   * platforms without a module loader — capabilities that need one (audio's
-   * default player) fail with a message pointing at the grant-provided
-   * factory instead.
+   * Load a host-side module by specifier (e.g. `"my-native-pkg"`). Absent on
+   * platforms without a module loader — capabilities that need one fail with
+   * a message pointing at the grant-provided factory instead.
    */
   requireNative?: (specifier: string) => unknown;
 }

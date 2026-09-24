@@ -48,7 +48,7 @@ export interface TrustedModulesPolicy {
   /** Registries tried in order. Defaults to npmjs. `https:` only. */
   registries?: string[];
   /**
-   * Allowlist: exact names (`"miniaudio_node"`) or scope prefixes
+   * Allowlist: exact names (`"my-native-pkg"`) or scope prefixes
    * (`"@myorg/*"`). Anything else is refused before any network happens.
    */
   allow: string[];

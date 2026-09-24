@@ -72,7 +72,7 @@ export interface PermissionResolved {
 }
 
 export interface CapabilityDefinition {
-  /** Registry name, e.g. `"audio"`. Validated, not free-form. */
+  /** Registry name, e.g. `"greet"`. Validated, not free-form. */
   readonly name: string;
   /**
    * Validate and normalize the manifest's `permissions.<name>` value. Throws

@@ -1,7 +1,7 @@
 /**
  * Node platform: the ready-made {@link HostPlatform} for Node and Bun hosts.
  *
- * This is the ONLY place (besides `node-filesystem.ts`, `miniaudio.ts` and
+ * This is the ONLY place (besides `node-filesystem.ts` and
  * `native/trusted-modules.ts`) allowed to import `node:*`. The portable core
  * never sees these imports, so desktop/bundled hosts that never import this
  * module never pay for them — statically or at runtime.

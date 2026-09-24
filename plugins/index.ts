@@ -8,8 +8,7 @@
  * This barrel is portable: nothing in its import graph touches `node:*` or
  * any npm package at runtime (type-only imports are erased). Hosts running
  * on Node/Bun add `"napi-vm/plugins/node"` for the ready-made platform
- * (`nodePlatform()`), the `miniaudio` player factory and the trusted-package
- * installer:
+ * (`nodePlatform()`) and the trusted-package installer:
  *
  * ```ts
  * import { PluginHost } from "napi-vm/plugins";
@@ -174,15 +173,6 @@ export {
   type FetchPolicy,
   type FetchTransport,
 } from "./capabilities/fetch-capability";
-
-export {
-  AUDIO_CAPABILITY,
-  AUDIO_DEFINITION,
-  AUDIO_MODULE_NAME,
-  DEFAULT_MAX_AUDIO_BYTES,
-  type AudioPlayerLike,
-  type AudioPolicyOptions,
-} from "./capabilities/audio-capability";
 
 // ── npm: pure guest package source ─────────────────────────────────
 
