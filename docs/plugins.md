@@ -187,6 +187,46 @@ them immediately as well — an errored plugin never keeps a live `node:fs` — 
 a failed `onUnload` still unloads the plugin. The registry keeps the errored
 entry so `reload()` can rebuild it from disk.
 
+## Rust desktop embedding
+
+The TypeScript `PluginHost` is host-side orchestration; it is not a Rust API
+and a pure Rust application cannot call it without embedding a JavaScript
+host. The Rust crate can run the same guest JavaScript directly with
+`Interpreter`, so a Rust desktop app needs a Rust host layer only for the
+manifest, capability policy, plugin registry, and lifecycle management. It
+does not need Node.js to execute ordinary guest plugins.
+
+[`examples/rust_plugin_host.rs`](../examples/rust_plugin_host.rs) runs the
+existing `example-plugin` fixture through the Rust interpreter with
+`--no-default-features`. It registers standard `node:fs` and `node:path`
+facades, checks file requests against both `plugin.json` and a separate host
+policy, and removes the internal bridge globals before guest code runs. The
+example demonstrates one plugin and a deliberately small permission-pattern
+subset; it is not a reusable Rust `PluginHost` API and does not yet port the
+dynamic capability registry or fresh-VM reload manager.
+
+```bash
+cargo run --no-default-features --example rust-plugin-host -- examples/plugins/example-plugin
+```
+
+Expose filesystem and path operations through checked Rust host functions and
+the guest-facing standard module names. They do not need `.node` addons or
+N-API. Keep path computation separate from file I/O, and authorize every I/O
+operation against the plugin root and host policy.
+
+Native extensions are an optional second path. A Rust plugin can be authored
+with `napi-rs`, compiled to a Node-API `.node` library, and loaded by the
+in-process Rust backend when it uses the Node-API subset napi-vm implements.
+[`examples/rust_native_addon.rs`](../examples/rust_native_addon.rs) shows the
+Rust host setup, and the compiled napi-rs fixture is exercised by the
+Node/Bun/VM compatibility tests. This path requires the `node-api-host`
+feature, an explicit addon allowlist and trusted SHA-256. Node-API support is
+currently broad but partial; addons that need V8, NAN, Node C++ APIs, or
+libuv ABI compatibility need the Node sidecar. Native code runs with host
+process privileges, so it is trusted code rather than a sandboxed plugin. See
+the [Rust desktop native addon loader plan](native-addon-loader-plan.md) for
+the current compatibility matrix and remaining implementation work.
+
 ## Platforms: bringing your own outside world
 
 Everything the host touches goes through one injected `HostPlatform`
