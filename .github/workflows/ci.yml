@@ -185,6 +185,19 @@ jobs:
       - name: Build native module
         run: npx napi build --platform --release
 
+      - name: Verify Rust napi-rs plugin host without Node at runtime
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          examples/plugins/rust-napi-plugin/build-and-run.sh
+
+          plugin_dir="$PWD/examples/plugins/rust-napi-plugin"
+          addon="$plugin_dir/node_modules/rust-napi-plugin.node/build/Release/addon.node"
+          digest="$(sha256sum "$addon" | cut -d ' ' -f 1)"
+          env -i PATH=/nonexistent TMPDIR="$TMPDIR" \
+            "$PWD/target/debug/examples/rust-plugin-napi" \
+            "$plugin_dir" "$addon" "$digest"
+
       # These two run first and single-threaded: generators run on their own
       # stacks via stack-switching, and a fault there aborts the whole test
       # process. On one thread the harness names the test that died instead of
