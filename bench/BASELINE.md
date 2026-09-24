@@ -90,3 +90,44 @@ for this workload profile: O(1) property maps for objects (benchmark objects
 have ≤6 props; the linear scan is cache-friendly and a per-object HashMap
 would tax creation-heavy code), string-literal interning (`Value::String`
 to `Rc<str>`), and RefCell-traffic reduction.
+
+## Results after borrowed-key lookups + hoist skip (uncommitted worktree)
+
+Same machine and methodology (`npm run bench`, Node v26.8.2, Linux x64).
+Changes, all behavior-preserving: `&str`-keyed property reads/writes end to
+end (`prop_str`, `get_prop_value_str`, `assign_member_str`, static-member fast
+paths in `eval_expr`, internal `"prototype"`/`"length"`/`"name"`/`"next"` call
+sites), per-call hoist skip via a `needs_hoisting` flag computed once at
+function creation, allocation-free `array_index`, ASCII fast paths for string
+length/char access, and removal of double-clones on property reads plus
+upfront receiver clones in prototype-chain walks. Test suites:
+`cargo test --release` **298 pass / 0 fail** (incl. 3 new `array_index`/string
+unit tests), `bun test` **1497 pass / 1 environmental fail** (rdev
+`t.skip()` unsupported under Bun, pre-existing), `node --test` **17/17**.
+
+### End-to-end through NAPI (`npm run bench`)
+
+| workload        | before   | after    | delta |
+|-----------------|----------|----------|-------|
+| arithmetic_loop | 3.64 ms  | 3.66 ms  | +1% (control path untouched; drift) |
+| recursion_fib   | 10.93 ms | 10.65 ms | −3%   |
+| array_chain     | 1.73 ms  | 1.60 ms  | −8%   |
+| string_ops      | 1.57 ms  | 1.44 ms  | −8%   |
+| class_methods   | 3.53 ms  | 3.09 ms  | −12%  |
+| closures        | 4.86 ms  | 4.58 ms  | −6%   |
+| json_roundtrip  | 1.25 ms  | 1.17 ms  | −6%   |
+
+Cross-checked with an interleaved old/new probe (eval-only, setup excluded,
+2×2 runs against HEAD): array −9%, string −6%, class −8%, json −3%, fib −2%,
+closures −1%, prop-read micro −21%, method-call micro −13% (untouched
+arithmetic/parse controls read +0.4%/±1% in the well-balanced round,
+confirming the gains exceed drift). Micro win
+breakdown: static member key alloc elimination (class/method workloads),
+hoist-walk skip (call-heavy workloads), receiver/deref clone removal
+(member-heavy workloads).
+
+Deferred again as not worth it: sharing/caching the builtins realm across
+`runCode` calls (breaks fresh-realm isolation — guest `Array.prototype`
+mutation would leak), `Rc<str>` string interning, prototype/inline caches
+(invalidation surface), and frontend work (parse is 4–12 µs of millisecond
+workloads).

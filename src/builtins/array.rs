@@ -268,7 +268,7 @@ pub fn array_method(name: &str) -> Option<Value> {
 }
 
 fn array_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    let join = interp.prop(&this, &Value::String("join".into()))?;
+    let join = interp.prop_str(&this, "join")?;
     if matches!(
         join,
         Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
@@ -281,7 +281,7 @@ fn array_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Resu
         .get("Object")
         .and_then(|object| object.get_prop("prototype"))
         .ok_or_else(|| VmErr::Msg("TypeError: Object.prototype is unavailable".into()))?;
-    let method = interp.prop(&object_prototype, &Value::String("toString".into()))?;
+    let method = interp.prop_str(&object_prototype, "toString")?;
     interp.call_this(&method, this, vec![])
 }
 
@@ -700,7 +700,7 @@ fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
 /// `LengthOfArrayLike`: `ToLength(Get(O, "length"))`, clamped to the VM's
 /// array bound so a hostile `length` cannot drive an unbounded loop.
 fn array_like_length(interp: &mut Interpreter, this: &Value) -> Result<usize, VmErr> {
-    let len_val = interp.get_prop_value(this, &Value::String("length".to_string()))?;
+    let len_val = interp.get_prop_value_str(this, "length")?;
     let n = interp.tn(&len_val);
     if !n.is_finite() || n <= 0.0 {
         return Ok(0);
@@ -739,11 +739,7 @@ fn array_push(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
         interp.assign_member(&this, &Value::String(len.to_string()), x)?;
         len += 1;
     }
-    interp.assign_member(
-        &this,
-        &Value::String("length".to_string()),
-        Value::Number(len as f64),
-    )?;
+    interp.assign_member_str(&this, "length", Value::Number(len as f64))?;
     Ok(Value::Number(len as f64))
 }
 
@@ -762,22 +758,14 @@ fn array_pop(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Val
     }
     let len = array_like_length(interp, &this)?;
     if len == 0 {
-        interp.assign_member(
-            &this,
-            &Value::String("length".to_string()),
-            Value::Number(0.0),
-        )?;
+        interp.assign_member_str(&this, "length", Value::Number(0.0))?;
         return Ok(Value::Undefined);
     }
     let new_len = len - 1;
     let key = Value::String(new_len.to_string());
     let result = interp.get_prop_value(&this, &key)?;
     interp.delete_member(&this, &key)?;
-    interp.assign_member(
-        &this,
-        &Value::String("length".to_string()),
-        Value::Number(new_len as f64),
-    )?;
+    interp.assign_member_str(&this, "length", Value::Number(new_len as f64))?;
     Ok(result)
 }
 

@@ -367,7 +367,7 @@ impl Interpreter {
 
     /// Read a string-keyed property, running a getter if one is installed.
     pub(crate) fn member(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
-        self.get_prop_value(o, &Value::String(key.to_string()))
+        self.get_prop_value_str(o, key)
     }
 
     /// Test whether a property exists, using the proxy `has` trap when one is
@@ -405,6 +405,11 @@ impl Interpreter {
 
     /// Resolve a property value, invoking it if it is a getter.
     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        // String keys take the borrowed-key path below, which never allocates
+        // a key `Value`. Only symbols, numbers, and exotic keys stay here.
+        if let Value::String(key) = p {
+            return self.get_prop_value_str(o, key);
+        }
         // A proxy's `get` trap replaces the read entirely; without one the
         // read falls through to the target.
         if let Some(proxy) = o.as_proxy() {
@@ -449,10 +454,9 @@ impl Interpreter {
             let Some(name) = accessor_name.and_then(|name| name.strip_prefix(prefix)) else {
                 return Ok(false);
             };
-            match p {
-                Value::String(key) => Ok(name == key),
-                _ => Ok(name == self.property_key(p)?),
-            }
+            // String keys delegate to `get_prop_value_str`; only exotic keys
+            // reach this coercion.
+            Ok(name == self.property_key(p)?)
         };
         let is_getter = name_matches("get ")?;
         let is_setter_only = !is_getter && name_matches("set ")?;
@@ -465,41 +469,90 @@ impl Interpreter {
         Ok(v)
     }
 
+    /// Borrowed-key variant of [`get_prop_value`](Self::get_prop_value).
+    /// Static member reads (`o.key`) and internal lookups resolve through
+    /// `&str` end to end: no key `String` and no key `Value` is allocated.
+    /// Proxy targets still allocate the trap key, exactly as before.
+    pub(crate) fn get_prop_value_str(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
+        if let Some(proxy) = o.as_proxy() {
+            let target = proxy.target.clone();
+            if let Some(trap) = self.proxy_trap(&proxy, "get") {
+                let trap_key = Value::String(key.to_owned());
+                let trap_key = self.proxy_property_key(&trap_key)?;
+                let handler = proxy.handler.clone();
+                return self.call_this(&trap, handler, vec![target, trap_key, o.clone()]);
+            }
+            return self.get_prop_value_str(&target, key);
+        }
+        if matches!(o, Value::Null | Value::Undefined) {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot read properties of {} (reading '{}')",
+                if matches!(o, Value::Null) {
+                    "null"
+                } else {
+                    "undefined"
+                },
+                key
+            )));
+        }
+        let v = self.prop_str(o, key)?;
+        let accessor_name = match &v {
+            Value::Function(function) => function.name.as_deref(),
+            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+                Some(name.as_ref())
+            }
+            _ => None,
+        };
+        let is_getter = accessor_name
+            .and_then(|name| name.strip_prefix("get "))
+            .is_some_and(|name| name == key);
+        let is_setter_only = !is_getter
+            && accessor_name
+                .and_then(|name| name.strip_prefix("set "))
+                .is_some_and(|name| name == key);
+        if is_getter {
+            return self.call_this(&v, o.clone(), vec![]);
+        }
+        if is_setter_only {
+            return Ok(Value::Undefined);
+        }
+        Ok(v)
+    }
+
     /// Read a property, resolving a live module binding to the value it names.
     pub(crate) fn prop(&self, o: &Value, p: &Value) -> Result<Value, VmErr> {
-        Ok(self.prop_raw(o, p)?.deref_binding())
+        let value = self.prop_raw(o, p)?;
+        // Only a live binding needs a second clone; anything else moves.
+        if matches!(value, Value::Binding(_)) {
+            Ok(value.deref_binding())
+        } else {
+            Ok(value)
+        }
+    }
+
+    /// Borrowed-key variant of [`prop`](Self::prop).
+    pub(crate) fn prop_str(&self, o: &Value, key: &str) -> Result<Value, VmErr> {
+        let value = self.prop_str_raw(o, key)?;
+        if matches!(value, Value::Binding(_)) {
+            Ok(value.deref_binding())
+        } else {
+            Ok(value)
+        }
     }
 
     fn prop_raw(&self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        // String keys dispatch on the receiver alone in `prop_str_raw`; the
+        // match below only sees symbols, numbers, and exotic keys.
+        if let Value::String(k) = p {
+            return self.prop_str_raw(o, k);
+        }
         match (o, p) {
-            // `window.x` / `globalThis.x` / `self.x` read a real global.
-            (Value::GlobalObject, Value::String(k)) => {
-                if let Some(value) = self.persistent_global.borrow().get(k) {
-                    return Ok(value);
-                }
-                if self.global_keys().iter().any(|key| key == k) {
-                    return Ok(Value::Undefined);
-                }
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(Value::Undefined)
-            }
             (Value::GlobalObject, Value::Symbol(_)) => {
                 if let Some(prototype) = self.prototype_of(o) {
                     self.prop(&prototype, p)
                 } else {
                     Ok(Value::Undefined)
                 }
-            }
-            (Value::Object { props }, Value::String(k)) => {
-                if let Some(value) = lookup_chain_found(self, o, k)? {
-                    return Ok(value);
-                }
-                let boxed = props.meta.borrow().boxed_primitive.clone();
-                Ok(boxed
-                    .map(|primitive| boxed_primitive_property(&primitive, k))
-                    .unwrap_or(Value::Undefined))
             }
             (Value::Object { props }, Value::Number(index)) => {
                 let key = crate::format::number_string(*index);
@@ -524,71 +577,10 @@ impl Interpreter {
                     }
                 }
             }
-            (Value::Array(items), Value::String(k)) => {
-                if k == "length" {
-                    Ok(Value::Number(items.borrow().len() as f64))
-                } else if let Some(idx) = crate::value::array_index(k) {
-                    let items = items.borrow();
-                    if idx < items.len() {
-                        Ok(items[idx].clone())
-                    } else {
-                        Ok(Value::Undefined)
-                    }
-                } else if let Some(value) = items.named_prop(k) {
-                    Ok(value)
-                } else {
-                    if let Some(prototype) = self.prototype_of(o) {
-                        return self.prop(&prototype, p);
-                    }
-                    Ok(crate::builtins::array_method(k).unwrap_or(Value::Undefined))
-                }
-            }
-            (Value::String(s), Value::String(k)) => {
-                if k == "length" {
-                    Ok(Value::Number(s.chars().count() as f64))
-                } else if k == "__symbol_iterator__" {
-                    Ok(Value::NativeFunction {
-                        name: "[Symbol.iterator]".into(),
-                        callable: string_iter,
-                    })
-                } else if let Ok(idx) = k.parse::<usize>() {
-                    Ok(s.chars()
-                        .nth(idx)
-                        .map(|c| Value::String(c.to_string()))
-                        .unwrap_or(Value::Undefined))
-                } else if let Some(m) = crate::builtins::string_method(k) {
-                    Ok(m)
-                } else {
-                    Ok(Value::Undefined)
-                }
-            }
-            (Value::Number(_), Value::String(k)) => {
-                if let Some(m) = crate::builtins::number_method(k) {
-                    Ok(m)
-                } else {
-                    Ok(Value::Undefined)
-                }
-            }
-            (Value::Promise { .. }, Value::String(k)) => {
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(crate::builtins::promise_method(k).unwrap_or(Value::Undefined))
-            }
             (Value::String(s), Value::Number(i)) => {
                 let idx = *i as usize;
-                Ok(s.chars()
-                    .nth(idx)
-                    .map(|c| Value::String(c.to_string()))
-                    .unwrap_or(Value::Undefined))
+                Ok(crate::value::str_char_at(s, idx).unwrap_or(Value::Undefined))
             }
-            (Value::Class(c), Value::String(k)) => lookup_chain(
-                self,
-                &Value::Object {
-                    props: c.statics.clone(),
-                },
-                k,
-            ),
             (Value::Class(c), Value::Symbol(symbol)) => lookup_chain(
                 self,
                 &Value::Object {
@@ -596,28 +588,6 @@ impl Interpreter {
                 },
                 &crate::interpreter::symbol_slot_key(symbol),
             ),
-            (Value::Function(function), Value::String(k)) => {
-                if k == "prototype" {
-                    return Ok(function.prototype_value(o));
-                }
-                function.ensure_name_length_properties();
-                if let Some(value) = lookup_chain_found(
-                    self,
-                    &Value::Object {
-                        props: function.properties.clone(),
-                    },
-                    k,
-                )? {
-                    return Ok(value);
-                }
-                Ok(match k.as_str() {
-                    // These values are inherited from Function.prototype
-                    // when a callable's configurable own property is deleted.
-                    "name" => Value::String(String::new()),
-                    "length" => Value::Number(0.0),
-                    _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
-                })
-            }
             (Value::Function(function), Value::Symbol(symbol)) => lookup_chain(
                 self,
                 &Value::Object {
@@ -625,61 +595,6 @@ impl Interpreter {
                 },
                 &super::symbol_slot_key(symbol),
             ),
-            (Value::Generator { .. }, Value::String(k)) => {
-                if k == "next" {
-                    Ok(Value::NativeFunction {
-                        name: "next".into(),
-                        callable: super::call::generator_next,
-                    })
-                } else if k == "throw" {
-                    Ok(Value::NativeFunction {
-                        name: "throw".into(),
-                        callable: super::call::generator_throw,
-                    })
-                } else if k == "return" {
-                    Ok(Value::NativeFunction {
-                        name: "return".into(),
-                        callable: super::call::generator_return,
-                    })
-                } else if k == "__symbol_iterator__" {
-                    // Generators are their own iterators: [Symbol.iterator]()
-                    // returns `this`.
-                    Ok(Value::NativeFunction {
-                        name: "[Symbol.iterator]".into(),
-                        callable: generator_iter_self,
-                    })
-                } else {
-                    Ok(Value::Undefined)
-                }
-            }
-            (Value::StringIterator { .. }, Value::String(k)) if k == "next" => {
-                Ok(Value::NativeFunction {
-                    name: "next".into(),
-                    callable: string_iter_next,
-                })
-            }
-            (Value::NativeFunction { name, .. }, Value::String(k)) => {
-                // Well-known symbols and static methods on `Symbol`. A native
-                // function cannot carry properties, so they are resolved here.
-                if name.as_ref() == "Symbol" {
-                    if let Some(symbol) = crate::builtins::well_known(k) {
-                        return Ok(symbol);
-                    }
-                    match k.as_str() {
-                        "for" => Ok(Value::NativeFunction {
-                            name: "for".into(),
-                            callable: crate::builtins::symbol_for,
-                        }),
-                        "keyFor" => Ok(Value::NativeFunction {
-                            name: "keyFor".into(),
-                            callable: crate::builtins::symbol_key_for,
-                        }),
-                        _ => Ok(Value::Undefined),
-                    }
-                } else {
-                    Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
-                }
-            }
             (Value::HostFunction { .. }, Value::Symbol(symbol)) => {
                 let key = super::symbol_slot_key(symbol);
                 if let Some(value) = lookup_chain_found(self, o, &key)? {
@@ -710,54 +625,7 @@ impl Interpreter {
                 }
                 Ok(crate::builtins::read_element(view, *i as usize).unwrap_or(Value::Undefined))
             }
-            (Value::TypedArray(view), Value::String(k)) => {
-                if let Ok(index) = k.parse::<usize>() {
-                    return Ok(
-                        crate::builtins::read_element(view, index).unwrap_or(Value::Undefined)
-                    );
-                }
-                if let Some(value) = crate::builtins::typed_member(view, k) {
-                    return Ok(value);
-                }
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(Value::Undefined)
-            }
             (Value::TypedArray(_), Value::Symbol(_)) => {
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(Value::Undefined)
-            }
-            (Value::ArrayBuffer(bytes), Value::String(k)) => {
-                if let Some(value) = crate::builtins::array_buffer_member(bytes, k) {
-                    return Ok(value);
-                }
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(Value::Undefined)
-            }
-            (Value::SharedArrayBuffer(bytes), Value::String(k)) => {
-                if let Some(value) = crate::builtins::shared_array_buffer_member(bytes, k) {
-                    return Ok(value);
-                }
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(Value::Undefined)
-            }
-            (Value::DataView(view), Value::String(k)) => {
-                if view.buffer.is_detached() && matches!(k.as_str(), "byteLength" | "byteOffset") {
-                    return Err(VmErr::Msg(
-                        "TypeError: Cannot access a DataView backed by a detached ArrayBuffer"
-                            .to_string(),
-                    ));
-                }
-                if let Some(value) = crate::builtins::data_view_member(view, k) {
-                    return Ok(value);
-                }
                 if let Some(prototype) = self.prototype_of(o) {
                     return self.prop(&prototype, p);
                 }
@@ -771,42 +639,6 @@ impl Interpreter {
                     return self.prop(&prototype, p);
                 }
                 Ok(Value::Undefined)
-            }
-            (Value::Date(_), Value::String(k)) => {
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(crate::builtins::date_member(k).unwrap_or(Value::Undefined))
-            }
-            (Value::BigInt(_), Value::String(k)) => {
-                Ok(crate::builtins::bigint_method(k).unwrap_or(Value::Undefined))
-            }
-            (Value::RegExp(data), Value::String(k)) => {
-                if let Some(value) = crate::builtins::regexp_member(data, k) {
-                    return Ok(value);
-                }
-                if let Some(prototype) = self.prototype_of(o) {
-                    return self.prop(&prototype, p);
-                }
-                Ok(Value::Undefined)
-            }
-            (Value::Symbol(symbol), Value::String(k)) => match k.as_str() {
-                "description" => Ok(symbol
-                    .description
-                    .clone()
-                    .map(Value::String)
-                    .unwrap_or(Value::Undefined)),
-                other => Ok(crate::builtins::symbol_method(other).unwrap_or(Value::Undefined)),
-            },
-            (Value::HostFunction { .. }, Value::String(k)) => {
-                if let Some(value) = lookup_chain_found(self, o, k)? {
-                    return Ok(value);
-                }
-                Ok(match k.as_str() {
-                    "name" => Value::String(String::new()),
-                    "length" => Value::Number(0.0),
-                    _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
-                })
             }
             // Symbol-keyed property access: `arr[Symbol.iterator]`,
             // `str[Symbol.iterator]`, `gen[Symbol.iterator]`.
@@ -876,9 +708,252 @@ impl Interpreter {
                     Ok(Value::Undefined)
                 }
             }
+            _ => Ok(Value::Undefined),
+        }
+    }
+
+    /// String-keyed half of [`prop_raw`](Self::prop_raw), dispatching on the
+    /// receiver alone. This is the only home of string-key semantics now:
+    /// `prop_raw` forwards every `Value::String` key here, and borrowed-key
+    /// callers arrive via [`prop_str`](Self::prop_str) without allocating.
+    fn prop_str_raw(&self, o: &Value, k: &str) -> Result<Value, VmErr> {
+        match o {
+            // `window.x` / `globalThis.x` / `self.x` read a real global.
+            Value::GlobalObject => {
+                if let Some(value) = self.persistent_global.borrow().get(k) {
+                    return Ok(value);
+                }
+                if self.global_keys().iter().any(|key| key == k) {
+                    return Ok(Value::Undefined);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(Value::Undefined)
+            }
+            Value::Object { props } => {
+                if let Some(value) = lookup_chain_found(self, o, k)? {
+                    return Ok(value);
+                }
+                let boxed = props.meta.borrow().boxed_primitive.clone();
+                Ok(boxed
+                    .map(|primitive| boxed_primitive_property(&primitive, k))
+                    .unwrap_or(Value::Undefined))
+            }
+            Value::Array(items) => {
+                if k == "length" {
+                    Ok(Value::Number(items.borrow().len() as f64))
+                } else if let Some(idx) = crate::value::array_index(k) {
+                    let items = items.borrow();
+                    if idx < items.len() {
+                        Ok(items[idx].clone())
+                    } else {
+                        Ok(Value::Undefined)
+                    }
+                } else if let Some(value) = items.named_prop(k) {
+                    Ok(value)
+                } else {
+                    if let Some(prototype) = self.prototype_of(o) {
+                        return self.prop_str(&prototype, k);
+                    }
+                    Ok(crate::builtins::array_method(k).unwrap_or(Value::Undefined))
+                }
+            }
+            Value::String(s) => {
+                if k == "length" {
+                    Ok(Value::Number(crate::value::str_char_len(s)))
+                } else if k == "__symbol_iterator__" {
+                    Ok(Value::NativeFunction {
+                        name: "[Symbol.iterator]".into(),
+                        callable: string_iter,
+                    })
+                } else if let Ok(idx) = k.parse::<usize>() {
+                    Ok(crate::value::str_char_at(s, idx).unwrap_or(Value::Undefined))
+                } else if let Some(m) = crate::builtins::string_method(k) {
+                    Ok(m)
+                } else {
+                    Ok(Value::Undefined)
+                }
+            }
+            Value::Number(_) => Ok(crate::builtins::number_method(k).unwrap_or(Value::Undefined)),
+            Value::Promise { .. } => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(crate::builtins::promise_method(k).unwrap_or(Value::Undefined))
+            }
+            Value::Class(c) => lookup_chain(
+                self,
+                &Value::Object {
+                    props: c.statics.clone(),
+                },
+                k,
+            ),
+            Value::Function(function) => {
+                if k == "prototype" {
+                    return Ok(function.prototype_value(o));
+                }
+                function.ensure_name_length_properties();
+                if let Some(value) = lookup_chain_found(
+                    self,
+                    &Value::Object {
+                        props: function.properties.clone(),
+                    },
+                    k,
+                )? {
+                    return Ok(value);
+                }
+                Ok(match k {
+                    // These values are inherited from Function.prototype
+                    // when a callable's configurable own property is deleted.
+                    "name" => Value::String(String::new()),
+                    "length" => Value::Number(0.0),
+                    _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
+                })
+            }
+            Value::Generator { .. } => {
+                if k == "next" {
+                    Ok(Value::NativeFunction {
+                        name: "next".into(),
+                        callable: super::call::generator_next,
+                    })
+                } else if k == "throw" {
+                    Ok(Value::NativeFunction {
+                        name: "throw".into(),
+                        callable: super::call::generator_throw,
+                    })
+                } else if k == "return" {
+                    Ok(Value::NativeFunction {
+                        name: "return".into(),
+                        callable: super::call::generator_return,
+                    })
+                } else if k == "__symbol_iterator__" {
+                    // Generators are their own iterators: [Symbol.iterator]()
+                    // returns `this`.
+                    Ok(Value::NativeFunction {
+                        name: "[Symbol.iterator]".into(),
+                        callable: generator_iter_self,
+                    })
+                } else {
+                    Ok(Value::Undefined)
+                }
+            }
+            Value::StringIterator { .. } => {
+                if k == "next" {
+                    Ok(Value::NativeFunction {
+                        name: "next".into(),
+                        callable: string_iter_next,
+                    })
+                } else {
+                    Ok(Value::Undefined)
+                }
+            }
+            Value::NativeFunction { name, .. } => {
+                // Well-known symbols and static methods on `Symbol`. A native
+                // function cannot carry properties, so they are resolved here.
+                if name.as_ref() == "Symbol" {
+                    if let Some(symbol) = crate::builtins::well_known(k) {
+                        return Ok(symbol);
+                    }
+                    match k {
+                        "for" => Ok(Value::NativeFunction {
+                            name: "for".into(),
+                            callable: crate::builtins::symbol_for,
+                        }),
+                        "keyFor" => Ok(Value::NativeFunction {
+                            name: "keyFor".into(),
+                            callable: crate::builtins::symbol_key_for,
+                        }),
+                        _ => Ok(Value::Undefined),
+                    }
+                } else {
+                    Ok(crate::builtins::function_method(k).unwrap_or(Value::Undefined))
+                }
+            }
+            Value::HostFunction { .. } => {
+                if let Some(value) = lookup_chain_found(self, o, k)? {
+                    return Ok(value);
+                }
+                Ok(match k {
+                    "name" => Value::String(String::new()),
+                    "length" => Value::Number(0.0),
+                    _ => crate::builtins::function_method(k).unwrap_or(Value::Undefined),
+                })
+            }
+            Value::TypedArray(view) => {
+                if let Ok(index) = k.parse::<usize>() {
+                    return Ok(
+                        crate::builtins::read_element(view, index).unwrap_or(Value::Undefined)
+                    );
+                }
+                if let Some(value) = crate::builtins::typed_member(view, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(Value::Undefined)
+            }
+            Value::ArrayBuffer(bytes) => {
+                if let Some(value) = crate::builtins::array_buffer_member(bytes, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(Value::Undefined)
+            }
+            Value::SharedArrayBuffer(bytes) => {
+                if let Some(value) = crate::builtins::shared_array_buffer_member(bytes, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(Value::Undefined)
+            }
+            Value::DataView(view) => {
+                if view.buffer.is_detached() && matches!(k, "byteLength" | "byteOffset") {
+                    return Err(VmErr::Msg(
+                        "TypeError: Cannot access a DataView backed by a detached ArrayBuffer"
+                            .to_string(),
+                    ));
+                }
+                if let Some(value) = crate::builtins::data_view_member(view, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(Value::Undefined)
+            }
+            Value::Date(_) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(crate::builtins::date_member(k).unwrap_or(Value::Undefined))
+            }
+            Value::BigInt(_) => Ok(crate::builtins::bigint_method(k).unwrap_or(Value::Undefined)),
+            Value::RegExp(data) => {
+                if let Some(value) = crate::builtins::regexp_member(data, k) {
+                    return Ok(value);
+                }
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
+                Ok(Value::Undefined)
+            }
+            Value::Symbol(symbol) => match k {
+                "description" => Ok(symbol
+                    .description
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Undefined)),
+                other => Ok(crate::builtins::symbol_method(other).unwrap_or(Value::Undefined)),
+            },
             // Internal errors surface to guest `catch` blocks as error objects
             // with readable `name`/`message` properties.
-            (Value::Error(e), Value::String(k)) => match k.as_str() {
+            Value::Error(e) => match k {
                 "message" => Ok(Value::String(e.message.clone())),
                 "name" => Ok(Value::String(e.name.clone())),
                 "stack" => Ok(Value::String(e.stack.clone())),
@@ -886,6 +961,8 @@ impl Interpreter {
                 "toString" => Ok(crate::builtins::error_to_string()),
                 _ => Ok(Value::Undefined),
             },
+            // Booleans, null, undefined, proxies (handled by the caller), and
+            // live bindings carry no string-keyed properties.
             _ => Ok(Value::Undefined),
         }
     }
@@ -901,9 +978,12 @@ fn lookup_chain(interp: &Interpreter, o: &Value, key: &str) -> Result<Value, VmE
 /// Look up an object property without conflating a missing property with an
 /// own or inherited property whose value is `undefined`.
 fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Option<Value>, VmErr> {
-    let mut current = o.clone();
+    // Borrow the receiver until the walk actually descends: own-property hits
+    // (the common case) never clone it.
+    let mut descended: Option<Value> = None;
     for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
-        let props = match &current {
+        let node = descended.as_ref().unwrap_or(o);
+        let props = match node {
             Value::Object { props } => props,
             Value::Array(array) => {
                 if let Some(value) = array.named_prop(key) {
@@ -911,10 +991,10 @@ fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Opti
                 }
                 // Array indices are handled by the caller before this walk.
                 // Named values and length live outside `ObjectCell`.
-                let Some(proto) = interp.prototype_of(&current) else {
+                let Some(proto) = interp.prototype_of(node) else {
                     return Ok(None);
                 };
-                current = proto.as_ref().clone();
+                descended = Some(proto.as_ref().clone());
                 continue;
             }
             Value::Class(class) => &class.statics,
@@ -925,10 +1005,10 @@ fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Opti
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {
             return Ok(Some(value.clone()));
         }
-        let Some(next) = interp.prototype_of(&current) else {
+        let Some(next) = interp.prototype_of(node) else {
             return Ok(None);
         };
-        current = next.as_ref().clone();
+        descended = Some(next.as_ref().clone());
     }
     Err(crate::value::limit_err(
         "Maximum prototype chain depth exceeded",
@@ -949,14 +1029,10 @@ fn boxed_primitive_property(primitive: &BoxedPrimitive, key: &str) -> Value {
     match primitive {
         BoxedPrimitive::String(value) => {
             if key == "length" {
-                return Value::Number(value.chars().count() as f64);
+                return Value::Number(crate::value::str_char_len(value));
             }
             if let Some(index) = crate::value::array_index(key) {
-                return value
-                    .chars()
-                    .nth(index)
-                    .map(|character| Value::String(character.to_string()))
-                    .unwrap_or(Value::Undefined);
+                return crate::value::str_char_at(value, index).unwrap_or(Value::Undefined);
             }
             if key == "toString" || key == "valueOf" {
                 return Value::NativeFunction {

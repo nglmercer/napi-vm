@@ -179,8 +179,7 @@ impl Interpreter {
             ));
         }
 
-        let prototype =
-            self.get_prop_value(constructor, &Value::String("prototype".to_string()))?;
+        let prototype = self.get_prop_value_str(constructor, "prototype")?;
         if !is_js_object(&prototype) {
             return Err(VmErr::Msg(
                 "TypeError: Function has non-object prototype in instanceof check".into(),
@@ -319,7 +318,7 @@ impl Interpreter {
                             if taken.iter().any(|t| t == k) {
                                 continue;
                             }
-                            let v = self.get_prop_value(val, &Value::String(k.clone()))?;
+                            let v = self.get_prop_value_str(val, k)?;
                             remaining.push((k.clone(), v));
                         }
                         let rest = Value::checked_object(remaining)?;
@@ -336,7 +335,7 @@ impl Interpreter {
                         }
                     };
                     taken.push(key_str.clone());
-                    let found = self.get_prop_value(val, &Value::String(key_str.clone()))?;
+                    let found = self.get_prop_value_str(val, &key_str)?;
                     if let Some(p) = pat {
                         self.destructure(p, &found)?;
                     } else {
@@ -684,6 +683,96 @@ impl Interpreter {
             current = next.as_ref().clone();
         }
         Ok(false)
+    }
+
+    /// Borrowed-key variant of [`assign_member`](Self::assign_member).
+    /// Static member writes (`o.key = v`) resolve through `&str` end to end:
+    /// no key `String` and no key `Value` is allocated. Typed arrays, exotic
+    /// receivers, and primitives keep the general path, exactly as before.
+    pub(crate) fn assign_member_str(
+        &mut self,
+        obj: &Value,
+        key: &str,
+        val: Value,
+    ) -> Result<(), VmErr> {
+        if let Some(proxy) = obj.as_proxy() {
+            let target = proxy.target.clone();
+            if let Some(trap) = self.proxy_trap(&proxy, "set") {
+                let prop = Value::String(key.to_owned());
+                let trap_key = self.proxy_property_key(&prop)?;
+                let handler = proxy.handler.clone();
+                self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
+                return Ok(());
+            }
+            return self.assign_member_str(&target, key, val);
+        }
+        match obj {
+            Value::Function(function) => {
+                function.ensure_name_length_properties();
+                function.prototype_value(obj);
+                self.assign_cell_property(obj, &function.properties, key, val)
+            }
+            Value::HostFunction { properties, .. } => {
+                self.assign_cell_property(obj, properties, key, val)
+            }
+            Value::Object { props } => self.assign_cell_property(obj, props, key, val),
+            Value::Class(class) => self.assign_cell_property(obj, &class.statics, key, val),
+            // `re.lastIndex = 0` resets a global pattern's scan position.
+            Value::RegExp(data) if key == "lastIndex" => {
+                let index = self.tn(&val);
+                data.last_index.set(if index.is_finite() && index > 0.0 {
+                    index as usize
+                } else {
+                    0
+                });
+                Ok(())
+            }
+            // `window.x = v` / `globalThis.x = v` define a real global.
+            Value::GlobalObject => self.set_global_checked(key, val),
+            Value::Array(cell) => {
+                // A non-index key on an array is a named property, not an
+                // element: `strings.raw`, `arr.total = 3`.
+                if key != "length" && crate::value::array_index(key).is_none() {
+                    let exists = cell.named_prop(key).is_some();
+                    if cell.meta.borrow().has_accessors {
+                        let current = cell.named_prop(key);
+                        if let Some(setter) = array_property_setter(cell, key, current.as_ref()) {
+                            self.call_this(&setter, obj.clone(), vec![val])?;
+                            return Ok(());
+                        }
+                    }
+                    if !exists
+                        && let Some(prototype) = self.prototype_of(obj)
+                        && self.assign_inherited_property(obj, prototype.as_ref(), key, &val)?
+                    {
+                        return Ok(());
+                    }
+                    if (exists && !cell.meta.borrow().attrs_of(key).writable)
+                        || (!exists && cell.meta.borrow().non_extensible)
+                    {
+                        return Ok(());
+                    }
+                    cell.set_named(key.to_owned(), val);
+                    Ok(())
+                } else if key == "length" {
+                    let length = self.tn(&val);
+                    if cell.meta.borrow().attrs_of("length").writable
+                        && length.is_finite()
+                        && length >= 0.0
+                        && length.fract() == 0.0
+                    {
+                        let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
+                        cell.set_length(length);
+                    }
+                    Ok(())
+                } else {
+                    let index =
+                        crate::value::array_index(key).expect("canonical array index guard");
+                    self.assign_member(obj, &Value::Number(index as f64), val)
+                }
+            }
+            _ => self.assign_member(obj, &Value::String(key.to_owned()), val),
+        }
     }
 
     pub(crate) fn assign_member(
@@ -1082,7 +1171,7 @@ impl Interpreter {
                 // host-provided stack.
                 let r =
                     stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
-                        self.run_program_body(&fd.body)
+                        self.run_function_body(&fd.body, fd.needs_hoisting)
                     });
                 // Convert a bare message into a located runtime error *before*
                 // popping the frame, so the snapshot carries the full call
@@ -1377,8 +1466,7 @@ impl Interpreter {
                     .borrow()
                     .host_function_id
                     .expect("host function identity is initialized");
-                let prototype =
-                    self.get_prop_value(&new_target, &Value::String("prototype".to_string()))?;
+                let prototype = self.get_prop_value_str(&new_target, "prototype")?;
                 let instance = if is_js_object(&prototype) {
                     Value::object_with_proto(vec![], Some(Rc::new(prototype)))
                 } else {
@@ -1435,8 +1523,7 @@ impl Interpreter {
                 if !fd.is_constructor {
                     return vm_err("TypeError: function is not a constructor");
                 }
-                let prototype =
-                    self.get_prop_value(&new_target, &Value::String("prototype".to_string()))?;
+                let prototype = self.get_prop_value_str(&new_target, "prototype")?;
                 let inst = if is_js_object(&prototype) {
                     Value::object_with_proto(vec![], Some(Rc::new(prototype)))
                 } else {
@@ -1504,7 +1591,7 @@ impl Interpreter {
                 };
 
                 let s = std::mem::replace(&mut self.global, fe);
-                let r = self.run_program_body(&fd.body);
+                let r = self.run_function_body(&fd.body, fd.needs_hoisting);
                 self.global = s;
                 match r {
                     Err(VmErr::Ret(v)) if is_js_object(&v) => Ok(v),
