@@ -7,12 +7,41 @@
 
 use std::rc::Rc;
 
+use crate::host::HostBridge;
+use crate::interpreter::commonjs::NativeAddonLoader;
+
 use super::node_addon::{NodeAddonOptions, NodeAddonSidecar};
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
 use super::rust_node_api::{RustNodeApiHost, RustNodeApiOptions};
+
+/// Shared runtime interface implemented by each native addon backend.
+///
+/// The loader owns addon initialization while the host bridge owns calls and
+/// external events. Combining both here lets interpreter setup install the
+/// matching provider and bridge as one backend instance.
+pub trait NativeAddonBackendHost: NativeAddonLoader + HostBridge {
+    /// Stable identifier for diagnostics and backend reporting.
+    fn backend_name(&self) -> &'static str;
+}
+
+impl NativeAddonBackendHost for NodeAddonSidecar {
+    fn backend_name(&self) -> &'static str {
+        "node-sidecar"
+    }
+}
+
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+impl NativeAddonBackendHost for RustNodeApiHost {
+    fn backend_name(&self) -> &'static str {
+        "rust-node-api"
+    }
+}
 
 /// Configuration for one native addon backend.
 ///
@@ -66,16 +95,21 @@ pub enum NativeAddonRuntime {
 }
 
 impl NativeAddonRuntime {
-    /// Name of the backend selected for this interpreter.
-    pub fn backend_name(&self) -> &'static str {
+    /// Shared loader and event bridge implemented by the selected backend.
+    pub fn host(&self) -> &dyn NativeAddonBackendHost {
         match self {
-            Self::NodeSidecar(_) => "node-sidecar",
+            Self::NodeSidecar(sidecar) => sidecar.as_ref(),
             #[cfg(all(
                 feature = "node-api-host",
                 any(target_os = "linux", target_os = "macos", target_os = "windows")
             ))]
-            Self::RustNodeApi(_) => "rust-node-api",
+            Self::RustNodeApi(host) => host.as_ref(),
         }
+    }
+
+    /// Name of the backend selected for this interpreter.
+    pub fn backend_name(&self) -> &'static str {
+        self.host().backend_name()
     }
 
     /// Return the Node sidecar when that backend is selected.

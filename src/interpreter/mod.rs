@@ -25,7 +25,7 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 #[cfg(not(target_arch = "wasm32"))]
-pub use native_addon::{NativeAddonOptions, NativeAddonRuntime};
+pub use native_addon::{NativeAddonBackendHost, NativeAddonOptions, NativeAddonRuntime};
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 pub(crate) use resolve::array_iter;
@@ -83,6 +83,8 @@ pub use ops::{
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use crate::error::{StackFrame, VmErr};
@@ -283,6 +285,26 @@ impl Interpreter {
         self.host = Some(bridge);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn install_native_addon_backend<T>(
+        &mut self,
+        loader: FileCommonJsLoader,
+        backend: Rc<T>,
+        entry: Option<PathBuf>,
+    ) -> Result<Rc<T>, VmErr>
+    where
+        T: NativeAddonBackendHost + 'static,
+    {
+        let addon_loader: Rc<dyn NativeAddonLoader> = backend.clone();
+        let host_bridge: Rc<dyn HostBridge> = backend.clone();
+        self.set_commonjs_loader(Rc::new(loader.with_native_addon_loader(addon_loader)))?;
+        self.set_host_bridge(host_bridge);
+        if let Some(entry) = entry {
+            self.set_commonjs_entry(entry.to_string_lossy().into_owned());
+        }
+        Ok(backend)
+    }
+
     /// Install a host-controlled CommonJS loader. The interpreter itself does
     /// not read files or load native code unless the host provides a loader.
     pub fn set_commonjs_loader(
@@ -364,13 +386,7 @@ impl Interpreter {
                 required_version
             )));
         }
-        let loader = loader.with_native_addon_loader(bridge.clone());
-        self.set_commonjs_loader(Rc::new(loader))?;
-        self.set_host_bridge(bridge.clone());
-        if let Some(entry) = entry {
-            self.set_commonjs_entry(entry.to_string_lossy().into_owned());
-        }
-        Ok(bridge)
+        self.install_native_addon_backend(loader, bridge, entry)
     }
 
     /// Configure one native addon backend while keeping guest `require()` and

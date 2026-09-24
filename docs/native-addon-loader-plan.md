@@ -40,7 +40,9 @@ returning plausible but incorrect results.
 - `Interpreter::enable_native_addons` is the first shared configuration entry
   point. It accepts the existing `NodeAddonOptions` or `RustNodeApiOptions` and
   returns a `NativeAddonRuntime` identifying the selected backend. Backend
-  configuration and lifecycle interfaces are still separate internally.
+  installation now uses one helper, and `NativeAddonBackendHost` combines the
+  existing addon loader and host event bridge. Backend options still differ;
+  shutdown remains owned by each backend's `Drop` implementation.
 
 ## Public host configuration
 
@@ -58,7 +60,7 @@ runtime.enable_native_addons(
 
 `NodeAddonOptions` selects `NodeSidecar`; `RustNodeApiOptions` selects
 `RustNodeApi`. This preserves all existing backend-specific configuration
-while the shared builder and host lifecycle interface are implemented.
+while shared preflight and explicit lifecycle methods are implemented.
 
 The backend choices should be:
 
@@ -94,9 +96,11 @@ surface each backend accepts before running guest code.
 
 ### 2. Make backend selection and module loading one host feature
 
-- Replace the initial `enable_native_addons` dispatcher with shared host
-  options and a backend trait around load, initialize, call, event pump, and
-  shutdown. Adapt `NodeAddonSidecar` and the Rust Node-API host behind it.
+- Extend `NativeAddonBackendHost` with shared binary preflight and explicit
+  shutdown behavior. Its current supertraits cover addon initialization,
+  host calls, and event polling; shutdown still relies on backend `Drop`.
+- Converge `NodeAddonOptions` and `RustNodeApiOptions` into common host options
+  while preserving backend-specific settings.
 - Route `.node` requests through that host feature while leaving JavaScript and
   JSON modules in the existing guest loader and cache.
 - Preserve provisional CommonJS exports, failed-initialization rollback,

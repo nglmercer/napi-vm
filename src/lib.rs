@@ -35,8 +35,8 @@ pub use interpreter::{
 pub use interpreter::{Environment, Interpreter, Module};
 #[cfg(not(target_arch = "wasm32"))]
 pub use interpreter::{
-    NativeAddonOptions, NativeAddonRuntime, NodeAddonOptions, NodeAddonRuntimeInfo,
-    NodeAddonSidecar,
+    NativeAddonBackendHost, NativeAddonOptions, NativeAddonRuntime, NodeAddonOptions,
+    NodeAddonRuntimeInfo, NodeAddonSidecar,
 };
 #[cfg(all(
     feature = "node-api-host",

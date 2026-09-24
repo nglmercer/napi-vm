@@ -9991,13 +9991,7 @@ impl Interpreter {
             loader.roots().to_vec(),
             loader.allowed_native_addon_digests().clone(),
         )?);
-        let loader = loader.with_native_addon_loader(host.clone());
-        self.set_commonjs_loader(Rc::new(loader))?;
-        self.set_host_bridge(host.clone());
-        if let Some(entry) = entry {
-            self.set_commonjs_entry(entry.to_string_lossy().into_owned());
-        }
-        Ok(host)
+        self.install_native_addon_backend(loader, host, entry)
     }
 }
 
