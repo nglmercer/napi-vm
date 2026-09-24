@@ -67,6 +67,9 @@ const NAPI_CLOSING: i32 = 16;
 const NAPI_BIGINT_EXPECTED: i32 = 17;
 const NAPI_ARRAYBUFFER_EXPECTED: i32 = 19;
 const NAPI_DETACHABLE_ARRAYBUFFER_EXPECTED: i32 = 20;
+const NAPI_SYMBOL_TYPE: i32 = 5;
+const NAPI_OBJECT_TYPE: i32 = 6;
+const NAPI_FUNCTION_TYPE: i32 = 7;
 const NAPI_PROPERTY_STATIC: i32 = 1 << 10;
 const MAX_LOCAL_HANDLES: usize = 1_048_576;
 const MAX_NAPI_BUFFER_BYTES: usize = crate::value::MAX_STRING_LEN;
@@ -511,6 +514,7 @@ enum NativeCallback {
 struct NapiEnvironment {
     module_path: String,
     module_file_url: CString,
+    api_version: u32,
     node_version: NapiNodeVersion,
     owner: Weak<RefCell<HostState>>,
     handles: RefCell<NapiHandleArena>,
@@ -670,7 +674,7 @@ impl Drop for GuestCallbackDispatcherScope {
 }
 
 struct NapiReference {
-    value: Value,
+    value: Option<Value>,
     ref_count: u32,
 }
 
@@ -5765,6 +5769,14 @@ unsafe extern "C" fn api_is_error(env: NapiEnv, value: NapiValue, result: *mut b
     })
 }
 
+fn napi_reference_uses_weak_semantics(environment: &NapiEnvironment, value: &Value) -> bool {
+    napi_is_external_value(environment, value)
+        || matches!(
+            napi_value_type(value),
+            NAPI_SYMBOL_TYPE | NAPI_OBJECT_TYPE | NAPI_FUNCTION_TYPE
+        )
+}
+
 unsafe extern "C" fn api_create_reference(
     env: NapiEnv,
     value: NapiValue,
@@ -5777,11 +5789,15 @@ unsafe extern "C" fn api_create_reference(
         }
         let environment = environment(env)?;
         let value = environment.handles.borrow().get(value)?;
+        let uses_weak_semantics = napi_reference_uses_weak_semantics(&environment, &value);
+        if environment.api_version < 10 && !uses_weak_semantics {
+            return Err(NAPI_INVALID_ARG);
+        }
         let reference = new_opaque_handle()?;
         environment.references.borrow_mut().insert(
             reference as usize,
             NapiReference {
-                value,
+                value: (initial_ref_count > 0 || uses_weak_semantics).then_some(value),
                 ref_count: initial_ref_count,
             },
         );
@@ -5832,6 +5848,14 @@ unsafe extern "C" fn api_reference_unref(
             .get_mut(&(reference as usize))
             .ok_or(NAPI_INVALID_ARG)?;
         reference.ref_count = reference.ref_count.saturating_sub(1);
+        if reference.ref_count == 0
+            && reference
+                .value
+                .as_ref()
+                .is_some_and(|value| !napi_reference_uses_weak_semantics(&environment, value))
+        {
+            reference.value = None;
+        }
         if !result.is_null() {
             unsafe { result.write(reference.ref_count) };
         }
@@ -5855,6 +5879,10 @@ unsafe extern "C" fn api_get_reference_value(
             .get(&(reference as usize))
             .map(|reference| reference.value.clone())
             .ok_or(NAPI_INVALID_ARG)?;
+        let Some(value) = value else {
+            unsafe { result.write(std::ptr::null_mut()) };
+            return Ok(());
+        };
         let handle = environment.handles.borrow_mut().create(value)?;
         unsafe { result.write(handle) };
         Ok(())
@@ -5890,7 +5918,7 @@ unsafe extern "C" fn api_wrap(
             environment.references.borrow_mut().insert(
                 reference as usize,
                 NapiReference {
-                    value: value.clone(),
+                    value: Some(value.clone()),
                     ref_count: 0,
                 },
             );
@@ -5939,7 +5967,7 @@ unsafe extern "C" fn api_add_finalizer(
             environment.references.borrow_mut().insert(
                 reference as usize,
                 NapiReference {
-                    value: value.clone(),
+                    value: Some(value.clone()),
                     ref_count: 0,
                 },
             );
@@ -9490,6 +9518,7 @@ impl NativeAddonLoader for RustNodeApiHost {
         let environment = Rc::new(NapiEnvironment {
             module_path: filename.to_string(),
             module_file_url,
+            api_version: version as u32,
             node_version: NapiNodeVersion {
                 major: reported_node_version.major,
                 minor: reported_node_version.minor,
@@ -17225,6 +17254,171 @@ process.stdout.write(JSON.stringify({
         });
 
         drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn napi_reference_primitive_lifetime_matches_requested_api_version() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-reference-version-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping Node-API reference fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/node-api/reference-v10.c");
+        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        let mut node_reports = Vec::new();
+        for api_version in [9, 10] {
+            let version_root = root.join(format!("v{api_version}"));
+            fs::create_dir_all(&version_root).unwrap();
+            let addon = version_root.join("fixture.node");
+            let built = Command::new("cc")
+                .args([
+                    "-std=c11",
+                    "-O2",
+                    "-fPIC",
+                    "-shared",
+                    &format!("-DNAPI_VERSION={api_version}"),
+                    "-I",
+                ])
+                .arg(&include)
+                .arg(&source)
+                .arg("-o")
+                .arg(&addon)
+                .output()
+                .unwrap();
+            assert!(
+                built.status.success(),
+                "Node-API v{api_version} reference fixture compilation failed: {}",
+                String::from_utf8_lossy(&built.stderr)
+            );
+            fs::write(
+                version_root.join("main.cjs"),
+                "module.exports = require('./fixture.node').referenceProbe();\n",
+            )
+            .unwrap();
+
+            let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
+            let mut interpreter = Interpreter::with_builtins();
+            interpreter
+                .enable_rust_node_api_addons(
+                    RustNodeApiOptions::new([version_root.clone()])
+                        .allow_native_addon_with_sha256(&addon, digest)
+                        .entry(version_root.join("main.cjs")),
+                )
+                .unwrap();
+            let vm_value = interpreter
+                .eval_source("JSON.stringify(require('./main.cjs'));")
+                .unwrap();
+            let Value::String(ref vm_json) = vm_value else {
+                panic!("Node-API v{api_version} fixture did not return JSON text");
+            };
+            let vm_report: serde_json::Value = serde_json::from_str(&vm_json).unwrap();
+
+            let node = Command::new("node")
+                .current_dir(&version_root)
+                .args(["-e", runner])
+                .output()
+                .unwrap_or_else(|error| {
+                    panic!("Node is required for N-API differential tests: {error}")
+                });
+            assert!(
+                node.status.success(),
+                "Node-API v{api_version} Node reference failed: {}",
+                String::from_utf8_lossy(&node.stderr)
+            );
+            let node_report: serde_json::Value = serde_json::from_slice(&node.stdout).unwrap();
+            assert_eq!(
+                vm_report, node_report,
+                "Node-API v{api_version} primitive reference behavior differs from Node"
+            );
+            if api_version == 9 {
+                assert_eq!(vm_report["createStrongStatus"], NAPI_INVALID_ARG);
+                assert_eq!(vm_report["createZeroStatus"], NAPI_INVALID_ARG);
+            } else {
+                assert_eq!(vm_report["createStrongStatus"], NAPI_OK);
+                assert_eq!(vm_report["initialValuePresent"], true);
+                assert_eq!(vm_report["unrefStatus"], NAPI_OK);
+                assert_eq!(vm_report["countAfterUnref"], 0);
+                assert_eq!(vm_report["releasedValueStatus"], NAPI_OK);
+                assert_eq!(vm_report["releasedValueIsNull"], true);
+                assert_eq!(vm_report["refAfterReleaseStatus"], NAPI_OK);
+                assert_eq!(vm_report["valueAfterReleaseRefStatus"], NAPI_OK);
+                assert_eq!(vm_report["valueAfterReleaseRefIsNull"], true);
+                assert_eq!(vm_report["createZeroStatus"], NAPI_OK);
+                assert_eq!(vm_report["zeroValueStatus"], NAPI_OK);
+                assert_eq!(vm_report["zeroValueIsNull"], true);
+            }
+            node_reports.push((api_version, node_report));
+            drop(interpreter);
+        }
+
+        if Command::new("bun")
+            .arg("--version")
+            .output()
+            .is_ok_and(|out| out.status.success())
+        {
+            for (api_version, node_report) in &node_reports {
+                let version_root = root.join(format!("v{api_version}"));
+                let bun = Command::new("bun")
+                    .current_dir(&version_root)
+                    .args(["-e", runner])
+                    .output()
+                    .unwrap();
+                assert!(
+                    bun.status.success(),
+                    "Node-API v{api_version} Bun reference failed: {}",
+                    String::from_utf8_lossy(&bun.stderr)
+                );
+                let bun_report: serde_json::Value = serde_json::from_slice(&bun.stdout).unwrap();
+                if bun_report != *node_report {
+                    assert_eq!(*api_version, 10);
+                    assert_eq!(
+                        bun_report,
+                        serde_json::json!({
+                            "createStrongStatus": NAPI_INVALID_ARG,
+                            "initialValueStatus": NAPI_GENERIC_FAILURE,
+                            "unrefStatus": NAPI_GENERIC_FAILURE,
+                            "countAfterUnref": 0,
+                            "releasedValueStatus": NAPI_GENERIC_FAILURE,
+                            "refAfterReleaseStatus": NAPI_GENERIC_FAILURE,
+                            "valueAfterReleaseRefStatus": NAPI_GENERIC_FAILURE,
+                            "createZeroStatus": NAPI_INVALID_ARG,
+                            "zeroValueStatus": NAPI_GENERIC_FAILURE,
+                            "initialValuePresent": false,
+                            "releasedValueIsNull": false,
+                            "valueAfterReleaseRefIsNull": false,
+                            "zeroValueIsNull": false,
+                        }),
+                        "unexpected Bun / Node difference in primitive references"
+                    );
+                    eprintln!(
+                        "Bun currently rejects v10 primitive napi_ref creation; Node is the v10 conformance reference"
+                    );
+                }
+            }
+        }
+
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -152,9 +152,12 @@ reports the most recent Node-API status and a VM-neutral message. Its returned
 data remains valid only until the next Node-API call. A null callback result
 with no pending exception maps to guest `undefined`. Handle entries are reclaimed
 when local scopes close; opaque handles do not retain one heap allocation
-apiece. Strong N-API references support creation, lookup, count changes, and
-deletion. The VM has no tracing garbage collector, so a zero-count reference
-does not clear until it is deleted. `napi_wrap`, `napi_unwrap`, and
+apiece. N-API references support creation, lookup, count changes, and deletion.
+For addons requesting Node-API v10, newly referenceable primitive values are
+released when their reference count reaches zero and lookups then return
+`NULL`. Zero-count references to objects, externals, functions, and symbols
+remain retained because the VM has no tracing garbage collector, so weak
+reference collection is not implemented. `napi_wrap`, `napi_unwrap`, and
 `napi_remove_wrap` work for values with stable VM object identity. Finalizers
 run once on the owning thread during Rust host shutdown, before addon libraries
 unload; removing a wrap skips its finalizer. Without guest-object collection,

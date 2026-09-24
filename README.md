@@ -341,19 +341,26 @@ finalization.
 `napi_get_last_error_info` exposes the most recent API status and a VM-neutral
 message. Its returned data is valid only until the next Node-API call. Returning
 a null callback value without a pending exception produces guest `undefined`.
-Imports outside that subset fail when the library is loaded. Strong `napi_ref` creation,
-lookup, count changes, and deletion are supported; because the VM has no tracing
-GC, zero-count references stay live until explicitly deleted. `napi_wrap`,
-`napi_unwrap`, and `napi_remove_wrap` work for VM values with stable object
-identity. Wrap finalizers run once on the runtime's owning thread when the
-Rust Node-API host shuts down; removing a wrap does not call its finalizer.
+Imports outside that subset fail when the library is loaded. Strong `napi_ref`
+creation, lookup, count changes, and deletion are supported. For addons
+requesting Node-API v10, references can also hold primitive values; those values
+are released when the count reaches zero, and later lookup returns `NULL`.
+Zero-count references to objects, externals, functions, and symbols remain
+retained because the VM has no tracing GC, so weak-reference collection is not
+implemented. `napi_wrap`, `napi_unwrap`, and `napi_remove_wrap` work for VM
+values with stable object identity. Wrap finalizers run once on the runtime's
+owning thread when the Rust Node-API host shuts down; removing a wrap does not
+call its finalizer.
 There is no guest-object garbage collector, so wrap finalizers do not run at
 ordinary object collection time. `napi_create_buffer`,
 `napi_create_buffer_copy`, `napi_get_buffer_info`, and `napi_is_buffer` are
-supported; these bytes appear to guest code as `Uint8Array` views. External
-buffers are not implemented. ArrayBuffer, typed-array, and DataView creation,
-type checks, and info APIs share backing storage with guest views and preserve
-byte offsets. `napi_create_promise`, deferred resolution/rejection, and
+supported; these bytes appear to guest code as `Uint8Array` views.
+`napi_create_external_buffer` and `napi_create_external_arraybuffer` expose
+addon-owned memory without copying. The runtime retains their backing values
+and runs their finalizers once on the owner thread during shutdown; collection
+time finalization is unavailable. ArrayBuffer, typed-array, and DataView
+creation, type checks, and info APIs share backing storage with guest views and
+preserve byte offsets. `napi_create_promise`, deferred resolution/rejection, and
 `napi_is_promise` use the VM's Promise and microtask implementation. During
 module initialization, deferreds can be settled directly with primitive
 resolutions or any rejection. Object and promise resolutions require an active
