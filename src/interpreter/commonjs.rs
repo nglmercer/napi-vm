@@ -59,6 +59,18 @@ pub trait CommonJsModuleLoader {
             module.filename
         )))
     }
+
+    /// Load a native addon with the provisional CommonJS `exports` object that
+    /// was published before initialization. Providers that cannot expose this
+    /// object to their initializer keep their existing behavior through the
+    /// default implementation.
+    fn load_native_addon_with_exports(
+        &self,
+        module: &ResolvedCommonJsModule,
+        _exports: Value,
+    ) -> Result<Value, VmErr> {
+        self.load_native_addon(module)
+    }
 }
 
 /// Allowlisted native addon provider hook.
@@ -69,6 +81,14 @@ pub trait CommonJsModuleLoader {
 pub trait NativeAddonLoader {
     /// Initialize the addon at `filename` and return its `module.exports`.
     fn load(&self, filename: &Path) -> Result<Value, VmErr>;
+
+    /// Initialize the addon with the provisional `exports` object that
+    /// CommonJS placed in its cache before initialization. Existing providers
+    /// can continue implementing only `load`; Node-API hosts should override
+    /// this method to preserve Node's initialization and cycle semantics.
+    fn load_with_exports(&self, filename: &Path, _exports: Value) -> Result<Value, VmErr> {
+        self.load(filename)
+    }
 }
 
 /// Filesystem resolver for JavaScript, JSON, and `.node` CommonJS modules.
@@ -844,6 +864,14 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
     }
 
     fn load_native_addon(&self, module: &ResolvedCommonJsModule) -> Result<Value, VmErr> {
+        self.load_native_addon_with_exports(module, Value::object(Vec::new()))
+    }
+
+    fn load_native_addon_with_exports(
+        &self,
+        module: &ResolvedCommonJsModule,
+        exports: Value,
+    ) -> Result<Value, VmErr> {
         let path = fs::canonicalize(&module.filename).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot verify native addon {}: {error}",
@@ -874,7 +902,7 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
                 module.filename
             ))
         })?;
-        loader.load(&path)
+        loader.load_with_exports(&path, exports)
     }
 }
 
@@ -1319,15 +1347,31 @@ pub(super) fn require_module(
 
     match module.format {
         CommonJsModuleFormat::NativeAddon => {
-            let exports = loader.load_native_addon(&module)?;
+            // Node inserts the CommonJS module in its cache before running a
+            // native initializer. Preserve that partial-export visibility for
+            // addons that re-enter module loading during initialization.
+            let initial_exports = Value::object(Vec::new());
             interp.commonjs_cache.borrow_mut().insert(
-                module.id,
+                module.id.clone(),
                 CommonJsCacheEntry {
-                    exports: exports.clone(),
+                    exports: initial_exports.clone(),
                     module: None,
                 },
             );
-            Ok(exports)
+            match loader.load_native_addon_with_exports(&module, initial_exports) {
+                Ok(exports) => {
+                    if let Some(entry) = interp.commonjs_cache.borrow_mut().get_mut(&module.id) {
+                        entry.exports = exports.clone();
+                    }
+                    Ok(exports)
+                }
+                Err(error) => {
+                    // CommonJS removes a module whose initializer throws so a
+                    // later require can retry it.
+                    interp.commonjs_cache.borrow_mut().remove(&module.id);
+                    Err(error)
+                }
+            }
         }
         CommonJsModuleFormat::Json => {
             let source = module.source.as_deref().ok_or_else(|| {
@@ -1856,6 +1900,76 @@ mod tests {
         fn load(&self, _filename: &Path) -> Result<Value, VmErr> {
             Ok(Value::Number(17.0))
         }
+    }
+
+    struct InitialExportsNativeAddon {
+        attempts: std::cell::Cell<usize>,
+        fail_first_attempt: bool,
+    }
+
+    impl NativeAddonLoader for InitialExportsNativeAddon {
+        fn load(&self, _filename: &Path) -> Result<Value, VmErr> {
+            Ok(Value::Number(17.0))
+        }
+
+        fn load_with_exports(&self, _filename: &Path, exports: Value) -> Result<Value, VmErr> {
+            let attempt = self.attempts.get() + 1;
+            self.attempts.set(attempt);
+            if self.fail_first_attempt && attempt == 1 {
+                return Err(VmErr::Msg("fixture initializer failed".into()));
+            }
+            exports.set_prop("initialized".into(), Value::Bool(true))?;
+            Ok(exports)
+        }
+    }
+
+    #[test]
+    fn native_addon_publishes_initial_exports_and_retries_after_initialization_failure() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-native-addon-cache-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let addon = root.join("fixture.node");
+        fs::write(&addon, b"trusted test fixture").unwrap();
+        let provider = Rc::new(InitialExportsNativeAddon {
+            attempts: std::cell::Cell::new(0),
+            fail_first_attempt: true,
+        });
+        let loader = FileCommonJsLoader::new([&root])
+            .unwrap()
+            .allow_native_addon(&addon)
+            .unwrap()
+            .with_native_addon_loader(provider.clone());
+        let mut interpreter = crate::interpreter::Interpreter::with_builtins();
+        interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
+
+        let first = interpreter.require_commonjs("./fixture.node", None);
+        assert!(
+            matches!(first, Err(VmErr::Msg(message)) if message == "fixture initializer failed")
+        );
+        assert!(matches!(
+            interpreter.require_commonjs("./fixture.node", None),
+            Ok(Value::Object { .. })
+        ));
+        let result = interpreter
+            .eval_source(
+                "const first = require('./fixture.node'); ({initialized: first.initialized, cached: first === require('./fixture.node')});",
+            )
+            .unwrap();
+        assert!(matches!(
+            result.get_prop("initialized"),
+            Some(Value::Bool(true))
+        ));
+        assert!(matches!(result.get_prop("cached"), Some(Value::Bool(true))));
+        assert_eq!(provider.attempts.get(), 2);
+
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -9301,6 +9301,10 @@ fn macho_architecture_name(cpu_type: u32) -> String {
 
 impl NativeAddonLoader for RustNodeApiHost {
     fn load(&self, filename: &Path) -> Result<Value, VmErr> {
+        self.load_with_exports(filename, Value::object(Vec::new()))
+    }
+
+    fn load_with_exports(&self, filename: &Path, exports: Value) -> Result<Value, VmErr> {
         let filename = fs::canonicalize(filename).map_err(|error| {
             VmErr::Msg(format!(
                 "cannot resolve native addon {}: {error}",
@@ -9456,7 +9460,6 @@ impl NativeAddonLoader for RustNodeApiHost {
             .borrow_mut()
             .environments
             .push(environment.clone());
-        let exports = Value::object(Vec::new());
         let scope = environment
             .handles
             .borrow_mut()

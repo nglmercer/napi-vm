@@ -405,6 +405,10 @@ not return success with a partial or fabricated result.
   `require()` cache, root check, and digest allowlist. This host alias replaces
   the package's JavaScript entry for that request; use it when the native
   exports are the package API.
+- [x] Publish an initial CommonJS exports object before invoking the Rust
+  Node-API initializer, replace it with the returned exports on success, and
+  remove the entry after initialization failure so the next `require()` can
+  retry.
 - [ ] The adapter does not implement the complete `node-gyp-build` JavaScript
   API or its `EXEC_PATH`, `PREBUILDS_ONLY`, and runtime-specific Node ABI/uv
   selection behavior.
@@ -414,8 +418,9 @@ not return success with a partial or fabricated result.
 - Require OS, architecture, and binary-format matches. Report the exact reason
   for a rejected file: missing allowlist entry, digest mismatch, wrong
   architecture, unsupported ABI, missing symbol, or initialization failure.
-- Cache initialized native exports by canonical module ID. Preserve Node-like
-  cycle and failed-initialization behavior in the CommonJS loader.
+- Cache native exports by canonical module ID. Full circular initialization
+  behavior still depends on a safe guest callback entry point during addon
+  initialization.
 
 ### 7. Prove compatibility differentially
 
