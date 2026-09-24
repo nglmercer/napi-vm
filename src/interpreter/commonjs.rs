@@ -84,6 +84,7 @@ pub struct FileCommonJsLoader {
     roots: Vec<PathBuf>,
     native_addons: Option<Rc<dyn NativeAddonLoader>>,
     allowed_native_addons: HashMap<PathBuf, [u8; 32]>,
+    native_addon_aliases: HashMap<String, PathBuf>,
 }
 
 impl std::fmt::Debug for FileCommonJsLoader {
@@ -92,6 +93,7 @@ impl std::fmt::Debug for FileCommonJsLoader {
             .field("roots", &self.roots)
             .field("native_addons", &self.native_addons.is_some())
             .field("allowed_native_addons", &self.allowed_native_addons)
+            .field("native_addon_aliases", &self.native_addon_aliases)
             .finish()
     }
 }
@@ -131,6 +133,7 @@ impl FileCommonJsLoader {
             roots: canonical_roots,
             native_addons: None,
             allowed_native_addons: HashMap::new(),
+            native_addon_aliases: HashMap::new(),
         })
     }
 
@@ -204,6 +207,100 @@ impl FileCommonJsLoader {
     /// The canonical roots this loader may read from.
     pub fn roots(&self) -> &[PathBuf] {
         &self.roots
+    }
+
+    /// Resolve a Node-API addon in a package's `build/Release`, `build/Debug`,
+    /// or `prebuilds/<platform>-<arch>` directory. Prebuild selection accepts
+    /// N-API-tagged binaries only; Node ABI and libuv-specific builds are not
+    /// compatible with this host's declared ABI boundary.
+    pub fn resolve_node_api_prebuild(
+        &self,
+        package_root: impl AsRef<Path>,
+    ) -> Result<ResolvedCommonJsModule, VmErr> {
+        let package_root = fs::canonicalize(package_root.as_ref()).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve native package {}: {error}",
+                package_root.as_ref().display()
+            ))
+        })?;
+        if !package_root.is_dir() || !self.in_roots(&package_root) {
+            return Err(VmErr::Msg(format!(
+                "native package root is not a directory inside configured roots: {}",
+                package_root.display()
+            )));
+        }
+        let candidate = select_node_api_prebuild(&package_root, &NodeApiPrebuildTarget::current())
+            .ok_or_else(|| {
+                let target = NodeApiPrebuildTarget::current();
+                VmErr::Msg(format!(
+                    "no compatible Node-API prebuild found for {}-{} in {}",
+                    target.platform,
+                    target.architecture,
+                    package_root.display()
+                ))
+            })?;
+        let candidate = self.canonical_file(&candidate)?.ok_or_else(|| {
+            VmErr::Msg(format!(
+                "selected Node-API prebuild is missing: {}",
+                candidate.display()
+            ))
+        })?;
+        self.resolved_file(candidate)
+    }
+
+    /// Map a bare package request to a prebuild already selected and added to
+    /// this loader's native-addon allowlist. This lets a desktop host expose a
+    /// package's native entry through ordinary `require('package')`.
+    pub fn with_native_addon_alias(
+        mut self,
+        request: impl Into<String>,
+        addon_path: impl AsRef<Path>,
+    ) -> Result<Self, VmErr> {
+        let request = request.into();
+        let (package_name, subpath) = split_package_request(&request)?;
+        if package_name != request || !subpath.is_empty() {
+            return Err(VmErr::Msg(format!(
+                "native addon alias must be a bare package request: {request}"
+            )));
+        }
+        let addon_path = fs::canonicalize(addon_path.as_ref()).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve aliased native addon {}: {error}",
+                addon_path.as_ref().display()
+            ))
+        })?;
+        if addon_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("node")
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon alias target must use the .node extension: {}",
+                addon_path.display()
+            )));
+        }
+        if !self.allowed_native_addons.contains_key(&addon_path) {
+            return Err(VmErr::Msg(format!(
+                "native addon alias target is not allowlisted: {}",
+                addon_path.display()
+            )));
+        }
+        if !self.in_roots(&addon_path) {
+            return Err(VmErr::Msg(format!(
+                "native addon alias target escapes configured roots: {}",
+                addon_path.display()
+            )));
+        }
+        if self
+            .native_addon_aliases
+            .insert(request.clone(), addon_path)
+            .is_some()
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon alias is already configured: {request}"
+            )));
+        }
+        Ok(self)
     }
 
     pub(super) fn allowed_native_addon_digests(&self) -> &HashMap<PathBuf, [u8; 32]> {
@@ -459,6 +556,9 @@ impl FileCommonJsLoader {
                 "Cannot find module '{request}' (host built-ins are not enabled)"
             )));
         }
+        if let Some(addon) = self.native_addon_aliases.get(request) {
+            return Ok(addon.clone());
+        }
         if request.starts_with('#') {
             return self.resolve_package_import(request, parent);
         }
@@ -542,6 +642,196 @@ impl FileCommonJsLoader {
             source,
         })
     }
+}
+
+#[derive(Clone, Debug)]
+struct NodeApiPrebuildTarget {
+    platform: String,
+    architecture: String,
+    libc: Option<String>,
+    armv: Option<String>,
+}
+
+impl NodeApiPrebuildTarget {
+    fn current() -> Self {
+        let platform = match std::env::consts::OS {
+            "macos" => "darwin",
+            "windows" => "win32",
+            other => other,
+        }
+        .to_string();
+        let architecture = match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "x86" => "ia32",
+            "aarch64" => "arm64",
+            "powerpc" => "ppc",
+            "powerpc64" | "powerpc64le" => "ppc64",
+            "loongarch64" => "loong64",
+            other => other,
+        }
+        .to_string();
+        let libc = if platform == "linux" {
+            Some(std::env::var("LIBC").unwrap_or_else(|_| {
+                if cfg!(target_env = "musl") {
+                    "musl".into()
+                } else {
+                    "glibc".into()
+                }
+            }))
+        } else {
+            None
+        };
+        let armv = std::env::var("ARM_VERSION")
+            .ok()
+            .or_else(|| (architecture == "arm64").then(|| "8".into()));
+        Self {
+            platform,
+            architecture,
+            libc,
+            armv,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PrebuildTuple {
+    name: String,
+    platform: String,
+    architectures: Vec<String>,
+}
+
+fn parse_prebuild_tuple(name: &str) -> Option<PrebuildTuple> {
+    let (platform, architectures) = name.split_once('-')?;
+    let architectures = architectures
+        .split('+')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if platform.is_empty() || architectures.is_empty() || architectures.iter().any(String::is_empty)
+    {
+        return None;
+    }
+    Some(PrebuildTuple {
+        name: name.to_string(),
+        platform: platform.to_string(),
+        architectures,
+    })
+}
+
+#[derive(Default)]
+struct PrebuildTags {
+    runtime: Option<String>,
+    napi: bool,
+    abi: bool,
+    uv: bool,
+    libc: Option<String>,
+    armv: Option<String>,
+    specificity: usize,
+}
+
+fn parse_prebuild_tags(filename: &str) -> Option<PrebuildTags> {
+    let stem = filename.strip_suffix(".node")?;
+    let mut tags = PrebuildTags::default();
+    for tag in stem.split('.') {
+        match tag {
+            "node" | "electron" | "node-webkit" => tags.runtime = Some(tag.to_string()),
+            "napi" => tags.napi = true,
+            "glibc" | "musl" => tags.libc = Some(tag.to_string()),
+            _ if tag.starts_with("abi") => tags.abi = true,
+            _ if tag.starts_with("uv") => tags.uv = true,
+            _ if tag.starts_with("armv") => tags.armv = Some(tag[4..].to_string()),
+            _ => continue,
+        }
+        tags.specificity += 1;
+    }
+    Some(tags)
+}
+
+fn select_node_api_prebuild(
+    package_root: &Path,
+    target: &NodeApiPrebuildTarget,
+) -> Option<PathBuf> {
+    for build_dir in ["build/Release", "build/Debug"] {
+        let mut candidates = read_node_addon_files(&package_root.join(build_dir));
+        if let Some(candidate) = candidates.drain(..).next() {
+            return Some(candidate);
+        }
+    }
+
+    let prebuilds_root = package_root.join("prebuilds");
+    let mut tuples = fs::read_dir(&prebuilds_root)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if !file_type.is_dir() {
+                return None;
+            }
+            parse_prebuild_tuple(&entry.file_name().to_string_lossy())
+        })
+        .filter(|tuple| {
+            tuple.platform == target.platform && tuple.architectures.contains(&target.architecture)
+        })
+        .collect::<Vec<_>>();
+    tuples.sort_by(|left, right| {
+        left.architectures
+            .len()
+            .cmp(&right.architectures.len())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    let tuple = tuples.into_iter().next()?;
+    let directory = prebuilds_root.join(tuple.name);
+
+    let candidates = read_node_addon_files(&directory)
+        .into_iter()
+        .filter_map(|path| {
+            let filename = path.file_name()?.to_str()?;
+            let tags = parse_prebuild_tags(filename)?;
+            if !tags.napi
+                || tags.abi
+                || tags.uv
+                || tags
+                    .runtime
+                    .as_deref()
+                    .is_some_and(|runtime| runtime != "node")
+                || tags
+                    .libc
+                    .as_deref()
+                    .is_some_and(|libc| target.libc.as_deref() != Some(libc))
+                || tags
+                    .armv
+                    .as_deref()
+                    .is_some_and(|armv| target.armv.as_deref() != Some(armv))
+            {
+                return None;
+            }
+            Some((path, tags))
+        })
+        .collect::<Vec<_>>();
+    let mut candidates = candidates;
+    candidates.sort_by(|(left_path, left_tags), (right_path, right_tags)| {
+        let left_runtime = usize::from(left_tags.runtime.as_deref() == Some("node"));
+        let right_runtime = usize::from(right_tags.runtime.as_deref() == Some("node"));
+        right_runtime
+            .cmp(&left_runtime)
+            .then_with(|| right_tags.specificity.cmp(&left_tags.specificity))
+            .then_with(|| left_path.cmp(right_path))
+    });
+    candidates.into_iter().next().map(|(path, _)| path)
+}
+
+fn read_node_addon_files(directory: &Path) -> Vec<PathBuf> {
+    let mut paths = fs::read_dir(directory)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("node")
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
 }
 
 impl CommonJsModuleLoader for FileCommonJsLoader {
@@ -1566,6 +1856,88 @@ mod tests {
         fn load(&self, _filename: &Path) -> Result<Value, VmErr> {
             Ok(Value::Number(17.0))
         }
+    }
+
+    #[test]
+    fn node_api_prebuild_resolution_filters_incompatible_tags_and_aliases_package() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-node-api-prebuild-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join("node_modules/fixture");
+        let target = NodeApiPrebuildTarget::current();
+        let tuple_name = format!("{}-{}", target.platform, target.architecture);
+        let prebuild_dir = package_root.join("prebuilds").join(tuple_name);
+        fs::create_dir_all(&prebuild_dir).unwrap();
+        for filename in [
+            "node.abi999.node",
+            "electron.napi.node",
+            "node.napi.uv1.node",
+            "node.napi.node",
+        ] {
+            fs::write(prebuild_dir.join(filename), filename).unwrap();
+        }
+        if let Some(libc) = &target.libc {
+            let filename = format!("node.napi.{libc}.node");
+            fs::write(prebuild_dir.join(filename), b"libc specific napi").unwrap();
+        }
+        if let Some(armv) = &target.armv {
+            let filename = format!("node.napi.armv{armv}.node");
+            fs::write(prebuild_dir.join(filename), b"arm specific napi").unwrap();
+        }
+        if let (Some(libc), Some(armv)) = (&target.libc, &target.armv) {
+            let filename = format!("node.napi.{libc}.armv{armv}.node");
+            fs::write(prebuild_dir.join(filename), b"libc and arm specific napi").unwrap();
+        }
+        fs::create_dir_all(&root).unwrap();
+
+        let loader = FileCommonJsLoader::new([&root]).unwrap();
+        let selected = loader.resolve_node_api_prebuild(&package_root).unwrap();
+        let selected_path = PathBuf::from(&selected.filename);
+        assert_eq!(selected.format, CommonJsModuleFormat::NativeAddon);
+        let selected_filename = selected_path.file_name().unwrap().to_str().unwrap();
+        if let (Some(libc), Some(armv)) = (&target.libc, &target.armv) {
+            assert_eq!(
+                selected_filename,
+                format!("node.napi.{libc}.armv{armv}.node")
+            );
+        } else if let Some(libc) = target.libc {
+            assert_eq!(selected_filename, format!("node.napi.{libc}.node"));
+        } else if let Some(armv) = target.armv {
+            assert_eq!(selected_filename, format!("node.napi.armv{armv}.node"));
+        } else {
+            assert_eq!(selected_filename, "node.napi.node");
+        }
+
+        let loader = loader
+            .allow_native_addon(&selected_path)
+            .unwrap()
+            .with_native_addon_alias("fixture", &selected_path)
+            .unwrap()
+            .with_native_addon_loader(Rc::new(FakeNativeAddon));
+        let mut interpreter = crate::interpreter::Interpreter::with_builtins();
+        interpreter.set_commonjs_loader(Rc::new(loader)).unwrap();
+        let result = interpreter
+            .eval_source(
+                "const first = require('fixture'); ({path: require.resolve('fixture'), value: first, cached: first === require('fixture')});",
+            )
+            .unwrap();
+        assert!(matches!(
+            result.get_prop("path"),
+            Some(Value::String(ref path)) if path == &selected.filename
+        ));
+        assert!(matches!(
+            result.get_prop("value"),
+            Some(Value::Number(17.0))
+        ));
+        assert!(matches!(result.get_prop("cached"), Some(Value::Bool(true))));
+
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

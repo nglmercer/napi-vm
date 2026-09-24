@@ -119,9 +119,17 @@ type NapiGuestOperation = fn(&mut Interpreter, Value, Vec<Value>) -> Result<Valu
 pub struct RustNodeApiOptions {
     roots: Vec<PathBuf>,
     allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
+    native_prebuild_aliases: Vec<NativePrebuildAlias>,
     entry: Option<PathBuf>,
     reported_node_version: ReportedNodeVersion,
     max_napi_version: u32,
+}
+
+#[derive(Clone, Debug)]
+struct NativePrebuildAlias {
+    request: String,
+    package_root: PathBuf,
+    expected_sha256: Option<[u8; 32]>,
 }
 
 /// Version numbers returned by `napi_get_node_version` in the Rust Node-API
@@ -160,6 +168,7 @@ impl RustNodeApiOptions {
         Self {
             roots: roots.into_iter().map(Into::into).collect(),
             allowed_addons: Vec::new(),
+            native_prebuild_aliases: Vec::new(),
             entry: None,
             reported_node_version: ReportedNodeVersion::NAPI_VM,
             max_napi_version: MAX_NODE_API_VERSION as u32,
@@ -178,6 +187,41 @@ impl RustNodeApiOptions {
     ) -> Self {
         self.allowed_addons
             .push((path.into(), Some(expected_sha256)));
+        self
+    }
+
+    /// Resolve a Node-API prebuild from the package's standard build/prebuilds
+    /// directories and expose it through a bare guest `require()` request.
+    /// The selected binary is pinned to its current SHA-256 at configuration
+    /// time, just like [`Self::allow_native_addon`]. This alias replaces the
+    /// package's JavaScript entry for that request; use it when the native
+    /// addon exports are the package's public API.
+    pub fn allow_native_prebuild(
+        mut self,
+        request: impl Into<String>,
+        package_root: impl Into<PathBuf>,
+    ) -> Self {
+        self.native_prebuild_aliases.push(NativePrebuildAlias {
+            request: request.into(),
+            package_root: package_root.into(),
+            expected_sha256: None,
+        });
+        self
+    }
+
+    /// Resolve a Node-API prebuild and require it to match a digest from
+    /// trusted host metadata before making it available to guest `require()`.
+    pub fn allow_native_prebuild_with_sha256(
+        mut self,
+        request: impl Into<String>,
+        package_root: impl Into<PathBuf>,
+        expected_sha256: [u8; 32],
+    ) -> Self {
+        self.native_prebuild_aliases.push(NativePrebuildAlias {
+            request: request.into(),
+            package_root: package_root.into(),
+            expected_sha256: Some(expected_sha256),
+        });
         self
     }
 
@@ -9682,6 +9726,17 @@ impl Interpreter {
                 None => loader.allow_native_addon(addon)?,
             };
         }
+        for alias in &options.native_prebuild_aliases {
+            let addon = loader.resolve_node_api_prebuild(&alias.package_root)?;
+            let addon_path = PathBuf::from(addon.filename);
+            loader = match alias.expected_sha256 {
+                Some(expected_sha256) => {
+                    loader.allow_native_addon_with_sha256(&addon_path, expected_sha256)?
+                }
+                None => loader.allow_native_addon(&addon_path)?,
+            };
+            loader = loader.with_native_addon_alias(&alias.request, &addon_path)?;
+        }
         let entry = validate_entry(&loader, options.entry)?;
         let host = Rc::new(RustNodeApiHost::new(
             self.persistent_global.clone(),
@@ -10168,6 +10223,143 @@ __attribute__((constructor)) static void register_module(void) {
 
         drop(interpreter);
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rust_host_selects_and_loads_a_napi_tagged_prebuild_through_bare_require() {
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "napi-vm-rust-node-api-prebuild-{}-{}",
+            std::process::id(),
+            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+        ));
+        let package_root = root.join("node_modules/prebuilt");
+        let platform = match std::env::consts::OS {
+            "macos" => "darwin",
+            "windows" => "win32",
+            other => other,
+        };
+        let architecture = match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "x86" => "ia32",
+            "aarch64" => "arm64",
+            other => other,
+        };
+        let tuple = format!("{platform}-{architecture}");
+        let prebuild_dir = package_root.join("prebuilds").join(&tuple);
+        fs::create_dir_all(&prebuild_dir).unwrap();
+
+        let compiler = Command::new("cc").arg("--version").output();
+        let include_dirs = [
+            std::env::var_os("NODE_INCLUDE_DIR").map(PathBuf::from),
+            Some(PathBuf::from("/usr/include/node")),
+            Some(PathBuf::from("/usr/local/include/node")),
+        ];
+        let include = include_dirs
+            .into_iter()
+            .flatten()
+            .find(|path| path.join("node_api.h").is_file());
+        let (Ok(compiler), Some(include)) = (compiler, include) else {
+            eprintln!("skipping Node-API prebuild fixture: cc or Node headers are unavailable");
+            let _ = fs::remove_dir_all(&root);
+            return;
+        };
+        assert!(compiler.status.success(), "cc --version failed");
+
+        let source = root.join("fixture.c");
+        let addon = prebuild_dir.join("node.napi.node");
+        fs::write(
+            &source,
+            r#"
+#define NAPI_VERSION 1
+#include <node_api.h>
+
+static napi_value initialize(napi_env env, napi_value exports) {
+  napi_value value;
+  if (napi_create_string_utf8(env, "selected prebuild", NAPI_AUTO_LENGTH,
+                              &value) != napi_ok ||
+      napi_set_named_property(env, exports, "kind", value) != napi_ok)
+    return NULL;
+  return exports;
+}
+
+NAPI_MODULE(prebuild_fixture, initialize)
+"#,
+        )
+        .unwrap();
+        let built = Command::new("cc")
+            .args(["-std=c11", "-O2", "-fPIC", "-shared", "-I"])
+            .arg(&include)
+            .arg(&source)
+            .arg("-o")
+            .arg(&addon)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success(),
+            "Node-API prebuild fixture compilation failed: {}",
+            String::from_utf8_lossy(&built.stderr)
+        );
+
+        fs::write(
+            package_root.join("package.json"),
+            r#"{"name":"prebuilt","main":"index.cjs"}"#,
+        )
+        .unwrap();
+        fs::write(
+            package_root.join("index.cjs"),
+            format!("module.exports = require('./prebuilds/{tuple}/node.napi.node');"),
+        )
+        .unwrap();
+        let main = root.join("main.cjs");
+        fs::write(
+            &main,
+            "const addon = require('prebuilt'); module.exports = {kind: addon.kind, cached: addon === require('prebuilt')};",
+        )
+        .unwrap();
+
+        let mut interpreter = Interpreter::with_builtins();
+        interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_prebuild("prebuilt", &package_root)
+                    .entry(&main),
+            )
+            .unwrap();
+        let vm_value = interpreter
+            .eval_source("JSON.stringify(require('./main.cjs'))")
+            .unwrap();
+        let Value::String(vm_json) = &vm_value else {
+            panic!("Node-API prebuild fixture did not return JSON: {vm_value:?}");
+        };
+        let vm_json: serde_json::Value = serde_json::from_str(vm_json).unwrap();
+
+        let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
+        for runtime in ["node", "bun"] {
+            let available = Command::new(runtime).arg("--version").output();
+            let Ok(version) = available else {
+                continue;
+            };
+            if !version.status.success() {
+                continue;
+            }
+            let reference = Command::new(runtime)
+                .current_dir(&root)
+                .args(["-e", runner])
+                .output()
+                .unwrap();
+            assert!(
+                reference.status.success(),
+                "{runtime} N-API prebuild fixture failed: {}",
+                String::from_utf8_lossy(&reference.stderr)
+            );
+            let reference: serde_json::Value = serde_json::from_slice(&reference.stdout).unwrap();
+            assert_eq!(vm_json, reference, "{runtime} and napi-vm differ");
+        }
+
+        drop(interpreter);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

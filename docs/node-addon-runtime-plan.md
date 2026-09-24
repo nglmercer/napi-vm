@@ -396,6 +396,18 @@ not return success with a partial or fabricated result.
 
 ### 6. Add package and native binary support
 
+- [x] Resolve a package's `build/Release`, `build/Debug`, or
+  `prebuilds/<platform>-<arch>` Node-API binary. Prebuild selection matches
+  platform, architecture, `glibc`/`musl`, and `armv` tags; it rejects files
+  carrying a Node ABI or libuv tag.
+- [x] Let `RustNodeApiOptions::allow_native_prebuild()` map a bare guest
+  package request to the selected addon while preserving the normal
+  `require()` cache, root check, and digest allowlist. This host alias replaces
+  the package's JavaScript entry for that request; use it when the native
+  exports are the package API.
+- [ ] The adapter does not implement the complete `node-gyp-build` JavaScript
+  API or its `EXEC_PATH`, `PREBUILDS_ONLY`, and runtime-specific Node ABI/uv
+  selection behavior.
 - Keep native path resolution in the Rust package loader. Support common
   package export conditions and platform prebuild layouts without running
   package install scripts.

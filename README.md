@@ -179,6 +179,28 @@ runtime
 let result = runtime.eval_source("require('./native/example.node').run();").unwrap();
 ```
 
+For a package whose public API is the native addon itself, the host can select
+a platform prebuild and expose it under the package's bare name:
+
+```rust
+let package_root = app_root.join("node_modules/example");
+runtime.enable_rust_node_api_addons(
+    RustNodeApiOptions::new([app_root.clone()])
+        .allow_native_prebuild("example", &package_root),
+)?;
+let result = runtime.eval_source("require('example').run();")?;
+```
+
+The resolver checks `build/Release`, `build/Debug`, and
+`prebuilds/<platform>-<arch>`. Within `prebuilds`, it selects N-API-tagged
+files for the current platform and architecture. On Linux it also matches
+`glibc` or `musl`; it honors `ARM_VERSION` where an arm-version tag is present.
+The alias replaces
+the package's JavaScript entry for that bare request, so use it when that
+wrapper only returns the native addon. The selected file is still restricted
+to configured roots and pinned to its SHA-256 when the runtime is configured.
+Use `allow_native_prebuild_with_sha256()` to pin against a trusted manifest.
+
 This is an early compatibility slice, not a general Node replacement. It
 accepts addons requesting Node-API versions 1 through the configured maximum
 (10 by default), but only implements a selected API subset rather than every
