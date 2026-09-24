@@ -105,6 +105,15 @@ pub trait CommonJsModuleLoader {
 /// another explicitly chosen host runtime. Merely opening the shared library
 /// is insufficient: its initializer expects a valid `napi_env`.
 pub trait NativeAddonLoader {
+    /// Check whether this provider can load `filename` without initializing
+    /// the addon. Providers with no separate preflight operation fail clearly.
+    fn preflight_addon(&self, filename: &Path) -> Result<(), VmErr> {
+        Err(VmErr::Msg(format!(
+            "native addon preflight is not available for {}",
+            filename.display()
+        )))
+    }
+
     /// Initialize the addon at `filename` and return its `module.exports`.
     fn load(&self, filename: &Path) -> Result<Value, VmErr>;
 

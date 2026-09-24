@@ -958,6 +958,59 @@ impl NodeAddonSidecar {
         self.state.borrow().shutdown_complete
     }
 
+    fn preflight_addon_path(&self, filename: &Path) -> Result<PathBuf, VmErr> {
+        if self.is_shutdown() {
+            return Err(VmErr::Msg("Node sidecar has been shut down".into()));
+        }
+        let filename = std::fs::canonicalize(filename).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve native addon {}: {error}",
+                filename.display()
+            ))
+        })?;
+        if !self
+            .allowed_roots
+            .iter()
+            .any(|root| filename.starts_with(root))
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon escapes configured roots: {}",
+                filename.display()
+            )));
+        }
+        if filename
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("node")
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon path must use the .node extension: {}",
+                filename.display()
+            )));
+        }
+        let expected_digest = self.allowed_addons.get(&filename).ok_or_else(|| {
+            VmErr::Msg(format!(
+                "native addon is not allowlisted: {}",
+                filename.display()
+            ))
+        })?;
+        let actual_digest =
+            crate::interpreter::commonjs::sha256_file(&filename).map_err(|error| {
+                VmErr::Msg(format!(
+                    "cannot verify native addon {}: {error}",
+                    filename.display()
+                ))
+            })?;
+        if &actual_digest != expected_digest {
+            return Err(VmErr::Msg(format!(
+                "native addon integrity check failed before loading: {}",
+                filename.display()
+            )));
+        }
+        crate::interpreter::native_addon_binary::validate_native_addon_binary(&filename)?;
+        Ok(filename)
+    }
+
     fn request(&self, message: JsonValue) -> Result<JsonValue, VmErr> {
         self.request_with_callback_handler(
             message,
@@ -1462,53 +1515,12 @@ fn fail_state(state: &mut State) {
 }
 
 impl NativeAddonLoader for NodeAddonSidecar {
+    fn preflight_addon(&self, filename: &Path) -> Result<(), VmErr> {
+        self.preflight_addon_path(filename).map(|_| ())
+    }
+
     fn load(&self, filename: &Path) -> Result<Value, VmErr> {
-        let filename = std::fs::canonicalize(filename).map_err(|error| {
-            VmErr::Msg(format!(
-                "cannot resolve native addon {}: {error}",
-                filename.display()
-            ))
-        })?;
-        if !self
-            .allowed_roots
-            .iter()
-            .any(|root| filename.starts_with(root))
-        {
-            return Err(VmErr::Msg(format!(
-                "native addon escapes configured roots: {}",
-                filename.display()
-            )));
-        }
-        if filename
-            .extension()
-            .and_then(|extension| extension.to_str())
-            != Some("node")
-        {
-            return Err(VmErr::Msg(format!(
-                "native addon path must use the .node extension: {}",
-                filename.display()
-            )));
-        }
-        let expected_digest = self.allowed_addons.get(&filename).ok_or_else(|| {
-            VmErr::Msg(format!(
-                "native addon is not allowlisted: {}",
-                filename.display()
-            ))
-        })?;
-        let actual_digest =
-            crate::interpreter::commonjs::sha256_file(&filename).map_err(|error| {
-                VmErr::Msg(format!(
-                    "cannot verify native addon {}: {error}",
-                    filename.display()
-                ))
-            })?;
-        if &actual_digest != expected_digest {
-            return Err(VmErr::Msg(format!(
-                "native addon integrity check failed before loading: {}",
-                filename.display()
-            )));
-        }
-        crate::interpreter::native_addon_binary::validate_native_addon_binary(&filename)?;
+        let filename = self.preflight_addon_path(filename)?;
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
@@ -4314,6 +4326,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
             )
             .unwrap();
         assert_eq!(runtime.backend_name(), "node-sidecar");
+        runtime.preflight_addon(&addon).unwrap();
         let bridge = runtime.node_sidecar().expect("Node sidecar backend");
         assert!(!bridge.runtime_info().node_version.is_empty());
         assert!(bridge.runtime_info().napi_version >= 1);

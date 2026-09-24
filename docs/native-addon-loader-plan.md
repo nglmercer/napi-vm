@@ -51,6 +51,9 @@ returning plausible but incorrect results.
 - Both backends use the same ELF, Mach-O, and PE header preflight to reject a
   malformed binary or a binary for another host architecture before invoking
   the native loader.
+- `NativeAddonRuntime::preflight_addon(path)` exposes the root, digest, file
+  format, and architecture checks to desktop hosts without invoking an addon
+  initializer. Each backend uses the same check when it later loads the addon.
 
 ## Public host configuration
 

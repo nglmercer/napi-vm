@@ -8686,6 +8686,57 @@ impl RustNodeApiHost {
         }
     }
 
+    fn preflight_addon_path(&self, filename: &Path) -> Result<PathBuf, VmErr> {
+        self.ensure_running()?;
+        let filename = fs::canonicalize(filename).map_err(|error| {
+            VmErr::Msg(format!(
+                "cannot resolve native addon {}: {error}",
+                filename.display()
+            ))
+        })?;
+        if !self
+            .allowed_roots
+            .iter()
+            .any(|root| filename.starts_with(root))
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon escapes configured roots: {}",
+                filename.display()
+            )));
+        }
+        if filename
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("node")
+        {
+            return Err(VmErr::Msg(format!(
+                "native addon path must use the .node extension: {}",
+                filename.display()
+            )));
+        }
+        let expected_digest = self.allowed_addons.get(&filename).ok_or_else(|| {
+            VmErr::Msg(format!(
+                "native addon is not allowlisted: {}",
+                filename.display()
+            ))
+        })?;
+        let actual_digest =
+            crate::interpreter::commonjs::sha256_file(&filename).map_err(|error| {
+                VmErr::Msg(format!(
+                    "cannot verify native addon {}: {error}",
+                    filename.display()
+                ))
+            })?;
+        if &actual_digest != expected_digest {
+            return Err(VmErr::Msg(format!(
+                "native addon integrity check failed before loading: {}",
+                filename.display()
+            )));
+        }
+        validate_native_addon_binary(&filename)?;
+        Ok(filename)
+    }
+
     fn invoke_native(
         &self,
         id: usize,
@@ -9103,6 +9154,10 @@ fn thread_safe_function_events(function_id: usize) -> Result<Vec<HostEvent>, VmE
 }
 
 impl NativeAddonLoader for RustNodeApiHost {
+    fn preflight_addon(&self, filename: &Path) -> Result<(), VmErr> {
+        self.preflight_addon_path(filename).map(|_| ())
+    }
+
     fn load(&self, filename: &Path) -> Result<Value, VmErr> {
         self.load_with_exports(filename, Value::object(Vec::new()))
     }
@@ -9117,56 +9172,10 @@ impl NativeAddonLoader for RustNodeApiHost {
         exports: Value,
         callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
-        self.ensure_running()?;
-        let filename = fs::canonicalize(filename).map_err(|error| {
-            VmErr::Msg(format!(
-                "cannot resolve native addon {}: {error}",
-                filename.display()
-            ))
-        })?;
-        if !self
-            .allowed_roots
-            .iter()
-            .any(|root| filename.starts_with(root))
-        {
-            return Err(VmErr::Msg(format!(
-                "native addon escapes configured roots: {}",
-                filename.display()
-            )));
-        }
-        if filename
-            .extension()
-            .and_then(|extension| extension.to_str())
-            != Some("node")
-        {
-            return Err(VmErr::Msg(format!(
-                "native addon path must use the .node extension: {}",
-                filename.display()
-            )));
-        }
-        let expected_digest = self.allowed_addons.get(&filename).ok_or_else(|| {
-            VmErr::Msg(format!(
-                "native addon is not allowlisted: {}",
-                filename.display()
-            ))
-        })?;
-        let actual_digest =
-            crate::interpreter::commonjs::sha256_file(&filename).map_err(|error| {
-                VmErr::Msg(format!(
-                    "cannot verify native addon {}: {error}",
-                    filename.display()
-                ))
-            })?;
-        if &actual_digest != expected_digest {
-            return Err(VmErr::Msg(format!(
-                "native addon integrity check failed before loading: {}",
-                filename.display()
-            )));
-        }
+        let filename = self.preflight_addon_path(filename)?;
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
-        validate_native_addon_binary(Path::new(filename))?;
         let registration_scope = NapiModuleRegistrationScope::new();
         let library_result = self._shim.load_addon(Path::new(filename).as_os_str());
         let registered_modules = registration_scope.finish();
@@ -10037,6 +10046,7 @@ __attribute__((constructor)) static void register_module(void) {
             .unwrap();
         assert_eq!(runtime.backend_name(), "rust-node-api");
         assert!(matches!(&runtime, NativeAddonRuntime::RustNodeApi(_)));
+        runtime.preflight_addon(&addon).unwrap();
         let value = interpreter
             .eval_source("JSON.stringify(require('./main.cjs'))")
             .unwrap();

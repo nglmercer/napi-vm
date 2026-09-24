@@ -83,10 +83,11 @@ fn main() {
     let addon_runtime = runtime
         .enable_native_addons(
             NodeAddonOptions::new("node", [app_root.clone()])
-                .allow_native_addon(addon)
+                .allow_native_addon(addon.clone())
                 .entry(app_root.join("main.cjs")),
         )
         .unwrap();
+    addon_runtime.preflight_addon(&addon).unwrap();
     let sidecar = addon_runtime.node_sidecar().expect("Node sidecar backend");
     println!("Node-API v{}", sidecar.runtime_info().napi_version);
     let result = runtime.eval_source("require('example').run();").unwrap();
@@ -113,7 +114,9 @@ that does not provide the required Node-API version during setup. The selected
 backend repeats the root, extension, and digest checks when called directly,
 so bypassing CommonJS resolution does not bypass the native addon policy. Both
 backends also reject malformed or wrong-architecture ELF, Mach-O, and PE files
-before loading them.
+before loading them. Hosts can call `NativeAddonRuntime::preflight_addon(path)`
+to run these checks without invoking the addon initializer; missing dynamic
+dependencies can still fail when the addon is loaded.
 Native module exports enter the CommonJS cache before the Rust Node-API
 initializer runs. If initialization fails, the cache entry is removed so a
 later `require()` can retry it. During initialization, synchronous guest entry

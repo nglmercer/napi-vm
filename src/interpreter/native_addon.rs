@@ -5,6 +5,7 @@
 //! backend-specific controls. This enum gives embedders one entry point for
 //! installing either backend on an interpreter.
 
+use std::path::Path;
 use std::rc::Rc;
 
 use crate::host::HostBridge;
@@ -136,6 +137,15 @@ impl NativeAddonRuntime {
     /// Name of the backend selected for this interpreter.
     pub fn backend_name(&self) -> &'static str {
         self.host().backend_name()
+    }
+
+    /// Check an allowlisted `.node` binary without running its initializer.
+    ///
+    /// This verifies the selected backend's root, digest, file format, and
+    /// host architecture checks. Dynamic dependencies and addon initialization
+    /// can still fail when the guest later calls `require()`.
+    pub fn preflight_addon(&self, filename: &Path) -> Result<(), crate::error::VmErr> {
+        self.host().preflight_addon(filename)
     }
 
     /// Shut down the selected backend. Repeated calls are safe.
