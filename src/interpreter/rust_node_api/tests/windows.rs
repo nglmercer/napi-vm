@@ -103,7 +103,7 @@ fn windows_node_api_shim_loads_with_the_node_import_name() {
 }
 
 #[test]
-fn windows_node_api_shim_directories_live_until_the_last_handle_closes() {
+fn windows_node_api_shim_is_shared_for_the_process_lifetime() {
     let _guard = SHIM_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -112,21 +112,13 @@ fn windows_node_api_shim_directories_live_until_the_last_handle_closes() {
     let first_root = first.path.parent().unwrap().to_path_buf();
     let second_root = second.path.parent().unwrap().to_path_buf();
 
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(first_root, second_root);
     drop(first);
+    drop(second);
     assert!(
         first_root.exists(),
-        "the active provider directory was removed"
-    );
-    assert!(
-        second_root.exists(),
-        "the active provider directory was removed"
-    );
-
-    drop(second);
-    assert!(!first_root.exists(), "the first provider directory leaked");
-    assert!(
-        !second_root.exists(),
-        "the second provider directory leaked"
+        "the process provider was removed early"
     );
 }
 

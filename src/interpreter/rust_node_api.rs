@@ -6,14 +6,16 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::ffi::{CStr, CString, OsStr, c_char, c_void};
+#[cfg(target_os = "windows")]
+use std::ffi::OsStr;
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak as SyncWeak};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -35,6 +37,15 @@ unsafe extern "system" {
 
 #[cfg(target_os = "windows")]
 static WINDOWS_NODE_API_SHIM_DIRECTORIES: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+// Native addons can retain imports from the ABI provider beyond a VM/plugin
+// environment (napi-rs does this for some generated modules). Keep one provider
+// mapped for the process lifetime so a later plugin generation never calls a
+// symbol in an unloaded shim.
+static PROCESS_NODE_API_SHIM: OnceLock<Mutex<Option<Arc<NodeApiShim>>>> = OnceLock::new();
+static PROCESS_NODE_API_ADDON_LIBRARIES: OnceLock<Mutex<HashMap<PathBuf, SyncWeak<Library>>>> =
+    OnceLock::new();
+static PINNED_NODE_API_ADDON_LIBRARIES: OnceLock<Mutex<HashMap<PathBuf, Arc<Library>>>> =
+    OnceLock::new();
 
 use crate::error::VmErr;
 use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
@@ -316,7 +327,7 @@ impl RustNodeApiOptions {
 /// Wine. Native Windows and macOS still need runtime CI verification.
 pub struct RustNodeApiHost {
     state: Rc<RefCell<HostState>>,
-    _shim: Rc<NodeApiShim>,
+    _shim: Arc<NodeApiShim>,
     allowed_roots: Vec<PathBuf>,
     allowed_addons: HashMap<PathBuf, [u8; 32]>,
     shutdown_started: Cell<bool>,
@@ -467,8 +478,13 @@ impl RustNodeApiHost {
 
         if active_threadsafe_workers {
             let libraries = std::mem::take(&mut self.state.borrow_mut().libraries);
-            std::mem::forget(libraries);
-            std::mem::forget(self._shim.clone());
+            let mut pinned = PINNED_NODE_API_ADDON_LIBRARIES
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            for (filename, library) in libraries {
+                pinned.entry(filename).or_insert(library);
+            }
         }
 
         // Keep HostState strongly reachable while finalizers run so ordinary
@@ -502,13 +518,13 @@ struct HostState {
     // Retain tagged values because this interpreter does not have a tracing GC
     // and pointer identities must not be recycled while a tag is observable.
     type_tags: HashMap<NapiObjectIdentity, (NapiTypeTag, Value)>,
-    libraries: Vec<Library>,
+    libraries: HashMap<PathBuf, Arc<Library>>,
     async_work_sender: SyncSender<AsyncWorkTaskMessage>,
     runtime_notifications: Receiver<HostRuntimeNotification>,
     runtime_notification_sender: Sender<HostRuntimeNotification>,
     async_workers: Vec<JoinHandle<()>>,
     // Keep the process-global ABI shim loaded until every addon library closes.
-    _shim: Rc<NodeApiShim>,
+    _shim: Arc<NodeApiShim>,
 }
 
 #[derive(Clone)]
@@ -3433,11 +3449,24 @@ struct NodeApiShim {
     _library: Option<Library>,
     path: PathBuf,
     #[cfg(target_os = "windows")]
-    dll_directory_cookie: *mut c_void,
+    dll_directory_cookie: usize,
 }
 
 impl NodeApiShim {
-    fn load() -> Result<Self, VmErr> {
+    fn load() -> Result<Arc<Self>, VmErr> {
+        let process_shim = PROCESS_NODE_API_SHIM.get_or_init(|| Mutex::new(None));
+        let mut process_shim = process_shim
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(shim) = process_shim.as_ref() {
+            return Ok(shim.clone());
+        }
+        let shim = Arc::new(Self::load_uncached()?);
+        *process_shim = Some(shim.clone());
+        Ok(shim)
+    }
+
+    fn load_uncached() -> Result<Self, VmErr> {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
         let bytes = include_bytes!(env!("NAPI_VM_NODE_API_SHIM_PATH"));
         let root = loop {
@@ -3503,7 +3532,7 @@ impl NodeApiShim {
                     "cannot register private Node-API shim directory: {error}"
                 )));
             }
-            cookie
+            cookie as usize
         };
 
         #[cfg(unix)]
@@ -3514,7 +3543,7 @@ impl NodeApiShim {
         let library = library_result.map_err(|error| {
             #[cfg(target_os = "windows")]
             unsafe {
-                let _ = RemoveDllDirectory(dll_directory_cookie);
+                let _ = RemoveDllDirectory(dll_directory_cookie as *mut c_void);
             }
             {
                 let _ = fs::remove_dir_all(&root);
@@ -3528,13 +3557,20 @@ impl NodeApiShim {
                     drop(library);
                     #[cfg(target_os = "windows")]
                     unsafe {
-                        let _ = RemoveDllDirectory(dll_directory_cookie);
+                        let _ = RemoveDllDirectory(dll_directory_cookie as *mut c_void);
                     }
                     let _ = fs::remove_dir_all(&root);
                     return Err(VmErr::Msg(format!("invalid Node-API symbol shim: {error}")));
                 }
             };
         unsafe { install(&NAPI_VM_API_TABLE) };
+        #[cfg(unix)]
+        {
+            // The process singleton keeps the mapping live. Unix permits
+            // unlinking a mapped shared object, so do not leave a temp copy
+            // behind for each application run.
+            let _ = fs::remove_dir_all(&root);
+        }
         #[cfg(target_os = "windows")]
         WINDOWS_NODE_API_SHIM_DIRECTORIES
             .get_or_init(|| Mutex::new(Vec::new()))
@@ -3549,16 +3585,57 @@ impl NodeApiShim {
         })
     }
 
-    fn load_addon(&self, filename: &OsStr) -> Result<Library, libloading::Error> {
+    fn load_addon(&self, filename: &Path) -> Result<Arc<Library>, libloading::Error> {
+        let key = filename.to_path_buf();
+        if let Some(library) = PINNED_NODE_API_ADDON_LIBRARIES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .cloned()
+        {
+            return Ok(library);
+        }
+        if let Some(library) = PROCESS_NODE_API_ADDON_LIBRARIES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .and_then(SyncWeak::upgrade)
+        {
+            return Ok(library);
+        }
+
+        let library = Arc::new(self.open_addon(filename)?);
+        let pinned = PINNED_NODE_API_ADDON_LIBRARIES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(library) = pinned.get(&key) {
+            return Ok(library.clone());
+        }
+        let mut cache = PROCESS_NODE_API_ADDON_LIBRARIES
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        cache.retain(|_, library| library.strong_count() != 0);
+        if let Some(library) = cache.get(&key).and_then(SyncWeak::upgrade) {
+            return Ok(library);
+        }
+        cache.insert(key, Arc::downgrade(&library));
+        Ok(library)
+    }
+
+    fn open_addon(&self, filename: &Path) -> Result<Library, libloading::Error> {
         #[cfg(unix)]
         {
-            unsafe { Library::open(Some(filename), RTLD_NOW) }
+            unsafe { Library::open(Some(filename.as_os_str()), RTLD_NOW) }
         }
         #[cfg(target_os = "windows")]
         {
             unsafe {
                 Library::load_with_flags(
-                    filename,
+                    filename.as_os_str(),
                     LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
                         | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
                         | LOAD_LIBRARY_SEARCH_USER_DIRS,
@@ -3578,7 +3655,7 @@ impl Drop for NodeApiShim {
             // so they have closed before the Node-API import provider unloads.
             drop(self._library.take());
             unsafe {
-                let _ = RemoveDllDirectory(self.dll_directory_cookie);
+                let _ = RemoveDllDirectory(self.dll_directory_cookie as *mut c_void);
             }
             let mut module_name: Vec<u16> = OsStr::new("node.exe").encode_wide().collect();
             module_name.push(0);
@@ -3693,7 +3770,7 @@ impl RustNodeApiHost {
             .borrow()
             .get("Object")
             .and_then(|object| object.get_prop("prototype"));
-        let shim = Rc::new(NodeApiShim::load()?);
+        let shim = NodeApiShim::load()?;
         let (runtime_notification_sender, runtime_notifications) = mpsc::channel();
         let (async_work_sender, async_workers) =
             create_async_work_pool(runtime_notification_sender.clone())?;
@@ -3707,7 +3784,7 @@ impl RustNodeApiHost {
                 callbacks: HashMap::new(),
                 environments: Vec::new(),
                 type_tags: HashMap::new(),
-                libraries: Vec::new(),
+                libraries: HashMap::new(),
                 async_work_sender,
                 runtime_notifications,
                 runtime_notification_sender,
@@ -4231,7 +4308,8 @@ impl NativeAddonLoader for RustNodeApiHost {
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
         let registration_scope = NapiModuleRegistrationScope::new();
-        let library_result = self._shim.load_addon(Path::new(filename).as_os_str());
+        let filename_path = Path::new(filename);
+        let library_result = self._shim.load_addon(filename_path);
         let registered_modules = registration_scope.finish();
         let max_napi_version = self.state.borrow().max_napi_version as i32;
         let library = library_result
@@ -4399,7 +4477,10 @@ impl NativeAddonLoader for RustNodeApiHost {
                     // code, and its completion callback owns the work data.
                     // Keep both environment and library alive until host
                     // shutdown joins the workers and delivers that callback.
-                    self.state.borrow_mut().libraries.push(library);
+                    self.state
+                        .borrow_mut()
+                        .libraries
+                        .insert(filename_path.to_path_buf(), library);
                 } else {
                     run_environment_cleanup_hooks(&environment);
                     environment.finalizing.set(true);
@@ -4412,7 +4493,10 @@ impl NativeAddonLoader for RustNodeApiHost {
                 return Err(error);
             }
         };
-        self.state.borrow_mut().libraries.push(library);
+        self.state
+            .borrow_mut()
+            .libraries
+            .insert(filename_path.to_path_buf(), library);
         Ok(exports)
     }
 }

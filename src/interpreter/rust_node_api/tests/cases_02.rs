@@ -1068,13 +1068,14 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
         let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
 
         let mut interpreter = Interpreter::with_builtins();
-        interpreter
+        let runtime = interpreter
             .enable_rust_node_api_addons(
                 RustNodeApiOptions::new([root.clone()])
                     .allow_native_addon_with_sha256(&addon, digest)
                     .entry(root.join("main.cjs")),
             )
             .unwrap();
+        let process_shim = runtime._shim.clone();
         let result = interpreter
             .eval_source("JSON.stringify(await require('./main.cjs'));")
             .unwrap();
@@ -1154,7 +1155,63 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
             assert_eq!(vm_result, bun_result, "Bun and napi-vm differ for napi-rs");
         }
 
+        let canonical_addon = fs::canonicalize(&addon).unwrap();
+        let first_library = runtime
+            .state
+            .borrow()
+            .libraries
+            .get(&canonical_addon)
+            .expect("the loaded addon handle is retained by its host")
+            .clone();
+        runtime.shutdown().unwrap();
+        let pinned_library = PINNED_NODE_API_ADDON_LIBRARIES
+            .get()
+            .expect("shutdown pins the active napi-rs addon")
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&canonical_addon)
+            .expect("the active napi-rs addon has a process pin")
+            .clone();
+        assert!(std::sync::Arc::ptr_eq(&first_library, &pinned_library));
         drop(interpreter);
+        drop(runtime);
+
+        // A later host generation must reuse the same ABI provider and addon
+        // mapping. This is required for libraries that retain their image
+        // across environment teardown.
+        let mut reloaded_interpreter = Interpreter::with_builtins();
+        let reloaded_runtime = reloaded_interpreter
+            .enable_rust_node_api_addons(
+                RustNodeApiOptions::new([root.clone()])
+                    .allow_native_addon_with_sha256(&addon, digest)
+                    .entry(root.join("main.cjs")),
+            )
+            .unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &process_shim,
+            &reloaded_runtime._shim
+        ));
+        let reloaded_result = reloaded_interpreter
+            .eval_source("JSON.stringify(await require('./main.cjs'));")
+            .unwrap();
+        let Value::String(reloaded_json) = &reloaded_result else {
+            panic!("reloaded napi-rs fixture did not return JSON text");
+        };
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(reloaded_json).unwrap(),
+            vm_result
+        );
+        let reloaded_library = reloaded_runtime
+            .state
+            .borrow()
+            .libraries
+            .get(&canonical_addon)
+            .expect("the reloaded host retains the addon handle")
+            .clone();
+        assert!(std::sync::Arc::ptr_eq(&pinned_library, &reloaded_library));
+        reloaded_runtime.shutdown().unwrap();
+        drop(reloaded_interpreter);
+        drop(reloaded_runtime);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -39,6 +39,16 @@ fn number_array(value: Value) -> Vec<u32> {
         .collect()
 }
 
+#[test]
+fn node_api_shim_is_shared_across_host_generations() {
+    let first = NodeApiShim::load().expect("load the process Node-API shim");
+    let second = NodeApiShim::load().expect("reuse the process Node-API shim");
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(first.path, second.path);
+    #[cfg(unix)]
+    assert!(!first.path.exists(), "the mapped shim should be unlinked");
+}
+
 include!("cases_01.rs");
 include!("cases_02.rs");
 

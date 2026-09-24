@@ -438,11 +438,13 @@ not return success with a partial or fabricated result.
 `CustomGC` thread-safe function with one remaining thread-count reference per
 environment. The Rust host cannot currently distinguish that runtime-owned
 reference from a live addon producer, so it conservatively retains the addon
-and ABI shim after unload. Repeated plugin reloads can therefore retain one
-shim mapping and temporary directory per generation. Do not force-release this
-reference: the napi-rs addon image can remain loaded across reloads and still
-call through its original shim. A process-shared shim plus explicit
-environment-teardown semantics is needed to reclaim these mappings safely.
+after unload. Do not force-release this reference: the napi-rs addon image can
+remain loaded across reloads and still call through the process-shared shim.
+The shim mapping is now shared by all host generations, and Unix unlinks its
+temporary file after loading. The host now retains one process-level loader
+handle per affected addon path and reuses it across reloads. Explicit
+environment-teardown semantics are needed to release those addon mappings
+safely.
 
 ### 6. Add package and native binary support
 
