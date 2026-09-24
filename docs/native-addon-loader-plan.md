@@ -43,11 +43,14 @@ returning plausible but incorrect results.
   installation now uses one helper, and `NativeAddonBackendHost` combines the
   existing addon loader and host event bridge. `NativeAddonRuntime::shutdown`
   now provides owner-thread, idempotent teardown for either backend. Backend
-  options and preflight still differ.
+  options and backend capability checks still differ.
 - Both native backends now enforce canonical roots, the `.node` extension, and
   the configured SHA-256 pin inside their own loader methods as well as in the
   CommonJS path. Direct calls through the public backend interface therefore
   cannot bypass the addon allowlist.
+- Both backends use the same ELF, Mach-O, and PE header preflight to reject a
+  malformed binary or a binary for another host architecture before invoking
+  the native loader.
 
 ## Public host configuration
 
@@ -101,9 +104,11 @@ surface each backend accepts before running guest code.
 
 ### 2. Make backend selection and module loading one host feature
 
-- Extend `NativeAddonBackendHost` with shared binary preflight. Its current
-  supertraits cover addon initialization, host calls, and event polling, and
-  its idempotent shutdown is explicit through `NativeAddonRuntime`.
+- Keep common format and architecture checks in the shared native-binary
+  preflight. Extend `NativeAddonBackendHost` with backend capability checks
+  before initialization. Its current supertraits cover addon initialization,
+  host calls, and event polling, and its idempotent shutdown is explicit
+  through `NativeAddonRuntime`.
 - Converge `NodeAddonOptions` and `RustNodeApiOptions` into common host options
   while preserving backend-specific settings.
 - Route `.node` requests through that host feature while leaving JavaScript and

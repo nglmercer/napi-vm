@@ -1508,6 +1508,7 @@ impl NativeAddonLoader for NodeAddonSidecar {
                 filename.display()
             )));
         }
+        crate::interpreter::native_addon_binary::validate_native_addon_binary(&filename)?;
         let filename = filename
             .to_str()
             .ok_or_else(|| VmErr::Msg("native addon path is not UTF-8".into()))?;
@@ -3319,10 +3320,12 @@ mod tests {
 
         let pinned_addon = root.join("pinned.node");
         let untrusted_addon = root.join("untrusted.node");
+        let invalid_binary = root.join("invalid.node");
         let outside_addon = outside.join("outside.node");
         let original = b"configured addon bytes";
         fs::write(&pinned_addon, original).unwrap();
         fs::write(&untrusted_addon, b"untrusted addon bytes").unwrap();
+        fs::write(&invalid_binary, b"not a native library").unwrap();
         fs::write(&outside_addon, b"outside addon bytes").unwrap();
         let digest: [u8; 32] = Sha256::digest(original).into();
 
@@ -3330,7 +3333,8 @@ mod tests {
         let sidecar = interpreter
             .enable_node_addons(
                 NodeAddonOptions::new("node", [root.clone()])
-                    .allow_native_addon_with_sha256(&pinned_addon, digest),
+                    .allow_native_addon_with_sha256(&pinned_addon, digest)
+                    .allow_native_addon(&invalid_binary),
             )
             .unwrap();
 
@@ -3357,6 +3361,15 @@ mod tests {
             extension_error
                 .to_string()
                 .contains("must use the .node extension")
+        );
+
+        let invalid_binary_error =
+            crate::interpreter::NativeAddonLoader::load(sidecar.as_ref(), &invalid_binary)
+                .unwrap_err();
+        assert!(
+            invalid_binary_error
+                .to_string()
+                .contains("incompatible native addon")
         );
 
         fs::write(&pinned_addon, b"changed after host configuration").unwrap();

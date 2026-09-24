@@ -111,7 +111,9 @@ the Node and Node-API versions that were actually started. Hosts can set
 `NodeAddonOptions::minimum_napi_version(version)` to reject a Node executable
 that does not provide the required Node-API version during setup. The selected
 backend repeats the root, extension, and digest checks when called directly,
-so bypassing CommonJS resolution does not bypass the native addon policy.
+so bypassing CommonJS resolution does not bypass the native addon policy. Both
+backends also reject malformed or wrong-architecture ELF, Mach-O, and PE files
+before loading them.
 Native module exports enter the CommonJS cache before the Rust Node-API
 initializer runs. If initialization fails, the cache entry is removed so a
 later `require()` can retry it. During initialization, synchronous guest entry
