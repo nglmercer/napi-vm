@@ -186,6 +186,9 @@ pub struct Interpreter {
     pub jobs: Jobs,
     /// Call stack for error reporting. Pushed on function entry, popped on exit.
     call_stack: Vec<StackFrame>,
+    /// Lazily interned names reused by ordinary function calls in this VM.
+    this_binding_key: Option<Rc<str>>,
+    anonymous_frame_name: Option<Rc<str>>,
     /// Active JavaScript constructor targets. A derived guest constructor
     /// inherits the original `new.target` when it calls a host constructor
     /// through `super()`.
@@ -284,6 +287,8 @@ impl Interpreter {
             yield_sink: None,
             jobs: Jobs::default(),
             call_stack: Vec::new(),
+            this_binding_key: None,
+            anonymous_frame_name: None,
             new_target_stack: Vec::new(),
             source_lines: Vec::new(),
             gen_depth: 0,

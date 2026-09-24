@@ -258,9 +258,9 @@ fn is_callable(value: &Value) -> bool {
 fn name_callable(value: &Value, name: &str) -> Option<Value> {
     Some(match value {
         Value::Function(function) => {
-            let mut function = function.clone();
-            function.name = Some(name.into());
-            Value::Function(function)
+            let mut renamed = function.as_ref().clone();
+            renamed.name = Some(name.into());
+            Value::Function(Rc::new(renamed))
         }
         Value::NativeFunction { callable, .. } => Value::NativeFunction {
             name: name.into(),

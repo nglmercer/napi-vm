@@ -1515,8 +1515,8 @@ impl ErrorData {
 /// Every variant's inline payload is at most 24 bytes (a `String`), so the
 /// whole enum is 32 bytes. Keeping `Value` small matters: it is returned from
 /// every `eval_expr`/`eval_stmt`/`bin_op` call and cloned on every variable
-/// read. Function/class/error payloads live behind a `Box` — constructing one
-/// allocates, but those are rare next to number/string/identifier traffic.
+/// read. Function payloads use `Rc` so reading a function binding does not
+/// allocate a fresh payload on every call; class and error payloads are boxed.
 #[derive(Debug, Clone)]
 pub enum Value {
     Undefined,
@@ -1528,7 +1528,7 @@ pub enum Value {
         props: Rc<ObjectCell>,
     },
     Array(Rc<ArrayCell>),
-    Function(Box<FunctionData>),
+    Function(Rc<FunctionData>),
     NativeFunction {
         name: Rc<str>,
         callable: fn(&mut Interpreter, Value, Vec<Value>) -> Result<Value, VmErr>,
@@ -2395,16 +2395,20 @@ impl Value {
                 }
             }
             Value::Function(fd) => {
-                if let Some(env) = fd.closure.take() {
-                    crate::interpreter::Environment::drain_chain(env, work);
-                }
-                if let Some(bound) = fd.bound.take()
-                    && let Ok(mut bound) = Rc::try_unwrap(bound)
-                {
-                    work.push(std::mem::replace(&mut bound.target, Value::Undefined));
-                    work.push(std::mem::replace(&mut bound.this_value, Value::Undefined));
-                    if let Ok(mut arguments) = Rc::try_unwrap(bound.arguments) {
-                        work.append(&mut arguments);
+                // A clone shares the function payload. Drain its nested
+                // values only when this is the final owner.
+                if let Some(fd) = Rc::get_mut(fd) {
+                    if let Some(env) = fd.closure.take() {
+                        crate::interpreter::Environment::drain_chain(env, work);
+                    }
+                    if let Some(bound) = fd.bound.take()
+                        && let Ok(mut bound) = Rc::try_unwrap(bound)
+                    {
+                        work.push(std::mem::replace(&mut bound.target, Value::Undefined));
+                        work.push(std::mem::replace(&mut bound.this_value, Value::Undefined));
+                        if let Ok(mut arguments) = Rc::try_unwrap(bound.arguments) {
+                            work.append(&mut arguments);
+                        }
                     }
                 }
             }

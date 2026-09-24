@@ -978,7 +978,11 @@ impl Interpreter {
                         // inherit the enclosing lexical `this` through the
                         // closure chain.
                         if !fd.is_arrow {
-                            vars.push((Key::from("this"), this_val));
+                            let key = self
+                                .this_binding_key
+                                .get_or_insert_with(|| Rc::from("this"))
+                                .clone();
+                            vars.push((key, this_val));
                         }
                         for (i, p) in fd.params.iter().enumerate() {
                             let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
@@ -1063,10 +1067,11 @@ impl Interpreter {
                 let s = std::mem::replace(&mut self.global, fe);
                 // `name` is an `Rc<str>`: cloning it for the stack frame is a
                 // refcount bump, so the hot path allocates nothing here.
-                let fname = fd
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| Rc::<str>::from("<anonymous>"));
+                let fname = fd.name.clone().unwrap_or_else(|| {
+                    self.anonymous_frame_name
+                        .get_or_insert_with(|| Rc::from("<anonymous>"))
+                        .clone()
+                });
                 self.push_frame(fname, Span::unknown());
                 // A function body is a fresh variable scope: `var` and
                 // function declarations hoist to it, lexical ones dead-zone.

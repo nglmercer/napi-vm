@@ -21,7 +21,7 @@ pub(super) fn install(e: &mut Environment) {
     let object_prototype = e
         .get("Object")
         .and_then(|object| object.get_prop("prototype"));
-    let prototype = Value::Function(Box::new(FunctionData {
+    let prototype = Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
         name: Some(Rc::from("")),
         properties: Rc::new(ObjectCell::new(Vec::new(), object_prototype.map(Rc::new))),
@@ -222,7 +222,7 @@ fn function_bind(
         },
     );
 
-    Ok(Value::Function(Box::new(FunctionData {
+    Ok(Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
         name: Some(format!("bound {target_name}").into()),
         properties,
@@ -359,7 +359,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     };
 
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
-    Ok(Value::Function(Box::new(FunctionData {
+    Ok(Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
         name: Some("anonymous".into()),
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),

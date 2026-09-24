@@ -2429,9 +2429,9 @@ fn callable_value(value: &Value) -> bool {
 fn named_accessor(value: Value, name: String) -> Result<Value, VmErr> {
     Ok(match &value {
         Value::Function(function) => {
-            let mut function = function.clone();
-            function.name = Some(name.into());
-            Value::Function(function)
+            let mut renamed = function.as_ref().clone();
+            renamed.name = Some(name.into());
+            Value::Function(Rc::new(renamed))
         }
         Value::NativeFunction { callable, .. } => Value::NativeFunction {
             name: name.into(),
