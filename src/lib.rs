@@ -14,6 +14,7 @@ pub mod lexer;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod lsp;
 pub mod parser;
+pub mod plugin_host;
 pub mod span;
 pub mod value;
 // `wasm` also requires the wasm32 target: the module depends on `js-sys`, which
@@ -45,6 +46,16 @@ pub use interpreter::{
 pub use interpreter::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions};
 pub use lexer::{Lexer, Token};
 pub use parser::{Expr, Parser, Statement};
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+pub use plugin_host::RustPluginNapiOptions;
+pub use plugin_host::{
+    DEFAULT_MAX_PLUGIN_FILE_BYTES, PLUGIN_MANIFEST_FILENAME, PluginHostError, RustLoadedPlugin,
+    RustPluginCapability, RustPluginFunction, RustPluginHost, RustPluginHostOptions,
+    RustPluginManifest, RustPluginPolicy, RustPluginStatus,
+};
 pub use value::Value;
 pub mod bigint;
 pub mod regex;

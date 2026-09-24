@@ -42,6 +42,10 @@ wasm-bindgen = { version = "0.2", optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 
+# O_NOFOLLOW is used only by the Unix filesystem capability facade.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # `file://` URI parsing for the language server. Scoped to native targets
 # because `crate::lsp` (its only consumer) is not compiled for wasm32.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

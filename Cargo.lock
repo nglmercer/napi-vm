@@ -659,6 +659,7 @@ dependencies = [
  "corosensei",
  "criterion",
  "js-sys",
+ "libc",
  "libloading",
  "napi",
  "napi-derive",
