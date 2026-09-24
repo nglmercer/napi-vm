@@ -558,7 +558,7 @@ module.exports = {collected, refStatus, remainsCollected};
             let Value::String(ref vm_json) = vm_value else {
                 panic!("Node-API v{api_version} fixture did not return JSON text");
             };
-            let vm_report: serde_json::Value = serde_json::from_str(&vm_json).unwrap();
+            let vm_report: serde_json::Value = serde_json::from_str(vm_json).unwrap();
             let vm_lifetime_value = interpreter
                 .eval_source("JSON.stringify(require('./lifetime.cjs'));")
                 .unwrap();
@@ -942,7 +942,7 @@ NODE_API_MODULE(napi_vm_node_addon_api_fixture, Init)
         let Value::String(vm_json) = &result else {
             panic!("napi-rs fixture did not return JSON text: {result:?}");
         };
-        let vm_result: serde_json::Value = serde_json::from_str(&vm_json).unwrap();
+        let vm_result: serde_json::Value = serde_json::from_str(vm_json).unwrap();
 
         let runner = "process.stdout.write(JSON.stringify(require('./main.cjs')))";
         if let Ok(node_version) = Command::new("node").arg("--version").output()

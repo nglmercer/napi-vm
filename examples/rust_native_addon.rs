@@ -25,7 +25,7 @@ fn run() -> Result<(), String> {
     let digest = args
         .next()
         .and_then(|value| value.into_string().ok())
-        .ok_or_else(|| usage())?;
+        .ok_or_else(usage)?;
     if args.next().is_some() {
         return Err(usage());
     }

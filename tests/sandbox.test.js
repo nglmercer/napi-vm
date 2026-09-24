@@ -144,10 +144,15 @@ test("cannot escape sandbox via the Function constructor", () => {
   expect(vm.run("new Function('return typeof globalThis.process.mainModule')();")).toBe(
     "undefined",
   );
-  // The `f.constructor.constructor` chain that the escape usually travels
-  // does not exist here at all.
-  expect(vm.run("String((function () {}).constructor);")).toBe("undefined");
-  expect(vm.run("String([].constructor);")).toBe("undefined");
+  // Constructor chains resolve to guest intrinsics. Dynamic source still
+  // runs in this interpreter and cannot reach a host realm.
+  expect(vm.run("(function () {}).constructor === Function;")).toBe("true");
+  expect(vm.run("(function () {}).constructor.constructor === Function;")).toBe("true");
+  expect(
+    vm.run("(function () {}).constructor.constructor('return typeof Deno')();"),
+  ).toBe("undefined");
+  expect(vm.run("[].constructor === Array;")).toBe("true");
+  expect(vm.run("[].constructor.constructor === Function;")).toBe("true");
 });
 
 test("Proxy intercepts guest objects only", () => {
