@@ -14,10 +14,67 @@ inside napi-vm. Let the host choose how native code runs. Node-API addons should
 be portable across supported host platforms; addons that depend on Node's V8,
 NAN, Node C++ APIs, or libuv ABI need a compatible Node runtime.
 
+The Node-API contract is portable; each `.node` binary is still specific to an
+OS, CPU architecture, and its external native dependencies. Select a matching
+prebuild or build the addon for the desktop target.
+
 “Full compatibility” means a published compatibility matrix with differential
 tests, not merely exporting every function name from `node_api.h`. Unknown or
 unsupported behavior must fail with a specific error rather than silently
 returning plausible but incorrect results.
+
+## Guest API and compatibility scope
+
+The guest uses ordinary CommonJS requests:
+
+```js
+const direct = require("./native/example.node");
+const packageAddon = require("example-addon");
+```
+
+`require("module.node")` without `./` is a package request resolved through
+`node_modules`; `require("./module.node")` is a file request relative to the
+requiring module. Both go through napi-vm's resolver and cache. Guest
+JavaScript and JSON execute in the VM, never through host `require()`. The
+guest API uses no VM-specific module namespace.
+
+The in-process target is the stable Node-API C ABI, including addons written
+with `node-addon-api` or Rust bindings such as napi-rs when they only import
+Node-API symbols supported by the selected version. “Full” means complete
+behavior for every API napi-vm advertises, including lifecycle and error
+semantics. It does not mean emulating the distinct V8, NAN, Node C++, or libuv
+ABIs; those addons use the Node sidecar. Node describes Node-API as
+runtime-independent and ABI-stable, while its V8, C++, and libuv interfaces do
+not carry the same cross-major compatibility guarantee ([Node-API](https://nodejs.org/api/n-api.html), [C++ addons](https://nodejs.org/api/addons.html)).
+
+The existing Rust desktop API is already usable as the plan's host entry
+point:
+
+```rust
+use napi_vm::{Interpreter, RustNodeApiOptions};
+
+let mut vm = Interpreter::with_builtins();
+let native_runtime = vm.enable_native_addons(
+    RustNodeApiOptions::new([app_root.clone()])
+        .allow_native_addon_with_sha256(addon_path, trusted_sha256)
+        .entry(app_root.join("main.cjs")),
+)?;
+vm.eval_source(r#"
+  const addon = require("./native/example.node");
+  addon.run();
+"#)?;
+native_runtime.shutdown()?;
+```
+
+For a pure Rust desktop build, depend on the crate with default features off
+and `node-api-host` enabled. Building that feature also requires a C compiler
+for the small Node-API ABI shim. Native addons remain explicitly enabled,
+allowlisted, and digest-pinned because they run with the desktop process's OS
+privileges.
+
+This document is the delivery roadmap. The more detailed per-API implementation
+notes and known behavior differences are tracked in
+[the Node addon runtime plan](node-addon-runtime-plan.md).
 
 ## Existing foundation
 
@@ -55,6 +112,17 @@ returning plausible but incorrect results.
   format, and architecture checks to desktop hosts without invoking an addon
   initializer. Each backend uses the same check when it later loads the addon.
 
+## Current compatibility status
+
+| Area | Current state | Remaining work |
+| --- | --- | --- |
+| CommonJS `require()` | VM resolver handles JS, JSON, direct `.node`, package exports, cache, cycles, and configured native prebuild helpers. | Audit parity against the supported Node resolution contract and retain differential tests for each behavior. |
+| Node sidecar | Uses a configured Node executable and provides the broadest addon compatibility. | Package and ship the selected Node runtime for desktop apps; keep this backend explicit. |
+| Rust Node-API host | Opt-in `node-api-host`; broad but partial Node-API v1-v10 behavior. Missing imported symbols fail during load. | Complete the advertised stable API surface. A max-version setting is not a completeness claim. |
+| Backend selection | The host explicitly chooses `NodeSidecar` or `RustNodeApi`. | Add `Auto` only after preflight can prove backend suitability without running addon initialization. |
+| Platforms | Linux runtime tests pass; Windows GNU has cross-build/Wine coverage. | Add native macOS, Windows MSVC, and Windows GNU CI before advertising those targets as verified. |
+| Guest module names | Plugin APIs use standard `node:` facades or package names. | Keep guest fixtures and docs free of VM-specific module specifiers. |
+
 ## Public host configuration
 
 Keep current APIs working. `NativeAddonPolicy` shares filesystem roots, the
@@ -83,8 +151,11 @@ The backend choices should be:
 - `NodeSidecar`: use the configured Node binary for Node-API and Node-ABI
   addons.
 - `Auto`: preflight the binary and choose a compatible backend before running
-  its initializer. Never retry in another backend after addon initialization
-  has started, since initialization can have side effects.
+  its initializer. Base this decision on explicit package metadata or static
+  import/dependency inspection. Never probe by loading the library, and never
+  retry in another backend after initialization starts, since library
+  constructors and addon initialization can have side effects. If inspection
+  is inconclusive, require an explicit backend choice.
 
 The guest keeps using `require()`. Backend choice, host process, integrity
 checks, and transport stay in Rust host configuration. Keep native loading
@@ -100,6 +171,9 @@ disabled unless explicitly enabled and allowlisted.
   host `require()` for arbitrary package JavaScript.
 - Maintain a checked-in Node-API inventory by version and function, with
   statuses `implemented`, `partial`, `unsupported`, and `not applicable`.
+- Include imported symbols from representative C, C++ `node-addon-api`, and
+  napi-rs addons; distinguish stable Node-API from experimental functions and
+  Node-runtime-specific imports.
 - Record whether each function is stable, experimental, or Node-specific, and
   its expected behavior during initialization, callbacks, and teardown.
 - Give every unsupported import or operation a diagnostic naming the API,
@@ -181,18 +255,26 @@ the compatibility matrix clearly marks any remaining GC differences.
 
 ### 5. Build the differential addon suite
 
-- Compile small C/C++ addon fixtures against pinned Node headers and run each
-  same guest fixture under Node, Bun where applicable, and napi-vm.
+- Compile small C and C++ `node-addon-api` fixtures against pinned Node
+  headers, plus a small napi-rs addon, and run each same guest fixture under
+  Node, Bun where applicable, and napi-vm. Keep the fixture source identical
+  between runtimes.
 - Compare structured results: status, stdout, values, error names/messages,
   callback order, and shutdown events. Normalize only unstable data such as
   paths and stack traces.
 - Organize cases by Node-API version and behavior family. Include package
   wrappers, direct `.node` imports, conditional exports, prebuild selection,
   circular loads, nested callbacks, worker completions, and permissions.
+- Include both `require("./fixture.node")` and bare package requests such as
+  `require("fixture")`; test extension fallback, `exports` conditions, and
+  `require.resolve()` without triggering addon initialization.
 - Classify each difference as module resolution, missing API, wrong semantics,
   event-loop ordering, host bridge, sandbox policy, native ABI, or runtime
   difference. Node is the primary reference; preserve Bun differences as
   explicit observations instead of treating them as Node's contract.
+- Give every discovered mismatch a regression fixture or a documented,
+  runtime-specific result. Normalize paths and unstable stack details only;
+  do not normalize observable API behavior.
 - Run security cases for traversal, symlinks, changed hashes, unlisted binaries,
   unsupported ABI files, malformed exports, and initialization failure.
 
@@ -207,6 +289,8 @@ every claimed supported API family has a passing Node differential fixture.
   shutdown behavior, and architecture checks on every supported target.
 - Document build-time C compiler requirements, required runtime files, Node
   sidecar packaging, and how applications supply trusted SHA-256 manifests.
+- Provide a Rust desktop example that selects each backend, runs the same
+  CommonJS entry, pumps external events, and shuts down deterministically.
 - Publish a support table for OS, architecture, backend, Node-API version, and
   known gaps.
 
