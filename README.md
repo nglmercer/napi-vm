@@ -196,6 +196,23 @@ runtime.enable_rust_node_api_addons(
 let result = runtime.eval_source("require('example').run();")?;
 ```
 
+Packages whose JavaScript entry calls
+`require('node-gyp-build')(__dirname)` can keep that wrapper. Configure the
+selected prebuild without aliasing over the package entry:
+
+```rust
+let package_root = app_root.join("node_modules/example");
+let digest: [u8; 32] = trusted_manifest_digest();
+runtime.enable_rust_node_api_addons(
+    RustNodeApiOptions::new([app_root.clone()])
+        .allow_native_package_prebuild_with_sha256(&package_root, digest),
+)?;
+```
+
+The Rust host provides the common `node-gyp-build(dir)`, `.path(dir)`, and
+`.resolve(dir)` calls. The selected `.node` file still passes through the
+configured root and digest allowlist.
+
 The resolver checks `build/Release`, `build/Debug`, and
 `prebuilds/<platform>-<arch>`. Within `prebuilds`, it selects N-API-tagged
 files for the current platform and architecture. On Linux it also matches

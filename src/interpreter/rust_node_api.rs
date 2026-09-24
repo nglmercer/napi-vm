@@ -120,6 +120,7 @@ pub struct RustNodeApiOptions {
     roots: Vec<PathBuf>,
     allowed_addons: Vec<(PathBuf, Option<[u8; 32]>)>,
     native_prebuild_aliases: Vec<NativePrebuildAlias>,
+    native_package_prebuilds: Vec<NativePackagePrebuild>,
     entry: Option<PathBuf>,
     reported_node_version: ReportedNodeVersion,
     max_napi_version: u32,
@@ -128,6 +129,12 @@ pub struct RustNodeApiOptions {
 #[derive(Clone, Debug)]
 struct NativePrebuildAlias {
     request: String,
+    package_root: PathBuf,
+    expected_sha256: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Debug)]
+struct NativePackagePrebuild {
     package_root: PathBuf,
     expected_sha256: Option<[u8; 32]>,
 }
@@ -169,6 +176,7 @@ impl RustNodeApiOptions {
             roots: roots.into_iter().map(Into::into).collect(),
             allowed_addons: Vec::new(),
             native_prebuild_aliases: Vec::new(),
+            native_package_prebuilds: Vec::new(),
             entry: None,
             reported_node_version: ReportedNodeVersion::NAPI_VM,
             max_napi_version: MAX_NODE_API_VERSION as u32,
@@ -219,6 +227,32 @@ impl RustNodeApiOptions {
     ) -> Self {
         self.native_prebuild_aliases.push(NativePrebuildAlias {
             request: request.into(),
+            package_root: package_root.into(),
+            expected_sha256: Some(expected_sha256),
+        });
+        self
+    }
+
+    /// Allow the selected Node-API prebuild to load through a package's
+    /// JavaScript wrapper that calls `require('node-gyp-build')(__dirname)`.
+    /// Unlike [`Self::allow_native_prebuild`], this preserves the JavaScript
+    /// package entry point and pins the binary selected for this host.
+    pub fn allow_native_package_prebuild(mut self, package_root: impl Into<PathBuf>) -> Self {
+        self.native_package_prebuilds.push(NativePackagePrebuild {
+            package_root: package_root.into(),
+            expected_sha256: None,
+        });
+        self
+    }
+
+    /// Allow a package wrapper to load a selected prebuild only when it
+    /// matches a digest from trusted host metadata.
+    pub fn allow_native_package_prebuild_with_sha256(
+        mut self,
+        package_root: impl Into<PathBuf>,
+        expected_sha256: [u8; 32],
+    ) -> Self {
+        self.native_package_prebuilds.push(NativePackagePrebuild {
             package_root: package_root.into(),
             expected_sha256: Some(expected_sha256),
         });
@@ -9759,6 +9793,19 @@ impl Interpreter {
             };
             loader = loader.with_native_addon_alias(&alias.request, &addon_path)?;
         }
+        for package in &options.native_package_prebuilds {
+            let addon = loader.resolve_node_api_prebuild(&package.package_root)?;
+            let addon_path = PathBuf::from(addon.filename);
+            loader = match package.expected_sha256 {
+                Some(expected_sha256) => {
+                    loader.allow_native_addon_with_sha256(&addon_path, expected_sha256)?
+                }
+                None => loader.allow_native_addon(&addon_path)?,
+            };
+        }
+        if !options.native_package_prebuilds.is_empty() {
+            loader = loader.with_node_gyp_build_compat();
+        }
         let entry = validate_entry(&loader, options.entry)?;
         let host = Rc::new(RustNodeApiHost::new(
             self.persistent_global.clone(),
@@ -10346,23 +10393,38 @@ NAPI_MODULE(prebuild_fixture, initialize)
             r#"{"name":"prebuilt","main":"index.cjs"}"#,
         )
         .unwrap();
+        let node_gyp_build = root.join("node_modules/node-gyp-build");
+        fs::create_dir_all(&node_gyp_build).unwrap();
+        fs::write(
+            node_gyp_build.join("index.cjs"),
+            format!(
+                "const path = require('node:path'); const tuple = {tuple:?}; function resolve(dir) {{ return path.join(dir, 'prebuilds', tuple, 'node.napi.node'); }} function load(dir) {{ return require(resolve(dir)); }} load.path = load.resolve = resolve; module.exports = load;"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            node_gyp_build.join("package.json"),
+            r#"{"name":"node-gyp-build","main":"index.cjs"}"#,
+        )
+        .unwrap();
         fs::write(
             package_root.join("index.cjs"),
-            format!("module.exports = require('./prebuilds/{tuple}/node.napi.node');"),
+            "const load = require('node-gyp-build'); const filename = load.path(__dirname); const addon = load(__dirname); module.exports = {kind: addon.kind, filename, helperPath: require.resolve('node-gyp-build'), resolved: load.resolve(__dirname) === filename, aliases: load.path === load.resolve, nativeCached: addon === require(filename)};",
         )
         .unwrap();
         let main = root.join("main.cjs");
         fs::write(
             &main,
-            "const addon = require('prebuilt'); module.exports = {kind: addon.kind, cached: addon === require('prebuilt')};",
+            "const addon = require('prebuilt'); module.exports = {...addon, packageCached: addon === require('prebuilt')};",
         )
         .unwrap();
+        let digest: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
 
         let mut interpreter = Interpreter::with_builtins();
         interpreter
             .enable_rust_node_api_addons(
                 RustNodeApiOptions::new([root.clone()])
-                    .allow_native_prebuild("prebuilt", &package_root)
+                    .allow_native_package_prebuild_with_sha256(&package_root, digest)
                     .entry(&main),
             )
             .unwrap();

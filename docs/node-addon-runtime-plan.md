@@ -412,8 +412,11 @@ not return success with a partial or fabricated result.
   Node-API initializer, replace it with the returned exports on success, and
   remove the entry after initialization failure so the next `require()` can
   retry.
-- [ ] The adapter does not implement the complete `node-gyp-build` JavaScript
-  API or its `EXEC_PATH`, `PREBUILDS_ONLY`, and runtime-specific Node ABI/uv
+- [x] Provide the common `node-gyp-build(dir)`, `.path(dir)`, and `.resolve(dir)`
+  calls to Rust Node-API package wrappers while preserving their JavaScript
+  entry point and the binary allowlist.
+- [ ] Complete the `node-gyp-build` helper surface, including `parseTags` /
+  `matchTags`, `EXEC_PATH`, `PREBUILDS_ONLY`, and runtime-specific Node ABI/uv
   selection behavior.
 - Keep native path resolution in the Rust package loader. Support common
   package export conditions and platform prebuild layouts without running
@@ -432,6 +435,9 @@ not return success with a partial or fabricated result.
   structured result. Bun 1.4.0 rejects this initializer path with a module
   error; the fixture reports it as `HOST_BRIDGE` and continues the Node/VM
   comparison.
+- [x] A Node-API prebuild fixture uses the same package wrapper source under
+  Node, Bun, and napi-vm. The wrapper loads through `node-gyp-build(dir)`, and
+  `.path()` / `.resolve()` return the selected trusted prebuild.
 - Build small C fixtures against selected Node-API versions. Each fixture
   should exercise one API family and run with the same JS wrapper under Node,
   Bun where supported, and `napi-vm`.

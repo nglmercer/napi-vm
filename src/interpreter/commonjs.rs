@@ -26,6 +26,8 @@ pub enum CommonJsModuleFormat {
     JavaScript,
     Json,
     NativeAddon,
+    /// A runtime-provided CommonJS helper with no filesystem source file.
+    RuntimeBuiltin,
 }
 
 /// One resolved CommonJS module. `id` is the stable cache key; `filename` is
@@ -35,8 +37,9 @@ pub struct ResolvedCommonJsModule {
     pub id: String,
     pub filename: String,
     pub format: CommonJsModuleFormat,
-    /// The exact source text for JavaScript and JSON. Native addons have no
-    /// source text and are represented by `None`.
+    /// The exact source text for JavaScript and JSON. Native addons and
+    /// runtime-provided modules have no source text and are represented by
+    /// `None`.
     pub source: Option<String>,
 }
 
@@ -83,6 +86,17 @@ pub trait CommonJsModuleLoader {
     ) -> Result<Value, VmErr> {
         self.load_native_addon_with_exports(module, exports)
     }
+
+    /// Resolve a trusted Node-API prebuild for a guest `node-gyp-build(dir)`
+    /// call. The default loader has no platform prebuild policy.
+    fn resolve_node_api_prebuild_for_package(
+        &self,
+        _package_root: &Path,
+    ) -> Result<ResolvedCommonJsModule, VmErr> {
+        Err(VmErr::Msg(
+            "Node-API prebuild resolution is not configured for this CommonJS loader".into(),
+        ))
+    }
 }
 
 /// Allowlisted native addon provider hook.
@@ -128,6 +142,7 @@ pub struct FileCommonJsLoader {
     native_addons: Option<Rc<dyn NativeAddonLoader>>,
     allowed_native_addons: HashMap<PathBuf, [u8; 32]>,
     native_addon_aliases: HashMap<String, PathBuf>,
+    node_gyp_build_compat: bool,
 }
 
 impl std::fmt::Debug for FileCommonJsLoader {
@@ -137,6 +152,7 @@ impl std::fmt::Debug for FileCommonJsLoader {
             .field("native_addons", &self.native_addons.is_some())
             .field("allowed_native_addons", &self.allowed_native_addons)
             .field("native_addon_aliases", &self.native_addon_aliases)
+            .field("node_gyp_build_compat", &self.node_gyp_build_compat)
             .finish()
     }
 }
@@ -177,6 +193,7 @@ impl FileCommonJsLoader {
             native_addons: None,
             allowed_native_addons: HashMap::new(),
             native_addon_aliases: HashMap::new(),
+            node_gyp_build_compat: false,
         })
     }
 
@@ -184,6 +201,14 @@ impl FileCommonJsLoader {
     /// resolved `.node` file fails with a clear configuration error.
     pub fn with_native_addon_loader(mut self, loader: Rc<dyn NativeAddonLoader>) -> Self {
         self.native_addons = Some(loader);
+        self
+    }
+
+    /// Provide the Node-API subset of `node-gyp-build` used by package entry
+    /// points: callable loading plus `.path()` and `.resolve()` selection.
+    /// Binary loading still passes through the normal root and digest policy.
+    pub fn with_node_gyp_build_compat(mut self) -> Self {
+        self.node_gyp_build_compat = true;
         self
     }
 
@@ -883,7 +908,33 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
         request: &str,
         parent: Option<&str>,
     ) -> Result<ResolvedCommonJsModule, VmErr> {
+        if self.node_gyp_build_compat && request == "node-gyp-build" {
+            let (id, filename) = match self.resolve_request(request, parent) {
+                Ok(path) => {
+                    let filename = path.to_string_lossy().into_owned();
+                    (filename.clone(), filename)
+                }
+                Err(error) if error.to_string() == "Cannot find module 'node-gyp-build'" => {
+                    let builtin = "napi-vm:node-gyp-build".to_string();
+                    (builtin.clone(), builtin)
+                }
+                Err(error) => return Err(error),
+            };
+            return Ok(ResolvedCommonJsModule {
+                id,
+                filename,
+                format: CommonJsModuleFormat::RuntimeBuiltin,
+                source: None,
+            });
+        }
         self.resolved_file(self.resolve_request(request, parent)?)
+    }
+
+    fn resolve_node_api_prebuild_for_package(
+        &self,
+        package_root: &Path,
+    ) -> Result<ResolvedCommonJsModule, VmErr> {
+        self.resolve_node_api_prebuild(package_root)
     }
 
     fn load_native_addon(&self, module: &ResolvedCommonJsModule) -> Result<Value, VmErr> {
@@ -1444,6 +1495,17 @@ pub(super) fn require_module(
             Ok(exports)
         }
         CommonJsModuleFormat::JavaScript => evaluate_commonjs_source(interp, module),
+        CommonJsModuleFormat::RuntimeBuiltin => {
+            let exports = make_node_gyp_build(interp)?;
+            interp.commonjs_cache.borrow_mut().insert(
+                module.id,
+                CommonJsCacheEntry {
+                    exports: exports.clone(),
+                    module: None,
+                },
+            );
+            Ok(exports)
+        }
     }
 }
 
@@ -1589,6 +1651,82 @@ pub(super) fn make_require(
     interp.pop_scope(outer);
     interp.source_lines = old_source_lines;
     result
+}
+
+fn make_node_gyp_build(interp: &mut crate::interpreter::Interpreter) -> Result<Value, VmErr> {
+    const LOAD_SOURCE: &str =
+        "(function nodeGypBuild(directory) { return __napi_vm_node_gyp_build_load(directory); })";
+    const RESOLVE_SOURCE: &str = "(function nodeGypBuildResolve(directory) { return __napi_vm_node_gyp_build_resolve(directory); })";
+
+    let outer = interp.push_scope();
+    let old_source_lines = std::mem::take(&mut interp.source_lines);
+    let result = (|| {
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_load",
+            Value::NativeFunction {
+                name: "node-gyp-build".into(),
+                callable: node_gyp_build_load,
+            },
+        )?;
+        interp.set_binding(
+            "__napi_vm_node_gyp_build_resolve",
+            Value::NativeFunction {
+                name: "node-gyp-build.resolve".into(),
+                callable: node_gyp_build_resolve,
+            },
+        )?;
+        let load = compile_guest_function(interp, LOAD_SOURCE)?;
+        let resolve = compile_guest_function(interp, RESOLVE_SOURCE)?;
+        load.set_prop("path".into(), resolve.clone())?;
+        load.set_prop("resolve".into(), resolve)?;
+        Ok(load)
+    })();
+    interp.pop_scope(outer);
+    interp.source_lines = old_source_lines;
+    result
+}
+
+fn compile_guest_function(
+    interp: &mut crate::interpreter::Interpreter,
+    source: &str,
+) -> Result<Value, VmErr> {
+    interp.set_source(source);
+    let tokens = crate::lexer::Lexer::new(source).tokenize_with_spans();
+    let mut parser = crate::parser::Parser::new_with_spans(tokens);
+    let statements = parser
+        .parse_program()
+        .map_err(|error| VmErr::Msg(error.to_string()))?;
+    interp.run_program_body(&statements)
+}
+
+fn node_gyp_build_resolve(
+    interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Some(Value::String(package_root)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: node-gyp-build expects a package directory string".into(),
+        ));
+    };
+    let loader = interp
+        .commonjs_loader
+        .clone()
+        .ok_or_else(|| VmErr::Msg("node-gyp-build requires a configured CommonJS loader".into()))?;
+    let module = loader.resolve_node_api_prebuild_for_package(Path::new(package_root))?;
+    Ok(Value::String(module.filename))
+}
+
+fn node_gyp_build_load(
+    interp: &mut crate::interpreter::Interpreter,
+    _this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let filename = node_gyp_build_resolve(interp, Value::Undefined, args)?;
+    let Value::String(filename) = &filename else {
+        unreachable!("node-gyp-build resolve returns a string")
+    };
+    interp.require_commonjs(filename, None)
 }
 
 pub(super) fn json_to_guest(value: JsonValue) -> Result<Value, VmErr> {
