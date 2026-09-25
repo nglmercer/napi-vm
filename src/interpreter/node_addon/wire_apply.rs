@@ -199,6 +199,7 @@ pub(super) fn apply_guest_mutation(
                 }
             }
             drop(slots);
+            props.note_mutated();
             let mut meta = props.meta.borrow_mut();
             for key in &deleted {
                 meta.forget(key);
@@ -295,6 +296,7 @@ pub(super) fn apply_guest_mutation(
                     statics.push((key, value));
                 }
             }
+            class.statics.note_mutated();
         }
         ("array", Value::Array(array)) => {
             let requested_length = mutation
@@ -766,6 +768,7 @@ pub(super) fn wire_to_guest_with_context(
                 .unwrap_or(GuestPrototypeState::Default);
             if let Value::Object { props } = &object {
                 *props.borrow_mut() = slots;
+                props.note_mutated();
                 let mut meta = props.meta.borrow_mut();
                 for (key, value, symbol) in attrs {
                     meta.set_attrs(&key, value);

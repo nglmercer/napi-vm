@@ -423,6 +423,7 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
                 slots.remove(index);
                 drop(slots);
                 props.meta.borrow_mut().forget(&key);
+                props.note_mutated();
             }
             Ok(true)
         }
@@ -438,6 +439,7 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
             drop(slots);
             class.statics.meta.borrow_mut().forget(&key);
             class.statics.meta.borrow_mut().forget(&companion);
+            class.statics.note_mutated();
             Ok(true)
         }
         Value::Function(function) => {
@@ -462,6 +464,7 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
                 .retain(|(name, _)| name != &key && name != &companion);
             function.properties.meta.borrow_mut().forget(&key);
             function.properties.meta.borrow_mut().forget(&companion);
+            function.properties.note_mutated();
             Ok(true)
         }
         Value::HostFunction { properties, .. } => {
@@ -476,6 +479,7 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
                 .retain(|(name, _)| name != &key && name != &companion);
             properties.meta.borrow_mut().forget(&key);
             properties.meta.borrow_mut().forget(&companion);
+            properties.note_mutated();
             Ok(true)
         }
         Value::Array(array) => {

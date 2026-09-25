@@ -408,6 +408,7 @@ impl Interpreter {
                     slots.remove(index);
                     drop(slots);
                     props.meta.borrow_mut().forget(&slot);
+                    props.note_mutated();
                 }
                 Ok(Value::Bool(true))
             }
@@ -425,6 +426,7 @@ impl Interpreter {
                     .retain(|(name, _)| name != &slot && name != &companion);
                 class.statics.meta.borrow_mut().forget(&slot);
                 class.statics.meta.borrow_mut().forget(&companion);
+                class.statics.note_mutated();
                 Ok(Value::Bool(true))
             }
             Value::Function(function) => {
@@ -452,6 +454,7 @@ impl Interpreter {
                     .retain(|(name, _)| name != &slot && name != &companion);
                 function.properties.meta.borrow_mut().forget(&slot);
                 function.properties.meta.borrow_mut().forget(&companion);
+                function.properties.note_mutated();
                 Ok(Value::Bool(true))
             }
             Value::HostFunction { properties, .. } => {
@@ -467,6 +470,7 @@ impl Interpreter {
                     .retain(|(name, _)| name != &slot && name != &companion);
                 properties.meta.borrow_mut().forget(&slot);
                 properties.meta.borrow_mut().forget(&companion);
+                properties.note_mutated();
                 Ok(Value::Bool(true))
             }
             // Deleting an array element leaves an absent slot while reads
@@ -587,13 +591,16 @@ impl Interpreter {
         if props.meta.borrow().non_extensible {
             return Ok(());
         }
-        let mut slots = props.borrow_mut();
-        if slots.len() >= crate::value::MAX_OBJECT_PROPS {
-            return Err(crate::value::limit_err(
-                "Maximum object property count exceeded",
-            ));
+        {
+            let mut slots = props.borrow_mut();
+            if slots.len() >= crate::value::MAX_OBJECT_PROPS {
+                return Err(crate::value::limit_err(
+                    "Maximum object property count exceeded",
+                ));
+            }
+            slots.push((key.to_owned(), value));
         }
-        slots.push((key.to_owned(), value));
+        props.note_key_added(key);
         Ok(())
     }
 

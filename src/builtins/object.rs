@@ -1121,6 +1121,9 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
             }
         }
     }
+    // Redefines add, drop, or convert slots (accessor companions): the
+    // layout changed in ways a single transition cannot describe.
+    c.note_mutated();
     let mut meta = c.meta.borrow_mut();
     meta.set_attrs(key, attrs);
     if new_is_accessor {

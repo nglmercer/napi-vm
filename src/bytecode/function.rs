@@ -63,6 +63,11 @@ pub struct BytecodeFunction {
     /// frame environment; arrows never seed (they would shadow the
     /// captured one) and pass the need outward to their definer instead.
     pub captures_arguments: bool,
+    /// Per-instruction property inline caches, parallel to `code`: only
+    /// `GetProp`/`SetProp` sites use their slot, the rest stay empty.
+    /// Cells only, so the VM probes and fills with plain loads and stores
+    /// and no borrow can span a re-entrant slow path.
+    pub caches: Box<[crate::shape::PropCache]>,
 }
 
 impl BytecodeFunction {

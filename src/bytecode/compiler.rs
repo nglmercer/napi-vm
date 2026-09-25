@@ -878,9 +878,11 @@ impl<'a> Compiler<'a> {
             u16::try_from(parameter_count).map_err(|_| Decline::Func("too many parameters"))?;
         let local_count =
             u16::try_from(self.slots.len()).map_err(|_| Decline::Func("too many locals"))?;
+        let code = std::mem::take(&mut self.code);
+        let caches = vec![crate::shape::PropCache::empty(); code.len()].into_boxed_slice();
         Ok(BytecodeFunction {
             name,
-            code: std::mem::take(&mut self.code),
+            code,
             constants: std::mem::take(&mut self.constants),
             register_count: self.max_reg,
             local_count,
@@ -890,6 +892,7 @@ impl<'a> Compiler<'a> {
             is_arrow,
             is_constructor,
             captures_arguments: self.captures_arguments,
+            caches,
         })
     }
 

@@ -566,6 +566,12 @@ impl std::ops::Deref for ArrayCell {
 pub struct ObjectCell {
     slots: RefCell<Vec<(String, Value)>>,
     pub meta: RefCell<ObjectMeta>,
+    /// Cached canonical layout of the slot keys, built lazily on first
+    /// indexed access. A cache, never authority: every indexed read
+    /// verifies the key at the slot, and any mismatch rebuilds from the
+    /// slots — so mutations that bypass the maintaining methods (host
+    /// bridges writing through the `Deref`) only cost a rebuild.
+    shape: RefCell<Option<Rc<crate::shape::Shape>>>,
 }
 
 impl ObjectCell {
@@ -576,6 +582,7 @@ impl ObjectCell {
                 proto,
                 ..ObjectMeta::default()
             }),
+            shape: RefCell::new(None),
         }
     }
 
@@ -586,6 +593,7 @@ impl ObjectCell {
                 uses_default_prototype: true,
                 ..ObjectMeta::default()
             }),
+            shape: RefCell::new(None),
         }
     }
 
@@ -628,7 +636,99 @@ impl ObjectCell {
         };
         slots.clear();
         meta.proto = None;
+        // The layout is empty now; drop the cached shape so a later access
+        // rebuilds instead of answering from a stale layout.
+        if let Ok(mut shape) = self.shape.try_borrow_mut() {
+            *shape = None;
+        }
         true
+    }
+
+    /// Own slot index of `key`: the cached shape answers in O(1) when it
+    /// agrees with the slots, and any disagreement — a key the shape does
+    /// not know, an index whose key moved — falls back to the linear scan
+    /// and rebuilds the shape from the slots. Absence the shape and the
+    /// scan agree on keeps the shape untouched, so prototype-chain misses
+    /// cost exactly what they always did.
+    pub(crate) fn own_index(&self, key: &str) -> Option<usize> {
+        let slots = self.slots.borrow();
+        let cached = self.shape.borrow().clone();
+        if let Some(shape) = &cached
+            && let Some(index) = shape.slot_of(key)
+            && slots.get(index).is_some_and(|(k, _)| k == key)
+        {
+            return Some(index);
+        }
+        let found = slots.iter().position(|(k, _)| k == key);
+        let agree = cached.as_ref().is_some_and(|shape| {
+            // Agreed absence is the only keep: anything else means the
+            // shape is missing, stale, or disagrees, and rebuilds.
+            shape.slot_of(key).is_none() && found.is_none()
+        });
+        if !agree {
+            *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
+                slots.iter().map(|(k, _)| k.as_str()),
+            ));
+        }
+        found
+    }
+
+    /// Clone the value at `index` after checking it still holds `key`.
+    /// Inline-cache hits land here: the guard already matched the shape id,
+    /// and this check is what keeps a stale shape from misreading.
+    pub(crate) fn slot_verified(&self, index: usize, key: &str) -> Option<Value> {
+        let slots = self.slots.borrow();
+        let (k, v) = slots.get(index)?;
+        (k == key).then(|| v.clone())
+    }
+
+    /// Clone an own property's raw slot value (bindings unresolved), if
+    /// present. The indexed equivalent of the linear search it replaces.
+    pub(crate) fn own_value(&self, key: &str) -> Option<Value> {
+        let index = self.own_index(key)?;
+        self.slot_verified(index, key)
+    }
+
+    /// This object's current shape id, building the shape on first access.
+    /// The id may lag a bypass mutation; every consumer verifies the key
+    /// at the slot before trusting an id-indexed answer.
+    pub(crate) fn shape_id(&self) -> u32 {
+        if let Some(shape) = self.shape.borrow().clone() {
+            return shape.id;
+        }
+        let slots = self.slots.borrow();
+        let shape =
+            crate::shape::Shape::rebuild(slots.iter().map(|(k, _)| k.as_str()));
+        let id = shape.id;
+        *self.shape.borrow_mut() = Some(shape);
+        id
+    }
+
+    /// Record a genuinely new key pushed onto the slots: follow the memoized
+    /// transition so identically-built objects keep sharing one shape. A key
+    /// the shape already knows means the push surprised the cache (or the
+    /// shape lagged a bypass), so rebuild instead of forking a duplicate.
+    pub(crate) fn note_key_added(&self, key: &str) {
+        let cached = self.shape.borrow().clone();
+        let Some(shape) = cached else {
+            // Unbuilt shapes build lazily with the key already in place.
+            return;
+        };
+        if shape.slot_of(key).is_some() {
+            let slots = self.slots.borrow();
+            *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
+                slots.iter().map(|(k, _)| k.as_str()),
+            ));
+        } else {
+            *self.shape.borrow_mut() = Some(shape.add(key));
+        }
+    }
+
+    /// Forget the cached layout after a bulk mutation (delete, redefine,
+    /// wholesale host-side replace). The next indexed access rebuilds from
+    /// the slots; until then the object behaves exactly as before shapes.
+    pub(crate) fn note_mutated(&self) {
+        *self.shape.borrow_mut() = None;
     }
 }
 
@@ -641,22 +741,23 @@ impl std::ops::Deref for ObjectCell {
 
 fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmErr> {
     let writable = props.meta.borrow().attrs_of(&key).writable;
-    let mut slots = props.borrow_mut();
-    for (name, value) in slots.iter_mut() {
-        if name == &key {
-            if writable {
-                *value = val;
-            }
-            return Ok(());
+    if let Some(index) = props.own_index(&key) {
+        if writable {
+            props.borrow_mut()[index].1 = val;
         }
+        return Ok(());
     }
     if props.meta.borrow().non_extensible {
         return Ok(());
     }
-    if slots.len() >= MAX_OBJECT_PROPS {
-        return Err(limit_err("Maximum object property count exceeded"));
+    {
+        let mut slots = props.borrow_mut();
+        if slots.len() >= MAX_OBJECT_PROPS {
+            return Err(limit_err("Maximum object property count exceeded"));
+        }
+        slots.push((key.clone(), val));
     }
-    slots.push((key, val));
+    props.note_key_added(&key);
     Ok(())
 }
 
@@ -797,6 +898,10 @@ impl FunctionData {
                 },
             );
         }
+        drop(properties);
+        // Runs once per function: materializing `length`/`name` changes the
+        // layout, and the next indexed access rebuilds the shape for it.
+        self.properties.note_mutated();
     }
 
     /// Return the function's own `prototype` property, creating the standard
@@ -2259,7 +2364,7 @@ impl Value {
                         Value::HostFunction { properties, .. } => properties,
                         _ => return None,
                     };
-                    if let Some((_, value)) = props.borrow().iter().find(|(name, _)| name == key) {
+                    if let Some(value) = props.own_value(key) {
                         return Some(value.deref_binding());
                     }
                     let Some(next) = props.proto() else {
@@ -2357,7 +2462,7 @@ impl Value {
                         Value::HostFunction { properties, .. } => properties,
                         _ => return false,
                     };
-                    if props.borrow().iter().any(|(name, _)| name == key) {
+                    if props.own_index(key).is_some() {
                         return true;
                     }
                     let Some(next) = props.proto() else {

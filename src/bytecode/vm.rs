@@ -199,6 +199,107 @@ fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) -> Result<()
     Ok(())
 }
 
+/// Property storage of the cell-backed receivers an inline cache serves:
+/// ordinary objects, classes, and functions. Arrays, strings, proxies,
+/// and primitives always take the slow path.
+fn cached_cell(obj: &Value) -> Option<&Rc<crate::value::ObjectCell>> {
+    match obj {
+        Value::Object { props } => Some(props),
+        Value::Class(class) => Some(&class.statics),
+        Value::Function(function) => Some(&function.properties),
+        Value::HostFunction { properties, .. } => Some(properties),
+        _ => None,
+    }
+}
+
+/// Whether `value` is a getter or setter for `key`: the `get {key}` /
+/// `set {key}` naming the evaluator recognizes. Mirrors the check in
+/// `get_prop_value` so cached reads invoke accessors exactly when the
+/// slow path would — by not caching them at all.
+fn is_accessor_for(value: &Value, key: &str) -> bool {
+    let name = match value {
+        Value::Function(function) => function.name.as_deref(),
+        Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
+            Some(name.as_ref())
+        }
+        _ => return false,
+    };
+    name.is_some_and(|name| {
+        name.strip_prefix("get ").is_some_and(|rest| rest == key)
+            || name.strip_prefix("set ").is_some_and(|rest| rest == key)
+    })
+}
+
+/// `GetProp` through this site's inline cache. A hit answers an own data
+/// slot directly; misses, accessors, and exotic receivers run the full
+/// lookup, which fills the cache when it resolved an own data slot. Filling
+/// is sound without comparing values: an own data slot shadows the whole
+/// prototype chain, so the slow path necessarily returned it.
+fn get_prop_cached(
+    interp: &mut Interpreter,
+    function: &BytecodeFunction,
+    site: usize,
+    obj: &Value,
+    key: &Value,
+) -> Result<Value, VmErr> {
+    let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
+        return interp.get_prop_value(obj, key);
+    };
+    let cache = &function.caches[site];
+    if let Some(index) = cache.probe(props.shape_id())
+        && let Some(value) = props.slot_verified(index, name)
+        && !is_accessor_for(&value, name)
+    {
+        return Ok(value.deref_binding());
+    }
+    let value = interp.get_prop_value(obj, key)?;
+    if let Some(index) = props.own_index(name)
+        && let Some(slot) = props.slot_verified(index, name)
+        && !is_accessor_for(&slot, name)
+    {
+        cache.fill(props.shape_id(), index);
+    }
+    Ok(value)
+}
+
+/// `SetProp` through this site's inline cache. A hit writes an own,
+/// writable data slot directly; anything else — misses, accessors,
+/// readonly properties, new keys, exotic receivers — runs the full
+/// assignment, which fills the cache when the outcome was an own,
+/// writable data slot (a fresh key included: its shape is current by
+/// the time the slow path returns).
+fn set_prop_cached(
+    interp: &mut Interpreter,
+    function: &BytecodeFunction,
+    site: usize,
+    obj: &Value,
+    key: &Value,
+    val: Value,
+) -> Result<(), VmErr> {
+    let (Some(props), Value::String(name)) = (cached_cell(obj), key) else {
+        return interp.assign_member(obj, key, val);
+    };
+    // Writability gates the probe: readonly properties always slow-path,
+    // so the hit below never has to reproduce refusal semantics.
+    if props.meta.borrow().attrs_of(name).writable
+        && let Some(index) = function.caches[site].probe(props.shape_id())
+        && let Some(current) = props.slot_verified(index, name)
+        && !is_accessor_for(&current, name)
+    {
+        props.borrow_mut()[index].1 = val;
+        return Ok(());
+    }
+    interp.assign_member(obj, key, val)?;
+    if props.meta.borrow().attrs_of(name).writable
+        && let Some(index) = props.own_index(name)
+        && let Some(slot) = props.slot_verified(index, name)
+        && !is_accessor_for(&slot, name)
+    {
+        function.caches[site].fill(props.shape_id(), index);
+    }
+    Ok(())
+}
+
 fn run_loop(
     interp: &mut Interpreter,
     frame: &mut CallFrame,
@@ -458,15 +559,18 @@ fn run_loop(
                 return Err(VmErr::Throw(frame.registers[src as usize].clone()));
             }
             Instr::GetProp { dst, obj, key } => {
+                let site = frame.ip - 1;
                 let obj = frame.registers[obj as usize].clone();
                 let key = frame.registers[key as usize].clone();
-                frame.registers[dst as usize] = interp.get_prop_value(&obj, &key)?;
+                frame.registers[dst as usize] =
+                    get_prop_cached(interp, frame.function, site, &obj, &key)?;
             }
             Instr::SetProp { obj, key, val } => {
+                let site = frame.ip - 1;
                 let obj = frame.registers[obj as usize].clone();
                 let key = frame.registers[key as usize].clone();
                 let val = frame.registers[val as usize].clone();
-                interp.assign_member(&obj, &key, val)?;
+                set_prop_cached(interp, frame.function, site, &obj, &key, val)?;
             }
             Instr::Call { dst, callee, args, argc } => {
                 let argv = take_range(frame, args, argc)?;
@@ -1311,4 +1415,103 @@ fn make_ast_function(
         bound: None,
         bytecode: None,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytecode::{compile_program, verify_module};
+    use crate::parser::parse_cached;
+
+    /// Run `src` on the bytecode tier and keep the module for cache
+    /// inspection. Panics unless the program compiles to bytecode, so no
+    /// test here can pass vacuously through the AST evaluator.
+    fn run_module(src: &str) -> (Result<Value, VmErr>, BytecodeModule) {
+        let statements = parse_cached(src).expect("test source must parse");
+        let module = compile_program(&statements).expect("test must reach the bytecode tier");
+        verify_module(&module).expect("compiler output must verify");
+        let mut interp = Interpreter::with_builtins();
+        interp.begin_execution();
+        interp.set_source(src);
+        let result = interp.run_bytecode_module(&module);
+        let _ = interp.drain_jobs();
+        (result, module)
+    }
+
+    /// Total hits, misses, megamorphic sites, and property sites across a
+    /// module's `GetProp`/`SetProp` instructions.
+    fn cache_stats(module: &BytecodeModule) -> (u32, u32, usize, usize) {
+        let mut hits = 0;
+        let mut misses = 0;
+        let mut mega = 0;
+        let mut sites = 0;
+        for (index, instr) in module.main.code.iter().enumerate() {
+            if matches!(instr, Instr::GetProp { .. } | Instr::SetProp { .. }) {
+                sites += 1;
+                let (h, m) = module.main.caches[index].stats();
+                hits += h;
+                misses += m;
+                mega += usize::from(module.main.caches[index].is_megamorphic());
+            }
+        }
+        (hits, misses, mega, sites)
+    }
+
+    fn num(value: &Result<Value, VmErr>) -> f64 {
+        match value {
+            Ok(Value::Number(n)) => *n,
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ic_serves_loop_reads_and_writes() {
+        let (result, module) = run_module(
+            "let o = {x: 41}; let s = 0; \
+             for (let i = 0; i < 10; i++) { s = s + o.x; o.y = i; } s;",
+        );
+        assert_eq!(num(&result), 410.0);
+        let (hits, misses, mega, sites) = cache_stats(&module);
+        assert!(sites >= 2, "expected read + write sites, got {sites}");
+        assert_eq!(mega, 0);
+        // The read site fills twice: once for `[x]`, again after the first
+        // `o.y` add reshapes the object to `[x, y]`. The rest hit.
+        assert!(hits >= 17, "hits={hits} misses={misses}");
+    }
+
+    #[test]
+    fn ic_never_caches_accessors() {
+        let (result, module) = run_module(
+            "let n = 0; let o = {}; \
+             Object.defineProperty(o, 'x', {get: function () { n = n + 1; return 7; }, \
+             enumerable: true, configurable: true}); \
+             let s = 0; for (let i = 0; i < 5; i++) { s = s + o.x; } s * 100 + n;",
+        );
+        // The getter ran on all five reads: 35 * 100 + 5.
+        assert_eq!(num(&result), 3505.0);
+        let (hits, _, _, _) = cache_stats(&module);
+        assert_eq!(hits, 0, "an accessor site must never hit");
+    }
+
+    #[test]
+    fn ic_survives_shape_change() {
+        let (result, _) = run_module(
+            "let o = {x: 1}; let a = o.x; delete o.x; o.x = 2; let b = o.x; a + b;",
+        );
+        assert_eq!(num(&result), 3.0);
+    }
+
+    #[test]
+    fn ic_goes_megamorphic_and_stays_correct() {
+        let (result, module) = run_module(
+            "let objs = [{x:0},{x:1,a:1},{x:2,a:2,b:2},{x:3,a:3,b:3,c:3},\
+             {x:4,a:4,b:4,c:4,d:4},{x:5,a:5,b:5,c:5,d:5,e:5},\
+             {x:6,a:6,b:6,c:6,d:6,e:6,f:6},{x:7,a:7,b:7,c:7,d:7,e:7,f:7,g:7},\
+             {x:8,a:8,b:8,c:8,d:8,e:8,f:8,g:8,h:8}]; \
+             let s = 0; for (let i = 0; i < 9; i++) { s = s + objs[i].x; } s;",
+        );
+        assert_eq!(num(&result), 36.0);
+        let (_, _, mega, _) = cache_stats(&module);
+        assert!(mega >= 1, "nine shapes at one site must go megamorphic");
+    }
 }

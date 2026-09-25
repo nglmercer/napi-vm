@@ -18,6 +18,7 @@ pub mod lexer;
 pub mod lsp;
 pub mod parser;
 pub mod plugin_host;
+pub mod shape;
 pub mod span;
 pub mod value;
 // `wasm` also requires the wasm32 target: the module depends on `js-sys`, which
