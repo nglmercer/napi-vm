@@ -26,16 +26,16 @@ pub use commonjs::{
     ResolvedCommonJsModule,
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
+pub(crate) use eval::{
+    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, close_iterator, insert_class_accessor,
+    insert_object_property, intern_params, push_call_arg,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_addon::{
     NativeAddonBackendHost, NativeAddonOptions, NativeAddonPolicy, NativeAddonRuntime,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
-pub(crate) use eval::{
-    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, close_iterator, insert_class_accessor,
-    insert_object_property, intern_params, push_call_arg,
-};
 pub(crate) use resolve::array_iter;
 #[cfg(all(
     feature = "node-api-host",
@@ -392,10 +392,8 @@ impl Interpreter {
             jit_policy: crate::jit::JitPolicy::default(),
             jit_backend: None,
         };
-        interp.gc_id = crate::heap::register_interp(
-            interp.gc_roots(),
-            interp.guest_execution_depth.clone(),
-        );
+        interp.gc_id =
+            crate::heap::register_interp(interp.gc_roots(), interp.guest_execution_depth.clone());
         interp
     }
 
@@ -1565,8 +1563,7 @@ impl Interpreter {
     ) -> crate::jit::TierDecision {
         match self.jit_backend.clone() {
             Some(backend) => {
-                let compile =
-                    |feedback: &crate::jit::TierFeedback| backend.compile(code, feedback);
+                let compile = |feedback: &crate::jit::TierFeedback| backend.compile(code, feedback);
                 crate::jit::tier_enter(&code.tiers, &self.jit_policy, Some(&compile), args)
             }
             None => crate::jit::tier_enter(&code.tiers, &self.jit_policy, None, args),

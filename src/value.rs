@@ -2285,7 +2285,10 @@ impl Value {
     /// seeding, so both tiers bind the identical shape.
     pub fn arguments_object(args: &[Value]) -> Result<Self, crate::error::VmErr> {
         let args_obj = Value::object(
-            args.iter().enumerate().map(|(i, v)| (i.to_string(), v.clone())).collect(),
+            args.iter()
+                .enumerate()
+                .map(|(i, v)| (i.to_string(), v.clone()))
+                .collect(),
         );
         args_obj.set_prop("length".to_string(), Value::Number(args.len() as f64))?;
         Ok(args_obj)
@@ -2350,7 +2353,9 @@ impl Value {
     }
 
     pub fn array_with_presence(items: Vec<Value>, present: Vec<bool>) -> Self {
-        Value::Array(crate::heap::tracked(Rc::new(ArrayCell::with_presence(items, present))))
+        Value::Array(crate::heap::tracked(Rc::new(ArrayCell::with_presence(
+            items, present,
+        ))))
     }
 
     pub fn checked_array(items: Vec<Value>) -> Result<Self, VmErr> {

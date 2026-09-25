@@ -41,35 +41,69 @@ pub enum KeySrc {
 pub enum Instr {
     // -- data movement --------------------------------------------------
     /// `dst = constants[cst]` (fresh runtime value per execution).
-    LoadConst { dst: Reg, cst: u16 },
+    LoadConst {
+        dst: Reg,
+        cst: u16,
+    },
     /// `dst = frame.register[src]`.
-    Mov { dst: Reg, src: Reg },
+    Mov {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst = slots[slot]`, enforcing the temporal dead zone.
-    LoadLocal { dst: Reg, slot: Slot },
+    LoadLocal {
+        dst: Reg,
+        slot: Slot,
+    },
     /// `slots[slot] = src`, enforcing const assignment rules.
-    StoreLocal { slot: Slot, src: Reg },
+    StoreLocal {
+        slot: Slot,
+        src: Reg,
+    },
     /// Hoisting declaration: reset the slot to `undefined` with a new kind,
     /// mirroring `Environment::declare` exactly (no checks, replaces).
-    DeclareLocal { slot: Slot, kind: SlotKind, initialized: bool },
+    DeclareLocal {
+        slot: Slot,
+        kind: SlotKind,
+        initialized: bool,
+    },
     /// Hoisting/declarator initialization: set value and mark initialized,
     /// keeping the slot kind, mirroring `try_set`/`initialize` (no checks).
-    InitLocal { slot: Slot, src: Reg },
+    InitLocal {
+        slot: Slot,
+        src: Reg,
+    },
     /// Hoisted top-level function binding: `set_binding` through the global
     /// environment (keeps kind, quota-checked, no const check).
-    InitGlobal { name: u16, src: Reg },
+    InitGlobal {
+        name: u16,
+        src: Reg,
+    },
     /// Top-level `var` hoisting: define `undefined` only when no binding
     /// exists yet, mirroring `hoist_vars` (a previous `eval` may own it).
-    HoistVarGlobal { name: u16 },
+    HoistVarGlobal {
+        name: u16,
+    },
     /// A bare `var x;` on a slot: no-op when initialized, dead-zone error
     /// otherwise (a merged `let` may still be uninitialized).
-    BareVarLocal { slot: Slot },
+    BareVarLocal {
+        slot: Slot,
+    },
     /// A bare `var x;` on a global binding: same rule via the environment.
-    BareVarGlobal { name: u16 },
+    BareVarGlobal {
+        name: u16,
+    },
     /// `dst = global.lookup(name)`: `ReferenceError` when missing or dead.
-    LoadGlobal { dst: Reg, name: u16 },
+    LoadGlobal {
+        dst: Reg,
+        name: u16,
+    },
     /// Assign through the scope chain, creating an implicit global when
     /// missing (sloppy mode, like the AST evaluator).
-    StoreGlobal { name: u16, src: Reg },
+    StoreGlobal {
+        name: u16,
+        src: Reg,
+    },
     /// Declare a top-level binding (hoisting), with quota enforcement.
     DefineGlobal {
         name: u16,
@@ -78,27 +112,56 @@ pub enum Instr {
         initialized: bool,
     },
     /// `dst` = the frame's `this` value (non-arrow functions).
-    LoadThis { dst: Reg },
+    LoadThis {
+        dst: Reg,
+    },
     /// `dst` = the global environment's `this` (top level / top-level arrows).
-    LoadGlobalThis { dst: Reg },
+    LoadGlobalThis {
+        dst: Reg,
+    },
     /// `dst = typeof global.lookup(name)`, evaluating to `"undefined"`
     /// for missing names instead of throwing.
-    TypeofGlobal { dst: Reg, name: u16 },
+    TypeofGlobal {
+        dst: Reg,
+        name: u16,
+    },
     /// `dst = typeof slots[slot]`, still enforcing the dead zone.
-    TypeofLocal { dst: Reg, slot: Slot },
+    TypeofLocal {
+        dst: Reg,
+        slot: Slot,
+    },
 
     // -- operators (all delegate to the AST evaluator's helpers) ---------
     /// `dst = lhs <op> rhs`. Short-circuit operators (`&&`, `||`, `??`)
     /// and `,` never appear here: the compiler lowers them to jumps.
-    Binary { dst: Reg, op: BinOp, lhs: Reg, rhs: Reg },
+    Binary {
+        dst: Reg,
+        op: BinOp,
+        lhs: Reg,
+        rhs: Reg,
+    },
     /// `dst = <op> src`. `++`/`--`/`delete` never appear here: they need
     /// targets, so they have dedicated instructions below.
-    Unary { dst: Reg, op: UnOp, src: Reg },
+    Unary {
+        dst: Reg,
+        op: UnOp,
+        src: Reg,
+    },
     /// Read-modify-write `slot <op>= rhs` with the AST evaluator's exact
     /// check order (writability before coercion before write).
-    CompoundLocal { dst: Reg, slot: Slot, op: AssignOp, rhs: Reg },
+    CompoundLocal {
+        dst: Reg,
+        slot: Slot,
+        op: AssignOp,
+        rhs: Reg,
+    },
     /// Read-modify-write `name <op>= rhs` on a global binding.
-    CompoundGlobal { dst: Reg, name: u16, op: AssignOp, rhs: Reg },
+    CompoundGlobal {
+        dst: Reg,
+        name: u16,
+        op: AssignOp,
+        rhs: Reg,
+    },
     /// Read-modify-write `obj[key] <op>= rhs` on a property.
     CompoundProp {
         dst: Reg,
@@ -109,9 +172,19 @@ pub enum Instr {
     },
     /// `++`/`--` on a local slot. `delta` is +1 or -1; `prefix` selects
     /// whether `dst` receives the new value or the old one.
-    IncLocal { dst: Reg, slot: Slot, delta: i8, prefix: bool },
+    IncLocal {
+        dst: Reg,
+        slot: Slot,
+        delta: i8,
+        prefix: bool,
+    },
     /// `++`/`--` on a global binding.
-    IncGlobal { dst: Reg, name: u16, delta: i8, prefix: bool },
+    IncGlobal {
+        dst: Reg,
+        name: u16,
+        delta: i8,
+        prefix: bool,
+    },
     /// `++`/`--` on a property.
     IncProp {
         dst: Reg,
@@ -121,31 +194,69 @@ pub enum Instr {
         prefix: bool,
     },
     /// `dst = delete obj[key]`.
-    DelProp { dst: Reg, obj: Reg, key: Reg },
+    DelProp {
+        dst: Reg,
+        obj: Reg,
+        key: Reg,
+    },
     /// `dst = delete name` on a global binding.
-    DelGlobal { dst: Reg, name: u16 },
+    DelGlobal {
+        dst: Reg,
+        name: u16,
+    },
 
     // -- control flow ----------------------------------------------------
-    Jump { target: Target },
-    JumpIfTrue { src: Reg, target: Target },
-    JumpIfFalse { src: Reg, target: Target },
-    JumpIfNullish { src: Reg, target: Target },
-    JumpIfNotNullish { src: Reg, target: Target },
+    Jump {
+        target: Target,
+    },
+    JumpIfTrue {
+        src: Reg,
+        target: Target,
+    },
+    JumpIfFalse {
+        src: Reg,
+        target: Target,
+    },
+    JumpIfNullish {
+        src: Reg,
+        target: Target,
+    },
+    JumpIfNotNullish {
+        src: Reg,
+        target: Target,
+    },
     /// Loop back-edge marker: consumes one loop-budget iteration (the same
     /// budget the AST evaluator's loops consume, so runaway loops raise the
     /// same `RangeError` on both tiers) plus instruction fuel.
     LoopHead,
-    Return { src: Reg },
+    Return {
+        src: Reg,
+    },
     ReturnUndefined,
-    Throw { src: Reg },
+    Throw {
+        src: Reg,
+    },
 
     // -- properties, calls, allocation -----------------------------------
     /// `dst = obj[key]` through the full lookup chain (proxies included).
-    GetProp { dst: Reg, obj: Reg, key: Reg },
+    GetProp {
+        dst: Reg,
+        obj: Reg,
+        key: Reg,
+    },
     /// `obj[key] = val` through the full assignment path.
-    SetProp { obj: Reg, key: Reg, val: Reg },
+    SetProp {
+        obj: Reg,
+        key: Reg,
+        val: Reg,
+    },
     /// `dst = callee(...args)`: `argc` registers starting at `args`.
-    Call { dst: Reg, callee: Reg, args: Reg, argc: u16 },
+    Call {
+        dst: Reg,
+        callee: Reg,
+        args: Reg,
+        argc: u16,
+    },
     /// `dst = callee.call(this, ...args)`: a method call keeps its receiver.
     CallMethod {
         dst: Reg,
@@ -156,128 +267,244 @@ pub enum Instr {
     },
     /// `dst` = template with `quasis` cooked chunks interpolating `argc`
     /// evaluated values starting at `args`.
-    Template { dst: Reg, quasis: u16, args: Reg, argc: u16 },
+    Template {
+        dst: Reg,
+        quasis: u16,
+        args: Reg,
+        argc: u16,
+    },
     /// `dst = new callee(...args)`.
-    Construct { dst: Reg, callee: Reg, args: Reg, argc: u16 },
+    Construct {
+        dst: Reg,
+        callee: Reg,
+        args: Reg,
+        argc: u16,
+    },
     /// `dst = {}`: a fresh ordinary object. Superseded by [`Instr::BuildObject`]
     /// (single-shot construction needs no live intermediate); retained as
     /// valid IR, never emitted.
-    NewObject { dst: Reg },
+    NewObject {
+        dst: Reg,
+    },
     /// Define one own property on a live object under construction.
     /// Superseded by [`Instr::BuildObject`]; retained as valid IR, never
     /// emitted. Note there is no `__proto__` switching anywhere: the
     /// evaluator stores it as ordinary data, and so would this.
-    SetOwnProp { obj: Reg, key: KeySrc, val: Reg },
+    SetOwnProp {
+        obj: Reg,
+        key: KeySrc,
+        val: Reg,
+    },
     /// `dst = [args..args+argc]` (no holes, no spread in Phase E).
-    NewArray { dst: Reg, args: Reg, argc: u16 },
+    NewArray {
+        dst: Reg,
+        args: Reg,
+        argc: u16,
+    },
     /// `dst` = a new bytecode-backed function from `constants[func]`.
-    MakeFunction { dst: Reg, func: u16 },
+    MakeFunction {
+        dst: Reg,
+        func: u16,
+    },
     /// `dst` = a new AST-backed function from `constants[ast]` (the
     /// per-function fallback, closed over the defining frame environment
     /// like any other function).
-    MakeAstFunction { dst: Reg, ast: u16 },
+    MakeAstFunction {
+        dst: Reg,
+        ast: u16,
+    },
     /// `dst` = the normalized form of computed key `src`: strings as-is,
     /// numbers stringified, symbols mapped to their slot keys, anything
     /// else `undefined` (those properties are skipped without evaluating
     /// their values, like the evaluator).
-    NormalKey { dst: Reg, src: Reg },
+    NormalKey {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst` = one object literal from `constants[tmpl]`: keys, values, and
     /// spread sources already evaluated into registers. Insertion, accessor
     /// pairing, spread, symbols, and the property-count limit all follow
     /// the evaluator's construction exactly.
-    BuildObject { dst: Reg, tmpl: u16 },
+    BuildObject {
+        dst: Reg,
+        tmpl: u16,
+    },
     /// `dst` = the named global, or `undefined` when missing or
     /// uninitialized. Shorthand properties never throw.
-    LoadGlobalSoft { dst: Reg, name: u16 },
+    LoadGlobalSoft {
+        dst: Reg,
+        name: u16,
+    },
     /// `dst` = the slot value, or `undefined` when uninitialized.
-    LoadLocalSoft { dst: Reg, slot: Slot },
+    LoadLocalSoft {
+        dst: Reg,
+        slot: Slot,
+    },
     /// `dst = callee(...spread_args)`: like [`Instr::Call`], but the
     /// argument list in `constants[tmpl]` splices array-valued spread
     /// elements and passes anything else as one argument.
-    CallSpread { dst: Reg, callee: Reg, tmpl: u16 },
+    CallSpread {
+        dst: Reg,
+        callee: Reg,
+        tmpl: u16,
+    },
     /// Method-call form of [`Instr::CallSpread`].
-    MethodSpread { dst: Reg, callee: Reg, this: Reg, tmpl: u16 },
+    MethodSpread {
+        dst: Reg,
+        callee: Reg,
+        this: Reg,
+        tmpl: u16,
+    },
     /// `dst` = one array literal from `constants[tmpl]`: plain elements
     /// plus spreads (arrays splice, strings spread per character, anything
     /// else drains the iterator protocol).
-    BuildArray { dst: Reg, tmpl: u16 },
+    BuildArray {
+        dst: Reg,
+        tmpl: u16,
+    },
     /// `dst` = `src` materialized for an array destructuring pattern:
     /// arrays clone, strings split per character (length-checked), plain
     /// objects and anything else become `[]`.
-    ToDestructArray { dst: Reg, src: Reg },
+    ToDestructArray {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst` = `src` sliced from element `from` for an array-rest element.
     /// `src` always holds an array the compiler materialized just before.
-    RestArray { dst: Reg, src: Reg, from: u16 },
+    RestArray {
+        dst: Reg,
+        src: Reg,
+        from: u16,
+    },
     /// Throw a `TypeError` when `src` is nullish (object patterns cannot
     /// destructure `null`/`undefined`); otherwise `dst` snapshots `src`'s
     /// own enumerable string keys (only objects have any) for a later
     /// [`Instr::RestObject`].
-    CheckDestructObject { dst: Reg, src: Reg },
+    CheckDestructObject {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst` = object of the `src` properties named by the `keys` array
     /// minus the `taken` array's keys, each read through the normal member
     /// path. Implements `{ ...rest }`.
-    RestObject { dst: Reg, src: Reg, keys: Reg, taken: Reg },
+    RestObject {
+        dst: Reg,
+        src: Reg,
+        keys: Reg,
+        taken: Reg,
+    },
     /// `dst` = own enumerable keys of `src` as a string array (proxy traps
     /// honored). Drives `for-in`.
-    EnumKeys { dst: Reg, src: Reg },
+    EnumKeys {
+        dst: Reg,
+        src: Reg,
+    },
     /// Initialize `for-of`: `iter` = the iterator for `src`,
     /// `next` = its `next` method (an error when absent).
-    ForOfInit { iter: Reg, next: Reg, src: Reg },
+    ForOfInit {
+        iter: Reg,
+        next: Reg,
+        src: Reg,
+    },
     /// One `for-of` step: call `next` on `iter`; `done` reports truthy
     /// `done` (missing counts as done), `value` the yielded value.
-    IterNext { done: Reg, value: Reg, iter: Reg, next: Reg },
+    IterNext {
+        done: Reg,
+        value: Reg,
+        iter: Reg,
+        next: Reg,
+    },
     /// Close `src` as a `for-of` iterator (runs a suspended generator's
     /// `finally` blocks); anything else ignores it.
-    CloseIterator { src: Reg },
+    CloseIterator {
+        src: Reg,
+    },
     /// Push a catch handler: a catchable error (`Throw`, `Msg`,
     /// `RuntimeError`) abandons the protected region, stores the catch
     /// value (thrown value, or a converted error object) in `dst`, and
     /// resumes at `target` with the handler popped.
-    PushCatch { target: Target, dst: Reg },
+    PushCatch {
+        target: Target,
+        dst: Reg,
+    },
     /// Push a finally handler: like [`Instr::PushCatch`] but also
     /// intercepts `return` unwinding, landing at `target` to run cleanup
     /// and [`Instr::Rethrow`]. Neither kind intercepts `break`,
     /// `continue`, or abandonment. `dst` receives the catch value (or
     /// `undefined` for a `return` landing) for uniformity; pads ignore it.
-    PushFinally { target: Target, dst: Reg },
+    PushFinally {
+        target: Target,
+        dst: Reg,
+    },
     /// Pop the innermost handler: the protected region completed.
     PopHandler,
     /// Re-raise the error a handler just landed with, after cleanup ran.
     Rethrow,
     /// `dst` = `super[key]`: a lookup on the superclass prototype from
     /// the enclosing method's scope (an error outside one).
-    SuperMember { dst: Reg, key: Reg },
+    SuperMember {
+        dst: Reg,
+        key: Reg,
+    },
     /// `dst` = `super(args)`: invoke the superclass constructor on the
     /// current `this` (an error outside a derived constructor).
-    SuperCall { dst: Reg, args: Reg, argc: u16 },
+    SuperCall {
+        dst: Reg,
+        args: Reg,
+        argc: u16,
+    },
     /// Spread-argument form of [`Instr::SuperCall`].
-    SuperCallSpread { dst: Reg, tmpl: u16 },
+    SuperCallSpread {
+        dst: Reg,
+        tmpl: u16,
+    },
     /// Raise `constants[msg]` as a runtime error. Used where the
     /// evaluator fails during reference evaluation (a bare `super`, an
     /// assignment through one) after running the earlier side effects.
-    Raise { msg: u16 },
+    Raise {
+        msg: u16,
+    },
     /// `dst` = the class defined by `constants[tmpl]`: methods close over
     /// a scope carrying the superclass prototype, the constructor over one
     /// carrying the superclass constructor, and static blocks run once the
     /// class value exists. Member functions come from the template's
     /// constants (bytecode or AST fallback each).
-    BuildClass { dst: Reg, tmpl: u16 },
+    BuildClass {
+        dst: Reg,
+        tmpl: u16,
+    },
     /// `dst` = `src` converted to a property key, like a computed class
     /// member name evaluated when the class is defined.
-    PropertyKey { dst: Reg, src: Reg },
+    PropertyKey {
+        dst: Reg,
+        src: Reg,
+    },
     /// Run the `import` statement in `constants[tmpl]`: resolve and
     /// evaluate the module, then bind its exports as live cells.
-    Import { tmpl: u16 },
+    Import {
+        tmpl: u16,
+    },
     /// Publish `src` as this module's default export.
-    ExportDefault { src: Reg },
+    ExportDefault {
+        src: Reg,
+    },
     /// Run the `export { ... }` statement in `constants[tmpl]`.
-    ExportNamed { tmpl: u16 },
+    ExportNamed {
+        tmpl: u16,
+    },
     /// Run the `export * [as ns] from` statement in `constants[tmpl]`.
-    ExportAll { tmpl: u16 },
+    ExportAll {
+        tmpl: u16,
+    },
     /// `dst` = the promise for the namespace of module `src`.
-    DynamicImport { dst: Reg, src: Reg },
+    DynamicImport {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst` = this module's `import.meta` object.
-    ImportMeta { dst: Reg },
+    ImportMeta {
+        dst: Reg,
+    },
     /// Push a fresh child of the current scope for captured block
     /// bindings. Nested closures created inside capture this scope, so
     /// each block entry (each loop iteration) gets its own cells.
@@ -486,7 +713,11 @@ impl fmt::Display for Instr {
             Instr::Mov { dst, src } => write!(f, "MOV r{dst}, r{src}"),
             Instr::LoadLocal { dst, slot } => write!(f, "LOAD_LOCAL r{dst}, s{slot}"),
             Instr::StoreLocal { slot, src } => write!(f, "STORE_LOCAL s{slot}, r{src}"),
-            Instr::DeclareLocal { slot, kind, initialized } => {
+            Instr::DeclareLocal {
+                slot,
+                kind,
+                initialized,
+            } => {
                 write!(f, "DECLARE_LOCAL s{slot}, {kind:?}, init={initialized}")
             }
             Instr::InitLocal { slot, src } => write!(f, "INIT_LOCAL s{slot}, r{src}"),
@@ -519,17 +750,42 @@ impl fmt::Display for Instr {
             Instr::CompoundGlobal { dst, name, op, rhs } => {
                 write!(f, "COMPOUND_GLOBAL r{dst}, c{name}, {op:?}, r{rhs}")
             }
-            Instr::CompoundProp { dst, obj, key, op, rhs } => {
+            Instr::CompoundProp {
+                dst,
+                obj,
+                key,
+                op,
+                rhs,
+            } => {
                 write!(f, "COMPOUND_PROP r{dst}, r{obj}, r{key}, {op:?}, r{rhs}")
             }
-            Instr::IncLocal { dst, slot, delta, prefix } => {
+            Instr::IncLocal {
+                dst,
+                slot,
+                delta,
+                prefix,
+            } => {
                 write!(f, "INC_LOCAL r{dst}, s{slot}, {delta}, prefix={prefix}")
             }
-            Instr::IncGlobal { dst, name, delta, prefix } => {
+            Instr::IncGlobal {
+                dst,
+                name,
+                delta,
+                prefix,
+            } => {
                 write!(f, "INC_GLOBAL r{dst}, c{name}, {delta}, prefix={prefix}")
             }
-            Instr::IncProp { dst, obj, key, delta, prefix } => {
-                write!(f, "INC_PROP r{dst}, r{obj}, r{key}, {delta}, prefix={prefix}")
+            Instr::IncProp {
+                dst,
+                obj,
+                key,
+                delta,
+                prefix,
+            } => {
+                write!(
+                    f,
+                    "INC_PROP r{dst}, r{obj}, r{key}, {delta}, prefix={prefix}"
+                )
             }
             Instr::DelProp { dst, obj, key } => write!(f, "DEL_PROP r{dst}, r{obj}, r{key}"),
             Instr::DelGlobal { dst, name } => write!(f, "DEL_GLOBAL r{dst}, c{name}"),
@@ -548,16 +804,40 @@ impl fmt::Display for Instr {
             Instr::Throw { src } => write!(f, "THROW r{src}"),
             Instr::GetProp { dst, obj, key } => write!(f, "GET_PROP r{dst}, r{obj}, r{key}"),
             Instr::SetProp { obj, key, val } => write!(f, "SET_PROP r{obj}, r{key}, r{val}"),
-            Instr::Call { dst, callee, args, argc } => {
+            Instr::Call {
+                dst,
+                callee,
+                args,
+                argc,
+            } => {
                 write!(f, "CALL r{dst}, r{callee}, r{args}..r{args}+{argc}")
             }
-            Instr::CallMethod { dst, callee, this, args, argc } => {
-                write!(f, "CALL_METHOD r{dst}, r{callee}, this=r{this}, r{args}..r{args}+{argc}")
+            Instr::CallMethod {
+                dst,
+                callee,
+                this,
+                args,
+                argc,
+            } => {
+                write!(
+                    f,
+                    "CALL_METHOD r{dst}, r{callee}, this=r{this}, r{args}..r{args}+{argc}"
+                )
             }
-            Instr::Template { dst, quasis, args, argc } => {
+            Instr::Template {
+                dst,
+                quasis,
+                args,
+                argc,
+            } => {
                 write!(f, "TEMPLATE r{dst}, c{quasis}, r{args}..r{args}+{argc}")
             }
-            Instr::Construct { dst, callee, args, argc } => {
+            Instr::Construct {
+                dst,
+                callee,
+                args,
+                argc,
+            } => {
                 write!(f, "CONSTRUCT r{dst}, r{callee}, r{args}..r{args}+{argc}")
             }
             Instr::NewObject { dst } => write!(f, "NEW_OBJECT r{dst}"),
@@ -577,7 +857,12 @@ impl fmt::Display for Instr {
             Instr::CallSpread { dst, callee, tmpl } => {
                 write!(f, "CALL_SPREAD r{dst}, r{callee}, c{tmpl}")
             }
-            Instr::MethodSpread { dst, callee, this, tmpl } => {
+            Instr::MethodSpread {
+                dst,
+                callee,
+                this,
+                tmpl,
+            } => {
                 write!(f, "METHOD_SPREAD r{dst}, r{callee}, r{this}, c{tmpl}")
             }
             Instr::BuildArray { dst, tmpl } => write!(f, "BUILD_ARRAY r{dst}, c{tmpl}"),
@@ -586,14 +871,24 @@ impl fmt::Display for Instr {
             Instr::CheckDestructObject { dst, src } => {
                 write!(f, "CHECK_DESTRUCT_OBJECT r{dst}, r{src}")
             }
-            Instr::RestObject { dst, src, keys, taken } => {
+            Instr::RestObject {
+                dst,
+                src,
+                keys,
+                taken,
+            } => {
                 write!(f, "REST_OBJECT r{dst}, r{src}, r{keys}, r{taken}")
             }
             Instr::EnumKeys { dst, src } => write!(f, "ENUM_KEYS r{dst}, r{src}"),
             Instr::ForOfInit { iter, next, src } => {
                 write!(f, "FOR_OF_INIT r{iter}, r{next}, r{src}")
             }
-            Instr::IterNext { done, value, iter, next } => {
+            Instr::IterNext {
+                done,
+                value,
+                iter,
+                next,
+            } => {
                 write!(f, "ITER_NEXT r{done}, r{value}, r{iter}, r{next}")
             }
             Instr::CloseIterator { src } => write!(f, "CLOSE_ITERATOR r{src}"),

@@ -137,7 +137,9 @@ impl BytecodeFunction {
                 continue;
             }
             stats.ic_sites += 1;
-            let Some(cache) = self.caches.get(index) else { continue };
+            let Some(cache) = self.caches.get(index) else {
+                continue;
+            };
             let (hits, misses) = cache.stats();
             stats.ic_hits = stats.ic_hits.saturating_add(hits);
             stats.ic_misses = stats.ic_misses.saturating_add(misses);

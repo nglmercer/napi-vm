@@ -27,7 +27,10 @@ pub enum Constant {
     BigInt(Rc<crate::bigint::BigInt>),
     /// A regex literal's source and flags; compiled fresh per `LoadConst`
     /// so every evaluation gets its own `lastIndex`, like the evaluator.
-    Regex { pattern: String, flags: String },
+    Regex {
+        pattern: String,
+        flags: String,
+    },
     /// A nested supported function, compiled to bytecode.
     Function(Rc<BytecodeFunction>),
     /// A nested function the compiler declined (async, generator, or an

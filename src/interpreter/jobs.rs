@@ -61,13 +61,20 @@ impl Job {
     /// Values this queued job keeps alive, for the cycle collector.
     pub(crate) fn trace_values(&self) -> Vec<Value> {
         match self {
-            Job::Reaction { value, reaction, .. } => vec![
+            Job::Reaction {
+                value, reaction, ..
+            } => vec![
                 value.clone(),
                 reaction.on_fulfilled.clone(),
                 reaction.on_rejected.clone(),
                 Value::Promise(reaction.derived.clone()),
             ],
-            Job::PromiseResolveThenable { target, thenable, then, resolution_guard } => vec![
+            Job::PromiseResolveThenable {
+                target,
+                thenable,
+                then,
+                resolution_guard,
+            } => vec![
                 Value::Promise(target.clone()),
                 thenable.clone(),
                 then.clone(),

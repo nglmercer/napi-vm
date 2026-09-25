@@ -67,7 +67,12 @@ impl Shape {
             // linear search answers with the first match.
             index.entry(key.clone()).or_insert(slot as u32);
         }
-        Rc::new(Shape { id, keys, index, transitions: RefCell::new(HashMap::new()) })
+        Rc::new(Shape {
+            id,
+            keys,
+            index,
+            transitions: RefCell::new(HashMap::new()),
+        })
     }
 
     /// The canonical empty layout.
@@ -91,7 +96,9 @@ impl Shape {
         let mut keys = self.keys.clone();
         keys.push(Rc::from(key));
         let child = Self::fresh(keys);
-        self.transitions.borrow_mut().insert(Rc::from(key), child.clone());
+        self.transitions
+            .borrow_mut()
+            .insert(Rc::from(key), child.clone());
         child
     }
 
@@ -250,9 +257,14 @@ mod tests {
     #[test]
     fn shared_layout_shared_shape() {
         let pair = eval("[{x: 1, y: 2}, {x: 3, y: 4}]");
-        let Value::Array(items) = &pair else { panic!("expected array, got {pair:?}") };
+        let Value::Array(items) = &pair else {
+            panic!("expected array, got {pair:?}")
+        };
         let items = items.borrow();
-        assert_eq!(built_id(&cell_of(&items[0]), "x"), built_id(&cell_of(&items[1]), "x"));
+        assert_eq!(
+            built_id(&cell_of(&items[0]), "x"),
+            built_id(&cell_of(&items[1]), "x")
+        );
     }
 
     #[test]
@@ -260,7 +272,11 @@ mod tests {
         let props = cell_of(&eval("({p: 1, q: 2})"));
         assert_eq!(props.shape_id(), None);
         assert_eq!(props.own_index("p"), Some(0));
-        assert_eq!(props.shape_id(), None, "one read must not allocate a layout");
+        assert_eq!(
+            props.shape_id(),
+            None,
+            "one read must not allocate a layout"
+        );
         assert_eq!(props.own_index("p"), Some(0));
         assert!(props.shape_id().is_some(), "the repeat read builds it");
     }

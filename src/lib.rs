@@ -12,12 +12,12 @@ pub mod format;
 pub mod heap;
 pub mod host;
 pub mod interpreter;
+pub mod jit;
 pub mod lang;
 pub mod lexer;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod lsp;
 pub mod parser;
-pub mod jit;
 pub mod plugin_host;
 pub mod runtime;
 pub mod shape;

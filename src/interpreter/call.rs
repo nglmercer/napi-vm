@@ -1034,7 +1034,9 @@ impl Interpreter {
         v: Value,
     ) -> Result<Value, VmErr> {
         let Some(bin) = op.bin_op() else {
-            return Err(VmErr::Msg("internal error: plain `=` in compound assign".to_string()));
+            return Err(VmErr::Msg(
+                "internal error: plain `=` in compound assign".to_string(),
+            ));
         };
         let v = if matches!(op, AssignOp::Add) {
             self.coerce_for_concat(&v)?
@@ -1077,15 +1079,13 @@ impl Interpreter {
         }
         match res {
             ModifyOutcome::Updated(v) => Ok(v),
-            ModifyOutcome::Missing => {
-                vm_err(format!("ReferenceError: {name} is not defined"))
-            }
-            ModifyOutcome::Const => {
-                vm_err(format!("TypeError: Assignment to constant variable '{name}'"))
-            }
-            ModifyOutcome::Uninitialized => {
-                vm_err(format!("ReferenceError: Cannot access '{name}' before initialization"))
-            }
+            ModifyOutcome::Missing => vm_err(format!("ReferenceError: {name} is not defined")),
+            ModifyOutcome::Const => vm_err(format!(
+                "TypeError: Assignment to constant variable '{name}'"
+            )),
+            ModifyOutcome::Uninitialized => vm_err(format!(
+                "ReferenceError: Cannot access '{name}' before initialization"
+            )),
         }
     }
 
@@ -1128,10 +1128,14 @@ impl Interpreter {
                 return vm_err(format!("ReferenceError: {name} is not defined"));
             }
             ModifyOutcome::Const => {
-                return vm_err(format!("TypeError: Assignment to constant variable '{name}'"));
+                return vm_err(format!(
+                    "TypeError: Assignment to constant variable '{name}'"
+                ));
             }
             ModifyOutcome::Uninitialized => {
-                return vm_err(format!("ReferenceError: Cannot access '{name}' before initialization"));
+                return vm_err(format!(
+                    "ReferenceError: Cannot access '{name}' before initialization"
+                ));
             }
         };
         if prefix {
@@ -1167,13 +1171,13 @@ impl Interpreter {
         prefix: bool,
     ) -> Result<Value, VmErr> {
         let cur = self.get_prop_value(obj, prop)?;
-        let new_val = Value::Number(if inc { self.tn(&cur) + 1.0 } else { self.tn(&cur) - 1.0 });
-        self.assign_member(obj, prop, new_val.clone())?;
-        if prefix {
-            Ok(new_val)
+        let new_val = Value::Number(if inc {
+            self.tn(&cur) + 1.0
         } else {
-            Ok(cur)
-        }
+            self.tn(&cur) - 1.0
+        });
+        self.assign_member(obj, prop, new_val.clone())?;
+        if prefix { Ok(new_val) } else { Ok(cur) }
     }
 
     pub(crate) fn call_this(
@@ -1245,13 +1249,13 @@ impl Interpreter {
                     let result = match r {
                         Err(VmErr::Ret(v)) => Ok(v),
                         Ok(v) => Ok(v),
-                        Err(VmErr::Msg(msg)) => Err(VmErr::RuntimeError(Box::new(
-                            RuntimeErrorData {
+                        Err(VmErr::Msg(msg)) => {
+                            Err(VmErr::RuntimeError(Box::new(RuntimeErrorData {
                                 message: msg,
                                 span: None,
                                 stack: self.get_stack().to_vec(),
-                            },
-                        ))),
+                            })))
+                        }
                         other => other,
                     };
                     self.pop_frame();

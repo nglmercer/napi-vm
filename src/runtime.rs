@@ -162,22 +162,33 @@ mod tests {
 
     #[test]
     fn spec_is_importable_after_build() {
-        let mut interp =
-            RuntimeBuilder::new().load_spec("constants", "export const ANSWER = 42;").build().unwrap();
-        let answer = interp.eval_source("import { ANSWER } from 'constants'; ANSWER;").unwrap();
-        assert!(matches!(answer, Value::Number(n) if n == 42.0), "got {answer:?}");
+        let mut interp = RuntimeBuilder::new()
+            .load_spec("constants", "export const ANSWER = 42;")
+            .build()
+            .unwrap();
+        let answer = interp
+            .eval_source("import { ANSWER } from 'constants'; ANSWER;")
+            .unwrap();
+        assert!(
+            matches!(answer, Value::Number(n) if n == 42.0),
+            "got {answer:?}"
+        );
     }
 
     #[test]
     fn loop_budget_applies() {
         let mut interp = RuntimeBuilder::new().loop_budget(5).build().unwrap();
         let result = interp.eval_source("let s = 0; for (let i = 0; i < 100; i++) { s += i; } s;");
-        assert!(matches!(&result, Err(VmErr::Msg(m)) if m.contains("loop")), "got {result:?}");
+        assert!(
+            matches!(&result, Err(VmErr::Msg(m)) if m.contains("loop")),
+            "got {result:?}"
+        );
     }
 
     #[test]
     fn missing_spec_file_errors() {
-        let result = RuntimeBuilder::new().load_spec_file(Path::new("/nonexistent-dir-7f3a/spec.js"));
+        let result =
+            RuntimeBuilder::new().load_spec_file(Path::new("/nonexistent-dir-7f3a/spec.js"));
         assert!(result.is_err());
     }
 
@@ -187,10 +198,18 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("greeting.js");
         std::fs::write(&path, "export const WORD = 'hi';").unwrap();
-        let mut interp =
-            RuntimeBuilder::new().load_spec_file(&path).unwrap().build().unwrap();
-        let word = interp.eval_source("import { WORD } from 'greeting'; WORD;").unwrap();
-        assert!(matches!(&word, Value::String(s) if s == "hi"), "got {word:?}");
+        let mut interp = RuntimeBuilder::new()
+            .load_spec_file(&path)
+            .unwrap()
+            .build()
+            .unwrap();
+        let word = interp
+            .eval_source("import { WORD } from 'greeting'; WORD;")
+            .unwrap();
+        assert!(
+            matches!(&word, Value::String(s) if s == "hi"),
+            "got {word:?}"
+        );
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_dir(&dir).unwrap();
     }
@@ -202,7 +221,9 @@ mod tests {
             Interpreter::compile("let s = 0; for (let i = 0; i < 5; i++) { s += i; } s;").unwrap();
         let mut interp = RuntimeBuilder::new().build().unwrap();
         interp.execute(&program).unwrap();
-        let stats = program.stats().expect("loop program must reach the bytecode tier");
+        let stats = program
+            .stats()
+            .expect("loop program must reach the bytecode tier");
         assert_eq!(stats.calls, 1);
         // Five iterations plus the loop-entry tick.
         assert_eq!(stats.loop_iters, 6);

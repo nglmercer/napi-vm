@@ -30,13 +30,20 @@ pub enum VerifyError {
     /// Constant-pool operand outside the pool.
     BadConstant { address: usize, index: u16 },
     /// Constant of the wrong variant for the instruction.
-    ConstantTypeMismatch { address: usize, expected: &'static str },
+    ConstantTypeMismatch {
+        address: usize,
+        expected: &'static str,
+    },
     /// Jump target outside `0..=code.len()`. Landing exactly on
     /// `code.len()` is falling off the end, which the VM defines
     /// (completion value at top level, `undefined` in functions).
     BadJumpTarget { address: usize, target: u32 },
     /// Call/array operand range outside the register file.
-    BadOperandRange { address: usize, start: u16, count: u16 },
+    BadOperandRange {
+        address: usize,
+        start: u16,
+        count: u16,
+    },
     /// `&&`/`||`/`??`/`,` must lower to jumps, never reach the VM.
     ShortCircuitInBinary { address: usize, op: BinOp },
     /// `++`/`--`/`delete` must use their dedicated instructions.
@@ -46,7 +53,11 @@ pub enum VerifyError {
     /// `++`/`--` delta must be +1 or -1.
     BadIncDelta { address: usize, delta: i8 },
     /// Template quasi count must be the hole count plus one.
-    TemplateArityMismatch { address: usize, quasis: usize, argc: u16 },
+    TemplateArityMismatch {
+        address: usize,
+        quasis: usize,
+        argc: u16,
+    },
     /// A defect inside a nested compiled function.
     NestedFunction { index: u16, error: Box<VerifyError> },
 }
@@ -86,7 +97,11 @@ impl std::fmt::Display for VerifyError {
                 f,
                 "bytecode verify failed at {address}: jump target @{target} out of range"
             ),
-            VerifyError::BadOperandRange { address, start, count } => write!(
+            VerifyError::BadOperandRange {
+                address,
+                start,
+                count,
+            } => write!(
                 f,
                 "bytecode verify failed at {address}: registers r{start}..+{count} out of range"
             ),
@@ -106,12 +121,19 @@ impl std::fmt::Display for VerifyError {
                 f,
                 "bytecode verify failed at {address}: inc delta {delta} is not +1/-1"
             ),
-            VerifyError::TemplateArityMismatch { address, quasis, argc } => write!(
+            VerifyError::TemplateArityMismatch {
+                address,
+                quasis,
+                argc,
+            } => write!(
                 f,
                 "bytecode verify failed at {address}: {quasis} quasis for {argc} template holes"
             ),
             VerifyError::NestedFunction { index, error } => {
-                write!(f, "bytecode verify failed in nested function c{index}: {error}")
+                write!(
+                    f,
+                    "bytecode verify failed in nested function c{index}: {error}"
+                )
             }
         }
     }
@@ -191,7 +213,12 @@ impl Checker<'_> {
         }
     }
 
-    fn check_const_is(&self, address: usize, index: u16, expected: &'static str) -> Result<(), VerifyError> {
+    fn check_const_is(
+        &self,
+        address: usize,
+        index: u16,
+        expected: &'static str,
+    ) -> Result<(), VerifyError> {
         self.check_const(address, index)?;
         let ok = match &self.function.constants[index as usize] {
             Constant::Number(_)
@@ -232,7 +259,11 @@ impl Checker<'_> {
         if end <= self.function.register_count as u32 {
             Ok(())
         } else {
-            Err(VerifyError::BadOperandRange { address, start, count })
+            Err(VerifyError::BadOperandRange {
+                address,
+                start,
+                count,
+            })
         }
     }
 
@@ -336,24 +367,40 @@ impl Checker<'_> {
                 self.check_reg(address, *rhs)?;
                 self.check_compound_op(address, *op)?;
             }
-            Instr::CompoundProp { dst, obj, key, op, rhs } => {
+            Instr::CompoundProp {
+                dst,
+                obj,
+                key,
+                op,
+                rhs,
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *obj)?;
                 self.check_reg(address, *key)?;
                 self.check_reg(address, *rhs)?;
                 self.check_compound_op(address, *op)?;
             }
-            Instr::IncLocal { dst, slot, delta, .. } => {
+            Instr::IncLocal {
+                dst, slot, delta, ..
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_slot(address, *slot)?;
                 self.check_delta(address, *delta)?;
             }
-            Instr::IncGlobal { dst, name, delta, .. } => {
+            Instr::IncGlobal {
+                dst, name, delta, ..
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *name, "string")?;
                 self.check_delta(address, *delta)?;
             }
-            Instr::IncProp { dst, obj, key, delta, .. } => {
+            Instr::IncProp {
+                dst,
+                obj,
+                key,
+                delta,
+                ..
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *obj)?;
                 self.check_reg(address, *key)?;
@@ -392,19 +439,40 @@ impl Checker<'_> {
                 self.check_reg(address, *key)?;
                 self.check_reg(address, *val)?;
             }
-            Instr::Call { dst, callee, args, argc }
-            | Instr::Construct { dst, callee, args, argc } => {
+            Instr::Call {
+                dst,
+                callee,
+                args,
+                argc,
+            }
+            | Instr::Construct {
+                dst,
+                callee,
+                args,
+                argc,
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
                 self.check_range(address, *args, *argc)?;
             }
-            Instr::CallMethod { dst, callee, this, args, argc } => {
+            Instr::CallMethod {
+                dst,
+                callee,
+                this,
+                args,
+                argc,
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
                 self.check_reg(address, *this)?;
                 self.check_range(address, *args, *argc)?;
             }
-            Instr::Template { dst, quasis, args, argc } => {
+            Instr::Template {
+                dst,
+                quasis,
+                args,
+                argc,
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *quasis, "string-list")?;
                 self.check_range(address, *args, *argc)?;
@@ -468,7 +536,12 @@ impl Checker<'_> {
                 self.check_reg(address, *callee)?;
                 self.check_spread_template(address, *tmpl)?;
             }
-            Instr::MethodSpread { dst, callee, this, tmpl } => {
+            Instr::MethodSpread {
+                dst,
+                callee,
+                this,
+                tmpl,
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
                 self.check_reg(address, *this)?;
@@ -486,7 +559,12 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
-            Instr::RestObject { dst, src, keys, taken } => {
+            Instr::RestObject {
+                dst,
+                src,
+                keys,
+                taken,
+            } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
                 self.check_reg(address, *keys)?;
@@ -501,7 +579,12 @@ impl Checker<'_> {
                 self.check_reg(address, *next)?;
                 self.check_reg(address, *src)?;
             }
-            Instr::IterNext { done, value, iter, next } => {
+            Instr::IterNext {
+                done,
+                value,
+                iter,
+                next,
+            } => {
                 self.check_reg(address, *done)?;
                 self.check_reg(address, *value)?;
                 self.check_reg(address, *iter)?;
@@ -612,7 +695,10 @@ impl Checker<'_> {
         self.check_const(address, index)?;
         match &self.function.constants[index as usize] {
             Constant::Function(_) | Constant::AstFunction(_) => Ok(()),
-            _ => Err(VerifyError::ConstantTypeMismatch { address, expected: "function" }),
+            _ => Err(VerifyError::ConstantTypeMismatch {
+                address,
+                expected: "function",
+            }),
         }
     }
 }
@@ -640,7 +726,10 @@ mod tests {
         unit.constants[index] = Constant::StringList(vec!["q".to_string()]);
         assert!(matches!(
             verify_function(&unit),
-            Err(VerifyError::ConstantTypeMismatch { expected: "scalar", .. })
+            Err(VerifyError::ConstantTypeMismatch {
+                expected: "scalar",
+                ..
+            })
         ));
     }
 
@@ -657,7 +746,11 @@ mod tests {
         }
         assert!(matches!(
             verify_function(&unit),
-            Err(VerifyError::TemplateArityMismatch { quasis: 1, argc: 1, .. })
+            Err(VerifyError::TemplateArityMismatch {
+                quasis: 1,
+                argc: 1,
+                ..
+            })
         ));
     }
 }

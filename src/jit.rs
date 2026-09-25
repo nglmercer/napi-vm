@@ -36,7 +36,11 @@ pub struct JitPolicy {
 
 impl Default for JitPolicy {
     fn default() -> Self {
-        Self { compile_at_calls: 50, compile_at_iters: 5000, max_deopts: 8 }
+        Self {
+            compile_at_calls: 50,
+            compile_at_iters: 5000,
+            max_deopts: 8,
+        }
     }
 }
 
@@ -153,7 +157,10 @@ pub struct TierCounters {
 impl TierCounters {
     /// Snapshot for a backend's specialization decisions.
     pub fn feedback(&self) -> TierFeedback {
-        TierFeedback { calls: self.calls.get(), loop_iters: self.loop_iters.get() }
+        TierFeedback {
+            calls: self.calls.get(),
+            loop_iters: self.loop_iters.get(),
+        }
     }
 }
 
@@ -206,7 +213,9 @@ pub(crate) fn tier_enter(
 
 /// Observe one loop back-edge for tier-up purposes.
 pub(crate) fn note_loop_iter(counters: &TierCounters) {
-    counters.loop_iters.set(counters.loop_iters.get().wrapping_add(1));
+    counters
+        .loop_iters
+        .set(counters.loop_iters.get().wrapping_add(1));
 }
 
 /// Shareable backend handle for interpreter configuration.
@@ -253,7 +262,11 @@ mod tests {
     }
 
     fn policy() -> JitPolicy {
-        JitPolicy { compile_at_calls: 3, compile_at_iters: 1000, max_deopts: 2 }
+        JitPolicy {
+            compile_at_calls: 3,
+            compile_at_iters: 1000,
+            max_deopts: 2,
+        }
     }
 
     /// Empty function for backend calls. `tier_enter` never touches it and
@@ -278,7 +291,10 @@ mod tests {
 
     #[test]
     fn cold_until_threshold_then_compiles_once() {
-        let backend = MockBackend { compiles: Cell::new(0), guards: Vec::new() };
+        let backend = MockBackend {
+            compiles: Cell::new(0),
+            guards: Vec::new(),
+        };
         let counters = TierCounters::default();
         let policy = policy();
         let run = |c: &TierCounters| {
@@ -298,10 +314,19 @@ mod tests {
     fn no_backend_reports_hot() {
         let counters = TierCounters::default();
         let policy = policy();
-        assert_eq!(tier_enter(&counters, &policy, None, &[]), TierDecision::Cold);
-        assert_eq!(tier_enter(&counters, &policy, None, &[]), TierDecision::Cold);
+        assert_eq!(
+            tier_enter(&counters, &policy, None, &[]),
+            TierDecision::Cold
+        );
+        assert_eq!(
+            tier_enter(&counters, &policy, None, &[]),
+            TierDecision::Cold
+        );
         for _ in 0..3 {
-            assert_eq!(tier_enter(&counters, &policy, None, &[]), TierDecision::NoBackend);
+            assert_eq!(
+                tier_enter(&counters, &policy, None, &[]),
+                TierDecision::NoBackend
+            );
         }
     }
 
@@ -311,19 +336,39 @@ mod tests {
         let counters = TierCounters::default();
         let policy = policy();
         assert_eq!(
-            tier_enter(&counters, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[]),
+            tier_enter(
+                &counters,
+                &policy,
+                Some(&|f| backend.compile(&fake_func(), f)),
+                &[]
+            ),
             TierDecision::Cold
         );
         assert_eq!(
-            tier_enter(&counters, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[]),
+            tier_enter(
+                &counters,
+                &policy,
+                Some(&|f| backend.compile(&fake_func(), f)),
+                &[]
+            ),
             TierDecision::Cold
         );
         assert_eq!(
-            tier_enter(&counters, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[]),
+            tier_enter(
+                &counters,
+                &policy,
+                Some(&|f| backend.compile(&fake_func(), f)),
+                &[]
+            ),
             TierDecision::Declined
         );
         assert_eq!(
-            tier_enter(&counters, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[]),
+            tier_enter(
+                &counters,
+                &policy,
+                Some(&|f| backend.compile(&fake_func(), f)),
+                &[]
+            ),
             TierDecision::Declined
         );
     }
@@ -333,12 +378,16 @@ mod tests {
         let backend = MockBackend {
             compiles: Cell::new(0),
             // Param 0 must have shape 424242: never true for `[]`.
-            guards: vec![ShapeGuard { param: 0, shape: 424242 }],
+            guards: vec![ShapeGuard {
+                param: 0,
+                shape: 424242,
+            }],
         };
         let counters = TierCounters::default();
         let policy = policy();
-        let run =
-            |c: &TierCounters| tier_enter(c, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[]);
+        let run = |c: &TierCounters| {
+            tier_enter(c, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[])
+        };
         assert_eq!(run(&counters), TierDecision::Cold);
         assert_eq!(run(&counters), TierDecision::Cold);
         assert_eq!(run(&counters), TierDecision::GuardFailed);
@@ -351,7 +400,10 @@ mod tests {
 
     #[test]
     fn loop_iters_trip_threshold() {
-        let backend = MockBackend { compiles: Cell::new(0), guards: Vec::new() };
+        let backend = MockBackend {
+            compiles: Cell::new(0),
+            guards: Vec::new(),
+        };
         let counters = TierCounters::default();
         let policy = policy();
         for _ in 0..1000 {
@@ -359,7 +411,12 @@ mod tests {
         }
         // First call is already hot through the loop counter.
         assert_eq!(
-            tier_enter(&counters, &policy, Some(&|f| backend.compile(&fake_func(), f)), &[]),
+            tier_enter(
+                &counters,
+                &policy,
+                Some(&|f| backend.compile(&fake_func(), f)),
+                &[]
+            ),
             TierDecision::NotExecutable
         );
         assert_eq!(backend.compiles.get(), 1);
@@ -375,7 +432,10 @@ mod tests {
         let statements = parse_cached(src).expect("test source must parse");
         let module = compile_program(&statements).expect("test must reach the bytecode tier");
         verify_module(&module).expect("compiler output must verify");
-        let backend = Rc::new(MockBackend { compiles: Cell::new(0), guards: Vec::new() });
+        let backend = Rc::new(MockBackend {
+            compiles: Cell::new(0),
+            guards: Vec::new(),
+        });
         let mut interp = Interpreter::with_builtins();
         interp.set_jit_backend(backend.clone());
         interp.set_jit_policy(JitPolicy {
@@ -387,7 +447,10 @@ mod tests {
         interp.set_source(src);
         let result = interp.run_bytecode_module(&module).expect("must run");
         // f(0) + ... + f(9) = 1 + ... + 10, on bytecode throughout.
-        assert!(matches!(result, Value::Number(n) if n == 55.0), "got {result:?}");
+        assert!(
+            matches!(result, Value::Number(n) if n == 55.0),
+            "got {result:?}"
+        );
         // Ten entries, one compilation: the seam asked, cached, and fell
         // back to bytecode every time.
         assert_eq!(backend.compiles.get(), 1);
@@ -404,15 +467,23 @@ mod tests {
         // the thread-local counter happens to align, so assert the shape
         // plumbing instead of a fixed outcome.
         let obj = Value::object(vec![("a".to_string(), Value::Number(1.0))]);
-        let Value::Object { props } = &obj else { unreachable!() };
+        let Value::Object { props } = &obj else {
+            unreachable!()
+        };
         // Unbuilt objects fail every guard; two reads build the layout.
         assert!(!ShapeGuard { param: 0, shape: 0 }.check(std::slice::from_ref(&obj)));
         props.own_index("a");
         props.own_index("a");
         let id = props.shape_id().expect("two reads build the layout");
-        let matching = ShapeGuard { param: 0, shape: id };
+        let matching = ShapeGuard {
+            param: 0,
+            shape: id,
+        };
         assert!(matching.check(std::slice::from_ref(&obj)));
-        let other = ShapeGuard { param: 0, shape: id.wrapping_add(1 << 20) };
+        let other = ShapeGuard {
+            param: 0,
+            shape: id.wrapping_add(1 << 20),
+        };
         assert!(!other.check(std::slice::from_ref(&obj)));
     }
 }
