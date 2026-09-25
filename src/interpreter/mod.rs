@@ -617,7 +617,11 @@ impl Interpreter {
     ))]
     pub(crate) fn run_script_source(&mut self, source: &str) -> Result<Value, VmErr> {
         let previous_source = self.source_lines.clone();
-        let result = self.eval_script_body(source);
+        self.set_source(source);
+        let result = match crate::parser::parse_cached(source) {
+            Ok(statements) => self.run_program_body(&statements),
+            Err(failure) => Err(failure.into_vm_err()),
+        };
         self.source_lines = previous_source;
         result
     }
