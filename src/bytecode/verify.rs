@@ -187,6 +187,7 @@ impl Checker<'_> {
         self.check_const(address, index)?;
         let ok = match &self.function.constants[index as usize] {
             Constant::String(_) => expected == "string",
+            Constant::StringList(_) => expected == "string-list",
             Constant::Function(_) => expected == "function",
             Constant::AstFunction(_) => expected == "ast-function",
             _ => false,
@@ -256,6 +257,20 @@ impl Checker<'_> {
                 self.check_slot(address, *slot)?;
                 self.check_reg(address, *src)?;
             }
+            Instr::DeclareLocal { slot, .. } | Instr::BareVarLocal { slot } => {
+                self.check_slot(address, *slot)?;
+            }
+            Instr::InitLocal { slot, src } => {
+                self.check_slot(address, *slot)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::InitGlobal { name, src } => {
+                self.check_const_is(address, *name, "string")?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::HoistVarGlobal { name } | Instr::BareVarGlobal { name } => {
+                self.check_const_is(address, *name, "string")?;
+            }
             Instr::LoadGlobal { dst, name } | Instr::TypeofGlobal { dst, name } => {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *name, "string")?;
@@ -282,7 +297,10 @@ impl Checker<'_> {
             Instr::Unary { dst, op, src } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
-                if matches!(op, UnOp::Inc | UnOp::Dec | UnOp::Delete) {
+                // `++`/`--` on non-targets evaluates, then converts without
+                // storing — the evaluator's fallback arm. Only `delete` has
+                // no meaning here: it always needs its reference.
+                if matches!(op, UnOp::Delete) {
                     return Err(VerifyError::TargetedUnary { address, op: *op });
                 }
             }
@@ -333,7 +351,10 @@ impl Checker<'_> {
             Instr::Jump { target } => {
                 self.check_target(address, *target)?;
             }
-            Instr::JumpIfTrue { src, target } | Instr::JumpIfFalse { src, target } => {
+            Instr::JumpIfTrue { src, target }
+            | Instr::JumpIfFalse { src, target }
+            | Instr::JumpIfNullish { src, target }
+            | Instr::JumpIfNotNullish { src, target } => {
                 self.check_reg(address, *src)?;
                 self.check_target(address, *target)?;
             }
@@ -355,6 +376,17 @@ impl Checker<'_> {
             | Instr::Construct { dst, callee, args, argc } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
+                self.check_range(address, *args, *argc)?;
+            }
+            Instr::CallMethod { dst, callee, this, args, argc } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *callee)?;
+                self.check_reg(address, *this)?;
+                self.check_range(address, *args, *argc)?;
+            }
+            Instr::Template { dst, quasis, args, argc } => {
+                self.check_reg(address, *dst)?;
+                self.check_const_is(address, *quasis, "string-list")?;
                 self.check_range(address, *args, *argc)?;
             }
             Instr::NewObject { dst } => {

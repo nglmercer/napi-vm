@@ -20,6 +20,8 @@ pub enum Constant {
     Bool(bool),
     Null,
     Undefined,
+    /// Cooked template-literal chunks for one `Template` instruction.
+    StringList(Vec<String>),
     /// A nested supported function, compiled to bytecode.
     Function(Rc<BytecodeFunction>),
     /// A nested function the compiler declined (async, generator, or an

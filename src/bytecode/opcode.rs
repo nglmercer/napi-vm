@@ -48,6 +48,23 @@ pub enum Instr {
     LoadLocal { dst: Reg, slot: Slot },
     /// `slots[slot] = src`, enforcing const assignment rules.
     StoreLocal { slot: Slot, src: Reg },
+    /// Hoisting declaration: reset the slot to `undefined` with a new kind,
+    /// mirroring `Environment::declare` exactly (no checks, replaces).
+    DeclareLocal { slot: Slot, kind: SlotKind, initialized: bool },
+    /// Hoisting/declarator initialization: set value and mark initialized,
+    /// keeping the slot kind, mirroring `try_set`/`initialize` (no checks).
+    InitLocal { slot: Slot, src: Reg },
+    /// Hoisted top-level function binding: `set_binding` through the global
+    /// environment (keeps kind, quota-checked, no const check).
+    InitGlobal { name: u16, src: Reg },
+    /// Top-level `var` hoisting: define `undefined` only when no binding
+    /// exists yet, mirroring `hoist_vars` (a previous `eval` may own it).
+    HoistVarGlobal { name: u16 },
+    /// A bare `var x;` on a slot: no-op when initialized, dead-zone error
+    /// otherwise (a merged `let` may still be uninitialized).
+    BareVarLocal { slot: Slot },
+    /// A bare `var x;` on a global binding: same rule via the environment.
+    BareVarGlobal { name: u16 },
     /// `dst = global.lookup(name)`: `ReferenceError` when missing or dead.
     LoadGlobal { dst: Reg, name: u16 },
     /// Assign through the scope chain, creating an implicit global when
@@ -112,6 +129,8 @@ pub enum Instr {
     Jump { target: Target },
     JumpIfTrue { src: Reg, target: Target },
     JumpIfFalse { src: Reg, target: Target },
+    JumpIfNullish { src: Reg, target: Target },
+    JumpIfNotNullish { src: Reg, target: Target },
     /// Loop back-edge marker: consumes one loop-budget iteration (the same
     /// budget the AST evaluator's loops consume, so runaway loops raise the
     /// same `RangeError` on both tiers) plus instruction fuel.
@@ -127,6 +146,17 @@ pub enum Instr {
     SetProp { obj: Reg, key: Reg, val: Reg },
     /// `dst = callee(...args)`: `argc` registers starting at `args`.
     Call { dst: Reg, callee: Reg, args: Reg, argc: u16 },
+    /// `dst = callee.call(this, ...args)`: a method call keeps its receiver.
+    CallMethod {
+        dst: Reg,
+        callee: Reg,
+        this: Reg,
+        args: Reg,
+        argc: u16,
+    },
+    /// `dst` = template with `quasis` cooked chunks interpolating `argc`
+    /// evaluated values starting at `args`.
+    Template { dst: Reg, quasis: u16, args: Reg, argc: u16 },
     /// `dst = new callee(...args)`.
     Construct { dst: Reg, callee: Reg, args: Reg, argc: u16 },
     /// `dst = {}`: a fresh ordinary object.
@@ -150,6 +180,12 @@ pub enum Opcode {
     Mov,
     LoadLocal,
     StoreLocal,
+    DeclareLocal,
+    InitLocal,
+    InitGlobal,
+    HoistVarGlobal,
+    BareVarLocal,
+    BareVarGlobal,
     LoadGlobal,
     StoreGlobal,
     DefineGlobal,
@@ -170,6 +206,8 @@ pub enum Opcode {
     Jump,
     JumpIfTrue,
     JumpIfFalse,
+    JumpIfNullish,
+    JumpIfNotNullish,
     LoopHead,
     Return,
     ReturnUndefined,
@@ -177,6 +215,8 @@ pub enum Opcode {
     GetProp,
     SetProp,
     Call,
+    CallMethod,
+    Template,
     Construct,
     NewObject,
     SetOwnProp,
@@ -193,6 +233,12 @@ impl Instr {
             Instr::Mov { .. } => Opcode::Mov,
             Instr::LoadLocal { .. } => Opcode::LoadLocal,
             Instr::StoreLocal { .. } => Opcode::StoreLocal,
+            Instr::DeclareLocal { .. } => Opcode::DeclareLocal,
+            Instr::InitLocal { .. } => Opcode::InitLocal,
+            Instr::InitGlobal { .. } => Opcode::InitGlobal,
+            Instr::HoistVarGlobal { .. } => Opcode::HoistVarGlobal,
+            Instr::BareVarLocal { .. } => Opcode::BareVarLocal,
+            Instr::BareVarGlobal { .. } => Opcode::BareVarGlobal,
             Instr::LoadGlobal { .. } => Opcode::LoadGlobal,
             Instr::StoreGlobal { .. } => Opcode::StoreGlobal,
             Instr::DefineGlobal { .. } => Opcode::DefineGlobal,
@@ -213,6 +259,8 @@ impl Instr {
             Instr::Jump { .. } => Opcode::Jump,
             Instr::JumpIfTrue { .. } => Opcode::JumpIfTrue,
             Instr::JumpIfFalse { .. } => Opcode::JumpIfFalse,
+            Instr::JumpIfNullish { .. } => Opcode::JumpIfNullish,
+            Instr::JumpIfNotNullish { .. } => Opcode::JumpIfNotNullish,
             Instr::LoopHead => Opcode::LoopHead,
             Instr::Return { .. } => Opcode::Return,
             Instr::ReturnUndefined => Opcode::ReturnUndefined,
@@ -220,6 +268,8 @@ impl Instr {
             Instr::GetProp { .. } => Opcode::GetProp,
             Instr::SetProp { .. } => Opcode::SetProp,
             Instr::Call { .. } => Opcode::Call,
+            Instr::CallMethod { .. } => Opcode::CallMethod,
+            Instr::Template { .. } => Opcode::Template,
             Instr::Construct { .. } => Opcode::Construct,
             Instr::NewObject { .. } => Opcode::NewObject,
             Instr::SetOwnProp { .. } => Opcode::SetOwnProp,
@@ -234,11 +284,17 @@ impl Instr {
     /// starting point for benchmark tuning, not a final schedule.
     pub fn cost(&self) -> u64 {
         match self.opcode() {
-            Opcode::Call => 5,
+            Opcode::Call | Opcode::CallMethod => 5,
             Opcode::Construct => 8,
             Opcode::NewObject | Opcode::NewArray => 10,
             Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
-            Opcode::Mov | Opcode::Jump | Opcode::LoopHead => 0,
+            Opcode::Mov
+            | Opcode::Jump
+            | Opcode::JumpIfTrue
+            | Opcode::JumpIfFalse
+            | Opcode::JumpIfNullish
+            | Opcode::JumpIfNotNullish
+            | Opcode::LoopHead => 0,
             _ => 1,
         }
     }
@@ -251,6 +307,14 @@ impl fmt::Display for Instr {
             Instr::Mov { dst, src } => write!(f, "MOV r{dst}, r{src}"),
             Instr::LoadLocal { dst, slot } => write!(f, "LOAD_LOCAL r{dst}, s{slot}"),
             Instr::StoreLocal { slot, src } => write!(f, "STORE_LOCAL s{slot}, r{src}"),
+            Instr::DeclareLocal { slot, kind, initialized } => {
+                write!(f, "DECLARE_LOCAL s{slot}, {kind:?}, init={initialized}")
+            }
+            Instr::InitLocal { slot, src } => write!(f, "INIT_LOCAL s{slot}, r{src}"),
+            Instr::InitGlobal { name, src } => write!(f, "INIT_GLOBAL c{name}, r{src}"),
+            Instr::HoistVarGlobal { name } => write!(f, "HOIST_VAR_GLOBAL c{name}"),
+            Instr::BareVarLocal { slot } => write!(f, "BARE_VAR_LOCAL s{slot}"),
+            Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
             Instr::LoadGlobal { dst, name } => write!(f, "LOAD_GLOBAL r{dst}, c{name}"),
             Instr::StoreGlobal { name, src } => write!(f, "STORE_GLOBAL c{name}, r{src}"),
             Instr::DefineGlobal {
@@ -293,6 +357,12 @@ impl fmt::Display for Instr {
             Instr::Jump { target } => write!(f, "JUMP @{target}"),
             Instr::JumpIfTrue { src, target } => write!(f, "JUMP_IF_TRUE r{src}, @{target}"),
             Instr::JumpIfFalse { src, target } => write!(f, "JUMP_IF_FALSE r{src}, @{target}"),
+            Instr::JumpIfNullish { src, target } => {
+                write!(f, "JUMP_IF_NULLISH r{src}, @{target}")
+            }
+            Instr::JumpIfNotNullish { src, target } => {
+                write!(f, "JUMP_IF_NOT_NULLISH r{src}, @{target}")
+            }
             Instr::LoopHead => write!(f, "LOOP_HEAD"),
             Instr::Return { src } => write!(f, "RETURN r{src}"),
             Instr::ReturnUndefined => write!(f, "RETURN_UNDEFINED"),
@@ -301,6 +371,12 @@ impl fmt::Display for Instr {
             Instr::SetProp { obj, key, val } => write!(f, "SET_PROP r{obj}, r{key}, r{val}"),
             Instr::Call { dst, callee, args, argc } => {
                 write!(f, "CALL r{dst}, r{callee}, r{args}..r{args}+{argc}")
+            }
+            Instr::CallMethod { dst, callee, this, args, argc } => {
+                write!(f, "CALL_METHOD r{dst}, r{callee}, this=r{this}, r{args}..r{args}+{argc}")
+            }
+            Instr::Template { dst, quasis, args, argc } => {
+                write!(f, "TEMPLATE r{dst}, c{quasis}, r{args}..r{args}+{argc}")
             }
             Instr::Construct { dst, callee, args, argc } => {
                 write!(f, "CONSTRUCT r{dst}, r{callee}, r{args}..r{args}+{argc}")

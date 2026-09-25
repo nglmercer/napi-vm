@@ -229,7 +229,7 @@ impl Drop for GuestExecutionGuard {
 /// Declarations and the empty statement produce *empty* in the specification's
 /// terms, which is not the same as producing `undefined`: an empty completion
 /// leaves the previous statement's value in place.
-fn produces_completion_value(statement: &Statement) -> bool {
+pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
     !matches!(
         statement,
         Statement::Empty
