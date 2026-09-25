@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{
-    BindKind, Env, Environment, Interpreter, Lookup, block_needs_lexical_scope,
-    body_needs_hoisting,
+    BindKind, Env, Environment, Interpreter, Lookup, SYMBOL_ITERATOR_SLOT,
+    block_needs_lexical_scope, body_needs_hoisting,
 };
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
@@ -711,7 +711,10 @@ impl Interpreter {
             }
             Ok(Value::Undefined)
         } else if module.starts_with('.') && self.cur_mod.is_none() {
-            vm_err(format!("Relative import requires a module context: {}", module))
+            vm_err(format!(
+                "Relative import requires a module context: {}",
+                module
+            ))
         } else {
             vm_err(format!("Module not found: {}", module))
         }
@@ -762,9 +765,7 @@ impl Interpreter {
                 let mut cells = Vec::with_capacity(specifiers.len());
                 {
                     let mut scope = self.global.borrow_mut();
-                    for ((local, exported), (_, existing)) in
-                        specifiers.iter().zip(promised)
-                    {
+                    for ((local, exported), (_, existing)) in specifiers.iter().zip(promised) {
                         if let Some(Value::Binding(cell)) = &existing {
                             scope.adopt_cell(local, cell.clone());
                             cells.push((exported.clone(), Value::Binding(cell.clone())));
@@ -1284,20 +1285,18 @@ impl Interpreter {
     /// protocol. Shared by `for...of` and `yield*`.
     pub(crate) fn iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
         if matches!(source, Value::String(_)) {
-            let iter_fn = self.prop(source, &Value::String("__symbol_iterator__".to_string()))?;
+            let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
             return self.call_this(&iter_fn, source.clone(), vec![]);
         }
         match source {
             // A generator is its own iterator.
             Value::Generator { .. } => Ok(source.clone()),
             Value::Array(_) => {
-                let iter_fn =
-                    self.prop(source, &Value::String("__symbol_iterator__".to_string()))?;
+                let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
                 self.call_this(&iter_fn, source.clone(), vec![])
             }
             Value::Object { .. } | Value::TypedArray(_) => {
-                let iter_fn =
-                    self.prop(source, &Value::String("__symbol_iterator__".to_string()))?;
+                let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
                 if matches!(iter_fn, Value::Undefined) {
                     return vm_err("object is not iterable (no Symbol.iterator)");
                 }

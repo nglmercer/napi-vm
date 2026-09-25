@@ -21,8 +21,8 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{
-    BindKind, Env, Environment, Interpreter, Lookup, ObjectAccessorKind,
-    insert_object_property, intern_params, push_call_arg, symbol_slot_key,
+    BindKind, Env, Environment, Interpreter, Lookup, ObjectAccessorKind, insert_object_property,
+    intern_params, push_call_arg, symbol_slot_key,
 };
 use crate::value::{FunctionData, PropAttrs, Value};
 
@@ -122,7 +122,11 @@ impl<'a> CallFrame<'a> {
 /// innermost pushed block scope, or the running scope when none is pushed.
 /// Pushed scopes chain to the running scope, so one lookup covers both.
 fn current_scope(interp: &Interpreter, frame: &CallFrame) -> Env {
-    frame.scopes.last().cloned().unwrap_or_else(|| interp.global.clone())
+    frame
+        .scopes
+        .last()
+        .cloned()
+        .unwrap_or_else(|| interp.global.clone())
 }
 
 fn internal(what: &str) -> VmErr {
@@ -139,7 +143,10 @@ fn const_string(function: &BytecodeFunction, index: u16) -> Result<&str, VmErr> 
 /// Execute a top-level module. Falling off the end yields register zero,
 /// the program completion value; `return` escapes as `VmErr::Ret`, exactly
 /// like the AST evaluator's `run`.
-pub(crate) fn run_module(interp: &mut Interpreter, module: &BytecodeModule) -> Result<Value, VmErr> {
+pub(crate) fn run_module(
+    interp: &mut Interpreter,
+    module: &BytecodeModule,
+) -> Result<Value, VmErr> {
     // Top-level programs tier up like functions: compile once, execute
     // many times is exactly the shape repeated `execute` calls take.
     tier_check(interp, &module.main, &[]);
@@ -200,22 +207,23 @@ fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) -> Result<()
     // wins. Arrows never carry the flag themselves.
     if code.captures_arguments && !code.is_arrow {
         let args_obj = Value::arguments_object(args)?;
-        fe.borrow_mut().declare("arguments", args_obj, BindKind::Var, true);
+        fe.borrow_mut()
+            .declare("arguments", args_obj, BindKind::Var, true);
     }
     for (index, info) in code.slots.iter().enumerate() {
         if !info.captured {
             continue;
         }
-        let (value, initialized) = if index < code.parameter_count as usize
-            && info.kind == SlotKind::Var
-        {
-            (args.get(index).cloned().unwrap_or(Value::Undefined), true)
-        } else if info.kind == SlotKind::Var {
-            (Value::Undefined, true)
-        } else {
-            (Value::Undefined, false)
-        };
-        fe.borrow_mut().declare(&info.name, value, bind_kind(info.kind), initialized);
+        let (value, initialized) =
+            if index < code.parameter_count as usize && info.kind == SlotKind::Var {
+                (args.get(index).cloned().unwrap_or(Value::Undefined), true)
+            } else if info.kind == SlotKind::Var {
+                (Value::Undefined, true)
+            } else {
+                (Value::Undefined, false)
+            };
+        fe.borrow_mut()
+            .declare(&info.name, value, bind_kind(info.kind), initialized);
     }
     Ok(())
 }
@@ -350,500 +358,598 @@ fn run_loop(
             interp.consume_fuel(instr.cost())?;
             frame.ip += 1;
             match instr {
-            Instr::LoadConst { dst, cst } => {
-                let value = match &frame.function.constants[cst as usize] {
-                    Constant::Number(n) => Value::Number(*n),
-                    Constant::String(s) => Value::String(s.clone()),
-                    Constant::Bool(b) => Value::Bool(*b),
-                    Constant::Null => Value::Null,
-                    Constant::Undefined => Value::Undefined,
-                    Constant::BigInt(v) => Value::BigInt(v.clone()),
-                    Constant::Regex { pattern, flags } => {
-                        crate::builtins::compile_regex(pattern, flags)?
-                    }
-                    _ => return Err(internal("invalid load_const")),
-                };
-                frame.registers[dst as usize] = value;
-            }
-            Instr::Mov { dst, src } => {
-                frame.registers[dst as usize] = frame.registers[src as usize].clone();
-            }
-            Instr::LoadLocal { dst, slot } => {
-                let slot_value = &frame.slots[slot as usize];
-                if !slot_value.initialized {
-                    return Err(VmErr::Msg(format!(
-                        "ReferenceError: Cannot access '{}' before initialization",
-                        frame.function.slots[slot as usize].name
-                    )));
+                Instr::LoadConst { dst, cst } => {
+                    let value = match &frame.function.constants[cst as usize] {
+                        Constant::Number(n) => Value::Number(*n),
+                        Constant::String(s) => Value::String(s.clone()),
+                        Constant::Bool(b) => Value::Bool(*b),
+                        Constant::Null => Value::Null,
+                        Constant::Undefined => Value::Undefined,
+                        Constant::BigInt(v) => Value::BigInt(v.clone()),
+                        Constant::Regex { pattern, flags } => {
+                            crate::builtins::compile_regex(pattern, flags)?
+                        }
+                        _ => return Err(internal("invalid load_const")),
+                    };
+                    frame.registers[dst as usize] = value;
                 }
-                frame.registers[dst as usize] = slot_value.value.clone();
-            }
-            Instr::StoreLocal { slot, src } => {
-                check_slot_writable(frame, slot)?;
-                let value = frame.registers[src as usize].clone();
-                let slot = &mut frame.slots[slot as usize];
-                slot.value = value;
-                slot.initialized = true;
-            }
-            Instr::DeclareLocal { slot, kind, initialized } => {
-                frame.slots[slot as usize] = RunSlot { value: Value::Undefined, initialized, kind };
-            }
-            Instr::InitLocal { slot, src } => {
-                let value = frame.registers[src as usize].clone();
-                let slot = &mut frame.slots[slot as usize];
-                slot.value = value;
-                slot.initialized = true;
-            }
-            Instr::LoadGlobal { dst, name } => {
-                let name = const_string(frame.function, name)?.to_string();
-                if name == "undefined" {
-                    frame.registers[dst as usize] = Value::Undefined;
-                } else {
+                Instr::Mov { dst, src } => {
+                    frame.registers[dst as usize] = frame.registers[src as usize].clone();
+                }
+                Instr::LoadLocal { dst, slot } => {
+                    let slot_value = &frame.slots[slot as usize];
+                    if !slot_value.initialized {
+                        return Err(VmErr::Msg(format!(
+                            "ReferenceError: Cannot access '{}' before initialization",
+                            frame.function.slots[slot as usize].name
+                        )));
+                    }
+                    frame.registers[dst as usize] = slot_value.value.clone();
+                }
+                Instr::StoreLocal { slot, src } => {
+                    check_slot_writable(frame, slot)?;
+                    let value = frame.registers[src as usize].clone();
+                    let slot = &mut frame.slots[slot as usize];
+                    slot.value = value;
+                    slot.initialized = true;
+                }
+                Instr::DeclareLocal {
+                    slot,
+                    kind,
+                    initialized,
+                } => {
+                    frame.slots[slot as usize] = RunSlot {
+                        value: Value::Undefined,
+                        initialized,
+                        kind,
+                    };
+                }
+                Instr::InitLocal { slot, src } => {
+                    let value = frame.registers[src as usize].clone();
+                    let slot = &mut frame.slots[slot as usize];
+                    slot.value = value;
+                    slot.initialized = true;
+                }
+                Instr::LoadGlobal { dst, name } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    if name == "undefined" {
+                        frame.registers[dst as usize] = Value::Undefined;
+                    } else {
+                        let scope = current_scope(interp, frame);
+                        match scope.borrow().lookup(&name) {
+                            Lookup::Value(v) => frame.registers[dst as usize] = v,
+                            Lookup::Uninitialized => {
+                                return Err(VmErr::Msg(format!(
+                                    "ReferenceError: Cannot access '{name}' before initialization"
+                                )));
+                            }
+                            Lookup::Missing => {
+                                return Err(VmErr::Msg(format!(
+                                    "ReferenceError: {name} is not defined"
+                                )));
+                            }
+                        }
+                    }
+                }
+                Instr::StoreGlobal { name, src } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let value = frame.registers[src as usize].clone();
                     let scope = current_scope(interp, frame);
-                    match scope.borrow().lookup(&name) {
-                        Lookup::Value(v) => frame.registers[dst as usize] = v,
-                        Lookup::Uninitialized => {
-                            return Err(VmErr::Msg(format!(
-                                "ReferenceError: Cannot access '{name}' before initialization"
-                            )));
-                        }
-                        Lookup::Missing => {
-                            return Err(VmErr::Msg(format!(
-                                "ReferenceError: {name} is not defined"
-                            )));
-                        }
+                    interp.assign_or_set_binding_in(&scope, &name, value)?;
+                }
+                Instr::DefineGlobal {
+                    name,
+                    src,
+                    kind,
+                    initialized,
+                } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let value = frame.registers[src as usize].clone();
+                    let scope = current_scope(interp, frame);
+                    interp.declare_binding_in(
+                        &scope,
+                        &name,
+                        value,
+                        bind_kind(kind),
+                        initialized,
+                    )?;
+                }
+                Instr::InitGlobal { name, src } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let value = frame.registers[src as usize].clone();
+                    let scope = current_scope(interp, frame);
+                    interp.set_binding_in(&scope, &name, value)?;
+                }
+                Instr::HoistVarGlobal { name } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    if !interp.global.borrow().has(&name) {
+                        interp.declare_binding(&name, Value::Undefined, BindKind::Var, true)?;
                     }
                 }
-            }
-            Instr::StoreGlobal { name, src } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let value = frame.registers[src as usize].clone();
-                let scope = current_scope(interp, frame);
-                interp.assign_or_set_binding_in(&scope, &name, value)?;
-            }
-            Instr::DefineGlobal { name, src, kind, initialized } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let value = frame.registers[src as usize].clone();
-                let scope = current_scope(interp, frame);
-                interp.declare_binding_in(&scope, &name, value, bind_kind(kind), initialized)?;
-            }
-            Instr::InitGlobal { name, src } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let value = frame.registers[src as usize].clone();
-                let scope = current_scope(interp, frame);
-                interp.set_binding_in(&scope, &name, value)?;
-            }
-            Instr::HoistVarGlobal { name } => {
-                let name = const_string(frame.function, name)?.to_string();
-                if !interp.global.borrow().has(&name) {
-                    interp.declare_binding(&name, Value::Undefined, BindKind::Var, true)?;
-                }
-            }
-            Instr::BareVarLocal { slot } => {
-                if !frame.slots[slot as usize].initialized {
-                    return Err(VmErr::Msg(format!(
-                        "ReferenceError: Cannot access '{}' before initialization",
-                        frame.function.slots[slot as usize].name
-                    )));
-                }
-            }
-            Instr::BareVarGlobal { name } => {
-                let name = const_string(frame.function, name)?.to_string();
-                if interp.global.borrow().get(&name).is_none() {
-                    interp.assign_or_set_binding(&name, Value::Undefined)?;
-                }
-            }
-            Instr::LoadThis { dst } => {
-                frame.registers[dst as usize] = frame.this_value.clone();
-            }
-            Instr::LoadGlobalThis { dst } => {
-                let scope = current_scope(interp, frame);
-                frame.registers[dst as usize] =
-                    scope.borrow().get("this").unwrap_or(Value::Undefined);
-            }
-            Instr::TypeofGlobal { dst, name } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let scope = current_scope(interp, frame);
-                let value = scope.borrow().get(&name).unwrap_or(Value::Undefined);
-                frame.registers[dst as usize] = interp.un_op(crate::parser::UnOp::Typeof, &value)?;
-            }
-            Instr::TypeofLocal { dst, slot } => {
-                let value = if frame.slots[slot as usize].initialized {
-                    frame.slots[slot as usize].value.clone()
-                } else {
-                    Value::Undefined
-                };
-                frame.registers[dst as usize] = interp.un_op(crate::parser::UnOp::Typeof, &value)?;
-            }
-            Instr::Binary { dst, op, lhs, rhs } => {
-                let l = frame.registers[lhs as usize].clone();
-                let r = frame.registers[rhs as usize].clone();
-                frame.registers[dst as usize] = interp.apply_binary(op, &l, &r)?;
-            }
-            Instr::Unary { dst, op, src } => {
-                let v = frame.registers[src as usize].clone();
-                frame.registers[dst as usize] = interp.un_op(op, &v)?;
-            }
-            Instr::CompoundLocal { dst, slot, op, rhs } => {
-                let value = compound_slot(interp, frame, slot, op, rhs)?;
-                frame.registers[dst as usize] = value;
-            }
-            Instr::CompoundGlobal { dst, name, op, rhs } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let rhs = frame.registers[rhs as usize].clone();
-                let scope = current_scope(interp, frame);
-                frame.registers[dst as usize] =
-                    interp.compound_assign_global_in(&scope, &name, op, rhs)?;
-            }
-            Instr::CompoundProp { dst, obj, key, op, rhs } => {
-                let Some(bin) = op.bin_op() else {
-                    return Err(internal("plain `=` in compound prop"));
-                };
-                let obj = frame.registers[obj as usize].clone();
-                let key = frame.registers[key as usize].clone();
-                let rhs = frame.registers[rhs as usize].clone();
-                frame.registers[dst as usize] = interp.compound_assign_prop(&obj, &key, bin, rhs)?;
-            }
-            Instr::IncLocal { dst, slot, delta, prefix } => {
-                check_slot_writable(frame, slot)?;
-                let current = frame.slots[slot as usize].value.clone();
-                let updated = Value::Number(if delta > 0 {
-                    interp.tn(&current) + 1.0
-                } else {
-                    interp.tn(&current) - 1.0
-                });
-                frame.slots[slot as usize].value = updated.clone();
-                frame.slots[slot as usize].initialized = true;
-                frame.registers[dst as usize] = if prefix { updated } else { current };
-            }
-            Instr::IncGlobal { dst, name, delta, prefix } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let scope = current_scope(interp, frame);
-                frame.registers[dst as usize] =
-                    interp.inc_global_binding_in(&scope, &name, delta > 0, prefix)?;
-            }
-            Instr::IncProp { dst, obj, key, delta, prefix } => {
-                let obj = frame.registers[obj as usize].clone();
-                let key = frame.registers[key as usize].clone();
-                frame.registers[dst as usize] =
-                    interp.inc_prop_value(&obj, &key, delta > 0, prefix)?;
-            }
-            Instr::DelProp { dst, obj, key } => {
-                let obj = frame.registers[obj as usize].clone();
-                let key = frame.registers[key as usize].clone();
-                frame.registers[dst as usize] = interp.delete_member(&obj, &key)?;
-            }
-            Instr::DelGlobal { dst, name } => {
-                let name = const_string(frame.function, name)?.to_string();
-                let scope = current_scope(interp, frame);
-                let bound = scope.borrow().get(&name).is_some();
-                frame.registers[dst as usize] = Value::Bool(!bound);
-            }
-            Instr::Jump { target } => {
-                frame.ip = target as usize;
-            }
-            Instr::JumpIfTrue { src, target } => {
-                if interp.truthy(&frame.registers[src as usize]) {
-                    frame.ip = target as usize;
-                }
-            }
-            Instr::JumpIfFalse { src, target } => {
-                if !interp.truthy(&frame.registers[src as usize]) {
-                    frame.ip = target as usize;
-                }
-            }
-            Instr::JumpIfNullish { src, target } => {
-                if matches!(
-                    frame.registers[src as usize],
-                    Value::Null | Value::Undefined
-                ) {
-                    frame.ip = target as usize;
-                }
-            }
-            Instr::JumpIfNotNullish { src, target } => {
-                if !matches!(
-                    frame.registers[src as usize],
-                    Value::Null | Value::Undefined
-                ) {
-                    frame.ip = target as usize;
-                }
-            }
-            Instr::LoopHead => {
-                interp.consume_loop()?;
-                crate::jit::note_loop_iter(&frame.function.tiers);
-            }
-            // `return` signals through `Ret`, like the evaluator's bodies:
-            // `call_this` maps it to a value, `ctor` maps object returns to
-            // the returned object. Only falling off the end yields `Ok`.
-            Instr::Return { src } => {
-                return Err(VmErr::Ret(frame.registers[src as usize].clone()));
-            }
-            Instr::ReturnUndefined => {
-                return Err(VmErr::Ret(Value::Undefined));
-            }
-            Instr::Throw { src } => {
-                return Err(VmErr::Throw(frame.registers[src as usize].clone()));
-            }
-            Instr::GetProp { dst, obj, key } => {
-                let site = frame.ip - 1;
-                let obj = frame.registers[obj as usize].clone();
-                let key = frame.registers[key as usize].clone();
-                frame.registers[dst as usize] =
-                    get_prop_cached(interp, frame.function, site, &obj, &key)?;
-            }
-            Instr::SetProp { obj, key, val } => {
-                let site = frame.ip - 1;
-                let obj = frame.registers[obj as usize].clone();
-                let key = frame.registers[key as usize].clone();
-                let val = frame.registers[val as usize].clone();
-                set_prop_cached(interp, frame.function, site, &obj, &key, val)?;
-            }
-            Instr::Call { dst, callee, args, argc } => {
-                let argv = take_range(frame, args, argc)?;
-                let callee = frame.registers[callee as usize].clone();
-                frame.registers[dst as usize] = interp.call_this(&callee, Value::Undefined, argv)?;
-            }
-            Instr::CallMethod { dst, callee, this, args, argc } => {
-                let argv = take_range(frame, args, argc)?;
-                let callee = frame.registers[callee as usize].clone();
-                let this = frame.registers[this as usize].clone();
-                frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
-            }
-            Instr::Construct { dst, callee, args, argc } => {
-                let argv = take_range(frame, args, argc)?;
-                let callee = frame.registers[callee as usize].clone();
-                frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
-            }
-            Instr::CallSpread { dst, callee, tmpl } => {
-                let template = spread_template(frame, tmpl)?;
-                let argv = spread_argv(frame, &template)?;
-                let callee = frame.registers[callee as usize].clone();
-                frame.registers[dst as usize] = interp.call_this(&callee, Value::Undefined, argv)?;
-            }
-            Instr::MethodSpread { dst, callee, this, tmpl } => {
-                let template = spread_template(frame, tmpl)?;
-                let argv = spread_argv(frame, &template)?;
-                let callee = frame.registers[callee as usize].clone();
-                let this = frame.registers[this as usize].clone();
-                frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
-            }
-            Instr::BuildArray { dst, tmpl } => {
-                let template = spread_template(frame, tmpl)?;
-                frame.registers[dst as usize] = spread_array(interp, frame, &template)?;
-            }
-            Instr::ToDestructArray { dst, src } => {
-                frame.registers[dst as usize] =
-                    to_destruct_array(&frame.registers[src as usize])?;
-            }
-            Instr::RestArray { dst, src, from } => {
-                let rest = match &frame.registers[src as usize] {
-                    Value::Array(items) => {
-                        items.borrow().get(from as usize..).unwrap_or(&[]).to_vec()
+                Instr::BareVarLocal { slot } => {
+                    if !frame.slots[slot as usize].initialized {
+                        return Err(VmErr::Msg(format!(
+                            "ReferenceError: Cannot access '{}' before initialization",
+                            frame.function.slots[slot as usize].name
+                        )));
                     }
-                    _ => return Err(internal("rest of non-array")),
-                };
-                frame.registers[dst as usize] = Value::array(rest);
-            }
-            Instr::CheckDestructObject { dst, src } => {
-                frame.registers[dst as usize] =
-                    check_destruct_object(&frame.registers[src as usize])?;
-            }
-            Instr::RestObject { dst, src, keys, taken } => {
-                let source = frame.registers[src as usize].clone();
-                let keys = frame.registers[keys as usize].clone();
-                let taken = frame.registers[taken as usize].clone();
-                frame.registers[dst as usize] = rest_object(interp, &source, &keys, &taken)?;
-            }
-            Instr::NewObject { .. } | Instr::SetOwnProp { .. } => {
-                // Superseded by `BuildObject`; retained as valid IR, never
-                // emitted. Reaching here is a compiler bug.
-                return Err(internal("incremental object construction is retired"));
-            }
-            Instr::NormalKey { dst, src } => {
-                let key = match &frame.registers[src as usize] {
-                    Value::String(s) => Value::String(s.clone()),
-                    Value::Number(n) => Value::String(n.to_string()),
-                    Value::Symbol(s) => Value::String(symbol_slot_key(s)),
-                    _ => Value::Undefined,
-                };
-                frame.registers[dst as usize] = key;
-            }
-            Instr::LoadGlobalSoft { dst, name } => {
-                let name = const_string(frame.function, name)?;
-                let scope = current_scope(interp, frame);
-                frame.registers[dst as usize] =
-                    scope.borrow().get(name).unwrap_or(Value::Undefined);
-            }
-            Instr::LoadLocalSoft { dst, slot } => {
-                frame.registers[dst as usize] = if frame.slots[slot as usize].initialized {
-                    frame.slots[slot as usize].value.clone()
-                } else {
-                    Value::Undefined
-                };
-            }
-            Instr::BuildObject { dst, tmpl } => {
-                let template = match &frame.function.constants[tmpl as usize] {
-                    Constant::ObjectTemplate(entries) => entries.clone(),
-                    _ => return Err(internal("bad object template")),
-                };
-                frame.registers[dst as usize] = build_object(interp, frame, &template)?;
-            }
-            Instr::NewArray { dst, args, argc } => {
-                let items = take_range(frame, args, argc)?;
-                frame.registers[dst as usize] = Value::checked_array(items)?;
-            }
-            Instr::MakeFunction { dst, func } => {
-                let code = match &frame.function.constants[func as usize] {
-                    Constant::Function(code) => code.clone(),
-                    _ => return Err(internal("bad function constant")),
-                };
-                let scope = current_scope(interp, frame);
-                frame.registers[dst as usize] = make_function(interp, &code, scope, None);
-            }
-            Instr::MakeAstFunction { dst, ast } => {
-                let ast = match &frame.function.constants[ast as usize] {
-                    Constant::AstFunction(ast) => ast.clone(),
-                    _ => return Err(internal("bad ast-function constant")),
-                };
-                let scope = current_scope(interp, frame);
-                frame.registers[dst as usize] = make_ast_function(interp, &ast, scope, None);
-            }
-            Instr::Template { dst, quasis, args, argc } => {
-                let quasis = match &frame.function.constants[quasis as usize] {
-                    Constant::StringList(quasis) => quasis.clone(),
-                    _ => return Err(internal("bad template constant")),
-                };
-                let values = take_range(frame, args, argc)?;
-                frame.registers[dst as usize] = interp.render_template(&quasis, &values)?;
-            }
-            Instr::EnumKeys { dst, src } => {
-                let source = frame.registers[src as usize].clone();
-                let keys = interp.keys_with_proxy_trap(&source)?;
-                frame.registers[dst as usize] =
-                    Value::array(keys.into_iter().map(Value::String).collect());
-            }
-            Instr::ForOfInit { iter, next, src } => {
-                let source = frame.registers[src as usize].clone();
-                let iterator = interp.iterator_for(&source)?;
-                let next_fn = interp.prop(&iterator, &Value::String("next".to_string()))?;
-                if matches!(next_fn, Value::Undefined) {
-                    return Err(VmErr::Msg("iterator has no next() method".to_string()));
                 }
-                frame.registers[iter as usize] = iterator;
-                frame.registers[next as usize] = next_fn;
-            }
-            Instr::IterNext { done, value, iter, next } => {
-                let iterator = frame.registers[iter as usize].clone();
-                let next_fn = frame.registers[next as usize].clone();
-                let result = interp.call_this(&next_fn, iterator, vec![])?;
-                let finished = result
-                    .get_prop("done")
-                    .map(|flag| flag.is_truthy())
-                    .unwrap_or(true);
-                frame.registers[done as usize] = Value::Bool(finished);
-                frame.registers[value as usize] =
-                    result.get_prop("value").unwrap_or(Value::Undefined);
-            }
-            Instr::CloseIterator { src } => {
-                crate::interpreter::close_iterator(&frame.registers[src as usize]);
-            }
-            Instr::PushCatch { target, dst } => {
-                let scope_depth = frame.scopes.len();
-                frame.handlers.push(HandlerEntry { target, dst, catch_returns: false, scope_depth });
-            }
-            Instr::PushFinally { target, dst } => {
-                let scope_depth = frame.scopes.len();
-                frame.handlers.push(HandlerEntry { target, dst, catch_returns: true, scope_depth });
-            }
-            Instr::PushScope => {
-                let parent = current_scope(interp, frame);
-                frame.scopes.push(Rc::new(RefCell::new(Environment::child(parent))));
-            }
-            Instr::PopScope => {
-                if frame.scopes.pop().is_none() {
-                    return Err(internal("scope stack underflow"));
+                Instr::BareVarGlobal { name } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    if interp.global.borrow().get(&name).is_none() {
+                        interp.assign_or_set_binding(&name, Value::Undefined)?;
+                    }
                 }
-            }
-            Instr::PopHandler => {
-                if frame.handlers.pop().is_none() {
-                    return Err(internal("handler stack underflow"));
+                Instr::LoadThis { dst } => {
+                    frame.registers[dst as usize] = frame.this_value.clone();
                 }
-            }
-            Instr::Rethrow => match frame.pending.take() {
-                Some(error) => return Err(error),
-                None => return Err(internal("rethrow without a pending error")),
-            },
-            Instr::SuperMember { dst, key } => {
-                let scope = current_scope(interp, frame);
-                let proto = scope.borrow().get(crate::interpreter::SUPER_PROTO);
-                let Some(proto) = proto else {
-                    return Err(VmErr::Msg("'super' used outside a derived class".to_string()));
-                };
-                let key = frame.registers[key as usize].clone();
-                frame.registers[dst as usize] = interp.get_prop_value(&proto, &key)?;
-            }
-            Instr::SuperCall { dst, args, argc } => {
-                let argv = take_range(frame, args, argc)?;
-                frame.registers[dst as usize] = super_call(interp, frame, argv)?;
-            }
-            Instr::SuperCallSpread { dst, tmpl } => {
-                let template = spread_template(frame, tmpl)?;
-                let argv = spread_argv(frame, &template)?;
-                frame.registers[dst as usize] = super_call(interp, frame, argv)?;
-            }
-            Instr::Raise { msg } => {
-                let message = const_string(frame.function, msg)?.to_string();
-                return Err(VmErr::Msg(message));
-            }
-            Instr::BuildClass { dst, tmpl } => {
-                let template = match &frame.function.constants[tmpl as usize] {
-                    Constant::ClassTemplate(template) => template.clone(),
-                    _ => return Err(internal("bad class template")),
-                };
-                frame.registers[dst as usize] = build_class_from_template(interp, frame, &template)?;
-            }
-            Instr::PropertyKey { dst, src } => {
-                let key = frame.registers[src as usize].clone();
-                let key = interp.property_key(&key)?;
-                frame.registers[dst as usize] = Value::String(key);
-            }
-            Instr::Import { tmpl } => {
-                let template = match &frame.function.constants[tmpl as usize] {
-                    Constant::ImportTemplate(template) => template.clone(),
-                    _ => return Err(internal("bad import template")),
-                };
-                interp.stmt_import(
-                    &template.module,
-                    template.default.as_deref(),
-                    &template.named,
-                    template.namespace.as_deref(),
-                )?;
-            }
-            Instr::ExportDefault { src } => {
-                let value = frame.registers[src as usize].clone();
-                interp.stmt_export_default(value)?;
-            }
-            Instr::ExportNamed { tmpl } => {
-                let template = match &frame.function.constants[tmpl as usize] {
-                    Constant::ExportNamedTemplate(template) => template.clone(),
-                    _ => return Err(internal("bad export template")),
-                };
-                interp.stmt_export_named(&template.specifiers, template.source.as_deref())?;
-            }
-            Instr::ExportAll { tmpl } => {
-                let template = match &frame.function.constants[tmpl as usize] {
-                    Constant::ExportAllTemplate(template) => template.clone(),
-                    _ => return Err(internal("bad export template")),
-                };
-                interp.stmt_export_all(&template.source, template.alias.as_deref())?;
-            }
-            Instr::DynamicImport { dst, src } => {
-                let specifier = frame.registers[src as usize].clone();
-                frame.registers[dst as usize] = interp.eval_dynamic_import(specifier)?;
-            }
-            Instr::ImportMeta { dst } => {
-                frame.registers[dst as usize] = interp.eval_import_meta()?;
-            }
+                Instr::LoadGlobalThis { dst } => {
+                    let scope = current_scope(interp, frame);
+                    frame.registers[dst as usize] =
+                        scope.borrow().get("this").unwrap_or(Value::Undefined);
+                }
+                Instr::TypeofGlobal { dst, name } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let scope = current_scope(interp, frame);
+                    let value = scope.borrow().get(&name).unwrap_or(Value::Undefined);
+                    frame.registers[dst as usize] =
+                        interp.un_op(crate::parser::UnOp::Typeof, &value)?;
+                }
+                Instr::TypeofLocal { dst, slot } => {
+                    let value = if frame.slots[slot as usize].initialized {
+                        frame.slots[slot as usize].value.clone()
+                    } else {
+                        Value::Undefined
+                    };
+                    frame.registers[dst as usize] =
+                        interp.un_op(crate::parser::UnOp::Typeof, &value)?;
+                }
+                Instr::Binary { dst, op, lhs, rhs } => {
+                    let l = frame.registers[lhs as usize].clone();
+                    let r = frame.registers[rhs as usize].clone();
+                    frame.registers[dst as usize] = interp.apply_binary(op, &l, &r)?;
+                }
+                Instr::Unary { dst, op, src } => {
+                    let v = frame.registers[src as usize].clone();
+                    frame.registers[dst as usize] = interp.un_op(op, &v)?;
+                }
+                Instr::CompoundLocal { dst, slot, op, rhs } => {
+                    let value = compound_slot(interp, frame, slot, op, rhs)?;
+                    frame.registers[dst as usize] = value;
+                }
+                Instr::CompoundGlobal { dst, name, op, rhs } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let rhs = frame.registers[rhs as usize].clone();
+                    let scope = current_scope(interp, frame);
+                    frame.registers[dst as usize] =
+                        interp.compound_assign_global_in(&scope, &name, op, rhs)?;
+                }
+                Instr::CompoundProp {
+                    dst,
+                    obj,
+                    key,
+                    op,
+                    rhs,
+                } => {
+                    let Some(bin) = op.bin_op() else {
+                        return Err(internal("plain `=` in compound prop"));
+                    };
+                    let obj = frame.registers[obj as usize].clone();
+                    let key = frame.registers[key as usize].clone();
+                    let rhs = frame.registers[rhs as usize].clone();
+                    frame.registers[dst as usize] =
+                        interp.compound_assign_prop(&obj, &key, bin, rhs)?;
+                }
+                Instr::IncLocal {
+                    dst,
+                    slot,
+                    delta,
+                    prefix,
+                } => {
+                    check_slot_writable(frame, slot)?;
+                    let current = frame.slots[slot as usize].value.clone();
+                    let updated = Value::Number(if delta > 0 {
+                        interp.tn(&current) + 1.0
+                    } else {
+                        interp.tn(&current) - 1.0
+                    });
+                    frame.slots[slot as usize].value = updated.clone();
+                    frame.slots[slot as usize].initialized = true;
+                    frame.registers[dst as usize] = if prefix { updated } else { current };
+                }
+                Instr::IncGlobal {
+                    dst,
+                    name,
+                    delta,
+                    prefix,
+                } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let scope = current_scope(interp, frame);
+                    frame.registers[dst as usize] =
+                        interp.inc_global_binding_in(&scope, &name, delta > 0, prefix)?;
+                }
+                Instr::IncProp {
+                    dst,
+                    obj,
+                    key,
+                    delta,
+                    prefix,
+                } => {
+                    let obj = frame.registers[obj as usize].clone();
+                    let key = frame.registers[key as usize].clone();
+                    frame.registers[dst as usize] =
+                        interp.inc_prop_value(&obj, &key, delta > 0, prefix)?;
+                }
+                Instr::DelProp { dst, obj, key } => {
+                    let obj = frame.registers[obj as usize].clone();
+                    let key = frame.registers[key as usize].clone();
+                    frame.registers[dst as usize] = interp.delete_member(&obj, &key)?;
+                }
+                Instr::DelGlobal { dst, name } => {
+                    let name = const_string(frame.function, name)?.to_string();
+                    let scope = current_scope(interp, frame);
+                    let bound = scope.borrow().get(&name).is_some();
+                    frame.registers[dst as usize] = Value::Bool(!bound);
+                }
+                Instr::Jump { target } => {
+                    frame.ip = target as usize;
+                }
+                Instr::JumpIfTrue { src, target } => {
+                    if interp.truthy(&frame.registers[src as usize]) {
+                        frame.ip = target as usize;
+                    }
+                }
+                Instr::JumpIfFalse { src, target } => {
+                    if !interp.truthy(&frame.registers[src as usize]) {
+                        frame.ip = target as usize;
+                    }
+                }
+                Instr::JumpIfNullish { src, target } => {
+                    if matches!(
+                        frame.registers[src as usize],
+                        Value::Null | Value::Undefined
+                    ) {
+                        frame.ip = target as usize;
+                    }
+                }
+                Instr::JumpIfNotNullish { src, target } => {
+                    if !matches!(
+                        frame.registers[src as usize],
+                        Value::Null | Value::Undefined
+                    ) {
+                        frame.ip = target as usize;
+                    }
+                }
+                Instr::LoopHead => {
+                    interp.consume_loop()?;
+                    crate::jit::note_loop_iter(&frame.function.tiers);
+                }
+                // `return` signals through `Ret`, like the evaluator's bodies:
+                // `call_this` maps it to a value, `ctor` maps object returns to
+                // the returned object. Only falling off the end yields `Ok`.
+                Instr::Return { src } => {
+                    return Err(VmErr::Ret(frame.registers[src as usize].clone()));
+                }
+                Instr::ReturnUndefined => {
+                    return Err(VmErr::Ret(Value::Undefined));
+                }
+                Instr::Throw { src } => {
+                    return Err(VmErr::Throw(frame.registers[src as usize].clone()));
+                }
+                Instr::GetProp { dst, obj, key } => {
+                    let site = frame.ip - 1;
+                    let obj = frame.registers[obj as usize].clone();
+                    let key = frame.registers[key as usize].clone();
+                    frame.registers[dst as usize] =
+                        get_prop_cached(interp, frame.function, site, &obj, &key)?;
+                }
+                Instr::SetProp { obj, key, val } => {
+                    let site = frame.ip - 1;
+                    let obj = frame.registers[obj as usize].clone();
+                    let key = frame.registers[key as usize].clone();
+                    let val = frame.registers[val as usize].clone();
+                    set_prop_cached(interp, frame.function, site, &obj, &key, val)?;
+                }
+                Instr::Call {
+                    dst,
+                    callee,
+                    args,
+                    argc,
+                } => {
+                    let argv = take_range(frame, args, argc)?;
+                    let callee = frame.registers[callee as usize].clone();
+                    frame.registers[dst as usize] =
+                        interp.call_this(&callee, Value::Undefined, argv)?;
+                }
+                Instr::CallMethod {
+                    dst,
+                    callee,
+                    this,
+                    args,
+                    argc,
+                } => {
+                    let argv = take_range(frame, args, argc)?;
+                    let callee = frame.registers[callee as usize].clone();
+                    let this = frame.registers[this as usize].clone();
+                    frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
+                }
+                Instr::Construct {
+                    dst,
+                    callee,
+                    args,
+                    argc,
+                } => {
+                    let argv = take_range(frame, args, argc)?;
+                    let callee = frame.registers[callee as usize].clone();
+                    frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
+                }
+                Instr::CallSpread { dst, callee, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let argv = spread_argv(frame, &template)?;
+                    let callee = frame.registers[callee as usize].clone();
+                    frame.registers[dst as usize] =
+                        interp.call_this(&callee, Value::Undefined, argv)?;
+                }
+                Instr::MethodSpread {
+                    dst,
+                    callee,
+                    this,
+                    tmpl,
+                } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let argv = spread_argv(frame, &template)?;
+                    let callee = frame.registers[callee as usize].clone();
+                    let this = frame.registers[this as usize].clone();
+                    frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
+                }
+                Instr::BuildArray { dst, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    frame.registers[dst as usize] = spread_array(interp, frame, &template)?;
+                }
+                Instr::ToDestructArray { dst, src } => {
+                    frame.registers[dst as usize] =
+                        to_destruct_array(&frame.registers[src as usize])?;
+                }
+                Instr::RestArray { dst, src, from } => {
+                    let rest = match &frame.registers[src as usize] {
+                        Value::Array(items) => {
+                            items.borrow().get(from as usize..).unwrap_or(&[]).to_vec()
+                        }
+                        _ => return Err(internal("rest of non-array")),
+                    };
+                    frame.registers[dst as usize] = Value::array(rest);
+                }
+                Instr::CheckDestructObject { dst, src } => {
+                    frame.registers[dst as usize] =
+                        check_destruct_object(&frame.registers[src as usize])?;
+                }
+                Instr::RestObject {
+                    dst,
+                    src,
+                    keys,
+                    taken,
+                } => {
+                    let source = frame.registers[src as usize].clone();
+                    let keys = frame.registers[keys as usize].clone();
+                    let taken = frame.registers[taken as usize].clone();
+                    frame.registers[dst as usize] = rest_object(interp, &source, &keys, &taken)?;
+                }
+                Instr::NewObject { .. } | Instr::SetOwnProp { .. } => {
+                    // Superseded by `BuildObject`; retained as valid IR, never
+                    // emitted. Reaching here is a compiler bug.
+                    return Err(internal("incremental object construction is retired"));
+                }
+                Instr::NormalKey { dst, src } => {
+                    let key = match &frame.registers[src as usize] {
+                        Value::String(s) => Value::String(s.clone()),
+                        Value::Number(n) => Value::String(n.to_string()),
+                        Value::Symbol(s) => Value::String(symbol_slot_key(s)),
+                        _ => Value::Undefined,
+                    };
+                    frame.registers[dst as usize] = key;
+                }
+                Instr::LoadGlobalSoft { dst, name } => {
+                    let name = const_string(frame.function, name)?;
+                    let scope = current_scope(interp, frame);
+                    frame.registers[dst as usize] =
+                        scope.borrow().get(name).unwrap_or(Value::Undefined);
+                }
+                Instr::LoadLocalSoft { dst, slot } => {
+                    frame.registers[dst as usize] = if frame.slots[slot as usize].initialized {
+                        frame.slots[slot as usize].value.clone()
+                    } else {
+                        Value::Undefined
+                    };
+                }
+                Instr::BuildObject { dst, tmpl } => {
+                    let template = match &frame.function.constants[tmpl as usize] {
+                        Constant::ObjectTemplate(entries) => entries.clone(),
+                        _ => return Err(internal("bad object template")),
+                    };
+                    frame.registers[dst as usize] = build_object(interp, frame, &template)?;
+                }
+                Instr::NewArray { dst, args, argc } => {
+                    let items = take_range(frame, args, argc)?;
+                    frame.registers[dst as usize] = Value::checked_array(items)?;
+                }
+                Instr::MakeFunction { dst, func } => {
+                    let code = match &frame.function.constants[func as usize] {
+                        Constant::Function(code) => code.clone(),
+                        _ => return Err(internal("bad function constant")),
+                    };
+                    let scope = current_scope(interp, frame);
+                    frame.registers[dst as usize] = make_function(interp, &code, scope, None);
+                }
+                Instr::MakeAstFunction { dst, ast } => {
+                    let ast = match &frame.function.constants[ast as usize] {
+                        Constant::AstFunction(ast) => ast.clone(),
+                        _ => return Err(internal("bad ast-function constant")),
+                    };
+                    let scope = current_scope(interp, frame);
+                    frame.registers[dst as usize] = make_ast_function(interp, &ast, scope, None);
+                }
+                Instr::Template {
+                    dst,
+                    quasis,
+                    args,
+                    argc,
+                } => {
+                    let quasis = match &frame.function.constants[quasis as usize] {
+                        Constant::StringList(quasis) => quasis,
+                        _ => return Err(internal("bad template constant")),
+                    };
+                    let values = take_range(frame, args, argc)?;
+                    let rendered = interp.render_template(quasis, &values)?;
+                    frame.registers[dst as usize] = rendered;
+                }
+                Instr::EnumKeys { dst, src } => {
+                    let source = frame.registers[src as usize].clone();
+                    let keys = interp.keys_with_proxy_trap(&source)?;
+                    frame.registers[dst as usize] =
+                        Value::array(keys.into_iter().map(Value::String).collect());
+                }
+                Instr::ForOfInit { iter, next, src } => {
+                    let source = frame.registers[src as usize].clone();
+                    let iterator = interp.iterator_for(&source)?;
+                    let next_fn = interp.prop_str(&iterator, "next")?;
+                    if matches!(next_fn, Value::Undefined) {
+                        return Err(VmErr::Msg("iterator has no next() method".to_string()));
+                    }
+                    frame.registers[iter as usize] = iterator;
+                    frame.registers[next as usize] = next_fn;
+                }
+                Instr::IterNext {
+                    done,
+                    value,
+                    iter,
+                    next,
+                } => {
+                    let iterator = frame.registers[iter as usize].clone();
+                    let next_fn = frame.registers[next as usize].clone();
+                    let result = interp.call_this(&next_fn, iterator, vec![])?;
+                    let finished = result
+                        .get_prop("done")
+                        .map(|flag| flag.is_truthy())
+                        .unwrap_or(true);
+                    frame.registers[done as usize] = Value::Bool(finished);
+                    frame.registers[value as usize] =
+                        result.get_prop("value").unwrap_or(Value::Undefined);
+                }
+                Instr::CloseIterator { src } => {
+                    crate::interpreter::close_iterator(&frame.registers[src as usize]);
+                }
+                Instr::PushCatch { target, dst } => {
+                    let scope_depth = frame.scopes.len();
+                    frame.handlers.push(HandlerEntry {
+                        target,
+                        dst,
+                        catch_returns: false,
+                        scope_depth,
+                    });
+                }
+                Instr::PushFinally { target, dst } => {
+                    let scope_depth = frame.scopes.len();
+                    frame.handlers.push(HandlerEntry {
+                        target,
+                        dst,
+                        catch_returns: true,
+                        scope_depth,
+                    });
+                }
+                Instr::PushScope => {
+                    let parent = current_scope(interp, frame);
+                    frame
+                        .scopes
+                        .push(Rc::new(RefCell::new(Environment::child(parent))));
+                }
+                Instr::PopScope => {
+                    if frame.scopes.pop().is_none() {
+                        return Err(internal("scope stack underflow"));
+                    }
+                }
+                Instr::PopHandler => {
+                    if frame.handlers.pop().is_none() {
+                        return Err(internal("handler stack underflow"));
+                    }
+                }
+                Instr::Rethrow => match frame.pending.take() {
+                    Some(error) => return Err(error),
+                    None => return Err(internal("rethrow without a pending error")),
+                },
+                Instr::SuperMember { dst, key } => {
+                    let scope = current_scope(interp, frame);
+                    let proto = scope.borrow().get(crate::interpreter::SUPER_PROTO);
+                    let Some(proto) = proto else {
+                        return Err(VmErr::Msg(
+                            "'super' used outside a derived class".to_string(),
+                        ));
+                    };
+                    let key = frame.registers[key as usize].clone();
+                    frame.registers[dst as usize] = interp.get_prop_value(&proto, &key)?;
+                }
+                Instr::SuperCall { dst, args, argc } => {
+                    let argv = take_range(frame, args, argc)?;
+                    frame.registers[dst as usize] = super_call(interp, frame, argv)?;
+                }
+                Instr::SuperCallSpread { dst, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let argv = spread_argv(frame, &template)?;
+                    frame.registers[dst as usize] = super_call(interp, frame, argv)?;
+                }
+                Instr::Raise { msg } => {
+                    let message = const_string(frame.function, msg)?.to_string();
+                    return Err(VmErr::Msg(message));
+                }
+                Instr::BuildClass { dst, tmpl } => {
+                    let template = match &frame.function.constants[tmpl as usize] {
+                        Constant::ClassTemplate(template) => template.clone(),
+                        _ => return Err(internal("bad class template")),
+                    };
+                    frame.registers[dst as usize] =
+                        build_class_from_template(interp, frame, &template)?;
+                }
+                Instr::PropertyKey { dst, src } => {
+                    let key = frame.registers[src as usize].clone();
+                    let key = interp.property_key(&key)?;
+                    frame.registers[dst as usize] = Value::String(key);
+                }
+                Instr::Import { tmpl } => {
+                    let template = match &frame.function.constants[tmpl as usize] {
+                        Constant::ImportTemplate(template) => template.clone(),
+                        _ => return Err(internal("bad import template")),
+                    };
+                    interp.stmt_import(
+                        &template.module,
+                        template.default.as_deref(),
+                        &template.named,
+                        template.namespace.as_deref(),
+                    )?;
+                }
+                Instr::ExportDefault { src } => {
+                    let value = frame.registers[src as usize].clone();
+                    interp.stmt_export_default(value)?;
+                }
+                Instr::ExportNamed { tmpl } => {
+                    let template = match &frame.function.constants[tmpl as usize] {
+                        Constant::ExportNamedTemplate(template) => template.clone(),
+                        _ => return Err(internal("bad export template")),
+                    };
+                    interp.stmt_export_named(&template.specifiers, template.source.as_deref())?;
+                }
+                Instr::ExportAll { tmpl } => {
+                    let template = match &frame.function.constants[tmpl as usize] {
+                        Constant::ExportAllTemplate(template) => template.clone(),
+                        _ => return Err(internal("bad export template")),
+                    };
+                    interp.stmt_export_all(&template.source, template.alias.as_deref())?;
+                }
+                Instr::DynamicImport { dst, src } => {
+                    let specifier = frame.registers[src as usize].clone();
+                    frame.registers[dst as usize] = interp.eval_dynamic_import(specifier)?;
+                }
+                Instr::ImportMeta { dst } => {
+                    frame.registers[dst as usize] = interp.eval_import_meta()?;
+                }
             }
             Ok(())
         })();
@@ -965,9 +1071,7 @@ fn class_function(
     name_override: Option<Rc<str>>,
 ) -> Result<Value, VmErr> {
     match frame.function.constants.get(index as usize) {
-        Some(Constant::Function(code)) => {
-            Ok(make_function(interp, code, closure, name_override))
-        }
+        Some(Constant::Function(code)) => Ok(make_function(interp, code, closure, name_override)),
         Some(Constant::AstFunction(ast)) => {
             Ok(make_ast_function(interp, ast, closure, name_override))
         }
@@ -998,10 +1102,7 @@ fn build_class_from_template(
     let member_closure = Interpreter::member_closure_env(&def_scope, &super_proto);
 
     let mut proto_props = Vec::new();
-    let mut statics = vec![(
-        "name".to_string(),
-        Value::String(template.name.clone()),
-    )];
+    let mut statics = vec![("name".to_string(), Value::String(template.name.clone()))];
     let mut static_attrs = vec![(
         "name".to_owned(),
         PropAttrs {
@@ -1028,7 +1129,9 @@ fn build_class_from_template(
         };
         match member.kind {
             ClassMemberKind::Method => {
-                let func = member.func.ok_or_else(|| internal("method without function"))?;
+                let func = member
+                    .func
+                    .ok_or_else(|| internal("method without function"))?;
                 let fn_val =
                     class_function(interp, frame, func, member_closure.clone(), display(""))?;
                 if member.is_static {
@@ -1046,8 +1149,14 @@ fn build_class_from_template(
                 }
             }
             ClassMemberKind::Getter | ClassMemberKind::Setter => {
-                let func = member.func.ok_or_else(|| internal("accessor without function"))?;
-                let prefix = if member.kind == ClassMemberKind::Getter { "get " } else { "set " };
+                let func = member
+                    .func
+                    .ok_or_else(|| internal("accessor without function"))?;
+                let prefix = if member.kind == ClassMemberKind::Getter {
+                    "get "
+                } else {
+                    "set "
+                };
                 let fn_val =
                     class_function(interp, frame, func, member_closure.clone(), display(prefix))?;
                 if member.is_static {
@@ -1066,7 +1175,9 @@ fn build_class_from_template(
                 }
             }
             ClassMemberKind::Field => {
-                let reg = member.value.ok_or_else(|| internal("field without value"))?;
+                let reg = member
+                    .value
+                    .ok_or_else(|| internal("field without value"))?;
                 let value = frame.registers[reg as usize].clone();
                 statics.push((key.clone(), value));
                 static_attrs.push((key, PropAttrs::default()));
@@ -1125,9 +1236,9 @@ fn super_call(
     let current = current_scope(interp, frame);
     let scope = current.borrow();
     let this_val = scope.get("this").unwrap_or(Value::Undefined);
-    let super_ctor = scope.get("__super_ctor").ok_or_else(|| {
-        VmErr::Msg("super used outside a derived class".to_string())
-    })?;
+    let super_ctor = scope
+        .get("__super_ctor")
+        .ok_or_else(|| VmErr::Msg("super used outside a derived class".to_string()))?;
     drop(scope);
     interp.invoke_ctor(&super_ctor, this_val, argv)
 }
@@ -1170,7 +1281,9 @@ fn build_object(
                 check_prop_limit(&positions)
             })?;
         } else {
-            let key_src = entry.key.ok_or_else(|| internal("spread-shaped data entry"))?;
+            let key_src = entry
+                .key
+                .ok_or_else(|| internal("spread-shaped data entry"))?;
             let key = match key_src {
                 KeySrc::Const(index) => const_string(frame.function, index)?.to_string(),
                 KeySrc::Reg(reg) => match &frame.registers[reg as usize] {
@@ -1193,7 +1306,14 @@ fn build_object(
                 PropKind::Setter => Some(ObjectAccessorKind::Setter),
                 PropKind::Spread => return Err(internal("misrouted spread entry")),
             };
-            insert_object_property(&mut object, &mut positions, &mut accessors, key, value, kind);
+            insert_object_property(
+                &mut object,
+                &mut positions,
+                &mut accessors,
+                key,
+                value,
+                kind,
+            );
         }
         if positions.len() > crate::value::MAX_OBJECT_PROPS {
             return Err(crate::value::limit_err(
@@ -1267,8 +1387,7 @@ fn spread_array(
                     items.extend(elements.iter().cloned());
                 }
                 Value::String(s) => {
-                    if items.len().saturating_add(s.chars().count()) > crate::value::MAX_ARRAY_LEN
-                    {
+                    if items.len().saturating_add(s.chars().count()) > crate::value::MAX_ARRAY_LEN {
                         return Err(crate::value::limit_err("Maximum array length exceeded"));
                     }
                     items.extend(s.chars().map(|c| Value::String(c.to_string())));
@@ -1525,9 +1644,8 @@ mod tests {
 
     #[test]
     fn ic_survives_shape_change() {
-        let (result, _) = run_module(
-            "let o = {x: 1}; let a = o.x; delete o.x; o.x = 2; let b = o.x; a + b;",
-        );
+        let (result, _) =
+            run_module("let o = {x: 1}; let a = o.x; delete o.x; o.x = 2; let b = o.x; a + b;");
         assert_eq!(num(&result), 3.0);
     }
 

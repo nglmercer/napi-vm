@@ -57,6 +57,10 @@ fn json_stringify(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
 fn reindent(compact: &str, indent: &str) -> Result<String, VmErr> {
     let mut out = String::with_capacity(compact.len() * 2);
     let mut depth = 0usize;
+    // One cached pad string per nesting depth, built on demand. The loop
+    // below touches a pad on every structural character; rebuilding
+    // `indent.repeat(depth)` there costs an allocation per character.
+    let mut pads: Vec<String> = vec![String::new()];
     let mut in_string = false;
     let mut escaped = false;
     for c in compact.chars() {
@@ -74,6 +78,10 @@ fn reindent(compact: &str, indent: &str) -> Result<String, VmErr> {
             }
             continue;
         }
+        // Every arm below indexes at most `depth + 1` (`{` increments first).
+        while pads.len() <= depth + 1 {
+            pads.push(format!("{}{}", pads[pads.len() - 1], indent));
+        }
         match c {
             '"' => {
                 in_string = true;
@@ -83,23 +91,30 @@ fn reindent(compact: &str, indent: &str) -> Result<String, VmErr> {
                 depth += 1;
                 out.push(c);
                 out.push('\n');
-                out.push_str(&indent.repeat(depth));
+                out.push_str(&pads[depth]);
             }
             '}' | ']' => {
                 depth = depth.saturating_sub(1);
-                // An empty object or array stays on one line.
-                if out.ends_with(&format!("\n{}", indent.repeat(depth + 1))) {
-                    out.truncate(out.len() - 1 - indent.repeat(depth + 1).len());
+                // An empty object or array stays on one line: the output ends
+                // with a newline plus the deeper pad. This byte check is
+                // exactly `out.ends_with("\n" + pad)` without the `format!`.
+                let pad = &pads[depth + 1];
+                let suffix_len = 1 + pad.len();
+                let is_empty = out.len() >= suffix_len
+                    && out.as_bytes()[out.len() - suffix_len] == b'\n'
+                    && out.ends_with(pad.as_str());
+                if is_empty {
+                    out.truncate(out.len() - suffix_len);
                 } else {
                     out.push('\n');
-                    out.push_str(&indent.repeat(depth));
+                    out.push_str(&pads[depth]);
                 }
                 out.push(c);
             }
             ',' => {
                 out.push(c);
                 out.push('\n');
-                out.push_str(&indent.repeat(depth));
+                out.push_str(&pads[depth]);
             }
             ':' => {
                 out.push(c);
@@ -615,5 +630,47 @@ impl<'a> JsonParser<'a> {
                 _ => return vm_err("Invalid JSON"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reindent_nests_objects_and_arrays() {
+        assert_eq!(reindent(r#"{"a":1}"#, "  ").unwrap(), "{\n  \"a\": 1\n}");
+        assert_eq!(
+            reindent(r#"{"a":[1,2]}"#, "  ").unwrap(),
+            "{\n  \"a\": [\n    1,\n    2\n  ]\n}"
+        );
+    }
+
+    #[test]
+    fn reindent_keeps_empty_containers_on_one_line() {
+        assert_eq!(reindent("{}", "  ").unwrap(), "{}");
+        assert_eq!(reindent("[]", "  ").unwrap(), "[]");
+        assert_eq!(
+            reindent(r#"{"a":{},"b":[]}"#, "  ").unwrap(),
+            "{\n  \"a\": {},\n  \"b\": []\n}"
+        );
+    }
+
+    #[test]
+    fn reindent_ignores_structure_inside_strings() {
+        assert_eq!(
+            reindent(r#"{"a":"{x},[y]"}"#, "  ").unwrap(),
+            "{\n  \"a\": \"{x},[y]\"\n}"
+        );
+        // Trailing spaces inside a string must not read as an empty body.
+        assert_eq!(
+            reindent(r#"{"a":"  "}"#, "  ").unwrap(),
+            "{\n  \"a\": \"  \"\n}"
+        );
+    }
+
+    #[test]
+    fn reindent_accepts_string_indent() {
+        assert_eq!(reindent(r#"{"a":1}"#, "\t").unwrap(), "{\n\t\"a\": 1\n}");
     }
 }
