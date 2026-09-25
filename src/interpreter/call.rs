@@ -1141,9 +1141,15 @@ impl Interpreter {
                     // pending sentinel. The interpreter parks at `await`.
                     bridge.call_host_async_with_this(id, this_val, args)
                 } else {
-                    bridge.call_host_with_callback_handler(id, this_val, args, &mut |callback| {
-                        self.run_host_callback(callback)
-                    })
+                    // The handler takes the interpreter as a parameter
+                    // instead of capturing it, so `&mut` is lent once.
+                    bridge.call_host_with_interp(
+                        id,
+                        this_val,
+                        args,
+                        &mut |interp, callback| interp.run_host_callback(callback),
+                        &mut *self,
+                    )
                 }
             }
             // A proxy over a function: `apply` intercepts the call.

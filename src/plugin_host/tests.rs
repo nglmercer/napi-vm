@@ -64,7 +64,7 @@ fn napi_prebuild_package_roots_stay_inside_the_plugin_directory() {
     assert!(error.to_string().contains("outside the plugin directory"));
 }
 
-fn string_value(args: Vec<Value>) -> Result<Value, VmErr> {
+fn string_value(_interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
     match args.first() {
         Some(Value::String(value)) => Ok(Value::String(format!("hello {value}"))),
         _ => Err(VmErr::Msg("expected one string argument".into())),
@@ -1099,4 +1099,97 @@ export default {
         Some(serde_json::json!({"loaded": "direct-lifecycle-async"}))
     );
     host.unload("direct-lifecycle-async").unwrap();
+}
+
+#[test]
+fn colon_capability_installs_from_extra_requests_with_interpreter_access() {
+    let dir = TestPluginDir::new("colon-capability");
+    dir.write(
+        "main.mjs",
+        r#"
+import { echo } from "host:echo";
+export default {
+  onLoad() { return { echoed: echo({ a: 1 }) }; },
+};
+"#,
+    );
+    // No manifest request: the embedder translates the plugin's ask.
+    dir.manifest("colon-capability", "main.mjs", "{}");
+    let capability = RustPluginCapability::new("host:echo").export("echo", |interp, args| {
+        let value = args.first().cloned().unwrap_or(Value::Undefined);
+        let json = crate::convert::value_to_json(interp, &value)?;
+        Ok(Value::String(json.to_string()))
+    });
+    let mut host = RustPluginHost::new(RustPluginHostOptions {
+        policy: RustPluginPolicy::default().grant("host:echo", JsonValue::Bool(true)),
+        ..RustPluginHostOptions::default()
+    });
+    host.define_capability(capability).unwrap();
+    host.set_extra_capability_requests(BTreeMap::from([(
+        "host:echo".to_owned(),
+        JsonValue::Bool(true),
+    )]))
+    .unwrap();
+    let plugin = host.load(&dir.0).unwrap();
+    assert_eq!(plugin.capabilities, ["host:echo"]);
+    assert_eq!(
+        plugin.load_result,
+        Some(serde_json::json!({"echoed": r#"{"a":1}"#}))
+    );
+    host.unload("colon-capability").unwrap();
+}
+
+#[test]
+fn extra_request_for_unknown_capability_fails_closed() {
+    let dir = TestPluginDir::new("unknown-capability");
+    dir.write("main.mjs", "export default { onLoad() { return {}; } };");
+    dir.manifest("unknown-capability", "main.mjs", "{}");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.set_extra_capability_requests(BTreeMap::from([(
+        "nope".to_owned(),
+        JsonValue::Bool(true),
+    )]))
+    .unwrap();
+    let error = match host.load(&dir.0) {
+        Ok(_) => panic!("load with an unknown capability request must fail"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("unknown capability"), "{error}");
+}
+
+#[test]
+fn extra_request_without_grant_does_not_install() {
+    let dir = TestPluginDir::new("ungranted-capability");
+    dir.write(
+        "main.mjs",
+        r#"
+export default {
+  onLoad() {
+    try {
+      require("host:private");
+      return { imported: true };
+    } catch {
+      return { imported: false };
+    }
+  },
+};
+"#,
+    );
+    dir.manifest("ungranted-capability", "main.mjs", "{}");
+    let capability = RustPluginCapability::new("host:private").export("echo", string_value);
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.define_capability(capability).unwrap();
+    // Requested, but the policy never grants it: the module must not exist.
+    host.set_extra_capability_requests(BTreeMap::from([(
+        "host:private".to_owned(),
+        JsonValue::Bool(true),
+    )]))
+    .unwrap();
+    let plugin = host.load(&dir.0).unwrap();
+    assert!(plugin.capabilities.is_empty());
+    assert_eq!(
+        plugin.load_result,
+        Some(serde_json::json!({"imported": false}))
+    );
+    host.unload("ungranted-capability").unwrap();
 }

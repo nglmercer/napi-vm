@@ -29,12 +29,17 @@ use std::time::Duration;
 
 use serde_json::{Map, Value as JsonValue};
 
-use crate::host::{HostBridge, WakeNotifier};
+use crate::host::HostBridge;
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
 ))]
-use crate::host::{HostCallback, HostEvent};
+use crate::host::HostEvent;
+#[cfg(all(
+    feature = "node-api-host",
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+use crate::host::WakeNotifier;
 use crate::interpreter::FileCommonJsLoader;
 use crate::interpreter::Interpreter;
 use crate::parser::Statement;
@@ -164,7 +169,8 @@ impl Default for RustPluginHostOptions {
 }
 
 /// A trusted Rust host callback exposed through one capability module.
-pub type RustPluginFunction = Rc<dyn Fn(Vec<Value>) -> Result<Value, VmErr>>;
+/// Receives the calling interpreter for value conversion and guest calls.
+pub type RustPluginFunction = Rc<dyn Fn(&mut Interpreter, Vec<Value>) -> Result<Value, VmErr>>;
 
 /// A host-owned guest capability module. Plugins can import it only when they
 /// request its name in `permissions.capabilities` and the host grants it.
@@ -186,7 +192,7 @@ impl RustPluginCapability {
     pub fn export(
         mut self,
         name: impl Into<String>,
-        function: impl Fn(Vec<Value>) -> Result<Value, VmErr> + 'static,
+        function: impl Fn(&mut Interpreter, Vec<Value>) -> Result<Value, VmErr> + 'static,
     ) -> Self {
         self.exports.push((name.into(), Rc::new(function)));
         self
@@ -304,6 +310,7 @@ pub struct RustPluginHost {
     options: RustPluginHostOptions,
     capabilities: BTreeMap<String, RustPluginCapability>,
     disabled: HashSet<String>,
+    extra_capability_requests: BTreeMap<String, JsonValue>,
     plugins: BTreeMap<String, RustLoadedPlugin>,
     #[cfg(all(
         feature = "node-api-host",
@@ -318,6 +325,7 @@ impl RustPluginHost {
             options,
             capabilities: BTreeMap::new(),
             disabled: HashSet::new(),
+            extra_capability_requests: BTreeMap::new(),
             plugins: BTreeMap::new(),
             #[cfg(all(
                 feature = "node-api-host",
@@ -355,6 +363,23 @@ impl RustPluginHost {
         }
         self.capabilities
             .insert(capability.name.clone(), capability);
+        Ok(())
+    }
+
+    /// Host-supplied capability requests, merged over the manifest's
+    /// `permissions.capabilities` at load (host wins per name). Embedders
+    /// whose manifests cannot carry napi-vm's request object (TikTools
+    /// owns `permissions` with its own shape) translate the plugin's ask
+    /// through this instead. Grants still apply: a request installs only
+    /// when the host defined the capability and the policy grants it.
+    pub fn set_extra_capability_requests(
+        &mut self,
+        requests: BTreeMap<String, JsonValue>,
+    ) -> Result<(), PluginHostError> {
+        for name in requests.keys() {
+            validate_capability_name(name)?;
+        }
+        self.extra_capability_requests = requests;
         Ok(())
     }
 
@@ -424,7 +449,12 @@ impl RustPluginHost {
         &mut self,
         plugin_directory: impl AsRef<Path>,
     ) -> Result<&mut RustLoadedPlugin, PluginHostError> {
-        let prepared = prepare_plugin(plugin_directory.as_ref(), self.options.max_file_bytes)?;
+        let mut prepared = prepare_plugin(plugin_directory.as_ref(), self.options.max_file_bytes)?;
+        // Embedder-translated requests merge over manifest requests; the
+        // grant checks below still decide what installs.
+        prepared
+            .capability_requests
+            .extend(self.extra_capability_requests.clone());
         let name = prepared.manifest.name.clone();
         if self
             .plugins
@@ -481,7 +511,10 @@ impl RustPluginHost {
         let root = current.root.clone();
         self.dispose(&mut current);
 
-        let prepared = prepare_plugin(&root, self.options.max_file_bytes)?;
+        let mut prepared = prepare_plugin(&root, self.options.max_file_bytes)?;
+        prepared
+            .capability_requests
+            .extend(self.extra_capability_requests.clone());
         if prepared.manifest.name != name {
             return Err(PluginHostError::Load(format!(
                 "plugin directory now declares \"{}\", expected \"{name}\"",

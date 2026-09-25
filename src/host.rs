@@ -1,4 +1,5 @@
 use crate::error::VmErr;
+use crate::interpreter::Interpreter;
 use crate::value::{PromiseInner, PromiseState, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -132,6 +133,26 @@ pub trait HostBridge {
         _callback_handler: &mut dyn FnMut(HostCallback) -> Result<Value, VmErr>,
     ) -> Result<Value, VmErr> {
         self.call_host_with_this(id, this_value, args)
+    }
+
+    /// Invoke a host function with interpreter access for callbacks that
+    /// need it (value conversion, guest calls). The handler takes the
+    /// interpreter as a parameter instead of capturing it, so the call
+    /// site lends `&mut` exactly once. The default ignores the
+    /// interpreter and delegates to
+    /// [`Self::call_host_with_callback_handler`]; bridges whose callbacks
+    /// need the interpreter override this.
+    fn call_host_with_interp(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        handler: &mut dyn FnMut(&mut Interpreter, HostCallback) -> Result<Value, VmErr>,
+        interp: &mut Interpreter,
+    ) -> Result<Value, VmErr> {
+        self.call_host_with_callback_handler(id, this_value, args, &mut |callback| {
+            handler(&mut *interp, callback)
+        })
     }
 
     /// Construct a host function with `new`. The default preserves legacy

@@ -44,10 +44,13 @@ pub(super) fn valid_plugin_name(name: &str) -> bool {
 
 pub(super) fn validate_capability_name(name: &str) -> Result<(), PluginHostError> {
     let mut chars = name.chars();
+    // Capability names double as module specifiers; `:` namespaces host
+    // capabilities (`tiktools:events`) mirroring `node:` builtins. Globals
+    // derived from the name are hex-encoded, so `:` never reaches one.
     if !chars
         .next()
         .is_some_and(|first| first.is_ascii_alphanumeric())
-        || !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+        || !chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | ':'))
     {
         return Err(PluginHostError::Manifest(format!(
             "invalid capability name \"{name}\""

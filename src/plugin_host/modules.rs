@@ -136,9 +136,9 @@ pub(super) fn install_custom_capability(
             sanitize_global(&capability.name),
             index
         );
-        expose_plugin_function(interpreter, bridge, &global_name, {
+        expose_interp_plugin_function(interpreter, bridge, &global_name, {
             let callback = callback.clone();
-            move |args| callback(args)
+            move |interp, args| callback(interp, args)
         })?;
         bridge_globals.push(global_name.clone());
         source.push_str(&format!(

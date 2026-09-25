@@ -53,9 +53,10 @@ pub(super) fn collect_guest_module_graph(
             continue;
         }
         for specifier in static_module_specifiers(source)? {
-            if specifier.starts_with("node:") {
-                // These names are resolved from host-installed capability
-                // modules such as node:fs and node:path.
+            if specifier.contains(':') && !specifier.starts_with('.') {
+                // Namespaced names resolve from host-installed capability
+                // modules (node:fs, tiktools:events, ...), never from
+                // files; unknown ones fail at import time.
                 continue;
             }
             let target = if specifier.starts_with('.') {

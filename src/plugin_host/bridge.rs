@@ -1,13 +1,20 @@
 //! Host bridge that dispatches guest calls to registered Rust functions.
 
 use super::*;
+use crate::host::HostCallback;
 
 pub(super) type HostFunction = Rc<dyn Fn(Vec<Value>) -> Result<Value, VmErr>>;
+
+/// A plugin host callback with interpreter access, for capability exports
+/// that convert values or call back into the guest.
+pub(super) type InterpHostFunction =
+    Rc<dyn Fn(&mut Interpreter, Vec<Value>) -> Result<Value, VmErr>>;
 
 #[derive(Default)]
 pub(super) struct PluginHostBridge {
     next_id: Cell<usize>,
     pub(super) functions: RefCell<HashMap<usize, HostFunction>>,
+    pub(super) interp_functions: RefCell<HashMap<usize, InterpHostFunction>>,
 }
 
 impl PluginHostBridge {
@@ -28,6 +35,23 @@ impl PluginHostBridge {
         Ok(id)
     }
 
+    fn register_interp(&self, function: InterpHostFunction) -> Result<usize, PluginHostError> {
+        let next = self
+            .next_id
+            .get()
+            .checked_add(1)
+            .ok_or_else(|| PluginHostError::Load("too many plugin host functions".into()))?;
+        if next >= PLUGIN_FUNCTION_TAG {
+            return Err(PluginHostError::Load(
+                "too many plugin host functions".into(),
+            ));
+        }
+        let id = PLUGIN_FUNCTION_TAG | next;
+        self.next_id.set(next);
+        self.interp_functions.borrow_mut().insert(id, function);
+        Ok(id)
+    }
+
     #[cfg(all(
         feature = "node-api-host",
         any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -39,6 +63,26 @@ impl PluginHostBridge {
 
 impl HostBridge for PluginHostBridge {
     fn call_host(&self, id: usize, args: Vec<Value>) -> Result<Value, VmErr> {
+        let function = self
+            .functions
+            .borrow()
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| VmErr::Msg(format!("unknown plugin host function id {id}")))?;
+        function(args)
+    }
+
+    fn call_host_with_interp(
+        &self,
+        id: usize,
+        _this_value: Value,
+        args: Vec<Value>,
+        _handler: &mut dyn FnMut(&mut Interpreter, HostCallback) -> Result<Value, VmErr>,
+        interp: &mut Interpreter,
+    ) -> Result<Value, VmErr> {
+        if let Some(function) = self.interp_functions.borrow().get(&id).cloned() {
+            return function(interp, args);
+        }
         let function = self
             .functions
             .borrow()
@@ -78,6 +122,23 @@ impl HostBridge for CompositeHostBridge {
     fn set_wake_notifier(&self, notifier: WakeNotifier) {
         self.plugin.set_wake_notifier(notifier.clone());
         self.native.set_wake_notifier(notifier);
+    }
+
+    fn call_host_with_interp(
+        &self,
+        id: usize,
+        this_value: Value,
+        args: Vec<Value>,
+        handler: &mut dyn FnMut(&mut Interpreter, HostCallback) -> Result<Value, VmErr>,
+        interp: &mut Interpreter,
+    ) -> Result<Value, VmErr> {
+        if PluginHostBridge::has_tag(id) {
+            self.plugin
+                .call_host_with_interp(id, this_value, args, handler, interp)
+        } else {
+            self.native
+                .call_host_with_interp(id, this_value, args, handler, interp)
+        }
     }
 
     fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {
@@ -240,6 +301,20 @@ pub(super) fn expose_plugin_function(
     function: impl Fn(Vec<Value>) -> Result<Value, VmErr> + 'static,
 ) -> Result<(), PluginHostError> {
     let id = bridge.register(Rc::new(function))?;
+    interpreter
+        .global
+        .borrow_mut()
+        .set(name, Value::host_function(name, id));
+    Ok(())
+}
+
+pub(super) fn expose_interp_plugin_function(
+    interpreter: &mut Interpreter,
+    bridge: &PluginHostBridge,
+    name: &str,
+    function: impl Fn(&mut Interpreter, Vec<Value>) -> Result<Value, VmErr> + 'static,
+) -> Result<(), PluginHostError> {
+    let id = bridge.register_interp(Rc::new(function))?;
     interpreter
         .global
         .borrow_mut()
