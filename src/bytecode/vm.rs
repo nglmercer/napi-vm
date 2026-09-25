@@ -22,11 +22,11 @@ use std::rc::Rc;
 use crate::error::VmErr;
 use crate::interpreter::{
     BindKind, Env, Environment, Interpreter, Lookup, ObjectAccessorKind,
-    insert_object_property, intern_params, symbol_slot_key,
+    insert_object_property, intern_params, push_call_arg, symbol_slot_key,
 };
 use crate::value::{FunctionData, Value};
 
-use super::constants::{Constant, PropEntry, PropKind};
+use super::constants::{Constant, PropEntry, PropKind, SpreadEntry};
 use super::function::{BytecodeFunction, SlotKind};
 use super::module::BytecodeModule;
 use super::opcode::{Instr, KeySrc, Reg, Slot};
@@ -424,6 +424,23 @@ fn run_loop(
                 let callee = frame.registers[callee as usize].clone();
                 frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
             }
+            Instr::CallSpread { dst, callee, tmpl } => {
+                let template = spread_template(frame, tmpl)?;
+                let argv = spread_argv(frame, &template)?;
+                let callee = frame.registers[callee as usize].clone();
+                frame.registers[dst as usize] = interp.call_this(&callee, Value::Undefined, argv)?;
+            }
+            Instr::MethodSpread { dst, callee, this, tmpl } => {
+                let template = spread_template(frame, tmpl)?;
+                let argv = spread_argv(frame, &template)?;
+                let callee = frame.registers[callee as usize].clone();
+                let this = frame.registers[this as usize].clone();
+                frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
+            }
+            Instr::BuildArray { dst, tmpl } => {
+                let template = spread_template(frame, tmpl)?;
+                frame.registers[dst as usize] = spread_array(interp, frame, &template)?;
+            }
             Instr::NewObject { .. } | Instr::SetOwnProp { .. } => {
                 // Superseded by `BuildObject`; retained as valid IR, never
                 // emitted. Reaching here is a compiler bug.
@@ -622,6 +639,83 @@ fn build_object(
         }
     }
     Ok(result)
+}
+
+fn spread_template(frame: &CallFrame, tmpl: u16) -> Result<Vec<SpreadEntry>, VmErr> {
+    match frame.function.constants.get(tmpl as usize) {
+        Some(Constant::SpreadTemplate(entries)) => Ok(entries.clone()),
+        _ => Err(internal("bad spread template")),
+    }
+}
+
+/// Build a call argument list with call-spread rules: arrays splice,
+/// anything else passes as one argument. Mirrors the evaluator's
+/// argument loop, including the count limit.
+fn spread_argv(frame: &CallFrame, template: &[SpreadEntry]) -> Result<Vec<Value>, VmErr> {
+    let mut argv = Vec::new();
+    for entry in template {
+        let value = frame.registers[entry.reg as usize].clone();
+        if !entry.spread {
+            push_call_arg(&mut argv, value)?;
+            continue;
+        }
+        match &value {
+            Value::Array(arr) => {
+                let items = arr.borrow();
+                if argv.len().saturating_add(items.len()) > crate::value::MAX_ARRAY_LEN {
+                    return Err(crate::value::limit_err("Maximum argument count exceeded"));
+                }
+                argv.extend(items.iter().cloned());
+            }
+            _ => push_call_arg(&mut argv, value)?,
+        }
+    }
+    Ok(argv)
+}
+
+/// Build an array literal with element-spread rules: arrays splice, strings
+/// spread per character, anything else drains the iterator protocol.
+/// Mirrors the evaluator's element loop, including every limit check.
+fn spread_array(
+    interp: &mut Interpreter,
+    frame: &CallFrame,
+    template: &[SpreadEntry],
+) -> Result<Value, VmErr> {
+    let mut items = Vec::new();
+    for entry in template {
+        let value = frame.registers[entry.reg as usize].clone();
+        if !entry.spread {
+            items.push(value);
+        } else {
+            match &value {
+                Value::Array(arr) => {
+                    let elements = arr.borrow();
+                    if items.len().saturating_add(elements.len()) > crate::value::MAX_ARRAY_LEN {
+                        return Err(crate::value::limit_err("Maximum array length exceeded"));
+                    }
+                    items.extend(elements.iter().cloned());
+                }
+                Value::String(s) => {
+                    if items.len().saturating_add(s.chars().count()) > crate::value::MAX_ARRAY_LEN
+                    {
+                        return Err(crate::value::limit_err("Maximum array length exceeded"));
+                    }
+                    items.extend(s.chars().map(|c| Value::String(c.to_string())));
+                }
+                other => {
+                    let drained = interp.drain_iterable(other)?;
+                    if items.len().saturating_add(drained.len()) > crate::value::MAX_ARRAY_LEN {
+                        return Err(crate::value::limit_err("Maximum array length exceeded"));
+                    }
+                    items.extend(drained);
+                }
+            }
+        }
+        if items.len() > crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        }
+    }
+    Value::checked_array(items)
 }
 
 fn check_prop_limit(positions: &HashMap<String, Vec<usize>>) -> Result<(), VmErr> {

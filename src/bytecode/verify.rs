@@ -204,6 +204,7 @@ impl Checker<'_> {
             Constant::Function(_) => expected == "function",
             Constant::AstFunction(_) => expected == "ast-function",
             Constant::ObjectTemplate(_) => expected == "object-template",
+            Constant::SpreadTemplate(_) => expected == "spread-template",
         };
         if ok {
             Ok(())
@@ -455,6 +456,33 @@ impl Checker<'_> {
             Instr::LoadLocalSoft { dst, slot } => {
                 self.check_reg(address, *dst)?;
                 self.check_slot(address, *slot)?;
+            }
+            Instr::CallSpread { dst, callee, tmpl } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *callee)?;
+                self.check_spread_template(address, *tmpl)?;
+            }
+            Instr::MethodSpread { dst, callee, this, tmpl } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *callee)?;
+                self.check_reg(address, *this)?;
+                self.check_spread_template(address, *tmpl)?;
+            }
+            Instr::BuildArray { dst, tmpl } => {
+                self.check_reg(address, *dst)?;
+                self.check_spread_template(address, *tmpl)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Checker<'_> {
+    fn check_spread_template(&self, address: usize, tmpl: u16) -> Result<(), VerifyError> {
+        self.check_const_is(address, tmpl, "spread-template")?;
+        if let Constant::SpreadTemplate(entries) = &self.function.constants[tmpl as usize] {
+            for entry in entries {
+                self.check_reg(address, entry.reg)?;
             }
         }
         Ok(())

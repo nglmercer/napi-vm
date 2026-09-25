@@ -38,6 +38,19 @@ pub enum Constant {
     /// static keys plus the registers holding dynamic keys, values, and
     /// spread sources, in source order.
     ObjectTemplate(Vec<PropEntry>),
+    /// One spread-bearing argument or element list, in source order, for
+    /// [`Instr::CallSpread`](super::opcode::Instr::CallSpread),
+    /// [`Instr::MethodSpread`](super::opcode::Instr::MethodSpread), and
+    /// [`Instr::BuildArray`](super::opcode::Instr::BuildArray).
+    SpreadTemplate(Vec<SpreadEntry>),
+}
+
+/// One element of a [`Constant::SpreadTemplate`]: a register plus whether
+/// it spreads (splice semantics) or passes as one value.
+#[derive(Debug, Clone, Copy)]
+pub struct SpreadEntry {
+    pub spread: bool,
+    pub reg: Reg,
 }
 
 /// One property of an [`Constant::ObjectTemplate`]: where its key and value

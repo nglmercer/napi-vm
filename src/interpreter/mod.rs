@@ -32,7 +32,9 @@ pub use native_addon::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
-pub(crate) use eval::{ObjectAccessorKind, insert_object_property, intern_params};
+pub(crate) use eval::{
+    ObjectAccessorKind, insert_object_property, intern_params, push_call_arg,
+};
 pub(crate) use resolve::array_iter;
 #[cfg(all(
     feature = "node-api-host",

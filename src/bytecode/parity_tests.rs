@@ -305,11 +305,59 @@ fn bigint_and_regex_literals() {
 }
 
 #[test]
+fn optional_chaining() {
+    check("let o = {a: 1}; o?.a", true);
+    check("let o = null; typeof o?.a", true);
+    check("let o = {a: {b: 2}}; o?.a?.b", true);
+    check("let o = {a: null}; o?.a?.b", true);
+    check("let o = null; o?.a.b", true);
+    check("let o = {m(){ return 7; }}; o?.m()", true);
+    check("let o = null; o?.m()", true);
+    check("let f = null; f?.(1)", true);
+    check("let f = (x) => x * 2; f?.(21)", true);
+    // Arguments evaluate before the nullish check, like the evaluator.
+    check("let ran = false; let o = null; o?.m(ran = true); ran", true);
+    check("let o = {m(a, b){ return a + b; }}; o?.m(1, 2)", true);
+    check("let o = {x: 5, m(){ return this.x; }}; o?.m()", true);
+    check("let o = {a: 1}; let k = 'a'; o?.[k]", true);
+    check("let o = null; let k = 'a'; o?.[k]", true);
+    // The key is not evaluated when short-circuited.
+    check("let ran = false; let o = null; o?.[(ran = true, 'a')]; ran", true);
+    check("let o = {a: 1}; delete o?.a; o.a", true);
+    check("let o = null; delete o?.a", true);
+    check("function f(){ return null; } f()?.x", true);
+    check("function f(){ return {x: 3}; } f()?.x", true);
+    check("let o = {m(){ return {n(){ return 9; }}; }}; o?.m()?.n()", true);
+    check("let o = {m(){ return null; }}; o?.m()?.n()", true);
+}
+
+#[test]
+fn spreads() {
+    // Call spread: arrays splice, anything else is one argument.
+    check("function f(a, b, c){ return a + b + c; } f(...[1, 2], 3)", true);
+    check("function f(...r){ return r.length; } f(...[1, 2])", true);
+    check("Math.max(...[1, 5, 3])", true);
+    check("function f(a){ return a; } f(...'ab')", true);
+    check("function f(a){ return typeof a; } f(...5)", true);
+    check("let o = {m(a, b){ return a * b; }}; o.m(...[6, 7])", true);
+    // Array spread: arrays splice, strings per character, else iterables.
+    check("let a = [...[1, 2], 3]; a.join(',')", true);
+    check("let a = [...'ab']; a.join(',')", true);
+    check("let a = [0, ...[1, 2], ...[3]]; a.join(',')", true);
+    check("function* g(){ yield 1; yield 2; } let a = [...g()]; a.join(',')", true);
+    check("let a = [...5]; 1", true);
+    check(
+        "let log = ''; function t(v){ log += v; return [v]; } \
+         let a = [...t('a'), ...t('b')]; log + a.join('')",
+        true,
+    );
+}
+
+#[test]
 fn declined_units_stay_on_ast() {
     check("try { throw 5; } catch (e) { e * 2; }", false);
     check("class C {} typeof C", false);
     check("let r = 0; switch (2) { case 1: r = 1; break; case 2: r = 2; break; } r", false);
-    check("Math.max(...[1, 2])", false);
     check("function o(){ function i(){ return 1; } return i(); } o()", true);
     // Block slots have no frame for the chain to serve: still declined.
     check("{ let y = 1; function f(){ return y; } f(); }", false);

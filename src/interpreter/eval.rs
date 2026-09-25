@@ -137,7 +137,7 @@ pub(crate) fn insert_object_property(
     }
 }
 
-fn push_call_arg(args: &mut Vec<Value>, value: Value) -> Result<(), VmErr> {
+pub(crate) fn push_call_arg(args: &mut Vec<Value>, value: Value) -> Result<(), VmErr> {
     if args.len() >= crate::value::MAX_ARRAY_LEN {
         return Err(crate::value::limit_err("Maximum argument count exceeded"));
     }

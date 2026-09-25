@@ -40,7 +40,7 @@ use crate::parser::{
     statements_capture_identifier, stmts_reference,
 };
 
-use super::constants::{AstFunction, Constant, PropEntry, PropKind};
+use super::constants::{AstFunction, Constant, PropEntry, PropKind, SpreadEntry};
 use super::function::{BytecodeFunction, SlotInfo, SlotKind};
 use super::module::BytecodeModule;
 use super::opcode::{Instr, KeySrc, Reg, Slot, Target};
@@ -1248,7 +1248,9 @@ impl<'a> Compiler<'a> {
                 })?;
                 self.load_const(index)
             }
-            Expr::OptionalChain { .. } => Err(Decline::Func("optional chaining needs Phase G")),
+            Expr::OptionalChain { object, property, .. } => {
+                self.compile_optional_chain(object, property)
+            }
         }
     }
 
@@ -1418,7 +1420,23 @@ impl<'a> Compiler<'a> {
 
     fn compile_array(&mut self, items: &'a [Expr]) -> Result<Reg, Decline> {
         if items.iter().any(|item| matches!(item, Expr::Spread(_))) {
-            return Err(Decline::Func("array spread needs Phase G"));
+            let mut template = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    Expr::Spread(inner) => {
+                        let reg = self.compile_expr(inner)?;
+                        template.push(SpreadEntry { spread: true, reg });
+                    }
+                    _ => {
+                        let reg = self.compile_expr(item)?;
+                        template.push(SpreadEntry { spread: false, reg });
+                    }
+                }
+            }
+            let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
+            let dst = self.alloc_reg()?;
+            self.emit(Instr::BuildArray { dst, tmpl });
+            return Ok(dst);
         }
         // Holes arrive as `Undefined` from the parser — no special case.
         let start = self.alloc_regs(items.len())?;
@@ -1539,7 +1557,19 @@ impl<'a> Compiler<'a> {
                 }
                 Ok(dst)
             }
-            Expr::OptionalChain { .. } => Err(Decline::Func("optional chaining needs Phase G")),
+            Expr::OptionalChain { object, property, .. } => {
+                let obj = self.compile_expr(object)?;
+                let dst = self.alloc_reg()?;
+                let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
+                let key = self.compile_expr(property)?;
+                self.emit(Instr::DelProp { dst, obj, key });
+                let over = self.emit_jump(|target| Instr::Jump { target });
+                self.patch_jump(end, self.here())?;
+                let index = self.const_true()?;
+                self.emit(Instr::LoadConst { dst, cst: index });
+                self.patch_jump(over, self.here())?;
+                Ok(dst)
+            }
             _ => {
                 let _ = self.compile_expr(operand)?;
                 let index = self.const_true()?;
@@ -1577,34 +1607,56 @@ impl<'a> Compiler<'a> {
     /// Calls evaluate arguments before the callee, like the evaluator (and
     /// unlike the specification — this engine's order is load-bearing).
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
-        if args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
-            return Err(Decline::Func("call spread needs Phase G"));
-        }
         // The callee shape is syntactic, so classify before emitting: method
-        // calls keep their receiver, `super`/optional chains decline.
-        enum Callee {
+        // calls keep their receiver, chains join on nullish, `super`
+        // declines.
+        enum Callee<'x> {
             Method,
             Plain,
+            Chain { object: &'x Expr, property: &'x Expr },
         }
         let kind = match callee {
             Expr::Member { object, .. } => {
                 check_callable_spine(object)?;
                 Callee::Method
             }
-            Expr::Super | Expr::OptionalChain { .. } => {
+            Expr::OptionalChain { object, property, .. } => Callee::Chain { object, property },
+            Expr::Super => {
                 return Err(Decline::Unit("super needs Phase G"));
             }
             _ => Callee::Plain,
         };
-        if matches!(kind, Callee::Plain) && contains_optional_chain(callee) {
-            return Err(Decline::Func("optional chaining needs Phase G"));
+        // Arguments evaluate before the callee, like the evaluator — even
+        // for chains, whose short-circuit skips only the property and the
+        // call itself.
+        enum CallArgs {
+            Range { start: Reg, argc: u16 },
+            Spread { tmpl: u16 },
         }
-        let start = self.alloc_regs(args.len())?;
-        for (i, arg) in args.iter().enumerate() {
-            let reg = self.compile_expr(arg)?;
-            self.emit(Instr::Mov { dst: start + i as u16, src: reg });
-        }
-        let argc = args.len() as u16;
+        let call_args = if args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
+            let mut template = Vec::with_capacity(args.len());
+            for arg in args {
+                match arg {
+                    Expr::Spread(inner) => {
+                        let reg = self.compile_expr(inner)?;
+                        template.push(SpreadEntry { spread: true, reg });
+                    }
+                    _ => {
+                        let reg = self.compile_expr(arg)?;
+                        template.push(SpreadEntry { spread: false, reg });
+                    }
+                }
+            }
+            let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
+            CallArgs::Spread { tmpl }
+        } else {
+            let start = self.alloc_regs(args.len())?;
+            for (i, arg) in args.iter().enumerate() {
+                let reg = self.compile_expr(arg)?;
+                self.emit(Instr::Mov { dst: start + i as u16, src: reg });
+            }
+            CallArgs::Range { start, argc: args.len() as u16 }
+        };
         let dst = self.alloc_reg()?;
         match kind {
             Callee::Method => {
@@ -1615,14 +1667,68 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
                 self.emit(Instr::GetProp { dst: callee, obj, key });
-                self.emit(Instr::CallMethod { dst, callee, this: obj, args: start, argc });
+                match call_args {
+                    CallArgs::Range { start, argc } => {
+                        self.emit(Instr::CallMethod { dst, callee, this: obj, args: start, argc });
+                    }
+                    CallArgs::Spread { tmpl } => {
+                        self.emit(Instr::MethodSpread { dst, callee, this: obj, tmpl });
+                    }
+                }
             }
             Callee::Plain => {
                 let callee = self.compile_expr(callee)?;
-                self.emit(Instr::Call { dst, callee, args: start, argc });
+                match call_args {
+                    CallArgs::Range { start, argc } => {
+                        self.emit(Instr::Call { dst, callee, args: start, argc });
+                    }
+                    CallArgs::Spread { tmpl } => {
+                        self.emit(Instr::CallSpread { dst, callee, tmpl });
+                    }
+                }
+            }
+            Callee::Chain { object, property } => {
+                let obj = self.compile_expr(object)?;
+                let undef = self.load_undefined()?;
+                self.emit(Instr::Mov { dst, src: undef });
+                let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
+                // An `Undefined` property marks an optional call `obj?.(args)`.
+                let callee = if matches!(property, Expr::Undefined) {
+                    obj
+                } else {
+                    let key = self.compile_expr(property)?;
+                    let callee = self.alloc_reg()?;
+                    self.emit(Instr::GetProp { dst: callee, obj, key });
+                    callee
+                };
+                match call_args {
+                    CallArgs::Range { start, argc } => {
+                        self.emit(Instr::CallMethod { dst, callee, this: obj, args: start, argc });
+                    }
+                    CallArgs::Spread { tmpl } => {
+                        self.emit(Instr::MethodSpread { dst, callee, this: obj, tmpl });
+                    }
+                }
+                self.patch_jump(end, self.here())?;
             }
         }
         Ok(dst)
+    }
+
+    fn compile_optional_chain(
+        &mut self,
+        object: &'a Expr,
+        property: &'a Expr,
+    ) -> Result<Reg, Decline> {
+        let obj = self.compile_expr(object)?;
+        let join = self.alloc_reg()?;
+        let undef = self.load_undefined()?;
+        self.emit(Instr::Mov { dst: join, src: undef });
+        let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
+        let key = self.compile_expr(property)?;
+        self.emit(Instr::GetProp { dst: join, obj, key });
+        self.patch_jump(end, self.here())?;
+        Ok(join)
     }
 
     /// Value first, then the target reference — the evaluator's order.
@@ -1747,31 +1853,17 @@ impl<'a> Compiler<'a> {
 
 /// Reject a method-call receiver spine containing `super` (whole unit) or an
 /// optional chain (this function). Plain member spines are fine.
+/// Reject a method-call receiver spine containing `super` (whole unit).
+/// Optional chains in the spine compile by shape: a short-circuited object
+/// flows into the member access like any other value.
 fn check_callable_spine(mut object: &Expr) -> Result<(), Decline> {
     loop {
         match object {
             Expr::Super => return Err(Decline::Unit("super needs Phase G")),
-            Expr::OptionalChain { .. } => {
-                return Err(Decline::Func("optional chaining needs Phase G"));
-            }
             Expr::Member { object: inner, .. } => object = inner,
+            Expr::OptionalChain { object: inner, .. } => object = inner,
             _ => return Ok(()),
         }
-    }
-}
-
-/// Whether an expression contains an optional chain anywhere. Used for plain
-/// callees, whose evaluation the `Call` instruction cannot short-circuit.
-fn contains_optional_chain(expr: &Expr) -> bool {
-    match expr {
-        Expr::OptionalChain { .. } => true,
-        Expr::Member { object, property, .. } => {
-            contains_optional_chain(object) || contains_optional_chain(property)
-        }
-        Expr::Call { callee, args } => {
-            contains_optional_chain(callee) || args.iter().any(contains_optional_chain)
-        }
-        _ => false,
     }
 }
 
@@ -1899,9 +1991,9 @@ mod tests {
             ("for (const v of a) { f(v); }", "for-in/of needs Phase G"),
             ("let o = { a: 1 };", "compiled"),
             ("let [a] = b;", "destructuring needs Phase G"),
-            ("f(...args);", "call spread needs Phase G"),
-            ("let a = [...b];", "array spread needs Phase G"),
-            ("a?.b;", "optional chaining needs Phase G"),
+            ("f(...args);", "compiled"),
+            ("let a = [...b];", "compiled"),
+            ("a?.b;", "compiled"),
             ("import x from 'm';", "modules need Phase G"),
             ("export default 1;", "modules need Phase G"),
             ("outer: for (;;) { break outer; }", "labels need Phase G"),

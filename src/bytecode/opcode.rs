@@ -191,6 +191,16 @@ pub enum Instr {
     LoadGlobalSoft { dst: Reg, name: u16 },
     /// `dst` = the slot value, or `undefined` when uninitialized.
     LoadLocalSoft { dst: Reg, slot: Slot },
+    /// `dst = callee(...spread_args)`: like [`Instr::Call`], but the
+    /// argument list in `constants[tmpl]` splices array-valued spread
+    /// elements and passes anything else as one argument.
+    CallSpread { dst: Reg, callee: Reg, tmpl: u16 },
+    /// Method-call form of [`Instr::CallSpread`].
+    MethodSpread { dst: Reg, callee: Reg, this: Reg, tmpl: u16 },
+    /// `dst` = one array literal from `constants[tmpl]`: plain elements
+    /// plus spreads (arrays splice, strings spread per character, anything
+    /// else drains the iterator protocol).
+    BuildArray { dst: Reg, tmpl: u16 },
 }
 
 /// The discriminant of [`Instr`], for classification without operands.
@@ -247,6 +257,9 @@ pub enum Opcode {
     BuildObject,
     LoadGlobalSoft,
     LoadLocalSoft,
+    CallSpread,
+    MethodSpread,
+    BuildArray,
 }
 
 impl Instr {
@@ -304,6 +317,9 @@ impl Instr {
             Instr::BuildObject { .. } => Opcode::BuildObject,
             Instr::LoadGlobalSoft { .. } => Opcode::LoadGlobalSoft,
             Instr::LoadLocalSoft { .. } => Opcode::LoadLocalSoft,
+            Instr::CallSpread { .. } => Opcode::CallSpread,
+            Instr::MethodSpread { .. } => Opcode::MethodSpread,
+            Instr::BuildArray { .. } => Opcode::BuildArray,
         }
     }
 
@@ -312,9 +328,9 @@ impl Instr {
     /// starting point for benchmark tuning, not a final schedule.
     pub fn cost(&self) -> u64 {
         match self.opcode() {
-            Opcode::Call | Opcode::CallMethod => 5,
+            Opcode::Call | Opcode::CallMethod | Opcode::CallSpread | Opcode::MethodSpread => 5,
             Opcode::Construct => 8,
-            Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject => 10,
+            Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject | Opcode::BuildArray => 10,
             Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
             Opcode::Mov
             | Opcode::Jump
@@ -423,6 +439,13 @@ impl fmt::Display for Instr {
             Instr::BuildObject { dst, tmpl } => write!(f, "BUILD_OBJECT r{dst}, c{tmpl}"),
             Instr::LoadGlobalSoft { dst, name } => write!(f, "LOAD_GLOBAL_SOFT r{dst}, c{name}"),
             Instr::LoadLocalSoft { dst, slot } => write!(f, "LOAD_LOCAL_SOFT r{dst}, s{slot}"),
+            Instr::CallSpread { dst, callee, tmpl } => {
+                write!(f, "CALL_SPREAD r{dst}, r{callee}, c{tmpl}")
+            }
+            Instr::MethodSpread { dst, callee, this, tmpl } => {
+                write!(f, "METHOD_SPREAD r{dst}, r{callee}, r{this}, c{tmpl}")
+            }
+            Instr::BuildArray { dst, tmpl } => write!(f, "BUILD_ARRAY r{dst}, c{tmpl}"),
         }
     }
 }
