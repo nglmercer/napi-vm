@@ -893,6 +893,7 @@ impl<'a> Compiler<'a> {
             is_constructor,
             captures_arguments: self.captures_arguments,
             caches,
+            tiers: crate::jit::TierCounters::default(),
         })
     }
 

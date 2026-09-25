@@ -17,6 +17,7 @@ pub mod lexer;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod lsp;
 pub mod parser;
+pub mod jit;
 pub mod plugin_host;
 pub mod shape;
 pub mod span;

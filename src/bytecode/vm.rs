@@ -156,6 +156,19 @@ pub(crate) fn run_function(
     this_value: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    // Tier-up check (JIT seam). No machine-code backend exists yet, so
+    // every decision runs the bytecode body below; `EnterJit` fails loudly
+    // if a backend ever claims to be executable before one can be.
+    match interp.tier_enter(code, &args) {
+        crate::jit::TierDecision::EnterJit => {
+            debug_assert!(false, "no backend emits machine code in Phase J")
+        }
+        crate::jit::TierDecision::Cold
+        | crate::jit::TierDecision::NoBackend
+        | crate::jit::TierDecision::Declined
+        | crate::jit::TierDecision::GuardFailed
+        | crate::jit::TierDecision::NotExecutable => {}
+    }
     let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
     if !code.is_arrow {
         fe.borrow_mut().set("this", this_value.clone());
@@ -545,6 +558,7 @@ fn run_loop(
             }
             Instr::LoopHead => {
                 interp.consume_loop()?;
+                crate::jit::note_loop_iter(&frame.function.tiers);
             }
             // `return` signals through `Ret`, like the evaluator's bodies:
             // `call_this` maps it to a value, `ctor` maps object returns to

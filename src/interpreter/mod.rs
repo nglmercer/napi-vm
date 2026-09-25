@@ -258,6 +258,12 @@ pub struct Interpreter {
     /// Cycle-collector registration id. Roots publish once here; the
     /// handles stay live, so moves never stale them, and drop unregisters.
     gc_id: crate::heap::InterpId,
+    /// Tier-up thresholds for the JIT seam. Default policy; hosts tune it
+    /// with [`Self::set_jit_policy`].
+    jit_policy: crate::jit::JitPolicy,
+    /// Registered native-code backend, if any. `None` (the default) means
+    /// hot functions stay on bytecode; see [`Self::set_jit_backend`].
+    jit_backend: Option<crate::jit::BackendRef>,
 }
 
 impl Drop for Interpreter {
@@ -355,6 +361,8 @@ impl Interpreter {
             max_jobs_per_drain: jobs::MAX_JOBS_PER_DRAIN,
             guest_execution_depth: Rc::new(Cell::new(0)),
             gc_id: 0,
+            jit_policy: crate::jit::JitPolicy::default(),
+            jit_backend: None,
         };
         interp.gc_id = crate::heap::register_interp(
             interp.gc_roots(),
@@ -1460,6 +1468,37 @@ impl Interpreter {
     pub fn set_loop_budget(&mut self, n: u64) {
         self.loop_budget = n;
         self.loops_remaining = n;
+    }
+
+    /// Register a native-code backend for the JIT seam. Hot bytecode
+    /// functions compile through it; with no backend (the default) they
+    /// stay on bytecode. No backend ships with the crate yet, so Phase J
+    /// backends observe, guard, and decline — they cannot execute.
+    pub fn set_jit_backend(&mut self, backend: crate::jit::BackendRef) {
+        self.jit_backend = Some(backend);
+    }
+
+    /// Tune when functions tier up and when deoptimizing code is discarded.
+    pub fn set_jit_policy(&mut self, policy: crate::jit::JitPolicy) {
+        self.jit_policy = policy;
+    }
+
+    /// Count one bytecode-function entry and decide its tier. The compiled-
+    /// code cache lives on the function, so backends compile at most once
+    /// until repeated deopts discard the artifact.
+    pub(crate) fn tier_enter(
+        &self,
+        code: &crate::bytecode::BytecodeFunction,
+        args: &[Value],
+    ) -> crate::jit::TierDecision {
+        match self.jit_backend.clone() {
+            Some(backend) => {
+                let compile =
+                    |feedback: &crate::jit::TierFeedback| backend.compile(code, feedback);
+                crate::jit::tier_enter(&code.tiers, &self.jit_policy, Some(&compile), args)
+            }
+            None => crate::jit::tier_enter(&code.tiers, &self.jit_policy, None, args),
+        }
     }
 
     /// Account one loop iteration against the budget. Every loop construct
