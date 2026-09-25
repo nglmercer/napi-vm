@@ -1122,6 +1122,64 @@ fn expr_references(e: &Expr, name: &str) -> bool {
     }
 }
 
+/// Read an assignment target as a binding pattern: `[a, b]`, `({ x })`,
+/// `[o.p]`, `[a = 1]`. Holes skip a position. `None` means the target is
+/// not a valid pattern and the assignment fails at runtime.
+pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
+    Some(match expr {
+        Expr::Identifier(name) => Pattern::Ident(name.clone()),
+        Expr::Member {
+            object, property, ..
+        } => Pattern::Member {
+            object: object.clone(),
+            property: property.clone(),
+        },
+        Expr::Array(items) => Pattern::Array(
+            items
+                .iter()
+                .map(|item| match item {
+                    Expr::Spread(inner) => {
+                        expr_to_pattern(inner).map(|p| Pattern::Rest(Box::new(p)))
+                    }
+                    // A hole (`[, a] = …`) skips a position.
+                    Expr::Undefined => Some(Pattern::Ident("hole".to_string())),
+                    other => expr_to_pattern(other),
+                })
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        Expr::Object(props) => Pattern::Object(
+            props
+                .iter()
+                .map(|prop| match prop {
+                    ObjectProp::Shorthand(name) => Some((PatternKey::Name(name.clone()), None)),
+                    ObjectProp::KeyValue(key, value) => {
+                        Some((PatternKey::Name(key.clone()), Some(expr_to_pattern(value)?)))
+                    }
+                    ObjectProp::Spread(inner) => Some((
+                        PatternKey::Name("...".to_string()),
+                        Some(Pattern::Rest(Box::new(expr_to_pattern(inner)?))),
+                    )),
+                    ObjectProp::Computed(key, value) => Some((
+                        PatternKey::Computed(key.clone()),
+                        Some(expr_to_pattern(value)?),
+                    )),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        // `[a = 1] = []` supplies a default.
+        Expr::Assignment {
+            target,
+            op: AssignOp::Assign,
+            value,
+        } => Pattern::Default(
+            Box::new(expr_to_pattern(target)?),
+            Box::new(value.as_ref().clone()),
+        ),
+        _ => return None,
+    })
+}
+
 fn pattern_references(p: &Pattern, name: &str) -> bool {
     match p {
         Pattern::Ident(_) | Pattern::Rest(_) => false,

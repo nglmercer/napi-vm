@@ -33,11 +33,12 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use crate::interpreter::produces_completion_value;
+use crate::interpreter::{block_needs_lexical_scope, produces_completion_value};
 use crate::parser::{
-    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Statement,
-    SwitchCase, UnOp, VarKind, arrow_body_references, collect_var_names, expr_captures_identifier,
-    statements_capture_identifier, stmts_reference,
+    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Pattern,
+    PatternKey, Statement, SwitchCase, UnOp, VarKind, arrow_body_references, collect_var_names,
+    expr_captures_identifier, expr_to_pattern, pattern_names, statements_capture_identifier,
+    stmts_reference,
 };
 
 use super::constants::{AstFunction, Constant, PropEntry, PropKind, SpreadEntry};
@@ -146,6 +147,17 @@ struct LoopCtx {
     continues: Vec<usize>,
     labels: Vec<String>,
     kind: CtxKind,
+    /// Unwind-stack length when this context opened: a break/continue
+    /// targeting it duplicates the cleanups above this depth.
+    try_depth: usize,
+}
+
+/// One protected region an abrupt exit must unwind: a `try` with a
+/// `finally` body to inline, and/or a `for-of` iterator to close. Both
+/// own a VM handler the duplication also pops.
+struct UnwindCtx<'a> {
+    finally: Option<&'a [Statement]>,
+    close_iter: Option<Reg>,
 }
 
 /// What a [`LoopCtx`] entry accepts: loops take both `break` and
@@ -174,6 +186,9 @@ struct Compiler<'a> {
     /// `label: <loop>` (labels nest, so a loop may carry several) and
     /// consumed by the loop's context.
     pending_labels: Vec<String>,
+    /// Protected regions enclosing the current position: `try/finally`
+    /// bodies and `for-of` iterators a break/continue must unwind.
+    unwind: Vec<UnwindCtx<'a>>,
     deferred: Vec<Deferred<'a>>,
     next_reg: u16,
     max_reg: u16,
@@ -210,6 +225,7 @@ impl<'a> Compiler<'a> {
             scopes: vec![Scope { bindings: HashMap::new(), global: true }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
+            unwind: Vec::new(),
             deferred: Vec::new(),
             next_reg: 0,
             max_reg: 0,
@@ -241,6 +257,7 @@ impl<'a> Compiler<'a> {
             scopes: vec![Scope { bindings: HashMap::new(), global: false }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
+            unwind: Vec::new(),
             deferred: Vec::new(),
             next_reg: 0,
             max_reg: 0,
@@ -394,7 +411,9 @@ impl<'a> Compiler<'a> {
             | Some(Instr::JumpIfTrue { target: slot, .. })
             | Some(Instr::JumpIfFalse { target: slot, .. })
             | Some(Instr::JumpIfNullish { target: slot, .. })
-            | Some(Instr::JumpIfNotNullish { target: slot, .. }) => {
+            | Some(Instr::JumpIfNotNullish { target: slot, .. })
+            | Some(Instr::PushCatch { target: slot, .. })
+            | Some(Instr::PushFinally { target: slot, .. }) => {
                 *slot = target;
                 Ok(())
             }
@@ -486,13 +505,51 @@ enum Binding {
 fn block_lexicals(stmts: &[Statement], out: &mut Vec<(String, SlotKind)>) {
     for stmt in stmts {
         match stmt {
-            Statement::VarDecl { kind: VarKind::Let, name, destructuring: None, .. } => {
+            Statement::VarDecl { kind: VarKind::Let, destructuring: None, name, .. } => {
                 out.push((name.clone(), SlotKind::Let));
             }
-            Statement::VarDecl { kind: VarKind::Const, name, destructuring: None, .. } => {
+            Statement::VarDecl { kind: VarKind::Const, destructuring: None, name, .. } => {
                 out.push((name.clone(), SlotKind::Const));
             }
+            // A pattern declaration binds every name in the pattern (the
+            // declarator's own `name` is empty); `var` patterns hoist
+            // through `collect_var_names` instead.
+            Statement::VarDecl {
+                kind: VarKind::Let,
+                destructuring: Some(pattern),
+                ..
+            } => {
+                for bound in pattern_names(pattern) {
+                    out.push((bound, SlotKind::Let));
+                }
+            }
+            Statement::VarDecl {
+                kind: VarKind::Const,
+                destructuring: Some(pattern),
+                ..
+            } => {
+                for bound in pattern_names(pattern) {
+                    out.push((bound, SlotKind::Const));
+                }
+            }
             Statement::Declarations(inner) => block_lexicals(inner, out),
+            _ => {}
+        }
+    }
+}
+
+/// `for-in`/`for-of` head names bound directly in one block: the head
+/// assigns in the enclosing scope, so a function-level head is visible to
+/// (and boxable for) nested closures exactly like a `var`.
+fn block_loop_heads(stmts: &[Statement], out: &mut Vec<String>) {
+    for stmt in stmts {
+        match stmt {
+            Statement::ForIn { name, .. } => out.push(name.clone()),
+            Statement::ForOf { name, pattern, .. } => match pattern {
+                Some(pattern) => out.extend(pattern_names(pattern)),
+                None => out.push(name.clone()),
+            },
+            Statement::Declarations(inner) => block_loop_heads(inner, out),
             _ => {}
         }
     }
@@ -790,8 +847,13 @@ impl<'a> Compiler<'a> {
         Ok(block_value)
     }
 
-    /// Compile statements as a lexical block: fresh scope, hoisting, body.
+    /// Compile statements as a block: a fresh scope with hoisting only
+    /// when the block has direct lexicals — otherwise the statements run
+    /// in the enclosing scope, exactly like the evaluator.
     fn compile_scoped_block(&mut self, stmts: &'a [Statement]) -> Result<Reg, Decline> {
+        if !block_needs_lexical_scope(stmts) {
+            return self.compile_block(stmts);
+        }
         self.push_scope();
         self.hoist_block(stmts)?;
         let value = self.compile_block(stmts)?;
@@ -803,7 +865,7 @@ impl<'a> Compiler<'a> {
         match stmt {
             Statement::Expr(expr) => self.compile_expr(expr),
             Statement::VarDecl { kind, name, init, destructuring } => {
-                self.compile_var_decl(kind.clone(), name, init.as_deref(), destructuring.is_some())
+                self.compile_var_decl(kind.clone(), name, init.as_deref(), destructuring.as_deref())
             }
             // Hoisted functions instantiate eagerly at scope entry AND again
             // here in order: the evaluator runs `eval_stmt` on the
@@ -843,9 +905,14 @@ impl<'a> Compiler<'a> {
                 self.compile_for(init.as_deref(), test.as_deref(), update.as_deref(), body)
             }
             Statement::Break => {
-                let addr = self.emit_jump(|target| Instr::Jump { target });
                 // Plain `break` targets the innermost breakable context: a
                 // loop, a switch, or a labeled block.
+                let depth = match self.loops.iter().next_back() {
+                    Some(ctx) => ctx.try_depth,
+                    None => return Err(Decline::Func("break outside loop")),
+                };
+                self.duplicate_unwind(depth)?;
+                let addr = self.emit_jump(|target| Instr::Jump { target });
                 match self.loops.iter_mut().next_back() {
                     Some(ctx) => ctx.breaks.push(addr),
                     None => return Err(Decline::Func("break outside loop")),
@@ -853,10 +920,20 @@ impl<'a> Compiler<'a> {
                 self.load_undefined()
             }
             Statement::Continue => {
-                let addr = self.emit_jump(|target| Instr::Jump { target });
                 // Plain `continue` targets the innermost loop, skipping over
                 // any switch or labeled-block contexts (`continue` inside a
                 // switch applies to the enclosing loop).
+                let depth = match self
+                    .loops
+                    .iter()
+                    .rev()
+                    .find(|ctx| ctx.kind == CtxKind::Loop)
+                {
+                    Some(ctx) => ctx.try_depth,
+                    None => return Err(Decline::Func("continue outside loop")),
+                };
+                self.duplicate_unwind(depth)?;
+                let addr = self.emit_jump(|target| Instr::Jump { target });
                 match self
                     .loops
                     .iter_mut()
@@ -884,14 +961,25 @@ impl<'a> Compiler<'a> {
                 self.load_undefined()
             }
             Statement::Empty => self.load_undefined(),
-            Statement::Try { .. } => Err(Decline::Func("try/catch needs Phase G")),
+            Statement::Try { body, catch, finally } => self.compile_try(body, catch, finally),
             Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
             Statement::ClassDecl { .. } => Err(Decline::Func("classes need Phase G")),
-            Statement::ForIn { .. } | Statement::ForOf { .. } => {
-                Err(Decline::Func("for-in/of needs Phase G"))
+            Statement::ForIn { name, obj, body } => self.compile_for_in(name, obj, body),
+            Statement::ForOf { name, pattern, iter, body, is_await } => {
+                self.compile_for_of(name, pattern, iter, body, *is_await)
             }
             Statement::Labeled { label, body } => self.compile_labeled(label, body),
             Statement::LabeledBreak(label) => {
+                let depth = match self
+                    .loops
+                    .iter()
+                    .rev()
+                    .find(|ctx| ctx.labels.iter().any(|known| known == label))
+                {
+                    Some(ctx) => ctx.try_depth,
+                    None => return Err(Decline::Func("unresolved break label")),
+                };
+                self.duplicate_unwind(depth)?;
                 let addr = self.emit_jump(|target| Instr::Jump { target });
                 match self
                     .loops
@@ -905,11 +993,24 @@ impl<'a> Compiler<'a> {
                 self.load_undefined()
             }
             Statement::LabeledContinue(label) => {
-                let addr = self.emit_jump(|target| Instr::Jump { target });
                 // `continue label` targets the innermost context carrying
                 // that label, which must be a loop; anything else (or no
                 // match at all) is a compile error the parser normally
                 // rejects ahead of us.
+                let mut depth = None;
+                for ctx in self.loops.iter().rev() {
+                    if ctx.labels.iter().any(|known| known == label) {
+                        if ctx.kind == CtxKind::Loop {
+                            depth = Some(ctx.try_depth);
+                        }
+                        break;
+                    }
+                }
+                let Some(depth) = depth else {
+                    return Err(Decline::Func("unresolved continue label"));
+                };
+                self.duplicate_unwind(depth)?;
+                let addr = self.emit_jump(|target| Instr::Jump { target });
                 let mut target = None;
                 for ctx in self.loops.iter_mut().rev() {
                     if ctx.labels.iter().any(|known| known == label) {
@@ -933,18 +1034,179 @@ impl<'a> Compiler<'a> {
     }
 }
 
+/// Whether a pattern binds fresh declaration names or assigns through
+/// existing bindings. `is_var` selects store-vs-initialize for declarations.
+#[derive(Clone, Copy)]
+enum DestructureMode {
+    Decl { is_var: bool },
+    Assign,
+}
+
+/// A prepared `for-in`/`for-of` head write: a function/block slot, or a
+/// top-level global name.
+enum ForHead {
+    Slot(Slot),
+    Global(u16),
+}
+
 impl<'a> Compiler<'a> {
     // -- declarations ----------------------------------------------------
+
+    /// Bind one pattern leaf: a declaration initializes (`var` stores,
+    /// lexicals leave the dead zone), an assignment stores through the
+    /// resolved binding — mirroring the plain declarator/assignment paths.
+    fn compile_pattern_ident(
+        &mut self,
+        name: &str,
+        src: Reg,
+        mode: DestructureMode,
+    ) -> Result<(), Decline> {
+        match (mode, self.resolve(name)?) {
+            (DestructureMode::Assign, Binding::Slot(slot))
+            | (DestructureMode::Decl { is_var: true }, Binding::Slot(slot)) => {
+                self.emit(Instr::StoreLocal { slot, src });
+            }
+            (DestructureMode::Assign, Binding::Global)
+            | (DestructureMode::Decl { is_var: true }, Binding::Global) => {
+                let index = self.intern_string(name)?;
+                self.emit(Instr::StoreGlobal { name: index, src });
+            }
+            (DestructureMode::Decl { .. }, Binding::Slot(slot)) => {
+                self.emit(Instr::InitLocal { slot, src });
+            }
+            (DestructureMode::Decl { .. }, Binding::Global) => {
+                let index = self.intern_string(name)?;
+                self.emit(Instr::InitGlobal { name: index, src });
+            }
+        }
+        Ok(())
+    }
+
+    /// Expand a binding pattern over the value in `val`, following the
+    /// evaluator's `destructure` case for case: array sources materialize
+    /// (objects become `[]`, strings split per character), the first rest
+    /// element ends positional binding, object sources reject nullish
+    /// inputs and snapshot their keys before named reads, defaults apply
+    /// on nullish values only.
+    fn compile_destructure(
+        &mut self,
+        pat: &'a Pattern,
+        val: Reg,
+        mode: DestructureMode,
+    ) -> Result<(), Decline> {
+        match pat {
+            Pattern::Ident(name) => self.compile_pattern_ident(name, val, mode),
+            Pattern::Member { object, property } => {
+                if matches!(object.as_ref(), Expr::Super) {
+                    return Err(Decline::Unit("super needs Phase G"));
+                }
+                let obj = self.compile_expr(object)?;
+                let key = self.compile_expr(property)?;
+                self.emit(Instr::SetProp { obj, key, val });
+                Ok(())
+            }
+            Pattern::Array(elements) => {
+                let arr = self.alloc_reg()?;
+                self.emit(Instr::ToDestructArray { dst: arr, src: val });
+                for (index, elem) in elements.iter().enumerate() {
+                    if let Pattern::Rest(inner) = elem {
+                        let from = u16::try_from(index)
+                            .map_err(|_| Decline::Func("code too large"))?;
+                        let rest = self.alloc_reg()?;
+                        self.emit(Instr::RestArray { dst: rest, src: arr, from });
+                        return self.compile_destructure(inner, rest, mode);
+                    }
+                    let position = self.intern_number(index as f64)?;
+                    let key = self.load_const(position)?;
+                    let found = self.alloc_reg()?;
+                    self.emit(Instr::GetProp { dst: found, obj: arr, key });
+                    self.compile_destructure(elem, found, mode)?;
+                }
+                Ok(())
+            }
+            Pattern::Object(props) => {
+                let keys = self.alloc_reg()?;
+                self.emit(Instr::CheckDestructObject { dst: keys, src: val });
+                let mut taken = Vec::new();
+                for (key, sub) in props {
+                    if let PatternKey::Name(name) = key
+                        && name == "..."
+                        && let Some(Pattern::Rest(target)) = sub
+                    {
+                        let template = taken
+                            .iter()
+                            .map(|reg| SpreadEntry { spread: false, reg: *reg })
+                            .collect();
+                        let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
+                        let taken_array = self.alloc_reg()?;
+                        self.emit(Instr::BuildArray { dst: taken_array, tmpl });
+                        let rest = self.alloc_reg()?;
+                        self.emit(Instr::RestObject {
+                            dst: rest,
+                            src: val,
+                            keys,
+                            taken: taken_array,
+                        });
+                        self.compile_destructure(target, rest, mode)?;
+                        continue;
+                    }
+                    let key_reg = match key {
+                        PatternKey::Name(name) => {
+                            let index = self.intern_string(name)?;
+                            self.load_const(index)?
+                        }
+                        PatternKey::Computed(expr) => self.compile_expr(expr)?,
+                    };
+                    taken.push(key_reg);
+                    let found = self.alloc_reg()?;
+                    self.emit(Instr::GetProp { dst: found, obj: val, key: key_reg });
+                    match sub {
+                        Some(next) => self.compile_destructure(next, found, mode)?,
+                        None => match key {
+                            PatternKey::Name(name) => {
+                                self.compile_pattern_ident(name, found, mode)?;
+                            }
+                            PatternKey::Computed(_) => {
+                                return Err(Decline::Func("invalid destructuring target"));
+                            }
+                        },
+                    }
+                }
+                Ok(())
+            }
+            // A rest element only binds at the top of an array pattern; a
+            // bare one anywhere else falls through, like the evaluator.
+            Pattern::Rest(_) => Ok(()),
+            Pattern::Default(inner, default) => {
+                let value = self.alloc_reg()?;
+                self.emit(Instr::Mov { dst: value, src: val });
+                let has = self.emit_jump(|target| Instr::JumpIfNotNullish { src: val, target });
+                let fallback = self.compile_expr(default)?;
+                self.emit(Instr::Mov { dst: value, src: fallback });
+                self.patch_jump(has, self.here())?;
+                self.compile_destructure(inner, value, mode)
+            }
+        }
+    }
 
     fn compile_var_decl(
         &mut self,
         kind: VarKind,
         name: &str,
         init: Option<&'a Expr>,
-        destructuring: bool,
+        destructuring: Option<&'a Pattern>,
     ) -> Result<Reg, Decline> {
-        if destructuring {
-            return Err(Decline::Func("destructuring needs Phase G"));
+        if let Some(pattern) = destructuring {
+            let src = match init {
+                Some(value) => self.compile_expr(value)?,
+                None => self.load_undefined()?,
+            };
+            self.compile_destructure(
+                pattern,
+                src,
+                DestructureMode::Decl { is_var: matches!(kind, VarKind::Var) },
+            )?;
+            return self.load_undefined();
         }
         // `var` declarators assign through the scope chain (bare ones only
         // touch dead-zone-merged bindings); `let`/`const` declarators
@@ -1027,6 +1289,116 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// Inline the cleanups a break/continue crosses when leaving the
+    /// protected regions above `depth`: `for-of` closes and `finally`
+    /// bodies innermost-first, then one handler pop per crossed region.
+    /// `return` needs none of this: it unwinds as an error the VM handlers
+    /// intercept.
+    fn duplicate_unwind(&mut self, depth: usize) -> Result<(), Decline> {
+        let mut index = self.unwind.len();
+        while index > depth {
+            index -= 1;
+            let (finally, close_iter) = {
+                let ctx = &self.unwind[index];
+                (ctx.finally, ctx.close_iter)
+            };
+            if let Some(iter) = close_iter {
+                self.emit(Instr::CloseIterator { src: iter });
+            }
+            if let Some(body) = finally {
+                // The inline copy runs outside its own region: compile it
+                // with the crossed regions (including this one) truncated
+                // away, so abrupt exits inside it do not unwind twice.
+                let mut crossed = self.unwind.split_off(index);
+                self.compile_finally_body(body)?;
+                self.unwind.append(&mut crossed);
+            }
+            self.emit(Instr::PopHandler);
+        }
+        Ok(())
+    }
+
+    /// One `finally` copy as a block; the block value is discarded, like
+    /// the evaluator's, while abrupt exits propagate.
+    fn compile_finally_body(&mut self, body: &'a [Statement]) -> Result<(), Decline> {
+        let _ = self.compile_scoped_block(body)?;
+        Ok(())
+    }
+
+    /// `try/catch/finally`. The body runs under a catch handler (when a
+    /// `catch` clause exists) nested inside a finally handler (when a
+    /// `finally` clause exists); pads run the catch body, the cleanup
+    /// copies, and rethrow. `return` unwinds through the handlers, while
+    /// `break`/`continue` duplicate the cleanups inline at each exit.
+    fn compile_try(
+        &mut self,
+        body: &'a [Statement],
+        catch: &'a Option<(String, Vec<Statement>)>,
+        finally: &'a Option<Vec<Statement>>,
+    ) -> Result<Reg, Decline> {
+        let value = self.alloc_reg()?;
+        let undef = self.load_undefined()?;
+        self.emit(Instr::Mov { dst: value, src: undef });
+        if catch.is_none() && finally.is_none() {
+            let body_value = self.compile_scoped_block(body)?;
+            self.emit(Instr::Mov { dst: value, src: body_value });
+            return Ok(value);
+        }
+        let err = self.alloc_reg()?;
+        let mut finally_addr = None;
+        let mut catch_addr = None;
+        if finally.is_some() {
+            finally_addr =
+                Some(self.emit_jump(|target| Instr::PushFinally { target, dst: err }));
+            self.unwind.push(UnwindCtx { finally: finally.as_deref(), close_iter: None });
+        }
+        if catch.is_some() {
+            catch_addr = Some(self.emit_jump(|target| Instr::PushCatch { target, dst: err }));
+            self.unwind.push(UnwindCtx { finally: None, close_iter: None });
+        }
+        let body_value = self.compile_scoped_block(body)?;
+        self.emit(Instr::Mov { dst: value, src: body_value });
+        if catch.is_some() {
+            self.emit(Instr::PopHandler);
+            self.unwind.pop().ok_or(Decline::Func("unwind stack underflow"))?;
+        }
+        let normal = self.emit_jump(|target| Instr::Jump { target });
+        let catch_pad = self.here();
+        if let Some((param, catch_body)) = catch {
+            self.push_scope();
+            let slot = self.declare_slot(param, SlotKind::Var)?;
+            self.emit(Instr::InitLocal { slot, src: err });
+            self.hoist_block(catch_body)?;
+            let catch_value = self.compile_block(catch_body)?;
+            self.emit(Instr::Mov { dst: value, src: catch_value });
+            self.pop_scope();
+        }
+        let finally_run = self.here();
+        if finally.is_some() {
+            self.emit(Instr::PopHandler);
+            self.unwind.pop().ok_or(Decline::Func("unwind stack underflow"))?;
+            if let Some(body) = finally.as_deref() {
+                self.compile_finally_body(body)?;
+            }
+        }
+        let end = self.emit_jump(|target| Instr::Jump { target });
+        let finally_pad = self.here();
+        if let Some(body) = finally.as_deref() {
+            self.compile_finally_body(body)?;
+            self.emit(Instr::Rethrow);
+        }
+        let done = self.here();
+        if let Some(addr) = catch_addr {
+            self.patch_jump(addr, catch_pad)?;
+        }
+        if let Some(addr) = finally_addr {
+            self.patch_jump(addr, finally_pad)?;
+        }
+        self.patch_jump(normal, finally_run)?;
+        self.patch_jump(end, done)?;
+        Ok(value)
+    }
+
     /// `label: body`. A labeled loop hands the label to the loop's
     /// context (so `break label`/`continue label` reach it); any other
     /// labeled statement runs inside a `LabelBlock` context whose breaks
@@ -1043,7 +1415,11 @@ impl<'a> Compiler<'a> {
         // discards the loop value exactly like the evaluator.
         if matches!(
             body,
-            Statement::While { .. } | Statement::DoWhile { .. } | Statement::For { .. }
+            Statement::While { .. }
+                | Statement::DoWhile { .. }
+                | Statement::For { .. }
+                | Statement::ForIn { .. }
+                | Statement::ForOf { .. }
         ) {
             self.pending_labels.push(label.to_string());
             return self.compile_stmt(body);
@@ -1051,6 +1427,7 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: vec![label.to_string()],
             kind: CtxKind::LabelBlock,
+            try_depth: self.unwind.len(),
             ..Default::default()
         });
         let value = self.compile_stmt(body)?;
@@ -1071,6 +1448,172 @@ impl<'a> Compiler<'a> {
             self.patch_jump(over, end)?;
         }
         Ok(value)
+    }
+
+    /// Prepare a `for-in`/`for-of` head name. The parser erases the head
+    /// kind, and the evaluator assigns (never re-declares) per iteration:
+    /// top level writes the global binding, function bodies reuse or
+    /// create the function-scope slot, nested blocks shadow it fresh.
+    fn prepare_for_head(&mut self, name: &str) -> Result<ForHead, Decline> {
+        if self.top_level {
+            return Ok(ForHead::Global(self.intern_string(name)?));
+        }
+        if self.scopes.len() == 1 {
+            let slot = self.declare_slot_if_absent(name, SlotKind::Var)?;
+            // A captured head lives in the frame environment, like any
+            // other captured function-scope name.
+            if self.captured.contains(name) {
+                return Ok(ForHead::Global(self.intern_string(name)?));
+            }
+            return Ok(ForHead::Slot(slot));
+        }
+        Ok(ForHead::Slot(self.declare_slot(name, SlotKind::Var)?))
+    }
+
+    /// One head write per iteration: an unchecked initialize, matching the
+    /// evaluator's kind- and zone-ignoring head assignment.
+    fn bind_for_head(&mut self, head: &ForHead, src: Reg) {
+        match head {
+            ForHead::Slot(slot) => self.emit(Instr::InitLocal { slot: *slot, src }),
+            ForHead::Global(name) => self.emit(Instr::InitGlobal { name: *name, src }),
+        }
+    }
+
+    /// `for (name in obj)`. Keys snapshot once up front; each iteration
+    /// binds the key and runs the body, like the evaluator.
+    fn compile_for_in(
+        &mut self,
+        name: &'a str,
+        obj: &'a Expr,
+        body: &'a [Statement],
+    ) -> Result<Reg, Decline> {
+        let head = self.prepare_for_head(name)?;
+        let source = self.compile_expr(obj)?;
+        let keys = self.alloc_reg()?;
+        self.emit(Instr::EnumKeys { dst: keys, src: source });
+        let length_key = self.intern_string("length")?;
+        let length_key = self.load_const(length_key)?;
+        let len = self.alloc_reg()?;
+        self.emit(Instr::GetProp { dst: len, obj: keys, key: length_key });
+        let zero = self.intern_number(0.0)?;
+        let idx = self.load_const(zero)?;
+        let one = self.intern_number(1.0)?;
+        let one = self.load_const(one)?;
+        let loop_value = self.alloc_reg()?;
+        let undef = self.load_undefined()?;
+        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        let top = self.here();
+        self.emit(Instr::LoopHead);
+        let cond = self.alloc_reg()?;
+        self.emit(Instr::Binary { dst: cond, op: BinOp::Lt, lhs: idx, rhs: len });
+        let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
+        self.loops.push(LoopCtx {
+            labels: std::mem::take(&mut self.pending_labels),
+            try_depth: self.unwind.len(),
+            ..Default::default()
+        });
+        let key = self.alloc_reg()?;
+        self.emit(Instr::GetProp { dst: key, obj: keys, key: idx });
+        self.bind_for_head(&head, key);
+        let body_value = self.compile_scoped_block(body)?;
+        self.emit(Instr::Mov { dst: loop_value, src: body_value });
+        let increment = self.here();
+        let next = self.alloc_reg()?;
+        self.emit(Instr::Binary { dst: next, op: BinOp::Add, lhs: idx, rhs: one });
+        self.emit(Instr::Mov { dst: idx, src: next });
+        self.emit(Instr::Jump { target: addr_target(top)? });
+        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
+        let end = self.here();
+        self.patch_jump(end_jump, end)?;
+        self.finish_loop(ctx, increment, end)?;
+        Ok(loop_value)
+    }
+
+    /// `for (name of iter)` (and pattern heads, destructured per
+    /// iteration). Early exits close the iterator: `break` through a close
+    /// pad, unwinding through a finally handler; exhaustion and `continue`
+    /// do not close.
+    fn compile_for_of(
+        &mut self,
+        name: &'a str,
+        pattern: &'a Option<Box<Pattern>>,
+        iter: &'a Expr,
+        body: &'a [Statement],
+        is_await: bool,
+    ) -> Result<Reg, Decline> {
+        if is_await {
+            return Err(Decline::Func("async needs Phase G"));
+        }
+        // Heads prepare before the iterable evaluates, like declarations.
+        let head = match pattern {
+            Some(_) => None,
+            None => Some(self.prepare_for_head(name)?),
+        };
+        if let Some(pattern) = pattern {
+            // Declare each head name; the per-iteration desugar resolves
+            // them back like any declaration.
+            for bound in pattern_names(pattern) {
+                self.prepare_for_head(&bound)?;
+            }
+        }
+        let source = self.compile_expr(iter)?;
+        let iterator = self.alloc_reg()?;
+        let next = self.alloc_reg()?;
+        self.emit(Instr::ForOfInit { iter: iterator, next, src: source });
+        let loop_value = self.alloc_reg()?;
+        let undef = self.load_undefined()?;
+        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        let scratch = self.alloc_reg()?;
+        let unwind_pad = self.emit_jump(|target| Instr::PushFinally { target, dst: scratch });
+        self.unwind.push(UnwindCtx { finally: None, close_iter: Some(iterator) });
+        self.loops.push(LoopCtx {
+            labels: std::mem::take(&mut self.pending_labels),
+            try_depth: self.unwind.len(),
+            ..Default::default()
+        });
+        let top = self.here();
+        self.emit(Instr::LoopHead);
+        let done = self.alloc_reg()?;
+        let yielded = self.alloc_reg()?;
+        self.emit(Instr::IterNext { done, value: yielded, iter: iterator, next });
+        let exhausted = self.emit_jump(|target| Instr::JumpIfTrue { src: done, target });
+        match (&head, pattern) {
+            (Some(head), None) => self.bind_for_head(head, yielded),
+            (None, Some(pattern)) => {
+                self.compile_destructure(
+                    pattern,
+                    yielded,
+                    DestructureMode::Decl { is_var: false },
+                )?;
+            }
+            _ => return Err(Decline::Func("bad for-of head")),
+        }
+        let body_value = self.compile_scoped_block(body)?;
+        self.emit(Instr::Mov { dst: loop_value, src: body_value });
+        self.emit(Instr::Jump { target: addr_target(top)? });
+        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
+        self.unwind.pop().ok_or(Decline::Func("unwind stack underflow"))?;
+        let drained = self.here();
+        self.emit(Instr::PopHandler);
+        let end_jump = self.emit_jump(|target| Instr::Jump { target });
+        let close_pad = self.here();
+        self.emit(Instr::CloseIterator { src: iterator });
+        self.emit(Instr::PopHandler);
+        let over_pad = self.emit_jump(|target| Instr::Jump { target });
+        self.patch_jump(unwind_pad, self.here())?;
+        self.emit(Instr::CloseIterator { src: iterator });
+        self.emit(Instr::Rethrow);
+        let end = self.here();
+        self.patch_jump(exhausted, drained)?;
+        self.patch_jump(end_jump, end)?;
+        self.patch_jump(over_pad, end)?;
+        for addr in ctx.continues {
+            self.patch_jump(addr, top)?;
+        }
+        for addr in ctx.breaks {
+            self.patch_jump(addr, close_pad)?;
+        }
+        Ok(loop_value)
     }
 
     /// `switch (disc) { ... }`. One scope hosts every case's lexical hoists
@@ -1121,6 +1664,7 @@ impl<'a> Compiler<'a> {
         let no_match = self.emit_jump(|target| Instr::Jump { target });
         self.loops.push(LoopCtx {
             kind: CtxKind::Switch,
+            try_depth: self.unwind.len(),
             ..Default::default()
         });
         let mut bodies = Vec::with_capacity(cases.len());
@@ -1161,6 +1705,7 @@ impl<'a> Compiler<'a> {
         let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
+            try_depth: self.unwind.len(),
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
@@ -1183,6 +1728,7 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::LoopHead);
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
+            try_depth: self.unwind.len(),
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
@@ -1223,6 +1769,7 @@ impl<'a> Compiler<'a> {
         };
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
+            try_depth: self.unwind.len(),
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
@@ -1243,45 +1790,77 @@ impl<'a> Compiler<'a> {
         Ok(loop_value)
     }
 
-    fn compile_for_init(&mut self, init: &'a ForInit) -> Result<(), Decline> {
-        match init {
-            ForInit::Var { kind, decls } => {
-                for (name, init) in decls {
-                    match kind {
-                        // Head `var`s live in the function scope (hoisted);
-                        // the head only assigns, defaulting to `undefined`
-                        // even when the declarator has no initializer.
-                        VarKind::Var => {
-                            let src = match init {
-                                Some(value) => self.compile_expr(value)?,
-                                None => self.load_undefined()?,
-                            };
-                            match self.resolve(name)? {
-                                Binding::Slot(slot) => {
-                                    self.emit(Instr::StoreLocal { slot, src });
-                                }
-                                Binding::Global => {
-                                    let index = self.intern_string(name)?;
-                                    self.emit(Instr::StoreGlobal { name: index, src });
-                                }
-                            }
+    /// Plain identifier declarators in a `for` head, shared by `Var`
+    /// heads and the trailing declarators of pattern heads.
+    fn compile_for_decls(
+        &mut self,
+        kind: &VarKind,
+        decls: &'a [(String, Option<Expr>)],
+    ) -> Result<(), Decline> {
+        for (name, init) in decls {
+            match kind {
+                // Head `var`s live in the function scope (hoisted);
+                // the head only assigns, defaulting to `undefined`
+                // even when the declarator has no initializer.
+                VarKind::Var => {
+                    let src = match init {
+                        Some(value) => self.compile_expr(value)?,
+                        None => self.load_undefined()?,
+                    };
+                    match self.resolve(name)? {
+                        Binding::Slot(slot) => {
+                            self.emit(Instr::StoreLocal { slot, src });
                         }
-                        VarKind::Let | VarKind::Const => {
-                            let slot_kind =
-                                if matches!(kind, VarKind::Const) { SlotKind::Const } else { SlotKind::Let };
-                            let slot = self.declare_slot(name, slot_kind)?;
-                            self.emit(Instr::DeclareLocal { slot, kind: slot_kind, initialized: false });
-                            let src = match init {
-                                Some(value) => self.compile_expr(value)?,
-                                None => self.load_undefined()?,
-                            };
-                            self.emit(Instr::InitLocal { slot, src });
+                        Binding::Global => {
+                            let index = self.intern_string(name)?;
+                            self.emit(Instr::StoreGlobal { name: index, src });
                         }
                     }
                 }
+                VarKind::Let | VarKind::Const => {
+                    let slot_kind =
+                        if matches!(kind, VarKind::Const) { SlotKind::Const } else { SlotKind::Let };
+                    let slot = self.declare_slot(name, slot_kind)?;
+                    self.emit(Instr::DeclareLocal { slot, kind: slot_kind, initialized: false });
+                    let src = match init {
+                        Some(value) => self.compile_expr(value)?,
+                        None => self.load_undefined()?,
+                    };
+                    self.emit(Instr::InitLocal { slot, src });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn compile_for_init(&mut self, init: &'a ForInit) -> Result<(), Decline> {
+        match init {
+            ForInit::Var { kind, decls } => self.compile_for_decls(kind, decls),
+            ForInit::Pattern { kind, pattern, init, trailing } => {
+                let src = self.compile_expr(init)?;
+                if !matches!(kind, VarKind::Var) {
+                    let slot_kind = if matches!(kind, VarKind::Const) {
+                        SlotKind::Const
+                    } else {
+                        SlotKind::Let
+                    };
+                    for bound in pattern_names(pattern) {
+                        let slot = self.declare_slot(&bound, slot_kind)?;
+                        self.emit(Instr::DeclareLocal {
+                            slot,
+                            kind: slot_kind,
+                            initialized: false,
+                        });
+                    }
+                }
+                self.compile_destructure(
+                    pattern,
+                    src,
+                    DestructureMode::Decl { is_var: matches!(kind, VarKind::Var) },
+                )?;
+                self.compile_for_decls(kind, trailing)?;
                 Ok(())
             }
-            ForInit::Pattern { .. } => Err(Decline::Func("destructuring needs Phase G")),
             ForInit::Expr(expr) => {
                 let _ = self.compile_expr(expr)?;
                 Ok(())
@@ -2027,7 +2606,20 @@ impl<'a> Compiler<'a> {
                 }
             }
             Expr::Array(_) | Expr::Object(_) => {
-                Err(Decline::Func("destructuring needs Phase G"))
+                // Only plain `=` destructures; anything else (or an
+                // unconvertible target) fails at runtime on the AST tier.
+                if op != AssignOp::Assign {
+                    return Err(Decline::Func("invalid assignment target"));
+                }
+                let Some(pattern) = expr_to_pattern(target) else {
+                    return Err(Decline::Func("invalid assignment target"));
+                };
+                // The converted pattern is owned, but nested function
+                // expressions borrow it for the rest of compilation: promote
+                // it to the compilation lifetime.
+                let pattern: &'a Pattern = Box::leak(Box::new(pattern));
+                self.compile_destructure(pattern, rhs, DestructureMode::Assign)?;
+                Ok(rhs)
             }
             _ => Err(Decline::Func("invalid assignment target")),
         }
@@ -2147,6 +2739,9 @@ fn find_captured(params: &[String], body: &FuncBody) -> HashSet<String> {
             let mut fns = Vec::new();
             block_fn_decls(stmts, &mut fns);
             names.extend(fns.iter().map(|decl| decl.name));
+            let mut heads = Vec::new();
+            block_loop_heads(stmts, &mut heads);
+            names.extend(heads.iter().map(String::as_str));
             names
                 .into_iter()
                 .filter(|name| statements_capture_identifier(stmts, name))
@@ -2237,13 +2832,13 @@ mod tests {
     #[test]
     fn unsupported_constructs_decline() {
         for (source, expected) in [
-            ("try { f(); } catch (e) { g(); }", "try/catch needs Phase G"),
+            ("try { f(); } catch (e) { g(); }", "compiled"),
             ("switch (x) { case 1: y(); }", "compiled"),
             ("class C {}", "classes need Phase G"),
-            ("for (let k in o) { f(k); }", "for-in/of needs Phase G"),
-            ("for (const v of a) { f(v); }", "for-in/of needs Phase G"),
+            ("for (let k in o) { f(k); }", "compiled"),
+            ("for (const v of a) { f(v); }", "compiled"),
             ("let o = { a: 1 };", "compiled"),
-            ("let [a] = b;", "destructuring needs Phase G"),
+            ("let [a] = b;", "compiled"),
             ("f(...args);", "compiled"),
             ("let a = [...b];", "compiled"),
             ("a?.b;", "compiled"),

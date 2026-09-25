@@ -201,6 +201,49 @@ pub enum Instr {
     /// plus spreads (arrays splice, strings spread per character, anything
     /// else drains the iterator protocol).
     BuildArray { dst: Reg, tmpl: u16 },
+    /// `dst` = `src` materialized for an array destructuring pattern:
+    /// arrays clone, strings split per character (length-checked), plain
+    /// objects and anything else become `[]`.
+    ToDestructArray { dst: Reg, src: Reg },
+    /// `dst` = `src` sliced from element `from` for an array-rest element.
+    /// `src` always holds an array the compiler materialized just before.
+    RestArray { dst: Reg, src: Reg, from: u16 },
+    /// Throw a `TypeError` when `src` is nullish (object patterns cannot
+    /// destructure `null`/`undefined`); otherwise `dst` snapshots `src`'s
+    /// own enumerable string keys (only objects have any) for a later
+    /// [`Instr::RestObject`].
+    CheckDestructObject { dst: Reg, src: Reg },
+    /// `dst` = object of the `src` properties named by the `keys` array
+    /// minus the `taken` array's keys, each read through the normal member
+    /// path. Implements `{ ...rest }`.
+    RestObject { dst: Reg, src: Reg, keys: Reg, taken: Reg },
+    /// `dst` = own enumerable keys of `src` as a string array (proxy traps
+    /// honored). Drives `for-in`.
+    EnumKeys { dst: Reg, src: Reg },
+    /// Initialize `for-of`: `iter` = the iterator for `src`,
+    /// `next` = its `next` method (an error when absent).
+    ForOfInit { iter: Reg, next: Reg, src: Reg },
+    /// One `for-of` step: call `next` on `iter`; `done` reports truthy
+    /// `done` (missing counts as done), `value` the yielded value.
+    IterNext { done: Reg, value: Reg, iter: Reg, next: Reg },
+    /// Close `src` as a `for-of` iterator (runs a suspended generator's
+    /// `finally` blocks); anything else ignores it.
+    CloseIterator { src: Reg },
+    /// Push a catch handler: a catchable error (`Throw`, `Msg`,
+    /// `RuntimeError`) abandons the protected region, stores the catch
+    /// value (thrown value, or a converted error object) in `dst`, and
+    /// resumes at `target` with the handler popped.
+    PushCatch { target: Target, dst: Reg },
+    /// Push a finally handler: like [`Instr::PushCatch`] but also
+    /// intercepts `return` unwinding, landing at `target` to run cleanup
+    /// and [`Instr::Rethrow`]. Neither kind intercepts `break`,
+    /// `continue`, or abandonment. `dst` receives the catch value (or
+    /// `undefined` for a `return` landing) for uniformity; pads ignore it.
+    PushFinally { target: Target, dst: Reg },
+    /// Pop the innermost handler: the protected region completed.
+    PopHandler,
+    /// Re-raise the error a handler just landed with, after cleanup ran.
+    Rethrow,
 }
 
 /// The discriminant of [`Instr`], for classification without operands.
@@ -260,6 +303,18 @@ pub enum Opcode {
     CallSpread,
     MethodSpread,
     BuildArray,
+    ToDestructArray,
+    RestArray,
+    CheckDestructObject,
+    RestObject,
+    EnumKeys,
+    ForOfInit,
+    IterNext,
+    CloseIterator,
+    PushCatch,
+    PushFinally,
+    PopHandler,
+    Rethrow,
 }
 
 impl Instr {
@@ -320,6 +375,18 @@ impl Instr {
             Instr::CallSpread { .. } => Opcode::CallSpread,
             Instr::MethodSpread { .. } => Opcode::MethodSpread,
             Instr::BuildArray { .. } => Opcode::BuildArray,
+            Instr::ToDestructArray { .. } => Opcode::ToDestructArray,
+            Instr::RestArray { .. } => Opcode::RestArray,
+            Instr::CheckDestructObject { .. } => Opcode::CheckDestructObject,
+            Instr::RestObject { .. } => Opcode::RestObject,
+            Instr::EnumKeys { .. } => Opcode::EnumKeys,
+            Instr::ForOfInit { .. } => Opcode::ForOfInit,
+            Instr::IterNext { .. } => Opcode::IterNext,
+            Instr::CloseIterator { .. } => Opcode::CloseIterator,
+            Instr::PushCatch { .. } => Opcode::PushCatch,
+            Instr::PushFinally { .. } => Opcode::PushFinally,
+            Instr::PopHandler => Opcode::PopHandler,
+            Instr::Rethrow => Opcode::Rethrow,
         }
     }
 
@@ -446,6 +513,26 @@ impl fmt::Display for Instr {
                 write!(f, "METHOD_SPREAD r{dst}, r{callee}, r{this}, c{tmpl}")
             }
             Instr::BuildArray { dst, tmpl } => write!(f, "BUILD_ARRAY r{dst}, c{tmpl}"),
+            Instr::ToDestructArray { dst, src } => write!(f, "TO_DESTRUCT_ARRAY r{dst}, r{src}"),
+            Instr::RestArray { dst, src, from } => write!(f, "REST_ARRAY r{dst}, r{src}, {from}"),
+            Instr::CheckDestructObject { dst, src } => {
+                write!(f, "CHECK_DESTRUCT_OBJECT r{dst}, r{src}")
+            }
+            Instr::RestObject { dst, src, keys, taken } => {
+                write!(f, "REST_OBJECT r{dst}, r{src}, r{keys}, r{taken}")
+            }
+            Instr::EnumKeys { dst, src } => write!(f, "ENUM_KEYS r{dst}, r{src}"),
+            Instr::ForOfInit { iter, next, src } => {
+                write!(f, "FOR_OF_INIT r{iter}, r{next}, r{src}")
+            }
+            Instr::IterNext { done, value, iter, next } => {
+                write!(f, "ITER_NEXT r{done}, r{value}, r{iter}, r{next}")
+            }
+            Instr::CloseIterator { src } => write!(f, "CLOSE_ITERATOR r{src}"),
+            Instr::PushCatch { target, dst } => write!(f, "PUSH_CATCH @{target}, r{dst}"),
+            Instr::PushFinally { target, dst } => write!(f, "PUSH_FINALLY @{target}, r{dst}"),
+            Instr::PopHandler => write!(f, "POP_HANDLER"),
+            Instr::Rethrow => write!(f, "RETHROW"),
         }
     }
 }

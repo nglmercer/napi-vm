@@ -474,6 +474,43 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_spread_template(address, *tmpl)?;
             }
+            Instr::ToDestructArray { dst, src } | Instr::CheckDestructObject { dst, src } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::RestArray { dst, src, .. } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::RestObject { dst, src, keys, taken } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+                self.check_reg(address, *keys)?;
+                self.check_reg(address, *taken)?;
+            }
+            Instr::EnumKeys { dst, src } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::ForOfInit { iter, next, src } => {
+                self.check_reg(address, *iter)?;
+                self.check_reg(address, *next)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::IterNext { done, value, iter, next } => {
+                self.check_reg(address, *done)?;
+                self.check_reg(address, *value)?;
+                self.check_reg(address, *iter)?;
+                self.check_reg(address, *next)?;
+            }
+            Instr::CloseIterator { src } => {
+                self.check_reg(address, *src)?;
+            }
+            Instr::PushCatch { target, dst } | Instr::PushFinally { target, dst } => {
+                self.check_target(address, *target)?;
+                self.check_reg(address, *dst)?;
+            }
+            Instr::PopHandler | Instr::Rethrow => {}
         }
         Ok(())
     }

@@ -46,6 +46,17 @@ pub struct CallFrame<'a> {
     pub registers: Vec<Value>,
     pub slots: Vec<RunSlot>,
     pub this_value: Value,
+    handlers: Vec<HandlerEntry>,
+    pending: Option<VmErr>,
+}
+
+/// One pushed exception handler: `target` resumes after an interception,
+/// `dst` receives the catch value (catch handlers), `catch_returns`
+/// selects finally handlers, which also intercept `return` unwinding.
+struct HandlerEntry {
+    target: u32,
+    dst: Reg,
+    catch_returns: bool,
 }
 
 impl<'a> CallFrame<'a> {
@@ -86,7 +97,7 @@ impl<'a> CallFrame<'a> {
                 });
             }
         }
-        Self { function, ip: 0, registers, slots, this_value }
+        Self { function, ip: 0, registers, slots, this_value, handlers: Vec::new(), pending: None }
     }
 }
 
@@ -171,9 +182,13 @@ fn run_loop(
             }
             None => return Err(internal("instruction pointer out of bounds")),
         };
-        interp.consume_fuel(instr.cost())?;
-        frame.ip += 1;
-        match instr {
+        // Every instruction runs inside a closure so handler
+        // interception sees each error exactly once; the `return`s in the
+        // arms below exit the closure, not the loop.
+        let outcome = (|| -> Result<(), VmErr> {
+            interp.consume_fuel(instr.cost())?;
+            frame.ip += 1;
+            match instr {
             Instr::LoadConst { dst, cst } => {
                 let value = match &frame.function.constants[cst as usize] {
                     Constant::Number(n) => Value::Number(*n),
@@ -441,6 +456,29 @@ fn run_loop(
                 let template = spread_template(frame, tmpl)?;
                 frame.registers[dst as usize] = spread_array(interp, frame, &template)?;
             }
+            Instr::ToDestructArray { dst, src } => {
+                frame.registers[dst as usize] =
+                    to_destruct_array(&frame.registers[src as usize])?;
+            }
+            Instr::RestArray { dst, src, from } => {
+                let rest = match &frame.registers[src as usize] {
+                    Value::Array(items) => {
+                        items.borrow().get(from as usize..).unwrap_or(&[]).to_vec()
+                    }
+                    _ => return Err(internal("rest of non-array")),
+                };
+                frame.registers[dst as usize] = Value::array(rest);
+            }
+            Instr::CheckDestructObject { dst, src } => {
+                frame.registers[dst as usize] =
+                    check_destruct_object(&frame.registers[src as usize])?;
+            }
+            Instr::RestObject { dst, src, keys, taken } => {
+                let source = frame.registers[src as usize].clone();
+                let keys = frame.registers[keys as usize].clone();
+                let taken = frame.registers[taken as usize].clone();
+                frame.registers[dst as usize] = rest_object(interp, &source, &keys, &taken)?;
+            }
             Instr::NewObject { .. } | Instr::SetOwnProp { .. } => {
                 // Superseded by `BuildObject`; retained as valid IR, never
                 // emitted. Reaching here is a compiler bug.
@@ -500,8 +538,103 @@ fn run_loop(
                 let values = take_range(frame, args, argc)?;
                 frame.registers[dst as usize] = interp.render_template(&quasis, &values)?;
             }
+            Instr::EnumKeys { dst, src } => {
+                let source = frame.registers[src as usize].clone();
+                let keys = interp.keys_with_proxy_trap(&source)?;
+                frame.registers[dst as usize] =
+                    Value::array(keys.into_iter().map(Value::String).collect());
+            }
+            Instr::ForOfInit { iter, next, src } => {
+                let source = frame.registers[src as usize].clone();
+                let iterator = interp.iterator_for(&source)?;
+                let next_fn = interp.prop(&iterator, &Value::String("next".to_string()))?;
+                if matches!(next_fn, Value::Undefined) {
+                    return Err(VmErr::Msg("iterator has no next() method".to_string()));
+                }
+                frame.registers[iter as usize] = iterator;
+                frame.registers[next as usize] = next_fn;
+            }
+            Instr::IterNext { done, value, iter, next } => {
+                let iterator = frame.registers[iter as usize].clone();
+                let next_fn = frame.registers[next as usize].clone();
+                let result = interp.call_this(&next_fn, iterator, vec![])?;
+                let finished = result
+                    .get_prop("done")
+                    .map(|flag| flag.is_truthy())
+                    .unwrap_or(true);
+                frame.registers[done as usize] = Value::Bool(finished);
+                frame.registers[value as usize] =
+                    result.get_prop("value").unwrap_or(Value::Undefined);
+            }
+            Instr::CloseIterator { src } => {
+                crate::interpreter::close_iterator(&frame.registers[src as usize]);
+            }
+            Instr::PushCatch { target, dst } => {
+                frame.handlers.push(HandlerEntry { target, dst, catch_returns: false });
+            }
+            Instr::PushFinally { target, dst } => {
+                frame.handlers.push(HandlerEntry { target, dst, catch_returns: true });
+            }
+            Instr::PopHandler => {
+                if frame.handlers.pop().is_none() {
+                    return Err(internal("handler stack underflow"));
+                }
+            }
+            Instr::Rethrow => match frame.pending.take() {
+                Some(error) => return Err(error),
+                None => return Err(internal("rethrow without a pending error")),
+            },
+            }
+            Ok(())
+        })();
+        if let Err(error) = outcome {
+            land_handler(interp, frame, error)?;
         }
     }
+}
+
+/// Route an instruction error to the innermost handler that takes it, or
+/// re-raise. Mirrors the evaluator's `try`: only thrown values and runtime
+/// errors land on a catch; `return` unwinds past catches to the nearest
+/// finally (or out); abandonment bypasses every handler.
+fn land_handler(
+    interp: &mut Interpreter,
+    frame: &mut CallFrame,
+    error: VmErr,
+) -> Result<(), VmErr> {
+    if error.is_abandon() {
+        return Err(error);
+    }
+    let catchable = matches!(
+        error,
+        VmErr::Throw(_) | VmErr::Msg(_) | VmErr::RuntimeError(_) | VmErr::Ret(_)
+    );
+    if !catchable {
+        return Err(error);
+    }
+    let mut entry = match frame.handlers.pop() {
+        Some(entry) => entry,
+        None => return Err(error),
+    };
+    while matches!(error, VmErr::Ret(_)) && !entry.catch_returns {
+        entry = match frame.handlers.pop() {
+            Some(entry) => entry,
+            None => return Err(error),
+        };
+    }
+    let value = match &error {
+        VmErr::Throw(value) => value.clone(),
+        VmErr::Msg(message) => crate::error::error_value_with_stack(message, interp.get_stack()),
+        VmErr::RuntimeError(data) => {
+            crate::error::error_value_with_stack(&data.message, &data.stack)
+        }
+        VmErr::Ret(_) => Value::Undefined,
+        _ => unreachable!("filtered above"),
+    };
+    frame.registers[entry.dst as usize] = value;
+    frame.pending = Some(error);
+    frame.ip = entry.target as usize;
+    Ok(())
 }
 
 fn bind_kind(kind: SlotKind) -> BindKind {
@@ -716,6 +849,85 @@ fn spread_array(
         }
     }
     Value::checked_array(items)
+}
+
+/// Materialize one value for an array destructuring pattern: arrays
+/// clone, strings split per character (length-checked), and anything else
+/// — plain objects included, which must never become a sparse vector keyed
+/// by guest data — becomes `[]`. Mirrors the evaluator's pattern path.
+fn to_destruct_array(value: &Value) -> Result<Value, VmErr> {
+    match value {
+        Value::Array(arr) => Ok(Value::array(arr.borrow().clone())),
+        Value::Object { .. } => Ok(Value::array(Vec::new())),
+        Value::String(s) => {
+            if s.chars().count() > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            }
+            Ok(Value::array(
+                s.chars().map(|c| Value::String(c.to_string())).collect(),
+            ))
+        }
+        _ => Ok(Value::array(Vec::new())),
+    }
+}
+
+/// Reject a nullish object-pattern source, else snapshot the own enumerable
+/// string keys a later `{ ...rest }` draws from. Only objects contribute
+/// keys; every other non-nullish value destructures through `Get` alone.
+fn check_destruct_object(value: &Value) -> Result<Value, VmErr> {
+    if matches!(value, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(format!(
+            "TypeError: Cannot destructure properties of {}",
+            if matches!(value, Value::Null) {
+                "null"
+            } else {
+                "undefined"
+            }
+        )));
+    }
+    let keys: Vec<Value> = match value {
+        Value::Object { props: oprops, .. } => {
+            let slots = oprops.borrow();
+            let meta = oprops.meta.borrow();
+            slots
+                .iter()
+                .filter(|(k, _)| {
+                    meta.attrs_of(k).enumerable && !crate::interpreter::is_internal_key(k)
+                })
+                .map(|(k, _)| Value::String(k.clone()))
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+    Ok(Value::array(keys))
+}
+
+/// `{ ...rest }`: the snapshotted `keys` minus the `taken` keys, each read
+/// through the normal member path (getters run, the prototype applies).
+fn rest_object(
+    interp: &mut Interpreter,
+    source: &Value,
+    keys: &Value,
+    taken: &Value,
+) -> Result<Value, VmErr> {
+    let as_strings = |list: &Value| match list {
+        Value::Array(items) => items
+            .borrow()
+            .iter()
+            .map(|key| interp.property_key(key))
+            .collect::<Result<Vec<_>, _>>(),
+        _ => Err(internal("rest key list of non-array")),
+    };
+    let taken = as_strings(taken)?;
+    let mut remaining = Vec::new();
+    for key in as_strings(keys)? {
+        if taken.iter().any(|t| t == &key) {
+            continue;
+        }
+        let value = interp.get_prop_value(source, &Value::String(key.clone()))?;
+        remaining.push((key, value));
+    }
+    Value::checked_object(remaining)
 }
 
 fn check_prop_limit(positions: &HashMap<String, Vec<usize>>) -> Result<(), VmErr> {

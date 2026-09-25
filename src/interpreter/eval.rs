@@ -154,7 +154,7 @@ pub(crate) fn push_call_arg(args: &mut Vec<Value>, value: Value) -> Result<(), V
 /// `try`, and JavaScript runs those `finally` blocks when the loop exits
 /// early. Any other iterable is a plain object with no teardown to perform.
 #[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
-fn close_iterator(iterator: &Value) {
+pub(crate) fn close_iterator(iterator: &Value) {
     #[cfg(stackful_coroutines)]
     if let Value::Generator { inner } = iterator {
         // A generator cannot be mid-`next()` here: this runs on the same
@@ -178,62 +178,6 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 /// The grammar cannot tell `[a, b]` apart from a pattern until the `=` is
 /// reached, so the parser produces a literal and this converts it. Anything
 /// that is not a valid target yields `None`, which the caller reports.
-fn expr_to_pattern(expr: &Expr) -> Option<crate::parser::Pattern> {
-    use crate::parser::{Pattern, PatternKey};
-    Some(match expr {
-        Expr::Identifier(name) => Pattern::Ident(name.clone()),
-        Expr::Member {
-            object, property, ..
-        } => Pattern::Member {
-            object: object.clone(),
-            property: property.clone(),
-        },
-        Expr::Array(items) => Pattern::Array(
-            items
-                .iter()
-                .map(|item| match item {
-                    Expr::Spread(inner) => {
-                        expr_to_pattern(inner).map(|p| Pattern::Rest(Box::new(p)))
-                    }
-                    // A hole (`[, a] = …`) skips a position.
-                    Expr::Undefined => Some(Pattern::Ident("hole".to_string())),
-                    other => expr_to_pattern(other),
-                })
-                .collect::<Option<Vec<_>>>()?,
-        ),
-        Expr::Object(props) => Pattern::Object(
-            props
-                .iter()
-                .map(|prop| match prop {
-                    ObjectProp::Shorthand(name) => Some((PatternKey::Name(name.clone()), None)),
-                    ObjectProp::KeyValue(key, value) => {
-                        Some((PatternKey::Name(key.clone()), Some(expr_to_pattern(value)?)))
-                    }
-                    ObjectProp::Spread(inner) => Some((
-                        PatternKey::Name("...".to_string()),
-                        Some(Pattern::Rest(Box::new(expr_to_pattern(inner)?))),
-                    )),
-                    ObjectProp::Computed(key, value) => Some((
-                        PatternKey::Computed(key.clone()),
-                        Some(expr_to_pattern(value)?),
-                    )),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?,
-        ),
-        // `[a = 1] = []` supplies a default.
-        Expr::Assignment {
-            target,
-            op: AssignOp::Assign,
-            value,
-        } => Pattern::Default(
-            Box::new(expr_to_pattern(target)?),
-            Box::new(value.as_ref().clone()),
-        ),
-        _ => return None,
-    })
-}
-
 /// Scope slot holding the superclass prototype inside a class member, so
 /// `super.method()` can resolve without the AST carrying a class link.
 pub(crate) const SUPER_PROTO: &str = "__super_proto__";
@@ -1180,7 +1124,7 @@ impl Interpreter {
 
     /// Obtain an iterator for `source`, following the `Symbol.iterator`
     /// protocol. Shared by `for...of` and `yield*`.
-    fn iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
+    pub(crate) fn iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
         if matches!(source, Value::String(_)) {
             let iter_fn = self.prop(source, &Value::String("__symbol_iterator__".to_string()))?;
             return self.call_this(&iter_fn, source.clone(), vec![]);
@@ -1988,7 +1932,7 @@ impl Interpreter {
                     // `({ x } = o)`. Unlike a declaration it binds nothing
                     // new, so each name is assigned through the scope chain.
                     Expr::Array(_) | Expr::Object(_) if matches!(op, AssignOp::Assign) => {
-                        let pattern = expr_to_pattern(target)
+                        let pattern = crate::parser::expr_to_pattern(target)
                             .ok_or_else(|| VmErr::Msg("Invalid assignment target".to_string()))?;
                         self.destructure(&pattern, &v)?;
                         Ok(v)

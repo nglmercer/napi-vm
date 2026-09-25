@@ -355,7 +355,6 @@ fn spreads() {
 
 #[test]
 fn declined_units_stay_on_ast() {
-    check("try { throw 5; } catch (e) { e * 2; }", false);
     check("class C {} typeof C", false);
     check("function o(){ function i(){ return 1; } return i(); } o()", true);
     // Block slots have no frame for the chain to serve: still declined.
@@ -450,4 +449,190 @@ fn trailing_jumps_land_on_end_of_code() {
     check("function f(){ blk: { break blk; } } f()", true);
     check("switch (1) { case 1: 1; break; }", true);
     check("while (1) { break; }", true);
+}
+
+#[test]
+fn destructuring_declarations() {
+    check("let [a, b] = [1, 2]; a + b", true);
+    check("const {x, y} = {x: 1, y: 2}; x * y", true);
+    check("var [a, b] = [3, 4]; a * b", true);
+    // Defaults apply on missing and nullish values only.
+    check("let [a = 5] = []; a", true);
+    check("let [a = 5] = [undefined]; a", true);
+    check("let [a = 5] = [null]; a", true);
+    check("let [a = 5] = [0]; a", true);
+    check("let {a = 5} = {}; a", true);
+    check("let {a = 5} = {a: null}; a", true);
+    check("let n = 0; function d(){ n++; return 9; } let [a = d()] = [1]; [a, n].join(',')", true);
+    // Nested patterns, renames, computed keys.
+    check("let [a, [b, c]] = [1, [2, 3]]; a + b + c", true);
+    check("let {a: {b}} = {a: {b: 7}}; b", true);
+    check("let {a: b} = {a: 3}; b", true);
+    check("let k = 'x'; let {[k]: v} = {x: 8}; v", true);
+    check("let {a, b: {c}} = {a: 1, b: {c: 2}}; a + c", true);
+    // Array rest slices from its position.
+    check("let [a, ...r] = [1, 2, 3]; [a, r.join(',')].join(':')", true);
+    check("let [...r] = [1, 2]; r.join(',')", true);
+    check("let [a, ...r] = [1]; [a, r.length].join(',')", true);
+    // Object rest takes what named keys did not.
+    check("let {a, ...r} = {a: 1, b: 2, c: 3}; [a, r.b, r.c].join(',')", true);
+    check("let k = 'b'; let {[k]: v, ...r} = {a: 1, b: 2}; [v, r.a, r.b].join(',')", true);
+    // Strings split per character; objects are not array sources.
+    check("let [a, b] = 'xy'; a + b", true);
+    check("let [a, ...r] = 'xyz'; [a, r.join('')].join(',')", true);
+    check("let [a] = {0: 9}; a === undefined", true);
+    check("let [a] = 5; a === undefined", true);
+    check("let [a] = null; a === undefined", true);
+    // Object patterns reject nullish sources.
+    check("let {a} = null; 1", true);
+    check("let {a} = undefined; 1", true);
+    // Declaration holes bind the rest, leaving later names in the dead zone.
+    check("let [, b] = [1, 2]; b", true);
+    // Missing initializers destructure `undefined`.
+    check("var [a]; a === undefined", true);
+    check("var {a}; 1", true);
+    // Pattern heads in `for` with trailing declarators.
+    check("let s = 0; for (let [a, b] = [1, 2], i = 0; i < 2; i++) { s += a + b; } s", true);
+    check("let s = 0; for (var {x} = {x: 3}, i = 0; i < 2; i++) { s += x; } s", true);
+    // Destructured parameters lower to pattern declarations.
+    check("function f([a, b = 2]) { return a + b; } f([10])", true);
+    check("function f({x}) { return x; } f({x: 9})", true);
+    check("function f({x = 1, ...r}) { return x + (r.y || 0); } f({y: 4})", true);
+    // Reading a dead-zone name from the initializer throws on both tiers.
+    check("let [a] = a; 1", true);
+}
+
+#[test]
+fn destructuring_assignment() {
+    check("let a = 1, b = 2; [a, b] = [b, a]; a * 10 + b", true);
+    check("let a; ({x: a} = {x: 5}); a", true);
+    check("let a = 0; [a] = [7]; a", true);
+    // The assignment evaluates to the right-hand side.
+    check("let a = 0; let r = [a] = [7]; r.length + a", true);
+    // Member targets write through the object.
+    check("let o = {}; [o.p] = [42]; o.p", true);
+    check("let o = {}; ({a: o.q} = {a: 9}); o.q", true);
+    check("let o = {p: 1}; [o.p, o.q] = [2, 3]; [o.p, o.q].join(',')", true);
+    // Defaults, nesting, and rest in assignments.
+    check("let a; [a = 4] = []; a", true);
+    check("let a, b; [a, [b]] = [1, [2]]; a + b", true);
+    check("let a, r; [a, ...r] = [1, 2, 3]; a + r.length", true);
+    check("let a, r; ({a, ...r} = {a: 1, b: 2}); a + r.b", true);
+    // Assignment holes assign a scratch binding and keep going.
+    check("let a; [, a] = [1, 2]; a", true);
+    // Nullish object sources throw; array sources tolerate anything.
+    check("let a; ({a} = null); 1", true);
+    check("let a; [a] = null; a === undefined", true);
+    // Non-plain assignment and invalid targets fail on the AST tier.
+    check("let a; [a] += [1]; 1", false);
+    check("let a; [a()] = [1]; 1", false);
+}
+
+#[test]
+fn try_catch_finally() {
+    check("try { throw 5; } catch (e) { e * 2; }", true);
+    check("let r = 0; try { r = 1; } catch (e) { r = 2; } r", true);
+    // Runtime errors arrive as error objects with name and message.
+    check("try { null.x; } catch (e) { e.name; }", true);
+    check("try { x_undefined; } catch (e) { e.name + ':' + typeof e.stack; }", true);
+    check("try { 1 + {}; } catch (e) { e.name; }", true);
+    // The try value is the body or catch completion.
+    check("try { 1; 2; } catch (e) {}", true);
+    check("try { throw 0; } catch (e) { 3; }", true);
+    // Catch binds its parameter in a fresh scope.
+    check("let e = 1; let r = 0; try { throw 2; } catch (e) { r = e; } [r, e].join(',')", true);
+    check("try { throw 1; } catch (e) { let q = e + 1; q; }", true);
+    // Finally runs on every path; its value is discarded.
+    check("let r = ''; try { r += 't'; } finally { r += 'f'; } r", true);
+    check("let r = ''; try { r += 't'; throw 1; } catch (e) { r += 'c'; } finally { r += 'f'; } r", true);
+    check("try { 1; } finally { 2; }", true);
+    check("try { throw 1; } catch (e) { 2; } finally { 3; }", true);
+    // Finally-only rethrows after cleanup.
+    check("let r = ''; try { try { throw 7; } finally { r += 'f'; } } catch (e) { r += e; } r", true);
+    check("try { throw 42; } finally {}", true);
+    // Return runs finally, then proceeds; a finally return replaces it.
+    check("function f(){ try { return 1; } finally { r = 2; } } let r = 0; [f(), r].join(',')", true);
+    check("function f(){ try { return 1; } finally { return 2; } } f()", true);
+    check("function f(){ try { throw 0; } catch (e) { return 1; } finally { r = 5; } } let r = 0; [f(), r].join(',')", true);
+    check("function f(){ try { return 1; } catch (e) { return 2; } } f()", true);
+    // A throw inside finally replaces the in-flight outcome.
+    check("try { try { throw 1; } finally { throw 2; } } catch (e) { e; }", true);
+    check("function f(){ try { return 1; } finally { throw 3; } } try { f(); } catch (e) { e; }", true);
+    // Break and continue run finally, then proceed.
+    check("let r = ''; for (let i = 0; i < 3; i++) { try { break; } finally { r += 'f'; } r += 'x'; } r", true);
+    check("let r = ''; for (let i = 0; i < 2; i++) { try { continue; } finally { r += 'f'; } r += 'x'; } r", true);
+    check("let r = ''; outer: { try { break outer; } finally { r += 'f'; } r += 'x'; } r", true);
+    check("let r = ''; for (let i = 0; i < 2; i++) { try { throw 1; } catch (e) { continue; } finally { r += 'f'; } r += 'x'; } r", true);
+    // Control-flow signals are not catchable.
+    check("let i = 0; for (; i < 5;) { try { break; } catch (e) {} } i", true);
+    // Nested handlers compose.
+    check("try { try { throw 'a'; } catch (e) { throw 'b'; } } catch (e) { e; }", true);
+    check("let r = ''; try { try { throw 1; } finally { r += 'i'; } } catch (e) { r += 'c'; } finally { r += 'o'; } r", true);
+}
+
+#[test]
+fn for_in_loops() {
+    check("let r = ''; for (let k in {a: 1, b: 2}) { r += k; } r", true);
+    check("let o = {a: 1, b: 2}; let s = 0; for (let k in o) { s += o[k]; } s", true);
+    // Heads assign, never shadow: top level updates the global binding.
+    check("let k = 9; for (let k in {a: 1}) {} k", true);
+    check("for (var k in {a: 1}) {} k", true);
+    check("function f(){ let k = 9; for (let k in {a: 1}) {} return k; } f()", true);
+    // ...while a head inside a block shadows the outer binding.
+    check("function f(){ let k = 9; { for (let k in {a: 1}) {} } return k; } f()", true);
+    check("function f(){ for (let k in {a: 1}) {} return k; } f()", true);
+    // Break, continue, and labels thread through.
+    check("let r = ''; for (let k in {a: 1, b: 2, c: 3}) { if (k === 'b') { continue; } r += k; } r", true);
+    check("let r = ''; for (let k in {a: 1, b: 2, c: 3}) { if (k === 'b') { break; } r += k; } r", true);
+    check("outer: for (let k in {a: 1}) { break outer; }", true);
+    check("let r = ''; outer: for (let k in {a: 1}) { for (let j in {x: 1}) { continue outer; r += 'x'; } } r", true);
+    // Keys snapshot once; later mutations do not join the iteration.
+    check("let o = {a: 1}; let r = ''; for (let k in o) { o[k + 'z'] = 1; r += k; } r", true);
+    // Empty and non-object sources simply run zero times.
+    check("let r = 0; for (let k in {}) { r = 1; } r", true);
+    check("for (let k in 5) {}", true);
+    check("for (let k in null) {}", true);
+    // The loop value is the last body value.
+    check("for (let k in {a: 1}) { 7; }", true);
+    check("for (let k in {}) { 7; }", true);
+    // Nested loops and captured heads.
+    check("let r = ''; for (let a in {x: 1}) { for (let b in {y: 1}) { r += a + b; } } r", true);
+    check("function f(){ for (let k in {a: 1, b: 2}) {} function g(){ return k; } return g(); } f()", true);
+    // A pattern head in `for-in` binds the placeholder name.
+    check("let o = {x: 1}; for (let [a] in o) {} typeof a", true);
+}
+
+#[test]
+fn for_of_loops() {
+    check("let s = 0; for (let v of [1, 2, 3]) { s += v; } s", true);
+    check("let r = ''; for (let c of 'ab') { r += c; } r", true);
+    // Heads assign like `for-in` heads do.
+    check("let v = 9; for (let v of [1]) {} v", true);
+    check("function f(){ let v = 9; for (let v of [1]) {} return v; } f()", true);
+    check("function f(){ let v = 9; { for (let v of [1]) {} } return v; } f()", true);
+    check("let r = ''; for (let v of [1, 2, 3]) { if (v === 2) { continue; } r += v; } r", true);
+    check("let r = ''; for (let v of [1, 2, 3]) { if (v === 2) { break; } r += v; } r", true);
+    // Pattern heads destructure per iteration.
+    check("let s = 0; for (let [a, b] of [[1, 2], [3, 4]]) { s += a + b; } s", true);
+    check("let s = 0; for (let {x} of [{x: 1}, {x: 2}]) { s += x; } s", true);
+    check("let s = 0; for (let [a = 9] of [[], [2]]) { s += a; } s", true);
+    // Early exits close the iterator; exhaustion and continue do not.
+    check("function* g(){ try { yield 1; yield 2; } finally { log += 'c'; } } let log = ''; for (let v of g()) { break; } log", true);
+    check("function* g(){ try { yield 1; yield 2; } finally { log += 'c'; } } let log = ''; function f(){ for (let v of g()) { return v; } } f(); log", true);
+    check("function* g(){ try { yield 1; yield 2; } finally { log += 'c'; } } let log = ''; try { for (let v of g()) { throw 9; } } catch (e) {} log", true);
+    check("function* g(){ try { yield 1; } finally { log += 'c'; } } let log = ''; for (let v of g()) {} log", true);
+    check("function* g(){ try { yield 1; yield 2; } finally { log += 'c'; } } let log = ''; for (let v of g()) { continue; } log", true);
+    // A destructuring failure also closes before propagating.
+    check("function* g(){ try { yield null; } finally { log += 'c'; } } let log = ''; try { for (let {a} of g()) {} } catch (e) { log += 'e'; } log", true);
+    // Non-iterables and method-less iterators fail like the evaluator.
+    check("for (let v of {}) {}", true);
+    check("let o = {}; o['__symbol_iterator__'] = function() { return {}; }; for (let v of o) {}", true);
+    // A missing `done` counts as done; a missing value is undefined.
+    check("let o = {}; o['__symbol_iterator__'] = function() { return { next: function() { return {}; } }; }; let n = 0; for (let v of o) { n++; } n", true);
+    check("let o = {}; let calls = 0; o['__symbol_iterator__'] = function() { return { next: function() { calls++; return calls > 1 ? {done: true} : {done: false}; } }; }; let r = []; for (let v of o) { r.push(v); } [r.length, r[0] === undefined].join(',')", true);
+    // Loop value, nesting, captured heads.
+    check("for (let v of [1]) { 7; }", true);
+    check("let r = ''; for (let a of [1]) { for (let b of [2]) { r += a + b; } } r", true);
+    check("function f(){ let g; for (let v of [1, 2]) { g = function() { return v; }; } return g(); } f()", true);
+    check("function f(){ for (let [a] of [[1], [2]]) {} function g(){ return a; } return g(); } f()", true);
 }
