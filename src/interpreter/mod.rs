@@ -721,6 +721,18 @@ pub struct PreparedProgram {
     executable: Executable,
 }
 
+impl PreparedProgram {
+    /// Snapshot this program's tier-up and inline-cache counters: `None`
+    /// when the AST tier was selected (it has no counters to report),
+    /// otherwise the whole function tree's totals.
+    pub fn stats(&self) -> Option<crate::bytecode::FunctionStats> {
+        match &self.executable {
+            Executable::Bytecode(module) => Some(module.main.stats()),
+            Executable::Ast => None,
+        }
+    }
+}
+
 /// The execution tier [`Interpreter::compile`] selected: verified bytecode
 /// for supported programs, the AST evaluator otherwise.
 #[derive(Clone)]
@@ -1481,6 +1493,18 @@ impl Interpreter {
     /// Tune when functions tier up and when deoptimizing code is discarded.
     pub fn set_jit_policy(&mut self, policy: crate::jit::JitPolicy) {
         self.jit_policy = policy;
+    }
+
+    /// Snapshot the thread-global runtime counters: heap tracking and
+    /// shape minting. Per-function counters live on the functions; see
+    /// [`PreparedProgram::stats`](crate::interpreter::PreparedProgram::stats).
+    pub fn runtime_stats(&self) -> crate::runtime::RuntimeStats {
+        let heap = crate::heap::counters();
+        crate::runtime::RuntimeStats {
+            heap_tracked: heap.tracked,
+            heap_collected_total: heap.total_collected,
+            shapes_created: crate::shape::Shape::created_count(),
+        }
     }
 
     /// Count one bytecode-function entry and decide its tier. The compiled-

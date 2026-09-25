@@ -1,10 +1,15 @@
 //! Criterion microbenchmarks for the VM, driving the full pipeline directly
 //! (lexer → parser → interpreter) with no NAPI overhead. Run with `cargo bench`.
 //!
-//! Two groups are measured:
+//! Groups measured:
 //! - `run`: end-to-end execution of representative JavaScript workloads.
 //! - `frontend`: the lexer and parser in isolation over a large source, to show
 //!   how much of the pipeline is parsing versus evaluation.
+//! - `warm`: steady-state invocation on a reused VM.
+//! - `plugin_call`: host-to-plugin call paths.
+//! - `tiers`: the Phase H–J runtime machinery at steady state — inline-cache
+//!   hits, megamorphic sites, call/tier-up counting, shape churn, and cycle
+//!   collection — via compile-once/execute-many on a reused interpreter.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use napi_vm::{
@@ -205,11 +210,89 @@ export default {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// Phase H–J steady-state suite. Each case compiles a setup program once
+/// (fixtures hoisted to top-level globals, work in `bench()`), executes it
+/// once, then invokes `bench()` per Criterion iteration on the same
+/// interpreter. Setup asserts the tier under test: `bench` must be
+/// bytecode-backed, so the suite can never silently measure the AST.
+fn bench_tiers(c: &mut Criterion) {
+    const CASES: &[(&str, &str)] = &[
+        (
+            "prop_mono_hot",
+            "const O = {x: 1}; function bench() { let s = 0; \
+             for (let i = 0; i < 2000; i++) { s += O.x; } return s; }",
+        ),
+        (
+            "prop_mega_hot",
+            "const OBJS = [{x:0},{x:1,a:1},{x:2,a:2,b:2},{x:3,a:3,b:3,c:3},\
+             {x:4,a:4,b:4,c:4,d:4},{x:5,a:5,b:5,c:5,d:5,e:5},\
+             {x:6,a:6,b:6,c:6,d:6,e:6,f:6},{x:7,a:7,b:7,c:7,d:7,e:7,f:7,g:7},\
+             {x:8,a:8,b:8,c:8,d:8,e:8,f:8,g:8,h:8},\
+             {x:9,a:9,b:9,c:9,d:9,e:9,f:9,g:9,h:9,i:9},\
+             {x:10,a:10,b:10,c:10,d:10,e:10,f:10,g:10,h:10,i:10,j:10},\
+             {x:11,a:11,b:11,c:11,d:11,e:11,f:11,g:11,h:11,i:11,j:11,k:11}]; \
+             function bench() { let s = 0; \
+             for (let i = 0; i < 2400; i++) { s += OBJS[i % 12].x; } return s; }",
+        ),
+        (
+            "call_tiny_hot",
+            "function add(a, b) { return a + b; } \
+             function bench() { let s = 0; \
+             for (let i = 0; i < 2000; i++) { s = add(s, i); } return s; }",
+        ),
+        (
+            "shape_churn",
+            "function bench() { let s = 0; \
+             for (let i = 0; i < 300; i++) { let o = {a: i}; o['k' + i] = i; s += o.a; } \
+             return s; }",
+        ),
+    ];
+    let invoke = napi_vm::Interpreter::compile("bench();").unwrap();
+    assert!(invoke.stats().is_some(), "invocation must be bytecode");
+
+    let mut group = c.benchmark_group("tiers");
+    for (name, setup_src) in CASES {
+        let setup = napi_vm::Interpreter::compile(setup_src).unwrap();
+        assert!(setup.stats().is_some(), "{name} setup must be bytecode");
+        let mut interp = napi_vm::Interpreter::with_builtins();
+        interp.execute(&setup).unwrap();
+        let defined = interp.global.borrow().get("bench").expect("bench defined");
+        assert!(
+            matches!(&defined, napi_vm::Value::Function(f) if f.bytecode.is_some()),
+            "{name} must be bytecode-backed"
+        );
+        // Warm the caches once so iterations measure steady state.
+        interp.execute(&invoke).unwrap();
+        group.bench_function(*name, |b| {
+            b.iter(|| black_box(interp.execute(black_box(&invoke)).unwrap()));
+        });
+    }
+
+    // Cycle collection over a builtin-rooted heap plus fresh garbage: each
+    // iteration orphans 200 two-object cycles, then reclaims them.
+    let garbage = napi_vm::Interpreter::compile(
+        "function bench() { let arr = []; \
+         for (let i = 0; i < 200; i++) { let a = {}; let b = {}; a.peer = b; b.peer = a; \
+         arr.push(a); } return arr.length; }",
+    )
+    .unwrap();
+    let mut interp = napi_vm::Interpreter::with_builtins();
+    interp.execute(&garbage).unwrap();
+    group.bench_function("gc_collect", |b| {
+        b.iter(|| {
+            black_box(interp.execute(black_box(&invoke)).unwrap());
+            black_box(interp.collect_cycles())
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_run,
     bench_frontend,
     bench_class_methods,
-    bench_plugin_call
+    bench_plugin_call,
+    bench_tiers
 );
 criterion_main!(benches);

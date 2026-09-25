@@ -140,8 +140,28 @@ fn const_string(function: &BytecodeFunction, index: u16) -> Result<&str, VmErr> 
 /// the program completion value; `return` escapes as `VmErr::Ret`, exactly
 /// like the AST evaluator's `run`.
 pub(crate) fn run_module(interp: &mut Interpreter, module: &BytecodeModule) -> Result<Value, VmErr> {
+    // Top-level programs tier up like functions: compile once, execute
+    // many times is exactly the shape repeated `execute` calls take.
+    tier_check(interp, &module.main, &[]);
     let mut frame = CallFrame::setup(&module.main, Value::Undefined, &[]);
     run_loop(interp, &mut frame, true)
+}
+
+/// Count one entry and apply the tier-up decision (JIT seam). No
+/// machine-code backend exists yet, so every decision runs bytecode;
+/// `EnterJit` fails loudly if a backend ever claims to be executable
+/// before one can be.
+fn tier_check(interp: &Interpreter, code: &BytecodeFunction, args: &[Value]) {
+    match interp.tier_enter(code, args) {
+        crate::jit::TierDecision::EnterJit => {
+            debug_assert!(false, "no backend emits machine code in Phase J")
+        }
+        crate::jit::TierDecision::Cold
+        | crate::jit::TierDecision::NoBackend
+        | crate::jit::TierDecision::Declined
+        | crate::jit::TierDecision::GuardFailed
+        | crate::jit::TierDecision::NotExecutable => {}
+    }
 }
 
 /// Call a bytecode function with freshly bound parameter slots. Falling off
@@ -156,19 +176,7 @@ pub(crate) fn run_function(
     this_value: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    // Tier-up check (JIT seam). No machine-code backend exists yet, so
-    // every decision runs the bytecode body below; `EnterJit` fails loudly
-    // if a backend ever claims to be executable before one can be.
-    match interp.tier_enter(code, &args) {
-        crate::jit::TierDecision::EnterJit => {
-            debug_assert!(false, "no backend emits machine code in Phase J")
-        }
-        crate::jit::TierDecision::Cold
-        | crate::jit::TierDecision::NoBackend
-        | crate::jit::TierDecision::Declined
-        | crate::jit::TierDecision::GuardFailed
-        | crate::jit::TierDecision::NotExecutable => {}
-    }
+    tier_check(interp, code, &args);
     let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
     if !code.is_arrow {
         fe.borrow_mut().set("this", this_value.clone());
@@ -1513,6 +1521,23 @@ mod tests {
             "let o = {x: 1}; let a = o.x; delete o.x; o.x = 2; let b = o.x; a + b;",
         );
         assert_eq!(num(&result), 3.0);
+    }
+
+    #[test]
+    fn program_stats_aggregate() {
+        let (result, module) = run_module(
+            "function f(x) { return x + 1; } let s = 0; \
+             for (let i = 0; i < 10; i++) { s = s + f(i); } s;",
+        );
+        assert_eq!(num(&result), 55.0);
+        let stats = module.main.stats();
+        // The top level entered once, `f` ten times; the loop marker ran
+        // once per iteration plus the entry tick, like the loop budget it
+        // mirrors; nothing compiled without a backend.
+        assert_eq!(stats.calls, 11);
+        assert_eq!(stats.loop_iters, 11);
+        assert_eq!(stats.compiled, 0);
+        assert_eq!(stats.deopts, 0);
     }
 
     #[test]

@@ -74,6 +74,43 @@ pub struct BytecodeFunction {
     pub tiers: crate::jit::TierCounters,
 }
 
+/// Tier-up and inline-cache counters for one function tree: this function
+/// plus every nested bytecode function in its constants, recursively.
+/// AST-backed nested functions contribute nothing — they have no tier.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FunctionStats {
+    /// Entries through the tier-up check (top-level programs included).
+    pub calls: u32,
+    /// Loop-head ticks: iterations plus one entry tick per loop, mirroring
+    /// the loop budget.
+    pub loop_iters: u64,
+    /// Functions currently holding a compiled artifact.
+    pub compiled: u32,
+    /// Guard failures since measurement began.
+    pub deopts: u32,
+    /// Property sites (`GetProp`/`SetProp` instructions).
+    pub ic_sites: usize,
+    /// Inline-cache hits and misses across those sites.
+    pub ic_hits: u32,
+    pub ic_misses: u32,
+    /// Sites that stopped caching after seeing too many shapes.
+    pub ic_mega_sites: usize,
+}
+
+impl FunctionStats {
+    /// Add another tree's counters into this one.
+    pub fn merge(&mut self, other: &Self) {
+        self.calls = self.calls.saturating_add(other.calls);
+        self.loop_iters = self.loop_iters.saturating_add(other.loop_iters);
+        self.compiled = self.compiled.saturating_add(other.compiled);
+        self.deopts = self.deopts.saturating_add(other.deopts);
+        self.ic_sites += other.ic_sites;
+        self.ic_hits = self.ic_hits.saturating_add(other.ic_hits);
+        self.ic_misses = self.ic_misses.saturating_add(other.ic_misses);
+        self.ic_mega_sites += other.ic_mega_sites;
+    }
+}
+
 impl BytecodeFunction {
     /// Render the instruction stream with addresses, for tests and debugging.
     pub fn disassemble(&self) -> String {
@@ -82,5 +119,35 @@ impl BytecodeFunction {
             out.push_str(&format!("{address:04} {instr}\n"));
         }
         out
+    }
+
+    /// Snapshot this function tree's tier-up and inline-cache counters.
+    pub fn stats(&self) -> FunctionStats {
+        let mut stats = FunctionStats {
+            calls: self.tiers.calls.get(),
+            loop_iters: self.tiers.loop_iters.get(),
+            ..FunctionStats::default()
+        };
+        if let Some(code) = self.tiers.code.borrow().as_ref().and_then(|c| c.as_ref()) {
+            stats.compiled = 1;
+            stats.deopts = code.deopts.get();
+        }
+        for (index, instr) in self.code.iter().enumerate() {
+            if !matches!(instr, Instr::GetProp { .. } | Instr::SetProp { .. }) {
+                continue;
+            }
+            stats.ic_sites += 1;
+            let Some(cache) = self.caches.get(index) else { continue };
+            let (hits, misses) = cache.stats();
+            stats.ic_hits = stats.ic_hits.saturating_add(hits);
+            stats.ic_misses = stats.ic_misses.saturating_add(misses);
+            stats.ic_mega_sites += usize::from(cache.is_megamorphic());
+        }
+        for constant in &self.constants {
+            if let Constant::Function(nested) = constant {
+                stats.merge(&nested.stats());
+            }
+        }
+        stats
     }
 }

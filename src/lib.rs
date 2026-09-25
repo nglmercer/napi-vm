@@ -19,6 +19,7 @@ pub mod lsp;
 pub mod parser;
 pub mod jit;
 pub mod plugin_host;
+pub mod runtime;
 pub mod shape;
 pub mod span;
 pub mod value;

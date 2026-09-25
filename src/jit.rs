@@ -142,7 +142,7 @@ pub trait JitBackend {
 pub struct TierCounters {
     /// Entries through the tier-up check.
     pub calls: Cell<u32>,
-    /// Loop back-edges executed.
+    /// Loop-head ticks (iterations plus one entry tick per loop).
     pub loop_iters: Cell<u64>,
     /// Cached compilation, if a backend produced one and it survived.
     /// `Declined` caches as `Some(None)`: asked once, never again.

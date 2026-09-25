@@ -97,6 +97,15 @@ impl Shape {
 
     /// Canonical layout for `keys` in order, replayed from the root through
     /// memoized transitions. Deletes and bulk mutations canonicalize through
+    /// Shapes minted on this thread: the id counter less the root. Deltas
+    /// across a workload measure layout churn; sharing keeps it far below
+    /// the object count.
+    pub fn created_count() -> u32 {
+        NEXT_SHAPE_ID.with(|next| next.get().saturating_sub(1))
+    }
+
+    /// Canonical layout for `keys` in order, replayed from the root through
+    /// memoized transitions. Deletes and bulk mutations canonicalize through
     /// here: `{a, c}` built directly and `{a, b, c}` minus `b` land on the
     /// same node.
     pub fn rebuild<'a>(keys: impl Iterator<Item = &'a str>) -> Rc<Shape> {
