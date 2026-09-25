@@ -557,6 +557,9 @@ impl Checker<'_> {
             Instr::ImportMeta { dst } => {
                 self.check_reg(address, *dst)?;
             }
+            // Scope balance is a compiler invariant, like handler balance:
+            // an underflow fails loudly at runtime as an internal error.
+            Instr::PushScope | Instr::PopScope => {}
         }
         Ok(())
     }

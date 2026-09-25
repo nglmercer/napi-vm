@@ -58,6 +58,11 @@ pub struct BytecodeFunction {
     pub is_arrow: bool,
     /// Whether `new` accepts this function (plain declarations/expressions).
     pub is_constructor: bool,
+    /// This function — or a nested arrow — reads `arguments` through the
+    /// scope chain. Non-arrow calls seed the arguments object into the
+    /// frame environment; arrows never seed (they would shadow the
+    /// captured one) and pass the need outward to their definer instead.
+    pub captures_arguments: bool,
 }
 
 impl BytecodeFunction {

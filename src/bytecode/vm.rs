@@ -48,15 +48,23 @@ pub struct CallFrame<'a> {
     pub this_value: Value,
     handlers: Vec<HandlerEntry>,
     pending: Option<VmErr>,
+    /// Pushed block scopes holding captured bindings, innermost last. The
+    /// stack dies with the frame, so abrupt exits need no scope cleanup of
+    /// their own — only handler jumps truncate it, to the depth the handler
+    /// recorded when it was pushed.
+    scopes: Vec<Env>,
 }
 
 /// One pushed exception handler: `target` resumes after an interception,
 /// `dst` receives the catch value (catch handlers), `catch_returns`
 /// selects finally handlers, which also intercept `return` unwinding.
+/// `scope_depth` truncates `scopes` on interception, popping the block
+/// scopes the abrupt exit crossed.
 struct HandlerEntry {
     target: u32,
     dst: Reg,
     catch_returns: bool,
+    scope_depth: usize,
 }
 
 impl<'a> CallFrame<'a> {
@@ -97,8 +105,24 @@ impl<'a> CallFrame<'a> {
                 });
             }
         }
-        Self { function, ip: 0, registers, slots, this_value, handlers: Vec::new(), pending: None }
+        Self {
+            function,
+            ip: 0,
+            registers,
+            slots,
+            this_value,
+            handlers: Vec::new(),
+            pending: None,
+            scopes: Vec::new(),
+        }
     }
+}
+
+/// The environment global-family instructions read and write: the
+/// innermost pushed block scope, or the running scope when none is pushed.
+/// Pushed scopes chain to the running scope, so one lookup covers both.
+fn current_scope(interp: &Interpreter, frame: &CallFrame) -> Env {
+    frame.scopes.last().cloned().unwrap_or_else(|| interp.global.clone())
 }
 
 fn internal(what: &str) -> VmErr {
@@ -136,7 +160,7 @@ pub(crate) fn run_function(
     if !code.is_arrow {
         fe.borrow_mut().set("this", this_value.clone());
     }
-    seed_captured(&fe, code, &args);
+    seed_captured(&fe, code, &args)?;
     let saved = std::mem::replace(&mut interp.global, fe);
     let mut frame = CallFrame::setup(code, this_value, &args);
     let result = run_loop(interp, &mut frame, false);
@@ -149,7 +173,14 @@ pub(crate) fn run_function(
 /// unless a lexical declaration merged the slot dead, plain `var`s start
 /// defined, lexicals dead. Hoisted-function cells are overwritten by the
 /// eager instantiation when the body starts.
-fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) {
+fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) -> Result<(), VmErr> {
+    // A nested arrow reads `arguments` through the chain: seed the object
+    // first, like the evaluator, so a shadowing parameter or lexical still
+    // wins. Arrows never carry the flag themselves.
+    if code.captures_arguments && !code.is_arrow {
+        let args_obj = Value::arguments_object(args)?;
+        fe.borrow_mut().declare("arguments", args_obj, BindKind::Var, true);
+    }
     for (index, info) in code.slots.iter().enumerate() {
         if !info.captured {
             continue;
@@ -165,6 +196,7 @@ fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) {
         };
         fe.borrow_mut().declare(&info.name, value, bind_kind(info.kind), initialized);
     }
+    Ok(())
 }
 
 fn run_loop(
@@ -241,7 +273,8 @@ fn run_loop(
                 if name == "undefined" {
                     frame.registers[dst as usize] = Value::Undefined;
                 } else {
-                    match interp.global.borrow().lookup(&name) {
+                    let scope = current_scope(interp, frame);
+                    match scope.borrow().lookup(&name) {
                         Lookup::Value(v) => frame.registers[dst as usize] = v,
                         Lookup::Uninitialized => {
                             return Err(VmErr::Msg(format!(
@@ -259,17 +292,20 @@ fn run_loop(
             Instr::StoreGlobal { name, src } => {
                 let name = const_string(frame.function, name)?.to_string();
                 let value = frame.registers[src as usize].clone();
-                interp.assign_or_set_binding(&name, value)?;
+                let scope = current_scope(interp, frame);
+                interp.assign_or_set_binding_in(&scope, &name, value)?;
             }
             Instr::DefineGlobal { name, src, kind, initialized } => {
                 let name = const_string(frame.function, name)?.to_string();
                 let value = frame.registers[src as usize].clone();
-                interp.declare_binding(&name, value, bind_kind(kind), initialized)?;
+                let scope = current_scope(interp, frame);
+                interp.declare_binding_in(&scope, &name, value, bind_kind(kind), initialized)?;
             }
             Instr::InitGlobal { name, src } => {
                 let name = const_string(frame.function, name)?.to_string();
                 let value = frame.registers[src as usize].clone();
-                interp.set_binding(&name, value)?;
+                let scope = current_scope(interp, frame);
+                interp.set_binding_in(&scope, &name, value)?;
             }
             Instr::HoistVarGlobal { name } => {
                 let name = const_string(frame.function, name)?.to_string();
@@ -295,12 +331,14 @@ fn run_loop(
                 frame.registers[dst as usize] = frame.this_value.clone();
             }
             Instr::LoadGlobalThis { dst } => {
+                let scope = current_scope(interp, frame);
                 frame.registers[dst as usize] =
-                    interp.global.borrow().get("this").unwrap_or(Value::Undefined);
+                    scope.borrow().get("this").unwrap_or(Value::Undefined);
             }
             Instr::TypeofGlobal { dst, name } => {
                 let name = const_string(frame.function, name)?.to_string();
-                let value = interp.global.borrow().get(&name).unwrap_or(Value::Undefined);
+                let scope = current_scope(interp, frame);
+                let value = scope.borrow().get(&name).unwrap_or(Value::Undefined);
                 frame.registers[dst as usize] = interp.un_op(crate::parser::UnOp::Typeof, &value)?;
             }
             Instr::TypeofLocal { dst, slot } => {
@@ -327,7 +365,9 @@ fn run_loop(
             Instr::CompoundGlobal { dst, name, op, rhs } => {
                 let name = const_string(frame.function, name)?.to_string();
                 let rhs = frame.registers[rhs as usize].clone();
-                frame.registers[dst as usize] = interp.compound_assign_global(&name, op, rhs)?;
+                let scope = current_scope(interp, frame);
+                frame.registers[dst as usize] =
+                    interp.compound_assign_global_in(&scope, &name, op, rhs)?;
             }
             Instr::CompoundProp { dst, obj, key, op, rhs } => {
                 let Some(bin) = op.bin_op() else {
@@ -352,8 +392,9 @@ fn run_loop(
             }
             Instr::IncGlobal { dst, name, delta, prefix } => {
                 let name = const_string(frame.function, name)?.to_string();
+                let scope = current_scope(interp, frame);
                 frame.registers[dst as usize] =
-                    interp.inc_global_binding(&name, delta > 0, prefix)?;
+                    interp.inc_global_binding_in(&scope, &name, delta > 0, prefix)?;
             }
             Instr::IncProp { dst, obj, key, delta, prefix } => {
                 let obj = frame.registers[obj as usize].clone();
@@ -368,7 +409,8 @@ fn run_loop(
             }
             Instr::DelGlobal { dst, name } => {
                 let name = const_string(frame.function, name)?.to_string();
-                let bound = interp.global.borrow().get(&name).is_some();
+                let scope = current_scope(interp, frame);
+                let bound = scope.borrow().get(&name).is_some();
                 frame.registers[dst as usize] = Value::Bool(!bound);
             }
             Instr::Jump { target } => {
@@ -498,8 +540,9 @@ fn run_loop(
             }
             Instr::LoadGlobalSoft { dst, name } => {
                 let name = const_string(frame.function, name)?;
+                let scope = current_scope(interp, frame);
                 frame.registers[dst as usize] =
-                    interp.global.borrow().get(name).unwrap_or(Value::Undefined);
+                    scope.borrow().get(name).unwrap_or(Value::Undefined);
             }
             Instr::LoadLocalSoft { dst, slot } => {
                 frame.registers[dst as usize] = if frame.slots[slot as usize].initialized {
@@ -524,16 +567,16 @@ fn run_loop(
                     Constant::Function(code) => code.clone(),
                     _ => return Err(internal("bad function constant")),
                 };
-                frame.registers[dst as usize] =
-                    make_function(interp, &code, interp.global.clone(), None);
+                let scope = current_scope(interp, frame);
+                frame.registers[dst as usize] = make_function(interp, &code, scope, None);
             }
             Instr::MakeAstFunction { dst, ast } => {
                 let ast = match &frame.function.constants[ast as usize] {
                     Constant::AstFunction(ast) => ast.clone(),
                     _ => return Err(internal("bad ast-function constant")),
                 };
-                frame.registers[dst as usize] =
-                    make_ast_function(interp, &ast, interp.global.clone(), None);
+                let scope = current_scope(interp, frame);
+                frame.registers[dst as usize] = make_ast_function(interp, &ast, scope, None);
             }
             Instr::Template { dst, quasis, args, argc } => {
                 let quasis = match &frame.function.constants[quasis as usize] {
@@ -575,10 +618,21 @@ fn run_loop(
                 crate::interpreter::close_iterator(&frame.registers[src as usize]);
             }
             Instr::PushCatch { target, dst } => {
-                frame.handlers.push(HandlerEntry { target, dst, catch_returns: false });
+                let scope_depth = frame.scopes.len();
+                frame.handlers.push(HandlerEntry { target, dst, catch_returns: false, scope_depth });
             }
             Instr::PushFinally { target, dst } => {
-                frame.handlers.push(HandlerEntry { target, dst, catch_returns: true });
+                let scope_depth = frame.scopes.len();
+                frame.handlers.push(HandlerEntry { target, dst, catch_returns: true, scope_depth });
+            }
+            Instr::PushScope => {
+                let parent = current_scope(interp, frame);
+                frame.scopes.push(Rc::new(RefCell::new(Environment::child(parent))));
+            }
+            Instr::PopScope => {
+                if frame.scopes.pop().is_none() {
+                    return Err(internal("scope stack underflow"));
+                }
             }
             Instr::PopHandler => {
                 if frame.handlers.pop().is_none() {
@@ -590,7 +644,8 @@ fn run_loop(
                 None => return Err(internal("rethrow without a pending error")),
             },
             Instr::SuperMember { dst, key } => {
-                let proto = interp.global.borrow().get(crate::interpreter::SUPER_PROTO);
+                let scope = current_scope(interp, frame);
+                let proto = scope.borrow().get(crate::interpreter::SUPER_PROTO);
                 let Some(proto) = proto else {
                     return Err(VmErr::Msg("'super' used outside a derived class".to_string()));
                 };
@@ -599,12 +654,12 @@ fn run_loop(
             }
             Instr::SuperCall { dst, args, argc } => {
                 let argv = take_range(frame, args, argc)?;
-                frame.registers[dst as usize] = super_call(interp, argv)?;
+                frame.registers[dst as usize] = super_call(interp, frame, argv)?;
             }
             Instr::SuperCallSpread { dst, tmpl } => {
                 let template = spread_template(frame, tmpl)?;
                 let argv = spread_argv(frame, &template)?;
-                frame.registers[dst as usize] = super_call(interp, argv)?;
+                frame.registers[dst as usize] = super_call(interp, frame, argv)?;
             }
             Instr::Raise { msg } => {
                 let message = const_string(frame.function, msg)?.to_string();
@@ -708,6 +763,7 @@ fn land_handler(
     };
     frame.registers[entry.dst as usize] = value;
     frame.pending = Some(error);
+    frame.scopes.truncate(entry.scope_depth);
     frame.ip = entry.target as usize;
     Ok(())
 }
@@ -800,9 +856,10 @@ fn build_class_from_template(
     use super::constants::{ClassMemberKind, ClassNameTemplate};
     use crate::interpreter::{ClassAssembly, insert_class_accessor};
 
+    let current = current_scope(interp, frame);
     let def_scope = match &template.expr_name {
-        Some(_) => Rc::new(RefCell::new(Environment::child(interp.global.clone()))),
-        None => interp.global.clone(),
+        Some(_) => Rc::new(RefCell::new(Environment::child(current))),
+        None => current,
     };
     let super_cls = template
         .superclass
@@ -930,8 +987,13 @@ fn build_class_from_template(
 }
 
 /// `super(...)`: invoke the superclass constructor on the current `this`.
-fn super_call(interp: &mut Interpreter, argv: Vec<Value>) -> Result<Value, VmErr> {
-    let scope = interp.global.borrow();
+fn super_call(
+    interp: &mut Interpreter,
+    frame: &CallFrame,
+    argv: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let current = current_scope(interp, frame);
+    let scope = current.borrow();
     let this_val = scope.get("this").unwrap_or(Value::Undefined);
     let super_ctor = scope.get("__super_ctor").ok_or_else(|| {
         VmErr::Msg("super used outside a derived class".to_string())
@@ -1208,15 +1270,15 @@ fn make_function(
         body: Rc::new(Vec::new()),
         // Lexical, like the evaluator: the defining frame environment.
         // `None` would resolve free variables through the *caller's* frame
-        // (dynamic scope). Capture-free-ness only means no *slot* bindings
-        // escape — slot bindings are invisible to environment chains, which
-        // is why capturing functions decline compilation.
+        // (dynamic scope). Captured bindings box into environments — frame
+        // cells for function scope, pushed scopes for blocks — so the
+        // chain serves every nested reader.
         closure: Some(closure),
         is_arrow: code.is_arrow,
         is_constructor: code.is_constructor,
         is_async: false,
         is_generator: false,
-        uses_arguments: false,
+        uses_arguments: code.captures_arguments,
         bound: None,
         bytecode: Some(code.clone()),
     }))

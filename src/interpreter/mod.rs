@@ -716,10 +716,22 @@ impl Interpreter {
     /// persistent global frame is checked; local frames retain their fast
     /// infallible insertion path.
     pub(crate) fn set_binding(&mut self, name: &str, value: Value) -> Result<(), VmErr> {
-        if Rc::ptr_eq(&self.global, &self.persistent_global) {
-            self.global.borrow_mut().try_set(name, value)
+        let scope = self.global.clone();
+        self.set_binding_in(&scope, name, value)
+    }
+
+    /// [`Self::set_binding`] against an explicit scope: the VM's pushed
+    /// block scopes bind here instead of in the running scope.
+    pub(crate) fn set_binding_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        if Rc::ptr_eq(scope, &self.persistent_global) {
+            scope.borrow_mut().try_set(name, value)
         } else {
-            self.global.borrow_mut().set(name, value);
+            scope.borrow_mut().set(name, value);
             Ok(())
         }
     }
@@ -819,8 +831,20 @@ impl Interpreter {
     /// already exist. A new binding in the persistent global frame consumes
     /// one global quota entry; updates do not.
     pub(crate) fn assign_or_set_binding(&mut self, name: &str, value: Value) -> Result<(), VmErr> {
-        let is_persistent_global = Rc::ptr_eq(&self.global, &self.persistent_global);
-        let mut env = self.global.borrow_mut();
+        let scope = self.global.clone();
+        self.assign_or_set_binding_in(&scope, name, value)
+    }
+
+    /// [`Self::assign_or_set_binding`] resolving from an explicit scope,
+    /// for the VM's pushed block scopes.
+    pub(crate) fn assign_or_set_binding_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let is_persistent_global = Rc::ptr_eq(scope, &self.persistent_global);
+        let mut env = scope.borrow_mut();
         match env.assign(name, value.clone()) {
             AssignOutcome::Assigned => Ok(()),
             AssignOutcome::Const => Err(VmErr::Msg(format!(
@@ -954,14 +978,26 @@ impl Interpreter {
         kind: BindKind,
         initialized: bool,
     ) -> Result<(), VmErr> {
-        if Rc::ptr_eq(&self.global, &self.persistent_global) {
-            self.global
+        let scope = self.global.clone();
+        self.declare_binding_in(&scope, name, value, kind, initialized)
+    }
+
+    /// [`Self::declare_binding`] against an explicit scope, for the VM's
+    /// pushed block scopes.
+    pub(crate) fn declare_binding_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+        kind: BindKind,
+        initialized: bool,
+    ) -> Result<(), VmErr> {
+        if Rc::ptr_eq(scope, &self.persistent_global) {
+            scope
                 .borrow_mut()
                 .declare_checked(name, value, kind, initialized)
         } else {
-            self.global
-                .borrow_mut()
-                .declare(name, value, kind, initialized);
+            scope.borrow_mut().declare(name, value, kind, initialized);
             Ok(())
         }
     }

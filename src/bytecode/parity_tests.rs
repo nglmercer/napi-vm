@@ -477,16 +477,47 @@ fn modules() {
     check("function f(){ let x = 1; export { x }; }", true);
 }
 
+#[test]
+fn captures() {
+    // Straight blocks: each entry boxes its own cells.
+    check("{ let y = 1; function f(){ return y; } f(); }", true);
+    check("function o(){ { let y = 2; function f(){ return y; } return f(); } } o()", true);
+    check("let f; { let y = 3; f = () => y; } f()", true);
+    check("let f; { let y = 1; f = () => y; y = 2; } f()", true);
+    check("let a; { let x = 1; a = () => x; } let b; { let x = 2; b = () => x; } a() + b()", true);
+    // C-style heads box per iteration.
+    check("function o(){ let r = 0; for (let i = 0; i < 2; i++) { function f(){ return i; } r += f(); } return r; } o()", true);
+    check("function f(){ let r = []; for (let i = 0; i < 3; i++) { r.push(() => i); } return r.map(g => g()).join(','); } f()", true);
+    check("function f(){ let r = []; for (let i = 0; i < 3; i++) { r.push(() => i * 2); } return r.map(g => g()).join(','); } f()", true);
+    // Loop bodies box per entry; for-in/of heads share one cell, like the AST.
+    check("function f(o){ let r = []; for (let k in o) { r.push(() => k); } return r.map(g => g()).join(','); } f({a:1,b:2})", true);
+    check("function f(o){ let r = []; for (let v of o) { r.push(() => v); } return r.map(g => g()).join(','); } f([1,2])", true);
+    check("function f(){ let r = []; for (let i = 0; i < 2; i++) { let t = i * 10; r.push(() => t); } return r.map(g => g()).join(','); } f()", true);
+    // Catch params, switch bindings, and nested arrows.
+    check("let f; try { throw 7; } catch (e) { f = () => e; } f()", true);
+    check("let f; switch (1) { case 1: let q = 9; f = () => q; } f()", true);
+    check("function g(){ const f = () => this; return typeof f(); } g()", true);
+    check("let o = { m(){ return () => this.n; }, n: 5 }; o.m()()", true);
+    check("function f(a, b){ return () => arguments.length; } f(1, 2, 3)()", true);
+    check("function f(){ return () => () => arguments[0]; } f(42)()()", true);
+    check("function f(arguments){ return () => arguments; } f(9)()", true);
+    // Abrupt exits pop scopes exactly once.
+    check("let f; { let y = 1; f = () => y; try { throw 0; } catch (e) {} } f()", true);
+    check("function f(){ for (let i = 0; i < 5; i++) { if (i > 1) break; } return i; } f()", true);
+    check("let n = 0; for (let i = 0; i < 3; i++) { n += i; continue; } n", true);
+    check("function f(){ { let y = 1; return () => y; } } f()()", true);
+    // Errors agree across tiers.
+    check("{ let y = 1; y(); }", true);
+    check("function f(){ { let y = y; } } f()", true);
+}
+
 fn declined_units_stay_on_ast() {
     check("function o(){ function i(){ return 1; } return i(); } o()", true);
-    // Block slots have no frame for the chain to serve: still declined.
-    check("{ let y = 1; function f(){ return y; } f(); }", false);
-    check("function o(){ { let y = 2; function f(){ return y; } return f(); } } o()", false);
+    // A head in an unscoped block nested in a pushed one still declines.
     check(
-        "function o(){ let r = 0; for (let i = 0; i < 2; i++) { function f(){ return i; } r += f(); } return r; } o()",
+        "function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; } g({})",
         false,
     );
-    check("function g(){ const f = () => this; return f; }", false);
 }
 
 #[test]

@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use super::{Environment, Interpreter, ModifyOutcome};
+use super::{Env, Environment, Interpreter, ModifyOutcome};
 use crate::error::{RuntimeErrorData, VmErr, vm_err};
 use crate::parser::{AssignOp, BinOp, Pattern, PatternKey, Statement};
 use crate::span::Span;
@@ -924,6 +924,19 @@ impl Interpreter {
         op: AssignOp,
         v: Value,
     ) -> Result<Value, VmErr> {
+        let scope = self.global.clone();
+        self.compound_assign_global_in(&scope, name, op, v)
+    }
+
+    /// [`Self::compound_assign_global`] resolving from an explicit scope,
+    /// for the VM's pushed block scopes.
+    pub(crate) fn compound_assign_global_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        op: AssignOp,
+        v: Value,
+    ) -> Result<Value, VmErr> {
         let Some(bin) = op.bin_op() else {
             return Err(VmErr::Msg("internal error: plain `=` in compound assign".to_string()));
         };
@@ -942,7 +955,7 @@ impl Interpreter {
         // meantime.
         let mut deferred = None;
         let res = {
-            let mut env = self.global.borrow_mut();
+            let mut env = scope.borrow_mut();
             env.modify(name, |cur| {
                 if matches!(bin, BinOp::Add) && Self::needs_concat_coercion(&cur) {
                     deferred = Some(cur.clone());
@@ -960,7 +973,7 @@ impl Interpreter {
         if let Some(current) = deferred {
             let left = self.coerce_for_concat(&current)?;
             let combined = self.bin_op(bin, &left, &v)?;
-            self.assign_or_set_binding(name, combined.clone())?;
+            self.assign_or_set_binding_in(scope, name, combined.clone())?;
             return Ok(combined);
         }
         if let Some(e) = err {
@@ -988,12 +1001,25 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
+        let scope = self.global.clone();
+        self.inc_global_binding_in(&scope, name, inc, prefix)
+    }
+
+    /// [`Self::inc_global_binding`] resolving from an explicit scope, for
+    /// the VM's pushed block scopes.
+    pub(crate) fn inc_global_binding_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        inc: bool,
+        prefix: bool,
+    ) -> Result<Value, VmErr> {
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
         // read borrow followed by a separate write borrow. `old` captures
         // the value before the update so postfix can return it.
         let mut old = None;
         let new_val = {
-            let mut env = self.global.borrow_mut();
+            let mut env = scope.borrow_mut();
             env.modify(name, |cur| {
                 let cur_num = self.tn(&cur);
                 old = Some(cur);
@@ -1160,15 +1186,10 @@ impl Interpreter {
                         }
                         // Create the (detached) arguments object only when
                         // the body actually reads it; most functions never do.
-                        if fd.uses_arguments {
-                            let args_obj = Value::object(
-                                args.iter()
-                                    .enumerate()
-                                    .map(|(i, v)| (i.to_string(), v.clone()))
-                                    .collect(),
-                            );
-                            args_obj
-                                .set_prop("length".to_string(), Value::Number(args.len() as f64))?;
+                        // Arrows inherit `arguments` through the chain; only real
+                        // functions bind their own.
+                        if fd.uses_arguments && !fd.is_arrow {
+                            let args_obj = Value::arguments_object(args.as_slice())?;
                             vars.push((Key::from("arguments"), args_obj));
                         }
                         Rc::new(RefCell::new(Environment::with_bindings(parent_env, vars)))
@@ -1203,15 +1224,10 @@ impl Interpreter {
                                 fe.borrow_mut().set(p, arg);
                             }
                         }
-                        if fd.uses_arguments {
-                            let args_obj = Value::object(
-                                args.iter()
-                                    .enumerate()
-                                    .map(|(i, v)| (i.to_string(), v.clone()))
-                                    .collect(),
-                            );
-                            args_obj
-                                .set_prop("length".to_string(), Value::Number(args.len() as f64))?;
+                        // Arrows inherit `arguments` through the chain; only real
+                        // functions bind their own.
+                        if fd.uses_arguments && !fd.is_arrow {
+                            let args_obj = Value::arguments_object(args.as_slice())?;
                             fe.borrow_mut().set("arguments", args_obj);
                         }
                         fe
@@ -1648,15 +1664,10 @@ impl Interpreter {
                             let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
                             vars.push((p.clone(), arg));
                         }
-                        if fd.uses_arguments {
-                            let args_obj = Value::object(
-                                args.iter()
-                                    .enumerate()
-                                    .map(|(i, v)| (i.to_string(), v.clone()))
-                                    .collect(),
-                            );
-                            args_obj
-                                .set_prop("length".to_string(), Value::Number(args.len() as f64))?;
+                        // Arrows inherit `arguments` through the chain; only real
+                        // functions bind their own.
+                        if fd.uses_arguments && !fd.is_arrow {
+                            let args_obj = Value::arguments_object(args.as_slice())?;
                             vars.push((Key::from("arguments"), args_obj));
                         }
                         Rc::new(RefCell::new(Environment::with_bindings(parent_env, vars)))
@@ -1683,15 +1694,10 @@ impl Interpreter {
                                 fe.borrow_mut().set(p, arg);
                             }
                         }
-                        if fd.uses_arguments {
-                            let args_obj = Value::object(
-                                args.iter()
-                                    .enumerate()
-                                    .map(|(i, v)| (i.to_string(), v.clone()))
-                                    .collect(),
-                            );
-                            args_obj
-                                .set_prop("length".to_string(), Value::Number(args.len() as f64))?;
+                        // Arrows inherit `arguments` through the chain; only real
+                        // functions bind their own.
+                        if fd.uses_arguments && !fd.is_arrow {
+                            let args_obj = Value::arguments_object(args.as_slice())?;
                             fe.borrow_mut().set("arguments", args_obj);
                         }
                         fe

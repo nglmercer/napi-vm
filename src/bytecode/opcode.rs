@@ -278,6 +278,12 @@ pub enum Instr {
     DynamicImport { dst: Reg, src: Reg },
     /// `dst` = this module's `import.meta` object.
     ImportMeta { dst: Reg },
+    /// Push a fresh child of the current scope for captured block
+    /// bindings. Nested closures created inside capture this scope, so
+    /// each block entry (each loop iteration) gets its own cells.
+    PushScope,
+    /// Pop the innermost pushed block scope.
+    PopScope,
 }
 
 /// The discriminant of [`Instr`], for classification without operands.
@@ -361,6 +367,8 @@ pub enum Opcode {
     ExportAll,
     DynamicImport,
     ImportMeta,
+    PushScope,
+    PopScope,
 }
 
 impl Instr {
@@ -445,6 +453,8 @@ impl Instr {
             Instr::ExportAll { .. } => Opcode::ExportAll,
             Instr::DynamicImport { .. } => Opcode::DynamicImport,
             Instr::ImportMeta { .. } => Opcode::ImportMeta,
+            Instr::PushScope => Opcode::PushScope,
+            Instr::PopScope => Opcode::PopScope,
         }
     }
 
@@ -605,6 +615,8 @@ impl fmt::Display for Instr {
             Instr::ExportAll { tmpl } => write!(f, "EXPORT_ALL c{tmpl}"),
             Instr::DynamicImport { dst, src } => write!(f, "DYNAMIC_IMPORT r{dst}, r{src}"),
             Instr::ImportMeta { dst } => write!(f, "IMPORT_META r{dst}"),
+            Instr::PushScope => write!(f, "PUSH_SCOPE"),
+            Instr::PopScope => write!(f, "POP_SCOPE"),
         }
     }
 }

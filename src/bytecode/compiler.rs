@@ -92,10 +92,10 @@ pub fn compile_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupporte
 enum ThisMode {
     /// Non-arrow function bodies: the frame's `this` value.
     Frame,
-    /// Top level and top-level arrows: the global environment's `this`.
+    /// Arrows and the top level: `this` through the scope chain. A nested
+    /// arrow's closure chains to the defining frame environment, which
+    /// carries the `this` the arrow captures.
     Global,
-    /// Arrows nested in functions: `this` would capture (Phase G).
-    Reject,
 }
 
 /// One lexically nested function awaiting compilation. Functions compile
@@ -164,6 +164,11 @@ struct Scope {
     /// The top-level outermost scope: names resolve to the global
     /// environment instead of slots.
     global: bool,
+    /// Block bindings captured by nested closures: they live in the pushed
+    /// runtime scope instead of slots, so every access resolves through
+    /// the environment chain. Never populated on the function scope, which
+    /// boxes through `captured` instead.
+    boxed: HashSet<String>,
 }
 
 /// Break/continue patch lists for one breakable context under compilation
@@ -174,17 +179,18 @@ struct LoopCtx {
     continues: Vec<usize>,
     labels: Vec<String>,
     kind: CtxKind,
-    /// Unwind-stack length when this context opened: a break/continue
+    /// Cleanup-stack length when this context opened: a break/continue
     /// targeting it duplicates the cleanups above this depth.
-    try_depth: usize,
+    cleanup_depth: usize,
 }
 
-/// One protected region an abrupt exit must unwind: a `try` with a
-/// `finally` body to inline, and/or a `for-of` iterator to close. Both
-/// own a VM handler the duplication also pops.
-struct UnwindCtx<'a> {
-    finally: Option<&'a [Statement]>,
-    close_iter: Option<Reg>,
+/// One cleanup an abrupt exit must run, in source order: a `try` region's
+/// handler (with a `finally` body to inline and/or a `for-of` iterator to
+/// close), or a pushed block scope to pop. Scopes and handlers interleave,
+/// so unwinding processes them innermost-first.
+enum UnwindCtx<'a> {
+    Handler { finally: Option<&'a [Statement]>, close_iter: Option<Reg> },
+    Scope,
 }
 
 /// What a [`LoopCtx`] entry accepts: loops take both `break` and
@@ -230,11 +236,13 @@ struct Compiler<'a> {
     /// the frame environment at call time; accesses compile to the global
     /// instruction family. Computed by [`find_captured`] before hoisting.
     captured: HashSet<String>,
-    /// Whether the enclosing scope is the top level (for arrow `this`).
-    enclosing_is_top: bool,
     top_level: bool,
     this_mode: ThisMode,
     is_arrow: bool,
+    /// A nested arrow (or this arrow's own body) reads `arguments` through
+    /// the chain: the defining non-arrow function seeds it. Fed by direct
+    /// references while the body compiles and by deferred arrow outcomes.
+    captures_arguments: bool,
 }
 
 impl<'a> Compiler<'a> {
@@ -249,7 +257,7 @@ impl<'a> Compiler<'a> {
             cached_null: None,
             cached_undefined: None,
             slots: Vec::new(),
-            scopes: vec![Scope { bindings: HashMap::new(), global: true }],
+            scopes: vec![Scope { bindings: HashMap::new(), global: true, boxed: HashSet::new() }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
             unwind: Vec::new(),
@@ -258,16 +266,15 @@ impl<'a> Compiler<'a> {
             max_reg: 0,
             outer_block: HashSet::new(),
             captured: HashSet::new(),
-            enclosing_is_top: true,
             top_level: true,
             this_mode: ThisMode::Global,
             is_arrow: false,
+            captures_arguments: false,
         }
     }
 
     fn for_function(
         outer_block: HashSet<String>,
-        enclosing_is_top: bool,
         this_mode: ThisMode,
         is_arrow: bool,
     ) -> Self {
@@ -281,7 +288,7 @@ impl<'a> Compiler<'a> {
             cached_null: None,
             cached_undefined: None,
             slots: Vec::new(),
-            scopes: vec![Scope { bindings: HashMap::new(), global: false }],
+            scopes: vec![Scope { bindings: HashMap::new(), global: false, boxed: HashSet::new() }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
             unwind: Vec::new(),
@@ -290,10 +297,10 @@ impl<'a> Compiler<'a> {
             max_reg: 0,
             outer_block,
             captured: HashSet::new(),
-            enclosing_is_top,
             top_level: false,
             this_mode,
             is_arrow,
+            captures_arguments: false,
         }
     }
 
@@ -454,12 +461,37 @@ impl<'a> Compiler<'a> {
 
     // -- scopes and resolution ---------------------------------------------
 
-    fn push_scope(&mut self) {
-        self.scopes.push(Scope { bindings: HashMap::new(), global: false });
+    /// Push a block scope, boxing `names` into a runtime scope: captured
+    /// block bindings live in the pushed environment instead of slots.
+    /// Scopes with no boxed names emit nothing and unwind nothing.
+    fn push_scope(&mut self, boxed: HashSet<String>) {
+        let tracked = !boxed.is_empty();
+        self.scopes.push(Scope { bindings: HashMap::new(), global: false, boxed });
+        if tracked {
+            self.emit(Instr::PushScope);
+            self.unwind.push(UnwindCtx::Scope);
+        }
     }
 
-    fn pop_scope(&mut self) {
-        self.scopes.pop();
+    /// Pop a block scope, emitting the runtime pop when it boxed names.
+    /// Nested cleanups balance before this runs, so the unwind top is
+    /// this scope's own entry — anything else is a compiler bug.
+    fn pop_scope(&mut self) -> Result<(), Decline> {
+        let scope = self.scopes.pop().ok_or(Decline::Func("scope stack underflow"))?;
+        if scope.boxed.is_empty() {
+            return Ok(());
+        }
+        self.emit(Instr::PopScope);
+        match self.unwind.pop() {
+            Some(UnwindCtx::Scope) => Ok(()),
+            _ => Err(Decline::Func("unwind stack underflow")),
+        }
+    }
+
+    /// Whether `name` is boxed in the innermost scope: declaration sites
+    /// branch on this instead of allocating a slot.
+    fn is_boxed_here(&self, name: &str) -> bool {
+        self.scopes.last().is_some_and(|scope| !scope.global && scope.boxed.contains(name))
     }
 
     /// Bind `name` in the innermost scope, allocating a fresh slot. Same-name
@@ -484,10 +516,15 @@ impl<'a> Compiler<'a> {
     /// reports `ReferenceError` for true misses, exactly like the AST).
     /// Captured root slots also resolve globally: the defining function
     /// boxes them into its frame environment, where the closure chain
-    /// serves nested readers. Shadowing block slots stay direct, and names
-    /// bound to slots in enclosing blocks decline the whole unit.
+    /// serves nested readers. Boxed block bindings resolve globally too:
+    /// they live in the pushed runtime scope. Shadowing block slots stay
+    /// direct, and names bound to slots in enclosing blocks decline the
+    /// whole unit.
     fn resolve(&self, name: &str) -> Result<Binding, Decline> {
         for (index, scope) in self.scopes.iter().enumerate().rev() {
+            if !scope.global && scope.boxed.contains(name) {
+                return Ok(Binding::Global);
+            }
             if let Some(slot) = scope.bindings.get(name) {
                 if index == 0 && self.captured.contains(name) {
                     return Ok(Binding::Global);
@@ -568,6 +605,73 @@ fn block_lexicals(stmts: &[Statement], out: &mut Vec<(String, SlotKind)>) {
             _ => {}
         }
     }
+}
+
+/// Names one block binds that nested closures capture: lexicals, class
+/// declarations, block functions, and directly-nested `for-in`/`of` head
+/// names. Each is boxed into the pushed runtime scope instead of a slot,
+/// so closures observe the entry's own cells through the chain.
+fn boxed_block_names(stmts: &[Statement]) -> HashSet<String> {
+    let mut candidates = Vec::new();
+    let mut lexicals = Vec::new();
+    block_lexicals(stmts, &mut lexicals);
+    candidates.extend(lexicals.into_iter().map(|(name, _)| name));
+    let mut fns = Vec::new();
+    block_fn_decls(stmts, &mut fns);
+    candidates.extend(fns.into_iter().map(|decl| decl.name.to_string()));
+    let mut heads = Vec::new();
+    block_loop_heads(stmts, &mut heads);
+    candidates.extend(heads);
+    candidates
+        .into_iter()
+        .filter(|name| statements_capture_identifier(stmts, name))
+        .collect()
+}
+
+/// Captured `let`/`const` names of a C-style `for` head: candidates come
+/// from the declarators (patterns included); a name boxes when a nested
+/// closure anywhere in the head expressions or body captures it. `var`
+/// heads stay function-scoped and never box.
+fn boxed_for_head_names(
+    init: Option<&ForInit>,
+    test: Option<&Expr>,
+    update: Option<&Expr>,
+    body: &[Statement],
+) -> HashSet<String> {
+    fn exprs_capture(exprs: &[&Expr], body: &[Statement], name: &str) -> bool {
+        exprs.iter().any(|expr| expr_captures_identifier(expr, name))
+            || statements_capture_identifier(body, name)
+    }
+    let mut candidates = Vec::new();
+    let mut inits: Vec<&Expr> = Vec::new();
+    match init {
+        Some(ForInit::Var { kind, decls })
+            if matches!(kind, VarKind::Let | VarKind::Const) =>
+        {
+            for (name, init) in decls.iter() {
+                candidates.push(name.clone());
+                inits.extend(init.as_ref());
+            }
+        }
+        Some(ForInit::Pattern { kind, pattern, init, trailing })
+            if matches!(kind, VarKind::Let | VarKind::Const) =>
+        {
+            candidates.extend(pattern_names(pattern));
+            inits.push(init);
+            for (name, init) in trailing.iter() {
+                candidates.push(name.clone());
+                inits.extend(init.as_ref());
+            }
+        }
+        _ => {}
+    }
+    let mut exprs = inits;
+    exprs.extend(test);
+    exprs.extend(update);
+    candidates
+        .into_iter()
+        .filter(|name| exprs_capture(&exprs, body, name))
+        .collect()
 }
 
 /// `for-in`/`for-of` head names bound directly in one block: the head
@@ -723,6 +827,17 @@ impl<'a> Compiler<'a> {
         let mut seen = HashSet::new();
         for (name, kind) in lexicals {
             if seen.insert(name.clone()) {
+                if self.is_boxed_here(&name) {
+                    let index = self.intern_string(&name)?;
+                    let undef = self.load_undefined()?;
+                    self.emit(Instr::DefineGlobal {
+                        name: index,
+                        src: undef,
+                        kind,
+                        initialized: false,
+                    });
+                    continue;
+                }
                 let slot = self.declare_slot(&name, kind)?;
                 self.emit(Instr::DeclareLocal { slot, kind, initialized: false });
             }
@@ -730,7 +845,6 @@ impl<'a> Compiler<'a> {
         let mut fns = Vec::new();
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
-            let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
             let value = self.defer_function(FuncDef {
                 name: Some(decl.name.to_string()),
                 params: decl.params,
@@ -740,6 +854,12 @@ impl<'a> Compiler<'a> {
                 is_generator: decl.is_generator,
                 is_constructor: !decl.is_async && !decl.is_generator,
             })?;
+            if self.is_boxed_here(decl.name) {
+                let index = self.intern_string(decl.name)?;
+                self.emit(Instr::InitGlobal { name: index, src: value });
+                continue;
+            }
+            let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
             self.emit(Instr::InitLocal { slot, src: value });
         }
         Ok(())
@@ -769,6 +889,7 @@ impl<'a> Compiler<'a> {
             slots: std::mem::take(&mut self.slots),
             is_arrow,
             is_constructor,
+            captures_arguments: self.captures_arguments,
         })
     }
 
@@ -794,7 +915,18 @@ impl<'a> Compiler<'a> {
         for item in deferred {
             let mut outer = self.outer_block.clone();
             outer.extend(item.snapshot);
-            let outcome = compile_function(item.def, outer, self.top_level)?;
+            let is_arrow = item.def.is_arrow;
+            let outcome = compile_function(item.def, outer)?;
+            // An arrow child's `arguments` need passes outward to this
+            // scope's definer; non-arrow children bind (or decline) their
+            // own. AST arrows read the defining frame the same way.
+            let child_captures = match &outcome {
+                FuncOutcome::Bytecode(code) => code.captures_arguments,
+                FuncOutcome::Ast(ast) => ast.uses_arguments,
+            };
+            if is_arrow && child_captures {
+                self.captures_arguments = true;
+            }
             let (index, is_bytecode) = match outcome {
                 FuncOutcome::Bytecode(code) => (self.push_const(Constant::Function(code))?, true),
                 FuncOutcome::Ast(ast) => (self.push_const(Constant::AstFunction(ast))?, false),
@@ -906,15 +1038,16 @@ impl<'a> Compiler<'a> {
 
     /// Compile statements as a block: a fresh scope with hoisting only
     /// when the block has direct lexicals — otherwise the statements run
-    /// in the enclosing scope, exactly like the evaluator.
+    /// in the enclosing scope, exactly like the evaluator. Bindings nested
+    /// closures capture box into a pushed runtime scope.
     fn compile_scoped_block(&mut self, stmts: &'a [Statement]) -> Result<Reg, Decline> {
         if !block_needs_lexical_scope(stmts) {
             return self.compile_block(stmts);
         }
-        self.push_scope();
+        self.push_scope(boxed_block_names(stmts));
         self.hoist_block(stmts)?;
         let value = self.compile_block(stmts)?;
-        self.pop_scope();
+        self.pop_scope()?;
         Ok(value)
     }
 
@@ -965,7 +1098,7 @@ impl<'a> Compiler<'a> {
                 // Plain `break` targets the innermost breakable context: a
                 // loop, a switch, or a labeled block.
                 let depth = match self.loops.iter().next_back() {
-                    Some(ctx) => ctx.try_depth,
+                    Some(ctx) => ctx.cleanup_depth,
                     None => return Err(Decline::Func("break outside loop")),
                 };
                 self.duplicate_unwind(depth)?;
@@ -986,7 +1119,7 @@ impl<'a> Compiler<'a> {
                     .rev()
                     .find(|ctx| ctx.kind == CtxKind::Loop)
                 {
-                    Some(ctx) => ctx.try_depth,
+                    Some(ctx) => ctx.cleanup_depth,
                     None => return Err(Decline::Func("continue outside loop")),
                 };
                 self.duplicate_unwind(depth)?;
@@ -1043,7 +1176,7 @@ impl<'a> Compiler<'a> {
                     .rev()
                     .find(|ctx| ctx.labels.iter().any(|known| known == label))
                 {
-                    Some(ctx) => ctx.try_depth,
+                    Some(ctx) => ctx.cleanup_depth,
                     None => return Err(Decline::Func("unresolved break label")),
                 };
                 self.duplicate_unwind(depth)?;
@@ -1068,7 +1201,7 @@ impl<'a> Compiler<'a> {
                 for ctx in self.loops.iter().rev() {
                     if ctx.labels.iter().any(|known| known == label) {
                         if ctx.kind == CtxKind::Loop {
-                            depth = Some(ctx.try_depth);
+                            depth = Some(ctx.cleanup_depth);
                         }
                         break;
                     }
@@ -1472,6 +1605,11 @@ impl<'a> Compiler<'a> {
                 ClassMember::StaticBlock { body: block_body } => {
                     // Static blocks always run on the AST tier: the builder
                     // hands their bodies to assembly, like the evaluator.
+                    // They read this scope's `arguments`, so a mention seeds
+                    // it (over-approximating, like hoisting).
+                    if stmts_reference(block_body, "arguments") {
+                        self.captures_arguments = true;
+                    }
                     let ast = build_ast_function(&FuncDef {
                         name: None,
                         params: &[],
@@ -1705,9 +1843,12 @@ impl<'a> Compiler<'a> {
         let mut index = self.unwind.len();
         while index > depth {
             index -= 1;
-            let (finally, close_iter) = {
-                let ctx = &self.unwind[index];
-                (ctx.finally, ctx.close_iter)
+            let (finally, close_iter) = match &self.unwind[index] {
+                UnwindCtx::Scope => {
+                    self.emit(Instr::PopScope);
+                    continue;
+                }
+                UnwindCtx::Handler { finally, close_iter } => (*finally, *close_iter),
             };
             if let Some(iter) = close_iter {
                 self.emit(Instr::CloseIterator { src: iter });
@@ -1716,6 +1857,8 @@ impl<'a> Compiler<'a> {
                 // The inline copy runs outside its own region: compile it
                 // with the crossed regions (including this one) truncated
                 // away, so abrupt exits inside it do not unwind twice.
+                // Scopes above the handler pop first (they were crossed
+                // getting here), so the copy observes the handler's depth.
                 let mut crossed = self.unwind.split_off(index);
                 self.compile_finally_body(body)?;
                 self.unwind.append(&mut crossed);
@@ -1757,11 +1900,11 @@ impl<'a> Compiler<'a> {
         if finally.is_some() {
             finally_addr =
                 Some(self.emit_jump(|target| Instr::PushFinally { target, dst: err }));
-            self.unwind.push(UnwindCtx { finally: finally.as_deref(), close_iter: None });
+            self.unwind.push(UnwindCtx::Handler { finally: finally.as_deref(), close_iter: None });
         }
         if catch.is_some() {
             catch_addr = Some(self.emit_jump(|target| Instr::PushCatch { target, dst: err }));
-            self.unwind.push(UnwindCtx { finally: None, close_iter: None });
+            self.unwind.push(UnwindCtx::Handler { finally: None, close_iter: None });
         }
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov { dst: value, src: body_value });
@@ -1772,13 +1915,22 @@ impl<'a> Compiler<'a> {
         let normal = self.emit_jump(|target| Instr::Jump { target });
         let catch_pad = self.here();
         if let Some((param, catch_body)) = catch {
-            self.push_scope();
-            let slot = self.declare_slot(param, SlotKind::Var)?;
-            self.emit(Instr::InitLocal { slot, src: err });
+            let mut boxed = boxed_block_names(catch_body);
+            if statements_capture_identifier(catch_body, param) {
+                boxed.insert(param.clone());
+            }
+            self.push_scope(boxed);
+            if self.is_boxed_here(param) {
+                let index = self.intern_string(param)?;
+                self.emit(Instr::InitGlobal { name: index, src: err });
+            } else {
+                let slot = self.declare_slot(param, SlotKind::Var)?;
+                self.emit(Instr::InitLocal { slot, src: err });
+            }
             self.hoist_block(catch_body)?;
             let catch_value = self.compile_block(catch_body)?;
             self.emit(Instr::Mov { dst: value, src: catch_value });
-            self.pop_scope();
+            self.pop_scope()?;
         }
         let finally_run = self.here();
         if finally.is_some() {
@@ -1834,7 +1986,7 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: vec![label.to_string()],
             kind: CtxKind::LabelBlock,
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let value = self.compile_stmt(body)?;
@@ -1873,6 +2025,12 @@ impl<'a> Compiler<'a> {
                 return Ok(ForHead::Global(self.intern_string(name)?));
             }
             return Ok(ForHead::Slot(slot));
+        }
+        // A boxed head binds in the enclosing pushed scope (one shared cell,
+        // like the evaluator); anything else keeps its slot — a nested
+        // capture of it still declines the unit.
+        if self.is_boxed_here(name) {
+            return Ok(ForHead::Global(self.intern_string(name)?));
         }
         Ok(ForHead::Slot(self.declare_slot(name, SlotKind::Var)?))
     }
@@ -1916,7 +2074,7 @@ impl<'a> Compiler<'a> {
         let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let key = self.alloc_reg()?;
@@ -1972,10 +2130,10 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::Mov { dst: loop_value, src: undef });
         let scratch = self.alloc_reg()?;
         let unwind_pad = self.emit_jump(|target| Instr::PushFinally { target, dst: scratch });
-        self.unwind.push(UnwindCtx { finally: None, close_iter: Some(iterator) });
+        self.unwind.push(UnwindCtx::Handler { finally: None, close_iter: Some(iterator) });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let top = self.here();
@@ -2033,7 +2191,12 @@ impl<'a> Compiler<'a> {
         cases: &'a [SwitchCase],
     ) -> Result<Reg, Decline> {
         let scrutinee = self.compile_expr(disc)?;
-        self.push_scope();
+        // One scope across all cases: a name captured in any case boxes.
+        let mut boxed = HashSet::new();
+        for case in cases {
+            boxed.extend(boxed_block_names(&case.body));
+        }
+        self.push_scope(boxed);
         for case in cases {
             self.hoist_block(&case.body)?;
         }
@@ -2071,7 +2234,7 @@ impl<'a> Compiler<'a> {
         let no_match = self.emit_jump(|target| Instr::Jump { target });
         self.loops.push(LoopCtx {
             kind: CtxKind::Switch,
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let mut bodies = Vec::with_capacity(cases.len());
@@ -2096,7 +2259,7 @@ impl<'a> Compiler<'a> {
             Some(index) => self.patch_jump(no_match, bodies[index])?,
             None => self.patch_jump(no_match, end)?,
         }
-        self.pop_scope();
+        self.pop_scope()?;
         Ok(value)
     }
 
@@ -2112,7 +2275,7 @@ impl<'a> Compiler<'a> {
         let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
@@ -2135,7 +2298,7 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::LoopHead);
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
@@ -2159,7 +2322,11 @@ impl<'a> Compiler<'a> {
         body: &'a [Statement],
     ) -> Result<Reg, Decline> {
         // The head owns a scope, like the evaluator's pushed loop scope.
-        self.push_scope();
+        // Captured `let`/`const` heads box per iteration: after the update,
+        // the scope rotates (pop, push, copy the head values forward), so
+        // each iteration's closures observe their own cells.
+        let boxed = boxed_for_head_names(init, test, update, body);
+        self.push_scope(boxed.clone());
         if let Some(init) = init {
             self.compile_for_init(init)?;
         }
@@ -2176,25 +2343,54 @@ impl<'a> Compiler<'a> {
         };
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
-            try_depth: self.unwind.len(),
+            cleanup_depth: self.unwind.len(),
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov { dst: loop_value, src: body_value });
-        // A `continue` runs the update, then the budgeted test.
-        let update_addr = self.here();
+        // A `continue` runs the update, then the budgeted test. With a
+        // boxed head, the scope rotates first: the update assigns the next
+        // iteration's cells, so the current iteration's closures keep the
+        // values they observed — like the evaluator's per-iteration copy.
+        let continue_addr = self.here();
+        if !boxed.is_empty() {
+            self.rotate_head_scope(&boxed)?;
+        }
         if let Some(update) = update {
             let _ = self.compile_expr(update)?;
         }
         self.emit(Instr::Jump { target: addr_target(test_addr)? });
         let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
-        let end = self.here();
+        // Breaks unwind to above the head scope, then land on the pop pad
+        // with everything else; the head scope pops exactly once per exit.
+        let pad = self.here();
+        self.pop_scope()?;
         if let Some(addr) = end_jump {
-            self.patch_jump(addr, end)?;
+            self.patch_jump(addr, pad)?;
         }
-        self.finish_loop(ctx, update_addr, end)?;
-        self.pop_scope();
+        self.finish_loop(ctx, continue_addr, pad)?;
         Ok(loop_value)
+    }
+
+    /// Rotate a boxed head scope between iterations: read the head values
+    /// out of the old scope, replace it, and define them in the new one.
+    fn rotate_head_scope(&mut self, boxed: &HashSet<String>) -> Result<(), Decline> {
+        let mut names: Vec<&String> = boxed.iter().collect();
+        names.sort();
+        let mut temps = Vec::with_capacity(names.len());
+        for name in &names {
+            let tmp = self.alloc_reg()?;
+            let index = self.intern_string(name)?;
+            self.emit(Instr::LoadGlobal { dst: tmp, name: index });
+            temps.push(tmp);
+        }
+        self.emit(Instr::PopScope);
+        self.emit(Instr::PushScope);
+        for (name, tmp) in names.iter().zip(temps) {
+            let index = self.intern_string(name)?;
+            self.emit(Instr::InitGlobal { name: index, src: tmp });
+        }
+        Ok(())
     }
 
     /// Plain identifier declarators in a `for` head, shared by `Var`
@@ -2227,6 +2423,22 @@ impl<'a> Compiler<'a> {
                 VarKind::Let | VarKind::Const => {
                     let slot_kind =
                         if matches!(kind, VarKind::Const) { SlotKind::Const } else { SlotKind::Let };
+                    if self.is_boxed_here(name) {
+                        let index = self.intern_string(name)?;
+                        let undef = self.load_undefined()?;
+                        self.emit(Instr::DefineGlobal {
+                            name: index,
+                            src: undef,
+                            kind: slot_kind,
+                            initialized: false,
+                        });
+                        let src = match init {
+                            Some(value) => self.compile_expr(value)?,
+                            None => self.load_undefined()?,
+                        };
+                        self.emit(Instr::InitGlobal { name: index, src });
+                        continue;
+                    }
                     let slot = self.declare_slot(name, slot_kind)?;
                     self.emit(Instr::DeclareLocal { slot, kind: slot_kind, initialized: false });
                     let src = match init {
@@ -2252,6 +2464,17 @@ impl<'a> Compiler<'a> {
                         SlotKind::Let
                     };
                     for bound in pattern_names(pattern) {
+                        if self.is_boxed_here(&bound) {
+                            let index = self.intern_string(&bound)?;
+                            let undef = self.load_undefined()?;
+                            self.emit(Instr::DefineGlobal {
+                                name: index,
+                                src: undef,
+                                kind: slot_kind,
+                                initialized: false,
+                            });
+                            continue;
+                        }
                         let slot = self.declare_slot(&bound, slot_kind)?;
                         self.emit(Instr::DeclareLocal {
                             slot,
@@ -2436,16 +2659,15 @@ impl<'a> Compiler<'a> {
     /// Identifier reads. `undefined` is always the value, even when shadowed
     /// — the evaluator special-cases it before any lookup. `arguments` in a
     /// real function needs the arguments object (per-function fallback); in
-    /// a nested arrow it would capture the enclosing one (whole unit).
+    /// an arrow it captures the enclosing one through the chain (seeded by
+    /// the defining non-arrow function).
     fn compile_identifier(&mut self, name: &str) -> Result<Reg, Decline> {
         if name == "undefined" {
             return self.load_undefined();
         }
         if name == "arguments" && !self.top_level {
             if self.is_arrow() {
-                if !self.enclosing_is_top {
-                    return Err(Decline::Unit("arrow `arguments` capture needs Phase G"));
-                }
+                self.captures_arguments = true;
             } else {
                 return Err(Decline::Func("arguments object needs fallback"));
             }
@@ -2875,7 +3097,6 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::LoadGlobalThis { dst });
                 Ok(dst)
             }
-            ThisMode::Reject => Err(Decline::Unit("arrow `this` capture needs Phase G")),
         }
     }
 
@@ -3213,28 +3434,20 @@ fn find_captured(params: &[String], body: &FuncBody) -> HashSet<String> {
 }
 
 /// Compile one nested function: bytecode when supported, otherwise an
-/// AST-backed constant. Captures and `super` decline the whole unit instead:
-/// slot bindings are invisible to environment chains, so neither bytecode
-/// nor a fallback closed over the defining frame could honor them.
+/// AST-backed constant. Either tier closes over the defining scope, whose
+/// captured bindings box into environments (frame cells for function
+/// scope, pushed scopes for blocks). A capture the analysis cannot box —
+/// a slot in an unscoped nested block — declines the whole unit instead.
 fn compile_function(
     def: FuncDef<'_>,
     outer_block: HashSet<String>,
-    enclosing_is_top: bool,
 ) -> Result<FuncOutcome, Decline> {
     if def.is_async || def.is_generator || has_rest_param(def.params) || has_dup_params(def.params) {
         return Ok(FuncOutcome::Ast(build_ast_function(&def)));
     }
-    let this_mode = if def.is_arrow {
-        if enclosing_is_top {
-            ThisMode::Global
-        } else {
-            ThisMode::Reject
-        }
-    } else {
-        ThisMode::Frame
-    };
+    let this_mode = if def.is_arrow { ThisMode::Global } else { ThisMode::Frame };
     let mut compiler =
-        Compiler::for_function(outer_block, enclosing_is_top, this_mode, def.is_arrow);
+        Compiler::for_function(outer_block, this_mode, def.is_arrow);
     match compiler.compile_unit_function(def.clone()) {
         Ok(bytecode) => Ok(FuncOutcome::Bytecode(Rc::new(bytecode))),
         Err(Decline::Func(_)) => Ok(FuncOutcome::Ast(build_ast_function(&def))),
@@ -3328,28 +3541,31 @@ mod tests {
     }
 
     #[test]
-    fn block_captures_decline_the_whole_unit() {
-        // Block slots have no frame of their own for the chain to serve.
-        assert_eq!(
-            reason("{ let y = 1; function f() { return y; } }"),
-            "block-scope capture needs Phase G"
-        );
+    fn block_captures_box_into_pushed_scopes() {
+        // Captured block bindings live in pushed runtime scopes now.
+        assert_eq!(reason("{ let y = 1; function f() { return y; } }"), "compiled");
         assert_eq!(
             reason("function g() { { let y = 1; function f() { return y; } } }"),
-            "block-scope capture needs Phase G"
+            "compiled"
         );
         assert_eq!(
             reason("function g() { for (let i = 0; i < 1; i++) { function f() { return i; } } }"),
-            "block-scope capture needs Phase G"
+            "compiled"
         );
         // Arrows inheriting `this` or `arguments` from a function.
         assert_eq!(
             reason("function g() { const f = () => this; return f; }"),
-            "arrow `this` capture needs Phase G"
+            "compiled"
         );
         assert_eq!(
             reason("function g() { const f = () => arguments; return f; }"),
-            "arrow `arguments` capture needs Phase G"
+            "compiled"
+        );
+        // A head inside an unscoped block nested in a pushed one declares
+        // in the outer scope without boxing, so capturing it declines.
+        assert_eq!(
+            reason("function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; }"),
+            "block-scope capture needs Phase G"
         );
     }
 

@@ -2016,6 +2016,17 @@ impl Value {
         }
     }
 
+    /// The detached `arguments` object for a call: indexed properties plus
+    /// `length`. Shared by the evaluator's call paths and the VM's frame
+    /// seeding, so both tiers bind the identical shape.
+    pub fn arguments_object(args: &[Value]) -> Result<Self, crate::error::VmErr> {
+        let args_obj = Value::object(
+            args.iter().enumerate().map(|(i, v)| (i.to_string(), v.clone())).collect(),
+        );
+        args_obj.set_prop("length".to_string(), Value::Number(args.len() as f64))?;
+        Ok(args_obj)
+    }
+
     pub fn object_with_proto(props: Vec<(String, Value)>, proto: Option<Rc<Value>>) -> Self {
         Value::Object {
             props: Rc::new(ObjectCell::new(props, proto)),
