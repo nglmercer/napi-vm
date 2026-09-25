@@ -33,8 +33,11 @@ pub enum Constant {
 
 /// A function kept as AST inside a compiled unit (the per-function fallback
 /// of Phase E). Carries everything needed to build the same `FunctionData`
-/// the AST evaluator would have built, minus the closure environment, which
-/// is always empty here: capturing functions decline the whole unit.
+/// the AST evaluator would have built; the VM closes it over the defining
+/// frame environment, like the evaluator. Capture-free by construction —
+/// capturing functions decline the whole unit — because slot bindings are
+/// invisible to environment chains, not because the link is unneeded: free
+/// variables must still resolve lexically, not through the caller's frame.
 #[derive(Debug, Clone)]
 pub struct AstFunction {
     pub name: Option<String>,

@@ -673,6 +673,10 @@ pub struct FunctionData {
     /// The bound target and arguments for functions created by
     /// `Function.prototype.bind`.
     pub bound: Option<Rc<BoundFunctionData>>,
+    /// Compiled bytecode for this function, when the Phase E compiler
+    /// accepted its body. `None` runs the AST `body`; `Some` runs the
+    /// bytecode VM with identical semantics.
+    pub bytecode: Option<Rc<crate::bytecode::BytecodeFunction>>,
 }
 
 impl FunctionData {

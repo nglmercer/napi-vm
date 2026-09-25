@@ -11,6 +11,8 @@ pub mod constants;
 pub mod function;
 pub mod module;
 pub mod opcode;
+#[cfg(test)]
+mod parity_tests;
 pub mod verify;
 pub mod vm;
 

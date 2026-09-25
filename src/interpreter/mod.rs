@@ -32,6 +32,7 @@ pub use native_addon::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
+pub(crate) use eval::intern_params;
 pub(crate) use resolve::array_iter;
 #[cfg(all(
     feature = "node-api-host",
@@ -128,6 +129,33 @@ pub const MAX_GENERATOR_DEPTH: u32 = 64;
 /// workloads stay under a few million) while still stopping an empty
 /// infinite loop within a couple of seconds.
 pub const DEFAULT_LOOP_BUDGET: u64 = 100_000_000;
+/// Default instruction fuel per top-level execution: enough for the loop
+/// budget's worth of bytecode iterations plus straight-line code, while
+/// still bounding pathological programs. Tune with benchmarks, not intuition.
+pub const DEFAULT_FUEL_BUDGET: u64 = 1_000_000_000;
+
+/// Bounded execution budget (spec §22): instruction fuel plus the
+/// call-depth and job-drain caps. Every top-level entry point refills the
+/// fuel and loop budgets; nested calls never refill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutionBudget {
+    /// Instruction fuel for the execution.
+    pub fuel: u64,
+    /// Maximum guest call-stack depth.
+    pub max_call_depth: usize,
+    /// Maximum jobs drained per drain call.
+    pub max_jobs: usize,
+}
+
+impl Default for ExecutionBudget {
+    fn default() -> Self {
+        Self {
+            fuel: DEFAULT_FUEL_BUDGET,
+            max_call_depth: MAX_CALL_DEPTH,
+            max_jobs: jobs::MAX_JOBS_PER_DRAIN,
+        }
+    }
+}
 
 pub struct Interpreter {
     pub global: Env,
@@ -211,6 +239,15 @@ pub struct Interpreter {
     /// `begin_execution()` at each NAPI entry point; decremented by
     /// `consume_loop()` on every loop iteration.
     loops_remaining: u64,
+    /// Configured per-execution instruction-fuel cap (bytecode tier).
+    fuel_budget: u64,
+    /// Remaining instruction fuel in the current execution. Refilled by
+    /// `begin_execution()`; decremented by `consume_fuel()` per instruction.
+    fuel_remaining: u64,
+    /// Maximum guest call-stack depth. Default [`MAX_CALL_DEPTH`].
+    max_call_depth: usize,
+    /// Maximum jobs drained per drain call. Default [`MAX_JOBS_PER_DRAIN`].
+    max_jobs_per_drain: usize,
     /// Active synchronous guest statement bodies. Node-API `make_callback`
     /// drains microtasks only when it is not nested inside guest JavaScript.
     guest_execution_depth: Rc<Cell<usize>>,
@@ -299,6 +336,10 @@ impl Interpreter {
             gen_depth: 0,
             loop_budget: DEFAULT_LOOP_BUDGET,
             loops_remaining: DEFAULT_LOOP_BUDGET,
+            fuel_budget: DEFAULT_FUEL_BUDGET,
+            fuel_remaining: DEFAULT_FUEL_BUDGET,
+            max_call_depth: MAX_CALL_DEPTH,
+            max_jobs_per_drain: jobs::MAX_JOBS_PER_DRAIN,
             guest_execution_depth: Rc::new(Cell::new(0)),
         }
     }
@@ -529,9 +570,25 @@ export default { createRequire, isBuiltin, builtinModules };
     pub fn compile(source: &str) -> Result<PreparedProgram, VmErr> {
         let statements =
             crate::parser::parse_cached(source).map_err(|failure| failure.into_vm_err())?;
+        // Tier selection is total and deterministic: supported programs run
+        // the register VM, everything else keeps the AST evaluator. A
+        // verification failure is a compiler bug and fails loudly here —
+        // never a silent fallback.
+        let executable = match crate::bytecode::compile_program(&statements) {
+            Ok(module) => {
+                if let Err(error) = crate::bytecode::verify_module(&module) {
+                    return Err(VmErr::Msg(format!(
+                        "internal error: bytecode verification failed: {error}"
+                    )));
+                }
+                Executable::Bytecode(module)
+            }
+            Err(_) => Executable::Ast,
+        };
         Ok(PreparedProgram {
             source: source.into(),
             statements,
+            executable,
         })
     }
 
@@ -541,13 +598,30 @@ export default { createRequire, isBuiltin, builtinModules };
     pub fn execute(&mut self, program: &PreparedProgram) -> Result<Value, VmErr> {
         self.begin_execution();
         self.set_source(&program.source);
-        match self.run_program_body(&program.statements) {
+        let result = match &program.executable {
+            Executable::Bytecode(module) => self.run_bytecode_module(module),
+            Executable::Ast => self.run_program_body(&program.statements),
+        };
+        match result {
             Ok(value) => self.drain_jobs().map(|()| value),
             Err(error) => {
                 let _ = self.drain_jobs();
                 Err(error)
             }
         }
+    }
+
+    /// One guest-execution level for a bytecode top-level run, mirroring
+    /// [`Self::run_program_body`]'s accounting. Hoisting is bytecode's own
+    /// (dedicated instructions, not interpreter passes).
+    pub(crate) fn run_bytecode_module(
+        &mut self,
+        module: &crate::bytecode::BytecodeModule,
+    ) -> Result<Value, VmErr> {
+        let depth = self.guest_execution_depth.clone();
+        depth.set(depth.get().saturating_add(1));
+        let _execution_guard = GuestExecutionGuard(depth);
+        crate::bytecode::vm::run_module(self, module)
     }
 }
 
@@ -560,6 +634,15 @@ export default { createRequire, isBuiltin, builtinModules };
 pub struct PreparedProgram {
     source: std::sync::Arc<str>,
     statements: std::sync::Arc<Vec<Statement>>,
+    executable: Executable,
+}
+
+/// The execution tier [`Interpreter::compile`] selected: verified bytecode
+/// for supported programs, the AST evaluator otherwise.
+#[derive(Clone)]
+enum Executable {
+    Bytecode(crate::bytecode::BytecodeModule),
+    Ast,
 }
 
 impl Interpreter {
@@ -1198,6 +1281,41 @@ impl Interpreter {
     /// bodies re-enter it recursively and must not refill mid-execution.
     pub fn begin_execution(&mut self) {
         self.loops_remaining = self.loop_budget;
+        self.fuel_remaining = self.fuel_budget;
+    }
+
+    /// The current execution budget: remaining fuel plus the live caps.
+    pub fn execution_budget(&self) -> ExecutionBudget {
+        ExecutionBudget {
+            fuel: self.fuel_remaining,
+            max_call_depth: self.max_call_depth,
+            max_jobs: self.max_jobs_per_drain,
+        }
+    }
+
+    /// Replace the execution budget wholesale (budgets and remaining fuel).
+    pub fn set_execution_budget(&mut self, budget: ExecutionBudget) {
+        self.fuel_budget = budget.fuel;
+        self.fuel_remaining = budget.fuel;
+        self.max_call_depth = budget.max_call_depth;
+        self.max_jobs_per_drain = budget.max_jobs;
+    }
+
+    /// Change the instruction-fuel cap (and refill to it).
+    pub fn set_fuel_budget(&mut self, n: u64) {
+        self.fuel_budget = n;
+        self.fuel_remaining = n;
+    }
+
+    /// Account one bytecode instruction against the fuel budget.
+    pub(crate) fn consume_fuel(&mut self, cost: u64) -> Result<(), VmErr> {
+        match self.fuel_remaining.checked_sub(cost) {
+            Some(remaining) => {
+                self.fuel_remaining = remaining;
+                Ok(())
+            }
+            None => Err(crate::value::limit_err("Maximum instruction fuel exceeded")),
+        }
     }
 
     /// Change the loop-iteration cap (exposed to Node as `setLoopLimit`).

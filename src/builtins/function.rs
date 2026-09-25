@@ -34,6 +34,7 @@ pub(super) fn install(e: &mut Environment) {
         is_async: false,
         is_generator: false,
         uses_arguments: false,
+        bytecode: None,
         bound: None,
     }));
 
@@ -235,6 +236,7 @@ fn function_bind(
         is_async: false,
         is_generator: false,
         uses_arguments: false,
+        bytecode: None,
         bound: Some(Rc::new(BoundFunctionData {
             target: bound_target,
             this_value: bound_this,
@@ -372,6 +374,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         is_async: false,
         is_generator: false,
         uses_arguments,
+        bytecode: None,
         bound: None,
     })))
 }

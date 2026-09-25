@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{
-    BindKind, Env, Environment, Interpreter, Lookup, ModifyOutcome, block_needs_lexical_scope,
+    BindKind, Env, Environment, Interpreter, Lookup, block_needs_lexical_scope,
 };
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
@@ -16,7 +16,7 @@ use crate::value::{ClassData, FunctionData, ObjectCell, PromiseState, PropAttrs,
 
 /// Convert parser-owned parameter names into interned `Rc<str>` so call-frame
 /// binding is a refcount bump, not a heap allocation.
-fn intern_params(params: &[String]) -> Rc<Vec<Rc<str>>> {
+pub(crate) fn intern_params(params: &[String]) -> Rc<Vec<Rc<str>>> {
     Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect())
 }
 
@@ -353,6 +353,7 @@ impl Interpreter {
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(mb, "arguments"),
+                        bytecode: None,
                         bound: None,
                     }));
                     if *st {
@@ -416,6 +417,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(gb, "arguments"),
+                        bytecode: None,
                         bound: None,
                     }));
                     if *st {
@@ -455,6 +457,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(sb, "arguments"),
+                        bytecode: None,
                         bound: None,
                     }));
                     if *st {
@@ -543,6 +546,7 @@ impl Interpreter {
             is_constructor: false,
             is_async: false,
             is_generator: false,
+            bytecode: None,
             bound: None,
         }));
 
@@ -710,6 +714,7 @@ impl Interpreter {
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bytecode: None,
                         bound: None,
                     })),
                 )?;
@@ -1450,6 +1455,7 @@ impl Interpreter {
                         is_async: *is_async,
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bytecode: None,
                         bound: None,
                     }));
                     insert_object_property(
@@ -1477,6 +1483,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bytecode: None,
                         bound: None,
                     }));
                     insert_object_property(
@@ -1504,6 +1511,7 @@ impl Interpreter {
                         is_async: false,
                         is_generator: false,
                         uses_arguments: stmts_reference(body, "arguments"),
+                        bytecode: None,
                         bound: None,
                     }));
                     insert_object_property(
@@ -1712,35 +1720,7 @@ impl Interpreter {
                     _ => {}
                 }
                 let r = self.eval_expr(right)?;
-                if matches!(op, crate::parser::BinOp::Instanceof) {
-                    return self.instance_of(&l, &r);
-                }
-                // A proxy's `has` trap answers `in`. It runs guest code, so it
-                // cannot live in `bin_op`, which does not borrow mutably.
-                // `+` may need to run a guest `toString`, which `bin_op`
-                // cannot do from `&self`. Coerce the operands first.
-                if matches!(op, crate::parser::BinOp::Add)
-                    && (Self::needs_concat_coercion(&l) || Self::needs_concat_coercion(&r))
-                {
-                    let left = self.coerce_for_concat(&l)?;
-                    let right = self.coerce_for_concat(&r)?;
-                    return self.bin_op(*op, &left, &right);
-                }
-                if matches!(op, crate::parser::BinOp::In)
-                    && let Some(proxy) = r.as_proxy()
-                {
-                    let target = proxy.target.clone();
-                    return match self.proxy_trap(&proxy, "has") {
-                        Some(trap) => {
-                            let key = self.proxy_property_key(&l)?;
-                            let handler = proxy.handler.clone();
-                            let result = self.call_this(&trap, handler, vec![target, key])?;
-                            Ok(Value::Bool(result.is_truthy()))
-                        }
-                        None => self.bin_op(*op, &l, &target),
-                    };
-                }
-                self.bin_op(*op, &l, &r)
+                self.apply_binary(*op, &l, &r)
             }
             Expr::Unary {
                 op,
@@ -1789,43 +1769,7 @@ impl Interpreter {
                 {
                     match operand.as_ref() {
                         Expr::Identifier(n) => {
-                            let inc = *op == UnOp::Inc;
-                            // Fused read-modify-write: one `borrow_mut` + one
-                            // scan instead of a read borrow followed by a
-                            // separate write borrow. `old` captures the value
-                            // before the update so postfix can return it.
-                            let mut old = None;
-                            let new_val = {
-                                let mut env = self.global.borrow_mut();
-                                env.modify(n, |cur| {
-                                    let cur_num = self.tn(&cur);
-                                    old = Some(cur);
-                                    Value::Number(if inc { cur_num + 1.0 } else { cur_num - 1.0 })
-                                })
-                            };
-                            let new_val = match new_val {
-                                ModifyOutcome::Updated(v) => v,
-                                ModifyOutcome::Missing => {
-                                    return vm_err(format!("ReferenceError: {} is not defined", n));
-                                }
-                                ModifyOutcome::Const => {
-                                    return vm_err(format!(
-                                        "TypeError: Assignment to constant variable '{}'",
-                                        n
-                                    ));
-                                }
-                                ModifyOutcome::Uninitialized => {
-                                    return vm_err(format!(
-                                        "ReferenceError: Cannot access '{}' before initialization",
-                                        n
-                                    ));
-                                }
-                            };
-                            if *prefix {
-                                Ok(new_val)
-                            } else {
-                                Ok(old.unwrap_or(Value::Undefined))
-                            }
+                            self.inc_global_binding(n, *op == UnOp::Inc, *prefix)
                         }
                         Expr::Member {
                             object,
@@ -1834,14 +1778,7 @@ impl Interpreter {
                         } => {
                             let obj = self.eval_expr(object)?;
                             let prop = self.eval_expr(property)?;
-                            let cur = self.get_prop_value(&obj, &prop)?;
-                            let new_val = if *op == UnOp::Inc {
-                                Value::Number(self.tn(&cur) + 1.0)
-                            } else {
-                                Value::Number(self.tn(&cur) - 1.0)
-                            };
-                            self.assign_member(&obj, &prop, new_val.clone())?;
-                            if *prefix { Ok(new_val) } else { Ok(cur) }
+                            self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix)
                         }
                         _ => {
                             let v = self.eval_expr(operand)?;
@@ -2026,73 +1963,12 @@ impl Interpreter {
                 let v = self.eval_expr(value)?;
                 match target.as_ref() {
                     Expr::Identifier(n) => {
-                        let v = if matches!(op, AssignOp::Add) {
-                            self.coerce_for_concat(&v)?
-                        } else {
-                            v
-                        };
-                        let fv = if let Some(bin) = op.bin_op() {
-                            // Fused read-modify-write: one `borrow_mut` + one
-                            // scan instead of a read borrow then a write borrow.
-                            // `bin_op` can still fail (e.g. string-length cap);
-                            // capture the error and leave the slot unchanged.
-                            let mut err = None;
-                            // An object on the *left* of `+=` needs its
-                            // `toString`, which cannot run while the scope is
-                            // borrowed. Detect it here and redo the whole
-                            // assignment outside the borrow, leaving the slot
-                            // untouched in the meantime.
-                            let mut deferred = None;
-                            let res = {
-                                let mut env = self.global.borrow_mut();
-                                env.modify(n, |cur| {
-                                    if matches!(bin, crate::parser::BinOp::Add)
-                                        && Self::needs_concat_coercion(&cur)
-                                    {
-                                        deferred = Some(cur.clone());
-                                        return cur;
-                                    }
-                                    match self.bin_op(bin, &cur, &v) {
-                                        Ok(new) => new,
-                                        Err(e) => {
-                                            err = Some(e);
-                                            cur
-                                        }
-                                    }
-                                })
-                            };
-                            if let Some(current) = deferred {
-                                let left = self.coerce_for_concat(&current)?;
-                                let combined = self.bin_op(bin, &left, &v)?;
-                                self.assign_or_set_binding(n, combined.clone())?;
-                                return Ok(combined);
-                            }
-                            if let Some(e) = err {
-                                return Err(e);
-                            }
-                            match res {
-                                ModifyOutcome::Updated(v) => v,
-                                ModifyOutcome::Missing => {
-                                    return vm_err(format!("ReferenceError: {} is not defined", n));
-                                }
-                                ModifyOutcome::Const => {
-                                    return vm_err(format!(
-                                        "TypeError: Assignment to constant variable '{}'",
-                                        n
-                                    ));
-                                }
-                                ModifyOutcome::Uninitialized => {
-                                    return vm_err(format!(
-                                        "ReferenceError: Cannot access '{}' before initialization",
-                                        n
-                                    ));
-                                }
-                            }
+                        if op.bin_op().is_some() {
+                            self.compound_assign_global(n, *op, v)
                         } else {
                             self.assign_or_set_binding(n, v.clone())?;
-                            v
-                        };
-                        Ok(fv)
+                            Ok(v)
+                        }
                     }
                     Expr::Member {
                         object,
@@ -2101,14 +1977,12 @@ impl Interpreter {
                     } => {
                         let obj = self.eval_expr(object)?;
                         let prop = self.eval_expr(property)?;
-                        let fv = if let Some(bin) = op.bin_op() {
-                            let c = self.get_prop_value(&obj, &prop)?;
-                            self.bin_op(bin, &c, &v)?
+                        if let Some(bin) = op.bin_op() {
+                            self.compound_assign_prop(&obj, &prop, bin, v)
                         } else {
-                            v
-                        };
-                        self.assign_member(&obj, &prop, fv.clone())?;
-                        Ok(fv)
+                            self.assign_member(&obj, &prop, v.clone())?;
+                            Ok(v)
+                        }
                     }
                     // A destructuring *assignment*: `[a, b] = [b, a]`,
                     // `({ x } = o)`. Unlike a declaration it binds nothing
@@ -2173,6 +2047,7 @@ impl Interpreter {
                 is_constructor: false,
                 is_async: *is_async,
                 is_generator: false,
+                bytecode: None,
                 bound: None,
             }))),
             Expr::FnExpr {
@@ -2196,6 +2071,7 @@ impl Interpreter {
                 is_async: *is_async,
                 is_generator: *is_generator,
                 uses_arguments: stmts_reference(body, "arguments"),
+                bytecode: None,
                 bound: None,
             }))),
             Expr::New { callee, args } => {

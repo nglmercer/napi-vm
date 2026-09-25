@@ -47,6 +47,10 @@ pub struct BytecodeFunction {
     pub upvalue_count: u16,
     /// Per-slot metadata, indexed by slot.
     pub slots: Vec<SlotInfo>,
+    /// Arrow functions bind `this` lexically (top-level arrows only in E).
+    pub is_arrow: bool,
+    /// Whether `new` accepts this function (plain declarations/expressions).
+    pub is_constructor: bool,
 }
 
 impl BytecodeFunction {

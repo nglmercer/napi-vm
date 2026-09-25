@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use super::Interpreter;
-use super::jobs::{Job, MAX_JOBS_PER_DRAIN, settle};
+use super::jobs::{Job, settle};
 use crate::error::VmErr;
 use crate::value::{PromiseInner, PromiseState, Reaction, Value};
 
@@ -353,7 +353,7 @@ impl Interpreter {
             };
             let Some(job) = job else { return Ok(()) };
             executed += 1;
-            if executed > MAX_JOBS_PER_DRAIN {
+            if executed > self.max_jobs_per_drain {
                 return Err(crate::value::limit_err("Maximum job count exceeded"));
             }
             match job {
@@ -512,7 +512,7 @@ impl Interpreter {
                 return Ok(());
             };
             executed += 1;
-            if executed > MAX_JOBS_PER_DRAIN {
+            if executed > self.max_jobs_per_drain {
                 return Err(crate::value::limit_err("Maximum job count exceeded"));
             }
             match job {

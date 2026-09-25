@@ -43,6 +43,8 @@ pub enum VerifyError {
     PlainAssignInCompound { address: usize },
     /// `++`/`--` delta must be +1 or -1.
     BadIncDelta { address: usize, delta: i8 },
+    /// Template quasi count must be the hole count plus one.
+    TemplateArityMismatch { address: usize, quasis: usize, argc: u16 },
     /// A defect inside a nested compiled function.
     NestedFunction { index: u16, error: Box<VerifyError> },
 }
@@ -101,6 +103,10 @@ impl std::fmt::Display for VerifyError {
             VerifyError::BadIncDelta { address, delta } => write!(
                 f,
                 "bytecode verify failed at {address}: inc delta {delta} is not +1/-1"
+            ),
+            VerifyError::TemplateArityMismatch { address, quasis, argc } => write!(
+                f,
+                "bytecode verify failed at {address}: {quasis} quasis for {argc} template holes"
             ),
             VerifyError::NestedFunction { index, error } => {
                 write!(f, "bytecode verify failed in nested function c{index}: {error}")
@@ -186,11 +192,14 @@ impl Checker<'_> {
     fn check_const_is(&self, address: usize, index: u16, expected: &'static str) -> Result<(), VerifyError> {
         self.check_const(address, index)?;
         let ok = match &self.function.constants[index as usize] {
-            Constant::String(_) => expected == "string",
+            Constant::Number(_) | Constant::Bool(_) | Constant::Null | Constant::Undefined => {
+                expected == "scalar"
+            }
+            // Strings load as values and name globals.
+            Constant::String(_) => expected == "string" || expected == "scalar",
             Constant::StringList(_) => expected == "string-list",
             Constant::Function(_) => expected == "function",
             Constant::AstFunction(_) => expected == "ast-function",
-            _ => false,
         };
         if ok {
             Ok(())
@@ -243,7 +252,7 @@ impl Checker<'_> {
         match instr {
             Instr::LoadConst { dst, cst } => {
                 self.check_reg(address, *dst)?;
-                self.check_const(address, *cst)?;
+                self.check_const_is(address, *cst, "scalar")?;
             }
             Instr::Mov { dst, src } => {
                 self.check_reg(address, *dst)?;
@@ -388,6 +397,15 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *quasis, "string-list")?;
                 self.check_range(address, *args, *argc)?;
+                if let Constant::StringList(chunks) = &self.function.constants[*quasis as usize] {
+                    if chunks.len() != *argc as usize + 1 {
+                        return Err(VerifyError::TemplateArityMismatch {
+                            address,
+                            quasis: chunks.len(),
+                            argc: *argc,
+                        });
+                    }
+                }
             }
             Instr::NewObject { dst } => {
                 self.check_reg(address, *dst)?;
@@ -411,5 +429,50 @@ impl Checker<'_> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bytecode::compiler::compile_program;
+    use crate::parser::parse_cached;
+
+    fn compile(source: &str) -> BytecodeFunction {
+        let stmts = parse_cached(source).expect("test source must parse");
+        let module = compile_program(&stmts).expect("test source must compile");
+        (*module.main).clone()
+    }
+
+    #[test]
+    fn load_const_rejects_non_scalar_constants() {
+        let mut unit = compile("1");
+        let index = unit
+            .constants
+            .iter()
+            .position(|c| matches!(c, Constant::Number(_)))
+            .expect("number const");
+        unit.constants[index] = Constant::StringList(vec!["q".to_string()]);
+        assert!(matches!(
+            verify_function(&unit),
+            Err(VerifyError::ConstantTypeMismatch { expected: "scalar", .. })
+        ));
+    }
+
+    #[test]
+    fn template_rejects_quasi_arity_mismatch() {
+        let mut unit = compile("`a${x}b`");
+        let index = unit
+            .constants
+            .iter()
+            .position(|c| matches!(c, Constant::StringList(_)))
+            .expect("quasis const");
+        if let Constant::StringList(quasis) = &mut unit.constants[index] {
+            quasis.pop();
+        }
+        assert!(matches!(
+            verify_function(&unit),
+            Err(VerifyError::TemplateArityMismatch { quasis: 1, argc: 1, .. })
+        ));
     }
 }

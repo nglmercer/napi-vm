@@ -96,6 +96,41 @@ pub fn symbol_id_from_slot(key: &str) -> Option<u64> {
 pub const SYMBOL_ITERATOR_SLOT: &str = "__symbol_iterator__";
 
 impl Interpreter {
+    /// Apply a binary operator to two evaluated operands: `instanceof`, the
+    /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
+    /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
+    pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+        if matches!(op, BinOp::Instanceof) {
+            return self.instance_of(l, r);
+        }
+        // A proxy's `has` trap answers `in`. It runs guest code, so it
+        // cannot live in `bin_op`, which does not borrow mutably.
+        // `+` may need to run a guest `toString`, which `bin_op`
+        // cannot do from `&self`. Coerce the operands first.
+        if matches!(op, BinOp::Add)
+            && (Self::needs_concat_coercion(l) || Self::needs_concat_coercion(r))
+        {
+            let left = self.coerce_for_concat(l)?;
+            let right = self.coerce_for_concat(r)?;
+            return self.bin_op(op, &left, &right);
+        }
+        if matches!(op, BinOp::In)
+            && let Some(proxy) = r.as_proxy()
+        {
+            let target = proxy.target.clone();
+            return match self.proxy_trap(&proxy, "has") {
+                Some(trap) => {
+                    let key = self.proxy_property_key(l)?;
+                    let handler = proxy.handler.clone();
+                    let result = self.call_this(&trap, handler, vec![target, key])?;
+                    Ok(Value::Bool(result.is_truthy()))
+                }
+                None => self.bin_op(op, l, &target),
+            };
+        }
+        self.bin_op(op, l, r)
+    }
+
     pub fn bin_op(&self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
         // Fast path: when both operands are already numbers, the arithmetic and
         // comparison operators need no coercion and `+` cannot be string

@@ -365,6 +365,31 @@ impl Interpreter {
         Ok(Value::String(self.vs(value)?))
     }
 
+    /// Render a template literal from its cooked chunks and evaluated
+    /// interpolation values. Shared by the AST evaluator and the bytecode VM
+    /// so both tiers agree (including the length-cap error).
+    pub(crate) fn render_template(
+        &mut self,
+        quasis: &[String],
+        values: &[Value],
+    ) -> Result<Value, VmErr> {
+        let mut result = String::new();
+        for (i, q) in quasis.iter().enumerate() {
+            if result.len().saturating_add(q.len()) > crate::value::MAX_STRING_LEN {
+                return Err(crate::value::limit_err("Maximum string length exceeded"));
+            }
+            result.push_str(q);
+            if i < values.len() {
+                let rendered = self.display_string(&values[i])?;
+                if result.len().saturating_add(rendered.len()) > crate::value::MAX_STRING_LEN {
+                    return Err(crate::value::limit_err("Maximum string length exceeded"));
+                }
+                result.push_str(&rendered);
+            }
+        }
+        Value::checked_string(result)
+    }
+
     /// Read a string-keyed property, running a getter if one is installed.
     pub(crate) fn member(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
         self.get_prop_value(o, &Value::String(key.to_string()))

@@ -617,7 +617,13 @@ impl<'a> Compiler<'a> {
 
     // -- units -------------------------------------------------------------
 
-    fn build_function(&mut self, name: Option<String>, parameter_count: usize) -> Result<BytecodeFunction, Decline> {
+    fn build_function(
+        &mut self,
+        name: Option<String>,
+        parameter_count: usize,
+        is_arrow: bool,
+        is_constructor: bool,
+    ) -> Result<BytecodeFunction, Decline> {
         let parameter_count =
             u16::try_from(parameter_count).map_err(|_| Decline::Func("too many parameters"))?;
         let local_count =
@@ -631,6 +637,8 @@ impl<'a> Compiler<'a> {
             parameter_count,
             upvalue_count: 0,
             slots: std::mem::take(&mut self.slots),
+            is_arrow,
+            is_constructor,
         })
     }
 
@@ -692,11 +700,11 @@ impl<'a> Compiler<'a> {
             self.restore(checkpoint);
         }
         self.finish_functions()?;
-        self.build_function(None, 0)
+        self.build_function(None, 0, false, false)
     }
 
     fn compile_unit_function(&mut self, def: FuncDef<'a>) -> Result<BytecodeFunction, Decline> {
-        let FuncDef { name, params, body, .. } = def;
+        let FuncDef { name, params, body, is_arrow, is_constructor, .. } = def;
         let parameter_count = params.len();
         match body {
             FuncBody::Stmts(stmts) => {
@@ -717,7 +725,7 @@ impl<'a> Compiler<'a> {
             }
         }
         self.finish_functions()?;
-        self.build_function(name, parameter_count)
+        self.build_function(name, parameter_count, is_arrow, is_constructor)
     }
 
     // -- blocks and statements ---------------------------------------------
@@ -1604,7 +1612,8 @@ fn has_dup_params(params: &[String]) -> bool {
 
 /// Compile one nested function: bytecode when supported, otherwise an
 /// AST-backed constant. Captures and `super` decline the whole unit instead:
-/// an AST fallback with no closure environment could not honor them.
+/// slot bindings are invisible to environment chains, so neither bytecode
+/// nor a fallback closed over the defining frame could honor them.
 fn compile_function(
     def: FuncDef<'_>,
     outer: HashSet<String>,
@@ -1735,11 +1744,67 @@ mod tests {
         assert_eq!(first.parameter_count, 1);
         assert_eq!(first.slots.len(), 1);
     }
+
+    fn nested_functions(source: &str) -> Vec<Constant> {
+        let module = compile(source).expect("test source must compile");
+        module
+            .main
+            .constants
+            .iter()
+            .filter(|c| matches!(c, Constant::Function(_) | Constant::AstFunction(_)))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn nested_functions_carry_arrow_and_constructor_flags() {
+        let consts = nested_functions("const f = () => 1;");
+        assert_eq!(consts.len(), 1);
+        match &consts[0] {
+            Constant::Function(code) => {
+                assert!(code.is_arrow);
+                assert!(!code.is_constructor);
+            }
+            other => panic!("expected bytecode function, got {other:?}"),
+        }
+        // Hoisted declarations instantiate twice (hoist + statement).
+        let consts = nested_functions("function g(){}");
+        assert_eq!(consts.len(), 2);
+        for c in &consts {
+            match c {
+                Constant::Function(code) => {
+                    assert!(!code.is_arrow);
+                    assert!(code.is_constructor);
+                }
+                other => panic!("expected bytecode function, got {other:?}"),
+            }
+        }
+        let consts = nested_functions("async function h(){}");
+        assert_eq!(consts.len(), 2);
+        assert!(consts.iter().all(|c| matches!(c, Constant::AstFunction(_))));
+    }
+
+    #[test]
+    fn recursive_and_self_referencing_functions_compile() {
+        // Declarations recurse through the enclosing scope in both tiers.
+        let module = compile(
+            "function fib(n){ return n < 2 ? n : fib(n - 1) + fib(n - 2); } fib(10);",
+        )
+        .expect("recursive declaration must compile");
+        assert!(
+            module.main.constants.iter().any(|c| matches!(c, Constant::Function(_)))
+        );
+        // Named expressions resolve their own name outward (the evaluator
+        // has no intermediate self-scope), so self-reference compiles too.
+        compile("(function bar(){ return typeof bar; })();")
+            .expect("self-referencing expression must compile");
+    }
 }
 
 /// Build the AST fallback for one function, mirroring the evaluator's
-/// function-creation arms (minus the closure: fallback functions are
-/// capture-free by construction).
+/// function-creation arms. The VM closes it over the defining frame
+/// environment; capture-free-ness holds because capturing functions decline
+/// the whole unit (slot bindings are invisible to environment chains).
 fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
     let body = match def.body {
         FuncBody::Stmts(stmts) => stmts.to_vec(),

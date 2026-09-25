@@ -6,9 +6,9 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use super::{Environment, Interpreter};
+use super::{Environment, Interpreter, ModifyOutcome};
 use crate::error::{RuntimeErrorData, VmErr, vm_err};
-use crate::parser::{Pattern, PatternKey, Statement};
+use crate::parser::{AssignOp, BinOp, Pattern, PatternKey, Statement};
 use crate::span::Span;
 #[cfg(stackful_coroutines)]
 use crate::value::{GenOutcome, GenResume};
@@ -914,6 +914,146 @@ impl Interpreter {
         }
     }
 
+    /// Compound assignment (`+=`, `-=`, …) to a scope binding: the RHS
+    /// coercion for `+` runs before the writability check, then a fused
+    /// read-modify-write applies the operator. Shared by the AST evaluator
+    /// and the bytecode VM so both tiers agree on order and errors.
+    pub(crate) fn compound_assign_global(
+        &mut self,
+        name: &str,
+        op: AssignOp,
+        v: Value,
+    ) -> Result<Value, VmErr> {
+        let Some(bin) = op.bin_op() else {
+            return Err(VmErr::Msg("internal error: plain `=` in compound assign".to_string()));
+        };
+        let v = if matches!(op, AssignOp::Add) {
+            self.coerce_for_concat(&v)?
+        } else {
+            v
+        };
+        // Fused read-modify-write: one `borrow_mut` + one scan instead of a
+        // read borrow then a write borrow. `bin_op` can still fail (e.g.
+        // string-length cap); capture the error and leave the slot unchanged.
+        let mut err = None;
+        // An object on the *left* of `+=` needs its `toString`, which cannot
+        // run while the scope is borrowed. Detect it here and redo the whole
+        // assignment outside the borrow, leaving the slot untouched in the
+        // meantime.
+        let mut deferred = None;
+        let res = {
+            let mut env = self.global.borrow_mut();
+            env.modify(name, |cur| {
+                if matches!(bin, BinOp::Add) && Self::needs_concat_coercion(&cur) {
+                    deferred = Some(cur.clone());
+                    return cur;
+                }
+                match self.bin_op(bin, &cur, &v) {
+                    Ok(new) => new,
+                    Err(e) => {
+                        err = Some(e);
+                        cur
+                    }
+                }
+            })
+        };
+        if let Some(current) = deferred {
+            let left = self.coerce_for_concat(&current)?;
+            let combined = self.bin_op(bin, &left, &v)?;
+            self.assign_or_set_binding(name, combined.clone())?;
+            return Ok(combined);
+        }
+        if let Some(e) = err {
+            return Err(e);
+        }
+        match res {
+            ModifyOutcome::Updated(v) => Ok(v),
+            ModifyOutcome::Missing => {
+                vm_err(format!("ReferenceError: {name} is not defined"))
+            }
+            ModifyOutcome::Const => {
+                vm_err(format!("TypeError: Assignment to constant variable '{name}'"))
+            }
+            ModifyOutcome::Uninitialized => {
+                vm_err(format!("ReferenceError: Cannot access '{name}' before initialization"))
+            }
+        }
+    }
+
+    /// `++`/`--` on a scope binding. Shared by the AST evaluator and the
+    /// bytecode VM. Postfix yields the pre-increment value.
+    pub(crate) fn inc_global_binding(
+        &mut self,
+        name: &str,
+        inc: bool,
+        prefix: bool,
+    ) -> Result<Value, VmErr> {
+        // Fused read-modify-write: one `borrow_mut` + one scan instead of a
+        // read borrow followed by a separate write borrow. `old` captures
+        // the value before the update so postfix can return it.
+        let mut old = None;
+        let new_val = {
+            let mut env = self.global.borrow_mut();
+            env.modify(name, |cur| {
+                let cur_num = self.tn(&cur);
+                old = Some(cur);
+                Value::Number(if inc { cur_num + 1.0 } else { cur_num - 1.0 })
+            })
+        };
+        let new_val = match new_val {
+            ModifyOutcome::Updated(v) => v,
+            ModifyOutcome::Missing => {
+                return vm_err(format!("ReferenceError: {name} is not defined"));
+            }
+            ModifyOutcome::Const => {
+                return vm_err(format!("TypeError: Assignment to constant variable '{name}'"));
+            }
+            ModifyOutcome::Uninitialized => {
+                return vm_err(format!("ReferenceError: Cannot access '{name}' before initialization"));
+            }
+        };
+        if prefix {
+            Ok(new_val)
+        } else {
+            Ok(old.unwrap_or(Value::Undefined))
+        }
+    }
+
+    /// Compound assignment to a property: read, apply, write back. Member
+    /// compounds never coerce for `+` (unlike identifier ones) — the
+    /// evaluator's own asymmetry, preserved here. Shared by both tiers.
+    pub(crate) fn compound_assign_prop(
+        &mut self,
+        obj: &Value,
+        prop: &Value,
+        bin: BinOp,
+        v: Value,
+    ) -> Result<Value, VmErr> {
+        let c = self.get_prop_value(obj, prop)?;
+        let fv = self.bin_op(bin, &c, &v)?;
+        self.assign_member(obj, prop, fv.clone())?;
+        Ok(fv)
+    }
+
+    /// `++`/`--` on a property. Shared by the AST evaluator and the bytecode
+    /// VM. Postfix yields the pre-increment value.
+    pub(crate) fn inc_prop_value(
+        &mut self,
+        obj: &Value,
+        prop: &Value,
+        inc: bool,
+        prefix: bool,
+    ) -> Result<Value, VmErr> {
+        let cur = self.get_prop_value(obj, prop)?;
+        let new_val = Value::Number(if inc { self.tn(&cur) + 1.0 } else { self.tn(&cur) - 1.0 });
+        self.assign_member(obj, prop, new_val.clone())?;
+        if prefix {
+            Ok(new_val)
+        } else {
+            Ok(cur)
+        }
+    }
+
     pub(crate) fn call_this(
         &mut self,
         f: &Value,
@@ -959,12 +1099,44 @@ impl Interpreter {
                 // Recursion guard: each VM call costs several native frames,
                 // so unbounded guest recursion would SIGSEGV the host. Fail
                 // with a catchable RangeError instead (V8 semantics).
-                if self.get_stack().len() >= crate::interpreter::MAX_CALL_DEPTH {
+                if self.get_stack().len() >= self.max_call_depth {
                     return Err(VmErr::Msg(
                         "RangeError: Maximum call stack size exceeded".to_string(),
                     ));
                 }
                 let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
+                // Bytecode-backed functions run the register VM. The frame
+                // environment is an empty child: locals live in slots, so
+                // only the chain matters for lexical resolution. Frame
+                // push/pop and error mapping mirror the AST path below
+                // exactly (async/generator bodies never compile).
+                if let Some(code) = &fd.bytecode {
+                    let code = code.clone();
+                    let fname = fd.name.clone().unwrap_or_else(|| {
+                        self.anonymous_frame_name
+                            .get_or_insert_with(|| Rc::from("<anonymous>"))
+                            .clone()
+                    });
+                    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+                    let saved = std::mem::replace(&mut self.global, fe);
+                    self.push_frame(fname, Span::unknown());
+                    let r = crate::bytecode::vm::run_function(self, &code, this_val, args);
+                    let result = match r {
+                        Err(VmErr::Ret(v)) => Ok(v),
+                        Ok(v) => Ok(v),
+                        Err(VmErr::Msg(msg)) => Err(VmErr::RuntimeError(Box::new(
+                            RuntimeErrorData {
+                                message: msg,
+                                span: None,
+                                stack: self.get_stack().to_vec(),
+                            },
+                        ))),
+                        other => other,
+                    };
+                    self.pop_frame();
+                    self.global = saved;
+                    return result;
+                }
                 let rest_idx = fd.params.iter().position(|p| p.starts_with("..."));
                 let fe = match rest_idx {
                     // Fast path (the overwhelming majority of calls): no rest
@@ -1449,6 +1621,22 @@ impl Interpreter {
                     Value::object(vec![])
                 };
                 let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
+
+                // Bytecode-backed constructors run the register VM with the
+                // fresh instance as `this`. No frame is pushed, and the
+                // collapse-everything-to-`inst` mapping matches the AST path.
+                if let Some(code) = &fd.bytecode {
+                    let code = code.clone();
+                    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+                    let saved = std::mem::replace(&mut self.global, fe);
+                    let r = crate::bytecode::vm::run_function(self, &code, inst.clone(), args);
+                    self.global = saved;
+                    return match r {
+                        Err(VmErr::Ret(v)) if is_js_object(&v) => Ok(v),
+                        Err(VmErr::Ret(_)) => Ok(inst),
+                        _ => Ok(inst),
+                    };
+                }
 
                 let rest_idx = fd.params.iter().position(|p| p.starts_with("..."));
                 let fe = match rest_idx {
