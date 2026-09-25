@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use super::{
     BindKind, Env, Environment, Interpreter, Lookup, block_needs_lexical_scope,
+    body_needs_hoisting,
 };
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
@@ -18,6 +19,17 @@ use crate::value::{ClassData, FunctionData, ObjectCell, PromiseState, PropAttrs,
 /// binding is a refcount bump, not a heap allocation.
 pub(crate) fn intern_params(params: &[String]) -> Rc<Vec<Rc<str>>> {
     Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect())
+}
+
+/// Length-guard a static member key without allocating it. Evaluating a
+/// string literal rejects oversized values, and the borrowed-key member
+/// paths below preserve that error exactly.
+#[inline]
+fn checked_static_key(key: &str) -> Result<(), VmErr> {
+    if key.len() > crate::value::MAX_STRING_LEN {
+        return Err(crate::value::limit_err("Maximum string length exceeded"));
+    }
+    Ok(())
 }
 
 fn class_accessor_kind(value: &Value) -> Option<&'static str> {
@@ -245,7 +257,7 @@ impl Interpreter {
                 // Native constructors (`Map`, `Set`, `Array`, ...) expose
                 // `.prototype` as an ordinary property; inherit from it like
                 // a class heritage would.
-                match self.get_prop_value(other, &Value::String("prototype".to_string())) {
+                match self.get_prop_value_str(other, "prototype") {
                     Ok(proto @ (Value::Object { .. } | Value::Array(_))) => {
                         Ok(Some(Rc::new(proto)))
                     }
@@ -444,6 +456,7 @@ impl Interpreter {
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(mb, "arguments"),
                         bytecode: None,
+                        needs_hoisting: body_needs_hoisting(mb),
                         bound: None,
                     }));
                     if *st {
@@ -508,6 +521,7 @@ impl Interpreter {
                         is_generator: false,
                         uses_arguments: stmts_reference(gb, "arguments"),
                         bytecode: None,
+                        needs_hoisting: body_needs_hoisting(gb),
                         bound: None,
                     }));
                     if *st {
@@ -548,6 +562,7 @@ impl Interpreter {
                         is_generator: false,
                         uses_arguments: stmts_reference(sb, "arguments"),
                         bytecode: None,
+                        needs_hoisting: body_needs_hoisting(sb),
                         bound: None,
                     }));
                     if *st {
@@ -626,6 +641,7 @@ impl Interpreter {
                     .collect(),
             ),
             uses_arguments: stmts_reference(&full_ctor_body, "arguments"),
+            needs_hoisting: body_needs_hoisting(&full_ctor_body),
             body: Rc::new(full_ctor_body),
             closure: Some(crate::heap::capture_env(&ctor_closure)),
             is_arrow: false,
@@ -931,6 +947,7 @@ impl Interpreter {
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
                         bytecode: None,
+                        needs_hoisting: body_needs_hoisting(body),
                         bound: None,
                     })),
                 )?;
@@ -1049,7 +1066,7 @@ impl Interpreter {
                 } else {
                     self.iterator_for(&source)?
                 };
-                let next_fn = self.prop(&iterator, &Value::String("next".to_string()))?;
+                let next_fn = self.prop_str(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
                     return vm_err("iterator has no next() method");
                 }
@@ -1229,7 +1246,7 @@ impl Interpreter {
     /// generator raises a catchable `RangeError` instead of hanging.
     pub(crate) fn drain_iterable(&mut self, source: &Value) -> Result<Vec<Value>, VmErr> {
         let iterator = self.iterator_for(source)?;
-        let next_fn = self.prop(&iterator, &Value::String("next".to_string()))?;
+        let next_fn = self.prop_str(&iterator, "next")?;
         if matches!(next_fn, Value::Undefined) {
             return Ok(Vec::new());
         }
@@ -1543,6 +1560,7 @@ impl Interpreter {
                         is_generator: *is_generator,
                         uses_arguments: stmts_reference(body, "arguments"),
                         bytecode: None,
+                        needs_hoisting: body_needs_hoisting(body),
                         bound: None,
                     }));
                     insert_object_property(
@@ -1565,6 +1583,7 @@ impl Interpreter {
                         params: Rc::new(vec![]),
                         body: Rc::new(body.clone()),
                         closure: Some(crate::heap::capture_env(&self.global)),
+                        needs_hoisting: body_needs_hoisting(body),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: false,
@@ -1593,6 +1612,7 @@ impl Interpreter {
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(body.clone()),
                         closure: Some(crate::heap::capture_env(&self.global)),
+                        needs_hoisting: body_needs_hoisting(body),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: false,
@@ -1862,6 +1882,17 @@ impl Interpreter {
                             computed: _,
                         } => {
                             let obj = self.eval_expr(object)?;
+                            if let Expr::String(key) = property.as_ref() {
+                                checked_static_key(key)?;
+                                let cur = self.get_prop_value_str(&obj, key)?;
+                                let new_val = if *op == UnOp::Inc {
+                                    Value::Number(self.tn(&cur) + 1.0)
+                                } else {
+                                    Value::Number(self.tn(&cur) - 1.0)
+                                };
+                                self.assign_member_str(&obj, key, new_val.clone())?;
+                                return if *prefix { Ok(new_val) } else { Ok(cur) };
+                            }
                             let prop = self.eval_expr(property)?;
                             self.inc_prop_value(&obj, &prop, *op == UnOp::Inc, *prefix)
                         }
@@ -1941,8 +1972,16 @@ impl Interpreter {
                         computed: _,
                     } => {
                         let obj = self.eval_expr(object)?;
-                        let prop = self.eval_expr(property)?;
-                        let f = self.get_prop_value(&obj, &prop)?;
+                        // `o.key(...)`: a static property parses as
+                        // `Expr::String`, so resolve it without allocating
+                        // the key value on every call.
+                        let f = if let Expr::String(key) = property.as_ref() {
+                            checked_static_key(key)?;
+                            self.get_prop_value_str(&obj, key)?
+                        } else {
+                            let prop = self.eval_expr(property)?;
+                            self.get_prop_value(&obj, &prop)?
+                        };
                         self.call_this(&f, obj, a)
                     }
                     Expr::OptionalChain {
@@ -1957,6 +1996,9 @@ impl Interpreter {
                         // A `Undefined` property marks an optional call `obj?.(args)`.
                         let f = if matches!(property.as_ref(), Expr::Undefined) {
                             obj.clone()
+                        } else if let Expr::String(key) = property.as_ref() {
+                            checked_static_key(key)?;
+                            self.get_prop_value_str(&obj, key)?
                         } else {
                             let prop = self.eval_expr(property)?;
                             self.get_prop_value(&obj, &prop)?
@@ -1984,6 +2026,10 @@ impl Interpreter {
                 computed: _,
             } => {
                 let o = self.eval_expr(object)?;
+                if let Expr::String(key) = property.as_ref() {
+                    checked_static_key(key)?;
+                    return self.get_prop_value_str(&o, key);
+                }
                 let p = self.eval_expr(property)?;
                 self.get_prop_value(&o, &p)
             }
@@ -1996,6 +2042,10 @@ impl Interpreter {
                 if matches!(o, Value::Null | Value::Undefined) {
                     return Ok(Value::Undefined);
                 }
+                if let Expr::String(key) = property.as_ref() {
+                    checked_static_key(key)?;
+                    return self.get_prop_value_str(&o, key);
+                }
                 let p = self.eval_expr(property)?;
                 self.get_prop_value(&o, &p)
             }
@@ -2004,6 +2054,30 @@ impl Interpreter {
             // `obj.x ||= expensive()` leaves a truthy `x` untouched and never
             // evaluates `expensive`.
             Expr::LogicalAssignment { target, op, value } => {
+                // Static member target: skip the key allocation on both the
+                // read and the conditional write.
+                if let Expr::Member {
+                    object, property, ..
+                } = target.as_ref()
+                    && let Expr::String(key) = property.as_ref()
+                {
+                    checked_static_key(key)?;
+                    let receiver = self.eval_expr(object)?;
+                    let current = self.get_prop_value_str(&receiver, key)?;
+                    let should_assign = match op {
+                        LogicalAssignOp::And => self.truthy(&current),
+                        LogicalAssignOp::Or => !self.truthy(&current),
+                        LogicalAssignOp::Nullish => {
+                            matches!(current, Value::Null | Value::Undefined)
+                        }
+                    };
+                    if !should_assign {
+                        return Ok(current);
+                    }
+                    let assigned = self.eval_expr(value)?;
+                    self.assign_member_str(&receiver, key, assigned.clone())?;
+                    return Ok(assigned);
+                }
                 let (receiver, key, current) = match target.as_ref() {
                     Expr::Identifier(name) => {
                         let current = self.eval_expr(target)?;
@@ -2061,6 +2135,17 @@ impl Interpreter {
                         computed: _,
                     } => {
                         let obj = self.eval_expr(object)?;
+                        if let Expr::String(key) = property.as_ref() {
+                            checked_static_key(key)?;
+                            let fv = if let Some(bin) = op.bin_op() {
+                                let c = self.get_prop_value_str(&obj, key)?;
+                                self.bin_op(bin, &c, &v)?
+                            } else {
+                                v
+                            };
+                            self.assign_member_str(&obj, key, fv.clone())?;
+                            return Ok(fv);
+                        }
                         let prop = self.eval_expr(property)?;
                         if let Some(bin) = op.bin_op() {
                             self.compound_assign_prop(&obj, &prop, bin, v)
@@ -2124,6 +2209,8 @@ impl Interpreter {
                 params: intern_params(params),
                 closure: Some(crate::heap::capture_env(&self.global)),
                 uses_arguments: arrow_body_references(body, "arguments"),
+                // An expression body declares nothing; only block bodies can.
+                needs_hoisting: matches!(body.as_ref(), ExprOrBlock::Block(s) if body_needs_hoisting(s)),
                 body: Rc::new(match body.as_ref() {
                     ExprOrBlock::Block(s) => s.clone(),
                     ExprOrBlock::Expr(e) => vec![Statement::Return(Some(e.clone()))],
@@ -2157,6 +2244,7 @@ impl Interpreter {
                 is_generator: *is_generator,
                 uses_arguments: stmts_reference(body, "arguments"),
                 bytecode: None,
+                needs_hoisting: body_needs_hoisting(body),
                 bound: None,
             }))),
             Expr::New { callee, args } => {
@@ -2284,7 +2372,7 @@ impl Interpreter {
                 // `next(v)` are forwarded to the delegate.
                 let source = self.eval_expr(inner)?;
                 let iterator = self.iterator_for(&source)?;
-                let next_fn = self.prop(&iterator, &Value::String("next".to_string()))?;
+                let next_fn = self.prop_str(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
                     return vm_err("TypeError: yield* requires an iterable");
                 }

@@ -50,9 +50,55 @@ pub fn limit_err(msg: &str) -> VmErr {
 
 /// Parse a canonical ECMAScript array-index property name. Strings such as
 /// `"01"` and the reserved `"4294967295"` key are ordinary named properties.
+///
+/// Allocation-free: the previous `parse` + `to_string` comparison heap-
+/// allocated on every numeric key, and this runs on each array property
+/// access.
 pub fn array_index(key: &str) -> Option<usize> {
-    let index = key.parse::<usize>().ok()?;
-    (index.to_string() == key && index < u32::MAX as usize).then_some(index)
+    let bytes = key.as_bytes();
+    if bytes.is_empty() || bytes.len() > 10 {
+        return None;
+    }
+    // Canonical form has no leading zeros: "01" is an ordinary property.
+    if bytes.len() > 1 && bytes[0] == b'0' {
+        return None;
+    }
+    let mut index: u64 = 0;
+    for &b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        index = index * 10 + u64::from(b - b'0');
+        // "4294967295" (`u32::MAX`) and anything larger are ordinary
+        // properties; bailing here also makes overlong digit runs overflow-
+        // free without parsing them fully.
+        if index >= u32::MAX as u64 {
+            return None;
+        }
+    }
+    Some(index as usize)
+}
+
+/// Character length of a string as a guest `length` value. A byte scan is an
+/// order of magnitude cheaper than UTF-8 decoding; only non-ASCII text pays
+/// for `chars().count()`.
+pub fn str_char_len(s: &str) -> f64 {
+    if s.is_ascii() {
+        s.len() as f64
+    } else {
+        s.chars().count() as f64
+    }
+}
+
+/// The single-character string at char index `idx`, if any. When every byte
+/// up to `idx` is ASCII the char index equals the byte index, so short
+/// indices into long ASCII strings cost O(idx) instead of a full decode.
+pub fn str_char_at(s: &str, idx: usize) -> Option<Value> {
+    let bytes = s.as_bytes();
+    if idx < bytes.len() && bytes[..=idx].is_ascii() {
+        return Some(Value::String(s[idx..idx + 1].to_owned()));
+    }
+    s.chars().nth(idx).map(|c| Value::String(c.to_string()))
 }
 
 /// Per-property attributes (`writable`, `enumerable`, `configurable`).
@@ -830,6 +876,11 @@ pub struct FunctionData {
     /// Whether the body references `arguments`. Frames for functions that
     /// never read it skip building the (detached) arguments object.
     pub uses_arguments: bool,
+    /// Whether the body declares anything hoistable (`var`/`let`/`const`,
+    /// function, or class). Computed once at creation so calls skip both
+    /// hoist passes — a recursive walk plus a `Vec` allocation — when the
+    /// body has nothing to hoist.
+    pub needs_hoisting: bool,
     /// The bound target and arguments for functions created by
     /// `Function.prototype.bind`.
     pub bound: Option<Rc<BoundFunctionData>>,
@@ -2355,9 +2406,11 @@ impl Value {
             | Value::Class(_)
             | Value::Function(_)
             | Value::HostFunction { .. } => {
-                let mut current = self.clone();
+                // Borrow the receiver until the walk actually descends.
+                let mut descended: Option<Value> = None;
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
-                    let props = match &current {
+                    let node = descended.as_ref().unwrap_or(self);
+                    let props = match node {
                         Value::Object { props } => props,
                         Value::Class(class) => &class.statics,
                         Value::Function(function) => &function.properties,
@@ -2370,7 +2423,7 @@ impl Value {
                     let Some(next) = props.proto() else {
                         break;
                     };
-                    current = next.as_ref().clone();
+                    descended = Some(next.as_ref().clone());
                 }
                 match self {
                     Value::Function(_) | Value::HostFunction { .. } => match key {
@@ -2398,10 +2451,10 @@ impl Value {
             }
             Value::String(s) => {
                 if key == "length" {
-                    return Some(Value::Number(s.chars().count() as f64));
+                    return Some(Value::Number(str_char_len(s)));
                 }
                 if let Ok(idx) = key.parse::<usize>() {
-                    return s.chars().nth(idx).map(|c| Value::String(c.to_string()));
+                    return str_char_at(s, idx);
                 }
                 None
             }
@@ -2453,9 +2506,11 @@ impl Value {
             | Value::Class(_)
             | Value::Function(_)
             | Value::HostFunction { .. } => {
-                let mut current = self.clone();
+                // Borrow the receiver until the walk actually descends.
+                let mut descended: Option<Value> = None;
                 for _ in 0..=MAX_PROTOTYPE_DEPTH {
-                    let props = match &current {
+                    let node = descended.as_ref().unwrap_or(self);
+                    let props = match node {
                         Value::Object { props } => props,
                         Value::Class(class) => &class.statics,
                         Value::Function(function) => &function.properties,
@@ -2468,7 +2523,7 @@ impl Value {
                     let Some(next) = props.proto() else {
                         break;
                     };
-                    current = next.as_ref().clone();
+                    descended = Some(next.as_ref().clone());
                 }
                 match self {
                     Value::Function(_) | Value::HostFunction { .. } => {
@@ -2708,5 +2763,55 @@ mod shared_array_buffer_tests {
         );
         assert!(clone.write(4, &[1, 2, 3, 4]));
         assert_eq!(word.load(Ordering::SeqCst).to_ne_bytes(), [1, 2, 3, 4]);
+    }
+}
+
+#[cfg(test)]
+mod array_index_tests {
+    use super::{Value, array_index, str_char_at, str_char_len};
+
+    #[test]
+    fn canonical_indices_parse() {
+        assert_eq!(array_index("0"), Some(0));
+        assert_eq!(array_index("1"), Some(1));
+        assert_eq!(array_index("42"), Some(42));
+        assert_eq!(array_index("262143"), Some(262143));
+        assert_eq!(array_index("4294967294"), Some(4294967294));
+    }
+
+    #[test]
+    fn non_canonical_names_are_ordinary_properties() {
+        for key in [
+            "",
+            "01",
+            "00",
+            "4294967295",
+            "4294967296",
+            "99999999999999999999",
+            "1e3",
+            "+1",
+            "-1",
+            " 1",
+            "1 ",
+            "length",
+            "push",
+            "１２", // full-width digits are not ASCII digits
+        ] {
+            assert_eq!(array_index(key), None, "key {key:?}");
+        }
+    }
+
+    #[test]
+    fn string_helpers_match_char_semantics() {
+        assert_eq!(str_char_len("hello"), 5.0);
+        assert_eq!(str_char_len("héllo"), 5.0);
+        assert_eq!(str_char_len("😀😀"), 2.0);
+        assert_eq!(str_char_len(""), 0.0);
+        assert!(matches!(str_char_at("hello", 1), Some(Value::String(ref s)) if s == "e"));
+        assert!(matches!(str_char_at("hello", 4), Some(Value::String(ref s)) if s == "o"));
+        assert!(matches!(str_char_at("héllo", 1), Some(Value::String(ref s)) if s == "é"));
+        assert!(matches!(str_char_at("😀x", 1), Some(Value::String(ref s)) if s == "x"));
+        assert!(str_char_at("hi", 2).is_none());
+        assert!(str_char_at("", 0).is_none());
     }
 }

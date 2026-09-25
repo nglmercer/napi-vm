@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use crate::error::VmErr;
-use crate::interpreter::{Environment, Interpreter};
+use crate::interpreter::{Environment, Interpreter, body_needs_hoisting};
 use crate::value::{BoundFunctionData, FunctionData, ObjectCell, Value};
 
 pub(super) fn install(e: &mut Environment) {
@@ -38,6 +38,7 @@ pub(super) fn install(e: &mut Environment) {
         is_generator: false,
         uses_arguments: false,
         bytecode: None,
+        needs_hoisting: false,
         bound: None,
     }));
 
@@ -165,7 +166,7 @@ fn function_bind(
 
     let bound_this = args.first().cloned().unwrap_or(Value::Undefined);
     let new_arguments: Vec<Value> = args.into_iter().skip(1).collect();
-    let target_name = interp.get_prop_value(&target, &Value::String("name".into()))?;
+    let target_name = interp.get_prop_value_str(&target, "name")?;
     let target_name = match &target_name {
         Value::String(name) => name.clone(),
         _ => match &target {
@@ -177,7 +178,7 @@ fn function_bind(
         },
     };
     let target_length = interp
-        .get_prop_value(&target, &Value::String("length".into()))
+        .get_prop_value_str(&target, "length")
         .and_then(|length| interp.ecmascript_to_number(&length))?;
     let target_length = if target_length.is_nan() {
         0.0
@@ -240,6 +241,8 @@ fn function_bind(
         is_generator: false,
         uses_arguments: false,
         bytecode: None,
+        // A bound function's body never runs; calls delegate to the target.
+        needs_hoisting: false,
         bound: Some(Rc::new(BoundFunctionData {
             target: bound_target,
             this_value: bound_this,
@@ -318,7 +321,7 @@ fn function_apply(
         Value::Undefined | Value::Null => Vec::new(),
         Value::Array(items) => items.borrow().clone(),
         other => {
-            let length_value = interp.get_prop_value(other, &Value::String("length".into()))?;
+            let length_value = interp.get_prop_value_str(other, "length")?;
             let length = interp.ecmascript_to_number(&length_value)?;
             let length = if length.is_nan() || length <= 0.0 {
                 0
@@ -362,6 +365,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     };
 
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
+    let needs_hoisting = body_needs_hoisting(&body);
     Ok(Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
         name: Some("anonymous".into()),
@@ -378,6 +382,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         is_generator: false,
         uses_arguments,
         bytecode: None,
+        needs_hoisting,
         bound: None,
     })))
 }

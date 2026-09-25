@@ -230,13 +230,9 @@ fn buffer_from(interpreter: &mut Interpreter, _: Value, args: Vec<Value>) -> Res
                 .map(make_buffer)
         }
         Value::Object { .. } => {
-            let json_data = interpreter
-                .prop(&source, &Value::String("data".into()))
-                .ok();
+            let json_data = interpreter.prop_str(&source, "data").ok();
             let json_buffer = matches!(
-                interpreter
-                    .prop(&source, &Value::String("type".into()))
-                    .ok(),
+                interpreter.prop_str(&source, "type").ok(),
                 Some(Value::String(ref kind)) if kind == "Buffer"
             );
             let items = if json_buffer {
@@ -245,9 +241,7 @@ fn buffer_from(interpreter: &mut Interpreter, _: Value, args: Vec<Value>) -> Res
                 } else {
                     return Err(type_error("The Buffer JSON data property must be an array"));
                 }
-            } else if let Ok(Value::Number(length)) =
-                interpreter.prop(&source, &Value::String("length".into()))
-            {
+            } else if let Ok(Value::Number(length)) = interpreter.prop_str(&source, "length") {
                 let length = checked_length(&Value::Number(length))?;
                 (0..length)
                     .map(|index| interpreter.prop(&source, &Value::String(index.to_string())))

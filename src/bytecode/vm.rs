@@ -1407,6 +1407,9 @@ fn make_function(
         uses_arguments: code.captures_arguments,
         bound: None,
         bytecode: Some(code.clone()),
+        // The AST body is an empty placeholder (calls dispatch on
+        // `bytecode`), and an empty body needs no hoisting.
+        needs_hoisting: false,
     }))
 }
 
@@ -1436,6 +1439,7 @@ fn make_ast_function(
         uses_arguments: ast.uses_arguments,
         bound: None,
         bytecode: None,
+        needs_hoisting: crate::interpreter::body_needs_hoisting(&ast.body),
     }))
 }
 

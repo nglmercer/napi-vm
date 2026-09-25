@@ -316,6 +316,34 @@ pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
     })
 }
 
+/// Whether a function body needs either hoisting pass when it runs.
+///
+/// This must stay exactly aligned with the two passes in
+/// [`run_program_body`](Interpreter::run_program_body): the `var`/function
+/// half reuses `collect_var_names` itself so its traversal cannot drift, and
+/// the lexical half mirrors `hoist_lexical` (top-level `let`/`const`,
+/// function, and class declarations, transparent through `Declarations`
+/// groups). Computed once when a function value is created.
+pub(crate) fn body_needs_hoisting(body: &[Statement]) -> bool {
+    // `var` half: a scratch `Vec` that never grows when empty, so bodies
+    // without `var`s pay only the walk, once, at creation.
+    let mut names = Vec::new();
+    collect_var_names(body, &mut names);
+    if !names.is_empty() {
+        return true;
+    }
+    body_needs_lexical_hoist(body)
+}
+
+fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
+        Statement::FnDecl { .. } | Statement::ClassDecl { .. } => true,
+        Statement::Declarations(inner) => body_needs_lexical_hoist(inner),
+        _ => false,
+    })
+}
+
 impl Default for Interpreter {
     fn default() -> Self {
         Self::new()
@@ -1059,6 +1087,26 @@ impl Interpreter {
             self.republish_roots();
         }
         result
+    }
+
+    /// Execute a function body, hoisting only if it declares anything.
+    ///
+    /// Identical to [`run_program_body`](Self::run_program_body) when the
+    /// precomputed `needs_hoisting` flag is set; otherwise just the execution
+    /// guard and the statements. Hot call paths use this so declaration-free
+    /// bodies skip both hoist walks on every invocation.
+    pub(crate) fn run_function_body(
+        &mut self,
+        body: &[Statement],
+        needs_hoisting: bool,
+    ) -> Result<Value, VmErr> {
+        if needs_hoisting {
+            return self.run_program_body(body);
+        }
+        let depth = self.guest_execution_depth.clone();
+        depth.set(depth.get().saturating_add(1));
+        let _execution_guard = GuestExecutionGuard(depth);
+        self.run(body)
     }
 
     /// Enter a new block scope, returning the scope to restore afterwards.
