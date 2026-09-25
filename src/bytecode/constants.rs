@@ -43,6 +43,69 @@ pub enum Constant {
     /// [`Instr::MethodSpread`](super::opcode::Instr::MethodSpread), and
     /// [`Instr::BuildArray`](super::opcode::Instr::BuildArray).
     SpreadTemplate(Vec<SpreadEntry>),
+    /// One class definition for [`Instr::BuildClass`](super::opcode::Instr::BuildClass):
+    /// the constructor and members with their function constants, plus the
+    /// registers holding the runtime-evaluated superclass, computed names,
+    /// and static initializers.
+    ClassTemplate(ClassTemplate),
+}
+
+/// Scope binding for one computed instance-field key, in field order.
+/// The space makes it unwritable as an identifier, so user code can never
+/// collide with it; shared by the class compiler (synthetic field
+/// assignments) and the class builder (which binds the values).
+pub fn class_key_name(index: usize) -> String {
+    format!("__class key {index}__")
+}
+
+/// A member name as written (`Static`) or evaluated when the class is
+/// defined (`Computed`, holding the register with the key value).
+#[derive(Debug, Clone)]
+pub enum ClassNameTemplate {
+    Static(String),
+    Computed(Reg),
+}
+
+/// One non-constructor class member: a method, accessor, or static field.
+/// Instance fields desugar into the constructor before this template is
+/// built, so only their computed keys (bound into the constructor's scope
+/// under `__class key {i}__`, in order) appear here.
+#[derive(Debug, Clone)]
+pub struct ClassMemberTemplate {
+    pub kind: ClassMemberKind,
+    pub is_static: bool,
+    pub name: ClassNameTemplate,
+    /// Method/accessor function constant (bytecode or AST fallback).
+    pub func: Option<u16>,
+    /// Static field initializer value.
+    pub value: Option<Reg>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassMemberKind {
+    Method,
+    Getter,
+    Setter,
+    Field,
+}
+
+/// A class definition template. Function-constant slots start as `u16::MAX`
+/// placeholders the deferred pass overwrites once each method compiles.
+#[derive(Debug, Clone)]
+pub struct ClassTemplate {
+    pub name: String,
+    /// A class *expression's* own name, bound in a child scope around the
+    /// definition (declarations bind in the enclosing scope instead).
+    pub expr_name: Option<String>,
+    pub superclass: Option<Reg>,
+    pub ctor_func: u16,
+    pub ctor_length: usize,
+    /// Computed instance-field keys, in field order, bound into the
+    /// constructor's scope for the desugared field assignments to read.
+    pub ctor_computed_keys: Vec<Reg>,
+    pub members: Vec<ClassMemberTemplate>,
+    /// Static-block bodies as AST-function constants.
+    pub blocks: Vec<u16>,
 }
 
 /// One element of a [`Constant::SpreadTemplate`]: a register plus whether

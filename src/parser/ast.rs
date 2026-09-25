@@ -856,14 +856,26 @@ fn class_members_capture_identifier(members: &[ClassMember], name: &str) -> bool
                 || stmts_reference(body, name)
         }
         ClassMember::Field {
-            name: key, init, ..
+            name: key,
+            is_static: st,
+            init,
+            ..
         } => {
             matches!(key, MemberName::Computed(expr) if expr_captures_identifier(expr, name))
-                || init
-                    .as_ref()
-                    .is_some_and(|expr| expr_captures_identifier(expr, name))
+                || init.as_ref().is_some_and(|expr| {
+                    if *st {
+                        // Static initializers run inline at definition.
+                        expr_captures_identifier(expr, name)
+                    } else {
+                        // Instance initializers move into the constructor,
+                        // so any reference captures through its closure.
+                        expr_references(expr, name)
+                    }
+                })
         }
-        ClassMember::StaticBlock { body } => statements_capture_identifier(body, name),
+        // Static blocks run in a fresh child of the defining scope, so any
+        // reference captures through the chain.
+        ClassMember::StaticBlock { body } => stmts_reference(body, name),
     })
 }
 

@@ -24,7 +24,7 @@ use crate::interpreter::{
     BindKind, Env, Environment, Interpreter, Lookup, ObjectAccessorKind,
     insert_object_property, intern_params, push_call_arg, symbol_slot_key,
 };
-use crate::value::{FunctionData, Value};
+use crate::value::{FunctionData, PropAttrs, Value};
 
 use super::constants::{Constant, PropEntry, PropKind, SpreadEntry};
 use super::function::{BytecodeFunction, SlotKind};
@@ -133,6 +133,9 @@ pub(crate) fn run_function(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+    if !code.is_arrow {
+        fe.borrow_mut().set("this", this_value.clone());
+    }
     seed_captured(&fe, code, &args);
     let saved = std::mem::replace(&mut interp.global, fe);
     let mut frame = CallFrame::setup(code, this_value, &args);
@@ -521,14 +524,16 @@ fn run_loop(
                     Constant::Function(code) => code.clone(),
                     _ => return Err(internal("bad function constant")),
                 };
-                frame.registers[dst as usize] = make_function(interp, &code);
+                frame.registers[dst as usize] =
+                    make_function(interp, &code, interp.global.clone(), None);
             }
             Instr::MakeAstFunction { dst, ast } => {
                 let ast = match &frame.function.constants[ast as usize] {
                     Constant::AstFunction(ast) => ast.clone(),
                     _ => return Err(internal("bad ast-function constant")),
                 };
-                frame.registers[dst as usize] = make_ast_function(interp, &ast);
+                frame.registers[dst as usize] =
+                    make_ast_function(interp, &ast, interp.global.clone(), None);
             }
             Instr::Template { dst, quasis, args, argc } => {
                 let quasis = match &frame.function.constants[quasis as usize] {
@@ -584,6 +589,39 @@ fn run_loop(
                 Some(error) => return Err(error),
                 None => return Err(internal("rethrow without a pending error")),
             },
+            Instr::SuperMember { dst, key } => {
+                let proto = interp.global.borrow().get(crate::interpreter::SUPER_PROTO);
+                let Some(proto) = proto else {
+                    return Err(VmErr::Msg("'super' used outside a derived class".to_string()));
+                };
+                let key = frame.registers[key as usize].clone();
+                frame.registers[dst as usize] = interp.get_prop_value(&proto, &key)?;
+            }
+            Instr::SuperCall { dst, args, argc } => {
+                let argv = take_range(frame, args, argc)?;
+                frame.registers[dst as usize] = super_call(interp, argv)?;
+            }
+            Instr::SuperCallSpread { dst, tmpl } => {
+                let template = spread_template(frame, tmpl)?;
+                let argv = spread_argv(frame, &template)?;
+                frame.registers[dst as usize] = super_call(interp, argv)?;
+            }
+            Instr::Raise { msg } => {
+                let message = const_string(frame.function, msg)?.to_string();
+                return Err(VmErr::Msg(message));
+            }
+            Instr::BuildClass { dst, tmpl } => {
+                let template = match &frame.function.constants[tmpl as usize] {
+                    Constant::ClassTemplate(template) => template.clone(),
+                    _ => return Err(internal("bad class template")),
+                };
+                frame.registers[dst as usize] = build_class_from_template(interp, frame, &template)?;
+            }
+            Instr::PropertyKey { dst, src } => {
+                let key = frame.registers[src as usize].clone();
+                let key = interp.property_key(&key)?;
+                frame.registers[dst as usize] = Value::String(key);
+            }
             }
             Ok(())
         })();
@@ -692,6 +730,177 @@ fn compound_slot(
     frame.slots[slot as usize].value = combined.clone();
     frame.slots[slot as usize].initialized = true;
     Ok(combined)
+}
+
+/// Instantiate one method/accessor/constructor function from a class
+/// template's function constant, closing over `closure`.
+fn class_function(
+    interp: &Interpreter,
+    frame: &CallFrame,
+    index: u16,
+    closure: Env,
+    name_override: Option<Rc<str>>,
+) -> Result<Value, VmErr> {
+    match frame.function.constants.get(index as usize) {
+        Some(Constant::Function(code)) => {
+            Ok(make_function(interp, code, closure, name_override))
+        }
+        Some(Constant::AstFunction(ast)) => {
+            Ok(make_ast_function(interp, ast, closure, name_override))
+        }
+        _ => Err(internal("bad class function constant")),
+    }
+}
+
+/// Build a class value from a template: resolve member names, instantiate
+/// functions over the superclass scopes, gather members exactly like the
+/// evaluator's member walk, then share its assembly.
+fn build_class_from_template(
+    interp: &mut Interpreter,
+    frame: &CallFrame,
+    template: &super::constants::ClassTemplate,
+) -> Result<Value, VmErr> {
+    use super::constants::{ClassMemberKind, ClassNameTemplate};
+    use crate::interpreter::{ClassAssembly, insert_class_accessor};
+
+    let def_scope = match &template.expr_name {
+        Some(_) => Rc::new(RefCell::new(Environment::child(interp.global.clone()))),
+        None => interp.global.clone(),
+    };
+    let super_cls = template
+        .superclass
+        .map(|reg| frame.registers[reg as usize].clone());
+    let super_proto = interp.super_proto_for(&super_cls)?;
+    let member_closure = Interpreter::member_closure_env(&def_scope, &super_proto);
+
+    let mut proto_props = Vec::new();
+    let mut statics = vec![(
+        "name".to_string(),
+        Value::String(template.name.clone()),
+    )];
+    let mut static_attrs = vec![(
+        "name".to_owned(),
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    )];
+    let mut static_has_accessors = false;
+    for member in &template.members {
+        let computed;
+        let key = match &member.name {
+            ClassNameTemplate::Static(name) => name.clone(),
+            ClassNameTemplate::Computed(reg) => {
+                computed = frame.registers[*reg as usize].clone();
+                interp.property_key(&computed)?
+            }
+        };
+        // Computed names are known only now; static ones were set when
+        // each function compiled.
+        let display = |prefix: &str| match &member.name {
+            ClassNameTemplate::Static(_) => None,
+            ClassNameTemplate::Computed(_) => Some(Rc::from(format!("{prefix}{key}"))),
+        };
+        match member.kind {
+            ClassMemberKind::Method => {
+                let func = member.func.ok_or_else(|| internal("method without function"))?;
+                let fn_val =
+                    class_function(interp, frame, func, member_closure.clone(), display(""))?;
+                if member.is_static {
+                    statics.push((key.clone(), fn_val));
+                    static_attrs.push((
+                        key,
+                        PropAttrs {
+                            writable: true,
+                            enumerable: false,
+                            configurable: true,
+                        },
+                    ));
+                } else {
+                    proto_props.push((key, fn_val));
+                }
+            }
+            ClassMemberKind::Getter | ClassMemberKind::Setter => {
+                let func = member.func.ok_or_else(|| internal("accessor without function"))?;
+                let prefix = if member.kind == ClassMemberKind::Getter { "get " } else { "set " };
+                let fn_val =
+                    class_function(interp, frame, func, member_closure.clone(), display(prefix))?;
+                if member.is_static {
+                    insert_class_accessor(&mut statics, &key, fn_val);
+                    static_attrs.push((
+                        key,
+                        PropAttrs {
+                            writable: false,
+                            enumerable: false,
+                            configurable: true,
+                        },
+                    ));
+                    static_has_accessors = true;
+                } else {
+                    proto_props.push((key, fn_val));
+                }
+            }
+            ClassMemberKind::Field => {
+                let reg = member.value.ok_or_else(|| internal("field without value"))?;
+                let value = frame.registers[reg as usize].clone();
+                statics.push((key.clone(), value));
+                static_attrs.push((key, PropAttrs::default()));
+            }
+        }
+    }
+
+    let super_ctor_value = Interpreter::super_ctor_for(&super_cls);
+    let ctor_closure = match (&super_ctor_value, template.ctor_computed_keys.is_empty()) {
+        (None, true) => def_scope.clone(),
+        _ => {
+            let env = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+            if let Some(target) = super_ctor_value {
+                env.borrow_mut().set("__super_ctor", target);
+            }
+            for (index, reg) in template.ctor_computed_keys.iter().enumerate() {
+                let key = frame.registers[*reg as usize].clone();
+                env.borrow_mut()
+                    .set(&super::constants::class_key_name(index), key);
+            }
+            env
+        }
+    };
+    let constructor = class_function(interp, frame, template.ctor_func, ctor_closure, None)?;
+    let mut static_blocks = Vec::with_capacity(template.blocks.len());
+    for block in &template.blocks {
+        match frame.function.constants.get(*block as usize) {
+            Some(Constant::AstFunction(ast)) => static_blocks.push(ast.body.clone()),
+            _ => return Err(internal("bad class static block")),
+        }
+    }
+    let class_val = interp.assemble_class(ClassAssembly {
+        name: template.name.clone(),
+        super_cls,
+        super_proto,
+        constructor,
+        constructor_length: template.ctor_length,
+        proto_props,
+        statics,
+        static_attrs,
+        static_has_accessors,
+        static_blocks,
+    })?;
+    if let Some(name) = &template.expr_name {
+        def_scope.borrow_mut().set(name, class_val.clone());
+    }
+    Ok(class_val)
+}
+
+/// `super(...)`: invoke the superclass constructor on the current `this`.
+fn super_call(interp: &mut Interpreter, argv: Vec<Value>) -> Result<Value, VmErr> {
+    let scope = interp.global.borrow();
+    let this_val = scope.get("this").unwrap_or(Value::Undefined);
+    let super_ctor = scope.get("__super_ctor").ok_or_else(|| {
+        VmErr::Msg("super used outside a derived class".to_string())
+    })?;
+    drop(scope);
+    interp.invoke_ctor(&super_ctor, this_val, argv)
 }
 
 /// Clone one verified operand range out of the register file.
@@ -943,14 +1152,19 @@ fn check_prop_limit(positions: &HashMap<String, Vec<usize>>) -> Result<(), VmErr
 /// empty program per instantiation: unique `Rc` identity per object (the
 /// callback registry keys on it), never executed (calls dispatch on
 /// `bytecode`, generators and async never compile).
-fn make_function(interp: &Interpreter, code: &Rc<BytecodeFunction>) -> Value {
+fn make_function(
+    interp: &Interpreter,
+    code: &Rc<BytecodeFunction>,
+    closure: Env,
+    name_override: Option<Rc<str>>,
+) -> Value {
     let params: Vec<String> = code.slots[..code.parameter_count as usize]
         .iter()
         .map(|slot| slot.name.clone())
         .collect();
     Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
-        name: code.name.as_deref().map(Rc::from),
+        name: name_override.or_else(|| code.name.as_deref().map(Rc::from)),
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
         standard_properties_initialized: Rc::new(Cell::new(false)),
         params: intern_params(&params),
@@ -960,7 +1174,7 @@ fn make_function(interp: &Interpreter, code: &Rc<BytecodeFunction>) -> Value {
         // (dynamic scope). Capture-free-ness only means no *slot* bindings
         // escape — slot bindings are invisible to environment chains, which
         // is why capturing functions decline compilation.
-        closure: Some(interp.global.clone()),
+        closure: Some(closure),
         is_arrow: code.is_arrow,
         is_constructor: code.is_constructor,
         is_async: false,
@@ -976,15 +1190,20 @@ fn make_function(interp: &Interpreter, code: &Rc<BytecodeFunction>) -> Value {
 /// construction (capturing functions decline the whole unit), but the link
 /// is still load-bearing: without it free variables would resolve through
 /// the caller's frame instead of the definition scope.
-fn make_ast_function(interp: &Interpreter, ast: &super::constants::AstFunction) -> Value {
+fn make_ast_function(
+    interp: &Interpreter,
+    ast: &super::constants::AstFunction,
+    closure: Env,
+    name_override: Option<Rc<str>>,
+) -> Value {
     Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
-        name: ast.name.as_deref().map(Rc::from),
+        name: name_override.or_else(|| ast.name.as_deref().map(Rc::from)),
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
         standard_properties_initialized: Rc::new(Cell::new(false)),
         params: intern_params(&ast.params),
         body: ast.body.clone(),
-        closure: Some(interp.global.clone()),
+        closure: Some(closure),
         is_arrow: ast.is_arrow,
         is_constructor: ast.is_constructor,
         is_async: ast.is_async,

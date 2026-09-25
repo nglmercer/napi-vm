@@ -33,7 +33,8 @@ pub use native_addon::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
 pub(crate) use eval::{
-    ObjectAccessorKind, close_iterator, insert_object_property, intern_params, push_call_arg,
+    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, close_iterator, insert_class_accessor,
+    insert_object_property, intern_params, push_call_arg,
 };
 pub(crate) use resolve::array_iter;
 #[cfg(all(

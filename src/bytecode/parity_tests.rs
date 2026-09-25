@@ -354,8 +354,46 @@ fn spreads() {
 }
 
 #[test]
+#[test]
+fn classes() {
+    check("class C {} typeof C", true);
+    check("class C { constructor(x){ this.x = x; } get(){ return this.x; } } new C(7).get()", true);
+    check("class C { m(){ return 1; } } new C().m()", true);
+    // Static members, fields, and blocks.
+    check("class C { static x = 40 + 2; } C.x", true);
+    check("class C { static a = 1; static b = C.a + 1; } C.b", true);
+    check("class C { static { C.y = 9; } } C.y", true);
+    check("class C { static m(){ return 's'; } } C.m()", true);
+    check("class C { static get g(){ return 3; } } C.g", true);
+    // Instance fields run in the constructor, in order, observing params.
+    check("class C { a = 1; b = 2; } let o = new C(); o.a + o.b", true);
+    check("class C { x = this.y; constructor(){ this.y = 5; } } new C().x", true);
+    check("class C { v = p; constructor(p){} } new C(11).v", true);
+    // Accessors and computed names.
+    check("class C { get v(){ return this._v; } set v(x){ this._v = x * 2; } } let o = new C(); o.v = 21; o.v", true);
+    check("let k = 'dyn'; class C { [k](){ return 8; } } new C().dyn()", true);
+    check("let k = 'f'; class C { [k] = 5; } new C().f", true);
+    check("class C { ['a' + 'b'] = 1; } new C().ab", true);
+    // Inheritance: implicit and explicit derived constructors, super calls.
+    check("class B { constructor(){ this.t = 'b'; } } class D extends B {} new D().t", true);
+    check("class B { who(){ return 'B'; } } class D extends B { who(){ return super.who() + 'D'; } } new D().who()", true);
+    check("class B { constructor(x){ this.x = x; } } class D extends B { constructor(){ super(4); } } new D().x", true);
+    check("class B { static s(){ return 1; } } class D extends B {} D.s()", true);
+    check("class B extends Object {} new B() instanceof Object", true);
+    // Expressions: anonymous, named (name visible to methods only).
+    check("let C = class { m(){ return 2; } }; new C().m()", true);
+    check("let C = class Named { m(){ return Named === C; } }; new C().m()", true);
+    check("let C = class { static n = 1; }; C.n", true);
+    // Field initializers close over the defining scope; methods capture.
+    check("function f(){ let base = 100; return class { m(){ return base + 1; } }; } new (f())().m()", true);
+    check("function f(){ let v = 9; return class { f = v; }; } new (f())().f", true);
+    // Errors agree across tiers.
+    check("class C { m(){ return super.m(); } } new C().m()", true);
+    check("class C extends null {} 1", true);
+    check("class C { constructor(){ super(); } } new C()", true);
+}
+
 fn declined_units_stay_on_ast() {
-    check("class C {} typeof C", false);
     check("function o(){ function i(){ return 1; } return i(); } o()", true);
     // Block slots have no frame for the chain to serve: still declined.
     check("{ let y = 1; function f(){ return y; } f(); }", false);

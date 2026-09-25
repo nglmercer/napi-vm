@@ -35,13 +35,16 @@ use std::rc::Rc;
 
 use crate::interpreter::{block_needs_lexical_scope, produces_completion_value};
 use crate::parser::{
-    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Pattern,
-    PatternKey, Statement, SwitchCase, UnOp, VarKind, arrow_body_references, collect_var_names,
-    expr_captures_identifier, expr_to_pattern, pattern_names, statements_capture_identifier,
-    stmts_reference,
+    AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName,
+    ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind,
+    arrow_body_references, collect_var_names, expr_captures_identifier, expr_to_pattern,
+    pattern_names, statements_capture_identifier, stmts_reference,
 };
 
-use super::constants::{AstFunction, Constant, PropEntry, PropKind, SpreadEntry};
+use super::constants::{
+    AstFunction, ClassMemberKind, ClassMemberTemplate, ClassNameTemplate, ClassTemplate,
+    Constant, PropEntry, PropKind, SpreadEntry, class_key_name,
+};
 use super::function::{BytecodeFunction, SlotInfo, SlotKind};
 use super::module::BytecodeModule;
 use super::opcode::{Instr, KeySrc, Reg, Slot, Target};
@@ -100,10 +103,19 @@ enum ThisMode {
 /// detection sees the scope the source had, not the scope left when the
 /// parent finishes.
 struct Deferred<'a> {
-    /// Address of the placeholder `MakeFunction` to overwrite.
-    addr: usize,
+    patch: PatchTarget,
     def: FuncDef<'a>,
     snapshot: HashSet<String>,
+}
+
+/// Where a deferred function's constant index lands once it compiles.
+enum PatchTarget {
+    /// Overwrite the placeholder `MakeFunction` at this address.
+    MakeFunction { addr: usize },
+    /// Fill the constructor slot of a class template constant.
+    ClassCtor { tmpl: u16 },
+    /// Fill one member's function slot of a class template constant.
+    ClassMember { tmpl: u16, index: usize },
 }
 
 /// A function definition to compile, borrowed from the parsed unit.
@@ -129,6 +141,20 @@ enum FuncBody<'a> {
 enum FuncOutcome {
     Bytecode(Rc<BytecodeFunction>),
     Ast(Rc<AstFunction>),
+}
+
+/// A written-out `constructor` method, borrowed until its deferred
+/// compilation runs.
+struct OwnedCtor<'a> {
+    params: &'a [String],
+    body: &'a [Statement],
+}
+
+/// An instance field's desugared key: the static name, or the index into
+/// the template's `ctor_computed_keys` holding the definition-time key.
+enum FieldKey {
+    Static(String),
+    Computed(usize),
 }
 
 /// One compile-time lexical scope: slot bindings, or the global marker.
@@ -532,6 +558,11 @@ fn block_lexicals(stmts: &[Statement], out: &mut Vec<(String, SlotKind)>) {
                     out.push((bound, SlotKind::Const));
                 }
             }
+            // Class declarations bind like `let`: block-scoped, mutable,
+            // dead until initialized.
+            Statement::ClassDecl { name, .. } => {
+                out.push((name.clone(), SlotKind::Let));
+            }
             Statement::Declarations(inner) => block_lexicals(inner, out),
             _ => {}
         }
@@ -746,7 +777,11 @@ impl<'a> Compiler<'a> {
         let dst = self.alloc_reg()?;
         let addr = self.here();
         self.emit(Instr::MakeFunction { dst, func: u16::MAX });
-        self.deferred.push(Deferred { addr, def, snapshot: self.live_block_names() });
+        self.deferred.push(Deferred {
+            patch: PatchTarget::MakeFunction { addr },
+            def,
+            snapshot: self.live_block_names(),
+        });
         Ok(dst)
     }
 
@@ -763,19 +798,40 @@ impl<'a> Compiler<'a> {
                 FuncOutcome::Bytecode(code) => (self.push_const(Constant::Function(code))?, true),
                 FuncOutcome::Ast(ast) => (self.push_const(Constant::AstFunction(ast))?, false),
             };
-            match self.code.get_mut(item.addr) {
-                Some(slot @ Instr::MakeFunction { .. }) => {
-                    let dst = match slot {
-                        Instr::MakeFunction { dst, .. } => *dst,
-                        _ => unreachable!("matched above"),
+            match item.patch {
+                PatchTarget::MakeFunction { addr } => match self.code.get_mut(addr) {
+                    Some(slot @ Instr::MakeFunction { .. }) => {
+                        let dst = match slot {
+                            Instr::MakeFunction { dst, .. } => *dst,
+                            _ => unreachable!("matched above"),
+                        };
+                        *slot = if is_bytecode {
+                            Instr::MakeFunction { dst, func: index }
+                        } else {
+                            Instr::MakeAstFunction { dst, ast: index }
+                        };
+                    }
+                    _ => return Err(Decline::Func("bad function patch")),
+                },
+                PatchTarget::ClassCtor { tmpl } => {
+                    let Some(Constant::ClassTemplate(template)) =
+                        self.constants.get_mut(tmpl as usize)
+                    else {
+                        return Err(Decline::Func("bad class patch"));
                     };
-                    *slot = if is_bytecode {
-                        Instr::MakeFunction { dst, func: index }
-                    } else {
-                        Instr::MakeAstFunction { dst, ast: index }
-                    };
+                    template.ctor_func = index;
                 }
-                _ => return Err(Decline::Func("bad function patch")),
+                PatchTarget::ClassMember { tmpl, index: member } => {
+                    let Some(Constant::ClassTemplate(template)) =
+                        self.constants.get_mut(tmpl as usize)
+                    else {
+                        return Err(Decline::Func("bad class patch"));
+                    };
+                    let Some(entry) = template.members.get_mut(member) else {
+                        return Err(Decline::Func("bad class patch"));
+                    };
+                    entry.func = Some(index);
+                }
             }
         }
         Ok(())
@@ -963,7 +1019,17 @@ impl<'a> Compiler<'a> {
             Statement::Empty => self.load_undefined(),
             Statement::Try { body, catch, finally } => self.compile_try(body, catch, finally),
             Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
-            Statement::ClassDecl { .. } => Err(Decline::Func("classes need Phase G")),
+            Statement::ClassDecl { name, superclass, body } => {
+                let value = self.compile_class(name, None, superclass.as_deref(), body)?;
+                match self.resolve(name)? {
+                    Binding::Slot(slot) => self.emit(Instr::InitLocal { slot, src: value }),
+                    Binding::Global => {
+                        let index = self.intern_string(name)?;
+                        self.emit(Instr::InitGlobal { name: index, src: value });
+                    }
+                }
+                self.load_undefined()
+            }
             Statement::ForIn { name, obj, body } => self.compile_for_in(name, obj, body),
             Statement::ForOf { name, pattern, iter, body, is_await } => {
                 self.compile_for_of(name, pattern, iter, body, *is_await)
@@ -1098,7 +1164,8 @@ impl<'a> Compiler<'a> {
             Pattern::Ident(name) => self.compile_pattern_ident(name, val, mode),
             Pattern::Member { object, property } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return Err(Decline::Unit("super needs Phase G"));
+                    // The reference fails before the property evaluates.
+                    return self.raise_bare_super().map(|_| ());
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -1187,6 +1254,286 @@ impl<'a> Compiler<'a> {
                 self.compile_destructure(inner, value, mode)
             }
         }
+    }
+
+    /// Compile a class declaration or expression to a `BuildClass`.
+    /// The walk mirrors the evaluator's member order exactly: the
+    /// superclass first, then each member's computed name and static
+    /// initializer inline. Methods defer like nested functions; instance
+    /// fields desugar into the constructor body, like the evaluator.
+    fn compile_class(
+        &mut self,
+        name: &str,
+        expr_name: Option<String>,
+        superclass: Option<&'a Expr>,
+        body: &'a [ClassMember],
+    ) -> Result<Reg, Decline> {
+        let snapshot = self.live_block_names();
+        let superclass = superclass.map(|expr| self.compile_expr(expr)).transpose()?;
+
+        let mut members = Vec::new();
+        let mut blocks = Vec::new();
+        let mut ctor_computed_keys = Vec::new();
+        let mut deferred = Vec::new();
+        // Instance field keys in field order: a static name, or the index
+        // into `ctor_computed_keys` holding the evaluated key.
+        let mut instance_fields: Vec<(FieldKey, Option<&'a Expr>)> = Vec::new();
+        let mut ctor: Option<OwnedCtor<'a>> = None;
+
+        for member in body {
+            match member {
+                ClassMember::Method {
+                    name: member_name,
+                    is_static: st,
+                    params,
+                    body: method_body,
+                    is_async,
+                    is_generator,
+                } => {
+                    let template = self.compile_member_name(member_name)?;
+                    // Only a written-out `constructor` is the constructor,
+                    // like the evaluator; a computed "constructor" stays a
+                    // plain method.
+                    let is_ctor = !st
+                        && matches!(member_name, MemberName::Static(n) if n == "constructor");
+                    if is_ctor {
+                        ctor = Some(OwnedCtor { params, body: method_body });
+                        continue;
+                    }
+                    let display = match &template {
+                        ClassNameTemplate::Static(key) => Some(key.clone()),
+                        // The builder names computed members once the key
+                        // value is known.
+                        ClassNameTemplate::Computed(_) => None,
+                    };
+                    deferred.push((
+                        PatchTarget::ClassMember { tmpl: u16::MAX, index: members.len() },
+                        FuncDef {
+                            name: display,
+                            params,
+                            body: FuncBody::Stmts(method_body),
+                            is_arrow: false,
+                            is_async: *is_async,
+                            is_generator: *is_generator,
+                            is_constructor: false,
+                        },
+                    ));
+                    members.push(ClassMemberTemplate {
+                        kind: ClassMemberKind::Method,
+                        is_static: *st,
+                        name: template,
+                        func: Some(u16::MAX),
+                        value: None,
+                    });
+                }
+                ClassMember::Field { name: field_name, is_static: st, init } => {
+                    let template = self.compile_member_name(field_name)?;
+                    if *st {
+                        let value = match init {
+                            Some(expr) => self.compile_expr(expr)?,
+                            None => self.load_undefined()?,
+                        };
+                        members.push(ClassMemberTemplate {
+                            kind: ClassMemberKind::Field,
+                            is_static: true,
+                            name: template,
+                            func: None,
+                            value: Some(value),
+                        });
+                    } else {
+                        let key = match template {
+                            ClassNameTemplate::Static(key) => FieldKey::Static(key),
+                            ClassNameTemplate::Computed(reg) => {
+                                let index = ctor_computed_keys.len();
+                                ctor_computed_keys.push(reg);
+                                FieldKey::Computed(index)
+                            }
+                        };
+                        instance_fields.push((key, init.as_ref()));
+                    }
+                }
+                ClassMember::Getter { name: member_name, is_static: st, body: getter_body } => {
+                    let template = self.compile_member_name(member_name)?;
+                    let display = match &template {
+                        ClassNameTemplate::Static(key) => Some(format!("get {key}")),
+                        ClassNameTemplate::Computed(_) => None,
+                    };
+                    deferred.push((
+                        PatchTarget::ClassMember { tmpl: u16::MAX, index: members.len() },
+                        FuncDef {
+                            name: display,
+                            params: &[],
+                            body: FuncBody::Stmts(getter_body),
+                            is_arrow: false,
+                            is_async: false,
+                            is_generator: false,
+                            is_constructor: false,
+                        },
+                    ));
+                    members.push(ClassMemberTemplate {
+                        kind: ClassMemberKind::Getter,
+                        is_static: *st,
+                        name: template,
+                        func: Some(u16::MAX),
+                        value: None,
+                    });
+                }
+                ClassMember::Setter {
+                    name: member_name,
+                    param,
+                    is_static: st,
+                    body: setter_body,
+                } => {
+                    let template = self.compile_member_name(member_name)?;
+                    let display = match &template {
+                        ClassNameTemplate::Static(key) => Some(format!("set {key}")),
+                        ClassNameTemplate::Computed(_) => None,
+                    };
+                    deferred.push((
+                        PatchTarget::ClassMember { tmpl: u16::MAX, index: members.len() },
+                        FuncDef {
+                            name: display,
+                            params: std::slice::from_ref(param),
+                            body: FuncBody::Stmts(setter_body),
+                            is_arrow: false,
+                            is_async: false,
+                            is_generator: false,
+                            is_constructor: false,
+                        },
+                    ));
+                    members.push(ClassMemberTemplate {
+                        kind: ClassMemberKind::Setter,
+                        is_static: *st,
+                        name: template,
+                        func: Some(u16::MAX),
+                        value: None,
+                    });
+                }
+                ClassMember::StaticBlock { body: block_body } => {
+                    // Static blocks always run on the AST tier: the builder
+                    // hands their bodies to assembly, like the evaluator.
+                    let ast = build_ast_function(&FuncDef {
+                        name: None,
+                        params: &[],
+                        body: FuncBody::Stmts(block_body),
+                        is_arrow: false,
+                        is_async: false,
+                        is_generator: false,
+                        is_constructor: false,
+                    });
+                    blocks.push(self.push_const(Constant::AstFunction(ast))?);
+                }
+            }
+        }
+
+        let (ctor_params, ctor_body) =
+            Self::class_ctor_body(superclass.is_some(), ctor, &instance_fields);
+        let ctor_length =
+            ctor_params.iter().take_while(|param| !param.starts_with("...")).count();
+        deferred.push((
+            PatchTarget::ClassCtor { tmpl: u16::MAX },
+            FuncDef {
+                // The evaluator names the constructor after the class.
+                name: Some(name.to_string()),
+                params: ctor_params,
+                body: FuncBody::Stmts(ctor_body),
+                is_arrow: false,
+                is_async: false,
+                is_generator: false,
+                is_constructor: false,
+            },
+        ));
+
+        let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
+            name: name.to_string(),
+            expr_name,
+            superclass,
+            ctor_func: u16::MAX,
+            ctor_length,
+            ctor_computed_keys,
+            members,
+            blocks,
+        }))?;
+        let dst = self.alloc_reg()?;
+        self.emit(Instr::BuildClass { dst, tmpl });
+        for (mut patch, def) in deferred {
+            match &mut patch {
+                PatchTarget::ClassCtor { tmpl: slot }
+                | PatchTarget::ClassMember { tmpl: slot, .. } => *slot = tmpl,
+                PatchTarget::MakeFunction { .. } => unreachable!("class defers class patches"),
+            }
+            self.deferred.push(Deferred { patch, def, snapshot: snapshot.clone() });
+        }
+        Ok(dst)
+    }
+
+    /// A member name as written, or compiled and coerced when computed.
+    /// Coercing now matches the evaluator, which keys members at class
+    /// definition time rather than at first use.
+    fn compile_member_name(&mut self, name: &'a MemberName) -> Result<ClassNameTemplate, Decline> {
+        match name {
+            MemberName::Static(key) => Ok(ClassNameTemplate::Static(key.clone())),
+            MemberName::Computed(expr) => {
+                let src = self.compile_expr(expr)?;
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::PropertyKey { dst, src });
+                Ok(ClassNameTemplate::Computed(dst))
+            }
+        }
+    }
+
+    /// The constructor's parameter list and body: the written one with
+    /// instance fields desugared ahead of it, the implicit derived
+    /// `constructor(...args) { super(...args); }`, or the empty default.
+    /// Owned bodies promote to the compilation lifetime, like converted
+    /// destructuring patterns.
+    fn class_ctor_body(
+        is_derived: bool,
+        ctor: Option<OwnedCtor<'a>>,
+        instance_fields: &[(FieldKey, Option<&'a Expr>)],
+    ) -> (&'a [String], &'a [Statement]) {
+        let (params, body): (&'a [String], &'a [Statement]) = match ctor {
+            Some(own) => (own.params, own.body),
+            None if is_derived => {
+                let params: &'a [String] =
+                    Box::leak(Box::new(vec!["...args".to_string()]));
+                let body: &'a [Statement] = Box::leak(Box::new(vec![Statement::Expr(
+                    Expr::Call {
+                        callee: Box::new(Expr::Super),
+                        args: vec![Expr::Spread(Box::new(Expr::Identifier(
+                            "args".to_string(),
+                        )))],
+                    },
+                )]));
+                (params, body)
+            }
+            None => (&[], &[]),
+        };
+        if instance_fields.is_empty() {
+            return (params, body);
+        }
+        let mut full = Vec::with_capacity(instance_fields.len() + body.len());
+        for (key, init) in instance_fields {
+            let (property, computed) = match key {
+                FieldKey::Static(field) => (Expr::String(field.clone()), false),
+                // Evaluated at class definition time; the builder binds the
+                // value into the constructor's scope under this key.
+                FieldKey::Computed(index) => {
+                    (Expr::Identifier(class_key_name(*index)), true)
+                }
+            };
+            full.push(Statement::Expr(Expr::Assignment {
+                target: Box::new(Expr::Member {
+                    object: Box::new(Expr::This),
+                    property: Box::new(property),
+                    computed,
+                }),
+                op: AssignOp::Assign,
+                value: Box::new(init.cloned().unwrap_or(Expr::Undefined)),
+            }));
+        }
+        full.extend(body.iter().cloned());
+        (params, Box::leak(full.into_boxed_slice()))
     }
 
     fn compile_var_decl(
@@ -1902,7 +2249,10 @@ impl<'a> Compiler<'a> {
             Expr::Call { callee, args } => self.compile_call(callee, args),
             Expr::Member { object, property, .. } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return Err(Decline::Unit("super needs Phase G"));
+                    let key = self.compile_expr(property)?;
+                    let dst = self.alloc_reg()?;
+                    self.emit(Instr::SuperMember { dst, key });
+                    return Ok(dst);
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -1974,31 +2324,24 @@ impl<'a> Compiler<'a> {
                 Ok(dst)
             }
             Expr::Template { quasis, exprs } => self.compile_template(quasis, exprs),
-            Expr::This => match self.this_mode {
-                ThisMode::Frame => {
-                    let dst = self.alloc_reg()?;
-                    self.emit(Instr::LoadThis { dst });
-                    Ok(dst)
-                }
-                ThisMode::Global => {
-                    let dst = self.alloc_reg()?;
-                    self.emit(Instr::LoadGlobalThis { dst });
-                    Ok(dst)
-                }
-                ThisMode::Reject => Err(Decline::Unit("arrow `this` capture needs Phase G")),
-            },
+            Expr::This => self.compile_this(),
             Expr::Object(props) => self.compile_object(props),
-            Expr::ClassExpr { .. } => Err(Decline::Func("classes need Phase G")),
+            Expr::ClassExpr { name, superclass, body } => self.compile_class(
+                name.as_deref().unwrap_or(""),
+                name.clone(),
+                superclass.as_deref(),
+                body,
+            ),
             Expr::TaggedTemplate { tag, cooked, exprs, .. } => {
                 self.compile_tagged(tag, cooked, exprs)
             }
-            Expr::Super => Err(Decline::Unit("super needs Phase G")),
+            Expr::Super => self.raise_bare_super(),
+            Expr::Spread(inner) => self.compile_expr(inner),
             Expr::ImportMeta | Expr::DynamicImport(_) => {
                 Err(Decline::Func("modules need Phase G"))
             }
             Expr::Await(_) => Err(Decline::Func("async needs Phase G")),
             Expr::Yield(_) | Expr::YieldFrom(_) => Err(Decline::Func("generators need Phase G")),
-            Expr::Spread(_) => Err(Decline::Func("spread needs Phase G")),
             Expr::BigIntLiteral(digits) => {
                 match crate::bigint::BigInt::parse(digits) {
                     Ok(value) => {
@@ -2279,7 +2622,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Member { object, property, .. } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return Err(Decline::Unit("super needs Phase G"));
+                    return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -2301,7 +2644,7 @@ impl<'a> Compiler<'a> {
         match operand {
             Expr::Member { object, property, .. } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return Err(Decline::Unit("super needs Phase G"));
+                    return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -2406,8 +2749,20 @@ impl<'a> Compiler<'a> {
         let argc = 1 + values.len() as u16;
         let dst = self.alloc_reg()?;
         match tag {
+            Expr::Member { object, property, .. } if matches!(object.as_ref(), Expr::Super) => {
+                let key = self.compile_expr(property)?;
+                let callee = self.alloc_reg()?;
+                self.emit(Instr::SuperMember { dst: callee, key });
+                let this = self.compile_this()?;
+                self.emit(Instr::CallMethod {
+                    dst,
+                    callee,
+                    this,
+                    args: start,
+                    argc,
+                });
+            }
             Expr::Member { object, property, .. } => {
-                check_callable_spine(object)?;
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
@@ -2421,7 +2776,7 @@ impl<'a> Compiler<'a> {
                 });
             }
             Expr::Super => {
-                return Err(Decline::Unit("super needs Phase G"));
+                return self.raise_bare_super();
             }
             _ => {
                 let callee = self.compile_expr(tag)?;
@@ -2438,6 +2793,33 @@ impl<'a> Compiler<'a> {
 
     /// Calls evaluate arguments before the callee, like the evaluator (and
     /// unlike the specification — this engine's order is load-bearing).
+    /// The current `this`: the frame's for plain functions, the global
+    /// one at top level. Arrows inside functions capture it lexically.
+    fn compile_this(&mut self) -> Result<Reg, Decline> {
+        match self.this_mode {
+            ThisMode::Frame => {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::LoadThis { dst });
+                Ok(dst)
+            }
+            ThisMode::Global => {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::LoadGlobalThis { dst });
+                Ok(dst)
+            }
+            ThisMode::Reject => Err(Decline::Unit("arrow `this` capture needs Phase G")),
+        }
+    }
+
+    /// A bare `super` (or a reference through one): the evaluator fails
+    /// reference evaluation, after any earlier side effects already ran.
+    /// The returned register never receives a value; the raise diverges.
+    fn raise_bare_super(&mut self) -> Result<Reg, Decline> {
+        let msg = self.intern_string("'super' must be called as a function")?;
+        self.emit(Instr::Raise { msg });
+        self.alloc_reg()
+    }
+
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
         // The callee shape is syntactic, so classify before emitting: method
         // calls keep their receiver, chains join on nullish, `super`
@@ -2446,16 +2828,16 @@ impl<'a> Compiler<'a> {
             Method,
             Plain,
             Chain { object: &'x Expr, property: &'x Expr },
+            Super,
+            SuperMember { property: &'x Expr },
         }
         let kind = match callee {
-            Expr::Member { object, .. } => {
-                check_callable_spine(object)?;
-                Callee::Method
+            Expr::Member { object, property, .. } if matches!(object.as_ref(), Expr::Super) => {
+                Callee::SuperMember { property }
             }
+            Expr::Member { .. } => Callee::Method,
             Expr::OptionalChain { object, property, .. } => Callee::Chain { object, property },
-            Expr::Super => {
-                return Err(Decline::Unit("super needs Phase G"));
-            }
+            Expr::Super => Callee::Super,
             _ => Callee::Plain,
         };
         // Arguments evaluate before the callee, like the evaluator — even
@@ -2516,6 +2898,28 @@ impl<'a> Compiler<'a> {
                     }
                     CallArgs::Spread { tmpl } => {
                         self.emit(Instr::CallSpread { dst, callee, tmpl });
+                    }
+                }
+            }
+            Callee::Super => match call_args {
+                CallArgs::Range { start, argc } => {
+                    self.emit(Instr::SuperCall { dst, args: start, argc });
+                }
+                CallArgs::Spread { tmpl } => {
+                    self.emit(Instr::SuperCallSpread { dst, tmpl });
+                }
+            },
+            Callee::SuperMember { property } => {
+                let key = self.compile_expr(property)?;
+                let callee = self.alloc_reg()?;
+                self.emit(Instr::SuperMember { dst: callee, key });
+                let this = self.compile_this()?;
+                match call_args {
+                    CallArgs::Range { start, argc } => {
+                        self.emit(Instr::CallMethod { dst, callee, this, args: start, argc });
+                    }
+                    CallArgs::Spread { tmpl } => {
+                        self.emit(Instr::MethodSpread { dst, callee, this, tmpl });
                     }
                 }
             }
@@ -2592,7 +2996,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Member { object, property, .. } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return Err(Decline::Unit("super needs Phase G"));
+                    return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -2651,7 +3055,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Member { object, property, .. } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return Err(Decline::Unit("super needs Phase G"));
+                    return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -2695,22 +3099,6 @@ impl<'a> Compiler<'a> {
 }
 
 // -- nested functions --------------------------------------------------------
-
-/// Reject a method-call receiver spine containing `super` (whole unit) or an
-/// optional chain (this function). Plain member spines are fine.
-/// Reject a method-call receiver spine containing `super` (whole unit).
-/// Optional chains in the spine compile by shape: a short-circuited object
-/// flows into the member access like any other value.
-fn check_callable_spine(mut object: &Expr) -> Result<(), Decline> {
-    loop {
-        match object {
-            Expr::Super => return Err(Decline::Unit("super needs Phase G")),
-            Expr::Member { object: inner, .. } => object = inner,
-            Expr::OptionalChain { object: inner, .. } => object = inner,
-            _ => return Ok(()),
-        }
-    }
-}
 
 fn has_rest_param(params: &[String]) -> bool {
     params.iter().any(|param| param.starts_with("..."))
@@ -2834,7 +3222,7 @@ mod tests {
         for (source, expected) in [
             ("try { f(); } catch (e) { g(); }", "compiled"),
             ("switch (x) { case 1: y(); }", "compiled"),
-            ("class C {}", "classes need Phase G"),
+            ("class C {}", "compiled"),
             ("for (let k in o) { f(k); }", "compiled"),
             ("for (const v of a) { f(v); }", "compiled"),
             ("let o = { a: 1 };", "compiled"),

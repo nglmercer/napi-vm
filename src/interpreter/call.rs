@@ -1407,7 +1407,7 @@ impl Interpreter {
 
     /// Run a constructor (class or function) against an already-created `this`,
     /// as done by `super(...)`. Returns `this`.
-    pub(super) fn invoke_ctor(
+    pub(crate) fn invoke_ctor(
         &mut self,
         f: &Value,
         this_val: Value,

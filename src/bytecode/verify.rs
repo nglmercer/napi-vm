@@ -207,6 +207,7 @@ impl Checker<'_> {
             Constant::AstFunction(_) => expected == "ast-function",
             Constant::ObjectTemplate(_) => expected == "object-template",
             Constant::SpreadTemplate(_) => expected == "spread-template",
+            Constant::ClassTemplate(_) => expected == "class-template",
         };
         if ok {
             Ok(())
@@ -511,6 +512,29 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
             }
             Instr::PopHandler | Instr::Rethrow => {}
+            Instr::SuperMember { dst, key } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *key)?;
+            }
+            Instr::SuperCall { dst, args, argc } => {
+                self.check_reg(address, *dst)?;
+                self.check_range(address, *args, *argc)?;
+            }
+            Instr::SuperCallSpread { dst, tmpl } => {
+                self.check_reg(address, *dst)?;
+                self.check_spread_template(address, *tmpl)?;
+            }
+            Instr::Raise { msg } => {
+                self.check_const_is(address, *msg, "string")?;
+            }
+            Instr::BuildClass { dst, tmpl } => {
+                self.check_reg(address, *dst)?;
+                self.check_class_template(address, *tmpl)?;
+            }
+            Instr::PropertyKey { dst, src } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+            }
         }
         Ok(())
     }
@@ -525,6 +549,46 @@ impl Checker<'_> {
             }
         }
         Ok(())
+    }
+
+    fn check_class_template(&self, address: usize, tmpl: u16) -> Result<(), VerifyError> {
+        use super::constants::ClassNameTemplate;
+        self.check_const_is(address, tmpl, "class-template")?;
+        let Constant::ClassTemplate(template) = &self.function.constants[tmpl as usize] else {
+            return Ok(());
+        };
+        if let Some(reg) = template.superclass {
+            self.check_reg(address, reg)?;
+        }
+        for reg in &template.ctor_computed_keys {
+            self.check_reg(address, *reg)?;
+        }
+        self.check_func_const(address, template.ctor_func)?;
+        for member in &template.members {
+            if let ClassNameTemplate::Computed(reg) = &member.name {
+                self.check_reg(address, *reg)?;
+            }
+            if let Some(func) = member.func {
+                self.check_func_const(address, func)?;
+            }
+            if let Some(reg) = member.value {
+                self.check_reg(address, reg)?;
+            }
+        }
+        for block in &template.blocks {
+            self.check_const_is(address, *block, "ast-function")?;
+        }
+        Ok(())
+    }
+
+    /// A function constant in either form: compiled bytecode or an AST
+    /// fallback for members the compiler declined.
+    fn check_func_const(&self, address: usize, index: u16) -> Result<(), VerifyError> {
+        self.check_const(address, index)?;
+        match &self.function.constants[index as usize] {
+            Constant::Function(_) | Constant::AstFunction(_) => Ok(()),
+            _ => Err(VerifyError::ConstantTypeMismatch { address, expected: "function" }),
+        }
     }
 }
 

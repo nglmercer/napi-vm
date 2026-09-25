@@ -244,6 +244,27 @@ pub enum Instr {
     PopHandler,
     /// Re-raise the error a handler just landed with, after cleanup ran.
     Rethrow,
+    /// `dst` = `super[key]`: a lookup on the superclass prototype from
+    /// the enclosing method's scope (an error outside one).
+    SuperMember { dst: Reg, key: Reg },
+    /// `dst` = `super(args)`: invoke the superclass constructor on the
+    /// current `this` (an error outside a derived constructor).
+    SuperCall { dst: Reg, args: Reg, argc: u16 },
+    /// Spread-argument form of [`Instr::SuperCall`].
+    SuperCallSpread { dst: Reg, tmpl: u16 },
+    /// Raise `constants[msg]` as a runtime error. Used where the
+    /// evaluator fails during reference evaluation (a bare `super`, an
+    /// assignment through one) after running the earlier side effects.
+    Raise { msg: u16 },
+    /// `dst` = the class defined by `constants[tmpl]`: methods close over
+    /// a scope carrying the superclass prototype, the constructor over one
+    /// carrying the superclass constructor, and static blocks run once the
+    /// class value exists. Member functions come from the template's
+    /// constants (bytecode or AST fallback each).
+    BuildClass { dst: Reg, tmpl: u16 },
+    /// `dst` = `src` converted to a property key, like a computed class
+    /// member name evaluated when the class is defined.
+    PropertyKey { dst: Reg, src: Reg },
 }
 
 /// The discriminant of [`Instr`], for classification without operands.
@@ -315,6 +336,12 @@ pub enum Opcode {
     PushFinally,
     PopHandler,
     Rethrow,
+    SuperMember,
+    SuperCall,
+    SuperCallSpread,
+    Raise,
+    BuildClass,
+    PropertyKey,
 }
 
 impl Instr {
@@ -387,6 +414,12 @@ impl Instr {
             Instr::PushFinally { .. } => Opcode::PushFinally,
             Instr::PopHandler => Opcode::PopHandler,
             Instr::Rethrow => Opcode::Rethrow,
+            Instr::SuperMember { .. } => Opcode::SuperMember,
+            Instr::SuperCall { .. } => Opcode::SuperCall,
+            Instr::SuperCallSpread { .. } => Opcode::SuperCallSpread,
+            Instr::Raise { .. } => Opcode::Raise,
+            Instr::BuildClass { .. } => Opcode::BuildClass,
+            Instr::PropertyKey { .. } => Opcode::PropertyKey,
         }
     }
 
@@ -533,6 +566,14 @@ impl fmt::Display for Instr {
             Instr::PushFinally { target, dst } => write!(f, "PUSH_FINALLY @{target}, r{dst}"),
             Instr::PopHandler => write!(f, "POP_HANDLER"),
             Instr::Rethrow => write!(f, "RETHROW"),
+            Instr::SuperMember { dst, key } => write!(f, "SUPER_MEMBER r{dst}, r{key}"),
+            Instr::SuperCall { dst, args, argc } => {
+                write!(f, "SUPER_CALL r{dst}, r{args}..r{args}+{argc}")
+            }
+            Instr::SuperCallSpread { dst, tmpl } => write!(f, "SUPER_CALL_SPREAD r{dst}, c{tmpl}"),
+            Instr::Raise { msg } => write!(f, "RAISE c{msg}"),
+            Instr::BuildClass { dst, tmpl } => write!(f, "BUILD_CLASS r{dst}, c{tmpl}"),
+            Instr::PropertyKey { dst, src } => write!(f, "PROPERTY_KEY r{dst}, r{src}"),
         }
     }
 }

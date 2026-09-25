@@ -37,7 +37,27 @@ fn class_accessor_kind(value: &Value) -> Option<&'static str> {
     }
 }
 
-fn insert_class_accessor(statics: &mut Vec<(String, Value)>, key: &str, accessor: Value) {
+/// Evaluated class parts handed to [`Interpreter::assemble_class`]:
+/// the constructor plus gathered prototype/static members, with static
+/// blocks to run once the class value exists.
+pub(crate) struct ClassAssembly {
+    pub name: String,
+    pub super_cls: Option<Value>,
+    pub super_proto: Option<Rc<Value>>,
+    pub constructor: Value,
+    pub constructor_length: usize,
+    pub proto_props: Vec<(String, Value)>,
+    pub statics: Vec<(String, Value)>,
+    pub static_attrs: Vec<(String, PropAttrs)>,
+    pub static_has_accessors: bool,
+    pub static_blocks: Vec<Rc<Vec<Statement>>>,
+}
+
+pub(crate) fn insert_class_accessor(
+    statics: &mut Vec<(String, Value)>,
+    key: &str,
+    accessor: Value,
+) {
     let companion = format!("__setter:{}__", key);
     let primary = statics.iter().position(|(name, _)| name == key);
     let setter = statics.iter().position(|(name, _)| name == &companion);
@@ -211,6 +231,148 @@ impl Interpreter {
         }
     }
 
+    /// The prototype a class inherits from: the superclass's own, or a
+    /// native constructor's `.prototype` property when that is an object.
+    /// Shared with the bytecode class builder, which evaluates the
+    /// superclass expression to a value first.
+    pub(crate) fn super_proto_for(
+        &mut self,
+        super_cls: &Option<Value>,
+    ) -> Result<Option<Rc<Value>>, VmErr> {
+        match super_cls {
+            Some(Value::Class(c)) => Ok(Some(c.prototype.clone())),
+            Some(other) => {
+                // Native constructors (`Map`, `Set`, `Array`, ...) expose
+                // `.prototype` as an ordinary property; inherit from it like
+                // a class heritage would.
+                match self.get_prop_value(other, &Value::String("prototype".to_string())) {
+                    Ok(proto @ (Value::Object { .. } | Value::Array(_))) => {
+                        Ok(Some(Rc::new(proto)))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// The `super(...)` target for a derived constructor: the superclass's
+    /// constructor, or a callable native heritage itself.
+    pub(crate) fn super_ctor_for(super_cls: &Option<Value>) -> Option<Value> {
+        match super_cls {
+            Some(Value::Class(sc)) => Some(sc.constructor.as_ref().clone()),
+            Some(other) if super::call::is_callable_value(other) => Some(other.clone()),
+            _ => None,
+        }
+    }
+
+    /// The scope methods close over: the definition scope, extended with
+    /// the superclass prototype when there is one.
+    pub(crate) fn member_closure_env(global: &Env, proto: &Option<Rc<Value>>) -> Env {
+        match proto {
+            Some(proto) => {
+                let env = Rc::new(RefCell::new(Environment::child(global.clone())));
+                env.borrow_mut().set(SUPER_PROTO, proto.as_ref().clone());
+                env
+            }
+            None => global.clone(),
+        }
+    }
+
+    /// Assemble a class value from evaluated parts: the constructor and
+    /// the gathered prototype/static members. The member walk (name
+    /// evaluation, function building, constructor detection) stays with
+    /// each tier; everything from the prototype object on is shared.
+    pub(crate) fn assemble_class(&mut self, asm: ClassAssembly) -> Result<Value, VmErr> {
+        let ClassAssembly {
+            name,
+            super_cls,
+            super_proto,
+            constructor,
+            constructor_length,
+            proto_props,
+            mut statics,
+            mut static_attrs,
+            static_has_accessors,
+            static_blocks,
+        } = asm;
+        let prototype = Value::object_with_proto(proto_props, super_proto);
+        prototype.set_prop("constructor".to_string(), constructor.clone())?;
+
+        statics.push((
+            "length".to_owned(),
+            Value::Number(constructor_length as f64),
+        ));
+        static_attrs.push((
+            "length".to_owned(),
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        ));
+        statics.push(("prototype".to_owned(), prototype.clone()));
+        static_attrs.push((
+            "prototype".to_owned(),
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        ));
+        let static_properties = Rc::new(ObjectCell::new_with_default_proto(statics));
+        if let Some(superclass) = &super_cls {
+            static_properties.set_proto(Some(Rc::new(superclass.clone())));
+        } else if let Some(function_prototype) =
+            FunctionData::default_function_prototype(&self.persistent_global)
+        {
+            static_properties.set_proto(Some(Rc::new(function_prototype)));
+        }
+        {
+            let mut meta = static_properties.meta.borrow_mut();
+            for (key, attrs) in static_attrs {
+                meta.set_attrs(&key, attrs);
+            }
+            meta.has_accessors = static_has_accessors;
+        }
+
+        let class_val = Value::Class(Box::new(ClassData {
+            name: name.to_string(),
+            constructor: Box::new(constructor),
+            prototype: Rc::new(prototype),
+            statics: static_properties,
+        }));
+        if let Value::Class(class) = &class_val {
+            class
+                .prototype
+                .as_ref()
+                .set_prop("constructor".to_owned(), class_val.clone())?;
+            if let Value::Object { props } = class.prototype.as_ref() {
+                props.meta.borrow_mut().set_attrs(
+                    "constructor",
+                    PropAttrs {
+                        writable: true,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
+
+        // The class binds its own name inside static blocks and
+        // method bodies, so `static { A.y = … }` can reach it.
+        for block in static_blocks {
+            let scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+            scope.borrow_mut().set("this", class_val.clone());
+            scope.borrow_mut().set(&name, class_val.clone());
+            let saved = std::mem::replace(&mut self.global, scope);
+            let result = self.run_program_body(&block);
+            self.global = saved;
+            result?;
+        }
+        Ok(class_val)
+    }
+
     fn build_class(
         &mut self,
         name: &str,
@@ -224,31 +386,12 @@ impl Interpreter {
         };
         // Inheritance: the instance prototype chains to the superclass's
         // prototype so inherited methods resolve.
-        let super_proto = match &super_cls {
-            Some(Value::Class(c)) => Some(c.prototype.clone()),
-            Some(other) => {
-                // Native constructors (`Map`, `Set`, `Array`, ...) expose
-                // `.prototype` as an ordinary property; inherit from it like
-                // a class heritage would.
-                match self.get_prop_value(other, &Value::String("prototype".to_string())) {
-                    Ok(proto @ (Value::Object { .. } | Value::Array(_))) => Some(Rc::new(proto)),
-                    _ => None,
-                }
-            }
-            None => None,
-        };
+        let super_proto = self.super_proto_for(&super_cls)?;
 
         // Methods, getters and setters close over a scope carrying the
         // superclass prototype, so `super.method()` inside one can find it.
         // The constructor gets `__super_ctor` separately, below.
-        let member_closure = match &super_proto {
-            Some(proto) => {
-                let env = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-                env.borrow_mut().set(SUPER_PROTO, proto.as_ref().clone());
-                env
-            }
-            None => self.global.clone(),
-        };
+        let member_closure = Self::member_closure_env(&self.global, &super_proto);
 
         // Gather the constructor, instance fields, and methods.
         let mut ctor_params: Vec<String> = Vec::new();
@@ -456,11 +599,7 @@ impl Interpreter {
         // For a derived class, expose the superclass constructor to the
         // constructor body as `__super_ctor` so `super(...)` can call it. A
         // native heritage is its own `super(...)` target.
-        let super_ctor_value = match &super_cls {
-            Some(Value::Class(sc)) => Some(sc.constructor.as_ref().clone()),
-            Some(other) if super::call::is_callable_value(other) => Some(other.clone()),
-            _ => None,
-        };
+        let super_ctor_value = Self::super_ctor_for(&super_cls);
         let ctor_closure = match super_ctor_value {
             Some(target) => {
                 let env = Rc::new(RefCell::new(Environment::child(self.global.clone())));
@@ -496,81 +635,18 @@ impl Interpreter {
             bound: None,
         }));
 
-        let prototype = Value::object_with_proto(proto_props, super_proto);
-        prototype.set_prop("constructor".to_string(), constructor.clone())?;
-
-        statics.push((
-            "length".to_owned(),
-            Value::Number(constructor_length as f64),
-        ));
-        static_attrs.push((
-            "length".to_owned(),
-            PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            },
-        ));
-        statics.push(("prototype".to_owned(), prototype.clone()));
-        static_attrs.push((
-            "prototype".to_owned(),
-            PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: false,
-            },
-        ));
-        let static_properties = Rc::new(ObjectCell::new_with_default_proto(statics));
-        if let Some(superclass) = &super_cls {
-            static_properties.set_proto(Some(Rc::new(superclass.clone())));
-        } else if let Some(function_prototype) =
-            FunctionData::default_function_prototype(&self.persistent_global)
-        {
-            static_properties.set_proto(Some(Rc::new(function_prototype)));
-        }
-        {
-            let mut meta = static_properties.meta.borrow_mut();
-            for (key, attrs) in static_attrs {
-                meta.set_attrs(&key, attrs);
-            }
-            meta.has_accessors = static_has_accessors;
-        }
-
-        let class_val = Value::Class(Box::new(ClassData {
+        self.assemble_class(ClassAssembly {
             name: name.to_string(),
-            constructor: Box::new(constructor),
-            prototype: Rc::new(prototype),
-            statics: static_properties,
-        }));
-        if let Value::Class(class) = &class_val {
-            class
-                .prototype
-                .as_ref()
-                .set_prop("constructor".to_owned(), class_val.clone())?;
-            if let Value::Object { props } = class.prototype.as_ref() {
-                props.meta.borrow_mut().set_attrs(
-                    "constructor",
-                    PropAttrs {
-                        writable: true,
-                        enumerable: false,
-                        configurable: true,
-                    },
-                );
-            }
-        }
-
-        // The class binds its own name inside static blocks and
-        // method bodies, so `static { A.y = … }` can reach it.
-        for block in static_blocks {
-            let scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-            scope.borrow_mut().set("this", class_val.clone());
-            scope.borrow_mut().set(name, class_val.clone());
-            let saved = std::mem::replace(&mut self.global, scope);
-            let result = self.run_program_body(&block);
-            self.global = saved;
-            result?;
-        }
-        Ok(class_val)
+            super_cls,
+            super_proto,
+            constructor,
+            constructor_length,
+            proto_props,
+            statics,
+            static_attrs,
+            static_has_accessors,
+            static_blocks: static_blocks.into_iter().map(Rc::new).collect(),
+        })
     }
 
     pub(super) fn eval_stmt(&mut self, s: &Statement) -> Result<Value, VmErr> {
