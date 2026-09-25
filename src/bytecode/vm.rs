@@ -1,0 +1,1 @@
+//! Bytecode virtual machine (stub).

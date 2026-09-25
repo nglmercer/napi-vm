@@ -5,6 +5,7 @@
 #[cfg(feature = "napi")]
 pub mod bindings;
 pub mod builtins;
+pub mod bytecode;
 pub mod convert;
 pub mod error;
 pub mod format;

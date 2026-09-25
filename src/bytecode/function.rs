@@ -1,0 +1,61 @@
+//! Static representation of one compiled function.
+//!
+//! A [`BytecodeFunction`] is pure data: instruction stream, constant pool,
+//! and the slot/register layout the VM needs to build a call frame. It
+//! borrows nothing from any interpreter, so compiled units are shareable
+//! across runtimes and threads.
+
+use super::opcode::Instr;
+use crate::bytecode::constants::Constant;
+
+/// Declaration kind of one local slot, mirroring `BindKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotKind {
+    Var,
+    Let,
+    Const,
+}
+
+/// Compile-time metadata for one local slot: the source name (for
+/// `ReferenceError`/`TypeError` messages) and its declaration kind (for
+/// temporal-dead-zone and const-assignment checks).
+#[derive(Debug, Clone)]
+pub struct SlotInfo {
+    pub name: String,
+    pub kind: SlotKind,
+}
+
+/// One compiled function (or top-level program, which compiles as a
+/// zero-parameter function whose outer scope is the global environment).
+#[derive(Debug, Clone)]
+pub struct BytecodeFunction {
+    /// Function name for stack traces; `None` for anonymous/top-level.
+    pub name: Option<String>,
+    /// Instruction stream. Jump targets are indices into this vector.
+    pub code: Vec<Instr>,
+    /// Constant pool. See [`Constant`].
+    pub constants: Vec<Constant>,
+    /// Expression temporaries per frame. Registers are always initialized:
+    /// the compiler never emits a read before a write.
+    pub register_count: u16,
+    /// Local slots per frame; always `slots.len()`.
+    pub local_count: u16,
+    /// Leading slots (`0..parameter_count`) hold parameters.
+    pub parameter_count: u16,
+    /// Captured-variable slots. Always zero in Phase E: capturing
+    /// functions decline compilation (upvalues arrive in Phase F).
+    pub upvalue_count: u16,
+    /// Per-slot metadata, indexed by slot.
+    pub slots: Vec<SlotInfo>,
+}
+
+impl BytecodeFunction {
+    /// Render the instruction stream with addresses, for tests and debugging.
+    pub fn disassemble(&self) -> String {
+        let mut out = String::new();
+        for (address, instr) in self.code.iter().enumerate() {
+            out.push_str(&format!("{address:04} {instr}\n"));
+        }
+        out
+    }
+}
