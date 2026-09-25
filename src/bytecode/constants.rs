@@ -48,6 +48,12 @@ pub enum Constant {
     /// registers holding the runtime-evaluated superclass, computed names,
     /// and static initializers.
     ClassTemplate(ClassTemplate),
+    /// One `import` statement for [`Instr::Import`](super::opcode::Instr::Import).
+    ImportTemplate(ImportTemplate),
+    /// One `export { ... }` statement for [`Instr::ExportNamed`](super::opcode::Instr::ExportNamed).
+    ExportNamedTemplate(ExportNamedTemplate),
+    /// One `export * [as ns] from` statement for [`Instr::ExportAll`](super::opcode::Instr::ExportAll).
+    ExportAllTemplate(ExportAllTemplate),
 }
 
 /// Scope binding for one computed instance-field key, in field order.
@@ -106,6 +112,31 @@ pub struct ClassTemplate {
     pub members: Vec<ClassMemberTemplate>,
     /// Static-block bodies as AST-function constants.
     pub blocks: Vec<u16>,
+}
+
+/// One `import` statement: the module specifier plus the local names to
+/// bind (default, `(imported, local)` pairs, namespace).
+#[derive(Debug, Clone)]
+pub struct ImportTemplate {
+    pub module: String,
+    pub default: Option<String>,
+    pub named: Vec<(String, String)>,
+    pub namespace: Option<String>,
+}
+
+/// One `export { ... }` statement: `(local, exported)` pairs, optionally
+/// re-exported from another module.
+#[derive(Debug, Clone)]
+pub struct ExportNamedTemplate {
+    pub specifiers: Vec<(String, String)>,
+    pub source: Option<String>,
+}
+
+/// One `export * [as ns] from 'm'` statement.
+#[derive(Debug, Clone)]
+pub struct ExportAllTemplate {
+    pub source: String,
+    pub alias: Option<String>,
 }
 
 /// One element of a [`Constant::SpreadTemplate`]: a register plus whether

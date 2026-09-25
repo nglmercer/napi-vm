@@ -649,6 +649,199 @@ impl Interpreter {
         })
     }
 
+    /// Shared `import` statement: resolve and evaluate the module, then bind
+    /// its exports as live cells. Both the AST evaluator and the register
+    /// VM's `Import` instruction run this, so binding semantics stay single.
+    pub(crate) fn stmt_import(
+        &mut self,
+        module: &str,
+        default: Option<&str>,
+        named: &[(String, String)],
+        namespace: Option<&str>,
+    ) -> Result<Value, VmErr> {
+        let resolved_module = self.resolve_module_name(module);
+        if let Some(name) = resolved_module.as_ref() {
+            let name = name.clone();
+            self.ensure_module(&name)?;
+        }
+        if let Some(md) = resolved_module.as_ref().and_then(|name| self.module(name)) {
+            if let Some(d) = default {
+                let v = md.default.clone().unwrap_or(Value::Undefined);
+                self.bind_import(d, v)?;
+            }
+            for (imported, local) in named {
+                // `import { default as x }` names the default export.
+                let v = if imported == "default" {
+                    md.default.clone().unwrap_or(Value::Undefined)
+                } else {
+                    match md.exports.get(imported).cloned() {
+                        Some(entry) => entry,
+                        // Not exported *yet*: in a cycle the exporting
+                        // module is still running, so bind the cell it
+                        // will fill in when its `export` runs.
+                        None => {
+                            let target = resolved_module.clone().unwrap_or_default();
+                            self.pending_export(&target, imported)
+                                .unwrap_or(Value::Undefined)
+                        }
+                    }
+                };
+                self.bind_import(local, v)?;
+            }
+            if let Some(ns) = namespace {
+                let namespace_object = Self::namespace_object(&md)?;
+                self.set_binding(ns, namespace_object)?;
+            }
+            Ok(Value::Undefined)
+        } else if module.starts_with('.') && self.cur_mod.is_none() {
+            vm_err(format!("Relative import requires a module context: {}", module))
+        } else {
+            vm_err(format!("Module not found: {}", module))
+        }
+    }
+
+    /// Shared `export default`: publish one value as the default export.
+    pub(crate) fn stmt_export_default(&mut self, value: Value) -> Result<Value, VmErr> {
+        self.current_module().default = Some(value);
+        Ok(Value::Undefined)
+    }
+
+    /// Shared `export { ... }`, with or without a `from` source.
+    pub(crate) fn stmt_export_named(
+        &mut self,
+        specifiers: &[(String, String)],
+        source: Option<&str>,
+    ) -> Result<Value, VmErr> {
+        match source {
+            // `export { a, b as c } from 'm'`: forward the *other*
+            // module's live bindings without binding anything locally.
+            Some(source) => {
+                let entries = self.resolve_reexports(source, specifiers)?;
+                let mut record = self.current_module();
+                for (exported, value) in entries {
+                    if exported == "default" {
+                        record.default = Some(value);
+                    } else {
+                        record.exports.insert(exported, value);
+                    }
+                }
+            }
+            // `export { a, b as c }`: publish this module's own
+            // bindings as live cells, so a later write is observed by
+            // every importer.
+            None => {
+                // A name an importer already bound during a cycle has
+                // a cell waiting; adopt it so the value lands where
+                // that importer is looking, instead of in a new one.
+                let promised: Vec<(String, Option<Value>)> = {
+                    let record = self.current_module();
+                    specifiers
+                        .iter()
+                        .map(|(_, exported)| {
+                            (exported.clone(), record.exports.get(exported).cloned())
+                        })
+                        .collect()
+                };
+                let mut cells = Vec::with_capacity(specifiers.len());
+                {
+                    let mut scope = self.global.borrow_mut();
+                    for ((local, exported), (_, existing)) in
+                        specifiers.iter().zip(promised)
+                    {
+                        if let Some(Value::Binding(cell)) = &existing {
+                            scope.adopt_cell(local, cell.clone());
+                            cells.push((exported.clone(), Value::Binding(cell.clone())));
+                            continue;
+                        }
+                        if let Some(cell) = scope.export_cell(local) {
+                            cells.push((exported.clone(), Value::Binding(cell.clone())));
+                        }
+                    }
+                }
+                let mut record = self.current_module();
+                for (exported, value) in cells {
+                    if exported == "default" {
+                        record.default = Some(value);
+                    } else {
+                        record.exports.insert(exported, value);
+                    }
+                }
+            }
+        }
+        Ok(Value::Undefined)
+    }
+
+    /// Shared `export * [as ns] from 'm'`.
+    pub(crate) fn stmt_export_all(
+        &mut self,
+        source: &str,
+        alias: Option<&str>,
+    ) -> Result<Value, VmErr> {
+        let resolved = self
+            .resolve_module_name(source)
+            .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
+        self.ensure_module(&resolved)?;
+        let other = self
+            .module(&resolved)
+            .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
+        match alias {
+            // `export * as ns from 'm'`: one export holding the
+            // namespace object.
+            Some(alias) => {
+                let namespace = Self::namespace_object(&other)?;
+                self.current_module()
+                    .exports
+                    .insert(alias.to_string(), namespace);
+            }
+            // `export * from 'm'`: every *named* export of `m`, which
+            // deliberately excludes its default.
+            None => {
+                let mut record = self.current_module();
+                for (name, value) in other.exports {
+                    record.exports.insert(name, value);
+                }
+            }
+        }
+        Ok(Value::Undefined)
+    }
+
+    /// Shared dynamic `import(specifier)`: a promise for the namespace.
+    pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
+        let name = self.vs(&specifier)?;
+        let resolved = self.resolve_module_name(&name);
+        if let Some(target) = resolved.as_ref() {
+            let target = target.clone();
+            self.ensure_module(&target)?;
+        }
+        match resolved.and_then(|n| self.module(&n)) {
+            Some(module) => Ok(Value::settled_promise(
+                PromiseState::Fulfilled,
+                Self::namespace_object(&module)?,
+            )),
+            None => Ok(Value::settled_promise(
+                PromiseState::Rejected,
+                Value::Error(crate::value::ErrorData::new(
+                    "TypeError",
+                    format!("Module not found: {}", name),
+                )),
+            )),
+        }
+    }
+
+    /// Shared `import.meta`: the current module's URL and main flag.
+    pub(crate) fn eval_import_meta(&mut self) -> Result<Value, VmErr> {
+        let url = self
+            .cur_mod
+            .as_ref()
+            .and_then(|module| self.module_file_urls.borrow().get(module).cloned())
+            .unwrap_or_else(|| "vm://module".into());
+        let o = vec![
+            ("url".to_string(), Value::String(url)),
+            ("main".to_string(), Value::Bool(self.is_main)),
+        ];
+        Ok(Value::object(o))
+    }
+
     pub(super) fn eval_stmt(&mut self, s: &Statement) -> Result<Value, VmErr> {
         match s {
             Statement::Expr(e) => self.eval_expr(e),
@@ -1011,149 +1204,20 @@ impl Interpreter {
             }
             Statement::ExportDefault(e) => {
                 let v = self.eval_expr(e)?;
-                let mn = self.cur_mod.clone().unwrap_or_default();
-                let _ = mn;
-                self.current_module().default = Some(v);
-                Ok(Value::Undefined)
+                self.stmt_export_default(v)
             }
             Statement::ExportNamed { specifiers, source } => {
-                match source {
-                    // `export { a, b as c } from 'm'`: forward the *other*
-                    // module's live bindings without binding anything locally.
-                    Some(source) => {
-                        let entries = self.resolve_reexports(source, specifiers)?;
-                        let mut record = self.current_module();
-                        for (exported, value) in entries {
-                            if exported == "default" {
-                                record.default = Some(value);
-                            } else {
-                                record.exports.insert(exported, value);
-                            }
-                        }
-                    }
-                    // `export { a, b as c }`: publish this module's own
-                    // bindings as live cells, so a later write is observed by
-                    // every importer.
-                    None => {
-                        // A name an importer already bound during a cycle has
-                        // a cell waiting; adopt it so the value lands where
-                        // that importer is looking, instead of in a new one.
-                        let promised: Vec<(String, Option<Value>)> = {
-                            let record = self.current_module();
-                            specifiers
-                                .iter()
-                                .map(|(_, exported)| {
-                                    (exported.clone(), record.exports.get(exported).cloned())
-                                })
-                                .collect()
-                        };
-                        let mut cells = Vec::with_capacity(specifiers.len());
-                        {
-                            let mut scope = self.global.borrow_mut();
-                            for ((local, exported), (_, existing)) in
-                                specifiers.iter().zip(promised)
-                            {
-                                if let Some(Value::Binding(cell)) = &existing {
-                                    scope.adopt_cell(local, cell.clone());
-                                    cells.push((exported.clone(), Value::Binding(cell.clone())));
-                                    continue;
-                                }
-                                if let Some(cell) = scope.export_cell(local) {
-                                    cells.push((exported.clone(), Value::Binding(cell.clone())));
-                                }
-                            }
-                        }
-                        let mut record = self.current_module();
-                        for (exported, value) in cells {
-                            if exported == "default" {
-                                record.default = Some(value);
-                            } else {
-                                record.exports.insert(exported, value);
-                            }
-                        }
-                    }
-                }
-                Ok(Value::Undefined)
+                self.stmt_export_named(specifiers, source.as_deref())
             }
             Statement::ExportAll { source, alias } => {
-                let resolved = self
-                    .resolve_module_name(source)
-                    .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
-                self.ensure_module(&resolved)?;
-                let other = self
-                    .module(&resolved)
-                    .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
-                match alias {
-                    // `export * as ns from 'm'`: one export holding the
-                    // namespace object.
-                    Some(alias) => {
-                        let namespace = Self::namespace_object(&other)?;
-                        self.current_module()
-                            .exports
-                            .insert(alias.clone(), namespace);
-                    }
-                    // `export * from 'm'`: every *named* export of `m`, which
-                    // deliberately excludes its default.
-                    None => {
-                        let mut record = self.current_module();
-                        for (name, value) in other.exports {
-                            record.exports.insert(name, value);
-                        }
-                    }
-                }
-                Ok(Value::Undefined)
+                self.stmt_export_all(source, alias.as_deref())
             }
             Statement::Import {
                 module,
                 default,
                 named,
                 namespace,
-            } => {
-                let resolved_module = self.resolve_module_name(module);
-                if let Some(name) = resolved_module.as_ref() {
-                    let name = name.clone();
-                    self.ensure_module(&name)?;
-                }
-                if let Some(md) = resolved_module.as_ref().and_then(|name| self.module(name)) {
-                    if let Some(d) = default {
-                        let v = md.default.clone().unwrap_or(Value::Undefined);
-                        self.bind_import(d, v)?;
-                    }
-                    for (imported, local) in named {
-                        // `import { default as x }` names the default export.
-                        let v = if imported == "default" {
-                            md.default.clone().unwrap_or(Value::Undefined)
-                        } else {
-                            match md.exports.get(imported).cloned() {
-                                Some(entry) => entry,
-                                // Not exported *yet*: in a cycle the exporting
-                                // module is still running, so bind the cell it
-                                // will fill in when its `export` runs.
-                                None => {
-                                    let target = resolved_module.clone().unwrap_or_default();
-                                    self.pending_export(&target, imported)
-                                        .unwrap_or(Value::Undefined)
-                                }
-                            }
-                        };
-                        self.bind_import(local, v)?;
-                    }
-                    if let Some(ns) = namespace {
-                        let namespace_object = Self::namespace_object(&md)?;
-                        self.set_binding(ns, namespace_object)?;
-                    }
-                    Ok(Value::Undefined)
-                } else {
-                    if module.starts_with('.') && self.cur_mod.is_none() {
-                        vm_err(format!(
-                            "Relative import requires a module context: {}",
-                            module
-                        ))
-                    } else {
-                        vm_err(format!("Module not found: {}", module))
-                    }
-                }
-            }
+            } => self.stmt_import(module, default.as_deref(), named, namespace.as_deref()),
             Statement::Empty => Ok(Value::Undefined),
         }
     }
@@ -2109,38 +2173,9 @@ impl Interpreter {
             // `await import(…)` and `.then(…)` both work.
             Expr::DynamicImport(specifier) => {
                 let specifier = self.eval_expr(specifier)?;
-                let name = self.vs(&specifier)?;
-                let resolved = self.resolve_module_name(&name);
-                if let Some(target) = resolved.as_ref() {
-                    let target = target.clone();
-                    self.ensure_module(&target)?;
-                }
-                match resolved.and_then(|n| self.module(&n)) {
-                    Some(module) => Ok(Value::settled_promise(
-                        PromiseState::Fulfilled,
-                        Self::namespace_object(&module)?,
-                    )),
-                    None => Ok(Value::settled_promise(
-                        PromiseState::Rejected,
-                        Value::Error(crate::value::ErrorData::new(
-                            "TypeError",
-                            format!("Module not found: {}", name),
-                        )),
-                    )),
-                }
+                self.eval_dynamic_import(specifier)
             }
-            Expr::ImportMeta => {
-                let url = self
-                    .cur_mod
-                    .as_ref()
-                    .and_then(|module| self.module_file_urls.borrow().get(module).cloned())
-                    .unwrap_or_else(|| "vm://module".into());
-                let o = vec![
-                    ("url".to_string(), Value::String(url)),
-                    ("main".to_string(), Value::Bool(self.is_main)),
-                ];
-                Ok(Value::object(o))
-            }
+            Expr::ImportMeta => self.eval_import_meta(),
             // `` tag`a${x}b` ``: the tag receives the literal chunks as an
             // array carrying a `raw` companion, then the interpolated values.
             Expr::TaggedTemplate {

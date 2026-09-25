@@ -35,20 +35,16 @@ fn tag(result: &Result<Value, VmErr>) -> String {
 }
 
 fn run_ast(source: &str) -> Result<Value, VmErr> {
-    let statements = parse_cached(source).expect("test source must parse");
-    let mut interp = Interpreter::with_builtins();
-    interp.begin_execution();
-    interp.set_source(source);
-    match interp.run_program_body(&statements) {
-        Ok(value) => interp.drain_jobs().map(|()| value),
-        Err(error) => {
-            let _ = interp.drain_jobs();
-            Err(error)
-        }
-    }
+    run_ast_with_modules(source, &[])
 }
 
 fn check(source: &str, expect_bytecode: bool) {
+    check_with_modules(source, expect_bytecode, &[]);
+}
+
+/// [`check`] with `define_module` sources registered on both interpreters,
+/// so imports resolve identically on each tier.
+fn check_with_modules(source: &str, expect_bytecode: bool, modules: &[(&str, &str)]) {
     let statements = parse_cached(source).expect("test source must parse");
     let tier = compile_program(&statements);
     assert_eq!(
@@ -62,9 +58,29 @@ fn check(source: &str, expect_bytecode: bool) {
     }
     let program = Interpreter::compile(source).expect("compile");
     let mut vm = Interpreter::with_builtins();
+    for (name, body) in modules {
+        vm.define_module(name, body.to_string());
+    }
     let vm_out = tag(&vm.execute(&program));
-    let ast_out = tag(&run_ast(source));
+    let ast_out = tag(&run_ast_with_modules(source, modules));
     assert_eq!(vm_out, ast_out, "tier divergence for {source:?}");
+}
+
+fn run_ast_with_modules(source: &str, modules: &[(&str, &str)]) -> Result<Value, VmErr> {
+    let statements = parse_cached(source).expect("test source must parse");
+    let mut interp = Interpreter::with_builtins();
+    for (name, body) in modules {
+        interp.define_module(name, body.to_string());
+    }
+    interp.begin_execution();
+    interp.set_source(source);
+    match interp.run_program_body(&statements) {
+        Ok(value) => interp.drain_jobs().map(|()| value),
+        Err(error) => {
+            let _ = interp.drain_jobs();
+            Err(error)
+        }
+    }
 }
 
 #[test]
@@ -391,6 +407,74 @@ fn classes() {
     check("class C { m(){ return super.m(); } } new C().m()", true);
     check("class C extends null {} 1", true);
     check("class C { constructor(){ super(); } } new C()", true);
+}
+
+#[test]
+fn modules() {
+    // Static imports: default, named, aliased, namespace.
+    check_with_modules(
+        "import d from 'm'; d",
+        true,
+        &[("m", "export default 42;")],
+    );
+    check_with_modules(
+        "import { a, b as c } from 'm'; a + c",
+        true,
+        &[("m", "export const a = 1; export const b = 2;")],
+    );
+    check_with_modules(
+        "import * as ns from 'm'; ns.x * 2",
+        true,
+        &[("m", "export const x = 21;")],
+    );
+    check_with_modules(
+        "import d, { n } from 'm'; d + n",
+        true,
+        &[("m", "export default 10; export const n = 5;")],
+    );
+    // Live bindings: the importer observes later writes.
+    check_with_modules(
+        "import { v } from 'm'; globalThis.__seen = v; 0",
+        true,
+        &[("m", "export let v = 1; v = 2;")],
+    );
+    // Re-exports forward the other module's bindings.
+    check_with_modules(
+        "import { q } from 'mid'; q",
+        true,
+        &[("mid", "export { q } from 'leaf';"), ("leaf", "export const q = 7;")],
+    );
+    check_with_modules(
+        "import * as ns from 'mid'; ns.q",
+        true,
+        &[("mid", "export * from 'leaf';"), ("leaf", "export const q = 8; export default 0;")],
+    );
+    check_with_modules(
+        "import { ns } from 'mid'; ns.q",
+        true,
+        &[("mid", "export * as ns from 'leaf';"), ("leaf", "export const q = 9;")],
+    );
+    // Exports from the main program publish into its record.
+    check("export default 1 + 2;", true);
+    check("let a = 1; export { a };", true);
+    check("let a = 1; export { a as b };", true);
+    // Dynamic import resolves to a namespace promise; import.meta works.
+    check_with_modules(
+        "let p = import('m'); typeof p.then",
+        true,
+        &[("m", "export const x = 1;")],
+    );
+    check("let m = import.meta; m.main === false", true);
+    // Errors agree across tiers.
+    check("import x from 'missing';", true);
+    check("import { x } from 'missing';", true);
+    check("export * from 'missing';", true);
+    // An unscoped block shares the enclosing scope, so it compiles.
+    check_with_modules("{ import x from 'm'; x }", true, &[("m", "export default 3;")]);
+    // Scoped bindings stay on the AST tier.
+    check("{ let y = 1; import x from 'm'; }", false);
+    // A nested scoped export falls back per-function; the unit compiles.
+    check("function f(){ let x = 1; export { x }; }", true);
 }
 
 fn declined_units_stay_on_ast() {

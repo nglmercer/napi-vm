@@ -43,7 +43,8 @@ use crate::parser::{
 
 use super::constants::{
     AstFunction, ClassMemberKind, ClassMemberTemplate, ClassNameTemplate, ClassTemplate,
-    Constant, PropEntry, PropKind, SpreadEntry, class_key_name,
+    Constant, ExportAllTemplate, ExportNamedTemplate, ImportTemplate, PropEntry, PropKind,
+    SpreadEntry, class_key_name,
 };
 use super::function::{BytecodeFunction, SlotInfo, SlotKind};
 use super::module::BytecodeModule;
@@ -1092,10 +1093,51 @@ impl<'a> Compiler<'a> {
                 }
                 self.load_undefined()
             }
-            Statement::Import { .. } => Err(Decline::Func("modules need Phase G")),
-            Statement::ExportDefault(_)
-            | Statement::ExportNamed { .. }
-            | Statement::ExportAll { .. } => Err(Decline::Func("modules need Phase G")),
+            Statement::Import { module, default, named, namespace } => {
+                // Imports bind into the running scope, which a block-level
+                // import would leak out of (the VM has no block frames).
+                let bound = default
+                    .iter()
+                    .map(String::as_str)
+                    .chain(named.iter().map(|(_, local)| local.as_str()))
+                    .chain(namespace.iter().map(String::as_str));
+                self.require_env_module_binding(bound)?;
+                let tmpl = self.push_const(Constant::ImportTemplate(ImportTemplate {
+                    module: module.clone(),
+                    default: default.clone(),
+                    named: named.clone(),
+                    namespace: namespace.clone(),
+                }))?;
+                self.emit(Instr::Import { tmpl });
+                self.load_undefined()
+            }
+            Statement::ExportDefault(expr) => {
+                let src = self.compile_expr(expr)?;
+                self.emit(Instr::ExportDefault { src });
+                self.load_undefined()
+            }
+            Statement::ExportNamed { specifiers, source } => {
+                // Local exports publish scope cells; slots are invisible to
+                // them, so only environment-bound lists compile.
+                if source.is_none() {
+                    self.require_env_module_binding(
+                        specifiers.iter().map(|(local, _)| local.as_str()),
+                    )?;
+                }
+                let tmpl = self.push_const(Constant::ExportNamedTemplate(
+                    ExportNamedTemplate { specifiers: specifiers.clone(), source: source.clone() },
+                ))?;
+                self.emit(Instr::ExportNamed { tmpl });
+                self.load_undefined()
+            }
+            Statement::ExportAll { source, alias } => {
+                let tmpl = self.push_const(Constant::ExportAllTemplate(ExportAllTemplate {
+                    source: source.clone(),
+                    alias: alias.clone(),
+                }))?;
+                self.emit(Instr::ExportAll { tmpl });
+                self.load_undefined()
+            }
         }
     }
 }
@@ -1254,6 +1296,24 @@ impl<'a> Compiler<'a> {
                 self.compile_destructure(inner, value, mode)
             }
         }
+    }
+
+    /// Module statements that bind or publish scope cells compile only
+    /// when every touched name lives in the environment: block slots have
+    /// no cells to publish, and a slot-bound import would shadow invisibly.
+    fn require_env_module_binding<'n>(
+        &self,
+        names: impl Iterator<Item = &'n str>,
+    ) -> Result<(), Decline> {
+        if self.scopes.len() != 1 {
+            return Err(Decline::Func("scoped modules need Phase G"));
+        }
+        for name in names {
+            if !matches!(self.resolve(name)?, Binding::Global) {
+                return Err(Decline::Func("scoped modules need Phase G"));
+            }
+        }
+        Ok(())
     }
 
     /// Compile a class declaration or expression to a `BuildClass`.
@@ -2337,8 +2397,16 @@ impl<'a> Compiler<'a> {
             }
             Expr::Super => self.raise_bare_super(),
             Expr::Spread(inner) => self.compile_expr(inner),
-            Expr::ImportMeta | Expr::DynamicImport(_) => {
-                Err(Decline::Func("modules need Phase G"))
+            Expr::DynamicImport(specifier) => {
+                let src = self.compile_expr(specifier)?;
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::DynamicImport { dst, src });
+                Ok(dst)
+            }
+            Expr::ImportMeta => {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::ImportMeta { dst });
+                Ok(dst)
             }
             Expr::Await(_) => Err(Decline::Func("async needs Phase G")),
             Expr::Yield(_) | Expr::YieldFrom(_) => Err(Decline::Func("generators need Phase G")),
@@ -3230,8 +3298,8 @@ mod tests {
             ("f(...args);", "compiled"),
             ("let a = [...b];", "compiled"),
             ("a?.b;", "compiled"),
-            ("import x from 'm';", "modules need Phase G"),
-            ("export default 1;", "modules need Phase G"),
+            ("import x from 'm';", "compiled"),
+            ("export default 1;", "compiled"),
             ("outer: for (;;) { break outer; }", "compiled"),
             ("async function f() {} f();", "compiled"), // per-function fallback
             ("function* g() {}", "compiled"),           // per-function fallback

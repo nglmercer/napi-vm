@@ -622,6 +622,43 @@ fn run_loop(
                 let key = interp.property_key(&key)?;
                 frame.registers[dst as usize] = Value::String(key);
             }
+            Instr::Import { tmpl } => {
+                let template = match &frame.function.constants[tmpl as usize] {
+                    Constant::ImportTemplate(template) => template.clone(),
+                    _ => return Err(internal("bad import template")),
+                };
+                interp.stmt_import(
+                    &template.module,
+                    template.default.as_deref(),
+                    &template.named,
+                    template.namespace.as_deref(),
+                )?;
+            }
+            Instr::ExportDefault { src } => {
+                let value = frame.registers[src as usize].clone();
+                interp.stmt_export_default(value)?;
+            }
+            Instr::ExportNamed { tmpl } => {
+                let template = match &frame.function.constants[tmpl as usize] {
+                    Constant::ExportNamedTemplate(template) => template.clone(),
+                    _ => return Err(internal("bad export template")),
+                };
+                interp.stmt_export_named(&template.specifiers, template.source.as_deref())?;
+            }
+            Instr::ExportAll { tmpl } => {
+                let template = match &frame.function.constants[tmpl as usize] {
+                    Constant::ExportAllTemplate(template) => template.clone(),
+                    _ => return Err(internal("bad export template")),
+                };
+                interp.stmt_export_all(&template.source, template.alias.as_deref())?;
+            }
+            Instr::DynamicImport { dst, src } => {
+                let specifier = frame.registers[src as usize].clone();
+                frame.registers[dst as usize] = interp.eval_dynamic_import(specifier)?;
+            }
+            Instr::ImportMeta { dst } => {
+                frame.registers[dst as usize] = interp.eval_import_meta()?;
+            }
             }
             Ok(())
         })();

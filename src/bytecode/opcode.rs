@@ -265,6 +265,19 @@ pub enum Instr {
     /// `dst` = `src` converted to a property key, like a computed class
     /// member name evaluated when the class is defined.
     PropertyKey { dst: Reg, src: Reg },
+    /// Run the `import` statement in `constants[tmpl]`: resolve and
+    /// evaluate the module, then bind its exports as live cells.
+    Import { tmpl: u16 },
+    /// Publish `src` as this module's default export.
+    ExportDefault { src: Reg },
+    /// Run the `export { ... }` statement in `constants[tmpl]`.
+    ExportNamed { tmpl: u16 },
+    /// Run the `export * [as ns] from` statement in `constants[tmpl]`.
+    ExportAll { tmpl: u16 },
+    /// `dst` = the promise for the namespace of module `src`.
+    DynamicImport { dst: Reg, src: Reg },
+    /// `dst` = this module's `import.meta` object.
+    ImportMeta { dst: Reg },
 }
 
 /// The discriminant of [`Instr`], for classification without operands.
@@ -342,6 +355,12 @@ pub enum Opcode {
     Raise,
     BuildClass,
     PropertyKey,
+    Import,
+    ExportDefault,
+    ExportNamed,
+    ExportAll,
+    DynamicImport,
+    ImportMeta,
 }
 
 impl Instr {
@@ -420,6 +439,12 @@ impl Instr {
             Instr::Raise { .. } => Opcode::Raise,
             Instr::BuildClass { .. } => Opcode::BuildClass,
             Instr::PropertyKey { .. } => Opcode::PropertyKey,
+            Instr::Import { .. } => Opcode::Import,
+            Instr::ExportDefault { .. } => Opcode::ExportDefault,
+            Instr::ExportNamed { .. } => Opcode::ExportNamed,
+            Instr::ExportAll { .. } => Opcode::ExportAll,
+            Instr::DynamicImport { .. } => Opcode::DynamicImport,
+            Instr::ImportMeta { .. } => Opcode::ImportMeta,
         }
     }
 
@@ -574,6 +599,12 @@ impl fmt::Display for Instr {
             Instr::Raise { msg } => write!(f, "RAISE c{msg}"),
             Instr::BuildClass { dst, tmpl } => write!(f, "BUILD_CLASS r{dst}, c{tmpl}"),
             Instr::PropertyKey { dst, src } => write!(f, "PROPERTY_KEY r{dst}, r{src}"),
+            Instr::Import { tmpl } => write!(f, "IMPORT c{tmpl}"),
+            Instr::ExportDefault { src } => write!(f, "EXPORT_DEFAULT r{src}"),
+            Instr::ExportNamed { tmpl } => write!(f, "EXPORT_NAMED c{tmpl}"),
+            Instr::ExportAll { tmpl } => write!(f, "EXPORT_ALL c{tmpl}"),
+            Instr::DynamicImport { dst, src } => write!(f, "DYNAMIC_IMPORT r{dst}, r{src}"),
+            Instr::ImportMeta { dst } => write!(f, "IMPORT_META r{dst}"),
         }
     }
 }

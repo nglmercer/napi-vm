@@ -1212,14 +1212,28 @@ impl Interpreter {
     }
 
     /// Parse and run one module body. Kept beside `ensure_module` so deferred
-    /// evaluation does not have to reach back into the N-API layer.
+    /// evaluation does not have to reach back into the N-API layer. Module
+    /// bodies select the execution tier exactly like scripts, so repeated
+    /// imports of supported modules run the register VM.
     fn eval_module_source(&mut self, source: &str) -> Result<(), VmErr> {
         let statements =
             crate::parser::parse_cached(source).map_err(|failure| failure.into_vm_err())?;
         // Modules hoist exactly like scripts: `var` and eagerly-defined
         // function declarations first, then lexical dead zones. Without this,
         // a module-level call above its function declaration fails to resolve.
-        self.run_program_body(&statements)?;
+        match crate::bytecode::compile_program(&statements) {
+            Ok(module) => {
+                crate::bytecode::verify_module(&module).map_err(|error| {
+                    VmErr::Msg(format!(
+                        "internal error: bytecode verification failed: {error}"
+                    ))
+                })?;
+                self.run_bytecode_module(&module)?;
+            }
+            Err(_) => {
+                self.run_program_body(&statements)?;
+            }
+        }
         Ok(())
     }
 

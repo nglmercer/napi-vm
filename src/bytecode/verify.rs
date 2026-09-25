@@ -208,6 +208,9 @@ impl Checker<'_> {
             Constant::ObjectTemplate(_) => expected == "object-template",
             Constant::SpreadTemplate(_) => expected == "spread-template",
             Constant::ClassTemplate(_) => expected == "class-template",
+            Constant::ImportTemplate(_) => expected == "import-template",
+            Constant::ExportNamedTemplate(_) => expected == "export-named-template",
+            Constant::ExportAllTemplate(_) => expected == "export-all-template",
         };
         if ok {
             Ok(())
@@ -534,6 +537,25 @@ impl Checker<'_> {
             Instr::PropertyKey { dst, src } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
+            }
+            Instr::Import { tmpl } => {
+                self.check_const_is(address, *tmpl, "import-template")?;
+            }
+            Instr::ExportDefault { src } => {
+                self.check_reg(address, *src)?;
+            }
+            Instr::ExportNamed { tmpl } => {
+                self.check_const_is(address, *tmpl, "export-named-template")?;
+            }
+            Instr::ExportAll { tmpl } => {
+                self.check_const_is(address, *tmpl, "export-all-template")?;
+            }
+            Instr::DynamicImport { dst, src } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::ImportMeta { dst } => {
+                self.check_reg(address, *dst)?;
             }
         }
         Ok(())
