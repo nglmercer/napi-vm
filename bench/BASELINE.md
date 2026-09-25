@@ -131,3 +131,71 @@ Deferred again as not worth it: sharing/caching the builtins realm across
 mutation would leak), `Rc<str>` string interning, prototype/inline caches
 (invalidation surface), and frontend work (parse is 4–12 µs of millisecond
 workloads).
+
+## Results after runtime-upgrade merge + lazy shapes (commit `de472ce`)
+
+Same machine and methodology (Node v26.8.2, Linux x64, Rust release
+profile). Before = `f6a1f57` (phase H tip: bytecode VM + heap/GC, without
+the remote hot-path opts); after = `e8d025a` (merge of phases A–J +
+cross-cutting with remote `006132b` borrowed-key lookups + hoist skip)
+plus `de472ce` (two-strike lazy shape assignment, keeping object creation
+cheap). The delta therefore measures phases I (shapes/slots/inline caches),
+J (tier-up seam), cross-cutting (RuntimeBuilder/observability), and the
+remote hot-path opts combined. Phases A–H are roughly perf-neutral on these
+workloads: the before-column below matches the previous section's
+before-column within run-to-run drift.
+Test suites: `cargo test --lib` **325 pass / 0 fail**, `--features
+node-api-host` **358 pass / 0 fail**, `node --test` **17/17**, `bun test`
+1446 pass / 15 pre-existing environmental fails (browser-build artifacts,
+rdev-node setup, timing-sensitive promise ordering — verified identical
+with and without `de472ce` via stash).
+
+### End-to-end through NAPI (`npm run bench`)
+
+| workload        | before   | after    | delta |
+|-----------------|----------|----------|-------|
+| arithmetic_loop | 3.97 ms  | 3.83 ms  | −4%   |
+| recursion_fib   | 10.96 ms | 10.60 ms | −3%   |
+| array_chain     | 1.73 ms  | 1.63 ms  | −6%   |
+| string_ops      | 1.57 ms  | 1.53 ms  | −3%   |
+| class_methods   | 3.53 ms  | 3.18 ms  | −10%  |
+| closures        | 4.98 ms  | 4.67 ms  | −6%   |
+| json_roundtrip  | 1.26 ms  | 1.26 ms  | flat  |
+
+### Criterion microbenchmarks (paired back-to-back runs)
+
+Full-suite runs on this box showed load/order artifacts (late-running
+benches inflated when the machine was busy), so each bench below was run
+filtered and back-to-back on both trees, alternating before/after; noisy
+cases were re-run until confidence intervals stabilized.
+`frontend/lex_big_source` exercises untouched code and serves as the noise
+canary (+3% ≈ drift).
+
+| benchmark                   | before   | after    | delta                    |
+|-----------------------------|----------|----------|--------------------------|
+| run/arithmetic_loop         | 3.91 ms  | 3.91 ms  | flat                     |
+| run/recursion_fib           | —        | —        | noisy, no claim (320–655 µs run-to-run on the same tree; bench.js fib −3% is the stable read) |
+| run/array_chain             | 1.80 ms  | 1.61 ms  | −11%                     |
+| run/string_ops              | 1.46 ms  | 1.42 ms  | −3% (~flat)              |
+| run/closures                | 5.69 ms  | 4.84 ms  | −15%                     |
+| run/json_roundtrip          | 1.21 ms  | 1.24 ms  | +2% (flat)               |
+| frontend/lex_big_source     | 3.71 ms  | 3.81 ms  | +3% (canary ≈ drift)     |
+| frontend/parse_big_source   | 6.77 ms  | 6.73 ms  | flat                     |
+| warm/class_methods_reused_vm| 3.03 ms  | 2.73 ms  | −10%                     |
+| plugin_call/legacy_wrapper_eval | 164 µs | 160 µs  | flat                     |
+| plugin_call/direct_call_json| 57 µs   | 56 µs    | flat                     |
+
+### New `tiers` steady-state suite (after only, first baselines)
+
+| benchmark          | time (estimate) |
+|--------------------|-----------------|
+| tiers/prop_mono_hot| 1.12 ms         |
+| tiers/prop_mega_hot| 2.03 ms         |
+| tiers/call_tiny_hot| 2.07 ms         |
+| tiers/shape_churn  | 1.08 ms         |
+| tiers/gc_collect   | 877 µs          |
+
+Headline: property/call-heavy paths −10..−15% (shapes + inline caches +
+borrowed-key lookups); everything else flat; no regressions. Gains from the
+remote opts vs phase I were not bisected further — the two landed together
+in the merge and both target the same member-access paths.
