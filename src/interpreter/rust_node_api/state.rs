@@ -16,7 +16,7 @@ use libloading::os::unix::Library;
 use libloading::os::windows::Library;
 
 use crate::error::VmErr;
-use crate::host::HostCallback;
+use crate::host::{HostCallback, WakeSlot};
 use crate::interpreter::Env;
 use crate::value::{PromiseInner, Value};
 
@@ -46,6 +46,7 @@ pub(super) struct HostState {
     pub(super) async_work_sender: SyncSender<AsyncWorkTaskMessage>,
     pub(super) runtime_notifications: Receiver<HostRuntimeNotification>,
     pub(super) runtime_notification_sender: Sender<HostRuntimeNotification>,
+    pub(super) wake: Arc<WakeSlot>,
     pub(super) async_workers: Vec<JoinHandle<()>>,
     // Keep the process-global ABI shim loaded until every addon library closes.
     pub(super) _shim: Arc<NodeApiShim>,
@@ -297,6 +298,7 @@ pub(super) struct NapiThreadsafeFunctionShared {
     pub(super) max_queue_size: usize,
     pub(super) owner_thread: thread::ThreadId,
     pub(super) notifications: Sender<HostRuntimeNotification>,
+    pub(super) wake: Arc<WakeSlot>,
     pub(super) state: Mutex<NapiThreadsafeFunctionQueue>,
     pub(super) queue_space: Condvar,
 }
@@ -329,11 +331,11 @@ pub(super) struct PostedFinalizer {
 }
 
 pub(super) static POST_FINALIZER_SENDERS: OnceLock<
-    Mutex<HashMap<usize, Sender<HostRuntimeNotification>>>,
+    Mutex<HashMap<usize, (Sender<HostRuntimeNotification>, Arc<WakeSlot>)>>,
 > = OnceLock::new();
 
 pub(super) fn post_finalizer_senders()
--> &'static Mutex<HashMap<usize, Sender<HostRuntimeNotification>>> {
+-> &'static Mutex<HashMap<usize, (Sender<HostRuntimeNotification>, Arc<WakeSlot>)>> {
     POST_FINALIZER_SENDERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

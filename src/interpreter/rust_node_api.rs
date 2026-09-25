@@ -48,7 +48,7 @@ static PINNED_NODE_API_ADDON_LIBRARIES: OnceLock<Mutex<HashMap<PathBuf, Arc<Libr
     OnceLock::new();
 
 use crate::error::VmErr;
-use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
+use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent, WakeNotifier, WakeSlot};
 use crate::interpreter::commonjs::NativeAddonLoader;
 use crate::interpreter::native_addon::NativeAddonPolicy;
 #[cfg(all(test, target_os = "windows"))]
@@ -356,6 +356,7 @@ pub struct RustNodeApiHost {
     allowed_roots: Vec<PathBuf>,
     allowed_addons: HashMap<PathBuf, [u8; 32]>,
     shutdown_started: Cell<bool>,
+    wake: Arc<WakeSlot>,
 }
 
 impl Drop for RustNodeApiHost {
@@ -1188,6 +1189,13 @@ impl HostBridge for RustNodeApiHost {
             }
         }
         Ok(events)
+    }
+
+    fn set_wake_notifier(&self, notifier: WakeNotifier) {
+        if self.is_shutdown() {
+            return;
+        }
+        self.wake.set(notifier);
     }
 
     fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {

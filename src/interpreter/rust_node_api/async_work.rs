@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use crate::error::VmErr;
-use crate::host::{HostCallback, HostCallbackKind, HostEvent};
+use crate::host::{HostCallback, HostCallbackKind, HostEvent, WakeSlot};
 use crate::interpreter::Env;
 use crate::interpreter::native_addon_binary::validate_native_addon_binary;
 use crate::value::Value;
@@ -35,6 +35,7 @@ use super::{
 
 pub(super) fn create_async_work_pool(
     runtime_notification_sender: Sender<HostRuntimeNotification>,
+    wake: Arc<WakeSlot>,
 ) -> Result<AsyncWorkPool, VmErr> {
     let (task_sender, task_receiver) = mpsc::sync_channel(ASYNC_WORK_QUEUE_CAPACITY);
     let task_receiver = Arc::new(Mutex::new(task_receiver));
@@ -43,6 +44,7 @@ pub(super) fn create_async_work_pool(
     for worker_id in 0..ASYNC_WORKER_COUNT {
         let task_receiver = task_receiver.clone();
         let runtime_notification_sender = runtime_notification_sender.clone();
+        let wake = wake.clone();
         let worker = thread::Builder::new()
             .name(format!("napi-vm-addon-{worker_id}"))
             .spawn(move || {
@@ -86,6 +88,7 @@ pub(super) fn create_async_work_pool(
                                     status,
                                 }),
                             );
+                            wake.fire();
                         }
                         Ok(AsyncWorkTaskMessage::Stop) | Err(_) => return,
                     }
@@ -120,8 +123,9 @@ impl RustNodeApiHost {
             .and_then(|object| object.get_prop("prototype"));
         let shim = NodeApiShim::load()?;
         let (runtime_notification_sender, runtime_notifications) = mpsc::channel();
+        let wake = Arc::new(WakeSlot::new());
         let (async_work_sender, async_workers) =
-            create_async_work_pool(runtime_notification_sender.clone())?;
+            create_async_work_pool(runtime_notification_sender.clone(), wake.clone())?;
         Ok(Self {
             state: Rc::new(RefCell::new(HostState {
                 global,
@@ -136,6 +140,7 @@ impl RustNodeApiHost {
                 async_work_sender,
                 runtime_notifications,
                 runtime_notification_sender,
+                wake: wake.clone(),
                 async_workers,
                 _shim: shim.clone(),
             })),
@@ -143,6 +148,7 @@ impl RustNodeApiHost {
             allowed_roots,
             allowed_addons,
             shutdown_started: Cell::new(false),
+            wake,
         })
     }
 

@@ -75,6 +75,11 @@ impl HostBridge for CompositeHostBridge {
         self.native.poll_host_events(timeout)
     }
 
+    fn set_wake_notifier(&self, notifier: WakeNotifier) {
+        self.plugin.set_wake_notifier(notifier.clone());
+        self.native.set_wake_notifier(notifier);
+    }
+
     fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {
         self.native.has_pending_host_work(promise)
     }

@@ -6,6 +6,7 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::JoinHandle;
@@ -15,7 +16,7 @@ use serde_json::{Value as JsonValue, json};
 
 use super::native_addon::NativeAddonPolicy;
 use crate::error::VmErr;
-use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
+use crate::host::{HostBridge, HostCallback, HostCallbackKind, HostEvent, WakeNotifier, WakeSlot};
 use crate::interpreter::NativeAddonLoader;
 use crate::value::{PromiseInner, PromiseState, Value};
 
@@ -326,6 +327,7 @@ pub struct NodeAddonSidecar {
     runtime_info: NodeAddonRuntimeInfo,
     allowed_roots: Vec<PathBuf>,
     allowed_addons: HashMap<PathBuf, [u8; 32]>,
+    wake: Arc<WakeSlot>,
 }
 
 /// Runtime versions reported by the Node process hosting native addons.
@@ -507,6 +509,8 @@ impl NodeAddonSidecar {
             .map_err(|e| VmErr::Msg(format!("cannot clone Node bridge stream: {e}")))?;
         let (response_tx, response_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
+        let wake = Arc::new(WakeSlot::new());
+        let reader_wake = wake.clone();
         let reader = std::thread::Builder::new()
             .name("napi-vm-node-events".into())
             .spawn(move || {
@@ -514,13 +518,16 @@ impl NodeAddonSidecar {
                     let Ok(frame) = read_frame(&mut read_stream) else {
                         break;
                     };
-                    let sender = if frame.get("event").is_some() {
-                        &event_tx
-                    } else {
-                        &response_tx
-                    };
+                    let is_event = frame.get("event").is_some();
+                    let sender = if is_event { &event_tx } else { &response_tx };
                     if sender.send(frame).is_err() {
                         break;
+                    }
+                    // Responses complete a synchronous host call already
+                    // waiting on the owner thread; only sidecar events need
+                    // to wake an idle owner.
+                    if is_event {
+                        reader_wake.fire();
                     }
                 }
             })
@@ -554,6 +561,7 @@ impl NodeAddonSidecar {
             runtime_info,
             allowed_roots,
             allowed_addons,
+            wake,
         })
     }
 
@@ -1228,6 +1236,13 @@ impl HostBridge for NodeAddonSidecar {
             host_events.push(HostEvent::Callback(self.guest_callback_from_event(&event)?));
         }
         Ok(host_events)
+    }
+
+    fn set_wake_notifier(&self, notifier: WakeNotifier) {
+        if self.is_shutdown() {
+            return;
+        }
+        self.wake.set(notifier);
     }
 
     fn has_pending_host_work(&self, promise: &Rc<RefCell<PromiseInner>>) -> bool {

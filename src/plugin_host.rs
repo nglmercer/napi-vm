@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value as JsonValue};
 
-use crate::host::HostBridge;
+use crate::host::{HostBridge, WakeNotifier};
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")

@@ -322,6 +322,16 @@ impl Interpreter {
         self.host = Some(bridge);
     }
 
+    /// Register a wake notifier on the attached host bridge, if any. The
+    /// bridge fires it from any thread when host-originated work arrives,
+    /// so event-loop owners can sleep instead of polling. See
+    /// [`HostBridge::set_wake_notifier`](crate::host::HostBridge::set_wake_notifier).
+    pub fn set_host_wake_notifier(&self, notifier: crate::host::WakeNotifier) {
+        if let Some(host) = &self.host {
+            host.set_wake_notifier(notifier);
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn install_native_addon_backend<T>(
         &mut self,

@@ -30,7 +30,7 @@ pub use builtins::setup_builtins;
 pub use convert::{value_from_json, value_to_json};
 pub use error::VmErr;
 pub use format::{PrintOptions, Printer};
-pub use host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};
+pub use host::{HostBridge, HostCallback, HostCallbackKind, HostEvent, WakeNotifier, WakeSlot};
 pub use interpreter::{
     CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
     ResolvedCommonJsModule,

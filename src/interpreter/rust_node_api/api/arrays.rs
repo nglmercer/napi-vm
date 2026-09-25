@@ -353,9 +353,13 @@ pub(super) unsafe extern "C" fn api_post_finalizer(
             });
             match post_finalizer_senders().lock() {
                 Ok(senders) => match senders.get(&(env as usize)) {
-                    Some(sender) => sender
-                        .send(notification)
-                        .map_or(NAPI_GENERIC_FAILURE, |_| NAPI_OK),
+                    Some((sender, wake)) => match sender.send(notification) {
+                        Ok(()) => {
+                            wake.fire();
+                            NAPI_OK
+                        }
+                        Err(_) => NAPI_GENERIC_FAILURE,
+                    },
                     None => NAPI_INVALID_ARG,
                 },
                 Err(_) => NAPI_GENERIC_FAILURE,

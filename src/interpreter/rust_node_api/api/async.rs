@@ -285,6 +285,7 @@ pub(super) unsafe extern "C" fn api_create_threadsafe_function(
         }
         let owner = environment.owner.upgrade().ok_or(NAPI_GENERIC_FAILURE)?;
         let notifications = owner.borrow().runtime_notification_sender.clone();
+        let wake = owner.borrow().wake.clone();
         let id = new_opaque_handle()? as usize;
         let shared = Arc::new(NapiThreadsafeFunctionShared {
             id,
@@ -293,6 +294,7 @@ pub(super) unsafe extern "C" fn api_create_threadsafe_function(
             max_queue_size,
             owner_thread: thread::current().id(),
             notifications,
+            wake,
             state: Mutex::new(NapiThreadsafeFunctionQueue {
                 values: VecDeque::new(),
                 thread_count: initial_thread_count,
@@ -383,6 +385,7 @@ pub(super) unsafe extern "C" fn api_call_threadsafe_function(
             shared.queue_space.notify_all();
             return Err(NAPI_GENERIC_FAILURE);
         }
+        shared.wake.fire();
         Ok(())
     })
 }
@@ -427,6 +430,7 @@ pub(super) unsafe extern "C" fn api_release_threadsafe_function(
         let _ = shared
             .notifications
             .send(HostRuntimeNotification::ThreadsafeFunction(shared.id));
+        shared.wake.fire();
         drop(state);
         if remove_orphaned && let Ok(mut registry) = threadsafe_function_registry().lock() {
             registry.remove(&shared.id);

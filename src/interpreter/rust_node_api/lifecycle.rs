@@ -352,9 +352,13 @@ pub(super) fn register_environment(environment: &Rc<NapiEnvironment>) {
     if let Some(owner) = environment.owner.upgrade()
         && let Ok(mut senders) = post_finalizer_senders().lock()
     {
+        let owner = owner.borrow();
         senders.insert(
             environment.raw() as usize,
-            owner.borrow().runtime_notification_sender.clone(),
+            (
+                owner.runtime_notification_sender.clone(),
+                owner.wake.clone(),
+            ),
         );
     }
 }

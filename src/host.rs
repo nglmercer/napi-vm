@@ -2,6 +2,7 @@ use crate::error::VmErr;
 use crate::value::{PromiseInner, PromiseState, Value};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// A guest callback requested by the host runtime, ready for an event-loop
@@ -23,6 +24,47 @@ pub struct HostCallback {
     pub this_value: Value,
     pub args: Vec<Value>,
     pub kind: HostCallbackKind,
+}
+
+/// Thread-safe wake signal a bridge fires whenever host-originated work
+/// arrives from another thread (native callbacks, async completions,
+/// finalizers). The VM owner registers a notifier that wakes its command
+/// wait, so idle owners sleep instead of polling; the owner still drains
+/// through [`HostBridge::poll_host_events`] on the interpreter thread.
+pub type WakeNotifier = Arc<dyn Fn() + Send + Sync>;
+
+/// Shared slot holding one owner's wake notifier. Bridges hand an `Arc`
+/// of this to every native-thread ingress path (thread-safe functions,
+/// async-work completions, finalizer posts, sidecar readers) so a
+/// notifier registered after those paths were created still takes effect.
+#[derive(Default)]
+pub struct WakeSlot {
+    notifier: Mutex<Option<WakeNotifier>>,
+}
+
+impl WakeSlot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replace the registered notifier. Best-effort under lock poisoning:
+    /// a poisoned slot keeps waking (or not) as before rather than
+    /// panicking a native thread.
+    pub fn set(&self, notifier: WakeNotifier) {
+        if let Ok(mut slot) = self.notifier.lock() {
+            *slot = Some(notifier);
+        }
+    }
+
+    /// Invoke the registered notifier, if any. The notifier runs outside
+    /// the slot lock and must never enter guest code; it only wakes the
+    /// interpreter thread, which drains through the normal event loop.
+    pub fn fire(&self) {
+        let notifier = self.notifier.lock().ok().and_then(|slot| slot.clone());
+        if let Some(notifier) = notifier {
+            notifier();
+        }
+    }
 }
 
 /// An event delivered from the host into the VM's shared event loop.
@@ -54,6 +96,11 @@ pub trait HostBridge {
     fn poll_host_events(&self, _timeout: Duration) -> Result<Vec<HostEvent>, VmErr> {
         Ok(Vec::new())
     }
+
+    /// Register a wake notifier the bridge fires (from any thread) when
+    /// host-originated work arrives, so the VM owner can sleep instead of
+    /// polling. Bridges without threaded ingress keep the default no-op.
+    fn set_wake_notifier(&self, _notifier: WakeNotifier) {}
 
     /// Whether an awaited promise still depends on an external host event.
     /// Synchronous top-level `await` uses this to pump only the work needed
@@ -164,5 +211,41 @@ pub trait HostBridge {
     /// unreachable (only called when `is_async_fn` returned true).
     fn await_host(&self, _pending_id: usize) -> Result<Value, VmErr> {
         Err(VmErr::Msg("async host call not supported".to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn wake_slot_fires_registered_notifier() {
+        let slot = WakeSlot::new();
+        slot.fire(); // No notifier: silent no-op, never panics.
+        let calls = Arc::new(AtomicUsize::new(0));
+        let probe = Arc::clone(&calls);
+        slot.set(Arc::new(move || {
+            probe.fetch_add(1, Ordering::SeqCst);
+        }));
+        slot.fire();
+        slot.fire();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // Replacing the notifier swaps delivery to the new target.
+        let second = Arc::new(AtomicUsize::new(0));
+        let probe = Arc::clone(&second);
+        slot.set(Arc::new(move || {
+            probe.fetch_add(1, Ordering::SeqCst);
+        }));
+        slot.fire();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(second.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn wake_notifier_is_thread_safe() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<WakeNotifier>();
+        assert_send_sync::<Arc<WakeSlot>>();
     }
 }
