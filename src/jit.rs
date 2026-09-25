@@ -71,8 +71,9 @@ pub struct ShapeGuard {
 }
 
 impl ShapeGuard {
-    /// Whether `args` satisfies this guard. A missing argument fails: the
-    /// backend specialized for a call shape the caller did not provide.
+    /// Whether `args` satisfies this guard. A missing argument fails, as
+    /// does an argument with no cached layout: the backend specialized for
+    /// a call shape the caller did not provide.
     pub fn check(&self, args: &[Value]) -> bool {
         let Some(arg) = args.get(self.param as usize) else {
             return false;
@@ -84,7 +85,7 @@ impl ShapeGuard {
             Value::HostFunction { properties, .. } => properties,
             _ => return false,
         };
-        props.shape_id() == self.shape
+        props.shape_id().is_some_and(|id| id == self.shape)
     }
 }
 
@@ -404,9 +405,14 @@ mod tests {
         // plumbing instead of a fixed outcome.
         let obj = Value::object(vec![("a".to_string(), Value::Number(1.0))]);
         let Value::Object { props } = &obj else { unreachable!() };
-        let matching = ShapeGuard { param: 0, shape: props.shape_id() };
+        // Unbuilt objects fail every guard; two reads build the layout.
+        assert!(!ShapeGuard { param: 0, shape: 0 }.check(std::slice::from_ref(&obj)));
+        props.own_index("a");
+        props.own_index("a");
+        let id = props.shape_id().expect("two reads build the layout");
+        let matching = ShapeGuard { param: 0, shape: id };
         assert!(matching.check(std::slice::from_ref(&obj)));
-        let other = ShapeGuard { param: 0, shape: props.shape_id().wrapping_add(1 << 20) };
+        let other = ShapeGuard { param: 0, shape: id.wrapping_add(1 << 20) };
         assert!(!other.check(std::slice::from_ref(&obj)));
     }
 }

@@ -160,10 +160,14 @@ impl PropCache {
         }
     }
 
-    /// Cached slot for `shape_id`, recording a hit. The caller still
-    /// verifies the key at the slot: shapes are caches, not authority.
-    pub fn probe(&self, shape_id: u32) -> Option<usize> {
-        if self.state.get() == CACHE_MONO && self.shape.get() == shape_id {
+    /// Cached slot for `shape_id`, recording a hit. `None` (no layout
+    /// cached yet) always misses fast. The caller still verifies the key
+    /// at the slot: shapes are caches, not authority.
+    pub fn probe(&self, shape_id: Option<u32>) -> Option<usize> {
+        if let Some(id) = shape_id
+            && self.state.get() == CACHE_MONO
+            && self.shape.get() == id
+        {
             self.hits.set(self.hits.get().wrapping_add(1));
             Some(self.slot.get() as usize)
         } else {
@@ -235,28 +239,46 @@ mod tests {
         }
     }
 
+    /// Read `key` twice so the cell builds its layout, then return the id.
+    /// Shapes build lazily; comparing unbuilt cells would pass vacuously.
+    fn built_id(cell: &Rc<crate::value::ObjectCell>, key: &str) -> u32 {
+        cell.own_index(key);
+        cell.own_index(key);
+        cell.shape_id().expect("two reads build the layout")
+    }
+
     #[test]
     fn shared_layout_shared_shape() {
         let pair = eval("[{x: 1, y: 2}, {x: 3, y: 4}]");
         let Value::Array(items) = &pair else { panic!("expected array, got {pair:?}") };
         let items = items.borrow();
-        assert_eq!(cell_of(&items[0]).shape_id(), cell_of(&items[1]).shape_id());
+        assert_eq!(built_id(&cell_of(&items[0]), "x"), built_id(&cell_of(&items[1]), "x"));
+    }
+
+    #[test]
+    fn single_read_builds_nothing() {
+        let props = cell_of(&eval("({p: 1, q: 2})"));
+        assert_eq!(props.shape_id(), None);
+        assert_eq!(props.own_index("p"), Some(0));
+        assert_eq!(props.shape_id(), None, "one read must not allocate a layout");
+        assert_eq!(props.own_index("p"), Some(0));
+        assert!(props.shape_id().is_some(), "the repeat read builds it");
     }
 
     #[test]
     fn add_transition_matches_literal() {
-        // The read builds the `[a]` shape so the add follows a transition
+        // Two reads build the `[a]` shape so the add follows a transition
         // instead of lazily rebuilding.
-        let grown = cell_of(&eval("let o = {a: 1}; o.a; o.b = 2; o;"));
+        let grown = cell_of(&eval("let o = {a: 1}; o.a; o.a; o.b = 2; o;"));
         let literal = cell_of(&eval("({a: 1, b: 2})"));
-        assert_eq!(grown.shape_id(), literal.shape_id());
+        assert_eq!(grown.shape_id(), Some(built_id(&literal, "a")));
     }
 
     #[test]
     fn delete_canonicalizes() {
         let shrunk = cell_of(&eval("let o = {a: 1, b: 2, c: 3}; delete o.b; o;"));
         let literal = cell_of(&eval("({a: 1, c: 3})"));
-        assert_eq!(shrunk.shape_id(), literal.shape_id());
+        assert_eq!(built_id(&shrunk, "a"), built_id(&literal, "a"));
         // And the survivor still reads correctly by index.
         assert!(matches!(shrunk.own_value("c"), Some(Value::Number(x)) if x == 3.0));
         assert_eq!(shrunk.own_index("b"), None);
@@ -268,13 +290,15 @@ mod tests {
             "Object.defineProperty({x: 1}, 'x', {writable: false, enumerable: true, configurable: true});",
         ));
         let plain = cell_of(&eval("({x: 1})"));
-        assert_eq!(frozen.shape_id(), plain.shape_id());
+        assert_eq!(built_id(&frozen, "x"), built_id(&plain, "x"));
     }
 
     #[test]
     fn bypass_mutation_heals() {
         let props = cell_of(&eval("({p: 1, q: 2})"));
         assert_eq!(props.own_index("p"), Some(0));
+        assert_eq!(props.own_index("p"), Some(0));
+        assert!(props.shape_id().is_some());
         // A host bridge writing through the `Deref` bypasses the shape
         // entirely: the next indexed access must heal, not misread.
         *props.borrow_mut() = vec![("z".to_string(), Value::Number(9.0))];

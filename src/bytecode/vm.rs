@@ -274,11 +274,14 @@ fn get_prop_cached(
         return Ok(value.deref_binding());
     }
     let value = interp.get_prop_value(obj, key)?;
+    // Fill only once a layout exists (`own_index` builds it on the second
+    // read): single-read objects never cache.
     if let Some(index) = props.own_index(name)
+        && let Some(shape_id) = props.shape_id()
         && let Some(slot) = props.slot_verified(index, name)
         && !is_accessor_for(&slot, name)
     {
-        cache.fill(props.shape_id(), index);
+        cache.fill(shape_id, index);
     }
     Ok(value)
 }
@@ -313,10 +316,11 @@ fn set_prop_cached(
     interp.assign_member(obj, key, val)?;
     if props.meta.borrow().attrs_of(name).writable
         && let Some(index) = props.own_index(name)
+        && let Some(shape_id) = props.shape_id()
         && let Some(slot) = props.slot_verified(index, name)
         && !is_accessor_for(&slot, name)
     {
-        function.caches[site].fill(props.shape_id(), index);
+        function.caches[site].fill(shape_id, index);
     }
     Ok(())
 }
@@ -1500,9 +1504,9 @@ mod tests {
         let (hits, misses, mega, sites) = cache_stats(&module);
         assert!(sites >= 2, "expected read + write sites, got {sites}");
         assert_eq!(mega, 0);
-        // The read site fills twice: once for `[x]`, again after the first
-        // `o.y` add reshapes the object to `[x, y]`. The rest hit.
-        assert!(hits >= 17, "hits={hits} misses={misses}");
+        // Two-strike caching: each site misses twice (mark, then build and
+        // fill) and hits the remaining eight iterations.
+        assert!(hits >= 16, "hits={hits} misses={misses}");
     }
 
     #[test]
@@ -1546,14 +1550,16 @@ mod tests {
 
     #[test]
     fn ic_goes_megamorphic_and_stays_correct() {
+        // Two passes: the first marks each object, the second builds all
+        // nine layouts and fills the site past the megamorphic cap.
         let (result, module) = run_module(
             "let objs = [{x:0},{x:1,a:1},{x:2,a:2,b:2},{x:3,a:3,b:3,c:3},\
              {x:4,a:4,b:4,c:4,d:4},{x:5,a:5,b:5,c:5,d:5,e:5},\
              {x:6,a:6,b:6,c:6,d:6,e:6,f:6},{x:7,a:7,b:7,c:7,d:7,e:7,f:7,g:7},\
              {x:8,a:8,b:8,c:8,d:8,e:8,f:8,g:8,h:8}]; \
-             let s = 0; for (let i = 0; i < 9; i++) { s = s + objs[i].x; } s;",
+             let s = 0; for (let i = 0; i < 18; i++) { s = s + objs[i % 9].x; } s;",
         );
-        assert_eq!(num(&result), 36.0);
+        assert_eq!(num(&result), 72.0);
         let (_, _, mega, _) = cache_stats(&module);
         assert!(mega >= 1, "nine shapes at one site must go megamorphic");
     }

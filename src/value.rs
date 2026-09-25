@@ -612,12 +612,17 @@ impl std::ops::Deref for ArrayCell {
 pub struct ObjectCell {
     slots: RefCell<Vec<(String, Value)>>,
     pub meta: RefCell<ObjectMeta>,
-    /// Cached canonical layout of the slot keys, built lazily on first
-    /// indexed access. A cache, never authority: every indexed read
-    /// verifies the key at the slot, and any mismatch rebuilds from the
-    /// slots — so mutations that bypass the maintaining methods (host
-    /// bridges writing through the `Deref`) only cost a rebuild.
+    /// Cached canonical layout of the slot keys, built lazily on the
+    /// second indexed read (see `own_index`). A cache, never authority:
+    /// every indexed read verifies the key at the slot, and any mismatch
+    /// rebuilds from the slots — so mutations that bypass the maintaining
+    /// methods (host bridges writing through the `Deref`) only cost a
+    /// rebuild.
     shape: RefCell<Option<Rc<crate::shape::Shape>>>,
+    /// An indexed scan already ran on this object. Single-read objects —
+    /// serialization, conversion, one-shot lookups — scan and stop here,
+    /// never allocating a shape; only a repeat read builds the layout.
+    read_once: Cell<bool>,
 }
 
 impl ObjectCell {
@@ -629,6 +634,7 @@ impl ObjectCell {
                 ..ObjectMeta::default()
             }),
             shape: RefCell::new(None),
+            read_once: Cell::new(false),
         }
     }
 
@@ -640,6 +646,7 @@ impl ObjectCell {
                 ..ObjectMeta::default()
             }),
             shape: RefCell::new(None),
+            read_once: Cell::new(false),
         }
     }
 
@@ -687,6 +694,7 @@ impl ObjectCell {
         if let Ok(mut shape) = self.shape.try_borrow_mut() {
             *shape = None;
         }
+        self.read_once.set(false);
         true
     }
 
@@ -696,6 +704,11 @@ impl ObjectCell {
     /// and rebuilds the shape from the slots. Absence the shape and the
     /// scan agree on keeps the shape untouched, so prototype-chain misses
     /// cost exactly what they always did.
+    ///
+    /// Shapes build on the *second* indexed read that finds its key. The
+    /// first scan only marks the cell, so single-read objects never
+    /// allocate a layout, and pure-miss traffic (prototype walks over
+    /// foreign keys) never builds one either.
     pub(crate) fn own_index(&self, key: &str) -> Option<usize> {
         let slots = self.slots.borrow();
         let cached = self.shape.borrow().clone();
@@ -706,15 +719,25 @@ impl ObjectCell {
             return Some(index);
         }
         let found = slots.iter().position(|(k, _)| k == key);
-        let agree = cached.as_ref().is_some_and(|shape| {
-            // Agreed absence is the only keep: anything else means the
-            // shape is missing, stale, or disagrees, and rebuilds.
-            shape.slot_of(key).is_none() && found.is_none()
-        });
-        if !agree {
-            *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
-                slots.iter().map(|(k, _)| k.as_str()),
-            ));
+        match &cached {
+            None => {
+                let second = self.read_once.replace(true);
+                if second && found.is_some() {
+                    *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
+                        slots.iter().map(|(k, _)| k.as_str()),
+                    ));
+                }
+            }
+            Some(shape) => {
+                // Agreed absence is the only keep: anything else means the
+                // shape is stale or disagrees, and rebuilds.
+                let agree = shape.slot_of(key).is_none() && found.is_none();
+                if !agree {
+                    *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
+                        slots.iter().map(|(k, _)| k.as_str()),
+                    ));
+                }
+            }
         }
         found
     }
@@ -735,19 +758,19 @@ impl ObjectCell {
         self.slot_verified(index, key)
     }
 
-    /// This object's current shape id, building the shape on first access.
+    /// This object's shape id, if a layout is cached. Never builds:
+    /// unbuilt objects answer `None` (inline caches miss fast, guards
+    /// fail) and only start caching once repeated reads build the shape.
     /// The id may lag a bypass mutation; every consumer verifies the key
     /// at the slot before trusting an id-indexed answer.
-    pub(crate) fn shape_id(&self) -> u32 {
-        if let Some(shape) = self.shape.borrow().clone() {
-            return shape.id;
-        }
-        let slots = self.slots.borrow();
-        let shape =
-            crate::shape::Shape::rebuild(slots.iter().map(|(k, _)| k.as_str()));
-        let id = shape.id;
-        *self.shape.borrow_mut() = Some(shape);
-        id
+    pub(crate) fn shape_id(&self) -> Option<u32> {
+        self.shape.borrow().as_ref().map(|shape| shape.id)
+    }
+
+    /// Whether a layout is cached. Writes consult this to skip indexed
+    /// lookup entirely on cold objects.
+    pub(crate) fn has_shape(&self) -> bool {
+        self.shape.borrow().is_some()
     }
 
     /// Record a genuinely new key pushed onto the slots: follow the memoized
@@ -787,7 +810,14 @@ impl std::ops::Deref for ObjectCell {
 
 fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmErr> {
     let writable = props.meta.borrow().attrs_of(&key).writable;
-    if let Some(index) = props.own_index(&key) {
+    // Cold objects scan linearly without touching the shape machinery:
+    // writes never build layouts, only repeated reads do.
+    let index = if props.has_shape() {
+        props.own_index(&key)
+    } else {
+        props.borrow().iter().position(|(name, _)| *name == key)
+    };
+    if let Some(index) = index {
         if writable {
             props.borrow_mut()[index].1 = val;
         }
@@ -796,14 +826,17 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     if props.meta.borrow().non_extensible {
         return Ok(());
     }
-    {
-        let mut slots = props.borrow_mut();
-        if slots.len() >= MAX_OBJECT_PROPS {
-            return Err(limit_err("Maximum object property count exceeded"));
-        }
-        slots.push((key.clone(), val));
+    let mut slots = props.borrow_mut();
+    if slots.len() >= MAX_OBJECT_PROPS {
+        return Err(limit_err("Maximum object property count exceeded"));
     }
-    props.note_key_added(&key);
+    if props.has_shape() {
+        slots.push((key.clone(), val));
+        drop(slots);
+        props.note_key_added(&key);
+    } else {
+        slots.push((key, val));
+    }
     Ok(())
 }
 
