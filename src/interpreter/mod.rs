@@ -32,7 +32,7 @@ pub use native_addon::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use node_addon::{NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar};
-pub(crate) use eval::intern_params;
+pub(crate) use eval::{ObjectAccessorKind, insert_object_property, intern_params};
 pub(crate) use resolve::array_iter;
 #[cfg(all(
     feature = "node-api-host",
@@ -1406,6 +1406,27 @@ impl Interpreter {
             }
         }
         Ok(names)
+    }
+
+    /// Copy one spread source's entries into an object under construction.
+    /// Only objects and proxies spread (anything else is silently ignored);
+    /// keys enumerate in order with getters firing per key, exactly as the
+    /// literal's spread element does. Shared by the AST evaluator and the
+    /// bytecode VM; the caller inserts each pair and enforces the
+    /// property-count limit.
+    pub(crate) fn for_each_spread_entry(
+        &mut self,
+        src: &Value,
+        mut insert: impl FnMut(String, Value) -> Result<(), VmErr>,
+    ) -> Result<(), VmErr> {
+        if !matches!(src, Value::Object { .. } | Value::Proxy(_)) {
+            return Ok(());
+        }
+        for key in self.keys_with_proxy_trap(src)? {
+            let value = self.member(src, &key)?;
+            insert(key, value)?;
+        }
+        Ok(())
     }
 }
 

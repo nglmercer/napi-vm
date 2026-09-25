@@ -76,15 +76,17 @@ fn insert_class_accessor(statics: &mut Vec<(String, Value)>, key: &str, accessor
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ObjectAccessorKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ObjectAccessorKind {
     Getter,
     Setter,
 }
 
 /// Add an object-literal property, replacing an earlier value for the same
 /// key while preserving a getter/setter pair for accessor properties.
-fn insert_object_property(
+/// Shared by the AST evaluator and the bytecode VM's single-shot literal
+/// construction, so both tiers lay out identical slots.
+pub(crate) fn insert_object_property(
     props: &mut Vec<Option<(String, Value)>>,
     positions: &mut HashMap<String, Vec<usize>>,
     accessors: &mut HashMap<usize, ObjectAccessorKind>,
@@ -1525,24 +1527,22 @@ impl Interpreter {
                 }
                 ObjectProp::Spread(expression) => {
                     let value = self.eval_expr(expression)?;
-                    if matches!(&value, Value::Object { .. } | Value::Proxy(_)) {
-                        for key in self.keys_with_proxy_trap(&value)? {
-                            let property_value = self.member(&value, &key)?;
-                            insert_object_property(
-                                &mut object,
-                                &mut positions,
-                                &mut accessors,
-                                key.clone(),
-                                property_value,
-                                None,
-                            );
-                            if positions.len() > crate::value::MAX_OBJECT_PROPS {
-                                return Err(crate::value::limit_err(
-                                    "Maximum object property count exceeded",
-                                ));
-                            }
+                    self.for_each_spread_entry(&value, |key, property_value| {
+                        insert_object_property(
+                            &mut object,
+                            &mut positions,
+                            &mut accessors,
+                            key,
+                            property_value,
+                            None,
+                        );
+                        if positions.len() > crate::value::MAX_OBJECT_PROPS {
+                            return Err(crate::value::limit_err(
+                                "Maximum object property count exceeded",
+                            ));
                         }
-                    }
+                        Ok(())
+                    })?;
                 }
             }
             if positions.len() > crate::value::MAX_OBJECT_PROPS {

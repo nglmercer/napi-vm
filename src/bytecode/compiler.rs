@@ -35,15 +35,15 @@ use std::rc::Rc;
 
 use crate::interpreter::produces_completion_value;
 use crate::parser::{
-    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, Statement, UnOp, VarKind,
-    arrow_body_references, collect_var_names, expr_captures_identifier,
+    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Statement, UnOp,
+    VarKind, arrow_body_references, collect_var_names, expr_captures_identifier,
     statements_capture_identifier, stmts_reference,
 };
 
-use super::constants::{AstFunction, Constant};
+use super::constants::{AstFunction, Constant, PropEntry, PropKind};
 use super::function::{BytecodeFunction, SlotInfo, SlotKind};
 use super::module::BytecodeModule;
-use super::opcode::{Instr, Reg, Slot, Target};
+use super::opcode::{Instr, KeySrc, Reg, Slot, Target};
 
 /// Compilation declined: the unit stays on the AST evaluator. The reason
 /// names the construct (or limit) that Phase E cannot compile yet.
@@ -1221,7 +1221,7 @@ impl<'a> Compiler<'a> {
                 }
                 ThisMode::Reject => Err(Decline::Unit("arrow `this` capture needs Phase G")),
             },
-            Expr::Object(_) => Err(Decline::Func("object literals need Phase G")),
+            Expr::Object(props) => self.compile_object(props),
             Expr::ClassExpr { .. } => Err(Decline::Func("classes need Phase G")),
             Expr::TaggedTemplate { .. } => Err(Decline::Func("tagged templates need Phase G")),
             Expr::Super => Err(Decline::Unit("super needs Phase G")),
@@ -1231,8 +1231,23 @@ impl<'a> Compiler<'a> {
             Expr::Await(_) => Err(Decline::Func("async needs Phase G")),
             Expr::Yield(_) | Expr::YieldFrom(_) => Err(Decline::Func("generators need Phase G")),
             Expr::Spread(_) => Err(Decline::Func("spread needs Phase G")),
-            Expr::BigIntLiteral(_) => Err(Decline::Func("bigint literals need Phase G")),
-            Expr::Regex(_, _) => Err(Decline::Func("regex literals need Phase G")),
+            Expr::BigIntLiteral(digits) => {
+                match crate::bigint::BigInt::parse(digits) {
+                    Ok(value) => {
+                        let index = self.push_const(Constant::BigInt(Rc::new(value)))?;
+                        self.load_const(index)
+                    }
+                    // The AST fallback reports the malformed literal.
+                    Err(_) => Err(Decline::Func("invalid bigint literal")),
+                }
+            }
+            Expr::Regex(pattern, flags) => {
+                let index = self.push_const(Constant::Regex {
+                    pattern: pattern.clone(),
+                    flags: flags.clone(),
+                })?;
+                self.load_const(index)
+            }
             Expr::OptionalChain { .. } => Err(Decline::Func("optional chaining needs Phase G")),
         }
     }
@@ -1262,6 +1277,142 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::LoadGlobal { dst, name: index });
             }
         }
+        Ok(dst)
+    }
+
+    fn compile_object(&mut self, props: &'a [ObjectProp]) -> Result<Reg, Decline> {
+        let mut template = Vec::with_capacity(props.len());
+        for prop in props {
+            match prop {
+                // Shorthand reads tolerate missing and dead bindings.
+                ObjectProp::Shorthand(name) => {
+                    let val = self.alloc_reg()?;
+                    match self.resolve(name)? {
+                        Binding::Slot(slot) => {
+                            self.emit(Instr::LoadLocalSoft { dst: val, slot });
+                        }
+                        Binding::Global => {
+                            let index = self.intern_string(name)?;
+                            self.emit(Instr::LoadGlobalSoft { dst: val, name: index });
+                        }
+                    }
+                    let key = self.intern_string(name)?;
+                    template.push(PropEntry {
+                        key: Some(KeySrc::Const(key)),
+                        val,
+                        kind: PropKind::Data,
+                    });
+                }
+                ObjectProp::KeyValue(key, expression) => {
+                    let val = self.compile_expr(expression)?;
+                    let key = self.intern_string(key)?;
+                    template.push(PropEntry {
+                        key: Some(KeySrc::Const(key)),
+                        val,
+                        kind: PropKind::Data,
+                    });
+                }
+                ObjectProp::Computed(key_expression, value_expression) => {
+                    match key_expression {
+                        // Statically known keys skip the normalization check.
+                        Expr::String(key) => {
+                            let val = self.compile_expr(value_expression)?;
+                            let key = self.intern_string(key)?;
+                            template.push(PropEntry {
+                                key: Some(KeySrc::Const(key)),
+                                val,
+                                kind: PropKind::Data,
+                            });
+                        }
+                        Expr::Number(key) => {
+                            let val = self.compile_expr(value_expression)?;
+                            let key = self.intern_string(&key.to_string())?;
+                            template.push(PropEntry {
+                                key: Some(KeySrc::Const(key)),
+                                val,
+                                kind: PropKind::Data,
+                            });
+                        }
+                        _ => {
+                            let key = self.compile_expr(key_expression)?;
+                            let normalized = self.alloc_reg()?;
+                            self.emit(Instr::NormalKey { dst: normalized, src: key });
+                            // Bad keys skip the value evaluation entirely.
+                            let end = self.emit_jump(|target| Instr::JumpIfNullish {
+                                src: normalized,
+                                target,
+                            });
+                            let val = self.compile_expr(value_expression)?;
+                            template.push(PropEntry {
+                                key: Some(KeySrc::Reg(key)),
+                                val,
+                                kind: PropKind::Data,
+                            });
+                            self.patch_jump(end, self.here())?;
+                        }
+                    }
+                }
+                ObjectProp::Method { name, params, body, is_async, is_generator } => {
+                    let val = self.defer_function(FuncDef {
+                        name: Some(name.clone()),
+                        params,
+                        body: FuncBody::Stmts(body),
+                        is_arrow: false,
+                        is_async: *is_async,
+                        is_generator: *is_generator,
+                        // Methods are never constructors.
+                        is_constructor: false,
+                    })?;
+                    let key = self.intern_string(name)?;
+                    template.push(PropEntry {
+                        key: Some(KeySrc::Const(key)),
+                        val,
+                        kind: PropKind::Data,
+                    });
+                }
+                ObjectProp::Getter { name, body } => {
+                    let val = self.defer_function(FuncDef {
+                        name: Some(format!("get {name}")),
+                        params: &[],
+                        body: FuncBody::Stmts(body),
+                        is_arrow: false,
+                        is_async: false,
+                        is_generator: false,
+                        is_constructor: false,
+                    })?;
+                    let key = self.intern_string(name)?;
+                    template.push(PropEntry {
+                        key: Some(KeySrc::Const(key)),
+                        val,
+                        kind: PropKind::Getter,
+                    });
+                }
+                ObjectProp::Setter { name, param, body } => {
+                    let val = self.defer_function(FuncDef {
+                        name: Some(format!("set {name}")),
+                        params: std::slice::from_ref(param),
+                        body: FuncBody::Stmts(body),
+                        is_arrow: false,
+                        is_async: false,
+                        is_generator: false,
+                        is_constructor: false,
+                    })?;
+                    let key = self.intern_string(name)?;
+                    template.push(PropEntry {
+                        key: Some(KeySrc::Const(key)),
+                        val,
+                        kind: PropKind::Setter,
+                    });
+                }
+                ObjectProp::Spread(expression) => {
+                    let src = self.compile_expr(expression)?;
+                    template.push(PropEntry { key: None, val: src, kind: PropKind::Spread });
+                }
+            }
+        }
+        let tmpl = self.push_const(Constant::ObjectTemplate(template))?;
+        let dst = self.alloc_reg()?;
+        self.emit(Instr::BuildObject { dst, tmpl });
         Ok(dst)
     }
 
@@ -1746,7 +1897,7 @@ mod tests {
             ("class C {}", "classes need Phase G"),
             ("for (let k in o) { f(k); }", "for-in/of needs Phase G"),
             ("for (const v of a) { f(v); }", "for-in/of needs Phase G"),
-            ("let o = { a: 1 };", "object literals need Phase G"),
+            ("let o = { a: 1 };", "compiled"),
             ("let [a] = b;", "destructuring needs Phase G"),
             ("f(...args);", "call spread needs Phase G"),
             ("let a = [...b];", "array spread needs Phase G"),
@@ -1757,8 +1908,8 @@ mod tests {
             ("async function f() {} f();", "compiled"), // per-function fallback
             ("function* g() {}", "compiled"),           // per-function fallback
             ("function f() { return arguments; }", "compiled"), // per-function fallback
-            ("let x = 10n;", "bigint literals need Phase G"),
-            ("let r = /ab+c/;", "regex literals need Phase G"),
+            ("let x = 10n;", "compiled"),
+            ("let r = /ab+c/;", "compiled"),
         ] {
             assert_eq!(reason(source), expected, "source: {source}");
         }

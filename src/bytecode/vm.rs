@@ -16,16 +16,20 @@
 //! UB, and never a silent wrong result.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::error::VmErr;
-use crate::interpreter::{BindKind, Env, Environment, Interpreter, Lookup, intern_params};
+use crate::interpreter::{
+    BindKind, Env, Environment, Interpreter, Lookup, ObjectAccessorKind,
+    insert_object_property, intern_params, symbol_slot_key,
+};
 use crate::value::{FunctionData, Value};
 
-use super::constants::Constant;
+use super::constants::{Constant, PropEntry, PropKind};
 use super::function::{BytecodeFunction, SlotKind};
 use super::module::BytecodeModule;
-use super::opcode::{Instr, Reg, Slot};
+use super::opcode::{Instr, KeySrc, Reg, Slot};
 
 /// One local slot at runtime: the value plus its declaration facts.
 #[derive(Debug, Clone)]
@@ -177,6 +181,10 @@ fn run_loop(
                     Constant::Bool(b) => Value::Bool(*b),
                     Constant::Null => Value::Null,
                     Constant::Undefined => Value::Undefined,
+                    Constant::BigInt(v) => Value::BigInt(v.clone()),
+                    Constant::Regex { pattern, flags } => {
+                        crate::builtins::compile_regex(pattern, flags)?
+                    }
                     _ => return Err(internal("invalid load_const")),
                 };
                 frame.registers[dst as usize] = value;
@@ -417,9 +425,37 @@ fn run_loop(
                 frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
             }
             Instr::NewObject { .. } | Instr::SetOwnProp { .. } => {
-                // Valid IR, but the Phase E compiler never emits it (object
-                // literals decline). Phase G implements construction.
-                return Err(internal("object construction needs Phase G"));
+                // Superseded by `BuildObject`; retained as valid IR, never
+                // emitted. Reaching here is a compiler bug.
+                return Err(internal("incremental object construction is retired"));
+            }
+            Instr::NormalKey { dst, src } => {
+                let key = match &frame.registers[src as usize] {
+                    Value::String(s) => Value::String(s.clone()),
+                    Value::Number(n) => Value::String(n.to_string()),
+                    Value::Symbol(s) => Value::String(symbol_slot_key(s)),
+                    _ => Value::Undefined,
+                };
+                frame.registers[dst as usize] = key;
+            }
+            Instr::LoadGlobalSoft { dst, name } => {
+                let name = const_string(frame.function, name)?;
+                frame.registers[dst as usize] =
+                    interp.global.borrow().get(name).unwrap_or(Value::Undefined);
+            }
+            Instr::LoadLocalSoft { dst, slot } => {
+                frame.registers[dst as usize] = if frame.slots[slot as usize].initialized {
+                    frame.slots[slot as usize].value.clone()
+                } else {
+                    Value::Undefined
+                };
+            }
+            Instr::BuildObject { dst, tmpl } => {
+                let template = match &frame.function.constants[tmpl as usize] {
+                    Constant::ObjectTemplate(entries) => entries.clone(),
+                    _ => return Err(internal("bad object template")),
+                };
+                frame.registers[dst as usize] = build_object(interp, frame, &template)?;
             }
             Instr::NewArray { dst, args, argc } => {
                 let items = take_range(frame, args, argc)?;
@@ -516,6 +552,85 @@ fn take_range(frame: &CallFrame, start: Reg, count: u16) -> Result<Vec<Value>, V
         Some(range) => Ok(range.to_vec()),
         None => Err(internal("operand range out of bounds")),
     }
+}
+
+/// Build one object literal from its template and evaluated registers.
+/// Insertion (including accessor pairing and dedup order), spread, symbol
+/// registration, and the property-count limit mirror the evaluator's
+/// construction entry for entry.
+fn build_object(
+    interp: &mut Interpreter,
+    frame: &CallFrame,
+    template: &[PropEntry],
+) -> Result<Value, VmErr> {
+    let mut object = Vec::new();
+    let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut accessors = HashMap::new();
+    let mut symbol_keys = Vec::new();
+    for entry in template {
+        if entry.kind == PropKind::Spread {
+            let src = frame.registers[entry.val as usize].clone();
+            interp.for_each_spread_entry(&src, |key, value| {
+                insert_object_property(
+                    &mut object,
+                    &mut positions,
+                    &mut accessors,
+                    key,
+                    value,
+                    None,
+                );
+                check_prop_limit(&positions)
+            })?;
+        } else {
+            let key_src = entry.key.ok_or_else(|| internal("spread-shaped data entry"))?;
+            let key = match key_src {
+                KeySrc::Const(index) => const_string(frame.function, index)?.to_string(),
+                KeySrc::Reg(reg) => match &frame.registers[reg as usize] {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Symbol(s) => {
+                        let key = symbol_slot_key(s);
+                        symbol_keys.push((key.clone(), s.clone()));
+                        key
+                    }
+                    // The compiler skips evaluating the value for these;
+                    // hitting one here means a hand-built unit.
+                    _ => continue,
+                },
+            };
+            let value = frame.registers[entry.val as usize].clone();
+            let kind = match entry.kind {
+                PropKind::Data => None,
+                PropKind::Getter => Some(ObjectAccessorKind::Getter),
+                PropKind::Setter => Some(ObjectAccessorKind::Setter),
+                PropKind::Spread => return Err(internal("misrouted spread entry")),
+            };
+            insert_object_property(&mut object, &mut positions, &mut accessors, key, value, kind);
+        }
+        if positions.len() > crate::value::MAX_OBJECT_PROPS {
+            return Err(crate::value::limit_err(
+                "Maximum object property count exceeded",
+            ));
+        }
+    }
+    let result = Value::checked_object(object.into_iter().flatten().collect())?;
+    if let Value::Object { props } = &result {
+        let mut meta = props.meta.borrow_mut();
+        meta.has_accessors = !accessors.is_empty();
+        for (key, symbol) in symbol_keys {
+            meta.set_symbol_key(&key, symbol);
+        }
+    }
+    Ok(result)
+}
+
+fn check_prop_limit(positions: &HashMap<String, Vec<usize>>) -> Result<(), VmErr> {
+    if positions.len() > crate::value::MAX_OBJECT_PROPS {
+        return Err(crate::value::limit_err(
+            "Maximum object property count exceeded",
+        ));
+    }
+    Ok(())
 }
 
 /// Instantiate a bytecode-backed function value. The AST body is a fresh

@@ -234,8 +234,78 @@ fn closures() {
 }
 
 #[test]
+fn objects() {
+    check("let o = {a: 1}; o.a", true);
+    check("let o = {a: 1, b: 2}; o.a + o.b", true);
+    check("let o = {}; typeof o", true);
+    check("let x = 41; let o = {x}; o.x + 1", true);
+    // Shorthand tolerates missing and dead-zone bindings.
+    check("let o = {missing}; typeof o.missing", true);
+    check("let o = {tdz}; let tdz = 1; typeof o.tdz", true);
+    // Computed keys: folded statics and dynamic normalization.
+    check("let o = {['lit']: 1}; o.lit", true);
+    check("let o = {[42]: 1}; o['42']", true);
+    check("let k = 'dyn'; let o = {[k]: 7}; o.dyn", true);
+    check("let k = 8; let o = {[k]: 1}; o['8']", true);
+    check("let s = Symbol('x'); let o = {[s]: 9}; o[s]", true);
+    // Bad computed keys skip the value evaluation entirely.
+    check("let ran = false; let o = {[{}]: (ran = true, 1)}; ran", true);
+    check("let ran = false; let o = {[null]: (ran = true, 1)}; ran", true);
+    check("let ran = false; let o = {[undefined]: (ran = true, 1)}; ran", true);
+    check("let ran = false; let o = {[true]: (ran = true, 1)}; ran", true);
+    // Dedup: later wins, first position kept.
+    check("let o = {a: 1, a: 2}; o.a", true);
+    check("Object.keys({a: 1, b: 2, a: 3}).join(',')", true);
+    // Methods are named, non-constructor, `this`-bound at call.
+    check("let o = {m(){ return 42; }}; o.m()", true);
+    check("let o = {m(){ return this.x; }, x: 5}; o.m()", true);
+    check("let o = {m(){}}; o.m.name", true);
+    check("let o = {m(){}}; new o.m()", true);
+    check("let o = {async m(){ return 1; }}; o.m() instanceof Promise", true);
+    // Getters and setters pair, replace, and read like the evaluator's.
+    check("let o = {get x(){ return 11; }}; o.x", true);
+    check(
+        "let o = {set x(v){ globalThis.sv = v; }, get x(){ return globalThis.sv + 1; }}; \
+         o.x = 10; o.x",
+        true,
+    );
+    check("let o = {set x(v){}}; typeof o.x", true);
+    check("let o = {x: 1, get x(){ return 2; }}; o.x", true);
+    check("let o = {get x(){ return 2; }, x: 1}; o.x", true);
+    // Spread copies objects, ignores the rest, fires getters in order.
+    check("let o = {...{a: 1}, b: 2}; o.a + o.b", true);
+    check("let o = {...null, ...42, a: 1}; o.a", true);
+    check("let o = {...[1, 2]}; typeof o[0]", true);
+    check(
+        "let log = ''; let s = {get a(){ log += 'a'; return 1; }, get b(){ log += 'b'; return 2; }}; \
+         let o = {...s}; log + o.a + o.b",
+        true,
+    );
+    check("let o = {a: 1, ...{a: 2, b: 3}, a: 4}; [o.a, o.b].join(',')", true);
+    // `__proto__` is ordinary data: no prototype switching.
+    check("let o = {__proto__: 5}; o.__proto__", true);
+    // Methods close over slots like any nested function.
+    check(
+        "function mk(){ let n = 0; return {inc(){ n += 1; return n; }}; } \
+         let o = mk(); o.inc(); o.inc()",
+        true,
+    );
+}
+
+#[test]
+fn bigint_and_regex_literals() {
+    check("typeof 10n", true);
+    check("10n + 5n === 15n", true);
+    check("10n", true);
+    check("typeof /ab+c/", true);
+    check("/ab+c/.test('xxabcxx')", true);
+    check("/ab+c/.test('xyz')", true);
+    check("let r = /a/g; r.lastIndex", true);
+    check("let r = /a/g; r.test('a'); r.lastIndex", true);
+}
+
+#[test]
 fn declined_units_stay_on_ast() {
-    check("let o = {a: 1}; o.a", false);
     check("try { throw 5; } catch (e) { e * 2; }", false);
     check("class C {} typeof C", false);
     check("let r = 0; switch (2) { case 1: r = 1; break; case 2: r = 2; break; } r", false);

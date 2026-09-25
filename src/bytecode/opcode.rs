@@ -159,18 +159,38 @@ pub enum Instr {
     Template { dst: Reg, quasis: u16, args: Reg, argc: u16 },
     /// `dst = new callee(...args)`.
     Construct { dst: Reg, callee: Reg, args: Reg, argc: u16 },
-    /// `dst = {}`: a fresh ordinary object.
+    /// `dst = {}`: a fresh ordinary object. Superseded by [`Instr::BuildObject`]
+    /// (single-shot construction needs no live intermediate); retained as
+    /// valid IR, never emitted.
     NewObject { dst: Reg },
-    /// Define one own property during object-literal construction,
-    /// including the `__proto__` special case.
+    /// Define one own property on a live object under construction.
+    /// Superseded by [`Instr::BuildObject`]; retained as valid IR, never
+    /// emitted. Note there is no `__proto__` switching anywhere: the
+    /// evaluator stores it as ordinary data, and so would this.
     SetOwnProp { obj: Reg, key: KeySrc, val: Reg },
     /// `dst = [args..args+argc]` (no holes, no spread in Phase E).
     NewArray { dst: Reg, args: Reg, argc: u16 },
     /// `dst` = a new bytecode-backed function from `constants[func]`.
     MakeFunction { dst: Reg, func: u16 },
     /// `dst` = a new AST-backed function from `constants[ast]` (the
-    /// per-function fallback; capture-free, so no closure environment).
+    /// per-function fallback, closed over the defining frame environment
+    /// like any other function).
     MakeAstFunction { dst: Reg, ast: u16 },
+    /// `dst` = the normalized form of computed key `src`: strings as-is,
+    /// numbers stringified, symbols mapped to their slot keys, anything
+    /// else `undefined` (those properties are skipped without evaluating
+    /// their values, like the evaluator).
+    NormalKey { dst: Reg, src: Reg },
+    /// `dst` = one object literal from `constants[tmpl]`: keys, values, and
+    /// spread sources already evaluated into registers. Insertion, accessor
+    /// pairing, spread, symbols, and the property-count limit all follow
+    /// the evaluator's construction exactly.
+    BuildObject { dst: Reg, tmpl: u16 },
+    /// `dst` = the named global, or `undefined` when missing or
+    /// uninitialized. Shorthand properties never throw.
+    LoadGlobalSoft { dst: Reg, name: u16 },
+    /// `dst` = the slot value, or `undefined` when uninitialized.
+    LoadLocalSoft { dst: Reg, slot: Slot },
 }
 
 /// The discriminant of [`Instr`], for classification without operands.
@@ -223,6 +243,10 @@ pub enum Opcode {
     NewArray,
     MakeFunction,
     MakeAstFunction,
+    NormalKey,
+    BuildObject,
+    LoadGlobalSoft,
+    LoadLocalSoft,
 }
 
 impl Instr {
@@ -276,6 +300,10 @@ impl Instr {
             Instr::NewArray { .. } => Opcode::NewArray,
             Instr::MakeFunction { .. } => Opcode::MakeFunction,
             Instr::MakeAstFunction { .. } => Opcode::MakeAstFunction,
+            Instr::NormalKey { .. } => Opcode::NormalKey,
+            Instr::BuildObject { .. } => Opcode::BuildObject,
+            Instr::LoadGlobalSoft { .. } => Opcode::LoadGlobalSoft,
+            Instr::LoadLocalSoft { .. } => Opcode::LoadLocalSoft,
         }
     }
 
@@ -286,7 +314,7 @@ impl Instr {
         match self.opcode() {
             Opcode::Call | Opcode::CallMethod => 5,
             Opcode::Construct => 8,
-            Opcode::NewObject | Opcode::NewArray => 10,
+            Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject => 10,
             Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
             Opcode::Mov
             | Opcode::Jump
@@ -391,6 +419,10 @@ impl fmt::Display for Instr {
             }
             Instr::MakeFunction { dst, func } => write!(f, "MAKE_FUNCTION r{dst}, c{func}"),
             Instr::MakeAstFunction { dst, ast } => write!(f, "MAKE_AST_FUNCTION r{dst}, c{ast}"),
+            Instr::NormalKey { dst, src } => write!(f, "NORMAL_KEY r{dst}, r{src}"),
+            Instr::BuildObject { dst, tmpl } => write!(f, "BUILD_OBJECT r{dst}, c{tmpl}"),
+            Instr::LoadGlobalSoft { dst, name } => write!(f, "LOAD_GLOBAL_SOFT r{dst}, c{name}"),
+            Instr::LoadLocalSoft { dst, slot } => write!(f, "LOAD_LOCAL_SOFT r{dst}, s{slot}"),
         }
     }
 }

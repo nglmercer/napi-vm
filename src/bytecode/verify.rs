@@ -192,14 +192,18 @@ impl Checker<'_> {
     fn check_const_is(&self, address: usize, index: u16, expected: &'static str) -> Result<(), VerifyError> {
         self.check_const(address, index)?;
         let ok = match &self.function.constants[index as usize] {
-            Constant::Number(_) | Constant::Bool(_) | Constant::Null | Constant::Undefined => {
-                expected == "scalar"
-            }
+            Constant::Number(_)
+            | Constant::Bool(_)
+            | Constant::Null
+            | Constant::Undefined
+            | Constant::BigInt(_)
+            | Constant::Regex { .. } => expected == "scalar",
             // Strings load as values and name globals.
             Constant::String(_) => expected == "string" || expected == "scalar",
             Constant::StringList(_) => expected == "string-list",
             Constant::Function(_) => expected == "function",
             Constant::AstFunction(_) => expected == "ast-function",
+            Constant::ObjectTemplate(_) => expected == "object-template",
         };
         if ok {
             Ok(())
@@ -426,6 +430,31 @@ impl Checker<'_> {
             Instr::MakeAstFunction { dst, ast } => {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *ast, "ast-function")?;
+            }
+            Instr::NormalKey { dst, src } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *src)?;
+            }
+            Instr::BuildObject { dst, tmpl } => {
+                self.check_reg(address, *dst)?;
+                self.check_const_is(address, *tmpl, "object-template")?;
+                if let Constant::ObjectTemplate(entries) = &self.function.constants[*tmpl as usize]
+                {
+                    for entry in entries {
+                        if let Some(key) = entry.key {
+                            self.check_key(address, key)?;
+                        }
+                        self.check_reg(address, entry.val)?;
+                    }
+                }
+            }
+            Instr::LoadGlobalSoft { dst, name } => {
+                self.check_reg(address, *dst)?;
+                self.check_const_is(address, *name, "string")?;
+            }
+            Instr::LoadLocalSoft { dst, slot } => {
+                self.check_reg(address, *dst)?;
+                self.check_slot(address, *slot)?;
             }
         }
         Ok(())

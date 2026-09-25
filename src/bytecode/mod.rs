@@ -17,7 +17,7 @@ pub mod verify;
 pub mod vm;
 
 pub use compiler::{Unsupported, compile_program};
-pub use constants::{AstFunction, Constant};
+pub use constants::{AstFunction, Constant, PropEntry, PropKind};
 pub use function::{BytecodeFunction, SlotInfo, SlotKind};
 pub use module::BytecodeModule;
 pub use opcode::{Instr, KeySrc, Opcode, Reg, Slot, Target};

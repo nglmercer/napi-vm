@@ -10,6 +10,7 @@ use std::rc::Rc;
 use crate::parser::Statement;
 
 use super::function::BytecodeFunction;
+use super::opcode::{KeySrc, Reg};
 
 /// One entry of a [`BytecodeFunction`](super::function::BytecodeFunction)
 /// constant pool.
@@ -22,13 +23,45 @@ pub enum Constant {
     Undefined,
     /// Cooked template-literal chunks for one `Template` instruction.
     StringList(Vec<String>),
+    /// A parsed bigint literal, shared across executions (immutable).
+    BigInt(Rc<crate::bigint::BigInt>),
+    /// A regex literal's source and flags; compiled fresh per `LoadConst`
+    /// so every evaluation gets its own `lastIndex`, like the evaluator.
+    Regex { pattern: String, flags: String },
     /// A nested supported function, compiled to bytecode.
     Function(Rc<BytecodeFunction>),
     /// A nested function the compiler declined (async, generator, or an
-    /// otherwise unsupported body). Capture-free by construction, so the VM
-    /// instantiates it as a plain AST-backed function with no closure
-    /// environment; calls run through the AST evaluator.
+    /// otherwise unsupported body). The VM instantiates it closed over the
+    /// defining frame environment; calls run through the AST evaluator.
     AstFunction(Rc<AstFunction>),
+    /// One object literal's shape for [`Instr::BuildObject`](super::opcode::Instr::BuildObject):
+    /// static keys plus the registers holding dynamic keys, values, and
+    /// spread sources, in source order.
+    ObjectTemplate(Vec<PropEntry>),
+}
+
+/// One property of an [`Constant::ObjectTemplate`]: where its key and value
+/// live plus its insertion kind. Registers are absolute, evaluated before
+/// the build runs.
+#[derive(Debug, Clone)]
+pub struct PropEntry {
+    /// Static keys name a string constant; computed keys name the register
+    /// holding the *original* key value (`undefined` there skips the
+    /// property, like the evaluator). `None` for spreads.
+    pub key: Option<KeySrc>,
+    /// The value register (data/accessor/method function) or the spread
+    /// source.
+    pub val: Reg,
+    pub kind: PropKind,
+}
+
+/// How one template entry inserts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropKind {
+    Data,
+    Getter,
+    Setter,
+    Spread,
 }
 
 /// A function kept as AST inside a compiled unit (the per-function fallback
