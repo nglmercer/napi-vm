@@ -31,7 +31,9 @@ pub enum VerifyError {
     BadConstant { address: usize, index: u16 },
     /// Constant of the wrong variant for the instruction.
     ConstantTypeMismatch { address: usize, expected: &'static str },
-    /// Jump target outside `0..code.len()`.
+    /// Jump target outside `0..=code.len()`. Landing exactly on
+    /// `code.len()` is falling off the end, which the VM defines
+    /// (completion value at top level, `undefined` in functions).
     BadJumpTarget { address: usize, target: u32 },
     /// Call/array operand range outside the register file.
     BadOperandRange { address: usize, start: u16, count: u16 },
@@ -214,7 +216,7 @@ impl Checker<'_> {
     }
 
     fn check_target(&self, address: usize, target: u32) -> Result<(), VerifyError> {
-        if (target as usize) < self.function.code.len() {
+        if (target as usize) <= self.function.code.len() {
             Ok(())
         } else {
             Err(VerifyError::BadJumpTarget { address, target })

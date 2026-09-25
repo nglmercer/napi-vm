@@ -357,7 +357,6 @@ fn spreads() {
 fn declined_units_stay_on_ast() {
     check("try { throw 5; } catch (e) { e * 2; }", false);
     check("class C {} typeof C", false);
-    check("let r = 0; switch (2) { case 1: r = 1; break; case 2: r = 2; break; } r", false);
     check("function o(){ function i(){ return 1; } return i(); } o()", true);
     // Block slots have no frame for the chain to serve: still declined.
     check("{ let y = 1; function f(){ return y; } f(); }", false);
@@ -367,4 +366,88 @@ fn declined_units_stay_on_ast() {
         false,
     );
     check("function g(){ const f = () => this; return f; }", false);
+}
+
+#[test]
+fn switch_statements() {
+    check("let r = 0; switch (2) { case 1: r = 1; break; case 2: r = 2; break; } r", true);
+    // Fallthrough without break runs subsequent bodies.
+    check("let r = ''; switch (1) { case 1: r += 'a'; case 2: r += 'b'; break; case 3: r += 'c'; } r", true);
+    // Default runs on no match, in position on fallthrough.
+    check("let r = 0; switch (9) { case 1: r = 1; break; default: r = 7; break; } r", true);
+    check("let r = ''; switch (1) { case 1: r += 'a'; default: r += 'd'; case 3: r += 'c'; } r", true);
+    check("let r = ''; switch (2) { case 1: r += 'a'; default: r += 'd'; case 3: r += 'c'; } r", true);
+    // No match and no default: nothing runs.
+    check("let r = 5; switch (9) { case 1: r = 1; break; } r", true);
+    // Strict equality: no coercion across types.
+    check("let r = 0; switch ('1') { case 1: r = 1; break; default: r = 2; } r", true);
+    check("let r = 0; switch (1) { case '1': r = 1; break; default: r = 2; } r", true);
+    // First matching case wins; later tests do not run.
+    check("let n = 0; function t(v){ n++; return v; } switch (1) { case t(1): break; case t(2): break; } n", true);
+    // The switch value is the last executed case body value.
+    check("switch (1) { case 1: 9; }", true);
+    check("switch (9) { case 1: 9; }", true);
+    check("switch (1) { case 1: 9; break; case 2: 3; }", true);
+    // Cases share one scope: fallthrough sees earlier `let`.
+    check("let r = 0; switch (1) { case 1: let q = 4; case 2: r = q * 2; break; } r", true);
+    // `break` exits the switch; `continue` reaches past it to the loop.
+    check("let r = ''; for (let i = 0; i < 3; i++) { switch (i) { case 1: continue; default: r += i; } } r", true);
+    check("let r = ''; for (let i = 0; i < 3; i++) { switch (i) { case 1: break; default: r += i; } r += '!'; } r", true);
+    // Lexical hoist before dispatch: TDZ throws like the evaluator.
+    check("switch (1) { case 1: r; let r = 2; break; }", true);
+    // Nested switches dispatch independently.
+    check("let r = ''; switch (1) { case 1: switch (2) { case 2: r = 'in'; break; } r += '!'; } r", true);
+}
+
+#[test]
+fn labeled_statements() {
+    check("let r = 0; outer: for (let i = 0; i < 5; i++) { if (i === 2) { break outer; } r = i; } r", true);
+    check("let r = ''; outer: for (let i = 0; i < 3; i++) { for (let j = 0; j < 3; j++) { if (j === 1) { continue outer; } r += i + '' + j + ';'; } } r", true);
+    // Labeled non-loop block: break exits with undefined.
+    check("let r = 1; blk: { r = 2; break blk; r = 3; } r", true);
+    check("blk: { 1; break blk; 2; }", true);
+    check("blk: { 1; 2; }", true);
+    // Labeled loops keep the loop value on a taken labeled break.
+    check("outer: for (let i = 0; i < 3; i++) { if (i === 1) { break outer; } i * 10; }", true);
+    // Nested labels: breaking to the outer discards the loop value.
+    check("a: b: for (let i = 0; i < 3; i++) { if (i === 1) { break a; } 7; }", true);
+    check("let r = 0; a: b: for (let i = 0; i < 3; i++) { if (i === 1) { break b; } r = i; } r", true);
+    // Plain break inside a labeled block still exits just the block.
+    check("let r = 0; for (let i = 0; i < 3; i++) { blk: { if (i === 1) { break blk; } r += 10; } r += 1; } r", true);
+    // Labeled while and do-while.
+    check("let i = 0; let r = 0; w: while (i < 5) { i++; if (i === 3) { break w; } r = i; } r", true);
+    check("let i = 0; let r = ''; w: while (i < 4) { i++; if (i === 2) { continue w; } r += i; } r", true);
+    check("let i = 0; d: do { i++; if (i === 2) { break d; } } while (i < 5); i", true);
+    // Unresolvable labels decline to the AST tier.
+    check("outer: for (;;) { break missing; }", false);
+    check("blk: { continue blk; }", false);
+}
+
+#[test]
+fn tagged_templates() {
+    check("function tag(parts){ return parts.join('|'); } tag`a${1}b${2}c`", true);
+    check("function tag(parts, a, b){ return parts.length + ':' + a + ':' + b; } tag`x${10}y${20}z`", true);
+    check("function tag(parts){ return parts.length; } tag`plain`", true);
+    check("function tag(parts, v){ return parts[0] + v + parts[1]; } tag`${40 + 2}`", true);
+    // Method tags keep their receiver.
+    check("let o = { p: 9, tag(parts, v){ return this.p + v; } }; o.tag`!${1}`", true);
+    // Evaluation order: substitutions, then tag, then call.
+    check("let log = ''; function s(v){ log += 's' + v; return v; } function t(p, v){ log += 't'; return log; } t`${s(1)}${s(2)}`", true);
+    // Fresh parts array per evaluation.
+    check("function tag(p){ p.push('x'); return p.length; } [tag`a`, tag`a`].join(',')", true);
+    // Empty template still passes one empty part.
+    check("function tag(p, v){ return p.length + ':' + (v === undefined); } tag``", true);
+}
+
+#[test]
+fn trailing_jumps_land_on_end_of_code() {
+    // A `break`/`switch` exit as the last statement of a function body
+    // jumps to exactly end-of-code; the VM treats that as fall-off.
+    check("function f(){ switch (1) { case 1: 1; break; } } f()", true);
+    check("function f(){ switch (9) { case 1: 1; break; } } f()", true);
+    check("function f(){ while (1) { break; } } f()", true);
+    check("function f(){ for (;;) { break; } } f()", true);
+    check("function f(){ blk: { break blk; } } f()", true);
+    check("switch (1) { case 1: 1; break; }", true);
+    check("while (1) { break; }", true);
 }

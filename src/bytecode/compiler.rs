@@ -35,8 +35,8 @@ use std::rc::Rc;
 
 use crate::interpreter::produces_completion_value;
 use crate::parser::{
-    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Statement, UnOp,
-    VarKind, arrow_body_references, collect_var_names, expr_captures_identifier,
+    AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, ObjectProp, Statement,
+    SwitchCase, UnOp, VarKind, arrow_body_references, collect_var_names, expr_captures_identifier,
     statements_capture_identifier, stmts_reference,
 };
 
@@ -138,11 +138,24 @@ struct Scope {
     global: bool,
 }
 
-/// Break/continue patch lists for one loop under compilation.
+/// Break/continue patch lists for one breakable context under compilation
+/// (a loop, a switch body, or a labeled non-loop statement).
 #[derive(Default)]
 struct LoopCtx {
     breaks: Vec<usize>,
     continues: Vec<usize>,
+    labels: Vec<String>,
+    kind: CtxKind,
+}
+
+/// What a [`LoopCtx`] entry accepts: loops take both `break` and
+/// `continue`, switches and labeled blocks take `break` only.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum CtxKind {
+    #[default]
+    Loop,
+    Switch,
+    LabelBlock,
 }
 
 struct Compiler<'a> {
@@ -157,6 +170,10 @@ struct Compiler<'a> {
     slots: Vec<SlotInfo>,
     scopes: Vec<Scope>,
     loops: Vec<LoopCtx>,
+    /// Labels applied to the next compiled loop, pushed while compiling
+    /// `label: <loop>` (labels nest, so a loop may carry several) and
+    /// consumed by the loop's context.
+    pending_labels: Vec<String>,
     deferred: Vec<Deferred<'a>>,
     next_reg: u16,
     max_reg: u16,
@@ -192,6 +209,7 @@ impl<'a> Compiler<'a> {
             slots: Vec::new(),
             scopes: vec![Scope { bindings: HashMap::new(), global: true }],
             loops: Vec::new(),
+            pending_labels: Vec::new(),
             deferred: Vec::new(),
             next_reg: 0,
             max_reg: 0,
@@ -222,6 +240,7 @@ impl<'a> Compiler<'a> {
             slots: Vec::new(),
             scopes: vec![Scope { bindings: HashMap::new(), global: false }],
             loops: Vec::new(),
+            pending_labels: Vec::new(),
             deferred: Vec::new(),
             next_reg: 0,
             max_reg: 0,
@@ -824,22 +843,28 @@ impl<'a> Compiler<'a> {
                 self.compile_for(init.as_deref(), test.as_deref(), update.as_deref(), body)
             }
             Statement::Break => {
-                if self.loops.is_empty() {
-                    return Err(Decline::Func("break outside loop"));
-                }
                 let addr = self.emit_jump(|target| Instr::Jump { target });
-                if let Some(ctx) = self.loops.last_mut() {
-                    ctx.breaks.push(addr);
+                // Plain `break` targets the innermost breakable context: a
+                // loop, a switch, or a labeled block.
+                match self.loops.iter_mut().next_back() {
+                    Some(ctx) => ctx.breaks.push(addr),
+                    None => return Err(Decline::Func("break outside loop")),
                 }
                 self.load_undefined()
             }
             Statement::Continue => {
-                if self.loops.is_empty() {
-                    return Err(Decline::Func("continue outside loop"));
-                }
                 let addr = self.emit_jump(|target| Instr::Jump { target });
-                if let Some(ctx) = self.loops.last_mut() {
-                    ctx.continues.push(addr);
+                // Plain `continue` targets the innermost loop, skipping over
+                // any switch or labeled-block contexts (`continue` inside a
+                // switch applies to the enclosing loop).
+                match self
+                    .loops
+                    .iter_mut()
+                    .rev()
+                    .find(|ctx| ctx.kind == CtxKind::Loop)
+                {
+                    Some(ctx) => ctx.continues.push(addr),
+                    None => return Err(Decline::Func("continue outside loop")),
                 }
                 self.load_undefined()
             }
@@ -860,14 +885,45 @@ impl<'a> Compiler<'a> {
             }
             Statement::Empty => self.load_undefined(),
             Statement::Try { .. } => Err(Decline::Func("try/catch needs Phase G")),
-            Statement::Switch { .. } => Err(Decline::Func("switch needs Phase G")),
+            Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
             Statement::ClassDecl { .. } => Err(Decline::Func("classes need Phase G")),
             Statement::ForIn { .. } | Statement::ForOf { .. } => {
                 Err(Decline::Func("for-in/of needs Phase G"))
             }
-            Statement::Labeled { .. } => Err(Decline::Func("labels need Phase G")),
-            Statement::LabeledBreak(_) | Statement::LabeledContinue(_) => {
-                Err(Decline::Func("labels need Phase G"))
+            Statement::Labeled { label, body } => self.compile_labeled(label, body),
+            Statement::LabeledBreak(label) => {
+                let addr = self.emit_jump(|target| Instr::Jump { target });
+                match self
+                    .loops
+                    .iter_mut()
+                    .rev()
+                    .find(|ctx| ctx.labels.iter().any(|known| known == label))
+                {
+                    Some(ctx) => ctx.breaks.push(addr),
+                    None => return Err(Decline::Func("unresolved break label")),
+                }
+                self.load_undefined()
+            }
+            Statement::LabeledContinue(label) => {
+                let addr = self.emit_jump(|target| Instr::Jump { target });
+                // `continue label` targets the innermost context carrying
+                // that label, which must be a loop; anything else (or no
+                // match at all) is a compile error the parser normally
+                // rejects ahead of us.
+                let mut target = None;
+                for ctx in self.loops.iter_mut().rev() {
+                    if ctx.labels.iter().any(|known| known == label) {
+                        if ctx.kind == CtxKind::Loop {
+                            target = Some(ctx);
+                        }
+                        break;
+                    }
+                }
+                match target {
+                    Some(ctx) => ctx.continues.push(addr),
+                    None => return Err(Decline::Func("unresolved continue label")),
+                }
+                self.load_undefined()
             }
             Statement::Import { .. } => Err(Decline::Func("modules need Phase G")),
             Statement::ExportDefault(_)
@@ -971,6 +1027,128 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// `label: body`. A labeled loop hands the label to the loop's
+    /// context (so `break label`/`continue label` reach it); any other
+    /// labeled statement runs inside a `LabelBlock` context whose breaks
+    /// land just past it with the statement value reset to `undefined`,
+    /// matching the evaluator's `LabeledBreak` propagation.
+    fn compile_labeled(
+        &mut self,
+        label: &'a str,
+        body: &'a Statement,
+    ) -> Result<Reg, Decline> {
+        // Only a directly-wrapped loop takes the label (the evaluator's
+        // loops likewise take a single pending label on entry); an outer
+        // label of a nested chain stays a `LabelBlock`, so breaking to it
+        // discards the loop value exactly like the evaluator.
+        if matches!(
+            body,
+            Statement::While { .. } | Statement::DoWhile { .. } | Statement::For { .. }
+        ) {
+            self.pending_labels.push(label.to_string());
+            return self.compile_stmt(body);
+        }
+        self.loops.push(LoopCtx {
+            labels: vec![label.to_string()],
+            kind: CtxKind::LabelBlock,
+            ..Default::default()
+        });
+        let value = self.compile_stmt(body)?;
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
+        debug_assert!(ctx.continues.is_empty());
+        if !ctx.breaks.is_empty() {
+            let over = self.emit_jump(|target| Instr::Jump { target });
+            let taken = self.here();
+            let undef = self.load_undefined()?;
+            self.emit(Instr::Mov { dst: value, src: undef });
+            let end = self.here();
+            for addr in ctx.breaks {
+                self.patch_jump(addr, taken)?;
+            }
+            self.patch_jump(over, end)?;
+        }
+        Ok(value)
+    }
+
+    /// `switch (disc) { ... }`. One scope hosts every case's lexical hoists
+    /// (shared switch scope, matching the evaluator); strict-equality tests
+    /// dispatch to case bodies in order with fallthrough, `break` exits the
+    /// switch, and a completed switch evaluates to `undefined`.
+    fn compile_switch(
+        &mut self,
+        disc: &'a Expr,
+        cases: &'a [SwitchCase],
+    ) -> Result<Reg, Decline> {
+        let scrutinee = self.compile_expr(disc)?;
+        self.push_scope();
+        for case in cases {
+            self.hoist_block(&case.body)?;
+        }
+        let value = self.alloc_reg()?;
+        let undef = self.load_undefined()?;
+        self.emit(Instr::Mov { dst: value, src: undef });
+        let mut tests = Vec::new();
+        let mut default = None;
+        for (index, case) in cases.iter().enumerate() {
+            match &case.test {
+                Some(test) => {
+                    let test_value = self.compile_expr(test)?;
+                    let matched = self.alloc_reg()?;
+                    self.emit(Instr::Binary {
+                        dst: matched,
+                        op: BinOp::Seq,
+                        lhs: scrutinee,
+                        rhs: test_value,
+                    });
+                    tests.push((
+                        self.emit_jump(|target| Instr::JumpIfTrue {
+                            src: matched,
+                            target,
+                        }),
+                        index,
+                    ));
+                }
+                None => {
+                    if default.is_none() {
+                        default = Some(index);
+                    }
+                }
+            }
+        }
+        let no_match = self.emit_jump(|target| Instr::Jump { target });
+        self.loops.push(LoopCtx {
+            kind: CtxKind::Switch,
+            ..Default::default()
+        });
+        let mut bodies = Vec::with_capacity(cases.len());
+        for case in cases {
+            bodies.push(self.here());
+            let case_value = self.compile_block(&case.body)?;
+            self.emit(Instr::Mov { dst: value, src: case_value });
+        }
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
+        debug_assert!(ctx.continues.is_empty());
+        let end = self.here();
+        for addr in ctx.breaks {
+            self.patch_jump(addr, end)?;
+        }
+        for (addr, index) in tests {
+            self.patch_jump(addr, bodies[index])?;
+        }
+        match default {
+            Some(index) => self.patch_jump(no_match, bodies[index])?,
+            None => self.patch_jump(no_match, end)?,
+        }
+        self.pop_scope();
+        Ok(value)
+    }
+
     fn compile_while(&mut self, test: &'a Expr, body: &'a [Statement]) -> Result<Reg, Decline> {
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
@@ -981,7 +1159,10 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::LoopHead);
         let cond = self.compile_expr(test)?;
         let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
-        self.loops.push(LoopCtx::default());
+        self.loops.push(LoopCtx {
+            labels: std::mem::take(&mut self.pending_labels),
+            ..Default::default()
+        });
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov { dst: loop_value, src: body_value });
         self.emit(Instr::Jump { target: addr_target(test_addr)? });
@@ -1000,7 +1181,10 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::Mov { dst: loop_value, src: undef });
         let body_addr = self.here();
         self.emit(Instr::LoopHead);
-        self.loops.push(LoopCtx::default());
+        self.loops.push(LoopCtx {
+            labels: std::mem::take(&mut self.pending_labels),
+            ..Default::default()
+        });
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov { dst: loop_value, src: body_value });
         // A `continue` lands here, after the body: the test runs without
@@ -1037,7 +1221,10 @@ impl<'a> Compiler<'a> {
         } else {
             None
         };
-        self.loops.push(LoopCtx::default());
+        self.loops.push(LoopCtx {
+            labels: std::mem::take(&mut self.pending_labels),
+            ..Default::default()
+        });
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov { dst: loop_value, src: body_value });
         // A `continue` runs the update, then the budgeted test.
@@ -1223,7 +1410,9 @@ impl<'a> Compiler<'a> {
             },
             Expr::Object(props) => self.compile_object(props),
             Expr::ClassExpr { .. } => Err(Decline::Func("classes need Phase G")),
-            Expr::TaggedTemplate { .. } => Err(Decline::Func("tagged templates need Phase G")),
+            Expr::TaggedTemplate { tag, cooked, exprs, .. } => {
+                self.compile_tagged(tag, cooked, exprs)
+            }
             Expr::Super => Err(Decline::Unit("super needs Phase G")),
             Expr::ImportMeta | Expr::DynamicImport(_) => {
                 Err(Decline::Func("modules need Phase G"))
@@ -1601,6 +1790,70 @@ impl<'a> Compiler<'a> {
         let src = self.compile_expr(operand)?;
         let dst = self.alloc_reg()?;
         self.emit(Instr::Unary { dst, op: UnOp::Typeof, src });
+        Ok(dst)
+    }
+
+    /// `` tag`a${x}b` `` desugars to `tag(parts, x)` where `parts` is a
+    /// fresh cooked-strings array per evaluation. Substitution values
+    /// evaluate before the tag, like the evaluator; `raw` is not modeled
+    /// there either.
+    fn compile_tagged(
+        &mut self,
+        tag: &'a Expr,
+        cooked: &'a [String],
+        exprs: &'a [Expr],
+    ) -> Result<Reg, Decline> {
+        let mut template = Vec::with_capacity(cooked.len());
+        for part in cooked {
+            let index = self.intern_string(part)?;
+            let reg = self.load_const(index)?;
+            template.push(SpreadEntry { spread: false, reg });
+        }
+        let mut values = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            values.push(self.compile_expr(expr)?);
+        }
+        let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
+        let parts = self.alloc_reg()?;
+        self.emit(Instr::BuildArray { dst: parts, tmpl });
+        let start = self.alloc_regs(1 + values.len())?;
+        self.emit(Instr::Mov { dst: start, src: parts });
+        for (i, value) in values.iter().enumerate() {
+            self.emit(Instr::Mov {
+                dst: start + 1 + i as u16,
+                src: *value,
+            });
+        }
+        let argc = 1 + values.len() as u16;
+        let dst = self.alloc_reg()?;
+        match tag {
+            Expr::Member { object, property, .. } => {
+                check_callable_spine(object)?;
+                let obj = self.compile_expr(object)?;
+                let key = self.compile_expr(property)?;
+                let callee = self.alloc_reg()?;
+                self.emit(Instr::GetProp { dst: callee, obj, key });
+                self.emit(Instr::CallMethod {
+                    dst,
+                    callee,
+                    this: obj,
+                    args: start,
+                    argc,
+                });
+            }
+            Expr::Super => {
+                return Err(Decline::Unit("super needs Phase G"));
+            }
+            _ => {
+                let callee = self.compile_expr(tag)?;
+                self.emit(Instr::Call {
+                    dst,
+                    callee,
+                    args: start,
+                    argc,
+                });
+            }
+        }
         Ok(dst)
     }
 
@@ -1985,7 +2238,7 @@ mod tests {
     fn unsupported_constructs_decline() {
         for (source, expected) in [
             ("try { f(); } catch (e) { g(); }", "try/catch needs Phase G"),
-            ("switch (x) { case 1: y(); }", "switch needs Phase G"),
+            ("switch (x) { case 1: y(); }", "compiled"),
             ("class C {}", "classes need Phase G"),
             ("for (let k in o) { f(k); }", "for-in/of needs Phase G"),
             ("for (const v of a) { f(v); }", "for-in/of needs Phase G"),
@@ -1996,7 +2249,7 @@ mod tests {
             ("a?.b;", "compiled"),
             ("import x from 'm';", "modules need Phase G"),
             ("export default 1;", "modules need Phase G"),
-            ("outer: for (;;) { break outer; }", "labels need Phase G"),
+            ("outer: for (;;) { break outer; }", "compiled"),
             ("async function f() {} f();", "compiled"), // per-function fallback
             ("function* g() {}", "compiled"),           // per-function fallback
             ("function f() { return arguments; }", "compiled"), // per-function fallback
