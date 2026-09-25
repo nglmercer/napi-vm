@@ -514,6 +514,38 @@ impl ArrayCell {
     pub fn elements_mut(&mut self) -> &mut Vec<Value> {
         self.elements.get_mut()
     }
+
+    /// Child values for the cycle collector's marker: elements, named
+    /// properties, and the prototype link.
+    pub(crate) fn trace_children(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        if let Ok(elements) = self.elements.try_borrow() {
+            out.extend(elements.iter().cloned());
+        }
+        if let Ok(named) = self.named.try_borrow() {
+            out.extend(named.iter().map(|(_, v)| v.clone()));
+        }
+        if let Ok(meta) = self.meta.try_borrow() {
+            out.extend(meta.proto.as_deref().cloned());
+        }
+        out
+    }
+
+    /// Drop this array's outgoing edges so an unreachable cycle can free.
+    /// Only the collector calls this, and only for unmarked objects.
+    pub(crate) fn clear_edges(&self) -> bool {
+        let (Ok(mut elements), Ok(mut named), Ok(mut meta)) = (
+            self.elements.try_borrow_mut(),
+            self.named.try_borrow_mut(),
+            self.meta.try_borrow_mut(),
+        ) else {
+            return false;
+        };
+        elements.clear();
+        named.clear();
+        meta.proto = None;
+        true
+    }
 }
 
 impl std::ops::Deref for ArrayCell {
@@ -570,6 +602,33 @@ impl ObjectCell {
     /// Uncontended access to the slots, for the iterative `Drop`.
     pub fn slots_mut(&mut self) -> &mut Vec<(String, Value)> {
         self.slots.get_mut()
+    }
+
+    /// Child values for the cycle collector's marker: slot values plus the
+    /// prototype link. A borrow conflict yields nothing — the marker keeps
+    /// the node either way.
+    pub(crate) fn trace_children(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        if let Ok(slots) = self.slots.try_borrow() {
+            out.extend(slots.iter().map(|(_, v)| v.clone()));
+        }
+        if let Ok(meta) = self.meta.try_borrow() {
+            out.extend(meta.proto.as_deref().cloned());
+        }
+        out
+    }
+
+    /// Drop this object's outgoing edges so an unreachable cycle can free.
+    /// Only the collector calls this, and only for unmarked objects.
+    pub(crate) fn clear_edges(&self) -> bool {
+        let (Ok(mut slots), Ok(mut meta)) =
+            (self.slots.try_borrow_mut(), self.meta.try_borrow_mut())
+        else {
+            return false;
+        };
+        slots.clear();
+        meta.proto = None;
+        true
     }
 }
 
@@ -692,7 +751,8 @@ impl FunctionData {
 
     /// Create own-property storage linked to the realm's Function.prototype.
     pub fn properties_with_default_prototype(global: &Env) -> Rc<ObjectCell> {
-        let properties = Rc::new(ObjectCell::new_with_default_proto(Vec::new()));
+        let properties =
+            crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(Vec::new())));
         if let Some(prototype) = Self::default_function_prototype(global) {
             properties.set_proto(Some(Rc::new(prototype)));
         }
@@ -1923,16 +1983,31 @@ impl std::fmt::Debug for GeneratorInner {
     }
 }
 
+impl GeneratorInner {
+    /// Whether this generator's suspended state holds values the tracer
+    /// cannot see. A live coroutine does; buffered yields are traced.
+    pub(crate) fn suspends_values(&self) -> bool {
+        #[cfg(stackful_coroutines)]
+        {
+            self.coroutine.is_some()
+        }
+        #[cfg(not(stackful_coroutines))]
+        {
+            false
+        }
+    }
+}
+
 impl Value {
     /// Construct a host-backed callable with JavaScript function own
     /// properties. `name` and `length` are non-enumerable, non-writable,
     /// configurable data properties, as for a native JavaScript function.
     pub fn host_function(name: impl Into<Rc<str>>, id: usize) -> Self {
         let name = name.into();
-        let properties = Rc::new(ObjectCell::new_with_default_proto(vec![
+        let properties = crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(vec![
             ("length".to_string(), Value::Number(0.0)),
             ("name".to_string(), Value::String(name.to_string())),
-        ]));
+        ])));
         let intrinsic_attributes = PropAttrs {
             writable: false,
             enumerable: false,
@@ -2012,7 +2087,7 @@ impl Value {
 
     pub fn object(props: Vec<(String, Value)>) -> Self {
         Value::Object {
-            props: Rc::new(ObjectCell::new_with_default_proto(props)),
+            props: crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(props))),
         }
     }
 
@@ -2029,7 +2104,7 @@ impl Value {
 
     pub fn object_with_proto(props: Vec<(String, Value)>, proto: Option<Rc<Value>>) -> Self {
         Value::Object {
-            props: Rc::new(ObjectCell::new(props, proto)),
+            props: crate::heap::tracked(Rc::new(ObjectCell::new(props, proto))),
         }
     }
 
@@ -2067,26 +2142,26 @@ impl Value {
     /// A promise that is already settled — what `Promise.resolve`,
     /// `Promise.reject` and a completed async function hand back.
     pub fn settled_promise(state: PromiseState, value: Value) -> Self {
-        Value::Promise(Rc::new(RefCell::new(PromiseInner {
+        Value::Promise(crate::heap::tracked(Rc::new(RefCell::new(PromiseInner {
             state,
             resolution_locked: true,
             external_pending: false,
             value,
             reactions: Vec::new(),
             handled: state != PromiseState::Rejected,
-        })))
+        }))))
     }
 
     pub fn pending_promise() -> Rc<RefCell<PromiseInner>> {
-        Rc::new(RefCell::new(PromiseInner::default()))
+        crate::heap::tracked(Rc::new(RefCell::new(PromiseInner::default())))
     }
 
     pub fn array(items: Vec<Value>) -> Self {
-        Value::Array(Rc::new(ArrayCell::new(items)))
+        Value::Array(crate::heap::tracked(Rc::new(ArrayCell::new(items))))
     }
 
     pub fn array_with_presence(items: Vec<Value>, present: Vec<bool>) -> Self {
-        Value::Array(Rc::new(ArrayCell::with_presence(items, present)))
+        Value::Array(crate::heap::tracked(Rc::new(ArrayCell::with_presence(items, present))))
     }
 
     pub fn checked_array(items: Vec<Value>) -> Result<Self, VmErr> {

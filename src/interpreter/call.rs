@@ -1119,7 +1119,7 @@ impl Interpreter {
                         return_value: None,
                     };
                     return Ok(Value::Generator {
-                        inner: Rc::new(RefCell::new(inner)),
+                        inner: crate::heap::tracked(Rc::new(RefCell::new(inner))),
                     });
                 }
                 // Recursion guard: each VM call costs several native frames,

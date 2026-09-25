@@ -158,11 +158,13 @@ pub(super) unsafe extern "C" fn api_define_class(
         let native_constructor =
             create_native_callback_value(&environment, &class_name, constructor, data)?;
         let prototype = Value::object(Vec::new());
-        let statics = Rc::new(crate::value::ObjectCell::new_with_default_proto(vec![
-            ("name".to_owned(), Value::String(class_name.clone())),
-            ("prototype".to_owned(), prototype.clone()),
-            ("length".to_owned(), Value::Number(0.0)),
-        ]));
+        let statics = crate::heap::tracked(Rc::new(
+            crate::value::ObjectCell::new_with_default_proto(vec![
+                ("name".to_owned(), Value::String(class_name.clone())),
+                ("prototype".to_owned(), prototype.clone()),
+                ("length".to_owned(), Value::Number(0.0)),
+            ]),
+        ));
         {
             let mut meta = statics.meta.borrow_mut();
             meta.set_attrs(

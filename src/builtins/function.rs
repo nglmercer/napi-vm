@@ -24,7 +24,10 @@ pub(super) fn install(e: &mut Environment) {
     let prototype = Value::Function(Rc::new(FunctionData {
         identity: Rc::new(0),
         name: Some(Rc::from("")),
-        properties: Rc::new(ObjectCell::new(Vec::new(), object_prototype.map(Rc::new))),
+        properties: crate::heap::tracked(Rc::new(ObjectCell::new(
+            Vec::new(),
+            object_prototype.map(Rc::new),
+        ))),
         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
         params: Rc::new(Vec::new()),
         body: Rc::new(Vec::new()),
@@ -368,7 +371,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         body: Rc::new(body.to_vec()),
         // The global scope, not the caller's: a function built from a string
         // must not capture bindings its source never named.
-        closure: Some(interp.persistent_global.clone()),
+        closure: Some(crate::heap::capture_env(&interp.persistent_global)),
         is_arrow: false,
         is_constructor: true,
         is_async: false,

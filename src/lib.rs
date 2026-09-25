@@ -9,6 +9,7 @@ pub mod bytecode;
 pub mod convert;
 pub mod error;
 pub mod format;
+pub mod heap;
 pub mod host;
 pub mod interpreter;
 pub mod lang;

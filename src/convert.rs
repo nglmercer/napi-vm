@@ -49,7 +49,9 @@ fn value_from_json_depth(value: &JsonValue, depth: usize) -> Result<Value, VmErr
             for item in items {
                 elements.push(value_from_json_depth(item, depth + 1)?);
             }
-            Ok(Value::Array(Rc::new(ArrayCell::new(elements))))
+            Ok(Value::Array(crate::heap::tracked(Rc::new(ArrayCell::new(
+                elements,
+            )))))
         }
         JsonValue::Object(map) => {
             if map.len() > MAX_OBJECT_PROPS {
@@ -65,7 +67,7 @@ fn value_from_json_depth(value: &JsonValue, depth: usize) -> Result<Value, VmErr
                 props.push((key.clone(), value_from_json_depth(item, depth + 1)?));
             }
             Ok(Value::Object {
-                props: Rc::new(ObjectCell::new_with_default_proto(props)),
+                props: crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(props))),
             })
         }
     }

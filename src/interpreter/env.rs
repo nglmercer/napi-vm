@@ -144,6 +144,23 @@ impl Vars {
         }
     }
 
+    /// Drop every binding in this frame. Only the cycle collector calls
+    /// this, and only for unmarked environments.
+    fn clear(&mut self) {
+        match self {
+            Vars::Small(vars) => vars.clear(),
+            Vars::Large(map) => map.clear(),
+        }
+    }
+
+    /// Clone every bound value out of this frame, for the marker.
+    fn values_cloned(&self) -> Vec<Value> {
+        match self {
+            Vars::Small(vars) => vars.iter().map(|(_, b)| b.value.clone()).collect(),
+            Vars::Large(map) => map.values().map(|b| b.value.clone()).collect(),
+        }
+    }
+
     /// Bind `n` in this frame, assuming it is not already bound. Small frames
     /// are promoted to a hash map once they outgrow `PROMOTE_AT`.
     fn insert_new(&mut self, n: &str, b: Binding) {
@@ -326,10 +343,10 @@ impl Environment {
         if let Value::Binding(cell) = &binding.value {
             return Some(cell.clone());
         }
-        let cell = Rc::new(RefCell::new(std::mem::replace(
+        let cell = crate::heap::tracked(Rc::new(RefCell::new(std::mem::replace(
             &mut binding.value,
             Value::Undefined,
-        )));
+        ))));
         binding.value = Value::Binding(cell.clone());
         binding.initialized = true;
         Some(cell)
@@ -523,6 +540,23 @@ impl Environment {
     /// Iteratively drain a scope chain into `work` for the iterative `Drop`
     /// of `Value`. Walks parent frames one Rc at a time; stops at the first
     /// shared frame (shared scopes stay alive and drop themselves later).
+    /// Bound values for the cycle collector's marker.
+    pub(crate) fn trace_values(&self) -> Vec<Value> {
+        self.vars.values_cloned()
+    }
+
+    /// Parent link for the cycle collector's marker.
+    pub(crate) fn trace_parent(&self) -> Option<Env> {
+        self.parent.clone()
+    }
+
+    /// Drop this frame's bindings and parent link so an unreachable cycle
+    /// can free. Only the collector calls this, on unmarked environments.
+    pub(crate) fn clear_edges(&mut self) {
+        self.vars.clear();
+        self.parent = None;
+    }
+
     pub(crate) fn drain_chain(env: Env, work: &mut Vec<Value>) {
         let mut cur = Some(env);
         while let Some(e) = cur {

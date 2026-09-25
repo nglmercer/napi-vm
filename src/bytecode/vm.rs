@@ -1273,7 +1273,7 @@ fn make_function(
         // (dynamic scope). Captured bindings box into environments — frame
         // cells for function scope, pushed scopes for blocks — so the
         // chain serves every nested reader.
-        closure: Some(closure),
+        closure: Some(crate::heap::capture_env(&closure)),
         is_arrow: code.is_arrow,
         is_constructor: code.is_constructor,
         is_async: false,
@@ -1302,7 +1302,7 @@ fn make_ast_function(
         standard_properties_initialized: Rc::new(Cell::new(false)),
         params: intern_params(&ast.params),
         body: ast.body.clone(),
-        closure: Some(closure),
+        closure: Some(crate::heap::capture_env(&closure)),
         is_arrow: ast.is_arrow,
         is_constructor: ast.is_constructor,
         is_async: ast.is_async,

@@ -39,6 +39,15 @@ impl std::fmt::Debug for AsyncTask {
     }
 }
 
+#[cfg(stackful_coroutines)]
+impl AsyncTask {
+    /// Whether this task's suspended coroutine holds values the tracer
+    /// cannot see. The result promise is traced in its own right.
+    pub(crate) fn suspends_values(&self) -> bool {
+        self.coroutine.is_some()
+    }
+}
+
 impl Interpreter {
     /// Evaluate `await value`.
     ///
@@ -209,10 +218,10 @@ pub(crate) fn spawn_async(
         }
     });
 
-    let task = Rc::new(RefCell::new(AsyncTask {
+    let task = crate::heap::tracked(Rc::new(RefCell::new(AsyncTask {
         coroutine: Some(coroutine),
         result: result.clone(),
-    }));
+    })));
     step(interp, &task, GenResume::Next(None))?;
     Ok(Value::Promise(result))
 }

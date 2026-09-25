@@ -47,10 +47,10 @@ fn make_error_class(name: &str, parent_prototype: Option<Rc<Value>>) -> Value {
     prototype
         .set_prop("constructor".to_string(), constructor.clone())
         .expect("built-in Error prototype property");
-    let statics = Rc::new(ObjectCell::new_with_default_proto(vec![
+    let statics = crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(vec![
         ("name".to_string(), Value::String(name.to_string())),
         ("prototype".to_string(), prototype.clone()),
-    ]));
+    ])));
     statics.meta.borrow_mut().set_attrs(
         "name",
         PropAttrs {

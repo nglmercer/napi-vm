@@ -57,6 +57,41 @@ pub enum Job {
     AtomicsWaitTimeout { key: (usize, usize), waiter_id: u64 },
 }
 
+impl Job {
+    /// Values this queued job keeps alive, for the cycle collector.
+    pub(crate) fn trace_values(&self) -> Vec<Value> {
+        match self {
+            Job::Reaction { value, reaction, .. } => vec![
+                value.clone(),
+                reaction.on_fulfilled.clone(),
+                reaction.on_rejected.clone(),
+                Value::Promise(reaction.derived.clone()),
+            ],
+            Job::PromiseResolveThenable { target, thenable, then, resolution_guard } => vec![
+                Value::Promise(target.clone()),
+                thenable.clone(),
+                then.clone(),
+                resolution_guard.clone(),
+            ],
+            Job::Callback { callback, args } => {
+                let mut out = vec![callback.clone()];
+                out.extend(args.iter().cloned());
+                out
+            }
+            Job::HostCallback { callback } => {
+                let mut out = vec![callback.callback.clone(), callback.this_value.clone()];
+                out.extend(callback.args.iter().cloned());
+                out
+            }
+            Job::HostPromiseSettled { promise, value, .. } => {
+                vec![Value::Promise(promise.clone()), value.clone()]
+            }
+            Job::HostUncaughtException { exception } => vec![exception.clone()],
+            Job::AtomicsWaitTimeout { .. } => Vec::new(),
+        }
+    }
+}
+
 struct AtomicsWaiter {
     id: u64,
     promise: Rc<RefCell<PromiseInner>>,
@@ -77,6 +112,24 @@ pub struct JobQueue {
 }
 
 impl JobQueue {
+    /// Every value the queued jobs and waiters keep alive, for the cycle
+    /// collector's root set.
+    pub(crate) fn trace_roots(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        for job in self.microtasks.iter().chain(self.external_events.iter()) {
+            out.extend(job.trace_values());
+        }
+        for (_, _, job) in &self.timers {
+            out.extend(job.trace_values());
+        }
+        for waiters in self.atomics_waiters.values() {
+            for waiter in waiters {
+                out.push(Value::Promise(waiter.promise.clone()));
+            }
+        }
+        out
+    }
+
     pub fn push_microtask(&mut self, job: Job) {
         self.microtasks.push_back(job);
     }

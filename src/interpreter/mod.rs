@@ -88,6 +88,7 @@ impl Realm {
         interp.commonjs_loader = self.commonjs_loader;
         interp.commonjs_cache = self.commonjs_cache;
         interp.commonjs_entry = self.commonjs_entry;
+        interp.republish_roots();
     }
 }
 pub use jobs::{Job, JobQueue, Jobs};
@@ -254,6 +255,15 @@ pub struct Interpreter {
     /// Active synchronous guest statement bodies. Node-API `make_callback`
     /// drains microtasks only when it is not nested inside guest JavaScript.
     guest_execution_depth: Rc<Cell<usize>>,
+    /// Cycle-collector registration id. Roots publish once here; the
+    /// handles stay live, so moves never stale them, and drop unregisters.
+    gc_id: crate::heap::InterpId,
+}
+
+impl Drop for Interpreter {
+    fn drop(&mut self) {
+        crate::heap::unregister_interp(self.gc_id);
+    }
 }
 
 struct GuestExecutionGuard(Rc<Cell<usize>>);
@@ -309,7 +319,7 @@ impl Default for Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         let global = Rc::new(RefCell::new(Environment::global(None)));
-        Self {
+        let mut interp = Self {
             global: global.clone(),
             persistent_global: global,
             modules: Rc::new(RefCell::new(HashMap::new())),
@@ -344,7 +354,13 @@ impl Interpreter {
             max_call_depth: MAX_CALL_DEPTH,
             max_jobs_per_drain: jobs::MAX_JOBS_PER_DRAIN,
             guest_execution_depth: Rc::new(Cell::new(0)),
-        }
+            gc_id: 0,
+        };
+        interp.gc_id = crate::heap::register_interp(
+            interp.gc_roots(),
+            interp.guest_execution_depth.clone(),
+        );
+        interp
     }
 
     /// Create an interpreter whose global scope is a fresh *user* frame chained
@@ -358,6 +374,7 @@ impl Interpreter {
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
+        interp.republish_roots();
         interp
     }
 
@@ -614,6 +631,56 @@ export default { createRequire, isBuiltin, builtinModules };
         }
     }
 
+    /// Reclaim unreachable reference cycles on this thread's heap: objects,
+    /// environments, and promises no live interpreter, module, job, or
+    /// host pin can reach. Runs only at quiescent points — while guest code
+    /// executes, or a generator or async task is suspended, the pass refuses
+    /// (see [`SkipReason`](crate::heap::SkipReason)) instead of risking
+    /// values the root set cannot see.
+    pub fn collect_cycles(&mut self) -> crate::heap::HeapStats {
+        self.republish_roots();
+        crate::heap::collect()
+    }
+
+    /// This interpreter's live GC roots: running and persistent globals,
+    /// module records and scopes, the CommonJS cache, queued jobs, and any
+    /// in-flight constructor targets.
+    pub(crate) fn gc_roots(&self) -> crate::heap::GcRoots {
+        let mut roots = crate::heap::GcRoots {
+            envs: vec![self.global.clone(), self.persistent_global.clone()],
+            values: self.new_target_stack.clone(),
+        };
+        if let Ok(modules) = self.modules.try_borrow() {
+            for module in modules.values() {
+                roots.values.extend(module.exports.values().cloned());
+                roots.values.extend(module.default.clone());
+                roots.envs.extend(module.scope.clone());
+            }
+        }
+        if let Ok(cache) = self.commonjs_cache.try_borrow() {
+            for entry in cache.values() {
+                roots.values.push(entry.exports.clone());
+                roots.values.extend(entry.module.clone());
+            }
+        }
+        if let Ok(jobs) = self.jobs.try_borrow() {
+            roots.values.extend(jobs.trace_roots());
+        }
+        #[cfg(not(stackful_coroutines))]
+        if let Some(sink) = &self.yield_sink
+            && let Ok(sink) = sink.try_borrow()
+        {
+            roots.values.extend(sink.iter().cloned());
+        }
+        roots
+    }
+
+    /// Refresh this interpreter's published roots after its handles change.
+    pub(crate) fn republish_roots(&mut self) {
+        let roots = self.gc_roots();
+        crate::heap::republish_roots(self.gc_id, roots);
+    }
+
     /// One guest-execution level for a bytecode top-level run, mirroring
     /// [`Self::run_program_body`]'s accounting. Hoisting is bytecode's own
     /// (dedicated instructions, not interpreter passes).
@@ -623,8 +690,14 @@ export default { createRequire, isBuiltin, builtinModules };
     ) -> Result<Value, VmErr> {
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
-        let _execution_guard = GuestExecutionGuard(depth);
-        crate::bytecode::vm::run_module(self, module)
+        let result = {
+            let _execution_guard = GuestExecutionGuard(depth.clone());
+            crate::bytecode::vm::run_module(self, module)
+        };
+        if depth.get() == 0 {
+            self.republish_roots();
+        }
+        result
     }
 }
 
@@ -679,17 +752,23 @@ impl Interpreter {
         self.begin_execution();
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
-        let _execution_guard = GuestExecutionGuard(depth);
-        match self
-            .call_this(function, receiver, args)
-            .and_then(|value| self.perform_await(value))
-        {
-            Ok(value) => self.drain_jobs().map(|()| value),
-            Err(error) => {
-                let _ = self.drain_jobs();
-                Err(error)
+        let result = {
+            let _execution_guard = GuestExecutionGuard(depth.clone());
+            match self
+                .call_this(function, receiver, args)
+                .and_then(|value| self.perform_await(value))
+            {
+                Ok(value) => self.drain_jobs().map(|()| value),
+                Err(error) => {
+                    let _ = self.drain_jobs();
+                    Err(error)
+                }
             }
+        };
+        if depth.get() == 0 {
+            self.republish_roots();
         }
+        result
     }
 
     /// Execute one synchronous script body without a microtask checkpoint.
@@ -950,10 +1029,16 @@ impl Interpreter {
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
-        let _execution_guard = GuestExecutionGuard(depth);
-        self.hoist_vars(stmts)?;
-        self.hoist_lexical(stmts)?;
-        self.run(stmts)
+        let result = {
+            let _execution_guard = GuestExecutionGuard(depth.clone());
+            self.hoist_vars(stmts)
+                .and_then(|()| self.hoist_lexical(stmts))
+                .and_then(|()| self.run(stmts))
+        };
+        if depth.get() == 0 {
+            self.republish_roots();
+        }
+        result
     }
 
     /// Enter a new block scope, returning the scope to restore afterwards.
@@ -1116,7 +1201,7 @@ impl Interpreter {
         if !self.evaluating.borrow().contains(module) {
             return None;
         }
-        let cell = Rc::new(RefCell::new(Value::Undefined));
+        let cell = crate::heap::tracked(Rc::new(RefCell::new(Value::Undefined)));
         let entry = Value::Binding(cell);
         self.modules
             .borrow_mut()
