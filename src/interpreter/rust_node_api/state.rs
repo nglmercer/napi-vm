@@ -330,12 +330,13 @@ pub(super) struct PostedFinalizer {
     pub(super) hint: usize,
 }
 
-pub(super) static POST_FINALIZER_SENDERS: OnceLock<
-    Mutex<HashMap<usize, (Sender<HostRuntimeNotification>, Arc<WakeSlot>)>>,
-> = OnceLock::new();
+/// Environment id → (runtime notification sender, wake slot) for finalizers
+/// posted from worker threads.
+type PostFinalizerSenders = Mutex<HashMap<usize, (Sender<HostRuntimeNotification>, Arc<WakeSlot>)>>;
 
-pub(super) fn post_finalizer_senders()
--> &'static Mutex<HashMap<usize, (Sender<HostRuntimeNotification>, Arc<WakeSlot>)>> {
+pub(super) static POST_FINALIZER_SENDERS: OnceLock<PostFinalizerSenders> = OnceLock::new();
+
+pub(super) fn post_finalizer_senders() -> &'static PostFinalizerSenders {
     POST_FINALIZER_SENDERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

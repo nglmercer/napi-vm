@@ -42,10 +42,12 @@ impl CachedParseError {
 
 const MAX_CACHED_PROGRAMS: usize = 1024;
 
-static PARSE_CACHE: OnceLock<Mutex<HashMap<(u64, u64, u64), Arc<Vec<Statement>>>>> =
-    OnceLock::new();
+/// Source key → shared AST for every identical source in the process.
+type ParseCacheMap = HashMap<(u64, u64, u64), Arc<Vec<Statement>>>;
 
-fn cache() -> &'static Mutex<HashMap<(u64, u64, u64), Arc<Vec<Statement>>>> {
+static PARSE_CACHE: OnceLock<Mutex<ParseCacheMap>> = OnceLock::new();
+
+fn cache() -> &'static Mutex<ParseCacheMap> {
     PARSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -66,10 +68,10 @@ fn source_key(source: &str) -> (u64, u64, u64) {
 /// Errors are re-parsed on every call (cold path, never cached).
 pub(crate) fn parse_cached(source: &str) -> Result<Arc<Vec<Statement>>, CachedParseError> {
     let key = source_key(source);
-    if let Ok(cache) = cache().lock() {
-        if let Some(hit) = cache.get(&key) {
-            return Ok(Arc::clone(hit));
-        }
+    if let Ok(cache) = cache().lock()
+        && let Some(hit) = cache.get(&key)
+    {
+        return Ok(Arc::clone(hit));
     }
     let tokens = Lexer::new(source).tokenize_with_spans();
     let mut parser = Parser::new_with_spans(tokens);

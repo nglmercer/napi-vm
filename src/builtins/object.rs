@@ -967,7 +967,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     let old_is_accessor = old_accessor_kind.is_some();
     let old_is_data = existing && !old_is_accessor;
     let new_is_accessor =
-        accessor_fields || (!value.is_some() && !writable.is_some() && old_is_accessor);
+        accessor_fields || (value.is_none() && writable.is_none() && old_is_accessor);
 
     // Omitted attributes preserve the current ones on redefine (and default
     // to `false` on first definition — which is why `defineProperty`
@@ -1262,7 +1262,7 @@ fn define_array_property(
     let old_is_accessor = old_accessor_kind.is_some();
     let old_is_data = existing && !old_is_accessor;
     let new_is_accessor =
-        accessor_fields || (!value.is_some() && !writable.is_some() && old_is_accessor);
+        accessor_fields || (value.is_none() && writable.is_none() && old_is_accessor);
 
     let attributes = PropAttrs {
         writable: if new_is_accessor {

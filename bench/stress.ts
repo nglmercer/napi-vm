@@ -231,10 +231,15 @@ class VmScriptsHarness {
         try { vm.run(`${handlerName}(${json});`); } catch { /* handler error */ }
       } else {
         // Async: mirrors the real plugin's `void vm.runAsync(...)` pattern.
-        const p = (vm.runAsync(`${handlerName}(${json});`) as Promise<unknown>)
-          .catch(() => {})
-          .finally(() => { this.pending.delete(p); });
-        this.pending.add(p);
+        // `runAsync` can also throw synchronously (e.g. the VM is busy with
+        // another execution); a fire-and-forget dispatch must not let that
+        // escape into the emitter.
+        try {
+          const p = (vm.runAsync(`${handlerName}(${json});`) as Promise<unknown>)
+            .catch(() => {})
+            .finally(() => { this.pending.delete(p); });
+          this.pending.add(p);
+        } catch { /* dispatch contention; in-flight work still drains below */ }
       }
     });
 

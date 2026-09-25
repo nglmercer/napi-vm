@@ -9,6 +9,7 @@
         "@preact/preset-vite": "^2.10.6",
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.2",
+        "node-addon-api": "8.9.2",
         "preact": "^10.29.7",
         "typescript": "^6.0.3",
         "valibot": "1.5.0",
@@ -404,6 +405,8 @@
     "mute-stream": ["mute-stream@3.0.0", "", {}, "sha512-dkEJPVvun4FryqBmZ5KhDo0K9iDXAwn08tMLDinNdRBNPcYEDiWYysLcc6k3mjTMlbP9KyylvRpd4wFtwrT9rw=="],
 
     "nanoid": ["nanoid@3.3.16", "", { "bin": "bin/nanoid.cjs" }, "sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q=="],
+
+    "node-addon-api": ["node-addon-api@8.9.2", "", {}, "sha512-VijLXbi3UACN69I0JVXJsX4tjACjNoQDgv2gTF6sx2wWEi8tkSg2eX8p5gSIFi8z2+DL3oHmY6OyKce38SDolg=="],
 
     "node-html-parser": ["node-html-parser@6.1.13", "", { "dependencies": { "css-select": "^5.1.0", "he": "1.2.0" } }, "sha512-qIsTMOY4C/dAa5Q5vsobRpOOvPfC4pB61UVW2uSwZNUp0QU/jCekTal1vMmbO0DgdHeLUJpv/ARmDqErVxA3Sg=="],
 

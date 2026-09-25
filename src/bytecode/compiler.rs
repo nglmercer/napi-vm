@@ -36,15 +36,15 @@ use std::rc::Rc;
 use crate::interpreter::{block_needs_lexical_scope, produces_completion_value};
 use crate::parser::{
     AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName,
-    ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind,
-    arrow_body_references, collect_var_names, expr_captures_identifier, expr_to_pattern,
-    pattern_names, statements_capture_identifier, stmts_reference,
+    ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind, arrow_body_references,
+    collect_var_names, expr_captures_identifier, expr_to_pattern, pattern_names,
+    statements_capture_identifier, stmts_reference,
 };
 
 use super::constants::{
-    AstFunction, ClassMemberKind, ClassMemberTemplate, ClassNameTemplate, ClassTemplate,
-    Constant, ExportAllTemplate, ExportNamedTemplate, ImportTemplate, PropEntry, PropKind,
-    SpreadEntry, class_key_name,
+    AstFunction, ClassMemberKind, ClassMemberTemplate, ClassNameTemplate, ClassTemplate, Constant,
+    ExportAllTemplate, ExportNamedTemplate, ImportTemplate, PropEntry, PropKind, SpreadEntry,
+    class_key_name,
 };
 use super::function::{BytecodeFunction, SlotInfo, SlotKind};
 use super::module::BytecodeModule;
@@ -82,8 +82,12 @@ impl Decline {
 pub fn compile_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupported> {
     let mut compiler = Compiler::top_level();
     match compiler.compile_top(stmts) {
-        Ok(main) => Ok(BytecodeModule { main: Rc::new(main) }),
-        Err(decline) => Err(Unsupported { reason: decline.reason() }),
+        Ok(main) => Ok(BytecodeModule {
+            main: Rc::new(main),
+        }),
+        Err(decline) => Err(Unsupported {
+            reason: decline.reason(),
+        }),
     }
 }
 
@@ -189,7 +193,10 @@ struct LoopCtx {
 /// close), or a pushed block scope to pop. Scopes and handlers interleave,
 /// so unwinding processes them innermost-first.
 enum UnwindCtx<'a> {
-    Handler { finally: Option<&'a [Statement]>, close_iter: Option<Reg> },
+    Handler {
+        finally: Option<&'a [Statement]>,
+        close_iter: Option<Reg>,
+    },
     Scope,
 }
 
@@ -257,7 +264,11 @@ impl<'a> Compiler<'a> {
             cached_null: None,
             cached_undefined: None,
             slots: Vec::new(),
-            scopes: vec![Scope { bindings: HashMap::new(), global: true, boxed: HashSet::new() }],
+            scopes: vec![Scope {
+                bindings: HashMap::new(),
+                global: true,
+                boxed: HashSet::new(),
+            }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
             unwind: Vec::new(),
@@ -273,11 +284,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn for_function(
-        outer_block: HashSet<String>,
-        this_mode: ThisMode,
-        is_arrow: bool,
-    ) -> Self {
+    fn for_function(outer_block: HashSet<String>, this_mode: ThisMode, is_arrow: bool) -> Self {
         Self {
             code: Vec::new(),
             constants: Vec::new(),
@@ -288,7 +295,11 @@ impl<'a> Compiler<'a> {
             cached_null: None,
             cached_undefined: None,
             slots: Vec::new(),
-            scopes: vec![Scope { bindings: HashMap::new(), global: false, boxed: HashSet::new() }],
+            scopes: vec![Scope {
+                bindings: HashMap::new(),
+                global: false,
+                boxed: HashSet::new(),
+            }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
             unwind: Vec::new(),
@@ -350,7 +361,11 @@ impl<'a> Compiler<'a> {
         // name shadows it and stays direct. Single-scope allocation means
         // the root scope — blocks always push first.
         let captured = self.scopes.len() == 1 && self.captured.contains(name);
-        self.slots.push(SlotInfo { name: name.to_string(), kind, captured });
+        self.slots.push(SlotInfo {
+            name: name.to_string(),
+            kind,
+            captured,
+        });
         Ok(slot)
     }
 
@@ -466,7 +481,11 @@ impl<'a> Compiler<'a> {
     /// Scopes with no boxed names emit nothing and unwind nothing.
     fn push_scope(&mut self, boxed: HashSet<String>) {
         let tracked = !boxed.is_empty();
-        self.scopes.push(Scope { bindings: HashMap::new(), global: false, boxed });
+        self.scopes.push(Scope {
+            bindings: HashMap::new(),
+            global: false,
+            boxed,
+        });
         if tracked {
             self.emit(Instr::PushScope);
             self.unwind.push(UnwindCtx::Scope);
@@ -477,7 +496,10 @@ impl<'a> Compiler<'a> {
     /// Nested cleanups balance before this runs, so the unwind top is
     /// this scope's own entry — anything else is a compiler bug.
     fn pop_scope(&mut self) -> Result<(), Decline> {
-        let scope = self.scopes.pop().ok_or(Decline::Func("scope stack underflow"))?;
+        let scope = self
+            .scopes
+            .pop()
+            .ok_or(Decline::Func("scope stack underflow"))?;
         if scope.boxed.is_empty() {
             return Ok(());
         }
@@ -491,7 +513,9 @@ impl<'a> Compiler<'a> {
     /// Whether `name` is boxed in the innermost scope: declaration sites
     /// branch on this instead of allocating a slot.
     fn is_boxed_here(&self, name: &str) -> bool {
-        self.scopes.last().is_some_and(|scope| !scope.global && scope.boxed.contains(name))
+        self.scopes
+            .last()
+            .is_some_and(|scope| !scope.global && scope.boxed.contains(name))
     }
 
     /// Bind `name` in the innermost scope, allocating a fresh slot. Same-name
@@ -499,7 +523,11 @@ impl<'a> Compiler<'a> {
     /// allocated, mirroring `declare`'s replace-in-place; the caller passes
     /// the final kind after hoist-order merging.
     fn declare_slot(&mut self, name: &str, kind: SlotKind) -> Result<Slot, Decline> {
-        if let Some(slot) = self.scopes.last().and_then(|scope| scope.bindings.get(name)) {
+        if let Some(slot) = self
+            .scopes
+            .last()
+            .and_then(|scope| scope.bindings.get(name))
+        {
             let slot = *slot;
             self.slots[slot as usize].kind = kind;
             return Ok(slot);
@@ -569,10 +597,20 @@ enum Binding {
 fn block_lexicals(stmts: &[Statement], out: &mut Vec<(String, SlotKind)>) {
     for stmt in stmts {
         match stmt {
-            Statement::VarDecl { kind: VarKind::Let, destructuring: None, name, .. } => {
+            Statement::VarDecl {
+                kind: VarKind::Let,
+                destructuring: None,
+                name,
+                ..
+            } => {
                 out.push((name.clone(), SlotKind::Let));
             }
-            Statement::VarDecl { kind: VarKind::Const, destructuring: None, name, .. } => {
+            Statement::VarDecl {
+                kind: VarKind::Const,
+                destructuring: None,
+                name,
+                ..
+            } => {
                 out.push((name.clone(), SlotKind::Const));
             }
             // A pattern declaration binds every name in the pattern (the
@@ -639,23 +677,29 @@ fn boxed_for_head_names(
     body: &[Statement],
 ) -> HashSet<String> {
     fn exprs_capture(exprs: &[&Expr], body: &[Statement], name: &str) -> bool {
-        exprs.iter().any(|expr| expr_captures_identifier(expr, name))
+        exprs
+            .iter()
+            .any(|expr| expr_captures_identifier(expr, name))
             || statements_capture_identifier(body, name)
     }
     let mut candidates = Vec::new();
     let mut inits: Vec<&Expr> = Vec::new();
     match init {
-        Some(ForInit::Var { kind, decls })
-            if matches!(kind, VarKind::Let | VarKind::Const) =>
-        {
+        Some(ForInit::Var {
+            kind: VarKind::Let | VarKind::Const,
+            decls,
+        }) => {
             for (name, init) in decls.iter() {
                 candidates.push(name.clone());
                 inits.extend(init.as_ref());
             }
         }
-        Some(ForInit::Pattern { kind, pattern, init, trailing })
-            if matches!(kind, VarKind::Let | VarKind::Const) =>
-        {
+        Some(ForInit::Pattern {
+            kind: VarKind::Let | VarKind::Const,
+            pattern,
+            init,
+            trailing,
+        }) => {
             candidates.extend(pattern_names(pattern));
             inits.push(init);
             for (name, init) in trailing.iter() {
@@ -708,8 +752,20 @@ struct FnDeclRef<'a> {
 fn block_fn_decls<'a>(stmts: &'a [Statement], out: &mut Vec<FnDeclRef<'a>>) {
     for stmt in stmts {
         match stmt {
-            Statement::FnDecl { name, params, body, is_async, is_generator } => {
-                out.push(FnDeclRef { name, params, body, is_async: *is_async, is_generator: *is_generator });
+            Statement::FnDecl {
+                name,
+                params,
+                body,
+                is_async,
+                is_generator,
+            } => {
+                out.push(FnDeclRef {
+                    name,
+                    params,
+                    body,
+                    is_async: *is_async,
+                    is_generator: *is_generator,
+                });
             }
             Statement::Declarations(inner) => block_fn_decls(inner, out),
             _ => {}
@@ -723,7 +779,11 @@ impl<'a> Compiler<'a> {
     /// Bind a slot only when the name is absent (hoisted functions keep the
     /// existing kind, mirroring `set_binding`).
     fn declare_slot_if_absent(&mut self, name: &str, kind: SlotKind) -> Result<Slot, Decline> {
-        if let Some(slot) = self.scopes.last().and_then(|scope| scope.bindings.get(name)) {
+        if let Some(slot) = self
+            .scopes
+            .last()
+            .and_then(|scope| scope.bindings.get(name))
+        {
             return Ok(*slot);
         }
         self.declare_slot(name, kind)
@@ -748,7 +808,12 @@ impl<'a> Compiler<'a> {
             if seen.insert(name.clone()) {
                 let index = self.intern_string(&name)?;
                 let undef = self.load_undefined()?;
-                self.emit(Instr::DefineGlobal { name: index, src: undef, kind, initialized: false });
+                self.emit(Instr::DefineGlobal {
+                    name: index,
+                    src: undef,
+                    kind,
+                    initialized: false,
+                });
             }
         }
         let mut fns = Vec::new();
@@ -764,7 +829,10 @@ impl<'a> Compiler<'a> {
                 is_constructor: !decl.is_async && !decl.is_generator,
             })?;
             let index = self.intern_string(decl.name)?;
-            self.emit(Instr::InitGlobal { name: index, src: value });
+            self.emit(Instr::InitGlobal {
+                name: index,
+                src: value,
+            });
         }
         Ok(())
     }
@@ -773,7 +841,11 @@ impl<'a> Compiler<'a> {
     /// (`var` starts defined, lexicals dead), which is exactly what
     /// `hoist_vars` + `hoist_lexical` produce on a fresh frame — so only the
     /// eager function instantiations need emission.
-    fn hoist_function(&mut self, params: &'a [String], body: &'a [Statement]) -> Result<(), Decline> {
+    fn hoist_function(
+        &mut self,
+        params: &'a [String],
+        body: &'a [Statement],
+    ) -> Result<(), Decline> {
         for param in params {
             self.declare_slot(param, SlotKind::Var)?;
         }
@@ -810,7 +882,10 @@ impl<'a> Compiler<'a> {
             // an untouched placeholder.
             if self.captured.contains(decl.name) {
                 let index = self.intern_string(decl.name)?;
-                self.emit(Instr::InitGlobal { name: index, src: value });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src: value,
+                });
             } else {
                 self.emit(Instr::InitLocal { slot, src: value });
             }
@@ -839,7 +914,11 @@ impl<'a> Compiler<'a> {
                     continue;
                 }
                 let slot = self.declare_slot(&name, kind)?;
-                self.emit(Instr::DeclareLocal { slot, kind, initialized: false });
+                self.emit(Instr::DeclareLocal {
+                    slot,
+                    kind,
+                    initialized: false,
+                });
             }
         }
         let mut fns = Vec::new();
@@ -856,7 +935,10 @@ impl<'a> Compiler<'a> {
             })?;
             if self.is_boxed_here(decl.name) {
                 let index = self.intern_string(decl.name)?;
-                self.emit(Instr::InitGlobal { name: index, src: value });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src: value,
+                });
                 continue;
             }
             let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
@@ -902,7 +984,10 @@ impl<'a> Compiler<'a> {
     fn defer_function(&mut self, def: FuncDef<'a>) -> Result<Reg, Decline> {
         let dst = self.alloc_reg()?;
         let addr = self.here();
-        self.emit(Instr::MakeFunction { dst, func: u16::MAX });
+        self.emit(Instr::MakeFunction {
+            dst,
+            func: u16::MAX,
+        });
         self.deferred.push(Deferred {
             patch: PatchTarget::MakeFunction { addr },
             def,
@@ -958,7 +1043,10 @@ impl<'a> Compiler<'a> {
                     };
                     template.ctor_func = index;
                 }
-                PatchTarget::ClassMember { tmpl, index: member } => {
+                PatchTarget::ClassMember {
+                    tmpl,
+                    index: member,
+                } => {
                     let Some(Constant::ClassTemplate(template)) =
                         self.constants.get_mut(tmpl as usize)
                     else {
@@ -978,14 +1066,20 @@ impl<'a> Compiler<'a> {
         // Register zero is the program completion value.
         let completion = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: completion, src: undef });
+        self.emit(Instr::Mov {
+            dst: completion,
+            src: undef,
+        });
         self.hoist_top(stmts)?;
         let checkpoint = self.checkpoint();
         self.restore(checkpoint);
         for stmt in stmts {
             let value = self.compile_stmt(stmt)?;
             if produces_completion_value(stmt) {
-                self.emit(Instr::Mov { dst: completion, src: value });
+                self.emit(Instr::Mov {
+                    dst: completion,
+                    src: value,
+                });
             }
             self.restore(checkpoint);
         }
@@ -994,7 +1088,14 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_unit_function(&mut self, def: FuncDef<'a>) -> Result<BytecodeFunction, Decline> {
-        let FuncDef { name, params, body, is_arrow, is_constructor, .. } = def;
+        let FuncDef {
+            name,
+            params,
+            body,
+            is_arrow,
+            is_constructor,
+            ..
+        } = def;
         // Box before hoisting: `resolve` and slot allocation both consult
         // this set while the body compiles.
         self.captured = find_captured(params, &body);
@@ -1028,12 +1129,18 @@ impl<'a> Compiler<'a> {
     fn compile_block(&mut self, stmts: &'a [Statement]) -> Result<Reg, Decline> {
         let block_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: block_value, src: undef });
+        self.emit(Instr::Mov {
+            dst: block_value,
+            src: undef,
+        });
         let checkpoint = self.checkpoint();
         for stmt in stmts {
             let value = self.compile_stmt(stmt)?;
             if produces_completion_value(stmt) {
-                self.emit(Instr::Mov { dst: block_value, src: value });
+                self.emit(Instr::Mov {
+                    dst: block_value,
+                    src: value,
+                });
             }
             self.restore(checkpoint);
         }
@@ -1058,15 +1165,29 @@ impl<'a> Compiler<'a> {
     fn compile_stmt(&mut self, stmt: &'a Statement) -> Result<Reg, Decline> {
         match stmt {
             Statement::Expr(expr) => self.compile_expr(expr),
-            Statement::VarDecl { kind, name, init, destructuring } => {
-                self.compile_var_decl(kind.clone(), name, init.as_deref(), destructuring.as_deref())
-            }
+            Statement::VarDecl {
+                kind,
+                name,
+                init,
+                destructuring,
+            } => self.compile_var_decl(
+                kind.clone(),
+                name,
+                init.as_deref(),
+                destructuring.as_deref(),
+            ),
             // Hoisted functions instantiate eagerly at scope entry AND again
             // here in order: the evaluator runs `eval_stmt` on the
             // declaration both during `hoist_lexical` and when `run` reaches
             // it, so two distinct function objects exist when code between
             // the hoist and the statement captured the first.
-            Statement::FnDecl { name, params, body, is_async, is_generator } => {
+            Statement::FnDecl {
+                name,
+                params,
+                body,
+                is_async,
+                is_generator,
+            } => {
                 let value = self.defer_function(FuncDef {
                     name: Some(name.clone()),
                     params,
@@ -1080,7 +1201,10 @@ impl<'a> Compiler<'a> {
                     Binding::Slot(slot) => self.emit(Instr::InitLocal { slot, src: value }),
                     Binding::Global => {
                         let index = self.intern_string(name)?;
-                        self.emit(Instr::InitGlobal { name: index, src: value });
+                        self.emit(Instr::InitGlobal {
+                            name: index,
+                            src: value,
+                        });
                     }
                 }
                 self.load_undefined()
@@ -1095,9 +1219,12 @@ impl<'a> Compiler<'a> {
             Statement::If { test, then, else_ } => self.compile_if(test, then, else_.as_deref()),
             Statement::While { test, body } => self.compile_while(test, body),
             Statement::DoWhile { test, body } => self.compile_do_while(test, body),
-            Statement::For { init, test, update, body } => {
-                self.compile_for(init.as_deref(), test.as_deref(), update.as_deref(), body)
-            }
+            Statement::For {
+                init,
+                test,
+                update,
+                body,
+            } => self.compile_for(init.as_deref(), test.as_deref(), update.as_deref(), body),
             Statement::Break => {
                 // Plain `break` targets the innermost breakable context: a
                 // loop, a switch, or a labeled block.
@@ -1155,23 +1282,38 @@ impl<'a> Compiler<'a> {
                 self.load_undefined()
             }
             Statement::Empty => self.load_undefined(),
-            Statement::Try { body, catch, finally } => self.compile_try(body, catch, finally),
+            Statement::Try {
+                body,
+                catch,
+                finally,
+            } => self.compile_try(body, catch, finally),
             Statement::Switch { disc, cases } => self.compile_switch(disc, cases),
-            Statement::ClassDecl { name, superclass, body } => {
+            Statement::ClassDecl {
+                name,
+                superclass,
+                body,
+            } => {
                 let value = self.compile_class(name, None, superclass.as_deref(), body)?;
                 match self.resolve(name)? {
                     Binding::Slot(slot) => self.emit(Instr::InitLocal { slot, src: value }),
                     Binding::Global => {
                         let index = self.intern_string(name)?;
-                        self.emit(Instr::InitGlobal { name: index, src: value });
+                        self.emit(Instr::InitGlobal {
+                            name: index,
+                            src: value,
+                        });
                     }
                 }
                 self.load_undefined()
             }
             Statement::ForIn { name, obj, body } => self.compile_for_in(name, obj, body),
-            Statement::ForOf { name, pattern, iter, body, is_await } => {
-                self.compile_for_of(name, pattern, iter, body, *is_await)
-            }
+            Statement::ForOf {
+                name,
+                pattern,
+                iter,
+                body,
+                is_await,
+            } => self.compile_for_of(name, pattern, iter, body, *is_await),
             Statement::Labeled { label, body } => self.compile_labeled(label, body),
             Statement::LabeledBreak(label) => {
                 let depth = match self
@@ -1230,7 +1372,12 @@ impl<'a> Compiler<'a> {
                 }
                 self.load_undefined()
             }
-            Statement::Import { module, default, named, namespace } => {
+            Statement::Import {
+                module,
+                default,
+                named,
+                namespace,
+            } => {
                 // Imports bind into the running scope, which a block-level
                 // import would leak out of (the VM has no block frames).
                 let bound = default
@@ -1261,9 +1408,10 @@ impl<'a> Compiler<'a> {
                         specifiers.iter().map(|(local, _)| local.as_str()),
                     )?;
                 }
-                let tmpl = self.push_const(Constant::ExportNamedTemplate(
-                    ExportNamedTemplate { specifiers: specifiers.clone(), source: source.clone() },
-                ))?;
+                let tmpl = self.push_const(Constant::ExportNamedTemplate(ExportNamedTemplate {
+                    specifiers: specifiers.clone(),
+                    source: source.clone(),
+                }))?;
                 self.emit(Instr::ExportNamed { tmpl });
                 self.load_undefined()
             }
@@ -1356,23 +1504,34 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::ToDestructArray { dst: arr, src: val });
                 for (index, elem) in elements.iter().enumerate() {
                     if let Pattern::Rest(inner) = elem {
-                        let from = u16::try_from(index)
-                            .map_err(|_| Decline::Func("code too large"))?;
+                        let from =
+                            u16::try_from(index).map_err(|_| Decline::Func("code too large"))?;
                         let rest = self.alloc_reg()?;
-                        self.emit(Instr::RestArray { dst: rest, src: arr, from });
+                        self.emit(Instr::RestArray {
+                            dst: rest,
+                            src: arr,
+                            from,
+                        });
                         return self.compile_destructure(inner, rest, mode);
                     }
                     let position = self.intern_number(index as f64)?;
                     let key = self.load_const(position)?;
                     let found = self.alloc_reg()?;
-                    self.emit(Instr::GetProp { dst: found, obj: arr, key });
+                    self.emit(Instr::GetProp {
+                        dst: found,
+                        obj: arr,
+                        key,
+                    });
                     self.compile_destructure(elem, found, mode)?;
                 }
                 Ok(())
             }
             Pattern::Object(props) => {
                 let keys = self.alloc_reg()?;
-                self.emit(Instr::CheckDestructObject { dst: keys, src: val });
+                self.emit(Instr::CheckDestructObject {
+                    dst: keys,
+                    src: val,
+                });
                 let mut taken = Vec::new();
                 for (key, sub) in props {
                     if let PatternKey::Name(name) = key
@@ -1381,11 +1540,17 @@ impl<'a> Compiler<'a> {
                     {
                         let template = taken
                             .iter()
-                            .map(|reg| SpreadEntry { spread: false, reg: *reg })
+                            .map(|reg| SpreadEntry {
+                                spread: false,
+                                reg: *reg,
+                            })
                             .collect();
                         let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
                         let taken_array = self.alloc_reg()?;
-                        self.emit(Instr::BuildArray { dst: taken_array, tmpl });
+                        self.emit(Instr::BuildArray {
+                            dst: taken_array,
+                            tmpl,
+                        });
                         let rest = self.alloc_reg()?;
                         self.emit(Instr::RestObject {
                             dst: rest,
@@ -1405,7 +1570,11 @@ impl<'a> Compiler<'a> {
                     };
                     taken.push(key_reg);
                     let found = self.alloc_reg()?;
-                    self.emit(Instr::GetProp { dst: found, obj: val, key: key_reg });
+                    self.emit(Instr::GetProp {
+                        dst: found,
+                        obj: val,
+                        key: key_reg,
+                    });
                     match sub {
                         Some(next) => self.compile_destructure(next, found, mode)?,
                         None => match key {
@@ -1425,10 +1594,16 @@ impl<'a> Compiler<'a> {
             Pattern::Rest(_) => Ok(()),
             Pattern::Default(inner, default) => {
                 let value = self.alloc_reg()?;
-                self.emit(Instr::Mov { dst: value, src: val });
+                self.emit(Instr::Mov {
+                    dst: value,
+                    src: val,
+                });
                 let has = self.emit_jump(|target| Instr::JumpIfNotNullish { src: val, target });
                 let fallback = self.compile_expr(default)?;
-                self.emit(Instr::Mov { dst: value, src: fallback });
+                self.emit(Instr::Mov {
+                    dst: value,
+                    src: fallback,
+                });
                 self.patch_jump(has, self.here())?;
                 self.compile_destructure(inner, value, mode)
             }
@@ -1491,10 +1666,13 @@ impl<'a> Compiler<'a> {
                     // Only a written-out `constructor` is the constructor,
                     // like the evaluator; a computed "constructor" stays a
                     // plain method.
-                    let is_ctor = !st
-                        && matches!(member_name, MemberName::Static(n) if n == "constructor");
+                    let is_ctor =
+                        !st && matches!(member_name, MemberName::Static(n) if n == "constructor");
                     if is_ctor {
-                        ctor = Some(OwnedCtor { params, body: method_body });
+                        ctor = Some(OwnedCtor {
+                            params,
+                            body: method_body,
+                        });
                         continue;
                     }
                     let display = match &template {
@@ -1504,7 +1682,10 @@ impl<'a> Compiler<'a> {
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
-                        PatchTarget::ClassMember { tmpl: u16::MAX, index: members.len() },
+                        PatchTarget::ClassMember {
+                            tmpl: u16::MAX,
+                            index: members.len(),
+                        },
                         FuncDef {
                             name: display,
                             params,
@@ -1523,7 +1704,11 @@ impl<'a> Compiler<'a> {
                         value: None,
                     });
                 }
-                ClassMember::Field { name: field_name, is_static: st, init } => {
+                ClassMember::Field {
+                    name: field_name,
+                    is_static: st,
+                    init,
+                } => {
                     let template = self.compile_member_name(field_name)?;
                     if *st {
                         let value = match init {
@@ -1549,14 +1734,21 @@ impl<'a> Compiler<'a> {
                         instance_fields.push((key, init.as_ref()));
                     }
                 }
-                ClassMember::Getter { name: member_name, is_static: st, body: getter_body } => {
+                ClassMember::Getter {
+                    name: member_name,
+                    is_static: st,
+                    body: getter_body,
+                } => {
                     let template = self.compile_member_name(member_name)?;
                     let display = match &template {
                         ClassNameTemplate::Static(key) => Some(format!("get {key}")),
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
-                        PatchTarget::ClassMember { tmpl: u16::MAX, index: members.len() },
+                        PatchTarget::ClassMember {
+                            tmpl: u16::MAX,
+                            index: members.len(),
+                        },
                         FuncDef {
                             name: display,
                             params: &[],
@@ -1587,7 +1779,10 @@ impl<'a> Compiler<'a> {
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
-                        PatchTarget::ClassMember { tmpl: u16::MAX, index: members.len() },
+                        PatchTarget::ClassMember {
+                            tmpl: u16::MAX,
+                            index: members.len(),
+                        },
                         FuncDef {
                             name: display,
                             params: std::slice::from_ref(param),
@@ -1630,8 +1825,10 @@ impl<'a> Compiler<'a> {
 
         let (ctor_params, ctor_body) =
             Self::class_ctor_body(superclass.is_some(), ctor, &instance_fields);
-        let ctor_length =
-            ctor_params.iter().take_while(|param| !param.starts_with("...")).count();
+        let ctor_length = ctor_params
+            .iter()
+            .take_while(|param| !param.starts_with("..."))
+            .count();
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
             FuncDef {
@@ -1664,7 +1861,11 @@ impl<'a> Compiler<'a> {
                 | PatchTarget::ClassMember { tmpl: slot, .. } => *slot = tmpl,
                 PatchTarget::MakeFunction { .. } => unreachable!("class defers class patches"),
             }
-            self.deferred.push(Deferred { patch, def, snapshot: snapshot.clone() });
+            self.deferred.push(Deferred {
+                patch,
+                def,
+                snapshot: snapshot.clone(),
+            });
         }
         Ok(dst)
     }
@@ -1697,16 +1898,12 @@ impl<'a> Compiler<'a> {
         let (params, body): (&'a [String], &'a [Statement]) = match ctor {
             Some(own) => (own.params, own.body),
             None if is_derived => {
-                let params: &'a [String] =
-                    Box::leak(Box::new(vec!["...args".to_string()]));
-                let body: &'a [Statement] = Box::leak(Box::new(vec![Statement::Expr(
-                    Expr::Call {
+                let params: &'a [String] = Box::leak(Box::new(vec!["...args".to_string()]));
+                let body: &'a [Statement] =
+                    Box::leak(Box::new(vec![Statement::Expr(Expr::Call {
                         callee: Box::new(Expr::Super),
-                        args: vec![Expr::Spread(Box::new(Expr::Identifier(
-                            "args".to_string(),
-                        )))],
-                    },
-                )]));
+                        args: vec![Expr::Spread(Box::new(Expr::Identifier("args".to_string())))],
+                    })]));
                 (params, body)
             }
             None => (&[], &[]),
@@ -1720,9 +1917,7 @@ impl<'a> Compiler<'a> {
                 FieldKey::Static(field) => (Expr::String(field.clone()), false),
                 // Evaluated at class definition time; the builder binds the
                 // value into the constructor's scope under this key.
-                FieldKey::Computed(index) => {
-                    (Expr::Identifier(class_key_name(*index)), true)
-                }
+                FieldKey::Computed(index) => (Expr::Identifier(class_key_name(*index)), true),
             };
             full.push(Statement::Expr(Expr::Assignment {
                 target: Box::new(Expr::Member {
@@ -1753,7 +1948,9 @@ impl<'a> Compiler<'a> {
             self.compile_destructure(
                 pattern,
                 src,
-                DestructureMode::Decl { is_var: matches!(kind, VarKind::Var) },
+                DestructureMode::Decl {
+                    is_var: matches!(kind, VarKind::Var),
+                },
             )?;
             return self.load_undefined();
         }
@@ -1810,17 +2007,26 @@ impl<'a> Compiler<'a> {
         let join = self.alloc_reg()?;
         let else_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
         let then_value = self.compile_scoped_block(then)?;
-        self.emit(Instr::Mov { dst: join, src: then_value });
+        self.emit(Instr::Mov {
+            dst: join,
+            src: then_value,
+        });
         let end_jump = self.emit_jump(|target| Instr::Jump { target });
         self.patch_jump(else_jump, self.here())?;
         match else_ {
             Some(stmts) => {
                 let else_value = self.compile_scoped_block(stmts)?;
-                self.emit(Instr::Mov { dst: join, src: else_value });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: else_value,
+                });
             }
             None => {
                 let undef = self.load_undefined()?;
-                self.emit(Instr::Mov { dst: join, src: undef });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: undef,
+                });
             }
         }
         self.patch_jump(end_jump, self.here())?;
@@ -1828,7 +2034,12 @@ impl<'a> Compiler<'a> {
     }
 
     /// Patch a finished loop's break/continue lists to their targets.
-    fn finish_loop(&mut self, ctx: LoopCtx, continue_target: usize, end: usize) -> Result<(), Decline> {
+    fn finish_loop(
+        &mut self,
+        ctx: LoopCtx,
+        continue_target: usize,
+        end: usize,
+    ) -> Result<(), Decline> {
         for addr in ctx.continues {
             self.patch_jump(addr, continue_target)?;
         }
@@ -1852,7 +2063,10 @@ impl<'a> Compiler<'a> {
                     self.emit(Instr::PopScope);
                     continue;
                 }
-                UnwindCtx::Handler { finally, close_iter } => (*finally, *close_iter),
+                UnwindCtx::Handler {
+                    finally,
+                    close_iter,
+                } => (*finally, *close_iter),
             };
             if let Some(iter) = close_iter {
                 self.emit(Instr::CloseIterator { src: iter });
@@ -1892,29 +2106,45 @@ impl<'a> Compiler<'a> {
     ) -> Result<Reg, Decline> {
         let value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: value, src: undef });
+        self.emit(Instr::Mov {
+            dst: value,
+            src: undef,
+        });
         if catch.is_none() && finally.is_none() {
             let body_value = self.compile_scoped_block(body)?;
-            self.emit(Instr::Mov { dst: value, src: body_value });
+            self.emit(Instr::Mov {
+                dst: value,
+                src: body_value,
+            });
             return Ok(value);
         }
         let err = self.alloc_reg()?;
         let mut finally_addr = None;
         let mut catch_addr = None;
         if finally.is_some() {
-            finally_addr =
-                Some(self.emit_jump(|target| Instr::PushFinally { target, dst: err }));
-            self.unwind.push(UnwindCtx::Handler { finally: finally.as_deref(), close_iter: None });
+            finally_addr = Some(self.emit_jump(|target| Instr::PushFinally { target, dst: err }));
+            self.unwind.push(UnwindCtx::Handler {
+                finally: finally.as_deref(),
+                close_iter: None,
+            });
         }
         if catch.is_some() {
             catch_addr = Some(self.emit_jump(|target| Instr::PushCatch { target, dst: err }));
-            self.unwind.push(UnwindCtx::Handler { finally: None, close_iter: None });
+            self.unwind.push(UnwindCtx::Handler {
+                finally: None,
+                close_iter: None,
+            });
         }
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov { dst: value, src: body_value });
+        self.emit(Instr::Mov {
+            dst: value,
+            src: body_value,
+        });
         if catch.is_some() {
             self.emit(Instr::PopHandler);
-            self.unwind.pop().ok_or(Decline::Func("unwind stack underflow"))?;
+            self.unwind
+                .pop()
+                .ok_or(Decline::Func("unwind stack underflow"))?;
         }
         let normal = self.emit_jump(|target| Instr::Jump { target });
         let catch_pad = self.here();
@@ -1926,20 +2156,28 @@ impl<'a> Compiler<'a> {
             self.push_scope(boxed);
             if self.is_boxed_here(param) {
                 let index = self.intern_string(param)?;
-                self.emit(Instr::InitGlobal { name: index, src: err });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src: err,
+                });
             } else {
                 let slot = self.declare_slot(param, SlotKind::Var)?;
                 self.emit(Instr::InitLocal { slot, src: err });
             }
             self.hoist_block(catch_body)?;
             let catch_value = self.compile_block(catch_body)?;
-            self.emit(Instr::Mov { dst: value, src: catch_value });
+            self.emit(Instr::Mov {
+                dst: value,
+                src: catch_value,
+            });
             self.pop_scope()?;
         }
         let finally_run = self.here();
         if finally.is_some() {
             self.emit(Instr::PopHandler);
-            self.unwind.pop().ok_or(Decline::Func("unwind stack underflow"))?;
+            self.unwind
+                .pop()
+                .ok_or(Decline::Func("unwind stack underflow"))?;
             if let Some(body) = finally.as_deref() {
                 self.compile_finally_body(body)?;
             }
@@ -1967,11 +2205,7 @@ impl<'a> Compiler<'a> {
     /// labeled statement runs inside a `LabelBlock` context whose breaks
     /// land just past it with the statement value reset to `undefined`,
     /// matching the evaluator's `LabeledBreak` propagation.
-    fn compile_labeled(
-        &mut self,
-        label: &'a str,
-        body: &'a Statement,
-    ) -> Result<Reg, Decline> {
+    fn compile_labeled(&mut self, label: &'a str, body: &'a Statement) -> Result<Reg, Decline> {
         // Only a directly-wrapped loop takes the label (the evaluator's
         // loops likewise take a single pending label on entry); an outer
         // label of a nested chain stays a `LabelBlock`, so breaking to it
@@ -2003,7 +2237,10 @@ impl<'a> Compiler<'a> {
             let over = self.emit_jump(|target| Instr::Jump { target });
             let taken = self.here();
             let undef = self.load_undefined()?;
-            self.emit(Instr::Mov { dst: value, src: undef });
+            self.emit(Instr::Mov {
+                dst: value,
+                src: undef,
+            });
             let end = self.here();
             for addr in ctx.breaks {
                 self.patch_jump(addr, taken)?;
@@ -2059,22 +2296,37 @@ impl<'a> Compiler<'a> {
         let head = self.prepare_for_head(name)?;
         let source = self.compile_expr(obj)?;
         let keys = self.alloc_reg()?;
-        self.emit(Instr::EnumKeys { dst: keys, src: source });
+        self.emit(Instr::EnumKeys {
+            dst: keys,
+            src: source,
+        });
         let length_key = self.intern_string("length")?;
         let length_key = self.load_const(length_key)?;
         let len = self.alloc_reg()?;
-        self.emit(Instr::GetProp { dst: len, obj: keys, key: length_key });
+        self.emit(Instr::GetProp {
+            dst: len,
+            obj: keys,
+            key: length_key,
+        });
         let zero = self.intern_number(0.0)?;
         let idx = self.load_const(zero)?;
         let one = self.intern_number(1.0)?;
         let one = self.load_const(one)?;
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: undef,
+        });
         let top = self.here();
         self.emit(Instr::LoopHead);
         let cond = self.alloc_reg()?;
-        self.emit(Instr::Binary { dst: cond, op: BinOp::Lt, lhs: idx, rhs: len });
+        self.emit(Instr::Binary {
+            dst: cond,
+            op: BinOp::Lt,
+            lhs: idx,
+            rhs: len,
+        });
         let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
@@ -2082,16 +2334,36 @@ impl<'a> Compiler<'a> {
             ..Default::default()
         });
         let key = self.alloc_reg()?;
-        self.emit(Instr::GetProp { dst: key, obj: keys, key: idx });
+        self.emit(Instr::GetProp {
+            dst: key,
+            obj: keys,
+            key: idx,
+        });
         self.bind_for_head(&head, key);
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov { dst: loop_value, src: body_value });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: body_value,
+        });
         let increment = self.here();
         let next = self.alloc_reg()?;
-        self.emit(Instr::Binary { dst: next, op: BinOp::Add, lhs: idx, rhs: one });
-        self.emit(Instr::Mov { dst: idx, src: next });
-        self.emit(Instr::Jump { target: addr_target(top)? });
-        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
+        self.emit(Instr::Binary {
+            dst: next,
+            op: BinOp::Add,
+            lhs: idx,
+            rhs: one,
+        });
+        self.emit(Instr::Mov {
+            dst: idx,
+            src: next,
+        });
+        self.emit(Instr::Jump {
+            target: addr_target(top)?,
+        });
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
         let end = self.here();
         self.patch_jump(end_jump, end)?;
         self.finish_loop(ctx, increment, end)?;
@@ -2128,13 +2400,26 @@ impl<'a> Compiler<'a> {
         let source = self.compile_expr(iter)?;
         let iterator = self.alloc_reg()?;
         let next = self.alloc_reg()?;
-        self.emit(Instr::ForOfInit { iter: iterator, next, src: source });
+        self.emit(Instr::ForOfInit {
+            iter: iterator,
+            next,
+            src: source,
+        });
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: undef,
+        });
         let scratch = self.alloc_reg()?;
-        let unwind_pad = self.emit_jump(|target| Instr::PushFinally { target, dst: scratch });
-        self.unwind.push(UnwindCtx::Handler { finally: None, close_iter: Some(iterator) });
+        let unwind_pad = self.emit_jump(|target| Instr::PushFinally {
+            target,
+            dst: scratch,
+        });
+        self.unwind.push(UnwindCtx::Handler {
+            finally: None,
+            close_iter: Some(iterator),
+        });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
@@ -2144,7 +2429,12 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::LoopHead);
         let done = self.alloc_reg()?;
         let yielded = self.alloc_reg()?;
-        self.emit(Instr::IterNext { done, value: yielded, iter: iterator, next });
+        self.emit(Instr::IterNext {
+            done,
+            value: yielded,
+            iter: iterator,
+            next,
+        });
         let exhausted = self.emit_jump(|target| Instr::JumpIfTrue { src: done, target });
         match (&head, pattern) {
             (Some(head), None) => self.bind_for_head(head, yielded),
@@ -2158,10 +2448,20 @@ impl<'a> Compiler<'a> {
             _ => return Err(Decline::Func("bad for-of head")),
         }
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov { dst: loop_value, src: body_value });
-        self.emit(Instr::Jump { target: addr_target(top)? });
-        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
-        self.unwind.pop().ok_or(Decline::Func("unwind stack underflow"))?;
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: body_value,
+        });
+        self.emit(Instr::Jump {
+            target: addr_target(top)?,
+        });
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
+        self.unwind
+            .pop()
+            .ok_or(Decline::Func("unwind stack underflow"))?;
         let drained = self.here();
         self.emit(Instr::PopHandler);
         let end_jump = self.emit_jump(|target| Instr::Jump { target });
@@ -2189,11 +2489,7 @@ impl<'a> Compiler<'a> {
     /// (shared switch scope, matching the evaluator); strict-equality tests
     /// dispatch to case bodies in order with fallthrough, `break` exits the
     /// switch, and a completed switch evaluates to `undefined`.
-    fn compile_switch(
-        &mut self,
-        disc: &'a Expr,
-        cases: &'a [SwitchCase],
-    ) -> Result<Reg, Decline> {
+    fn compile_switch(&mut self, disc: &'a Expr, cases: &'a [SwitchCase]) -> Result<Reg, Decline> {
         let scrutinee = self.compile_expr(disc)?;
         // One scope across all cases: a name captured in any case boxes.
         let mut boxed = HashSet::new();
@@ -2206,7 +2502,10 @@ impl<'a> Compiler<'a> {
         }
         let value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: value, src: undef });
+        self.emit(Instr::Mov {
+            dst: value,
+            src: undef,
+        });
         let mut tests = Vec::new();
         let mut default = None;
         for (index, case) in cases.iter().enumerate() {
@@ -2245,7 +2544,10 @@ impl<'a> Compiler<'a> {
         for case in cases {
             bodies.push(self.here());
             let case_value = self.compile_block(&case.body)?;
-            self.emit(Instr::Mov { dst: value, src: case_value });
+            self.emit(Instr::Mov {
+                dst: value,
+                src: case_value,
+            });
         }
         let ctx = self
             .loops
@@ -2270,7 +2572,10 @@ impl<'a> Compiler<'a> {
     fn compile_while(&mut self, test: &'a Expr, body: &'a [Statement]) -> Result<Reg, Decline> {
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: undef,
+        });
         // Budget first, then the test — the evaluator's order — so a
         // `continue` re-entering here consumes exactly once per iteration.
         let test_addr = self.here();
@@ -2283,9 +2588,17 @@ impl<'a> Compiler<'a> {
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov { dst: loop_value, src: body_value });
-        self.emit(Instr::Jump { target: addr_target(test_addr)? });
-        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: body_value,
+        });
+        self.emit(Instr::Jump {
+            target: addr_target(test_addr)?,
+        });
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
         let end = self.here();
         self.patch_jump(end_jump, end)?;
         // `break`/`continue` jump over the value move, so neither updates
@@ -2297,7 +2610,10 @@ impl<'a> Compiler<'a> {
     fn compile_do_while(&mut self, test: &'a Expr, body: &'a [Statement]) -> Result<Reg, Decline> {
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: undef,
+        });
         let body_addr = self.here();
         self.emit(Instr::LoopHead);
         self.loops.push(LoopCtx {
@@ -2306,13 +2622,22 @@ impl<'a> Compiler<'a> {
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov { dst: loop_value, src: body_value });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: body_value,
+        });
         // A `continue` lands here, after the body: the test runs without
         // consuming the budget a second time, like the evaluator.
         let test_addr = self.here();
         let cond = self.compile_expr(test)?;
-        self.emit(Instr::JumpIfTrue { src: cond, target: addr_target(body_addr)? });
-        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
+        self.emit(Instr::JumpIfTrue {
+            src: cond,
+            target: addr_target(body_addr)?,
+        });
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
         let end = self.here();
         self.finish_loop(ctx, test_addr, end)?;
         Ok(loop_value)
@@ -2336,7 +2661,10 @@ impl<'a> Compiler<'a> {
         }
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: loop_value, src: undef });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: undef,
+        });
         let test_addr = self.here();
         self.emit(Instr::LoopHead);
         let end_jump = if let Some(test) = test {
@@ -2351,7 +2679,10 @@ impl<'a> Compiler<'a> {
             ..Default::default()
         });
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov { dst: loop_value, src: body_value });
+        self.emit(Instr::Mov {
+            dst: loop_value,
+            src: body_value,
+        });
         // A `continue` runs the update, then the budgeted test. With a
         // boxed head, the scope rotates first: the update assigns the next
         // iteration's cells, so the current iteration's closures keep the
@@ -2363,8 +2694,13 @@ impl<'a> Compiler<'a> {
         if let Some(update) = update {
             let _ = self.compile_expr(update)?;
         }
-        self.emit(Instr::Jump { target: addr_target(test_addr)? });
-        let ctx = self.loops.pop().ok_or(Decline::Func("loop stack underflow"))?;
+        self.emit(Instr::Jump {
+            target: addr_target(test_addr)?,
+        });
+        let ctx = self
+            .loops
+            .pop()
+            .ok_or(Decline::Func("loop stack underflow"))?;
         // Breaks unwind to above the head scope, then land on the pop pad
         // with everything else; the head scope pops exactly once per exit.
         let pad = self.here();
@@ -2385,14 +2721,20 @@ impl<'a> Compiler<'a> {
         for name in &names {
             let tmp = self.alloc_reg()?;
             let index = self.intern_string(name)?;
-            self.emit(Instr::LoadGlobal { dst: tmp, name: index });
+            self.emit(Instr::LoadGlobal {
+                dst: tmp,
+                name: index,
+            });
             temps.push(tmp);
         }
         self.emit(Instr::PopScope);
         self.emit(Instr::PushScope);
         for (name, tmp) in names.iter().zip(temps) {
             let index = self.intern_string(name)?;
-            self.emit(Instr::InitGlobal { name: index, src: tmp });
+            self.emit(Instr::InitGlobal {
+                name: index,
+                src: tmp,
+            });
         }
         Ok(())
     }
@@ -2425,8 +2767,11 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 VarKind::Let | VarKind::Const => {
-                    let slot_kind =
-                        if matches!(kind, VarKind::Const) { SlotKind::Const } else { SlotKind::Let };
+                    let slot_kind = if matches!(kind, VarKind::Const) {
+                        SlotKind::Const
+                    } else {
+                        SlotKind::Let
+                    };
                     if self.is_boxed_here(name) {
                         let index = self.intern_string(name)?;
                         let undef = self.load_undefined()?;
@@ -2444,7 +2789,11 @@ impl<'a> Compiler<'a> {
                         continue;
                     }
                     let slot = self.declare_slot(name, slot_kind)?;
-                    self.emit(Instr::DeclareLocal { slot, kind: slot_kind, initialized: false });
+                    self.emit(Instr::DeclareLocal {
+                        slot,
+                        kind: slot_kind,
+                        initialized: false,
+                    });
                     let src = match init {
                         Some(value) => self.compile_expr(value)?,
                         None => self.load_undefined()?,
@@ -2459,7 +2808,12 @@ impl<'a> Compiler<'a> {
     fn compile_for_init(&mut self, init: &'a ForInit) -> Result<(), Decline> {
         match init {
             ForInit::Var { kind, decls } => self.compile_for_decls(kind, decls),
-            ForInit::Pattern { kind, pattern, init, trailing } => {
+            ForInit::Pattern {
+                kind,
+                pattern,
+                init,
+                trailing,
+            } => {
                 let src = self.compile_expr(init)?;
                 if !matches!(kind, VarKind::Var) {
                     let slot_kind = if matches!(kind, VarKind::Const) {
@@ -2490,7 +2844,9 @@ impl<'a> Compiler<'a> {
                 self.compile_destructure(
                     pattern,
                     src,
-                    DestructureMode::Decl { is_var: matches!(kind, VarKind::Var) },
+                    DestructureMode::Decl {
+                        is_var: matches!(kind, VarKind::Var),
+                    },
                 )?;
                 self.compile_for_decls(kind, trailing)?;
                 Ok(())
@@ -2532,9 +2888,15 @@ impl<'a> Compiler<'a> {
             Expr::Identifier(name) => self.compile_identifier(name),
             Expr::Array(items) => self.compile_array(items),
             Expr::Binary { op, left, right } => self.compile_binary(*op, left, right),
-            Expr::Unary { op, operand, prefix } => self.compile_unary(*op, operand, *prefix),
+            Expr::Unary {
+                op,
+                operand,
+                prefix,
+            } => self.compile_unary(*op, operand, *prefix),
             Expr::Call { callee, args } => self.compile_call(callee, args),
-            Expr::Member { object, property, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     let key = self.compile_expr(property)?;
                     let dst = self.alloc_reg()?;
@@ -2551,21 +2913,34 @@ impl<'a> Compiler<'a> {
             Expr::LogicalAssignment { target, op, value } => {
                 self.compile_logical_assignment(target, *op, value)
             }
-            Expr::Conditional { test, consequent, alternate } => {
+            Expr::Conditional {
+                test,
+                consequent,
+                alternate,
+            } => {
                 let cond = self.compile_expr(test)?;
                 let join = self.alloc_reg()?;
-                let else_jump =
-                    self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
+                let else_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
                 let then_value = self.compile_expr(consequent)?;
-                self.emit(Instr::Mov { dst: join, src: then_value });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: then_value,
+                });
                 let end_jump = self.emit_jump(|target| Instr::Jump { target });
                 self.patch_jump(else_jump, self.here())?;
                 let else_value = self.compile_expr(alternate)?;
-                self.emit(Instr::Mov { dst: join, src: else_value });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: else_value,
+                });
                 self.patch_jump(end_jump, self.here())?;
                 Ok(join)
             }
-            Expr::ArrowFn { params, body, is_async } => {
+            Expr::ArrowFn {
+                params,
+                body,
+                is_async,
+            } => {
                 let body = match body.as_ref() {
                     ExprOrBlock::Block(stmts) => FuncBody::Stmts(stmts),
                     ExprOrBlock::Expr(expr) => FuncBody::Expr(expr),
@@ -2580,17 +2955,21 @@ impl<'a> Compiler<'a> {
                     is_constructor: false,
                 })
             }
-            Expr::FnExpr { name, params, body, is_async, is_generator } => {
-                self.defer_function(FuncDef {
-                    name: name.clone(),
-                    params,
-                    body: FuncBody::Stmts(body),
-                    is_arrow: false,
-                    is_async: *is_async,
-                    is_generator: *is_generator,
-                    is_constructor: !is_async && !is_generator,
-                })
-            }
+            Expr::FnExpr {
+                name,
+                params,
+                body,
+                is_async,
+                is_generator,
+            } => self.defer_function(FuncDef {
+                name: name.clone(),
+                params,
+                body: FuncBody::Stmts(body),
+                is_arrow: false,
+                is_async: *is_async,
+                is_generator: *is_generator,
+                is_constructor: !is_async && !is_generator,
+            }),
             Expr::New { callee, args } => {
                 // Spread in `new` is transparent (evaluates to one argument),
                 // like the evaluator — unlike call spread, which declines.
@@ -2603,25 +2982,37 @@ impl<'a> Compiler<'a> {
                 }
                 let start = self.alloc_regs(compiled.len())?;
                 for (i, reg) in compiled.iter().enumerate() {
-                    self.emit(Instr::Mov { dst: start + i as u16, src: *reg });
+                    self.emit(Instr::Mov {
+                        dst: start + i as u16,
+                        src: *reg,
+                    });
                 }
                 let callee = self.compile_expr(callee)?;
                 let dst = self.alloc_reg()?;
-                self.emit(Instr::Construct { dst, callee, args: start, argc: compiled.len() as u16 });
+                self.emit(Instr::Construct {
+                    dst,
+                    callee,
+                    args: start,
+                    argc: compiled.len() as u16,
+                });
                 Ok(dst)
             }
             Expr::Template { quasis, exprs } => self.compile_template(quasis, exprs),
             Expr::This => self.compile_this(),
             Expr::Object(props) => self.compile_object(props),
-            Expr::ClassExpr { name, superclass, body } => self.compile_class(
+            Expr::ClassExpr {
+                name,
+                superclass,
+                body,
+            } => self.compile_class(
                 name.as_deref().unwrap_or(""),
                 name.clone(),
                 superclass.as_deref(),
                 body,
             ),
-            Expr::TaggedTemplate { tag, cooked, exprs, .. } => {
-                self.compile_tagged(tag, cooked, exprs)
-            }
+            Expr::TaggedTemplate {
+                tag, cooked, exprs, ..
+            } => self.compile_tagged(tag, cooked, exprs),
             Expr::Super => self.raise_bare_super(),
             Expr::Spread(inner) => self.compile_expr(inner),
             Expr::DynamicImport(specifier) => {
@@ -2654,9 +3045,9 @@ impl<'a> Compiler<'a> {
                 })?;
                 self.load_const(index)
             }
-            Expr::OptionalChain { object, property, .. } => {
-                self.compile_optional_chain(object, property)
-            }
+            Expr::OptionalChain {
+                object, property, ..
+            } => self.compile_optional_chain(object, property),
         }
     }
 
@@ -2700,7 +3091,10 @@ impl<'a> Compiler<'a> {
                         }
                         Binding::Global => {
                             let index = self.intern_string(name)?;
-                            self.emit(Instr::LoadGlobalSoft { dst: val, name: index });
+                            self.emit(Instr::LoadGlobalSoft {
+                                dst: val,
+                                name: index,
+                            });
                         }
                     }
                     let key = self.intern_string(name)?;
@@ -2743,7 +3137,10 @@ impl<'a> Compiler<'a> {
                         _ => {
                             let key = self.compile_expr(key_expression)?;
                             let normalized = self.alloc_reg()?;
-                            self.emit(Instr::NormalKey { dst: normalized, src: key });
+                            self.emit(Instr::NormalKey {
+                                dst: normalized,
+                                src: key,
+                            });
                             // Bad keys skip the value evaluation entirely.
                             let end = self.emit_jump(|target| Instr::JumpIfNullish {
                                 src: normalized,
@@ -2759,7 +3156,13 @@ impl<'a> Compiler<'a> {
                         }
                     }
                 }
-                ObjectProp::Method { name, params, body, is_async, is_generator } => {
+                ObjectProp::Method {
+                    name,
+                    params,
+                    body,
+                    is_async,
+                    is_generator,
+                } => {
                     let val = self.defer_function(FuncDef {
                         name: Some(name.clone()),
                         params,
@@ -2813,7 +3216,11 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::Spread(expression) => {
                     let src = self.compile_expr(expression)?;
-                    template.push(PropEntry { key: None, val: src, kind: PropKind::Spread });
+                    template.push(PropEntry {
+                        key: None,
+                        val: src,
+                        kind: PropKind::Spread,
+                    });
                 }
             }
         }
@@ -2847,26 +3254,44 @@ impl<'a> Compiler<'a> {
         let start = self.alloc_regs(items.len())?;
         for (i, item) in items.iter().enumerate() {
             let reg = self.compile_expr(item)?;
-            self.emit(Instr::Mov { dst: start + i as u16, src: reg });
+            self.emit(Instr::Mov {
+                dst: start + i as u16,
+                src: reg,
+            });
         }
         let dst = self.alloc_reg()?;
-        self.emit(Instr::NewArray { dst, args: start, argc: items.len() as u16 });
+        self.emit(Instr::NewArray {
+            dst,
+            args: start,
+            argc: items.len() as u16,
+        });
         Ok(dst)
     }
 
-    fn compile_binary(&mut self, op: BinOp, left: &'a Expr, right: &'a Expr) -> Result<Reg, Decline> {
+    fn compile_binary(
+        &mut self,
+        op: BinOp,
+        left: &'a Expr,
+        right: &'a Expr,
+    ) -> Result<Reg, Decline> {
         match op {
             BinOp::And | BinOp::Or | BinOp::Nullish => {
                 let lhs = self.compile_expr(left)?;
                 let join = self.alloc_reg()?;
-                self.emit(Instr::Mov { dst: join, src: lhs });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: lhs,
+                });
                 let end_jump = match op {
                     BinOp::And => self.emit_jump(|target| Instr::JumpIfFalse { src: lhs, target }),
                     BinOp::Or => self.emit_jump(|target| Instr::JumpIfTrue { src: lhs, target }),
                     _ => self.emit_jump(|target| Instr::JumpIfNotNullish { src: lhs, target }),
                 };
                 let rhs = self.compile_expr(right)?;
-                self.emit(Instr::Mov { dst: join, src: rhs });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: rhs,
+                });
                 self.patch_jump(end_jump, self.here())?;
                 Ok(join)
             }
@@ -2898,30 +3323,53 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn compile_inc_dec(&mut self, op: UnOp, operand: &'a Expr, prefix: bool) -> Result<Reg, Decline> {
+    fn compile_inc_dec(
+        &mut self,
+        op: UnOp,
+        operand: &'a Expr,
+        prefix: bool,
+    ) -> Result<Reg, Decline> {
         let delta = if op == UnOp::Inc { 1 } else { -1 };
         match operand {
             Expr::Identifier(name) => {
                 let dst = self.alloc_reg()?;
                 match self.resolve(name)? {
                     Binding::Slot(slot) => {
-                        self.emit(Instr::IncLocal { dst, slot, delta, prefix });
+                        self.emit(Instr::IncLocal {
+                            dst,
+                            slot,
+                            delta,
+                            prefix,
+                        });
                     }
                     Binding::Global => {
                         let index = self.intern_string(name)?;
-                        self.emit(Instr::IncGlobal { dst, name: index, delta, prefix });
+                        self.emit(Instr::IncGlobal {
+                            dst,
+                            name: index,
+                            delta,
+                            prefix,
+                        });
                     }
                 }
                 Ok(dst)
             }
-            Expr::Member { object, property, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
                 let dst = self.alloc_reg()?;
-                self.emit(Instr::IncProp { dst, obj, key, delta, prefix });
+                self.emit(Instr::IncProp {
+                    dst,
+                    obj,
+                    key,
+                    delta,
+                    prefix,
+                });
                 Ok(dst)
             }
             // Anything else evaluates, then converts without storing.
@@ -2936,7 +3384,9 @@ impl<'a> Compiler<'a> {
 
     fn compile_delete(&mut self, operand: &'a Expr) -> Result<Reg, Decline> {
         match operand {
-            Expr::Member { object, property, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     return self.raise_bare_super();
                 }
@@ -2962,7 +3412,9 @@ impl<'a> Compiler<'a> {
                 }
                 Ok(dst)
             }
-            Expr::OptionalChain { object, property, .. } => {
+            Expr::OptionalChain {
+                object, property, ..
+            } => {
                 let obj = self.compile_expr(object)?;
                 let dst = self.alloc_reg()?;
                 let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
@@ -2990,7 +3442,11 @@ impl<'a> Compiler<'a> {
             if name == "undefined" {
                 let src = self.load_undefined()?;
                 let dst = self.alloc_reg()?;
-                self.emit(Instr::Unary { dst, op: UnOp::Typeof, src });
+                self.emit(Instr::Unary {
+                    dst,
+                    op: UnOp::Typeof,
+                    src,
+                });
                 return Ok(dst);
             }
             let dst = self.alloc_reg()?;
@@ -3005,7 +3461,11 @@ impl<'a> Compiler<'a> {
         }
         let src = self.compile_expr(operand)?;
         let dst = self.alloc_reg()?;
-        self.emit(Instr::Unary { dst, op: UnOp::Typeof, src });
+        self.emit(Instr::Unary {
+            dst,
+            op: UnOp::Typeof,
+            src,
+        });
         Ok(dst)
     }
 
@@ -3033,7 +3493,10 @@ impl<'a> Compiler<'a> {
         let parts = self.alloc_reg()?;
         self.emit(Instr::BuildArray { dst: parts, tmpl });
         let start = self.alloc_regs(1 + values.len())?;
-        self.emit(Instr::Mov { dst: start, src: parts });
+        self.emit(Instr::Mov {
+            dst: start,
+            src: parts,
+        });
         for (i, value) in values.iter().enumerate() {
             self.emit(Instr::Mov {
                 dst: start + 1 + i as u16,
@@ -3043,7 +3506,9 @@ impl<'a> Compiler<'a> {
         let argc = 1 + values.len() as u16;
         let dst = self.alloc_reg()?;
         match tag {
-            Expr::Member { object, property, .. } if matches!(object.as_ref(), Expr::Super) => {
+            Expr::Member {
+                object, property, ..
+            } if matches!(object.as_ref(), Expr::Super) => {
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
                 self.emit(Instr::SuperMember { dst: callee, key });
@@ -3056,11 +3521,17 @@ impl<'a> Compiler<'a> {
                     argc,
                 });
             }
-            Expr::Member { object, property, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
-                self.emit(Instr::GetProp { dst: callee, obj, key });
+                self.emit(Instr::GetProp {
+                    dst: callee,
+                    obj,
+                    key,
+                });
                 self.emit(Instr::CallMethod {
                     dst,
                     callee,
@@ -3120,16 +3591,23 @@ impl<'a> Compiler<'a> {
         enum Callee<'x> {
             Method,
             Plain,
-            Chain { object: &'x Expr, property: &'x Expr },
+            Chain {
+                object: &'x Expr,
+                property: &'x Expr,
+            },
             Super,
-            SuperMember { property: &'x Expr },
+            SuperMember {
+                property: &'x Expr,
+            },
         }
         let kind = match callee {
-            Expr::Member { object, property, .. } if matches!(object.as_ref(), Expr::Super) => {
-                Callee::SuperMember { property }
-            }
+            Expr::Member {
+                object, property, ..
+            } if matches!(object.as_ref(), Expr::Super) => Callee::SuperMember { property },
             Expr::Member { .. } => Callee::Method,
-            Expr::OptionalChain { object, property, .. } => Callee::Chain { object, property },
+            Expr::OptionalChain {
+                object, property, ..
+            } => Callee::Chain { object, property },
             Expr::Super => Callee::Super,
             _ => Callee::Plain,
         };
@@ -3160,26 +3638,50 @@ impl<'a> Compiler<'a> {
             let start = self.alloc_regs(args.len())?;
             for (i, arg) in args.iter().enumerate() {
                 let reg = self.compile_expr(arg)?;
-                self.emit(Instr::Mov { dst: start + i as u16, src: reg });
+                self.emit(Instr::Mov {
+                    dst: start + i as u16,
+                    src: reg,
+                });
             }
-            CallArgs::Range { start, argc: args.len() as u16 }
+            CallArgs::Range {
+                start,
+                argc: args.len() as u16,
+            }
         };
         let dst = self.alloc_reg()?;
         match kind {
             Callee::Method => {
-                let Expr::Member { object, property, .. } = callee else {
+                let Expr::Member {
+                    object, property, ..
+                } = callee
+                else {
                     return Err(Decline::Func("callee shape changed"));
                 };
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
-                self.emit(Instr::GetProp { dst: callee, obj, key });
+                self.emit(Instr::GetProp {
+                    dst: callee,
+                    obj,
+                    key,
+                });
                 match call_args {
                     CallArgs::Range { start, argc } => {
-                        self.emit(Instr::CallMethod { dst, callee, this: obj, args: start, argc });
+                        self.emit(Instr::CallMethod {
+                            dst,
+                            callee,
+                            this: obj,
+                            args: start,
+                            argc,
+                        });
                     }
                     CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::MethodSpread { dst, callee, this: obj, tmpl });
+                        self.emit(Instr::MethodSpread {
+                            dst,
+                            callee,
+                            this: obj,
+                            tmpl,
+                        });
                     }
                 }
             }
@@ -3187,7 +3689,12 @@ impl<'a> Compiler<'a> {
                 let callee = self.compile_expr(callee)?;
                 match call_args {
                     CallArgs::Range { start, argc } => {
-                        self.emit(Instr::Call { dst, callee, args: start, argc });
+                        self.emit(Instr::Call {
+                            dst,
+                            callee,
+                            args: start,
+                            argc,
+                        });
                     }
                     CallArgs::Spread { tmpl } => {
                         self.emit(Instr::CallSpread { dst, callee, tmpl });
@@ -3196,7 +3703,11 @@ impl<'a> Compiler<'a> {
             }
             Callee::Super => match call_args {
                 CallArgs::Range { start, argc } => {
-                    self.emit(Instr::SuperCall { dst, args: start, argc });
+                    self.emit(Instr::SuperCall {
+                        dst,
+                        args: start,
+                        argc,
+                    });
                 }
                 CallArgs::Spread { tmpl } => {
                     self.emit(Instr::SuperCallSpread { dst, tmpl });
@@ -3209,10 +3720,21 @@ impl<'a> Compiler<'a> {
                 let this = self.compile_this()?;
                 match call_args {
                     CallArgs::Range { start, argc } => {
-                        self.emit(Instr::CallMethod { dst, callee, this, args: start, argc });
+                        self.emit(Instr::CallMethod {
+                            dst,
+                            callee,
+                            this,
+                            args: start,
+                            argc,
+                        });
                     }
                     CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::MethodSpread { dst, callee, this, tmpl });
+                        self.emit(Instr::MethodSpread {
+                            dst,
+                            callee,
+                            this,
+                            tmpl,
+                        });
                     }
                 }
             }
@@ -3227,15 +3749,30 @@ impl<'a> Compiler<'a> {
                 } else {
                     let key = self.compile_expr(property)?;
                     let callee = self.alloc_reg()?;
-                    self.emit(Instr::GetProp { dst: callee, obj, key });
+                    self.emit(Instr::GetProp {
+                        dst: callee,
+                        obj,
+                        key,
+                    });
                     callee
                 };
                 match call_args {
                     CallArgs::Range { start, argc } => {
-                        self.emit(Instr::CallMethod { dst, callee, this: obj, args: start, argc });
+                        self.emit(Instr::CallMethod {
+                            dst,
+                            callee,
+                            this: obj,
+                            args: start,
+                            argc,
+                        });
                     }
                     CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::MethodSpread { dst, callee, this: obj, tmpl });
+                        self.emit(Instr::MethodSpread {
+                            dst,
+                            callee,
+                            this: obj,
+                            tmpl,
+                        });
                     }
                 }
                 self.patch_jump(end, self.here())?;
@@ -3252,16 +3789,28 @@ impl<'a> Compiler<'a> {
         let obj = self.compile_expr(object)?;
         let join = self.alloc_reg()?;
         let undef = self.load_undefined()?;
-        self.emit(Instr::Mov { dst: join, src: undef });
+        self.emit(Instr::Mov {
+            dst: join,
+            src: undef,
+        });
         let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
         let key = self.compile_expr(property)?;
-        self.emit(Instr::GetProp { dst: join, obj, key });
+        self.emit(Instr::GetProp {
+            dst: join,
+            obj,
+            key,
+        });
         self.patch_jump(end, self.here())?;
         Ok(join)
     }
 
     /// Value first, then the target reference — the evaluator's order.
-    fn compile_assignment(&mut self, target: &'a Expr, op: AssignOp, value: &'a Expr) -> Result<Reg, Decline> {
+    fn compile_assignment(
+        &mut self,
+        target: &'a Expr,
+        op: AssignOp,
+        value: &'a Expr,
+    ) -> Result<Reg, Decline> {
         let rhs = self.compile_expr(value)?;
         match target {
             Expr::Identifier(name) => {
@@ -3273,7 +3822,10 @@ impl<'a> Compiler<'a> {
                     }
                     (Binding::Global, true) => {
                         let index = self.intern_string(name)?;
-                        self.emit(Instr::StoreGlobal { name: index, src: rhs });
+                        self.emit(Instr::StoreGlobal {
+                            name: index,
+                            src: rhs,
+                        });
                         Ok(rhs)
                     }
                     (Binding::Slot(slot), false) => {
@@ -3282,12 +3834,19 @@ impl<'a> Compiler<'a> {
                     }
                     (Binding::Global, false) => {
                         let index = self.intern_string(name)?;
-                        self.emit(Instr::CompoundGlobal { dst, name: index, op, rhs });
+                        self.emit(Instr::CompoundGlobal {
+                            dst,
+                            name: index,
+                            op,
+                            rhs,
+                        });
                         Ok(dst)
                     }
                 }
             }
-            Expr::Member { object, property, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     return self.raise_bare_super();
                 }
@@ -3298,7 +3857,13 @@ impl<'a> Compiler<'a> {
                     Ok(rhs)
                 } else {
                     let dst = self.alloc_reg()?;
-                    self.emit(Instr::CompoundProp { dst, obj, key, op, rhs });
+                    self.emit(Instr::CompoundProp {
+                        dst,
+                        obj,
+                        key,
+                        op,
+                        rhs,
+                    });
                     Ok(dst)
                 }
             }
@@ -3333,32 +3898,53 @@ impl<'a> Compiler<'a> {
         let end_jump = match target {
             Expr::Identifier(name) => {
                 let current = self.compile_identifier(name)?;
-                self.emit(Instr::Mov { dst: join, src: current });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: current,
+                });
                 let jump = self.logical_skip_jump(op, current)?;
                 let rhs = self.compile_expr(value)?;
                 match self.resolve(name)? {
                     Binding::Slot(slot) => self.emit(Instr::StoreLocal { slot, src: rhs }),
                     Binding::Global => {
                         let index = self.intern_string(name)?;
-                        self.emit(Instr::StoreGlobal { name: index, src: rhs });
+                        self.emit(Instr::StoreGlobal {
+                            name: index,
+                            src: rhs,
+                        });
                     }
                 }
-                self.emit(Instr::Mov { dst: join, src: rhs });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: rhs,
+                });
                 jump
             }
-            Expr::Member { object, property, .. } => {
+            Expr::Member {
+                object, property, ..
+            } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
                 let current = self.alloc_reg()?;
-                self.emit(Instr::GetProp { dst: current, obj, key });
-                self.emit(Instr::Mov { dst: join, src: current });
+                self.emit(Instr::GetProp {
+                    dst: current,
+                    obj,
+                    key,
+                });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: current,
+                });
                 let jump = self.logical_skip_jump(op, current)?;
                 let rhs = self.compile_expr(value)?;
                 self.emit(Instr::SetProp { obj, key, val: rhs });
-                self.emit(Instr::Mov { dst: join, src: rhs });
+                self.emit(Instr::Mov {
+                    dst: join,
+                    src: rhs,
+                });
                 jump
             }
             _ => return Err(Decline::Func("invalid assignment target")),
@@ -3370,11 +3956,18 @@ impl<'a> Compiler<'a> {
     /// Jump over a logical-assignment write when the current value decides.
     fn logical_skip_jump(&mut self, op: LogicalAssignOp, current: Reg) -> Result<usize, Decline> {
         match op {
-            LogicalAssignOp::And => Ok(self.emit_jump(|target| Instr::JumpIfFalse { src: current, target })),
-            LogicalAssignOp::Or => Ok(self.emit_jump(|target| Instr::JumpIfTrue { src: current, target })),
-            LogicalAssignOp::Nullish => {
-                Ok(self.emit_jump(|target| Instr::JumpIfNotNullish { src: current, target }))
-            }
+            LogicalAssignOp::And => Ok(self.emit_jump(|target| Instr::JumpIfFalse {
+                src: current,
+                target,
+            })),
+            LogicalAssignOp::Or => Ok(self.emit_jump(|target| Instr::JumpIfTrue {
+                src: current,
+                target,
+            })),
+            LogicalAssignOp::Nullish => Ok(self.emit_jump(|target| Instr::JumpIfNotNullish {
+                src: current,
+                target,
+            })),
         }
     }
 
@@ -3382,11 +3975,19 @@ impl<'a> Compiler<'a> {
         let start = self.alloc_regs(exprs.len())?;
         for (i, expr) in exprs.iter().enumerate() {
             let reg = self.compile_expr(expr)?;
-            self.emit(Instr::Mov { dst: start + i as u16, src: reg });
+            self.emit(Instr::Mov {
+                dst: start + i as u16,
+                src: reg,
+            });
         }
         let quasis = self.push_const(Constant::StringList(quasis.to_vec()))?;
         let dst = self.alloc_reg()?;
-        self.emit(Instr::Template { dst, quasis, args: start, argc: exprs.len() as u16 });
+        self.emit(Instr::Template {
+            dst,
+            quasis,
+            args: start,
+            argc: exprs.len() as u16,
+        });
         Ok(dst)
     }
 }
@@ -3446,17 +4047,47 @@ fn compile_function(
     def: FuncDef<'_>,
     outer_block: HashSet<String>,
 ) -> Result<FuncOutcome, Decline> {
-    if def.is_async || def.is_generator || has_rest_param(def.params) || has_dup_params(def.params) {
+    if def.is_async || def.is_generator || has_rest_param(def.params) || has_dup_params(def.params)
+    {
         return Ok(FuncOutcome::Ast(build_ast_function(&def)));
     }
-    let this_mode = if def.is_arrow { ThisMode::Global } else { ThisMode::Frame };
-    let mut compiler =
-        Compiler::for_function(outer_block, this_mode, def.is_arrow);
+    let this_mode = if def.is_arrow {
+        ThisMode::Global
+    } else {
+        ThisMode::Frame
+    };
+    let mut compiler = Compiler::for_function(outer_block, this_mode, def.is_arrow);
     match compiler.compile_unit_function(def.clone()) {
         Ok(bytecode) => Ok(FuncOutcome::Bytecode(Rc::new(bytecode))),
         Err(Decline::Func(_)) => Ok(FuncOutcome::Ast(build_ast_function(&def))),
         Err(unit @ Decline::Unit(_)) => Err(unit),
     }
+}
+
+/// Build the AST fallback for one function, mirroring the evaluator's
+/// function-creation arms. The VM closes it over the defining frame
+/// environment; capture-free-ness holds because capturing functions decline
+/// the whole unit (slot bindings are invisible to environment chains).
+fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
+    let body = match def.body {
+        FuncBody::Stmts(stmts) => stmts.to_vec(),
+        FuncBody::Expr(expr) => vec![Statement::Return(Some(Box::new((*expr).clone())))],
+    };
+    let uses_arguments = if def.is_arrow {
+        arrow_body_references(&ExprOrBlock::Block(body.clone()), "arguments")
+    } else {
+        stmts_reference(&body, "arguments")
+    };
+    Rc::new(AstFunction {
+        name: def.name.clone(),
+        params: def.params.to_vec(),
+        body: Rc::new(body),
+        is_arrow: def.is_arrow,
+        is_constructor: def.is_constructor,
+        is_async: def.is_async,
+        is_generator: def.is_generator,
+        uses_arguments,
+    })
 }
 
 #[cfg(test)]
@@ -3536,7 +4167,10 @@ mod tests {
             "compiled"
         );
         // Top-level names are globals, not captures.
-        assert_eq!(reason("let x = 1; function f() { return x; } f();"), "compiled");
+        assert_eq!(
+            reason("let x = 1; function f() { return x; } f();"),
+            "compiled"
+        );
         // Nested declarations recurse through the chain, not slots.
         assert_eq!(
             reason("function g() { function f() { return f; } return f(); } g();"),
@@ -3547,7 +4181,10 @@ mod tests {
     #[test]
     fn block_captures_box_into_pushed_scopes() {
         // Captured block bindings live in pushed runtime scopes now.
-        assert_eq!(reason("{ let y = 1; function f() { return y; } }"), "compiled");
+        assert_eq!(
+            reason("{ let y = 1; function f() { return y; } }"),
+            "compiled"
+        );
         assert_eq!(
             reason("function g() { { let y = 1; function f() { return y; } } }"),
             "compiled"
@@ -3568,22 +4205,30 @@ mod tests {
         // A head inside an unscoped block nested in a pushed one declares
         // in the outer scope without boxing, so capturing it declines.
         assert_eq!(
-            reason("function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; }"),
+            reason(
+                "function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; }"
+            ),
             "block-scope capture needs Phase G"
         );
     }
 
     #[test]
     fn fibonacci_disassembly() {
-        let module = compile("function fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }").unwrap();
+        let module =
+            compile("function fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }")
+                .unwrap();
         crate::bytecode::verify::verify_module(&module).expect("compiler output verifies");
         // Undefined + "fib" + two instantiations (hoist-eager and in-order,
         // mirroring the evaluator's double evaluation of declarations).
         assert_eq!(module.main.constants.len(), 4);
-        let mut functions = module.main.constants.iter().filter_map(|constant| match constant {
-            Constant::Function(func) => Some(func),
-            _ => None,
-        });
+        let mut functions = module
+            .main
+            .constants
+            .iter()
+            .filter_map(|constant| match constant {
+                Constant::Function(func) => Some(func),
+                _ => None,
+            });
         let (first, second) = (functions.next().unwrap(), functions.next().unwrap());
         assert!(functions.next().is_none());
         assert_eq!(format!("{:?}", first.code), format!("{:?}", second.code));
@@ -3637,42 +4282,19 @@ mod tests {
     #[test]
     fn recursive_and_self_referencing_functions_compile() {
         // Declarations recurse through the enclosing scope in both tiers.
-        let module = compile(
-            "function fib(n){ return n < 2 ? n : fib(n - 1) + fib(n - 2); } fib(10);",
-        )
-        .expect("recursive declaration must compile");
+        let module =
+            compile("function fib(n){ return n < 2 ? n : fib(n - 1) + fib(n - 2); } fib(10);")
+                .expect("recursive declaration must compile");
         assert!(
-            module.main.constants.iter().any(|c| matches!(c, Constant::Function(_)))
+            module
+                .main
+                .constants
+                .iter()
+                .any(|c| matches!(c, Constant::Function(_)))
         );
         // Named expressions resolve their own name outward (the evaluator
         // has no intermediate self-scope), so self-reference compiles too.
         compile("(function bar(){ return typeof bar; })();")
             .expect("self-referencing expression must compile");
     }
-}
-
-/// Build the AST fallback for one function, mirroring the evaluator's
-/// function-creation arms. The VM closes it over the defining frame
-/// environment; capture-free-ness holds because capturing functions decline
-/// the whole unit (slot bindings are invisible to environment chains).
-fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
-    let body = match def.body {
-        FuncBody::Stmts(stmts) => stmts.to_vec(),
-        FuncBody::Expr(expr) => vec![Statement::Return(Some(Box::new((*expr).clone())))],
-    };
-    let uses_arguments = if def.is_arrow {
-        arrow_body_references(&ExprOrBlock::Block(body.clone()), "arguments")
-    } else {
-        stmts_reference(&body, "arguments")
-    };
-    Rc::new(AstFunction {
-        name: def.name.clone(),
-        params: def.params.to_vec(),
-        body: Rc::new(body),
-        is_arrow: def.is_arrow,
-        is_constructor: def.is_constructor,
-        is_async: def.is_async,
-        is_generator: def.is_generator,
-        uses_arguments,
-    })
 }

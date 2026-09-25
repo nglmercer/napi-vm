@@ -20,14 +20,13 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
-use crate::interpreter::Env;
 #[cfg(stackful_coroutines)]
 use crate::interpreter::AsyncTask;
-use crate::value::{
-    ArrayCell, ClassData, FunctionData, GeneratorInner, ObjectCell, PromiseInner, ProxyData,
-    Value,
-};
+use crate::interpreter::Env;
 use crate::interpreter::Environment;
+use crate::value::{
+    ArrayCell, ClassData, FunctionData, GeneratorInner, ObjectCell, PromiseInner, ProxyData, Value,
+};
 
 /// Identity of a tracked heap object: the address of its `Rc` block. Unique
 /// among live allocations; dead registry entries prune on every collection.
@@ -214,7 +213,10 @@ struct Marker {
 
 impl Marker {
     fn new() -> Self {
-        Self { marked: HashSet::new(), work: Vec::new() }
+        Self {
+            marked: HashSet::new(),
+            work: Vec::new(),
+        }
     }
 
     fn mark_env(&mut self, env: &Env) {
@@ -298,7 +300,9 @@ impl Marker {
                     }
                 }
                 MarkItem::Env(env) => {
-                    let Ok(borrowed) = env.try_borrow() else { continue };
+                    let Ok(borrowed) = env.try_borrow() else {
+                        continue;
+                    };
                     for child in borrowed.trace_values() {
                         self.mark_value(&child);
                     }
@@ -323,7 +327,9 @@ impl Marker {
                     // `bytecode` is code, not data: constants hold no values.
                 }
                 MarkItem::Promise(inner) => {
-                    let Ok(borrowed) = inner.try_borrow() else { continue };
+                    let Ok(borrowed) = inner.try_borrow() else {
+                        continue;
+                    };
                     self.mark_value(&borrowed.value);
                     for reaction in &borrowed.reactions {
                         self.mark_value(&reaction.on_fulfilled);
@@ -334,7 +340,9 @@ impl Marker {
                     }
                 }
                 MarkItem::Generator(inner) => {
-                    let Ok(borrowed) = inner.try_borrow() else { continue };
+                    let Ok(borrowed) = inner.try_borrow() else {
+                        continue;
+                    };
                     if let Some(closure) = &borrowed.closure {
                         self.mark_env(closure);
                     }
@@ -356,7 +364,9 @@ impl Marker {
                     self.mark_value(&data.handler);
                 }
                 MarkItem::Binding(cell) => {
-                    let Ok(borrowed) = cell.try_borrow() else { continue };
+                    let Ok(borrowed) = cell.try_borrow() else {
+                        continue;
+                    };
                     self.mark_value(&borrowed);
                 }
                 #[cfg(stackful_coroutines)]
@@ -372,10 +382,7 @@ impl Marker {
 
 /// Register an interpreter's live roots. Called once per construction; the
 /// returned id unregisters on drop.
-pub(crate) fn register_interp(
-    roots: GcRoots,
-    executing: Rc<std::cell::Cell<usize>>,
-) -> InterpId {
+pub(crate) fn register_interp(roots: GcRoots, executing: Rc<std::cell::Cell<usize>>) -> InterpId {
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         let id = heap.next_interp;
@@ -430,7 +437,9 @@ fn sweep_vec<T>(
 ) -> usize {
     let mut collected = 0;
     entries.retain(|weak| {
-        let Some(strong) = weak.upgrade() else { return false };
+        let Some(strong) = weak.upgrade() else {
+            return false;
+        };
         if marked.contains(&(Rc::as_ptr(&strong) as usize)) {
             return true;
         }
@@ -457,7 +466,9 @@ pub(crate) fn collect() -> HeapStats {
         let heap = heap.borrow();
         heap.generators.iter().any(|weak| {
             weak.upgrade().is_some_and(|strong| {
-                strong.try_borrow().is_ok_and(|inner| inner.suspends_values())
+                strong
+                    .try_borrow()
+                    .is_ok_and(|inner| inner.suspends_values())
             })
         }) || {
             #[cfg(stackful_coroutines)]
@@ -475,12 +486,22 @@ pub(crate) fn collect() -> HeapStats {
         }
     });
     if suspended {
-        return HeapStats { skipped: Some(SkipReason::SuspendedTasks), ..HeapStats::default() };
+        return HeapStats {
+            skipped: Some(SkipReason::SuspendedTasks),
+            ..HeapStats::default()
+        };
     }
-    let executing =
-        HEAP.with(|heap| heap.borrow().interps.values().any(|(_, depth)| depth.get() > 0));
+    let executing = HEAP.with(|heap| {
+        heap.borrow()
+            .interps
+            .values()
+            .any(|(_, depth)| depth.get() > 0)
+    });
     if executing {
-        return HeapStats { skipped: Some(SkipReason::Executing), ..HeapStats::default() };
+        return HeapStats {
+            skipped: Some(SkipReason::Executing),
+            ..HeapStats::default()
+        };
     }
 
     let mut marker = Marker::new();
@@ -500,14 +521,19 @@ pub(crate) fn collect() -> HeapStats {
     });
     marker.drain();
 
-    let mut stats = HeapStats { marked: marker.marked.len(), ..HeapStats::default() };
+    let mut stats = HeapStats {
+        marked: marker.marked.len(),
+        ..HeapStats::default()
+    };
     HEAP.with(|heap| {
         let mut heap = heap.borrow_mut();
         stats.tracked = heap.tracked_count();
         stats.collected += sweep_vec(&mut heap.objects, &marker.marked, |cell| cell.clear_edges());
         stats.collected += sweep_vec(&mut heap.arrays, &marker.marked, |cell| cell.clear_edges());
         stats.collected += sweep_vec(&mut heap.envs, &marker.marked, |env| {
-            let Ok(mut borrowed) = env.try_borrow_mut() else { return false };
+            let Ok(mut borrowed) = env.try_borrow_mut() else {
+                return false;
+            };
             borrowed.clear_edges();
             true
         });
@@ -515,13 +541,17 @@ pub(crate) fn collect() -> HeapStats {
         // containers that reference them cascades through these nodes.
         stats.collected += sweep_vec(&mut heap.functions, &marker.marked, |_| true);
         stats.collected += sweep_vec(&mut heap.promises, &marker.marked, |inner| {
-            let Ok(mut borrowed) = inner.try_borrow_mut() else { return false };
+            let Ok(mut borrowed) = inner.try_borrow_mut() else {
+                return false;
+            };
             borrowed.value = Value::Undefined;
             borrowed.reactions.clear();
             true
         });
         stats.collected += sweep_vec(&mut heap.generators, &marker.marked, |inner| {
-            let Ok(mut borrowed) = inner.try_borrow_mut() else { return false };
+            let Ok(mut borrowed) = inner.try_borrow_mut() else {
+                return false;
+            };
             borrowed.args.clear();
             borrowed.return_value = None;
             borrowed.closure = None;
@@ -531,7 +561,9 @@ pub(crate) fn collect() -> HeapStats {
         });
         stats.collected += sweep_vec(&mut heap.proxies, &marker.marked, |_| true);
         stats.collected += sweep_vec(&mut heap.bindings, &marker.marked, |cell| {
-            let Ok(mut borrowed) = cell.try_borrow_mut() else { return false };
+            let Ok(mut borrowed) = cell.try_borrow_mut() else {
+                return false;
+            };
             *borrowed = Value::Undefined;
             true
         });
@@ -554,7 +586,10 @@ pub struct HeapCounters {
 pub fn counters() -> HeapCounters {
     HEAP.with(|heap| {
         let heap = heap.borrow();
-        HeapCounters { tracked: heap.tracked_count(), total_collected: heap.total_collected }
+        HeapCounters {
+            tracked: heap.tracked_count(),
+            total_collected: heap.total_collected,
+        }
     })
 }
 
@@ -583,18 +618,26 @@ mod tests {
         assert_eq!(stats.skipped, None);
         // Whichever entry sweeps first clears and its cascade frees the
         // partner before its entry is reached, so the pair counts once.
-        assert!(stats.collected >= 1, "expected the a/b cycle, got {stats:?}");
+        assert!(
+            stats.collected >= 1,
+            "expected the a/b cycle, got {stats:?}"
+        );
     }
 
     #[test]
     fn reachable_objects_survive() {
         let mut interp = clean_interp();
-        interp.eval_source("globalThis.keep = { x: 41 }; globalThis.arr = [1, 2, 3];").unwrap();
+        interp
+            .eval_source("globalThis.keep = { x: 41 }; globalThis.arr = [1, 2, 3];")
+            .unwrap();
         let stats = interp.collect_cycles();
         assert_eq!(stats.skipped, None);
         assert_eq!(stats.collected, 0);
         let check = interp.eval_source("keep.x + arr.length;").unwrap();
-        assert!(matches!(check, Value::Number(x) if x == 44.0), "got {check:?}");
+        assert!(
+            matches!(check, Value::Number(x) if x == 44.0),
+            "got {check:?}"
+        );
     }
 
     #[test]
@@ -607,7 +650,10 @@ mod tests {
         assert_eq!(stats.skipped, None);
         // The object clears first and its cascade frees the function and
         // the captured env before their entries are swept.
-        assert!(stats.collected >= 1, "expected the closure cycle, got {stats:?}");
+        assert!(
+            stats.collected >= 1,
+            "expected the closure cycle, got {stats:?}"
+        );
     }
 
     #[test]
@@ -623,7 +669,10 @@ mod tests {
         // Envs sweep before promises, so the captured env is still alive
         // (held through the reaction) when its entry is swept: it clears,
         // and the cascade frees both promises before their entries run.
-        assert!(stats.collected >= 1, "expected the env cycle, got {stats:?}");
+        assert!(
+            stats.collected >= 1,
+            "expected the env cycle, got {stats:?}"
+        );
     }
 
     #[test]
@@ -650,7 +699,10 @@ mod tests {
         assert_eq!(stats.skipped, None);
         // The first entry to sweep clears and its cascade frees the
         // partner, so the pair counts once.
-        assert!(stats.collected >= 1, "expected the promise cycle, got {stats:?}");
+        assert!(
+            stats.collected >= 1,
+            "expected the promise cycle, got {stats:?}"
+        );
     }
 
     fn probe_collect(
@@ -659,14 +711,14 @@ mod tests {
         _: Vec<Value>,
     ) -> Result<Value, crate::error::VmErr> {
         let stats = interp.collect_cycles();
-        Ok(Value::String(format!(
-            "{}",
+        Ok(Value::String(
             match stats.skipped {
                 Some(SkipReason::Executing) => "executing",
                 Some(SkipReason::SuspendedTasks) => "suspended",
                 None => "ran",
             }
-        )))
+            .to_string(),
+        ))
     }
 
     #[test]
@@ -674,12 +726,18 @@ mod tests {
         let mut interp = clean_interp();
         interp.global.borrow_mut().declare(
             "__collect",
-            Value::NativeFunction { name: Rc::from("__collect"), callable: probe_collect },
+            Value::NativeFunction {
+                name: Rc::from("__collect"),
+                callable: probe_collect,
+            },
             crate::interpreter::BindKind::Var,
             true,
         );
         let verdict = interp.eval_source("__collect();").unwrap();
-        assert!(matches!(&verdict, Value::String(s) if s == "executing"), "got {verdict:?}");
+        assert!(
+            matches!(&verdict, Value::String(s) if s == "executing"),
+            "got {verdict:?}"
+        );
         // Quiescent again: a direct call runs.
         let stats = interp.collect_cycles();
         assert_eq!(stats.skipped, None);
@@ -700,16 +758,26 @@ mod tests {
     fn host_pin_survives_collection() {
         use std::rc::Weak;
         let mut interp = clean_interp();
-        let value = interp.eval_source("globalThis.tmp = { v: 7 }; tmp;").unwrap();
-        let Value::Object { props } = &value else { panic!("expected object, got {value:?}") };
+        let value = interp
+            .eval_source("globalThis.tmp = { v: 7 }; tmp;")
+            .unwrap();
+        let Value::Object { props } = &value else {
+            panic!("expected object, got {value:?}")
+        };
         let weak: Weak<ObjectCell> = Rc::downgrade(props);
         let pin = add_root(value);
         interp.eval_source("globalThis.tmp = undefined;").unwrap();
         let stats = interp.collect_cycles();
         assert_eq!(stats.skipped, None);
-        assert!(weak.upgrade().is_some(), "pinned object was collected: {stats:?}");
+        assert!(
+            weak.upgrade().is_some(),
+            "pinned object was collected: {stats:?}"
+        );
         remove_root(pin);
         let stats = interp.collect_cycles();
-        assert!(weak.upgrade().is_none(), "unpinned garbage survived: {stats:?}");
+        assert!(
+            weak.upgrade().is_none(),
+            "unpinned garbage survived: {stats:?}"
+        );
     }
 }
