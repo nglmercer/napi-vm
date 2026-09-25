@@ -184,6 +184,56 @@ fn fallback_functions_inside_bytecode_units() {
 }
 
 #[test]
+fn closures() {
+    // The defining function boxes captured slots into its frame env.
+    check("function o(){ let v = 1; function i(){ return v; } return i(); } o()", true);
+    // Mutation through the shared cell, both directions.
+    check(
+        "function mk(){ let n = 0; function inc(){ n += 1; return n; } return inc; } \
+         let f = mk(); f(); f();",
+        true,
+    );
+    check(
+        "function mk(){ let n = 0; function get(){ return n; } function set(v){ n = v; } \
+         set(41); get() + 1; } mk()",
+        true,
+    );
+    // Parameters capture like any other function-level binding.
+    check("function mk(a){ return function(){ return a * 2; }; } mk(21)()", true);
+    // Transitive capture through an intermediate frame.
+    check(
+        "function o(){ let x = 5; function m(){ function leaf(){ return x + 1; } return leaf(); } \
+         return m(); } o()",
+        true,
+    );
+    // Independent calls get independent cells.
+    check(
+        "function mk(){ let n = 0; return function(){ n += 1; return n; }; } \
+         let a = mk(); let b = mk(); a(); a(); b();",
+        true,
+    );
+    // Capture over a hoisted function declaration.
+    check(
+        "function o(){ function f(){ return 7; } function g(){ return f() + 1; } return g(); } o()",
+        true,
+    );
+    // Nested declarations recurse through the chain.
+    check("function o(){ function f(n){ return n < 1 ? 0 : f(n - 1); } return f(3); } o()", true);
+    // Arrows capture slots (only `this`/`arguments` still decline).
+    check("function o(){ let x = 1; let f = () => x + 1; return f(); } o()", true);
+    // Shadowed names stay direct slots; only the outer cell boxes.
+    check(
+        "function o(){ let x = 1; function i(){ let x = 2; return x; } return i() + x; } o()",
+        true,
+    );
+    // Captured `var` keeps hoisting semantics.
+    check(
+        "function o(){ function i(){ return v; } var v = 9; return i(); } o()",
+        true,
+    );
+}
+
+#[test]
 fn declined_units_stay_on_ast() {
     check("let o = {a: 1}; o.a", false);
     check("try { throw 5; } catch (e) { e * 2; }", false);
@@ -191,5 +241,12 @@ fn declined_units_stay_on_ast() {
     check("let r = 0; switch (2) { case 1: r = 1; break; case 2: r = 2; break; } r", false);
     check("Math.max(...[1, 2])", false);
     check("function o(){ function i(){ return 1; } return i(); } o()", true);
-    check("function o(){ let v = 1; function i(){ return v; } return i(); } o()", false);
+    // Block slots have no frame for the chain to serve: still declined.
+    check("{ let y = 1; function f(){ return y; } f(); }", false);
+    check("function o(){ { let y = 2; function f(){ return y; } return f(); } } o()", false);
+    check(
+        "function o(){ let r = 0; for (let i = 0; i < 2; i++) { function f(){ return i; } r += f(); } return r; } o()",
+        false,
+    );
+    check("function g(){ const f = () => this; return f; }", false);
 }

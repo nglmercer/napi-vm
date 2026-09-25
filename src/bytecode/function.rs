@@ -23,6 +23,13 @@ pub enum SlotKind {
 pub struct SlotInfo {
     pub name: String,
     pub kind: SlotKind,
+    /// Whether a nested function may observe this slot. Captured slots live
+    /// in the frame environment (where the closure chain reaches them) and
+    /// compile to the global instruction family; the slot itself stays an
+    /// untouched placeholder. Only function-root slots are ever captured.
+    /// The verifier does not check this: a violation would surface as a
+    /// loud dead-zone error, never unsoundness.
+    pub captured: bool,
 }
 
 /// One compiled function (or top-level program, which compiles as a

@@ -397,14 +397,14 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *quasis, "string-list")?;
                 self.check_range(address, *args, *argc)?;
-                if let Constant::StringList(chunks) = &self.function.constants[*quasis as usize] {
-                    if chunks.len() != *argc as usize + 1 {
-                        return Err(VerifyError::TemplateArityMismatch {
-                            address,
-                            quasis: chunks.len(),
-                            argc: *argc,
-                        });
-                    }
+                if let Constant::StringList(chunks) = &self.function.constants[*quasis as usize]
+                    && chunks.len() != *argc as usize + 1
+                {
+                    return Err(VerifyError::TemplateArityMismatch {
+                        address,
+                        quasis: chunks.len(),
+                        argc: *argc,
+                    });
                 }
             }
             Instr::NewObject { dst } => {

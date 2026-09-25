@@ -36,7 +36,8 @@ use std::rc::Rc;
 use crate::interpreter::produces_completion_value;
 use crate::parser::{
     AssignOp, BinOp, Expr, ExprOrBlock, ForInit, LogicalAssignOp, Statement, UnOp, VarKind,
-    arrow_body_references, collect_var_names, stmts_reference,
+    arrow_body_references, collect_var_names, expr_captures_identifier,
+    statements_capture_identifier, stmts_reference,
 };
 
 use super::constants::{AstFunction, Constant};
@@ -88,7 +89,7 @@ enum ThisMode {
     Frame,
     /// Top level and top-level arrows: the global environment's `this`.
     Global,
-    /// Arrows nested in functions: `this` would capture (Phase F).
+    /// Arrows nested in functions: `this` would capture (Phase G).
     Reject,
 }
 
@@ -159,12 +160,17 @@ struct Compiler<'a> {
     deferred: Vec<Deferred<'a>>,
     next_reg: u16,
     max_reg: u16,
-    /// Names bound to slots anywhere in enclosing functions/blocks: a free
-    /// variable landing here is a closure capture (Phase F work).
-    outer: HashSet<String>,
-    /// This function's function-level bindings (params, hoisted vars,
-    /// top-level lexicals and functions), for children's capture checks.
-    fn_level: HashSet<String>,
+    /// Names bound to slots in enclosing *blocks*: a free variable landing
+    /// here is a capture the environment chain cannot serve (block slots
+    /// have no frame of their own) and declines the whole unit. Names bound
+    /// at an enclosing *function* level resolve through the chain instead,
+    /// because the defining function boxes them into its frame environment.
+    outer_block: HashSet<String>,
+    /// This function's own function-level bindings (params, hoisted vars,
+    /// lexicals, functions) that a nested callable may observe. Boxed into
+    /// the frame environment at call time; accesses compile to the global
+    /// instruction family. Computed by [`find_captured`] before hoisting.
+    captured: HashSet<String>,
     /// Whether the enclosing scope is the top level (for arrow `this`).
     enclosing_is_top: bool,
     top_level: bool,
@@ -189,8 +195,8 @@ impl<'a> Compiler<'a> {
             deferred: Vec::new(),
             next_reg: 0,
             max_reg: 0,
-            outer: HashSet::new(),
-            fn_level: HashSet::new(),
+            outer_block: HashSet::new(),
+            captured: HashSet::new(),
             enclosing_is_top: true,
             top_level: true,
             this_mode: ThisMode::Global,
@@ -199,7 +205,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn for_function(
-        outer: HashSet<String>,
+        outer_block: HashSet<String>,
         enclosing_is_top: bool,
         this_mode: ThisMode,
         is_arrow: bool,
@@ -219,8 +225,8 @@ impl<'a> Compiler<'a> {
             deferred: Vec::new(),
             next_reg: 0,
             max_reg: 0,
-            outer,
-            fn_level: HashSet::new(),
+            outer_block,
+            captured: HashSet::new(),
             enclosing_is_top,
             top_level: false,
             this_mode,
@@ -270,7 +276,11 @@ impl<'a> Compiler<'a> {
 
     fn alloc_slot(&mut self, name: &str, kind: SlotKind) -> Result<Slot, Decline> {
         let slot = u16::try_from(self.slots.len()).map_err(|_| Decline::Func("too many locals"))?;
-        self.slots.push(SlotInfo { name: name.to_string(), kind });
+        // Only function-root slots box: a block slot sharing a captured
+        // name shadows it and stays direct. Single-scope allocation means
+        // the root scope — blocks always push first.
+        let captured = self.scopes.len() == 1 && self.captured.contains(name);
+        self.slots.push(SlotInfo { name: name.to_string(), kind, captured });
         Ok(slot)
     }
 
@@ -406,28 +416,37 @@ impl<'a> Compiler<'a> {
 
     /// Resolve a name: innermost slot binding wins; the top-level outer
     /// scope and anything undeclared resolve globally (the runtime lookup
-    /// reports `ReferenceError` for true misses, exactly like the AST);
-    /// anything bound to a slot in an enclosing function is a capture.
+    /// reports `ReferenceError` for true misses, exactly like the AST).
+    /// Captured root slots also resolve globally: the defining function
+    /// boxes them into its frame environment, where the closure chain
+    /// serves nested readers. Shadowing block slots stay direct, and names
+    /// bound to slots in enclosing blocks decline the whole unit.
     fn resolve(&self, name: &str) -> Result<Binding, Decline> {
-        for scope in self.scopes.iter().rev() {
+        for (index, scope) in self.scopes.iter().enumerate().rev() {
             if let Some(slot) = scope.bindings.get(name) {
+                if index == 0 && self.captured.contains(name) {
+                    return Ok(Binding::Global);
+                }
                 return Ok(Binding::Slot(*slot));
             }
             if scope.global {
                 return Ok(Binding::Global);
             }
         }
-        if self.outer.contains(name) {
-            return Err(Decline::Unit("closure capture needs Phase F"));
+        if self.outer_block.contains(name) {
+            return Err(Decline::Unit("block-scope capture needs Phase G"));
         }
         Ok(Binding::Global)
     }
 
-    /// Live slot-bound names in the current scope stack, for the capture
-    /// snapshot of a nested function defined here.
+    /// Live slot-bound names in enclosing *blocks*, for the capture
+    /// snapshot of a nested function defined here. The function-root scope
+    /// is excluded: its captured names resolve through the environment
+    /// chain instead of declining.
     fn live_block_names(&self) -> HashSet<String> {
         let mut names = HashSet::new();
-        for scope in &self.scopes {
+        let blocks = if self.top_level { 0 } else { 1 };
+        for scope in self.scopes.iter().skip(blocks) {
             if !scope.global {
                 names.extend(scope.bindings.keys().cloned());
             }
@@ -545,7 +564,6 @@ impl<'a> Compiler<'a> {
     fn hoist_function(&mut self, params: &'a [String], body: &'a [Statement]) -> Result<(), Decline> {
         for param in params {
             self.declare_slot(param, SlotKind::Var)?;
-            self.fn_level.insert(param.clone());
         }
         let mut vars = Vec::new();
         collect_var_names(body, &mut vars);
@@ -555,7 +573,6 @@ impl<'a> Compiler<'a> {
                 // A `var` sharing a parameter's slot keeps the argument:
                 // bind only when absent.
                 self.declare_slot_if_absent(&name, SlotKind::Var)?;
-                self.fn_level.insert(name);
             }
         }
         let mut lexicals = Vec::new();
@@ -563,13 +580,11 @@ impl<'a> Compiler<'a> {
         for (name, kind) in lexicals {
             // The lexical pass replaces whatever the `var` pass declared.
             self.declare_slot(&name, kind)?;
-            self.fn_level.insert(name);
         }
         let mut fns = Vec::new();
         block_fn_decls(body, &mut fns);
         for decl in fns {
             let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
-            self.fn_level.insert(decl.name.to_string());
             let value = self.defer_function(FuncDef {
                 name: Some(decl.name.to_string()),
                 params: decl.params,
@@ -579,7 +594,14 @@ impl<'a> Compiler<'a> {
                 is_generator: decl.is_generator,
                 is_constructor: !decl.is_async && !decl.is_generator,
             })?;
-            self.emit(Instr::InitLocal { slot, src: value });
+            // Captured names live in the frame environment; the slot stays
+            // an untouched placeholder.
+            if self.captured.contains(decl.name) {
+                let index = self.intern_string(decl.name)?;
+                self.emit(Instr::InitGlobal { name: index, src: value });
+            } else {
+                self.emit(Instr::InitLocal { slot, src: value });
+            }
         }
         Ok(())
     }
@@ -658,8 +680,7 @@ impl<'a> Compiler<'a> {
     fn finish_functions(&mut self) -> Result<(), Decline> {
         let deferred = std::mem::take(&mut self.deferred);
         for item in deferred {
-            let mut outer = self.outer.clone();
-            outer.extend(self.fn_level.iter().cloned());
+            let mut outer = self.outer_block.clone();
             outer.extend(item.snapshot);
             let outcome = compile_function(item.def, outer, self.top_level)?;
             let (index, is_bytecode) = match outcome {
@@ -705,6 +726,9 @@ impl<'a> Compiler<'a> {
 
     fn compile_unit_function(&mut self, def: FuncDef<'a>) -> Result<BytecodeFunction, Decline> {
         let FuncDef { name, params, body, is_arrow, is_constructor, .. } = def;
+        // Box before hoisting: `resolve` and slot allocation both consult
+        // this set while the body compiles.
+        self.captured = find_captured(params, &body);
         let parameter_count = params.len();
         match body {
             FuncBody::Stmts(stmts) => {
@@ -718,7 +742,6 @@ impl<'a> Compiler<'a> {
             FuncBody::Expr(expr) => {
                 for param in params {
                     self.declare_slot(param, SlotKind::Var)?;
-                    self.fn_level.insert(param.clone());
                 }
                 let value = self.compile_expr(expr)?;
                 self.emit(Instr::Return { src: value });
@@ -1196,7 +1219,7 @@ impl<'a> Compiler<'a> {
                     self.emit(Instr::LoadGlobalThis { dst });
                     Ok(dst)
                 }
-                ThisMode::Reject => Err(Decline::Unit("arrow `this` capture needs Phase F")),
+                ThisMode::Reject => Err(Decline::Unit("arrow `this` capture needs Phase G")),
             },
             Expr::Object(_) => Err(Decline::Func("object literals need Phase G")),
             Expr::ClassExpr { .. } => Err(Decline::Func("classes need Phase G")),
@@ -1225,7 +1248,7 @@ impl<'a> Compiler<'a> {
         if name == "arguments" && !self.top_level {
             if self.is_arrow() {
                 if !self.enclosing_is_top {
-                    return Err(Decline::Unit("arrow `arguments` capture needs Phase F"));
+                    return Err(Decline::Unit("arrow `arguments` capture needs Phase G"));
                 }
             } else {
                 return Err(Decline::Func("arguments object needs fallback"));
@@ -1610,13 +1633,45 @@ fn has_dup_params(params: &[String]) -> bool {
     params.iter().any(|param| !seen.insert(param))
 }
 
+/// Names bound at this function level that a nested callable may observe.
+/// Covers exactly what hoisting declares (params, vars, lexicals, function
+/// declarations): a missed name would leave a nested reader with no cell in
+/// the frame environment. Over-approximation (shadowed occurrences inside
+/// nested bodies) only boxes more.
+fn find_captured(params: &[String], body: &FuncBody) -> HashSet<String> {
+    match body {
+        FuncBody::Stmts(stmts) => {
+            let mut names: Vec<&str> = params.iter().map(String::as_str).collect();
+            let mut vars = Vec::new();
+            collect_var_names(stmts, &mut vars);
+            names.extend(vars.iter().map(String::as_str));
+            let mut lexicals = Vec::new();
+            block_lexicals(stmts, &mut lexicals);
+            names.extend(lexicals.iter().map(|(name, _)| name.as_str()));
+            let mut fns = Vec::new();
+            block_fn_decls(stmts, &mut fns);
+            names.extend(fns.iter().map(|decl| decl.name));
+            names
+                .into_iter()
+                .filter(|name| statements_capture_identifier(stmts, name))
+                .map(str::to_string)
+                .collect()
+        }
+        FuncBody::Expr(expr) => params
+            .iter()
+            .filter(|param| expr_captures_identifier(expr, param))
+            .cloned()
+            .collect(),
+    }
+}
+
 /// Compile one nested function: bytecode when supported, otherwise an
 /// AST-backed constant. Captures and `super` decline the whole unit instead:
 /// slot bindings are invisible to environment chains, so neither bytecode
 /// nor a fallback closed over the defining frame could honor them.
 fn compile_function(
     def: FuncDef<'_>,
-    outer: HashSet<String>,
+    outer_block: HashSet<String>,
     enclosing_is_top: bool,
 ) -> Result<FuncOutcome, Decline> {
     if def.is_async || def.is_generator || has_rest_param(def.params) || has_dup_params(def.params) {
@@ -1631,7 +1686,8 @@ fn compile_function(
     } else {
         ThisMode::Frame
     };
-    let mut compiler = Compiler::for_function(outer, enclosing_is_top, this_mode, def.is_arrow);
+    let mut compiler =
+        Compiler::for_function(outer_block, enclosing_is_top, this_mode, def.is_arrow);
     match compiler.compile_unit_function(def.clone()) {
         Ok(bytecode) => Ok(FuncOutcome::Bytecode(Rc::new(bytecode))),
         Err(Decline::Func(_)) => Ok(FuncOutcome::Ast(build_ast_function(&def))),
@@ -1709,17 +1765,44 @@ mod tests {
     }
 
     #[test]
-    fn captures_decline_the_whole_unit() {
+    fn function_level_captures_compile() {
+        // The defining function boxes `x` into its frame environment.
         assert_eq!(
             reason("function g() { let x = 1; function f() { return x; } return f(); } g();"),
-            "closure capture needs Phase F"
+            "compiled"
         );
         // Top-level names are globals, not captures.
         assert_eq!(reason("let x = 1; function f() { return x; } f();"), "compiled");
-        // Arrows inheriting `this` from a function capture it.
+        // Nested declarations recurse through the chain, not slots.
+        assert_eq!(
+            reason("function g() { function f() { return f; } return f(); } g();"),
+            "compiled"
+        );
+    }
+
+    #[test]
+    fn block_captures_decline_the_whole_unit() {
+        // Block slots have no frame of their own for the chain to serve.
+        assert_eq!(
+            reason("{ let y = 1; function f() { return y; } }"),
+            "block-scope capture needs Phase G"
+        );
+        assert_eq!(
+            reason("function g() { { let y = 1; function f() { return y; } } }"),
+            "block-scope capture needs Phase G"
+        );
+        assert_eq!(
+            reason("function g() { for (let i = 0; i < 1; i++) { function f() { return i; } } }"),
+            "block-scope capture needs Phase G"
+        );
+        // Arrows inheriting `this` or `arguments` from a function.
         assert_eq!(
             reason("function g() { const f = () => this; return f; }"),
-            "arrow `this` capture needs Phase F"
+            "arrow `this` capture needs Phase G"
+        );
+        assert_eq!(
+            reason("function g() { const f = () => arguments; return f; }"),
+            "arrow `arguments` capture needs Phase G"
         );
     }
 

@@ -648,7 +648,7 @@ fn for_init_captures(init: &ForInit, name: &str) -> bool {
     }
 }
 
-fn statements_capture_identifier(stmts: &[Statement], name: &str) -> bool {
+pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::Expr(expr) => expr_captures_identifier(expr, name),
         Statement::VarDecl {
@@ -757,7 +757,7 @@ fn statements_capture_identifier(stmts: &[Statement], name: &str) -> bool {
     })
 }
 
-fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
+pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
     match expr {
         Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
         Expr::FnExpr { body, .. } => stmts_reference(body, name),

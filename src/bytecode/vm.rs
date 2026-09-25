@@ -15,11 +15,11 @@
 //! sites) fails loudly with an internal error — never a panic, never Rust
 //! UB, and never a silent wrong result.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::error::VmErr;
-use crate::interpreter::{BindKind, Interpreter, Lookup, intern_params};
+use crate::interpreter::{BindKind, Env, Environment, Interpreter, Lookup, intern_params};
 use crate::value::{FunctionData, Value};
 
 use super::constants::Constant;
@@ -49,6 +49,16 @@ impl<'a> CallFrame<'a> {
         let registers = vec![Value::Undefined; function.register_count as usize];
         let mut slots = Vec::with_capacity(function.local_count as usize);
         for (index, info) in function.slots.iter().enumerate() {
+            // Captured slots live in the frame environment (boxed at call
+            // time); the slot stays an untouched placeholder.
+            if info.captured {
+                slots.push(RunSlot {
+                    value: Value::Undefined,
+                    initialized: false,
+                    kind: info.kind,
+                });
+                continue;
+            }
             // Parameters bind their arguments; a parameter slot merged with
             // a lexical declaration discards the argument and starts dead,
             // mirroring hoisting. Plain `var` slots start defined.
@@ -80,7 +90,7 @@ fn internal(what: &str) -> VmErr {
     VmErr::Msg(format!("internal error: {what}"))
 }
 
-fn const_string<'b>(function: &'b BytecodeFunction, index: u16) -> Result<&'b str, VmErr> {
+fn const_string(function: &BytecodeFunction, index: u16) -> Result<&str, VmErr> {
     match function.constants.get(index as usize) {
         Some(Constant::String(name)) => Ok(name),
         _ => Err(internal("bad string constant")),
@@ -96,15 +106,47 @@ pub(crate) fn run_module(interp: &mut Interpreter, module: &BytecodeModule) -> R
 }
 
 /// Call a bytecode function with freshly bound parameter slots. Falling off
-/// the end yields `undefined`; `return` yields its value.
+/// the end yields `undefined`; `return` signals `VmErr::Ret`, like the
+/// evaluator's bodies. The frame environment carries the captured slots so
+/// nested closures observe them through the scope chain; locals stay in
+/// slots. The previous scope is restored on every path, including errors.
 pub(crate) fn run_function(
     interp: &mut Interpreter,
     code: &BytecodeFunction,
+    parent_env: Env,
     this_value: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+    seed_captured(&fe, code, &args);
+    let saved = std::mem::replace(&mut interp.global, fe);
     let mut frame = CallFrame::setup(code, this_value, &args);
-    run_loop(interp, &mut frame, false)
+    let result = run_loop(interp, &mut frame, false);
+    interp.global = saved;
+    result
+}
+
+/// Box the captured slots into a fresh frame environment, mirroring
+/// [`CallFrame::setup`]'s merge rules: parameters bind their arguments
+/// unless a lexical declaration merged the slot dead, plain `var`s start
+/// defined, lexicals dead. Hoisted-function cells are overwritten by the
+/// eager instantiation when the body starts.
+fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) {
+    for (index, info) in code.slots.iter().enumerate() {
+        if !info.captured {
+            continue;
+        }
+        let (value, initialized) = if index < code.parameter_count as usize
+            && info.kind == SlotKind::Var
+        {
+            (args.get(index).cloned().unwrap_or(Value::Undefined), true)
+        } else if info.kind == SlotKind::Var {
+            (Value::Undefined, true)
+        } else {
+            (Value::Undefined, false)
+        };
+        fe.borrow_mut().declare(&info.name, value, bind_kind(info.kind), initialized);
+    }
 }
 
 fn run_loop(

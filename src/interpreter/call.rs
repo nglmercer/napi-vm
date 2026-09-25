@@ -1105,11 +1105,11 @@ impl Interpreter {
                     ));
                 }
                 let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
-                // Bytecode-backed functions run the register VM. The frame
-                // environment is an empty child: locals live in slots, so
-                // only the chain matters for lexical resolution. Frame
-                // push/pop and error mapping mirror the AST path below
-                // exactly (async/generator bodies never compile).
+                // Bytecode-backed functions run the register VM. Locals live
+                // in slots; the frame environment carries captured slots
+                // for nested closures. Frame push/pop and error mapping
+                // mirror the AST path below exactly (async/generator
+                // bodies never compile).
                 if let Some(code) = &fd.bytecode {
                     let code = code.clone();
                     let fname = fd.name.clone().unwrap_or_else(|| {
@@ -1117,10 +1117,9 @@ impl Interpreter {
                             .get_or_insert_with(|| Rc::from("<anonymous>"))
                             .clone()
                     });
-                    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
-                    let saved = std::mem::replace(&mut self.global, fe);
                     self.push_frame(fname, Span::unknown());
-                    let r = crate::bytecode::vm::run_function(self, &code, this_val, args);
+                    let r =
+                        crate::bytecode::vm::run_function(self, &code, parent_env, this_val, args);
                     let result = match r {
                         Err(VmErr::Ret(v)) => Ok(v),
                         Ok(v) => Ok(v),
@@ -1134,7 +1133,6 @@ impl Interpreter {
                         other => other,
                     };
                     self.pop_frame();
-                    self.global = saved;
                     return result;
                 }
                 let rest_idx = fd.params.iter().position(|p| p.starts_with("..."));
@@ -1627,10 +1625,13 @@ impl Interpreter {
                 // collapse-everything-to-`inst` mapping matches the AST path.
                 if let Some(code) = &fd.bytecode {
                     let code = code.clone();
-                    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
-                    let saved = std::mem::replace(&mut self.global, fe);
-                    let r = crate::bytecode::vm::run_function(self, &code, inst.clone(), args);
-                    self.global = saved;
+                    let r = crate::bytecode::vm::run_function(
+                        self,
+                        &code,
+                        parent_env,
+                        inst.clone(),
+                        args,
+                    );
                     return match r {
                         Err(VmErr::Ret(v)) if is_js_object(&v) => Ok(v),
                         Err(VmErr::Ret(_)) => Ok(inst),
