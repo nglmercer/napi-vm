@@ -5,7 +5,7 @@ mod collections;
 mod date;
 mod error;
 mod function;
-mod json;
+pub(crate) mod json;
 mod math;
 mod number;
 pub(crate) mod object;

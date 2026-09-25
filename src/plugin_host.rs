@@ -211,6 +211,11 @@ pub struct RustLoadedPlugin {
     pub status: RustPluginStatus,
     pub load_result: Option<JsonValue>,
     pub capabilities: Vec<String>,
+    /// The guest `__pluginInstance`, resolved once at load. Lifecycle hooks
+    /// and `call` resolve per invocation from this value (preserving dynamic
+    /// dispatch if the guest rebinds them), but no global lookup or parsing
+    /// happens on the steady-state path again.
+    plugin_instance: Value,
     interpreter: Interpreter,
     plugin_bridge: Rc<PluginHostBridge>,
     module_ids: Vec<String>,
@@ -231,6 +236,49 @@ impl RustLoadedPlugin {
     /// between lifecycle hooks. Guest code still receives only installed APIs.
     pub fn interpreter_mut(&mut self) -> &mut Interpreter {
         &mut self.interpreter
+    }
+
+    /// Invoke the guest `call(request, context)` export directly: no source
+    /// is generated, nothing is parsed, and no JSON trampoline crosses the
+    /// boundary. Promise results are awaited and microtasks drained, exactly
+    /// like a top-level entry point. The raw guest value is returned, so an
+    /// `undefined` result is the caller's contract to interpret.
+    pub fn call_value(&mut self, request: Value, context: Value) -> Result<Value, PluginHostError> {
+        let instance = self.plugin_instance.clone();
+        if matches!(instance, Value::Undefined | Value::Null) {
+            return Err(PluginHostError::Vm(crate::VmErr::Msg(
+                "Error: Plugin instance is unavailable".to_string(),
+            )));
+        }
+        let call = self.interpreter.member(&instance, "call")?;
+        if !crate::interpreter::call::is_callable_value(&call) {
+            return Err(PluginHostError::Vm(crate::VmErr::Msg(
+                "Error: Plugin must export call(request, context)".to_string(),
+            )));
+        }
+        self.interpreter
+            .call_host_function(&call, instance, vec![request, context])
+            .map_err(PluginHostError::Vm)
+    }
+
+    /// [`Self::call_value`] with JSON host values: the request and context
+    /// convert directly to guest values and the awaited result converts
+    /// back, with no intermediate strings in either direction. An
+    /// `undefined` result is an error: a JSON call must produce data.
+    pub fn call_json(
+        &mut self,
+        request: &JsonValue,
+        context: &JsonValue,
+    ) -> Result<JsonValue, PluginHostError> {
+        let request = crate::convert::value_from_json(request)?;
+        let context = crate::convert::value_from_json(context)?;
+        let result = self.call_value(request, context)?;
+        if matches!(result, Value::Undefined) {
+            return Err(PluginHostError::Vm(crate::VmErr::Msg(
+                "TypeError: Plugin call must return a result object".to_string(),
+            )));
+        }
+        crate::convert::value_to_json(&mut self.interpreter, &result).map_err(PluginHostError::from)
     }
 }
 
@@ -389,10 +437,8 @@ impl RustPluginHost {
         }
 
         let mut plugin = self.instantiate(prepared)?;
-        match invoke_json(
-            &mut plugin.interpreter,
-            &format!("__plugin_onLoad({})", context_json(&plugin.manifest, None)),
-        ) {
+        let context = context_value(&plugin.manifest, None);
+        match invoke_named_hook(&mut plugin, "onLoad", vec![context]) {
             Ok(result) => plugin.load_result = result,
             Err(error) => {
                 self.dispose(&mut plugin);
@@ -417,13 +463,8 @@ impl RustPluginHost {
             )));
         };
         let previous_state = if current.status == RustPluginStatus::Loaded {
-            match invoke_json(
-                &mut current.interpreter,
-                &format!(
-                    "__plugin_onUnload({})",
-                    context_json(&current.manifest, Some("reload"))
-                ),
-            ) {
+            let context = context_value(&current.manifest, Some("reload"));
+            match invoke_named_hook(&mut current, "onUnload", vec![context]) {
                 Ok(state) => state,
                 Err(error) => {
                     self.dispose(&mut current);
@@ -448,15 +489,26 @@ impl RustPluginHost {
             )));
         }
         let mut plugin = self.instantiate(prepared)?;
+        // Wrapper parity: when `onReload` is absent, `onLoad` runs with the
+        // context alone instead of receiving previous state.
+        let context = context_value(&plugin.manifest, None);
         let state = previous_state.unwrap_or(JsonValue::Null);
-        let state_source = serde_json::to_string(&state)
-            .map_err(|error| PluginHostError::Load(error.to_string()))?;
-        let source = format!(
-            "__plugin_onReload({}, {})",
-            context_json(&plugin.manifest, None),
-            state_source
-        );
-        match invoke_json(&mut plugin.interpreter, &source) {
+        let instance = plugin.plugin_instance.clone();
+        let (hook, args) = match resolve_hook(&mut plugin.interpreter, &instance, "onReload")? {
+            Some(hook) => {
+                let args = vec![
+                    crate::convert::value_from_json(&context)?,
+                    crate::convert::value_from_json(&state)?,
+                ];
+                (Some(hook), args)
+            }
+            None => {
+                let hook = resolve_hook(&mut plugin.interpreter, &instance, "onLoad")?;
+                let args = vec![crate::convert::value_from_json(&context)?];
+                (hook, args)
+            }
+        };
+        match invoke_plugin_hook(&mut plugin.interpreter, hook.as_ref(), instance, args) {
             Ok(result) => plugin.load_result = result,
             Err(error) => {
                 self.dispose(&mut plugin);
@@ -480,13 +532,8 @@ impl RustPluginHost {
             )));
         };
         let state = if plugin.status == RustPluginStatus::Loaded {
-            invoke_json(
-                &mut plugin.interpreter,
-                &format!(
-                    "__plugin_onUnload({})",
-                    context_json(&plugin.manifest, Some("unload"))
-                ),
-            )
+            let context = context_value(&plugin.manifest, Some("unload"));
+            invoke_named_hook(&mut plugin, "onUnload", vec![context])
         } else {
             Ok(None)
         };
@@ -756,20 +803,15 @@ impl RustPluginHost {
             }
             return Err(PluginHostError::Vm(error));
         }
-        let shape = match interpreter.eval_source("__plugin_describe()") {
-            Ok(shape) => shape,
-            Err(error) => {
-                #[cfg(all(
-                    feature = "node-api-host",
-                    any(target_os = "linux", target_os = "macos", target_os = "windows")
-                ))]
-                if let Some(runtime) = &native_runtime {
-                    let _ = runtime.shutdown();
-                }
-                return Err(PluginHostError::Vm(error));
-            }
-        };
-        if !matches!(shape.get_prop("hasInstance"), Some(Value::Bool(true))) {
+        // Resolve the guest instance once, directly from the global scope:
+        // this replaces the `__plugin_describe()` eval with a binding read,
+        // and every later lifecycle/call invocation reuses this value.
+        let plugin_instance = interpreter
+            .global
+            .borrow()
+            .get("__pluginInstance")
+            .filter(|instance| !matches!(instance, Value::Undefined | Value::Null));
+        let Some(plugin_instance) = plugin_instance else {
             #[cfg(all(
                 feature = "node-api-host",
                 any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -781,7 +823,7 @@ impl RustPluginHost {
                 "plugin \"{}\" must default-export an object or a class",
                 prepared.manifest.name
             )));
-        }
+        };
         bridge_globals.extend([
             "__plugin_onLoad".into(),
             "__plugin_onUnload".into(),
@@ -795,6 +837,7 @@ impl RustPluginHost {
             status: RustPluginStatus::Loaded,
             load_result: None,
             capabilities: active_capabilities,
+            plugin_instance,
             interpreter,
             plugin_bridge: bridge,
             module_ids,

@@ -527,6 +527,34 @@ export default { createRequire, isBuiltin, builtinModules };
         }
     }
 
+    /// Drive one host-initiated guest function call exactly like a top-level
+    /// entry point, without parsing anything: fresh loop budget, guest-depth
+    /// guard (so a nested `napi_make_callback` defers its microtasks to our
+    /// checkpoint, as it does inside `eval_source`), Promise-aware await,
+    /// then a full job drain. Plugin hosts call this instead of evaluating
+    /// generated wrapper source per invocation.
+    pub(crate) fn call_host_function(
+        &mut self,
+        function: &Value,
+        receiver: Value,
+        args: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        self.begin_execution();
+        let depth = self.guest_execution_depth.clone();
+        depth.set(depth.get().saturating_add(1));
+        let _execution_guard = GuestExecutionGuard(depth);
+        match self
+            .call_this(function, receiver, args)
+            .and_then(|value| self.perform_await(value))
+        {
+            Ok(value) => self.drain_jobs().map(|()| value),
+            Err(error) => {
+                let _ = self.drain_jobs();
+                Err(error)
+            }
+        }
+    }
+
     /// Execute one synchronous script body without a microtask checkpoint.
     /// Node-API's `napi_run_script` uses this when called from a native callback:
     /// its Promise jobs must wait until the host returns to the VM event loop.

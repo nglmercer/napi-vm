@@ -5,6 +5,7 @@
 #[cfg(feature = "napi")]
 pub mod bindings;
 pub mod builtins;
+pub mod convert;
 pub mod error;
 pub mod format;
 pub mod host;
@@ -26,6 +27,7 @@ pub mod wasm;
 #[cfg(feature = "napi")]
 pub use bindings::{LanguageService, VM, create_vm, debug_parse, run_code};
 pub use builtins::setup_builtins;
+pub use convert::{value_from_json, value_to_json};
 pub use error::VmErr;
 pub use format::{PrintOptions, Printer};
 pub use host::{HostBridge, HostCallback, HostCallbackKind, HostEvent};

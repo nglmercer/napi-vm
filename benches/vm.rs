@@ -7,7 +7,9 @@
 //!   how much of the pipeline is parsing versus evaluation.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use napi_vm::{Interpreter, Lexer, Parser, Statement, setup_builtins};
+use napi_vm::{
+    Interpreter, Lexer, Parser, RustPluginHost, RustPluginHostOptions, Statement, setup_builtins,
+};
 
 /// Lex + parse a source string into statements.
 fn parse(src: &str) -> Vec<Statement> {
@@ -128,5 +130,86 @@ fn bench_class_methods(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_run, bench_frontend, bench_class_methods);
+/// Phase A comparison: the legacy per-call wrapper (generate JS source,
+/// eval/parse it, `JSON.stringify` the result, re-parse the envelope)
+/// against the direct `call_json` path (convert values, invoke the cached
+/// guest function, convert back). Same fixture plugin, same payloads.
+fn bench_plugin_call(c: &mut Criterion) {
+    const GUEST: &str = r#"
+export default {
+  call(request, context) {
+    return {
+      echo: request,
+      plugin: context.name,
+      total: request.items.reduce((sum, item) => sum + item.n, 0),
+    };
+  },
+};
+"#;
+    let root = std::env::temp_dir().join(format!("napi-vm-bench-plugin-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("main.mjs"), GUEST).unwrap();
+    std::fs::write(
+        root.join("plugin.json"),
+        r#"{"name":"bench-plugin","version":"1.0.0","apiVersion":1,"entry":"main.mjs","permissions":{}}"#,
+    )
+    .unwrap();
+
+    let request = serde_json::json!({
+        "type": "poll",
+        "items": (0..32).map(|n| serde_json::json!({"n": n})).collect::<Vec<_>>(),
+    });
+    let context = serde_json::json!({"name": "bench-plugin", "version": "1.0.0"});
+    let request_text = serde_json::to_string(&request).unwrap();
+    let context_text = serde_json::to_string(&context).unwrap();
+
+    let mut group = c.benchmark_group("plugin_call");
+    group.bench_function("legacy_wrapper_eval", |b| {
+        let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+        host.load(&root).unwrap();
+        let plugin = host.get_mut("bench-plugin").unwrap();
+        b.iter(|| {
+            let source = format!(
+                r#"await (async () => {{
+  const request = {request_text};
+  const context = {context_text};
+  const value = await __pluginInstance.call(request, context);
+  return JSON.stringify({{ serialized: JSON.stringify(value) }});
+}})()"#
+            );
+            let value = plugin
+                .interpreter_mut()
+                .eval_source(black_box(&source))
+                .unwrap();
+            let napi_vm::Value::String(envelope) = &value else {
+                panic!("envelope must be a string");
+            };
+            let envelope: serde_json::Value = serde_json::from_str(envelope).unwrap();
+            black_box(envelope.get("serialized").unwrap().clone())
+        });
+    });
+    group.bench_function("direct_call_json", |b| {
+        let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+        host.load(&root).unwrap();
+        let plugin = host.get_mut("bench-plugin").unwrap();
+        b.iter(|| {
+            black_box(
+                plugin
+                    .call_json(black_box(&request), black_box(&context))
+                    .unwrap(),
+            )
+        });
+    });
+    group.finish();
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+criterion_group!(
+    benches,
+    bench_run,
+    bench_frontend,
+    bench_class_methods,
+    bench_plugin_call
+);
 criterion_main!(benches);

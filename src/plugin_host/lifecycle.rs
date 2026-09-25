@@ -98,7 +98,7 @@ undefined;
     )
 }
 
-pub(super) fn context_json(manifest: &RustPluginManifest, reason: Option<&str>) -> String {
+pub(super) fn context_value(manifest: &RustPluginManifest, reason: Option<&str>) -> JsonValue {
     let mut context = serde_json::Map::new();
     context.insert("name".into(), JsonValue::String(manifest.name.clone()));
     context.insert(
@@ -108,38 +108,65 @@ pub(super) fn context_json(manifest: &RustPluginManifest, reason: Option<&str>) 
     if let Some(reason) = reason {
         context.insert("reason".into(), JsonValue::String(reason.into()));
     }
-    serde_json::to_string(&JsonValue::Object(context)).expect("context is serializable")
+    JsonValue::Object(context)
 }
 
-pub(super) fn invoke_json(
+/// Invoke one guest lifecycle hook directly: no generated source, no
+/// parsing, no JSON trampoline. A missing hook (`None`, or a non-function
+/// value) is not an error — it behaves like the old wrapper's
+/// `typeof hook === "function"` guard and yields no state. An `undefined`
+/// result likewise yields no state; anything else converts to JSON with
+/// the same serializer semantics `JSON.stringify` would apply.
+pub(super) fn invoke_plugin_hook(
     interpreter: &mut Interpreter,
-    expression: &str,
+    function: Option<&Value>,
+    receiver: Value,
+    args: Vec<Value>,
 ) -> Result<Option<JsonValue>, PluginHostError> {
-    let source = format!(
-        r#"await (async () => {{
-  const value = await ({expression});
-  if (value === undefined) return JSON.stringify({{ defined: false }});
-  const serialized = JSON.stringify(value);
-  if (typeof serialized !== "string") throw new TypeError("plugin lifecycle state must be JSON serializable");
-  return JSON.stringify({{ defined: true, serialized }});
-}})()"#
-    );
-    let result = interpreter.eval_source(&source)?;
-    let Value::String(envelope) = &result else {
-        return Err(PluginHostError::Load(
-            "plugin lifecycle hook returned an invalid host result".into(),
-        ));
+    let Some(function) = function else {
+        return Ok(None);
     };
-    let envelope: JsonValue = serde_json::from_str(envelope)
-        .map_err(|error| PluginHostError::Load(format!("invalid lifecycle result: {error}")))?;
-    if envelope.get("defined") == Some(&JsonValue::Bool(false)) {
+    if !crate::interpreter::call::is_callable_value(function) {
         return Ok(None);
     }
-    let serialized = envelope
-        .get("serialized")
-        .and_then(JsonValue::as_str)
-        .ok_or_else(|| PluginHostError::Load("lifecycle state is not serializable".into()))?;
-    serde_json::from_str(serialized)
+    let result = interpreter.call_host_function(function, receiver, args)?;
+    if matches!(result, Value::Undefined) {
+        return Ok(None);
+    }
+    crate::convert::value_to_json(interpreter, &result)
         .map(Some)
-        .map_err(|error| PluginHostError::Load(format!("invalid lifecycle JSON: {error}")))
+        .map_err(PluginHostError::from)
+}
+
+/// Resolve a lifecycle hook by name from the cached plugin instance.
+/// Member lookup (with getter semantics) preserves the dynamic dispatch
+/// the generated wrappers had; only the parse/eval round-trip is gone.
+pub(super) fn resolve_hook(
+    interpreter: &mut Interpreter,
+    instance: &Value,
+    name: &str,
+) -> Result<Option<Value>, PluginHostError> {
+    let hook = interpreter.member(instance, name)?;
+    if crate::interpreter::call::is_callable_value(&hook) {
+        Ok(Some(hook))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Resolve one hook by name and invoke it with JSON arguments. Arguments
+/// convert directly to guest values; the awaited result converts back,
+/// with `undefined` (or a missing hook) yielding no state.
+pub(super) fn invoke_named_hook(
+    plugin: &mut RustLoadedPlugin,
+    name: &str,
+    args: Vec<JsonValue>,
+) -> Result<Option<JsonValue>, PluginHostError> {
+    let instance = plugin.plugin_instance.clone();
+    let hook = resolve_hook(&mut plugin.interpreter, &instance, name)?;
+    let mut converted = Vec::with_capacity(args.len());
+    for arg in &args {
+        converted.push(crate::convert::value_from_json(arg)?);
+    }
+    invoke_plugin_hook(&mut plugin.interpreter, hook.as_ref(), instance, converted)
 }

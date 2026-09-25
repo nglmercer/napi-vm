@@ -918,3 +918,185 @@ export default {
     };
     assert!(error.contains("outside plugin root"), "{error}");
 }
+
+fn load_direct_call_plugin(dir: &TestPluginDir, source: &str) -> RustPluginHost {
+    dir.write("main.mjs", source);
+    dir.manifest("direct-call-plugin", "main.mjs", "{}");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.load(&dir.0).unwrap();
+    host
+}
+
+fn parse_count() -> u64 {
+    crate::parser::PARSE_PROGRAM_COUNT.with(|count| count.get())
+}
+
+#[test]
+fn direct_call_invokes_export_without_parsing() {
+    let dir = TestPluginDir::new("direct-call");
+    let mut host = load_direct_call_plugin(
+        &dir,
+        r#"
+export default {
+  prefix: "Hi ",
+  call(request, context) {
+    return { greeting: this.prefix + request.name, via: context.channel };
+  },
+};
+"#,
+    );
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let before = parse_count();
+    for _ in 0..3 {
+        let result = plugin
+            .call_json(
+                &serde_json::json!({"name": "Ada"}),
+                &serde_json::json!({"channel": "test"}),
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({"greeting": "Hi Ada", "via": "test"}),
+        );
+    }
+    assert_eq!(
+        parse_count(),
+        before,
+        "steady-state calls must not touch the parser"
+    );
+}
+
+#[test]
+fn direct_call_awaits_promises_and_drains_before_converting() {
+    let dir = TestPluginDir::new("direct-call-async");
+    let mut host = load_direct_call_plugin(
+        &dir,
+        r#"
+export default {
+  async call(request) {
+    const seen = await Promise.resolve(request.depth + 1);
+    return { seen };
+  },
+};
+"#,
+    );
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let result = plugin
+        .call_json(&serde_json::json!({"depth": 41}), &serde_json::json!({}))
+        .unwrap();
+    assert_eq!(result, serde_json::json!({"seen": 42}));
+
+    // A sync return still observes already-queued microtasks: the drain
+    // runs before the result converts back to JSON.
+    let dir = TestPluginDir::new("direct-call-drain");
+    let mut host = load_direct_call_plugin(
+        &dir,
+        r#"
+export default {
+  call() {
+    const out = { seen: [] };
+    Promise.resolve(1).then((value) => out.seen.push(value));
+    return out;
+  },
+};
+"#,
+    );
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let result = plugin
+        .call_json(&serde_json::json!({}), &serde_json::json!({}))
+        .unwrap();
+    assert_eq!(result, serde_json::json!({"seen": [1]}));
+}
+
+#[test]
+fn direct_call_propagates_exceptions() {
+    let dir = TestPluginDir::new("direct-call-throw");
+    let mut host = load_direct_call_plugin(
+        &dir,
+        r#"
+export default {
+  call() {
+    throw new Error("boom-from-guest");
+  },
+};
+"#,
+    );
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let error = plugin
+        .call_json(&serde_json::json!({}), &serde_json::json!({}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("boom-from-guest"), "{error}");
+}
+
+#[test]
+fn direct_call_without_export_fails_closed() {
+    let dir = TestPluginDir::new("direct-call-missing");
+    let mut host = load_direct_call_plugin(&dir, "export default { onLoad() {} };\n");
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let error = plugin
+        .call_json(&serde_json::json!({}), &serde_json::json!({}))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("must export call(request, context)"),
+        "{error}"
+    );
+}
+
+#[test]
+fn direct_call_rejects_undefined_result() {
+    let dir = TestPluginDir::new("direct-call-undefined");
+    let mut host = load_direct_call_plugin(&dir, "export default { call() {} };\n");
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let error = plugin
+        .call_json(&serde_json::json!({}), &serde_json::json!({}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("must return a result object"), "{error}");
+}
+
+#[test]
+fn direct_call_value_returns_raw_values_with_this() {
+    let dir = TestPluginDir::new("direct-call-value");
+    let mut host = load_direct_call_plugin(
+        &dir,
+        r#"
+export default {
+  factor: 3,
+  call(request) {
+    return request.input * this.factor;
+  },
+};
+"#,
+    );
+    let plugin = host.get_mut("direct-call-plugin").unwrap();
+    let request = crate::convert::value_from_json(&serde_json::json!({"input": 14})).unwrap();
+    let context = crate::convert::value_from_json(&serde_json::json!({})).unwrap();
+    let result = plugin.call_value(request, context).unwrap();
+    assert!(matches!(result, Value::Number(number) if number == 42.0));
+}
+
+#[test]
+fn direct_lifecycle_awaits_async_on_load() {
+    let dir = TestPluginDir::new("direct-lifecycle-async");
+    dir.write(
+        "main.mjs",
+        r#"
+export default {
+  async onLoad(context) {
+    const name = await Promise.resolve(context.name);
+    return { loaded: name };
+  },
+};
+"#,
+    );
+    dir.manifest("direct-lifecycle-async", "main.mjs", "{}");
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    let plugin = host.load(&dir.0).unwrap();
+    assert_eq!(
+        plugin.load_result,
+        Some(serde_json::json!({"loaded": "direct-lifecycle-async"}))
+    );
+    host.unload("direct-lifecycle-async").unwrap();
+}

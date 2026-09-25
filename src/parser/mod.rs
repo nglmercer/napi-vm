@@ -20,6 +20,16 @@ use crate::span::Span;
 /// few dozen levels.
 const MAX_PARSE_DEPTH: u32 = 64;
 
+#[cfg(test)]
+thread_local! {
+    /// Test-only count of whole-program parses on this thread. Thread-local
+    /// so parallel tests never observe each other's parsing; steady-state
+    /// plugin calls must leave it unchanged, proving the hot path parses
+    /// nothing.
+    pub static PARSE_PROGRAM_COUNT: std::cell::Cell<u64> =
+        const { std::cell::Cell::new(0) };
+}
+
 /// Render a token the way a syntax error should name it.
 ///
 /// Literals and identifiers are shown with their text, so the message points
@@ -133,6 +143,8 @@ impl Parser {
     /// This is what execution should use: running the salvaged half of a
     /// malformed program is worse than reporting where it broke.
     pub fn parse_program(&mut self) -> Result<Vec<Statement>, ParseError> {
+        #[cfg(test)]
+        PARSE_PROGRAM_COUNT.with(|count| count.set(count.get() + 1));
         let stmts = self.parse();
         if self.depth_exceeded {
             return Err(ParseError {

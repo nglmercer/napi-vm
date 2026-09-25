@@ -16,8 +16,9 @@ pub(super) fn install(e: &mut Environment) {
 
 /// Maximum nesting `JSON.stringify` / `JSON.parse` will walk. Real engines
 /// throw a `RangeError` here; without a limit a million-deep structure
-/// overflows the native stack.
-const MAX_JSON_DEPTH: usize = 512;
+/// overflows the native stack. Shared with the host conversion layer so
+/// both directions enforce the same bound.
+pub(crate) const MAX_JSON_DEPTH: usize = 512;
 
 fn json_stringify(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
