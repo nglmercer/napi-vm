@@ -348,14 +348,12 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         None => String::new(),
     };
 
-    let tokens = crate::lexer::Lexer::new(&body_source).tokenize_with_spans();
-    let mut parser = crate::parser::Parser::new_with_spans(tokens);
-    let body = match parser.parse_program() {
-        Ok(statements) => statements,
-        Err(_) if parser.depth_exceeded => {
+    let body = match crate::parser::parse_cached(&body_source) {
+        Ok(body) => body,
+        Err(failure) if failure.depth_exceeded => {
             return Err(crate::value::limit_err("Maximum parse depth exceeded"));
         }
-        Err(error) => return Err(VmErr::Msg(format!("SyntaxError: {}", error))),
+        Err(failure) => return Err(VmErr::Msg(format!("SyntaxError: {}", failure.message))),
     };
 
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
@@ -365,7 +363,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
         params: Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect()),
-        body: Rc::new(body),
+        body: Rc::new(body.to_vec()),
         // The global scope, not the caller's: a function built from a string
         // must not capture bindings its source never named.
         closure: Some(interp.persistent_global.clone()),

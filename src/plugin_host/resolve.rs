@@ -346,21 +346,19 @@ pub(super) fn resolve_plugin_package_file(
 }
 
 pub(super) fn static_module_specifiers(source: &str) -> Result<Vec<String>, PluginHostError> {
-    let tokens = Lexer::new(source).tokenize_with_spans();
-    let mut parser = Parser::new_with_spans(tokens);
-    let statements = parser
-        .parse_program()
-        .map_err(|error| PluginHostError::Load(format!("guest module parse failed: {error}")))?;
+    let statements = crate::parser::parse_cached(source).map_err(|failure| {
+        PluginHostError::Load(format!("guest module parse failed: {}", failure.message))
+    })?;
     let mut modules = Vec::new();
-    for statement in statements {
+    for statement in statements.iter() {
         match statement {
             Statement::Import { module, .. } | Statement::ExportAll { source: module, .. } => {
-                modules.push(module);
+                modules.push(module.clone());
             }
             Statement::ExportNamed {
                 source: Some(module),
                 ..
-            } => modules.push(module),
+            } => modules.push(module.clone()),
             _ => {}
         }
     }

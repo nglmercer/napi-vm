@@ -1193,3 +1193,32 @@ export default {
     );
     host.unload("ungranted-capability").unwrap();
 }
+
+#[test]
+fn repeated_plugin_loads_share_module_parses() {
+    let dir = TestPluginDir::new("module-cache");
+    dir.write(
+        "main.mjs",
+        r#"
+import { depValue } from "./dep.mjs";
+export default {
+  onLoad() { return { v: depValue + 1 }; },
+};
+"#,
+    );
+    dir.write("dep.mjs", "export const depValue = 41;\n");
+    dir.manifest("module-cache", "main.mjs", "{}");
+    // First load warms the cache: the two modules plus host shims (fs
+    // facade, require/resolve factories, entry wrapper, barrel). The exact
+    // warm count varies with what other tests already cached, so assert the
+    // invariant that matters: a fresh host reloading the same plugin parses
+    // nothing, even though the import scan and evaluation both run again.
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    host.load(&dir.0).unwrap();
+    host.unload("module-cache").unwrap();
+    let before = parse_count();
+    let mut host = RustPluginHost::new(RustPluginHostOptions::default());
+    let plugin = host.load(&dir.0).unwrap();
+    assert_eq!(parse_count() - before, 0);
+    assert_eq!(plugin.load_result, Some(serde_json::json!({"v": 42})));
+}

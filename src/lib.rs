@@ -35,7 +35,7 @@ pub use interpreter::{
     CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
     ResolvedCommonJsModule,
 };
-pub use interpreter::{Environment, Interpreter, Module};
+pub use interpreter::{Environment, Interpreter, Module, PreparedProgram};
 #[cfg(not(target_arch = "wasm32"))]
 pub use interpreter::{
     NativeAddonBackendHost, NativeAddonOptions, NativeAddonPolicy, NativeAddonRuntime,

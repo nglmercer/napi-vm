@@ -1,4 +1,5 @@
 mod ast;
+mod cache;
 mod compound;
 mod expr;
 mod index;
@@ -6,6 +7,7 @@ mod primary;
 mod stmt;
 
 pub use ast::*;
+pub(crate) use cache::parse_cached;
 pub use index::{DeclKind, Entry, Occurrence, ScopeNode, SymbolIndex};
 
 use crate::lexer::Token;

@@ -1092,16 +1092,9 @@ fn evaluate_commonjs_source(
     let old_source_lines = std::mem::take(&mut interp.source_lines);
     interp.set_source(&wrapped);
     let outcome = (|| {
-        let tokens = crate::lexer::Lexer::new(&wrapped).tokenize_with_spans();
-        let mut parser = crate::parser::Parser::new_with_spans(tokens);
-        let statements = match parser.parse_program() {
+        let statements = match crate::parser::parse_cached(&wrapped) {
             Ok(statements) => statements,
-            Err(_) if parser.depth_exceeded => {
-                return Err(VmErr::Msg(
-                    "RangeError: Maximum parse depth exceeded".to_string(),
-                ));
-            }
-            Err(error) => return Err(VmErr::Msg(error.to_string())),
+            Err(failure) => return Err(failure.into_vm_err()),
         };
         let factory = interp.run_program_body(&statements)?;
         interp.call_this(
@@ -1171,19 +1164,13 @@ pub(super) fn make_require(
             },
         )?;
         interp.set_source(SOURCE);
-        let tokens = crate::lexer::Lexer::new(SOURCE).tokenize_with_spans();
-        let mut parser = crate::parser::Parser::new_with_spans(tokens);
-        let statements = parser
-            .parse_program()
-            .map_err(|error| VmErr::Msg(error.to_string()))?;
+        let statements =
+            crate::parser::parse_cached(SOURCE).map_err(|failure| VmErr::Msg(failure.message))?;
         let require = interp.run_program_body(&statements)?;
 
         interp.set_source(RESOLVE_SOURCE);
-        let tokens = crate::lexer::Lexer::new(RESOLVE_SOURCE).tokenize_with_spans();
-        let mut parser = crate::parser::Parser::new_with_spans(tokens);
-        let statements = parser
-            .parse_program()
-            .map_err(|error| VmErr::Msg(error.to_string()))?;
+        let statements = crate::parser::parse_cached(RESOLVE_SOURCE)
+            .map_err(|failure| VmErr::Msg(failure.message))?;
         let resolve = interp.run_program_body(&statements)?;
         require.set_prop("resolve".to_string(), resolve)?;
         Ok(require)

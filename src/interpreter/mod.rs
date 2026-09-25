@@ -523,13 +523,54 @@ export default { createRequire, isBuiltin, builtinModules };
         commonjs::require_module(self, request, parent)
     }
 
+    /// Lex + parse `source` without executing it. Identical sources share
+    /// one cached AST; failures carry the same messages `eval_source`
+    /// reports.
+    pub fn compile(source: &str) -> Result<PreparedProgram, VmErr> {
+        let statements =
+            crate::parser::parse_cached(source).map_err(|failure| failure.into_vm_err())?;
+        Ok(PreparedProgram {
+            source: source.into(),
+            statements,
+        })
+    }
+
+    /// Execute a program compiled with [`Self::compile`]: fresh loop
+    /// budget, full job drain, same as [`Self::eval_source`] but with no
+    /// lexer or parser work.
+    pub fn execute(&mut self, program: &PreparedProgram) -> Result<Value, VmErr> {
+        self.begin_execution();
+        self.set_source(&program.source);
+        match self.run_program_body(&program.statements) {
+            Ok(value) => self.drain_jobs().map(|()| value),
+            Err(error) => {
+                let _ = self.drain_jobs();
+                Err(error)
+            }
+        }
+    }
+}
+
+/// A lexed+parsed script, ready for repeated execution without touching
+/// the lexer or parser again. Compile once with [`Interpreter::compile`],
+/// run many times with [`Interpreter::execute`]. The AST is shared through
+/// the process-wide parse cache, so identical sources compile once even
+/// across interpreters; the source text is retained for diagnostics.
+#[derive(Clone)]
+pub struct PreparedProgram {
+    source: std::sync::Arc<str>,
+    statements: std::sync::Arc<Vec<Statement>>,
+}
+
+impl Interpreter {
     /// Parse and execute a complete JavaScript script, draining the existing
     /// promise/job queue before returning. This is the Rust embedding entry
     /// point; `require()` still needs an explicitly configured loader.
+    /// Delegates to [`Self::compile`] + [`Self::execute`]: for repeated
+    /// execution, compile once and execute many times instead.
     pub fn eval_source(&mut self, source: &str) -> Result<Value, VmErr> {
-        self.begin_execution();
-        match self.eval_script_body(source) {
-            Ok(value) => self.drain_jobs().map(|()| value),
+        match Self::compile(source) {
+            Ok(program) => self.execute(&program),
             Err(error) => {
                 let _ = self.drain_jobs();
                 Err(error)
@@ -579,22 +620,6 @@ export default { createRequire, isBuiltin, builtinModules };
         let result = self.eval_script_body(source);
         self.source_lines = previous_source;
         result
-    }
-
-    fn eval_script_body(&mut self, source: &str) -> Result<Value, VmErr> {
-        self.set_source(source);
-        let tokens = crate::lexer::Lexer::new(source).tokenize_with_spans();
-        let mut parser = crate::parser::Parser::new_with_spans(tokens);
-        let statements = match parser.parse_program() {
-            Ok(statements) => statements,
-            Err(_) if parser.depth_exceeded => {
-                return Err(VmErr::Msg(
-                    "RangeError: Maximum parse depth exceeded".to_string(),
-                ));
-            }
-            Err(error) => return Err(VmErr::Msg(error.to_string())),
-        };
-        self.run_program_body(&statements)
     }
 
     /// Insert or replace a binding in the currently active scope. The
@@ -1099,17 +1124,8 @@ export default { createRequire, isBuiltin, builtinModules };
     /// Parse and run one module body. Kept beside `ensure_module` so deferred
     /// evaluation does not have to reach back into the N-API layer.
     fn eval_module_source(&mut self, source: &str) -> Result<(), VmErr> {
-        let tokens = crate::lexer::Lexer::new(source).tokenize_with_spans();
-        let mut parser = crate::parser::Parser::new_with_spans(tokens);
-        let statements = match parser.parse_program() {
-            Ok(statements) => statements,
-            Err(_) if parser.depth_exceeded => {
-                return Err(VmErr::Msg(
-                    "RangeError: Maximum parse depth exceeded".to_string(),
-                ));
-            }
-            Err(error) => return Err(VmErr::Msg(error.to_string())),
-        };
+        let statements =
+            crate::parser::parse_cached(source).map_err(|failure| failure.into_vm_err())?;
         // Modules hoist exactly like scripts: `var` and eagerly-defined
         // function declarations first, then lexical dead zones. Without this,
         // a module-level call above its function declaration fails to resolve.

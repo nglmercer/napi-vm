@@ -344,11 +344,8 @@ pub(super) fn compile_guest_function(
     source: &str,
 ) -> Result<Value, VmErr> {
     interp.set_source(source);
-    let tokens = crate::lexer::Lexer::new(source).tokenize_with_spans();
-    let mut parser = crate::parser::Parser::new_with_spans(tokens);
-    let statements = parser
-        .parse_program()
-        .map_err(|error| VmErr::Msg(error.to_string()))?;
+    let statements =
+        crate::parser::parse_cached(source).map_err(|failure| VmErr::Msg(failure.message))?;
     interp.run_program_body(&statements)
 }
 

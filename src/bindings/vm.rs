@@ -1002,21 +1002,12 @@ fn execute_module_source(
 fn execute_source(interp: &mut Interpreter, source: &str) -> Result<Value, VmErr> {
     interp.set_source(source);
     interp.begin_execution();
-    let mut lexer = Lexer::new(source);
-    let tokens = lexer.tokenize_with_spans();
-    let mut parser = Parser::new_with_spans(tokens);
     // Refuse to execute a program that did not parse. Recovering from a
     // syntax error and running whatever statements survived is worse than
     // reporting where the source broke.
-    let statements = match parser.parse_program() {
+    let statements = match crate::parser::parse_cached(source) {
         Ok(statements) => statements,
-        Err(error) if parser.depth_exceeded => {
-            let _ = error;
-            return Err(VmErr::Msg(
-                "RangeError: Maximum parse depth exceeded".to_string(),
-            ));
-        }
-        Err(error) => return Err(VmErr::Msg(error.to_string())),
+        Err(failure) => return Err(failure.into_vm_err()),
     };
     let completion = interp.run_program_body(&statements);
     // The event loop runs to completion before the entry point returns:

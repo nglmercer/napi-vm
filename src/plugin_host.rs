@@ -29,6 +29,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value as JsonValue};
 
+use crate::VmErr;
 use crate::host::HostBridge;
 #[cfg(all(
     feature = "node-api-host",
@@ -49,7 +50,6 @@ use crate::parser::Statement;
 ))]
 use crate::value::PromiseInner;
 use crate::value::Value;
-use crate::{Lexer, Parser, VmErr};
 
 #[cfg(all(
     feature = "node-api-host",
