@@ -33,6 +33,10 @@ sha2 = "0.10"
 smallvec = "1"
 stacker = "0.1.25"
 regex-syntax = "0.8"
+# `file://` URI parsing for the language server and for module file URLs
+# recorded by the plugin host. Unconditional (including wasm32): the plugin
+# host compiles for the browser target and needs it there too.
+url = "2"
 # Browser ↔ Rust bindings for the `wasm` feature. `js-sys` (below, target-scoped)
 # provides the typed wrappers over JS built-ins used by the marshalling layer.
 wasm-bindgen = { version = "0.2", optional = true }
@@ -45,11 +49,6 @@ js-sys = "0.3"
 # O_NOFOLLOW is used only by the Unix filesystem capability facade.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-# `file://` URI parsing for the language server. Scoped to native targets
-# because `crate::lsp` (its only consumer) is not compiled for wasm32.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-url = "2"
 
 # `corosensei` provides the stackful coroutines that back generators and async
 # function bodies. It needs hand-written stack-switching assembly and

@@ -672,9 +672,12 @@ impl RustPluginHost {
         for (name, source) in &prepared.sources {
             interpreter.define_module(name, source.clone());
             let prefix = format!("./plugin:{}/", prepared.manifest.name);
-            if let Some(relative) = name.strip_prefix(&prefix) {
-                let path = prepared.root.join(relative);
-                if let Ok(url) = url::Url::from_file_path(path) {
+            // File URLs are recorded on native targets only: the `url` crate
+            // exposes no `from_file_path` on wasm32, and browser plugin roots
+            // are virtual paths with no file URL anyway.
+            if let Some(_relative) = name.strip_prefix(&prefix) {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Ok(url) = url::Url::from_file_path(prepared.root.join(_relative)) {
                     interpreter.define_module_file_url(name, url.into());
                 }
             }

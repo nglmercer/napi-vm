@@ -52,6 +52,7 @@ fn main() {
                     std::env::var_os("CC").unwrap_or_else(|| "cc".into())
                 }
             });
+            let compiler_name = compiler.to_string_lossy().into_owned();
             let mut command = std::process::Command::new(compiler);
             if target_os == "windows" && target_env == "msvc" {
                 command
@@ -84,9 +85,16 @@ fn main() {
                     .arg("-o")
                     .arg(&library);
             }
-            let status = command
-                .status()
-                .expect("node-api-host requires a C compiler");
+            let status = command.status().unwrap_or_else(|error| {
+                if target_os == "windows" && target_env == "msvc" {
+                    panic!(
+                        "node-api-host requires a C compiler: could not run '{compiler_name}': {error}. Install the Visual Studio C++ workload and build from a Developer prompt (or set CC to the full path of cl.exe)."
+                    );
+                }
+                panic!(
+                    "node-api-host requires a C compiler: could not run '{compiler_name}': {error}"
+                );
+            });
             assert!(
                 status.success(),
                 "failed to compile the Node-API symbol shim"

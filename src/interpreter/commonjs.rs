@@ -769,7 +769,7 @@ impl FileCommonJsLoader {
                 path.display()
             )));
         }
-        let filename = path.to_string_lossy().into_owned();
+        let filename = guest_filename(&path);
         let extension = path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -828,7 +828,7 @@ impl CommonJsModuleLoader for FileCommonJsLoader {
         if self.node_gyp_build_compat && request == "node-gyp-build" {
             let (id, filename) = match self.resolve_request(request, parent) {
                 Ok(path) => {
-                    let filename = path.to_string_lossy().into_owned();
+                    let filename = guest_filename(&path);
                     (filename.clone(), filename)
                 }
                 Err(error) if error.to_string() == "Cannot find module 'node-gyp-build'" => {
@@ -920,6 +920,28 @@ impl FileCommonJsLoader {
             None => loader.load_with_exports(&path, exports),
         }
     }
+}
+
+/// Render a resolved path the way Node reports it to guest code.
+///
+/// `fs::canonicalize` (like `fs.realpath`) resolves symlinks, but on Windows
+/// it also prepends the `\\?\` verbatim prefix, which Node strips before
+/// exposing the path through `require.resolve`, `__filename`, or
+/// `module.filename`. The internal root/allowlist checks keep using the
+/// canonical form; only the guest-visible `id`/`filename` strings go through
+/// here.
+fn guest_filename(path: &Path) -> String {
+    let rendered = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = rendered.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = rendered.strip_prefix(r"\\?\") {
+            return rest.to_owned();
+        }
+    }
+    rendered.into_owned()
 }
 
 pub(super) fn sha256_file(path: &Path) -> std::io::Result<[u8; 32]> {

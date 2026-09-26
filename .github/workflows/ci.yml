@@ -641,32 +641,18 @@ jobs:
           toolchain: 1.96.0
           targets: x86_64-pc-windows-msvc
 
+      # Puts cl.exe, link.exe and the Windows SDK on PATH for the build
+      # script and the fixture link below. This replaces a hand-rolled vcvars
+      # import whose failures were silent (a vcvars error still exits 0
+      # through the trailing `set`), leaving `cl.exe` unfound.
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+
       - name: Test in-process Node-API loading (MSVC)
         shell: pwsh
         run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vsInstall = & $vswhere -latest -products '*' -property installationPath
-          if (-not $vsInstall) {
-            throw 'Could not locate Visual Studio for the MSVC Node-API test.'
-          }
-
-          $vcvars = Join-Path $vsInstall 'VC\Auxiliary\Build\vcvars64.bat'
-          $envScript = Join-Path $env:RUNNER_TEMP 'load-msvc-environment.cmd'
-          @("call `"$vcvars`" -arch=x64 -host_arch=x64 >nul", 'set') |
-            Set-Content -Path $envScript -Encoding ascii
-          $msvcEnvironment = & cmd.exe /d /c $envScript
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Could not initialize the MSVC environment.'
-          }
-          foreach ($line in $msvcEnvironment) {
-            $separator = $line.IndexOf('=')
-            if ($separator -gt 0) {
-              $name = $line.Substring(0, $separator)
-              $value = $line.Substring($separator + 1)
-              Set-Item "Env:$name" $value
-            }
-          }
-
           cargo build --release --no-default-features --features node-api-host --lib
           if ($LASTEXITCODE -ne 0) {
             throw 'Could not build the in-process Node-API host.'
