@@ -91,6 +91,67 @@ fn host() -> Host {
     .unwrap()
 }
 #[tokio::test]
+async fn javascript_preflight_uses_a_relative_entry_and_preserves_arguments() {
+    let pkg = package();
+    let manifest_path = pkg.0.join("plugin.json");
+    let mut manifest: Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+    let entry = "-entry 日本語 file.js";
+    std::fs::write(pkg.0.join(entry), b"// controlled preflight fixture").unwrap();
+    manifest["profile"] = json!("portable-js");
+    manifest["launch"] = json!({"kind":"javascript","entry":entry,"runtimes":["node"],"preferredRuntime":"node","args":["argument with spaces"]});
+    std::fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let opts = RuntimeOptions {
+        runtime_paths: [(
+            "node".into(),
+            env!("CARGO_BIN_EXE_trusted-fixture-rust").into(),
+        )]
+        .into_iter()
+        .collect(),
+        ..Default::default()
+    };
+    let prepared = prepare(&manifest_path, &opts).await.unwrap();
+    assert_eq!(prepared.selected_runtime, "node");
+    assert_eq!(prepared.directory, std::fs::canonicalize(&pkg.0).unwrap());
+    assert_eq!(prepared.arguments.len(), 2);
+    assert_eq!(
+        PathBuf::from(&prepared.arguments[0]),
+        PathBuf::from(".").join(entry)
+    );
+    assert!(prepared.arguments[0].starts_with('.'));
+    assert_eq!(prepared.arguments[1], "argument with spaces");
+}
+
+#[tokio::test]
+async fn startup_failures_include_bounded_redacted_plugin_output() {
+    let pkg = package();
+    let h = host();
+    let secret = "private-startup-fixture-credential";
+    let mut opts = LoadOptions::default();
+    opts.environment
+        .insert("NAPI_VM_TEST_STARTUP_FAILURE".into(), secret.into());
+    let error = match h.load(pkg.0.join("plugin.json"), opts).await {
+        Ok(_) => panic!("fixture should exit before hello"),
+        Err(error) => error,
+    };
+    assert_eq!(error.stable_code(), "PLUGIN_EXITED");
+    assert_eq!(error.data["runtime"], "executable");
+    let output: String = error.data["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|log| log["text"].as_str().unwrap())
+        .collect();
+    assert!(output.len() <= 1024);
+    assert!(output.contains("startup fixture failure"));
+    assert!(!output.contains(secret));
+    assert_eq!(output.matches("[redacted]").count(), 2);
+    assert!(error.data["droppedLogBytes"].as_u64().unwrap() > 0);
+    assert_eq!(h.list()[0].status, Status::Failed);
+    h.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn repeated_unload_reaps_and_instances_are_independent() {
     let pkg = package();
     let h = host();

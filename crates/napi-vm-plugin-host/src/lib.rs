@@ -111,14 +111,12 @@ impl Logs {
     fn push(&mut self, stream: &str, bytes: &[u8], limit: usize, token: &str) {
         let mut text = String::from_utf8_lossy(bytes).replace(token, "[bootstrap token redacted]");
         if text.len() > limit {
-            text = text
-                .chars()
-                .rev()
-                .take(limit / 4)
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
+            let mut start = text.len() - limit;
+            while !text.is_char_boundary(start) {
+                start += 1;
+            }
+            self.dropped += start as u64;
+            text = text.split_off(start);
         }
         let n = text.len();
         while self.bytes + n > limit {
@@ -135,8 +133,6 @@ impl Logs {
                 stream: stream.into(),
                 text,
             });
-        } else {
-            self.dropped += bytes.len() as u64;
         }
     }
 }
@@ -535,12 +531,19 @@ impl Host {
         let stream = tokio::select! {r=tokio::time::timeout_at(deadline,handshake)=>match r{Ok(v)=>v,Err(_)=>Err(RpcError::new("DEADLINE_EXCEEDED","plugin startup/hello deadline exceeded"))},s=child.wait()=>Err(RpcError::new("PLUGIN_EXITED",format!("plugin exited before hello: {s:?}")))};
         let stream = match stream {
             Ok(s) => s,
-            Err(e) => {
+            Err(mut e) => {
                 let _ = child.kill().await;
                 let _ = child.wait().await;
                 for d in drainers {
                     let _ = d.await;
                 }
+                // Await pipe EOF before exposing the bounded, already-redacted
+                // plugin output. A CLI caller otherwise sees only the host's
+                // exit status and loses the child's actual startup error.
+                let logs = instance.logs.lock().unwrap();
+                e.data["runtime"] = json!(prepared.selected_runtime);
+                e.data["logs"] = json!(&logs.chunks);
+                e.data["droppedLogBytes"] = json!(logs.dropped);
                 return Err(e);
             }
         };
@@ -1557,6 +1560,20 @@ fn supervise(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn oversized_log_chunks_keep_utf8_tails_and_count_dropped_bytes() {
+        for limit in [0, 1, 2, 3, 8, 16] {
+            let input = "prefix 日本語 😀 tail";
+            let mut logs = Logs::default();
+            logs.push("stderr", input.as_bytes(), limit, "\0");
+            let output: String = logs.chunks.iter().map(|log| log.text.as_str()).collect();
+            assert!(output.len() <= limit);
+            assert!(input.ends_with(&output));
+            assert_eq!(logs.dropped as usize + output.len(), input.len());
+            assert_eq!(logs.bytes, output.len());
+        }
+    }
+
     #[test]
     fn error_redaction_preserves_contract_codes_and_envelope_names() {
         let mut error = RpcError::new("INTERNAL_ERROR", "INTERNAL_ERROR private-key");
