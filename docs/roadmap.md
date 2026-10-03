@@ -177,8 +177,9 @@ Every claim below was checked against the current build.
   unsupported; unimplemented imports fail during loading
   (`src/interpreter/rust_node_api.rs`).
 
-- **Generators on `wasm32`** — the browser target has no stack switching, so a
-  body cannot be suspended. It runs once to completion on the first `next()`
+- **Generators without stack switching (`wasm32`, Windows ARM64)** — these
+  targets have no supported stack-switching backend, so the body cannot be
+  suspended. It runs once to completion on the first `next()`
   and its yields are buffered for the remaining calls to drain. Values,
   `for…of`, spread, `Array.from` and `yield*` all work
   (`tests/wasm/browser-build.test.mjs`), but the difference is observable: the
@@ -186,6 +187,12 @@ Every claim below was checked against the current build.
   with the consumer, `next(v)` cannot send a value in, abandoning a `for…of`
   early does not stop a body that has already run, and an unbounded generator
   hits a cap and raises a catchable `RangeError`.
+
+  `Array.from` still calls the mapper immediately after each iterator read,
+  including on these targets. The eager generator body is what changes the
+  order of generator side effects; ordinary iterators retain interleaved reads
+  and mapping. Node compatibility tests check both iterator behavior and this
+  documented backend difference.
 
   Real suspension needs one of three things, none of them small:
 

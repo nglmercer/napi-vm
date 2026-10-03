@@ -127,19 +127,30 @@ test('throwing checkpoint recovers before new guest code', () => {
 test('unawaited host results do not lock admission and remain awaitable', async () => {
   const s = new AsyncSession();
   let resolve;
+  let releaseDispatch;
+  const dispatch = new Promise(r => { releaseDispatch = r; });
+  let notifyStarted;
+  const started = new Promise(r => { notifyStarted = r; });
   try {
     await s.exposeFunction('background', async () => 1, true);
     assert.equal(await s.run('background();42;'), '42');
     assert.equal(await s.run('2+2;'), '4');
-    await s.exposeFunction('pending', () => new Promise(r => { resolve = r; }), true);
+    await s.exposeFunction('pending', async () => {
+      // Force the resolver to become available after both guest commands.
+      // A run's completion does not imply its queued host callback has run.
+      await dispatch;
+      return new Promise(r => { resolve = r; notifyStarted(); });
+    }, true);
     assert.equal(await s.run('var saved=pending();42;'), '42');
     assert.equal(await s.run('2+2;'), '4');
+    releaseDispatch();
+    await started;
     resolve(7);
     assert.equal(await s.run('await saved;'), '7');
     await s.exposeFunction('bad', async () => { throw new Error('rejected'); }, true);
     await s.run('var rejected=bad();');
     await assert.rejects(s.run('await rejected;'), /rejected/);
-  } finally { s.dispose(); }
+  } finally { releaseDispatch(); s.dispose(); }
 });
 test('top-level await waits for future and nested real-time timers', async () => {
   const s = new AsyncSession({ clock: 'real-time' });

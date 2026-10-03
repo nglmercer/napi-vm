@@ -154,7 +154,9 @@ const groups = {
     '(() => {const a=[1,2]; return Array.from(a,(x,i)=>{a[1]=9; return x;}).join();})()',
     '(() => {const a={0:1,1:2,length:2}; return Array.from(a,(x,i)=>{a[1]=9; return x;}).join();})()',
     '(() => {const a=[1,2]; a[Symbol.iterator]=function*(){yield 9;}; return Array.from(a).join();})()',
-    '(() => {const seen=[]; function* g(){seen.push("next");yield 1;seen.push("next");yield 2;} Array.from(g(),x=>{seen.push("map");return x;});return seen.join();})()',
+    '(() => {const seen=[];const source={[Symbol.iterator](){let i=0;return{next(){if(i===2)return{done:true};seen.push("next");return{value:++i,done:false};}};}};Array.from(source,x=>{seen.push("map");return x;});return seen.join();})()',
+    '(() => {let closed=false;const source={[Symbol.iterator](){return{next(){return{value:1,done:false};},return(){closed=true;return{done:true};}};}};try{Array.from(source,()=>{throw new Error("x");});}catch(e){}return closed;})()',
+    '(() => {const source={[Symbol.iterator](){return{next(){return{value:1,done:false};},return(){throw new Error("close");}};}};try{Array.from(source,()=>{throw new Error("map");});}catch(e){return e.message;}})()',
     '(() => {let closed=false;function* g(){try{yield 1;}finally{closed=true;}}try{Array.from(g(),()=>{throw new Error("x");});}catch(e){}return closed;})()',
   ],
   "string methods normalize positions and omitted arguments": [
@@ -179,3 +181,18 @@ for (const [name, expressions] of Object.entries(groups)) {
     for (const expression of expressions) matchesNode(expression);
   });
 }
+
+test('Array.from generator side effects follow the platform generator backend', () => {
+  // Cargo scopes corosensei to supported targets. Windows ARM64 uses the
+  // documented buffered fallback: the body runs fully on its first next().
+  // Ordinary iterators above must still interleave reads and mapping everywhere.
+  const buffered = process.platform === 'win32' && process.arch === 'arm64';
+  const cases = [
+    ['(() => {const seen=[]; function* g(){seen.push("next");yield 1;seen.push("next");yield 2;} Array.from(g(),x=>{seen.push("map");return x;});return seen.join();})()', 'next,next,map,map'],
+    ['(() => {const seen=[];function* g(){try{seen.push("next");yield 1;seen.push("next");yield 2;}finally{seen.push("close");}}try{Array.from(g(),()=>{seen.push("map");throw new Error("x");});}catch(e){}return seen.join();})()', 'next,next,close,map'],
+  ];
+  for (const [expression, bufferedResult] of cases) {
+    if (buffered) assert.equal(runCode(expression), bufferedResult, expression);
+    else matchesNode(expression);
+  }
+});
