@@ -697,7 +697,11 @@ pub async fn prepare(path: &Path, options: &RuntimeOptions) -> PluginResult<Prep
             } else {
                 vec![]
             };
-            a.push(file.to_string_lossy().into_owned());
+            // Windows canonicalization produces verbatim (\\?\) paths, which
+            // JavaScript entry-point loaders need not support. The child cwd
+            // is the verified package root, so pass the contained canonical
+            // file relative to that root, retaining argument/path boundaries.
+            a.push(javascript_entry_argument(&root, &file)?);
             a.extend(args.clone());
             (path, a, runtime, v)
         }
@@ -754,6 +758,22 @@ pub async fn prepare(path: &Path, options: &RuntimeOptions) -> PluginResult<Prep
     })
 }
 
+fn javascript_entry_argument(root: &Path, file: &Path) -> PluginResult<String> {
+    let entry = file
+        .strip_prefix(root)
+        .map_err(|_| invalid("JavaScript entry escapes package directory"))?;
+    if entry.as_os_str().is_empty()
+        || entry
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err(invalid("invalid contained JavaScript entry"));
+    }
+    // The leading dot also prevents an entry named -script.js becoming a
+    // runtime command-line option. Path joining preserves Unicode and spaces.
+    Ok(Path::new(".").join(entry).to_string_lossy().into_owned())
+}
+
 async fn probe_output(path: &Path, args: &[&str]) -> PluginResult<Vec<u8>> {
     let mut command = Command::new(path);
     command
@@ -793,5 +813,31 @@ async fn probe_output(path: &Path, args: &[&str]) -> PluginResult<Vec<u8>> {
                 _ => unreachable!(),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    #[test]
+    fn javascript_entries_are_relative_to_the_verified_package() {
+        #[cfg(windows)]
+        let root = Path::new(r"\\?\C:\package with spaces");
+        #[cfg(not(windows))]
+        let root = Path::new("/package with spaces");
+        for name in ["dist/main.js", "-entry.mjs", "dist/日本語 file.js"] {
+            let argument = javascript_entry_argument(root, &root.join(name)).unwrap();
+            assert!(Path::new(&argument).is_relative());
+            assert!(argument.starts_with('.'));
+            assert_eq!(Path::new(&argument), Path::new(".").join(name));
+            assert!(!argument.contains("package with spaces"));
+        }
+        assert!(javascript_entry_argument(root, root).is_err());
+        assert!(javascript_entry_argument(root, &root.join("../escape.js")).is_err());
+        assert!(
+            javascript_entry_argument(root, &root.with_file_name("other").join("entry.js"))
+                .is_err()
+        );
     }
 }

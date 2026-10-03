@@ -100,6 +100,32 @@ impl Lifecycle for Hooks {
 }
 #[tokio::main]
 async fn main() {
+    // Controlled runtime probes let preflight tests inspect the actual launch
+    // plan without depending on Node being installed for cargo test.
+    match std::env::args().nth(1).as_deref() {
+        Some("--version") => {
+            println!("v24.19.0");
+            return;
+        }
+        Some("-e") => {
+            println!(
+                "{}",
+                json!({"versions":{"node":"24.19.0","napi":"8"},"target":napi_vm_plugin_host::Target::current()})
+            );
+            return;
+        }
+        _ => {}
+    }
+    if let Ok(secret) = std::env::var("NAPI_VM_TEST_STARTUP_FAILURE") {
+        for _ in 0..256 {
+            eprintln!("controlled noisy startup output abcdefghijklmnopqrstuvwxyz");
+        }
+        eprintln!(
+            "startup fixture failure {secret} {}",
+            std::env::var("NAPI_VM_PLUGIN_TOKEN").unwrap()
+        );
+        std::process::exit(7);
+    }
     let result = async {
         let hooks = Hooks::default();
         let registry = Registry::new();
