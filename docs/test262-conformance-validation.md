@@ -1,4 +1,6 @@
-# Test262 conformance validation
+# Test262 conformance validation: merged PR #22 baseline
+
+This document preserves the PR #22 baseline. Current phase work is documented in [phases 1–3](test262-phases-1-3.md), and `tools/test262/latest.json` records the latest complete measurement.
 
 This change improves conformance; it does not achieve a full Test262 pass or establish a stable ECMAScript compatibility claim.
 
@@ -20,7 +22,7 @@ The pinned corpus is `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`.
 
 Before this change, the complete development run recorded 33,547 passes / 102,956 variants (32.58%): 68,037 failures, 870 timeouts, 32 crashes, 470 harness errors and zero skips. That run used an unoptimized worker, 16 workers and a two-second timeout; its worker SHA-256 was `f35c670b84f76c1af8ae0ac06c7a8ea96347530b62f2f7d75e4207d997858d59`. Timing-dependent outcomes are not directly comparable with the optimized final run.
 
-The final complete optimized run recorded **34,736 passes / 102,956 variants (33.74%)**, with 67,740 failures, two timeouts, eight crashes, 470 harness errors and zero skips. It used four workers and a five-second timeout, with worker SHA-256 `15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b`. The compact evidence is versioned in `tools/test262/latest.json`; full rows, the dashboard and triage are generated under `artifacts/test262/`.
+The final complete optimized run recorded **34,736 passes / 102,956 variants (33.74%)**, with 67,740 failures, two timeouts, eight crashes, 470 harness errors and zero skips. It used four workers and a five-second timeout, with worker SHA-256 `15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b`. At merge time, the compact evidence was versioned in `tools/test262/latest.json`; full rows, the dashboard and triage are generated under `artifacts/test262/`.
 
 The eight remaining crashes occur in three destructuring tests (both modes) and String subclassing (both modes). Four previously passing regex variants now fail with the explicit nesting-budget RangeError. The corrected async harness reports existing Promise/async failures previously masked by caught completion errors. These effects remain visible in the full score.
 

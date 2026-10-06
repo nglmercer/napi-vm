@@ -193,6 +193,18 @@ fn own_names_for(
     value: &Value,
     enumerable_only: bool,
 ) -> Result<Vec<String>, VmErr> {
+    if matches!(value, Value::GlobalObject) {
+        return Ok(interp
+            .global_keys()
+            .into_iter()
+            .filter(|name| {
+                !enumerable_only
+                    || interp
+                        .global_property(name)
+                        .is_some_and(|(_, attrs)| attrs.enumerable)
+            })
+            .collect());
+    }
     if matches!(value, Value::Proxy(_)) {
         // The current Proxy model exposes ownKeys as a string array. Native
         // addon proxies return the host object's enumerable own keys here.
@@ -524,6 +536,13 @@ fn object_property_is_enumerable(
 ) -> Result<Value, VmErr> {
     let receiver = to_object_receiver(&this)?;
     let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
+    if matches!(receiver, Value::GlobalObject) {
+        return Ok(Value::Bool(
+            interp
+                .global_property(&key)
+                .is_some_and(|(_, attrs)| attrs.enumerable),
+        ));
+    }
     Ok(Value::Bool(
         object_property_attributes(&receiver, &key).is_some_and(|attributes| attributes.enumerable),
     ))
@@ -1427,19 +1446,19 @@ fn object_get_own_descriptor(
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
     let key = interp.property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
-    Ok(descriptor_for(&target, &key))
+    Ok(descriptor_for_in(interp, &target, &key))
 }
 
 fn object_get_own_descriptors(
-    _: &mut Interpreter,
+    interp: &mut Interpreter,
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let props = own_names(&target, false)
+    let props = own_names_for(interp, &target, false)?
         .into_iter()
         .map(|key| {
-            let descriptor = descriptor_for(&target, &key);
+            let descriptor = descriptor_for_in(interp, &target, &key);
             (key, descriptor)
         })
         .collect();
@@ -1448,6 +1467,23 @@ fn object_get_own_descriptors(
 
 /// Build the descriptor object for one own property, or `undefined` when the
 /// property does not exist.
+fn descriptor_for_in(interp: &Interpreter, target: &Value, key: &str) -> Value {
+    if matches!(target, Value::GlobalObject) {
+        return interp
+            .global_property(key)
+            .map(|(value, attrs)| {
+                Value::object(vec![
+                    ("value".into(), value),
+                    ("writable".into(), Value::Bool(attrs.writable)),
+                    ("enumerable".into(), Value::Bool(attrs.enumerable)),
+                    ("configurable".into(), Value::Bool(attrs.configurable)),
+                ])
+            })
+            .unwrap_or(Value::Undefined);
+    }
+    descriptor_for(target, key)
+}
+
 fn descriptor_for(target: &Value, key: &str) -> Value {
     if let Value::Array(items) = target {
         let array = items;

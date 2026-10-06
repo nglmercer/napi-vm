@@ -193,6 +193,7 @@ enum PatternKeyView<'a> {
 }
 #[derive(Clone)]
 enum PatternView<'a> {
+    Elision,
     Ident(&'a str),
     Member {
         object: &'a Expr,
@@ -206,6 +207,7 @@ enum PatternView<'a> {
 impl<'a> PatternView<'a> {
     fn from_pattern(p: &'a Pattern) -> Self {
         match p {
+            Pattern::Elision => Self::Elision,
             Pattern::Ident(n) => Self::Ident(n),
             Pattern::Member { object, property } => Self::Member { object, property },
             Pattern::Array(v) => Self::Array(v.iter().map(Self::from_pattern).collect()),
@@ -236,7 +238,7 @@ impl<'a> PatternView<'a> {
                 v.iter()
                     .map(|e| match e {
                         Expr::Spread(v) => Some(Self::Rest(Box::new(Self::from_expr(v)?))),
-                        Expr::Undefined => Some(Self::Ident("hole")),
+                        Expr::Undefined => Some(Self::Elision),
                         e => Self::from_expr(e),
                     })
                     .collect::<Option<_>>()?,
@@ -1754,7 +1756,7 @@ impl<'a> Compiler<'a> {
             }
             // A rest element only binds at the top of an array pattern; a
             // bare one anywhere else falls through, like the evaluator.
-            PatternView::Rest(_) => Ok(()),
+            PatternView::Elision | PatternView::Rest(_) => Ok(()),
             PatternView::Default(inner, default) => {
                 let value = self.alloc_reg()?;
                 self.emit(Instr::Mov {
@@ -3034,7 +3036,7 @@ impl<'a> Compiler<'a> {
                 let index = self.intern_number(*value)?;
                 self.load_const(index)
             }
-            Expr::String(value) => {
+            Expr::String(value) | Expr::EscapedString(value) => {
                 let index = self.push_const(Constant::String(value.clone()))?;
                 self.load_const(index)
             }
@@ -3195,6 +3197,11 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::DynamicImport { dst, src });
                 Ok(dst)
             }
+            Expr::NewTarget => {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::NewTarget { dst });
+                Ok(dst)
+            }
             Expr::ImportMeta => {
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::ImportMeta { dst });
@@ -3295,7 +3302,7 @@ impl<'a> Compiler<'a> {
                 ObjectProp::Computed(key_expression, value_expression) => {
                     match key_expression {
                         // Statically known keys skip the normalization check.
-                        Expr::String(key) => {
+                        Expr::String(key) | Expr::EscapedString(key) => {
                             let val = self.compile_expr(value_expression)?;
                             let key = self.intern_string(&key.to_key())?;
                             template.push(PropEntry {
@@ -3779,6 +3786,18 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
+        let direct_eval = matches!(callee, Expr::Identifier(name) if name == "eval");
+        if direct_eval && (!self.top_level || self.scopes.len() != 1) {
+            // Dynamic access must see every lexical binding, including locals
+            // normally held only in registers. Keep the AST path until frames
+            // can materialize the complete environment for direct eval.
+            return Err(Decline::Func("direct eval requires a lexical environment"));
+        }
+        let evaluated_eval = if direct_eval {
+            Some(self.compile_expr(callee)?)
+        } else {
+            None
+        };
         // The callee shape is syntactic, so classify before emitting: method
         // calls keep their receiver, chains join on nullish, `super`
         // declines.
@@ -3881,18 +3900,34 @@ impl<'a> Compiler<'a> {
                 }
             }
             Callee::Plain => {
-                let callee = self.compile_expr(callee)?;
+                let callee = match evaluated_eval {
+                    Some(reg) => reg,
+                    None => self.compile_expr(callee)?,
+                };
                 match call_args {
                     CallArgs::Range { start, argc } => {
-                        self.emit(Instr::Call {
-                            dst,
-                            callee,
-                            args: start,
-                            argc,
+                        self.emit(if direct_eval {
+                            Instr::DirectEval {
+                                dst,
+                                callee,
+                                args: start,
+                                argc,
+                            }
+                        } else {
+                            Instr::Call {
+                                dst,
+                                callee,
+                                args: start,
+                                argc,
+                            }
                         });
                     }
                     CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::CallSpread { dst, callee, tmpl });
+                        self.emit(if direct_eval {
+                            Instr::DirectEvalSpread { dst, callee, tmpl }
+                        } else {
+                            Instr::CallSpread { dst, callee, tmpl }
+                        });
                     }
                 }
             }

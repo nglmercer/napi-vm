@@ -55,7 +55,7 @@ impl Interpreter {
         let prototype = self
             .persistent_global
             .borrow()
-            .get(builtin)
+            .intrinsic(builtin)
             .and_then(|constructor| constructor.get_prop("prototype"))?;
         if crate::interpreter::strict_equals(object, &prototype) {
             return None;
@@ -419,10 +419,19 @@ impl Interpreter {
 
     /// Resolve a property value, invoking it if it is a getter.
     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        self.get_prop_value_with_receiver(o, p, o)
+    }
+
+    pub(crate) fn get_prop_value_with_receiver(
+        &mut self,
+        o: &Value,
+        p: &Value,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
         // String keys take the borrowed-key path below, which never allocates
         // a key `Value`. Only symbols, numbers, and exotic keys stay here.
         if let Value::String(key) = p {
-            return self.get_prop_value_str(o, &key.to_key());
+            return self.get_prop_value_str_with_receiver(o, &key.to_key(), receiver);
         }
         // A proxy's `get` trap replaces the read entirely; without one the
         // read falls through to the target.
@@ -431,9 +440,9 @@ impl Interpreter {
             if let Some(trap) = self.proxy_trap(&proxy, "get") {
                 let key = self.proxy_property_key(p)?;
                 let handler = proxy.handler.clone();
-                return self.call_this(&trap, handler, vec![target, key, o.clone()]);
+                return self.call_this(&trap, handler, vec![target, key, receiver.clone()]);
             }
-            return self.get_prop_value(&target, p);
+            return self.get_prop_value_with_receiver(&target, p, receiver);
         }
         // Reading a property of `null` or `undefined` is a `TypeError`, not
         // `undefined`. Silently answering `undefined` hides the mistake and
@@ -475,7 +484,7 @@ impl Interpreter {
         let is_getter = name_matches("get ")?;
         let is_setter_only = !is_getter && name_matches("set ")?;
         if is_getter {
-            return self.call_this(&v, o.clone(), vec![]);
+            return self.call_this(&v, receiver.clone(), vec![]);
         }
         if is_setter_only {
             return Ok(Value::Undefined);
@@ -488,7 +497,16 @@ impl Interpreter {
     /// `&str` end to end: no key `String` and no key `Value` is allocated.
     /// Proxy targets still allocate the trap key, exactly as before.
     pub(crate) fn get_prop_value_str(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
-        let value = self.get_prop_value_str_inner(o, key)?;
+        self.get_prop_value_str_with_receiver(o, key, o)
+    }
+
+    fn get_prop_value_str_with_receiver(
+        &mut self,
+        o: &Value,
+        key: &str,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
+        let value = self.get_prop_value_str_inner(o, key, receiver)?;
         if matches!(value, Value::Uninitialized) {
             return Err(VmErr::Msg(format!(
                 "ReferenceError: Cannot access '{key}' before initialization"
@@ -496,16 +514,21 @@ impl Interpreter {
         }
         Ok(value)
     }
-    fn get_prop_value_str_inner(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
+    fn get_prop_value_str_inner(
+        &mut self,
+        o: &Value,
+        key: &str,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
         if let Some(proxy) = o.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "get") {
                 let trap_key = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&trap_key)?;
                 let handler = proxy.handler.clone();
-                return self.call_this(&trap, handler, vec![target, trap_key, o.clone()]);
+                return self.call_this(&trap, handler, vec![target, trap_key, receiver.clone()]);
             }
-            return self.get_prop_value_str(&target, key);
+            return self.get_prop_value_str_with_receiver(&target, key, receiver);
         }
         if matches!(o, Value::Null | Value::Undefined) {
             return Err(VmErr::Msg(format!(
@@ -534,7 +557,7 @@ impl Interpreter {
                 .and_then(|name| name.strip_prefix("set "))
                 .is_some_and(|name| name == key);
         if is_getter {
-            return self.call_this(&v, o.clone(), vec![]);
+            return self.call_this(&v, receiver.clone(), vec![]);
         }
         if is_setter_only {
             return Ok(Value::Undefined);
@@ -745,7 +768,7 @@ impl Interpreter {
         match o {
             // `window.x` / `globalThis.x` / `self.x` read a real global.
             Value::GlobalObject => {
-                if let Some(value) = self.persistent_global.borrow().get(k) {
+                if let Some((value, _)) = self.global_property(k) {
                     return Ok(value);
                 }
                 if self.global_keys().iter().any(|key| key == k) {

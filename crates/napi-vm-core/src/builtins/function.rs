@@ -346,29 +346,23 @@ fn function_apply(
 }
 
 fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let mut params: Vec<String> = Vec::new();
-    for value in a.iter().take(a.len().saturating_sub(1)) {
-        // One argument may list several parameters: `new Function('a, b', …)`.
-        for name in interp.vs(value)?.split(',') {
-            let name = name.trim();
-            if !name.is_empty() {
-                params.push(name.to_string());
-            }
+    let mut parameter_source = crate::JsString::default();
+    for (index, value) in a.iter().take(a.len().saturating_sub(1)).enumerate() {
+        if index != 0 {
+            parameter_source.push(',');
         }
+        parameter_source.push_str(interp.display_string(value)?);
     }
     let body_source = match a.last() {
         Some(value) => interp.display_string(value)?,
         None => crate::JsString::default(),
     };
-
-    let mut parser = crate::Parser::new_with_spans(
-        crate::Lexer::from_js_string(&body_source).tokenize_with_spans(),
-    );
-    let body = std::sync::Arc::new(
-        parser
-            .parse_program()
-            .map_err(|e| VmErr::Msg(format!("SyntaxError: {}", e.message)))?,
-    );
+    // Parse each grammar component separately to prevent a parameter/body
+    // string from escaping its delimiters, then parse together for strict
+    // parameter/body early errors. Preserve original UTF-16 code units.
+    parse_dynamic_function(&parameter_source, &crate::JsString::default())?;
+    parse_dynamic_function(&crate::JsString::default(), &body_source)?;
+    let (params, body) = parse_dynamic_function(&parameter_source, &body_source)?;
 
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
     let needs_hoisting = body_needs_hoisting(&body);
@@ -392,4 +386,33 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         needs_hoisting,
         bound: None,
     })))
+}
+
+fn parse_dynamic_function(
+    params: &crate::JsString,
+    body: &crate::JsString,
+) -> Result<(Vec<String>, Vec<crate::parser::Statement>), VmErr> {
+    let mut source = crate::JsString::from("function anonymous(\n");
+    source.push_str(params.clone());
+    source.push_str("\n) {\n");
+    source.push_str(body.clone());
+    source.push_str("\n}");
+    let mut parser =
+        crate::Parser::new_with_spans(crate::Lexer::from_js_string(&source).tokenize_with_spans());
+    let mut parsed = parser
+        .parse_program()
+        .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
+    if parsed.len() != 1 {
+        return Err(VmErr::Msg(
+            "SyntaxError: invalid dynamic function source".into(),
+        ));
+    }
+    match parsed.pop() {
+        Some(crate::parser::Statement::FnDecl {
+            name, params, body, ..
+        }) if name == "anonymous" => Ok((params, body)),
+        _ => Err(VmErr::Msg(
+            "SyntaxError: invalid dynamic function source".into(),
+        )),
+    }
 }

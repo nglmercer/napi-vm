@@ -222,7 +222,8 @@ impl Interpreter {
             .borrow()
             .get(SUPER_PROTO)
             .ok_or_else(|| VmErr::Msg("'super' used outside a derived class".to_string()))?;
-        self.get_prop_value(&proto, key)
+        let receiver = self.global.borrow().get("this").unwrap_or(Value::Undefined);
+        self.get_prop_value_with_receiver(&proto, key, &receiver)
     }
 
     /// Build a class value from its parts: prototype methods and accessors,
@@ -621,7 +622,7 @@ impl Interpreter {
         let super_ctor_value = Self::super_ctor_for(&super_cls);
         let ctor_closure = match super_ctor_value {
             Some(target) => {
-                let env = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+                let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
                 env.borrow_mut().set("__super_ctor", target);
                 env
             }
@@ -1747,7 +1748,7 @@ impl Interpreter {
         self.consume_fuel(1)?;
         match e {
             Expr::Number(n) => Ok(Value::Number(*n)),
-            Expr::String(s) => {
+            Expr::String(s) | Expr::EscapedString(s) => {
                 if s.len() > crate::value::MAX_STRING_LEN {
                     return Err(crate::value::limit_err("Maximum string length exceeded"));
                 }
@@ -1946,6 +1947,15 @@ impl Interpreter {
                 }
             }
             Expr::Call { callee, args } => {
+                // Direct eval is determined by syntax and the original intrinsic,
+                // not by a function's display name. Resolve before arguments.
+                let direct_eval =
+                    matches!(callee.as_ref(), Expr::Identifier(name) if name == "eval");
+                let evaluated_eval = if direct_eval {
+                    Some(self.eval_expr(callee)?)
+                } else {
+                    None
+                };
                 let mut a = Vec::new();
                 for x in args {
                     match x {
@@ -2033,8 +2043,15 @@ impl Interpreter {
                         self.call_this(&f, obj, a)
                     }
                     _ => {
-                        let c = self.eval_expr(callee)?;
-                        self.call_this(&c, Value::Undefined, a)
+                        let c = match evaluated_eval {
+                            Some(value) => value,
+                            None => self.eval_expr(callee)?,
+                        };
+                        if direct_eval && crate::builtins::is_intrinsic_eval(&c) {
+                            crate::builtins::eval_direct(self, a)
+                        } else {
+                            self.call_this(&c, Value::Undefined, a)
+                        }
                     }
                 }
             }
@@ -2285,7 +2302,13 @@ impl Interpreter {
                 self.ctor(&c, a)
             }
             Expr::Spread(i) => self.eval_expr(i),
-            Expr::This => Ok(self.global.borrow().get("this").unwrap_or(Value::Undefined)),
+            Expr::This => Ok(self.global.borrow().get("this").unwrap_or_else(|| {
+                if self.cur_mod.is_some() {
+                    Value::Undefined
+                } else {
+                    Value::GlobalObject
+                }
+            })),
             // `import(specifier)`. Module registration is synchronous in this
             // VM, so the promise is already settled when it is handed back;
             // `await import(…)` and `.then(…)` both work.
@@ -2294,6 +2317,11 @@ impl Interpreter {
                 self.eval_dynamic_import(specifier)
             }
             Expr::ImportMeta => self.eval_import_meta(),
+            Expr::NewTarget => self
+                .global
+                .borrow()
+                .new_target()
+                .ok_or_else(|| VmErr::Msg("SyntaxError: new.target outside a function".into())),
             // `` tag`a${x}b` ``: the tag receives the literal chunks as an
             // array carrying a `raw` companion, then the interpolated values.
             Expr::TaggedTemplate {

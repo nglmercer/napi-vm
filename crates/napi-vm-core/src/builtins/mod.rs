@@ -133,22 +133,19 @@ pub fn setup_builtins(env: &Env) {
     e.set("Infinity", Value::Number(f64::INFINITY));
     e.set("NaN", Value::Number(f64::NAN));
     e.set("undefined", Value::Undefined);
-    e.set(
-        "eval",
-        nf("eval", |interp, _, args| match args.first() {
-            Some(Value::String(source)) => {
-                let mut parser = crate::Parser::new_with_spans(
-                    crate::Lexer::from_js_string(source).tokenize_with_spans(),
-                );
-                let body = parser
-                    .parse_program()
-                    .map_err(|e| VmErr::Msg(format!("SyntaxError: {}", e.message)))?;
-                interp.run_program_body(&body)
-            }
-            Some(value) => Ok(value.clone()),
-            None => Ok(Value::Undefined),
-        }),
-    );
+    e.set("eval", nf("eval", eval_indirect));
+    for name in e.own_keys() {
+        let immutable = matches!(name.as_str(), "Infinity" | "NaN" | "undefined");
+        e.set_property_attributes(
+            &name,
+            PropAttrs {
+                writable: !immutable,
+                enumerable: false,
+                configurable: !immutable,
+            },
+        );
+    }
+    e.snapshot_intrinsics();
 }
 
 /// Overwrite the placeholder members above with real native implementations.
@@ -361,6 +358,35 @@ fn join_str(interp: &Interpreter, v: &Value) -> Result<crate::JsString, VmErr> {
 }
 
 // --- Global functions -------------------------------------------------------
+
+pub(crate) fn is_intrinsic_eval(value: &Value) -> bool {
+    matches!(value, Value::NativeFunction { callable, .. } if std::ptr::fn_addr_eq(*callable, eval_indirect as NativeFn))
+}
+
+pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
+    match args.first() {
+        Some(Value::String(source)) => {
+            let mut parser = crate::Parser::new_with_spans(
+                crate::Lexer::from_js_string(source).tokenize_with_spans(),
+            );
+            let body = parser
+                .parse_program_in_context(interp.global.borrow().new_target().is_some())
+                .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
+            interp.run_program_body(&body)
+        }
+        Some(value) => Ok(value.clone()),
+        None => Ok(Value::Undefined),
+    }
+}
+
+fn eval_indirect(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let saved_global = std::mem::replace(&mut interp.global, interp.persistent_global.clone());
+    let saved_module = interp.cur_mod.take();
+    let result = eval_direct(interp, args);
+    interp.global = saved_global;
+    interp.cur_mod = saved_module;
+    result
+}
 
 fn global_is_nan(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let n = a.first().map(|v| v.to_number()).unwrap_or(f64::NAN);

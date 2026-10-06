@@ -794,9 +794,9 @@ fn labeled_statements() {
         "let i = 0; d: do { i++; if (i === 2) { break d; } } while (i < 5); i",
         true,
     );
-    // Unresolvable labels decline to the AST tier.
-    check("outer: for (;;) { break missing; }", false);
-    check("blk: { continue blk; }", false);
+    // Invalid control-flow targets are early errors in every execution tier.
+    assert!(parse_cached("outer: for (;;) { break missing; }").is_err());
+    assert!(parse_cached("blk: { continue blk; }").is_err());
 }
 
 #[test]
@@ -899,7 +899,7 @@ fn destructuring_declarations() {
     // Object patterns reject nullish sources.
     check("let {a} = null; 1", true);
     check("let {a} = undefined; 1", true);
-    // Declaration holes bind the rest, leaving later names in the dead zone.
+    // Declaration elisions consume a position without binding a name.
     check("let [, b] = [1, 2]; b", true);
     // Missing initializers destructure `undefined`.
     check("var [a]; a === undefined", true);
@@ -943,7 +943,7 @@ fn destructuring_assignment() {
     check("let a, b; [a, [b]] = [1, [2]]; a + b", true);
     check("let a, r; [a, ...r] = [1, 2, 3]; a + r.length", true);
     check("let a, r; ({a, ...r} = {a: 1, b: 2}); a + r.b", true);
-    // Assignment holes assign a scratch binding and keep going.
+    // Assignment elisions leave all bindings untouched.
     check("let a; [, a] = [1, 2]; a", true);
     // Nullish object sources throw; array sources tolerate anything.
     check("let a; ({a} = null); 1", true);

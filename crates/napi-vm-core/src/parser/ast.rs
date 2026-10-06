@@ -102,6 +102,8 @@ pub enum Expr {
     /// A `BigInt` literal, carrying its digits.
     BigIntLiteral(String),
     String(crate::JsString),
+    /// Decoded string with escaped spelling, retained for directive semantics.
+    EscapedString(crate::JsString),
     /// `/pattern/flags`.
     Regex(crate::JsString, String),
     Bool(bool),
@@ -184,6 +186,7 @@ pub enum Expr {
     This,
     Super,
     ImportMeta,
+    NewTarget,
     /// `import(specifier)`: resolves to the module's namespace object.
     DynamicImport(Box<Expr>),
     Template {
@@ -415,6 +418,8 @@ pub enum PatternKey {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
+    /// An array-pattern elision consumes a position without binding a name.
+    Elision,
     Ident(String),
     Array(Vec<Pattern>),
     Object(Vec<(PatternKey, Option<Pattern>)>),
@@ -447,6 +452,7 @@ pub fn pattern_names(pattern: &Pattern) -> Vec<String> {
 
 fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
     match pattern {
+        Pattern::Elision => {}
         Pattern::Ident(name) => out.push(name.clone()),
         // A property target binds no name.
         Pattern::Member { .. } => {}
@@ -830,6 +836,7 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
         Expr::Number(_)
         | Expr::BigIntLiteral(_)
         | Expr::String(_)
+        | Expr::EscapedString(_)
         | Expr::Regex(_, _)
         | Expr::Bool(_)
         | Expr::Null
@@ -837,7 +844,8 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
         | Expr::Identifier(_)
         | Expr::This
         | Expr::Super
-        | Expr::ImportMeta => false,
+        | Expr::ImportMeta
+        | Expr::NewTarget => false,
     }
 }
 
@@ -881,7 +889,7 @@ fn class_members_capture_identifier(members: &[ClassMember], name: &str) -> bool
 
 fn pattern_captures_identifier(pattern: &Pattern, name: &str) -> bool {
     match pattern {
-        Pattern::Ident(_) => false,
+        Pattern::Elision | Pattern::Ident(_) => false,
         Pattern::Array(items) => items
             .iter()
             .any(|item| pattern_captures_identifier(item, name)),
@@ -1124,12 +1132,14 @@ fn expr_references(e: &Expr, name: &str) -> bool {
             .unwrap_or(false),
         Expr::Number(_)
         | Expr::String(_)
+        | Expr::EscapedString(_)
         | Expr::Bool(_)
         | Expr::Null
         | Expr::Undefined
         | Expr::This
         | Expr::Super
-        | Expr::ImportMeta => false,
+        | Expr::ImportMeta
+        | Expr::NewTarget => false,
         Expr::DynamicImport(specifier) => expr_references(specifier, name),
     }
 }
@@ -1154,7 +1164,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
                         expr_to_pattern(inner).map(|p| Pattern::Rest(Box::new(p)))
                     }
                     // A hole (`[, a] = …`) skips a position.
-                    Expr::Undefined => Some(Pattern::Ident("hole".to_string())),
+                    Expr::Undefined => Some(Pattern::Elision),
                     other => expr_to_pattern(other),
                 })
                 .collect::<Option<Vec<_>>>()?,
@@ -1194,7 +1204,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
 
 fn pattern_references(p: &Pattern, name: &str) -> bool {
     match p {
-        Pattern::Ident(_) | Pattern::Rest(_) => false,
+        Pattern::Elision | Pattern::Ident(_) | Pattern::Rest(_) => false,
         Pattern::Member { object, property } => {
             expr_references(object, name) || expr_references(property, name)
         }

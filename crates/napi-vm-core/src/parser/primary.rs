@@ -17,10 +17,15 @@ impl Parser {
                 self.adv();
                 Some(Expr::Number(v))
             }
-            Token::String(s) => {
-                let v = s.clone();
+            Token::String(s) | Token::EscapedString(s) => {
+                let escaped = matches!(self.cur(), Token::EscapedString(_));
+                let value = s.clone();
                 self.adv();
-                Some(Expr::String(v))
+                Some(if escaped {
+                    Expr::EscapedString(value)
+                } else {
+                    Expr::String(value)
+                })
             }
             Token::KwTrue => {
                 self.adv();
@@ -113,7 +118,7 @@ impl Parser {
                     let is_method = self.starts_accessor(&Token::KwGet) && self.eat(&Token::KwGet);
                     let is_setter = self.starts_accessor(&Token::KwSet) && self.eat(&Token::KwSet);
                     let key = match self.cur() {
-                        Token::String(s) => {
+                        Token::String(s) | Token::EscapedString(s) => {
                             let v = s.to_key();
                             self.adv();
                             v
@@ -144,6 +149,7 @@ impl Parser {
                                     self.eat(&Token::LBrace);
                                     let b = self.block_body();
                                     self.expect(&Token::RBrace);
+                                    self.check_parameters(&params, &defaults, &b, true);
                                     let mut body = defaults;
                                     body.extend(b);
                                     // If the computed key is a simple literal,
@@ -155,7 +161,9 @@ impl Parser {
                                     // is a variable to evaluate — `{ [k]() {} }`
                                     // names the property `k` holds, not "k".
                                     let key_str = match &e {
-                                        Expr::String(s) => Some(s.to_key()),
+                                        Expr::String(s) | Expr::EscapedString(s) => {
+                                            Some(s.to_key())
+                                        }
                                         Expr::Number(n) => Some(n.to_string()),
                                         _ => None,
                                     };
@@ -226,6 +234,7 @@ impl Parser {
                         self.eat(&Token::LBrace);
                         let b = self.block_body();
                         self.expect(&Token::RBrace);
+                        self.check_parameters(&params, &defaults, &b, true);
                         let mut body = defaults;
                         body.extend(b);
                         if is_method {
@@ -287,6 +296,13 @@ impl Parser {
             }
             Token::KwNew => {
                 self.adv();
+                if self.eat(&Token::Dot) {
+                    if self.ident().as_deref() != Some("target") {
+                        self.record_error("expected target after new.".into());
+                        return None;
+                    }
+                    return Some(Expr::NewTarget);
+                }
                 let c = self.new_callee()?;
                 let a = if self.eat(&Token::LParen) {
                     let mut ag = Vec::new();
@@ -499,6 +515,7 @@ impl Parser {
         self.eat(&Token::LBrace);
         let b = self.block_body();
         self.expect(&Token::RBrace);
+        self.check_parameters(&p, &defaults, &b, is_async || is_generator);
         let mut body = defaults;
         body.extend(b);
         Some(Expr::FnExpr {
@@ -537,6 +554,7 @@ impl Parser {
         if self.eat(&Token::LBrace) {
             let b = self.block_body();
             self.expect(&Token::RBrace);
+            self.check_parameters(&params, &defaults, &b, true);
             let mut body = defaults;
             body.extend(b);
             Expr::ArrowFn {
@@ -546,6 +564,7 @@ impl Parser {
             }
         } else {
             let e = self.assign().unwrap_or(Expr::Undefined);
+            self.check_parameters(&params, &defaults, &[], true);
             if defaults.is_empty() {
                 Expr::ArrowFn {
                     params,

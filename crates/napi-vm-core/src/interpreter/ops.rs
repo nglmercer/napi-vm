@@ -452,7 +452,16 @@ impl Interpreter {
         }
     }
 
-    pub fn un_op(&self, op: UnOp, v: &Value) -> Result<Value, VmErr> {
+    pub fn un_op(&mut self, op: UnOp, v: &Value) -> Result<Value, VmErr> {
+        let primitive = if matches!(
+            op,
+            UnOp::Neg | UnOp::Pos | UnOp::BitNot | UnOp::Inc | UnOp::Dec
+        ) {
+            Some(self.coerce_object_to_primitive(v, "number")?)
+        } else {
+            None
+        };
+        let v = primitive.as_ref().unwrap_or(v);
         // `-`, `~`, `++` and `--` stay in the BigInt domain; `+` on a BigInt
         // is a TypeError, since it would have to narrow to a Number.
         if let Some(value) = v.as_bigint() {
@@ -480,9 +489,9 @@ impl Interpreter {
         }
         Ok(match op {
             UnOp::Not => Value::Bool(!self.truthy(v)),
-            UnOp::Neg => Value::Number(-self.tn(v)),
-            UnOp::Pos => Value::Number(self.tn(v)),
-            UnOp::BitNot => Value::Number(!to_int32(self.tn(v)) as f64),
+            UnOp::Neg => Value::Number(-self.ecmascript_to_number(v)?),
+            UnOp::Pos => Value::Number(self.ecmascript_to_number(v)?),
+            UnOp::BitNot => Value::Number(!to_int32(self.ecmascript_to_number(v)?) as f64),
             UnOp::Typeof if super::call::callable_slot(v, super::call::CALL_SLOT).is_some() => {
                 Value::String(("function".to_string()).into())
             }
@@ -553,7 +562,14 @@ impl Interpreter {
                 .filter(|index| i.has_index(*index))
                 .map(|x| x.to_string())
                 .collect(),
-            Value::GlobalObject => self.global_keys(),
+            Value::GlobalObject => self
+                .global_keys()
+                .into_iter()
+                .filter(|key| {
+                    self.global_property(key)
+                        .is_some_and(|(_, attrs)| attrs.enumerable)
+                })
+                .collect(),
             _ => vec![],
         }
     }

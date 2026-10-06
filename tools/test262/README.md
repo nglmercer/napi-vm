@@ -68,8 +68,10 @@ python3 tools/test262/triage.py artifacts/test262/full-results.json \
 See `docs/test262-conformance-validation.md` for the current validation evidence.
 
 
-Known runner limitations: `$262.createRealm`, agents, GC and
-detachArrayBuffer hooks are incomplete.
+Known runner limitations: `$262.createRealm` and agents are not implemented.
+ArrayBuffer detachment is implemented; GC requests run at quiescent host boundaries
+and do not guarantee synchronous collection or finalization.
+See [phases 1–3 implementation notes](../../docs/test262-phases-1-3.md).
 Those limitations contribute failures or harness errors; they are not silently
 removed from the denominator. No stable compatibility claim is made.
 

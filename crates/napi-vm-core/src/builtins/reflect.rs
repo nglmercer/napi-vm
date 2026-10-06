@@ -69,7 +69,15 @@ fn arg(a: &[Value], i: usize) -> Value {
 }
 
 fn reflect_get(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    interp.get_prop_value(&arg(&a, 0), &arg(&a, 1))
+    let target = arg(&a, 0);
+    if !crate::interpreter::call::is_js_object(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect.get target must be an object".into(),
+        ));
+    }
+    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    let receiver = a.get(2).cloned().unwrap_or_else(|| target.clone());
+    interp.get_prop_value_with_receiver(&target, &key, &receiver)
 }
 
 fn reflect_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

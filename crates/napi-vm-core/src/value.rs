@@ -987,7 +987,7 @@ impl FunctionData {
     pub fn default_function_prototype(global: &Env) -> Option<Value> {
         global
             .borrow()
-            .get("Function")
+            .intrinsic("Function")
             .and_then(|constructor| constructor.get_prop("prototype"))
     }
 

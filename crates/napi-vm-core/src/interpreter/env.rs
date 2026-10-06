@@ -216,6 +216,9 @@ pub struct Environment {
     /// function/catch frames and the trusted builtins frame leave this unset.
     global_limit: Option<usize>,
     module_context: Option<String>,
+    new_target: Option<Value>,
+    property_attributes: HashMap<String, crate::value::PropAttrs>,
+    intrinsics: HashMap<String, Value>,
 }
 
 impl std::fmt::Debug for Environment {
@@ -231,6 +234,87 @@ impl Default for Environment {
 }
 
 impl Environment {
+    pub(crate) fn snapshot_intrinsics(&mut self) {
+        self.intrinsics = self
+            .own_keys()
+            .into_iter()
+            .filter_map(|name| self.own_binding(&name).map(|value| (name, value)))
+            .collect();
+    }
+
+    pub(crate) fn intrinsic(&self, name: &str) -> Option<Value> {
+        self.intrinsics
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|parent| parent.borrow().intrinsic(name))
+            })
+            .or_else(|| self.get(name))
+    }
+
+    pub(crate) fn set_property_attributes(&mut self, name: &str, attrs: crate::value::PropAttrs) {
+        self.property_attributes.insert(name.into(), attrs);
+    }
+
+    pub(crate) fn global_property(&self, name: &str) -> Option<(Value, crate::value::PropAttrs)> {
+        if let Some(binding) = self.vars.get(name)
+            && (binding.kind == BindKind::Var || self.property_attributes.contains_key(name))
+        {
+            return Some((
+                binding.value.deref_binding(),
+                self.property_attributes
+                    .get(name)
+                    .copied()
+                    .unwrap_or_default(),
+            ));
+        }
+        self.parent
+            .as_ref()
+            .and_then(|p| p.borrow().global_property(name))
+    }
+
+    pub(crate) fn delete_global_property(&mut self, name: &str) -> bool {
+        let Some((_, attrs)) = self.global_property(name) else {
+            return true;
+        };
+        if !attrs.configurable {
+            return false;
+        }
+        if self
+            .vars
+            .get(name)
+            .is_some_and(|binding| binding.kind == BindKind::Var)
+        {
+            self.remove(name);
+        }
+        self.property_attributes.remove(name);
+        // User shadows and the builtin parent represent one global property;
+        // deleting it must not reveal an earlier value from that parent.
+        if let Some(parent) = &self.parent {
+            parent.borrow_mut().delete_global_property(name);
+        }
+        true
+    }
+
+    pub(crate) fn global_property_keys(&self) -> Vec<String> {
+        self.all_keys()
+            .into_iter()
+            .filter(|name| self.global_property(name).is_some())
+            .collect()
+    }
+
+    pub(crate) fn set_new_target(&mut self, target: Value) {
+        self.new_target = Some(target);
+    }
+
+    pub(crate) fn new_target(&self) -> Option<Value> {
+        self.new_target
+            .clone()
+            .or_else(|| self.parent.as_ref().and_then(|p| p.borrow().new_target()))
+    }
+
     pub(crate) fn set_module_context(&mut self, name: &str) {
         self.module_context = Some(name.into());
     }
@@ -247,6 +331,9 @@ impl Environment {
             parent: None,
             global_limit: None,
             module_context: None,
+            new_target: None,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -256,6 +343,9 @@ impl Environment {
             parent: Some(p),
             global_limit: None,
             module_context: None,
+            new_target: None,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -268,6 +358,9 @@ impl Environment {
             parent,
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
+            new_target: None,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -292,6 +385,9 @@ impl Environment {
             parent: Some(p),
             global_limit: None,
             module_context: None,
+            new_target: None,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -336,6 +432,16 @@ impl Environment {
     /// `initialized: false` puts a `let`/`const` into its temporal dead zone;
     /// the declaration statement later calls [`Environment::initialize`].
     pub fn declare(&mut self, n: &str, value: Value, kind: BindKind, initialized: bool) {
+        if self.global_limit.is_some() && kind == BindKind::Var {
+            let attrs = self.global_property(n).map(|(_, attrs)| attrs).unwrap_or(
+                crate::value::PropAttrs {
+                    writable: true,
+                    enumerable: true,
+                    configurable: false,
+                },
+            );
+            self.property_attributes.entry(n.into()).or_insert(attrs);
+        }
         let binding = Binding {
             value,
             kind,
@@ -622,7 +728,10 @@ impl Environment {
     /// shared frame (shared scopes stay alive and drop themselves later).
     /// Bound values for the cycle collector's marker.
     pub(crate) fn trace_values(&self) -> Vec<Value> {
-        self.vars.values_cloned()
+        let mut values = self.vars.values_cloned();
+        values.extend(self.new_target.iter().cloned());
+        values.extend(self.intrinsics.values().cloned());
+        values
     }
 
     /// Parent link for the cycle collector's marker.
@@ -635,6 +744,9 @@ impl Environment {
     #[doc(hidden)]
     pub fn clear_edges(&mut self) {
         self.vars.clear();
+        self.property_attributes.clear();
+        self.intrinsics.clear();
+        self.new_target = None;
         self.parent = None;
     }
 
@@ -645,6 +757,8 @@ impl Environment {
                 Ok(cell) => {
                     let mut env = cell.into_inner();
                     env.vars.drain_into(work);
+                    work.extend(env.new_target.take());
+                    work.extend(env.intrinsics.drain().map(|(_, value)| value));
                     cur = env.parent.take();
                 }
                 Err(_) => break,

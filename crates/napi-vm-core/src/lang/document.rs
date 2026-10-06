@@ -909,7 +909,7 @@ impl Builder<'_> {
     fn expr(&mut self, expr: &Expr, env: &mut HashMap<String, Type>) -> Type {
         match expr {
             Expr::Number(_) => Type::Number,
-            Expr::String(_) | Expr::Template { .. } => Type::String,
+            Expr::String(_) | Expr::EscapedString(_) | Expr::Template { .. } => Type::String,
             // A tag can return anything, so its call site is unconstrained.
             Expr::TaggedTemplate { .. } => Type::Unknown,
             // `import(…)` resolves to a namespace object.
@@ -1053,7 +1053,7 @@ impl Builder<'_> {
                 let object_ty = self.expr(object, env);
                 let name = match property.as_ref() {
                     Expr::Identifier(name) => name.clone(),
-                    Expr::String(name) => name.to_string(),
+                    Expr::String(name) | Expr::EscapedString(name) => name.to_string(),
                     _ => return Type::Unknown,
                 };
                 let property_ty = object_ty.property(&name);
@@ -1109,9 +1109,12 @@ impl Builder<'_> {
             Expr::Unary { .. } => Type::Number,
             Expr::Assignment { value, .. } => self.expr(value, env),
             Expr::Spread(value) => self.expr(value, env),
-            Expr::This | Expr::Super | Expr::ImportMeta | Expr::Yield(_) | Expr::YieldFrom(_) => {
-                Type::Unknown
-            }
+            Expr::This
+            | Expr::Super
+            | Expr::ImportMeta
+            | Expr::NewTarget
+            | Expr::Yield(_)
+            | Expr::YieldFrom(_) => Type::Unknown,
         }
     }
 
@@ -1273,7 +1276,7 @@ fn position_at(source: &str, offset: usize) -> (usize, usize) {
 fn expression_property_name(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Identifier(name) => Some(name),
-        Expr::String(name) => Some(name.as_str()),
+        Expr::String(name) | Expr::EscapedString(name) => Some(name.as_str()),
         _ => None,
     }
 }

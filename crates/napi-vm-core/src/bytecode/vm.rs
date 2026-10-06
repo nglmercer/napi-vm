@@ -208,11 +208,15 @@ pub(crate) fn run_function(
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
-    let fe = if code.needs_frame_environment {
+    let fe = if code.needs_frame_environment || !code.is_arrow {
         Rc::new(RefCell::new(Environment::child(parent_env)))
     } else {
         parent_env
     };
+    if !code.is_arrow {
+        fe.borrow_mut()
+            .set_new_target(interp.pending_new_target.take().unwrap_or(Value::Undefined));
+    }
     if code.needs_frame_environment {
         if !code.is_arrow {
             fe.borrow_mut().set("this", this_value.clone());
@@ -538,7 +542,13 @@ fn run_loop(
                 Instr::LoadGlobalThis { dst } => {
                     let scope = current_scope(interp, frame);
                     frame.registers[dst as usize] =
-                        scope.borrow().get("this").unwrap_or(Value::Undefined);
+                        scope.borrow().get("this").unwrap_or_else(|| {
+                            if interp.cur_mod.is_some() {
+                                Value::Undefined
+                            } else {
+                                Value::GlobalObject
+                            }
+                        });
                 }
                 Instr::TypeofGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
@@ -726,6 +736,30 @@ fn run_loop(
                         &frame.registers[key as usize],
                         val,
                     )?;
+                }
+                Instr::DirectEval {
+                    dst,
+                    callee,
+                    args,
+                    argc,
+                } => {
+                    let argv = take_range(frame, args, argc)?;
+                    let callee = frame.registers[callee as usize].clone_for_execution();
+                    frame.registers[dst as usize] = if crate::builtins::is_intrinsic_eval(&callee) {
+                        crate::builtins::eval_direct(interp, argv)?
+                    } else {
+                        interp.call_this(&callee, Value::Undefined, argv)?
+                    };
+                }
+                Instr::DirectEvalSpread { dst, callee, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let argv = spread_argv(frame, &template)?;
+                    let callee = frame.registers[callee as usize].clone_for_execution();
+                    frame.registers[dst as usize] = if crate::builtins::is_intrinsic_eval(&callee) {
+                        crate::builtins::eval_direct(interp, argv)?
+                    } else {
+                        interp.call_this(&callee, Value::Undefined, argv)?
+                    };
                 }
                 Instr::Call {
                     dst,
@@ -969,7 +1003,8 @@ fn run_loop(
                         ));
                     };
                     let key = frame.registers[key as usize].clone_for_execution();
-                    frame.registers[dst as usize] = interp.get_prop_value(&proto, &key)?;
+                    frame.registers[dst as usize] =
+                        interp.get_prop_value_with_receiver(&proto, &key, &frame.this_value)?;
                 }
                 Instr::SuperCall { dst, args, argc } => {
                     let argv = take_range(frame, args, argc)?;
@@ -1034,6 +1069,12 @@ fn run_loop(
                 Instr::Await { dst, src } => {
                     let value = frame.registers[src as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.perform_await(value)?;
+                }
+                Instr::NewTarget { dst } => {
+                    frame.registers[dst as usize] =
+                        interp.global.borrow().new_target().ok_or_else(|| {
+                            VmErr::Msg("SyntaxError: new.target outside a function".into())
+                        })?;
                 }
                 Instr::ImportMeta { dst } => {
                     frame.registers[dst as usize] = interp.eval_import_meta()?;
@@ -1280,7 +1321,7 @@ fn build_class_from_template(
     let ctor_closure = match (&super_ctor_value, template.ctor_computed_keys.is_empty()) {
         (None, true) => def_scope.clone(),
         _ => {
-            let env = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+            let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
             if let Some(target) = super_ctor_value {
                 env.borrow_mut().set("__super_ctor", target);
             }

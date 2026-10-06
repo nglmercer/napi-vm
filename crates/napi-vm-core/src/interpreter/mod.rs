@@ -266,6 +266,7 @@ pub struct Interpreter {
     /// inherits the original `new.target` when it calls a host constructor
     /// through `super()`.
     pub(crate) new_target_stack: Vec<Value>,
+    pub(crate) pending_new_target: Option<Value>,
     /// The source code for the current module/script, used to extract
     /// source lines for error context. Stored as lines for efficient lookup.
     source_lines: SourceContext,
@@ -430,6 +431,7 @@ impl Interpreter {
             this_binding_key: None,
             anonymous_frame_name: None,
             new_target_stack: Vec::new(),
+            pending_new_target: None,
             source_lines: SourceContext::default(),
             prepared_cache: PreparedCache::default(),
             collection_threshold: 4096,
@@ -935,7 +937,12 @@ export default { createRequire, isBuiltin, builtinModules };
     pub fn gc_roots(&self) -> crate::heap::GcRoots {
         let mut roots = crate::heap::GcRoots {
             envs: vec![self.global.clone(), self.persistent_global.clone()],
-            values: self.new_target_stack.clone(),
+            values: self
+                .new_target_stack
+                .iter()
+                .cloned()
+                .chain(self.pending_new_target.iter().cloned())
+                .collect(),
             jobs: vec![self.jobs.clone()],
             modules: vec![self.modules.clone()],
         };
@@ -1406,7 +1413,14 @@ impl Interpreter {
         // own user-global binding. Do not use `assign` here: it walks into the
         // trusted builtins parent and would mutate (for example) builtin
         // `Math` instead of creating a user shadow.
+        let attributes = global.global_property(name).map(|(_, attrs)| attrs);
+        if attributes.is_some_and(|attrs| !attrs.writable) {
+            return Ok(());
+        }
         global.try_set(name, value)?;
+        if let Some(attrs) = attributes {
+            global.set_property_attributes(name, attrs);
+        }
         Ok(())
     }
 
@@ -2093,7 +2107,11 @@ impl Interpreter {
     /// Return all global variable names (user-defined + builtins). Used by
     /// `Object.getOwnPropertyNames(window)`.
     pub fn global_keys(&self) -> Vec<String> {
-        self.persistent_global.borrow().all_keys()
+        self.persistent_global.borrow().global_property_keys()
+    }
+
+    pub(crate) fn global_property(&self, name: &str) -> Option<(Value, crate::value::PropAttrs)> {
+        self.persistent_global.borrow().global_property(name)
     }
 
     /// Enumerate a proxy through its `ownKeys` trap when one is installed.

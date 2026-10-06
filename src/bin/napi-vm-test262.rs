@@ -109,6 +109,33 @@ fn done(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr
     }
     Ok(Value::Undefined)
 }
+fn detach_array_buffer(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let Some(Value::ArrayBuffer(buffer)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: detachArrayBuffer requires an ArrayBuffer".into(),
+        ));
+    };
+    if args
+        .get(1)
+        .is_some_and(|key| !matches!(key, Value::Undefined))
+    {
+        return Err(VmErr::Msg(
+            "TypeError: ArrayBuffer detachment key mismatch".into(),
+        ));
+    }
+    buffer.detach();
+    Ok(Value::Undefined)
+}
+
+fn request_gc(vm: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    // Collection is only safe at a host boundary: defer requests made while
+    // guest frames are live until execute() has returned from evaluation.
+    vm.persistent_global
+        .borrow_mut()
+        .set("__test262_gc_requested", Value::Bool(true));
+    Ok(Value::Undefined)
+}
+
 fn error_type(error: &VmErr) -> String {
     if let VmErr::Throw(value) = error
         && let Some(Value::String(ref name)) = value.get_prop("name")
@@ -197,6 +224,20 @@ fn execute(request: Request) -> Json {
             },
         },
     )]);
+    host.set_prop(
+        "detachArrayBuffer".into(),
+        Value::NativeFunction {
+            name: "detachArrayBuffer".into(),
+            callable: detach_array_buffer,
+        },
+    )
+    .expect("$262.detachArrayBuffer");
+    let gc = Value::NativeFunction {
+        name: "gc".into(),
+        callable: request_gc,
+    };
+    host.set_prop("gc".into(), gc.clone()).expect("$262.gc");
+    vm.global.borrow_mut().set("gc", gc);
     host.set_prop("global".into(), Value::GlobalObject)
         .expect("$262.global");
     vm.global.borrow_mut().set("$262", host);
@@ -220,6 +261,12 @@ fn execute(request: Request) -> Json {
     } else {
         vm.eval_source(&request.source)
     };
+    if matches!(
+        vm.persistent_global.borrow().get("__test262_gc_requested"),
+        Some(Value::Bool(true))
+    ) {
+        vm.collect_cycles();
+    }
     if let Err(error) = result {
         return failure("runtime", &error);
     }

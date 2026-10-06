@@ -107,7 +107,7 @@ impl Parser {
                         self.adv();
                         v
                     }
-                    Token::String(s) => {
+                    Token::String(s) | Token::EscapedString(s) => {
                         let v = s.to_key();
                         self.adv();
                         v
@@ -178,6 +178,7 @@ impl Parser {
                 let bd = self.block_body();
                 self.expect(&Token::RBrace);
                 self.pop_scope(method_scope);
+                self.check_parameters(&p, &defaults, &bd, true);
                 let mut body = defaults;
                 body.extend(bd);
                 if is_getter {
@@ -266,7 +267,7 @@ impl Parser {
                 return None;
             }
             let source = match self.cur() {
-                Token::String(x) => {
+                Token::String(x) | Token::EscapedString(x) => {
                     let v = x.clone();
                     self.adv();
                     v
@@ -305,7 +306,7 @@ impl Parser {
             self.expect(&Token::RBrace);
             let s = if self.eat(&Token::KwFrom) {
                 match self.cur() {
-                    Token::String(x) => {
+                    Token::String(x) | Token::EscapedString(x) => {
                         let v = x.clone();
                         self.adv();
                         Some(v)
@@ -464,7 +465,7 @@ impl Parser {
                 named: nd,
                 namespace: None,
             })
-        } else if let Token::String(s) = self.cur() {
+        } else if let Token::String(s) | Token::EscapedString(s) = self.cur() {
             let m = self.module_specifier(s.clone())?;
             self.adv();
             self.semi();
@@ -496,7 +497,7 @@ impl Parser {
     fn from(&mut self) -> Option<String> {
         self.eat(&Token::KwFrom);
         match self.cur() {
-            Token::String(s) => {
+            Token::String(s) | Token::EscapedString(s) => {
                 let v = self.module_specifier(s.clone())?;
                 self.adv();
                 Some(v)

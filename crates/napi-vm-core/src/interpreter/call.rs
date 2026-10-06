@@ -221,6 +221,7 @@ impl Interpreter {
 
     pub(super) fn destructure(&mut self, pat: &Pattern, val: &Value) -> Result<Value, VmErr> {
         match pat {
+            Pattern::Elision => Ok(Value::Undefined),
             Pattern::Ident(name) => {
                 // A *declaration* pre-declares its names in this scope, still
                 // in their temporal dead zone; giving one its value is an
@@ -270,7 +271,7 @@ impl Interpreter {
                 if let Some(rest_idx) = rest_target
                     && let Pattern::Rest(rest_pat) = &elements[rest_idx]
                 {
-                    let rest_vals = values[rest_idx..].to_vec();
+                    let rest_vals = values.get(rest_idx..).unwrap_or(&[]).to_vec();
                     let rest_val = Value::array(rest_vals);
                     self.destructure(rest_pat, &rest_val)?;
                 }
@@ -396,6 +397,14 @@ impl Interpreter {
             return self.delete_member(&target, key);
         }
         match obj {
+            Value::GlobalObject => {
+                let key = self.property_key(key)?;
+                Ok(Value::Bool(
+                    self.persistent_global
+                        .borrow_mut()
+                        .delete_global_property(&key),
+                ))
+            }
             Value::Object { props } => {
                 let slot = self.property_key(key)?;
                 if !props.meta.borrow().attrs_of(&slot).configurable
@@ -1313,6 +1322,7 @@ impl Interpreter {
                 if fd.bytecode.is_some() {
                     return self.call_this_borrowed(f, this_val, &args);
                 }
+                let new_target = self.pending_new_target.take().unwrap_or(Value::Undefined);
                 let rest_idx = fd.params.iter().position(|p| p.starts_with("..."));
                 let fe = match rest_idx {
                     // Fast path (the overwhelming majority of calls): no rest
@@ -1385,6 +1395,10 @@ impl Interpreter {
                         fe
                     }
                 };
+
+                if !fd.is_arrow {
+                    fe.borrow_mut().set_new_target(new_target);
+                }
 
                 // An async body runs on its own stack so `await` can suspend
                 // it. The frame is already built, so the coroutine starts
@@ -1624,7 +1638,7 @@ impl Interpreter {
                         new_target,
                     )
                 } else {
-                    self.call_this(f, this_val, args)
+                    self.call_constructor_body(f, this_val, args, new_target)
                 }
             }
             // The built-in error types have native constructors, so
@@ -1675,6 +1689,19 @@ impl Interpreter {
                 vm_err(format!("TypeError: {} is not a constructor", type_name))
             }
         }
+    }
+
+    fn call_constructor_body(
+        &mut self,
+        f: &Value,
+        this: Value,
+        args: Vec<Value>,
+        target: Value,
+    ) -> Result<Value, VmErr> {
+        let saved = self.pending_new_target.replace(target);
+        let result = self.call_this(f, this, args);
+        self.pending_new_target = saved;
+        result
     }
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
@@ -1800,7 +1827,7 @@ impl Interpreter {
                 // Constructors share ordinary function call admission, stack
                 // growth and error propagation. Only their return-value rule
                 // differs: an explicit object replaces the fresh instance.
-                match self.call_this(f, inst.clone(), args) {
+                match self.call_constructor_body(f, inst.clone(), args, new_target) {
                     Ok(value) if is_js_object(&value) => Ok(value),
                     Ok(_) => Ok(inst),
                     Err(error) => Err(error),
@@ -1886,6 +1913,7 @@ fn make_generator_coroutine(
             // Bind parameters in a child of the defining scope.
             let parent_env = closure.unwrap_or_else(|| interp.global.clone());
             let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+            fe.borrow_mut().set_new_target(Value::Undefined);
             for (i, p) in params.iter().enumerate() {
                 let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
                 fe.borrow_mut().set(p, arg);
@@ -2072,6 +2100,7 @@ fn run_buffered_generator(
     let sink: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
     let parent_env = closure.unwrap_or_else(|| interp.global.clone());
     let frame = Rc::new(RefCell::new(Environment::child(parent_env)));
+    frame.borrow_mut().set_new_target(Value::Undefined);
     for (index, param) in params.iter().enumerate() {
         let arg = args.get(index).cloned().unwrap_or(Value::Undefined);
         frame.borrow_mut().set(param, arg);
