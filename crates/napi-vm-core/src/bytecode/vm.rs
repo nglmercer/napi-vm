@@ -1618,6 +1618,7 @@ fn make_function(
         .map(|slot| slot.name.clone())
         .collect();
     Value::Function(Rc::new(FunctionData {
+        native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| code.name.as_deref().map(Rc::from)),
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
@@ -1655,6 +1656,7 @@ fn make_ast_function(
     name_override: Option<Rc<str>>,
 ) -> Value {
     Value::Function(Rc::new(FunctionData {
+        native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| ast.name.as_deref().map(Rc::from)),
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),

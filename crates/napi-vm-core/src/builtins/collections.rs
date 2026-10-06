@@ -16,7 +16,7 @@ use std::rc::Rc;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter, strict_equals};
 use crate::value::weak::{WeakStorage, WeakTarget};
-use crate::value::{ArrayCell, ObjectCell, Value};
+use crate::value::{ArrayCell, CollectionKind as Kind, ObjectCell, Value};
 
 /// Slot holding a collection's entries: `[key, value]` pairs for a map,
 /// `[value, value]` for a set, so one storage shape serves both.
@@ -35,12 +35,14 @@ pub(super) fn install(e: &mut Environment) {
         let Some(namespace) = e.get(name) else {
             continue;
         };
-        super::make_callable(&namespace, kind.constructor(), None);
+        super::make_callable(&namespace, require_new, Some(kind.constructor()));
         // Each VM gets its own prototype object: instances inherit from the
         // namespace's live `.prototype` (identity matters for `instanceof`),
         // and the `constructor` back-link must point at this VM's namespace,
         // not a cross-VM shared object.
-        let proto = build_prototype(kind).expect("collection prototype");
+        let function_prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));
+        let proto =
+            build_prototype(kind, function_prototype.clone()).expect("collection prototype");
         proto
             .set_prop("constructor".to_string(), namespace.clone())
             .expect("collection prototype constructor");
@@ -53,10 +55,24 @@ pub(super) fn install(e: &mut Environment) {
                 },
             );
         }
+        super::set_builtin_constructor_prototype(e, &namespace, proto);
         namespace
-            .set_prop("prototype".to_string(), proto)
-            .expect("collection prototype link");
+            .set_prop("name".into(), Value::String(name.into()))
+            .expect("constructor name");
+        namespace
+            .set_prop("length".into(), Value::Number(0.))
+            .expect("constructor length");
         if let Value::Object { props } = &namespace {
+            for key in ["name", "length"] {
+                props.meta.borrow_mut().set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
             props.meta.borrow_mut().set_attrs(
                 "prototype",
                 crate::value::PropAttrs {
@@ -67,14 +83,6 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Map,
-    Set,
-    WeakMap,
-    WeakSet,
 }
 
 impl Kind {
@@ -120,16 +128,10 @@ fn entries_of(this: &Value) -> Option<Rc<ArrayCell>> {
 }
 
 fn kind_of(this: &Value) -> Option<Kind> {
-    match &this.get_prop(KIND_SLOT)? {
-        Value::String(tag) => match tag.as_str() {
-            "Map" => Some(Kind::Map),
-            "Set" => Some(Kind::Set),
-            "WeakMap" => Some(Kind::WeakMap),
-            "WeakSet" => Some(Kind::WeakSet),
-            _ => None,
-        },
-        _ => None,
-    }
+    let Value::Object { props } = this else {
+        return None;
+    };
+    props.meta.borrow().collection_kind
 }
 
 /// The ECMAScript `Object.prototype.toString` brand for guest collections.
@@ -223,20 +225,85 @@ pub(crate) fn clear_collection_cache() {
 
 /// A fresh prototype object: methods, the `size` getter and the iterator.
 /// The caller decides whether it is cached or installed per-VM.
-fn build_prototype(kind: Kind) -> Result<Value, VmErr> {
+fn build_prototype(kind: Kind, function_prototype: Option<Value>) -> Result<Value, VmErr> {
     let proto = Value::object(vec![]);
     for (name, callable) in methods(kind) {
-        proto.set_prop(name.to_string(), super::nf(name, callable))?;
+        let length = match name {
+            "set" | "getOrInsert" | "getOrInsertComputed" => 2,
+            "clear" | "keys" | "values" | "entries" => 0,
+            _ => 1,
+        };
+        proto.set_prop(
+            name.to_string(),
+            super::native_method(name, length, callable, function_prototype.clone()),
+        )?;
+        if let Value::Object { props } = &proto {
+            props.meta.borrow_mut().set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+        }
     }
     // `size` is a getter, so it tracks mutation instead of freezing at
     // construction time. The `get ` name prefix is what the property resolver
     // recognizes as an accessor.
     if !matches!(kind, Kind::WeakMap | Kind::WeakSet) {
         proto.set_prop("size".to_string(), super::nf("get size", size_getter))?;
+        let iterator = proto
+            .get_prop(if kind == Kind::Map {
+                "entries"
+            } else {
+                "values"
+            })
+            .expect("iterator method");
+        if kind == Kind::Set {
+            proto.set_prop("keys".into(), iterator.clone())?;
+        }
         proto.set_prop(
             crate::interpreter::SYMBOL_ITERATOR_SLOT.to_string(),
-            super::nf("[Symbol.iterator]", collection_iterator),
+            iterator,
         )?;
+        if let Value::Object { props } = &proto {
+            props.meta.borrow_mut().set_attrs(
+                "size",
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+            props.meta.borrow_mut().set_attrs(
+                crate::interpreter::SYMBOL_ITERATOR_SLOT,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+            if let Some(Value::Symbol(ref symbol)) = super::well_known("iterator") {
+                props
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(crate::interpreter::SYMBOL_ITERATOR_SLOT, symbol.clone());
+            }
+        }
+    }
+    if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        proto.set_prop(key.clone(), Value::String(kind.tag().into()))?;
+        if let Value::Object { props } = &proto {
+            let mut meta = props.meta.borrow_mut();
+            meta.set_symbol_key(&key, symbol.clone());
+            meta.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
     }
     Ok(proto)
 }
@@ -251,7 +318,7 @@ fn prototype_for(kind: Kind) -> Result<Rc<Value>, VmErr> {
     }) {
         return Ok(existing);
     }
-    let proto = Rc::new(build_prototype(kind)?);
+    let proto = Rc::new(build_prototype(kind, None)?);
     let pin = crate::heap::add_root((*proto).clone());
     PROTOTYPES.with(|protos| protos.borrow_mut().push((kind.tag(), proto.clone(), pin)));
     Ok(proto)
@@ -263,7 +330,11 @@ fn prototype_for(kind: Kind) -> Result<Rc<Value>, VmErr> {
 fn instance_proto(interp: &mut Interpreter, kind: Kind) -> Result<Rc<Value>, VmErr> {
     // The global lookup ends before `member` runs: the member read can
     // execute guest getters, which need the interpreter mutably.
-    let namespace = interp.global.borrow().get(kind.tag());
+    let namespace = interp
+        .new_target_stack
+        .last()
+        .cloned()
+        .or_else(|| interp.global.borrow().get(kind.tag()));
     if let Some(namespace) = namespace
         && let Ok(proto) = interp.member(&namespace, "prototype")
         && matches!(proto, Value::Object { .. })
@@ -338,63 +409,220 @@ fn construct(
         ),
     };
 
-    if matches!(kind, Kind::WeakMap | Kind::WeakSet)
-        && let Value::Object { props } = &collection
-    {
-        *props.weak.borrow_mut() = WeakStorage::Map(Vec::new());
+    if let Value::Object { props } = &collection {
+        props.meta.borrow_mut().collection_kind = Some(kind);
+        if matches!(kind, Kind::WeakMap | Kind::WeakSet) {
+            *props.weak.borrow_mut() = WeakStorage::Map(Vec::new());
+        }
     }
     if let Some(source) = args.first()
         && !matches!(source, Value::Undefined | Value::Null)
     {
-        let items = interp.iterate(source)?;
-        let entries = require(&collection, kind.tag())?;
-        for item in items {
-            let (key, value) = if kind.keyed() {
-                (interp.member(&item, "0")?, interp.member(&item, "1")?)
-            } else {
-                (item.clone(), item)
-            };
-            if let Some(props) = weak_entries(&collection) {
-                weak_insert(
-                    interp,
-                    &props,
-                    &key,
-                    if kind.keyed() {
-                        value
-                    } else {
-                        Value::Undefined
-                    },
-                )?;
-                continue;
+        // The adder is captured once before obtaining the iterator, including
+        // for empty iterables. Overrides and accessor failures are observable.
+        let adder = interp.member(&collection, if kind.keyed() { "set" } else { "add" })?;
+        if !crate::interpreter::is_callable_value(&adder) {
+            return Err(VmErr::Msg(
+                "TypeError: Collection adder is not callable".into(),
+            ));
+        }
+        let symbol = super::well_known("iterator").expect("Symbol.iterator");
+        let method = interp.get_prop_value(source, &symbol)?;
+        if !crate::interpreter::is_callable_value(&method) {
+            return Err(VmErr::Msg("TypeError: Value is not iterable".into()));
+        }
+        let iterator = interp.call_this(&method, source.clone(), vec![])?;
+        if !crate::interpreter::call::is_js_object(&iterator) {
+            return Err(VmErr::Msg("TypeError: Iterator must be an object".into()));
+        }
+        let next = interp.member(&iterator, "next")?;
+        loop {
+            interp.consume_loop()?;
+            let step = interp.call_this(&next, iterator.clone(), vec![])?;
+            if !crate::interpreter::call::is_js_object(&step) {
+                return Err(VmErr::Msg(
+                    "TypeError: Iterator result must be an object".into(),
+                ));
             }
-            if position(&entries, &key).is_none() {
-                if entries.borrow().len() >= crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum collection size exceeded"));
+            if interp.member(&step, "done")?.is_truthy() {
+                break;
+            }
+            let item = interp.member(&step, "value")?;
+            let inserted = (|| {
+                let arguments = if kind.keyed() {
+                    if !crate::interpreter::call::is_js_object(&item) {
+                        return Err(VmErr::Msg(
+                            "TypeError: Iterator entry must be an object".into(),
+                        ));
+                    }
+                    vec![interp.member(&item, "0")?, interp.member(&item, "1")?]
+                } else {
+                    vec![item]
+                };
+                interp.call_this(&adder, collection.clone(), arguments)
+            })();
+            if let Err(error) = inserted {
+                // IteratorClose with a throw completion preserves the original
+                // exception even when getting/calling return also throws.
+                if let Ok(close) = interp.member(&iterator, "return")
+                    && !matches!(close, Value::Undefined | Value::Null)
+                {
+                    let _ = interp.call_this(&close, iterator.clone(), vec![]);
                 }
-                entries.borrow_mut().push(entry(key, value));
+                crate::interpreter::close_iterator(&iterator);
+                return Err(error);
             }
         }
     }
     Ok(collection)
 }
 
+macro_rules! branded {
+    ($name:ident, $kind:ident, $implementation:ident) => {
+        fn $name(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+            if kind_of(&this) != Some(Kind::$kind) {
+                return Err(VmErr::Msg(
+                    "TypeError: Collection method called on incompatible receiver".into(),
+                ));
+            }
+            $implementation(interp, this, args)
+        }
+    };
+}
+branded!(map_has, Map, collection_has);
+branded!(map_delete, Map, collection_delete);
+branded!(map_get_branded, Map, map_get);
+branded!(map_set_branded, Map, map_set);
+branded!(map_clear, Map, collection_clear);
+branded!(map_for_each, Map, collection_for_each);
+branded!(map_keys, Map, collection_keys);
+branded!(map_values, Map, collection_values);
+branded!(map_entries, Map, collection_entries);
+branded!(weak_map_has, WeakMap, collection_has);
+branded!(weak_map_delete, WeakMap, collection_delete);
+branded!(weak_map_get, WeakMap, map_get);
+branded!(weak_map_set, WeakMap, map_set);
+branded!(set_has, Set, collection_has);
+branded!(set_delete, Set, collection_delete);
+branded!(set_add_branded, Set, set_add);
+branded!(set_clear, Set, collection_clear);
+branded!(set_for_each, Set, collection_for_each);
+branded!(set_keys, Set, collection_keys);
+branded!(set_values, Set, collection_values);
+branded!(set_entries, Set, collection_entries);
+branded!(weak_set_has, WeakSet, collection_has);
+branded!(weak_set_delete, WeakSet, collection_delete);
+branded!(weak_set_add, WeakSet, set_add);
+branded!(map_get_or_insert, Map, get_or_insert);
+branded!(weak_map_get_or_insert, WeakMap, get_or_insert);
+branded!(map_get_or_insert_computed, Map, get_or_insert_computed);
+branded!(
+    weak_map_get_or_insert_computed,
+    WeakMap,
+    get_or_insert_computed
+);
+
 fn methods(kind: Kind) -> Vec<(&'static str, super::NativeFn)> {
-    let mut out: Vec<(&'static str, super::NativeFn)> =
-        vec![("has", collection_has), ("delete", collection_delete)];
-    if kind.keyed() {
-        out.push(("get", map_get));
-        out.push(("set", map_set));
-    } else {
-        out.push(("add", set_add));
+    use Kind::*;
+    match kind {
+        Map => vec![
+            ("has", map_has),
+            ("delete", map_delete),
+            ("get", map_get_branded),
+            ("set", map_set_branded),
+            ("getOrInsert", map_get_or_insert),
+            ("getOrInsertComputed", map_get_or_insert_computed),
+            ("clear", map_clear),
+            ("forEach", map_for_each),
+            ("keys", map_keys),
+            ("values", map_values),
+            ("entries", map_entries),
+        ],
+        WeakMap => vec![
+            ("has", weak_map_has),
+            ("delete", weak_map_delete),
+            ("get", weak_map_get),
+            ("set", weak_map_set),
+            ("getOrInsert", weak_map_get_or_insert),
+            ("getOrInsertComputed", weak_map_get_or_insert_computed),
+        ],
+        Set => vec![
+            ("has", set_has),
+            ("delete", set_delete),
+            ("add", set_add_branded),
+            ("clear", set_clear),
+            ("forEach", set_for_each),
+            ("keys", set_keys),
+            ("values", set_values),
+            ("entries", set_entries),
+        ],
+        WeakSet => vec![
+            ("has", weak_set_has),
+            ("delete", weak_set_delete),
+            ("add", weak_set_add),
+        ],
     }
-    if !matches!(kind, Kind::WeakMap | Kind::WeakSet) {
-        out.push(("clear", collection_clear));
-        out.push(("forEach", collection_for_each));
-        out.push(("keys", collection_keys));
-        out.push(("values", collection_values));
-        out.push(("entries", collection_entries));
+}
+
+fn existing_value(this: &Value, key: &Value) -> Option<Value> {
+    if let Some(props) = weak_entries(this) {
+        let storage = props.weak.borrow();
+        let WeakStorage::Map(entries) = &*storage else {
+            unreachable!()
+        };
+        return entries
+            .iter()
+            .find(|(target, _)| target.matches(key))
+            .map(|(_, value)| value.clone());
     }
-    out
+    let entries = entries_of(this)?;
+    let index = position(&entries, key)?;
+    entries.borrow()[index].get_prop("1")
+}
+fn upsert_key(interp: &Interpreter, this: &Value, args: &[Value]) -> Result<Value, VmErr> {
+    let mut key = args.first().cloned().unwrap_or(Value::Undefined);
+    if kind_of(this) == Some(Kind::WeakMap) {
+        if WeakTarget::new(&key, &interp.persistent_global).is_none() {
+            return Err(VmErr::Msg(
+                "TypeError: WeakMap key must be weakly holdable".into(),
+            ));
+        }
+    } else if matches!(key,Value::Number(n) if n==0.) {
+        key = Value::Number(0.);
+    }
+    Ok(key)
+}
+fn get_or_insert(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let key = upsert_key(interp, &this, &args)?;
+    if let Some(value) = existing_value(&this, &key) {
+        return Ok(value);
+    }
+    let value = args.get(1).cloned().unwrap_or(Value::Undefined);
+    map_set(interp, this, vec![key, value.clone()])?;
+    Ok(value)
+}
+fn get_or_insert_computed(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let key = upsert_key(interp, &this, &args)?;
+    let callback = args.get(1).cloned().unwrap_or(Value::Undefined);
+    if !crate::interpreter::is_callable_value(&callback) {
+        return Err(VmErr::Msg("TypeError: Callback must be callable".into()));
+    }
+    if let Some(value) = existing_value(&this, &key) {
+        return Ok(value);
+    }
+    let value = interp.call_this(&callback, Value::Undefined, vec![key.clone()])?;
+    map_set(interp, this, vec![key, value.clone()])?;
+    Ok(value)
+}
+
+fn require_new(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Err(VmErr::Msg(
+        "TypeError: Collection constructor requires new".into(),
+    ))
 }
 
 fn new_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -582,18 +810,6 @@ fn collection_entries(
     _: Vec<Value>,
 ) -> Result<Value, VmErr> {
     iterate_projection(interp, &this, |e| e.clone())
-}
-
-/// A collection's default iterator: entries for a map, values for a set.
-fn collection_iterator(
-    interp: &mut Interpreter,
-    this: Value,
-    _: Vec<Value>,
-) -> Result<Value, VmErr> {
-    match kind_of(&this) {
-        Some(kind) if kind.keyed() => collection_entries(interp, this, vec![]),
-        _ => collection_values(interp, this, vec![]),
-    }
 }
 
 /// A collection's kind name and its entries, for callers that need to rebuild

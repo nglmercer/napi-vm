@@ -44,12 +44,27 @@ pub(super) fn install(e: &mut Environment) {
         if let Value::Object { props } = &d {
             props.meta.borrow_mut().builtin_constructor = Some(BuiltinConstructor::Date);
         }
-        d.set_prop("now".to_string(), super::nf("now", date_now))
-            .expect("built-in Date property");
-        d.set_prop("parse".to_string(), super::nf("parse", date_parse))
-            .expect("built-in Date property");
-        d.set_prop("UTC".to_string(), super::nf("UTC", date_utc))
-            .expect("built-in Date property");
+        let function_prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));
+        for (name, length, callable) in [
+            ("now", 0, date_now as super::NativeFn),
+            ("parse", 1, date_parse as super::NativeFn),
+            ("UTC", 7, date_utc as super::NativeFn),
+        ] {
+            d.set_prop(
+                name.into(),
+                super::native_method(name, length, callable, function_prototype.clone()),
+            )
+            .expect("Date static");
+            if let Value::Object { props } = &d {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         super::make_callable(&d, date_call, Some(date_construct));
 
         let object_prototype = e
@@ -61,10 +76,19 @@ pub(super) fn install(e: &mut Environment) {
             .set_prop("constructor".into(), d.clone())
             .expect("Date.prototype constructor");
         for name in DATE_PROTOTYPE_METHODS {
+            let implementation = date_member(name).expect("listed Date.prototype method");
+            let Value::NativeFunction { callable, .. } = &implementation else {
+                unreachable!()
+            };
             prototype
                 .set_prop(
                     (*name).into(),
-                    date_member(name).expect("listed Date.prototype method"),
+                    super::native_method(
+                        name,
+                        usize::from(matches!(*name, "setTime" | "toJSON")),
+                        *callable,
+                        function_prototype.clone(),
+                    ),
                 )
                 .expect("Date.prototype method");
         }
@@ -98,14 +122,16 @@ fn date_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
         1 => match &a[0] {
             Value::String(s) => parse_iso(s).unwrap_or(f64::NAN),
             Value::Date(existing) => existing.get(),
-            other => other.to_number(),
+            other => interp.ecmascript_to_number(other)?,
         },
         _ => {
             let utc = date_utc(interp, Value::Undefined, a)?;
             utc.to_number()
         }
     };
-    Ok(Value::Date(std::rc::Rc::new(std::cell::Cell::new(ms))))
+    Ok(Value::Date(std::rc::Rc::new(std::cell::Cell::new(
+        time_clip(ms),
+    ))))
 }
 
 /// Members readable on a `Date` instance.
@@ -126,8 +152,9 @@ pub fn date_member(key: &str) -> Option<Value> {
         // No local timezone means no offset from UTC.
         "getTimezoneOffset" => date_zero,
         "setTime" => date_set_time,
-        "toISOString" | "toJSON" => date_to_iso,
-        "toString" | "toUTCString" => date_to_iso,
+        "toISOString" => date_to_iso,
+        "toJSON" => date_to_json,
+        "toString" | "toUTCString" => date_to_string,
         _ => return None,
     };
     Some(super::nf(key, callable))
@@ -148,7 +175,7 @@ struct Civil(i64, i64, i64, i64, i64, i64, i64, i64);
 
 /// Split epoch milliseconds into UTC civil components.
 fn civil(ms: f64) -> Option<Civil> {
-    if !ms.is_finite() {
+    if !ms.is_finite() || ms.abs() > 8.64e15 {
         return None;
     }
     let total = ms as i64;
@@ -185,10 +212,17 @@ fn civil_from_days(z: i64) -> (i64, i64, i64) {
 
 fn to_iso(ms: f64) -> String {
     match civil(ms) {
-        Some(Civil(year, month, day, hour, minute, second, millis, _)) => format!(
-            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-            year, month, day, hour, minute, second, millis
-        ),
+        Some(Civil(year, month, day, hour, minute, second, millis, _)) => {
+            let year = if (0..=9999).contains(&year) {
+                format!("{year:04}")
+            } else {
+                format!("{year:+07}")
+            };
+            format!(
+                "{year}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+                month, day, hour, minute, second, millis
+            )
+        }
         None => "Invalid Date".to_string(),
     }
 }
@@ -226,16 +260,47 @@ fn date_zero(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmEr
     Ok(Value::Number(0.0))
 }
 
-fn date_set_time(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let ms = a.first().map(|v| v.to_number()).unwrap_or(f64::NAN);
-    if let Value::Date(slot) = &this {
-        slot.set(ms);
-    }
+fn date_set_time(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let Value::Date(slot) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: Date.setTime called on incompatible receiver".into(),
+        ));
+    };
+    let ms = time_clip(interp.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?);
+    slot.set(ms);
     Ok(Value::Number(ms))
 }
 
 fn date_to_iso(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let Value::Date(slot) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: Date.toISOString called on incompatible receiver".into(),
+        ));
+    };
+    if !slot.get().is_finite() || slot.get().abs() > 8.64e15 {
+        return Err(VmErr::Msg("RangeError: Invalid time value".into()));
+    }
     Ok(Value::String((to_iso(epoch(&this))).into()))
+}
+
+fn date_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let Value::Date(slot) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: Date.toString called on incompatible receiver".into(),
+        ));
+    };
+    Ok(Value::String(to_iso(slot.get()).into()))
+}
+
+fn date_to_json(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let primitive = interp.coerce_object_to_primitive(&this, "number")?;
+    if let Value::Number(number) = primitive
+        && !number.is_finite()
+    {
+        return Ok(Value::Null);
+    }
+    let method = interp.member(&this, "toISOString")?;
+    interp.call_this(&method, this, vec![])
 }
 
 /// The ISO rendering of a date, for the formatter and the N-API boundary.
@@ -262,22 +327,42 @@ fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 
-fn date_utc(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let num = |i: usize, dflt: f64| a.get(i).map(|v| v.to_number()).unwrap_or(dflt);
-    let mut year = num(0, 1970.0) as i64;
+fn date_utc(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let mut numbers = [f64::NAN, 0., 1., 0., 0., 0., 0.];
+    for (index, value) in a.iter().take(7).enumerate() {
+        numbers[index] = interp.ecmascript_to_number(value)?;
+    }
+    if numbers.iter().any(|n| !n.is_finite())
+        || numbers[..2].iter().any(|n| n.abs() >= i64::MAX as f64)
+    {
+        return Ok(Value::Number(f64::NAN));
+    }
+    let mut year = numbers[0].trunc() as i64;
     // Two-digit years map into the 1900s, matching JavaScript.
     if (0..=99).contains(&year) {
         year += 1900;
     }
-    let month = num(1, 0.0) as i64 + 1; // month index is zero-based
-    let day = num(2, 1.0) as i64;
-    let hour = num(3, 0.0) as i64;
-    let minute = num(4, 0.0) as i64;
-    let second = num(5, 0.0) as i64;
-    let millis = num(6, 0.0) as i64;
-    Ok(Value::Number(utc_ms(
-        year, month, day, hour, minute, second, millis,
-    )))
+    let month = numbers[1].trunc() as i64; // month index is zero-based
+    year = match year.checked_add(month.div_euclid(12)) {
+        Some(year) => year,
+        None => return Ok(Value::Number(f64::NAN)),
+    };
+    let month = month.rem_euclid(12) + 1;
+    let day = days_from_civil(year, month, 1) as f64 + numbers[2].trunc() - 1.;
+    // MakeTime and MakeDate deliberately use ECMAScript's floating-point
+    // evaluation order: large finite components can cancel to a valid time.
+    let time = ((numbers[3].trunc() * 3_600_000. + numbers[4].trunc() * 60_000.)
+        + numbers[5].trunc() * 1_000.)
+        + numbers[6].trunc();
+    Ok(Value::Number(time_clip(day * 86_400_000. + time)))
+}
+
+fn time_clip(value: f64) -> f64 {
+    if !value.is_finite() || value.abs() > 8.64e15 {
+        f64::NAN
+    } else {
+        value.trunc() + 0.
+    }
 }
 
 fn date_parse(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -286,20 +371,22 @@ fn date_parse(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value
         Some(v) => interp.vs(v)?,
         None => return Ok(Value::Number(f64::NAN)),
     };
-    Ok(Value::Number(parse_iso(&s).unwrap_or(f64::NAN)))
+    Ok(Value::Number(time_clip(parse_iso(&s).unwrap_or(f64::NAN))))
 }
 
 /// Milliseconds since the epoch for a UTC civil date/time.
 fn utc_ms(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64, ms: i64) -> f64 {
     let days = days_from_civil(year, month, day);
-    let secs = days * 86_400 + hour * 3_600 + minute * 60 + second;
-    (secs * 1_000 + ms) as f64
+    let secs =
+        days * 86_400 + i128::from(hour) * 3_600 + i128::from(minute) * 60 + i128::from(second);
+    (secs * 1_000 + i128::from(ms)) as f64
 }
 
 /// Days since 1970-01-01 for a civil date (Hinnant's algorithm). Negative for
 /// dates before the epoch.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = y - i64::from(m <= 2);
+fn days_from_civil(y: i64, m: i64, d: i64) -> i128 {
+    let (y, m, d) = (i128::from(y), i128::from(m), i128::from(d));
+    let y = y - i128::from(m <= 2);
     let era = (if y >= 0 { y } else { y - 399 }) / 400;
     let yoe = y - era * 400; // [0, 399]
     let mshift = m + if m > 2 { -3 } else { 9 };

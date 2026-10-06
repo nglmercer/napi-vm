@@ -561,6 +561,7 @@ fn object_to_string_tag(value: &Value) -> String {
         Value::String(_) => "String".into(),
         Value::Symbol(_) => "Symbol".into(),
         Value::BigInt(_) => "BigInt".into(),
+        Value::Object { .. } if crate::interpreter::is_callable_value(value) => "Function".into(),
         Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
             Some(BoxedPrimitive::Bool(_)) => "Boolean".into(),
             Some(BoxedPrimitive::Number(_)) => "Number".into(),
@@ -602,7 +603,7 @@ fn object_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Res
         && let Some(Value::Symbol(to_string_tag)) =
             crate::builtins::well_known("toStringTag").as_ref()
     {
-        let custom = interp.prop(&this, &Value::Symbol(to_string_tag.clone()))?;
+        let custom = interp.get_prop_value(&this, &Value::Symbol(to_string_tag.clone()))?;
         if let Value::String(custom) = &custom {
             tag = custom.clone();
         }

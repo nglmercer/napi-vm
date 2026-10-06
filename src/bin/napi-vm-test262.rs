@@ -1,6 +1,6 @@
 //! One test per process. Corpus orchestration applies a hard process timeout.
 use napi_vm::interpreter::{DrainPolicy, EvaluationOptions, ExecutionBudget};
-use napi_vm::{Interpreter, Value, VirtualLoader, VmErr};
+use napi_vm::{Interpreter, ModuleLoader, ModuleSource, Value, VirtualLoader, VmErr};
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
 use std::io::{self, Read};
@@ -19,24 +19,90 @@ struct Request {
     modules: std::collections::HashMap<String, String>,
     #[serde(default = "default_id")]
     id: String,
+    /// Explicit host capability used only by this isolated conformance worker.
+    #[serde(default)]
+    corpus_root: Option<std::path::PathBuf>,
+}
+
+struct CorpusLoader {
+    virtual_loader: VirtualLoader,
+    root: Option<std::path::PathBuf>,
+    entry: String,
+}
+impl CorpusLoader {
+    fn path(&self, id: &str) -> Result<std::path::PathBuf, VmErr> {
+        let root = self
+            .root
+            .as_ref()
+            .ok_or_else(|| VmErr::Msg("TypeError: Module not found".into()))?;
+        let path = root
+            .join(id)
+            .canonicalize()
+            .map_err(|_| VmErr::Msg(format!("TypeError: Module not found: {id}")))?;
+        if !path.starts_with(root) || !path.is_file() {
+            return Err(VmErr::Msg(
+                "TypeError: Module escapes the test corpus".into(),
+            ));
+        }
+        Ok(path)
+    }
+}
+impl ModuleLoader for CorpusLoader {
+    fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr> {
+        let referrer = referrer.unwrap_or(&self.entry);
+        if let Ok(id) = self.virtual_loader.resolve(specifier, Some(referrer)) {
+            return Ok(id);
+        }
+        let id = if specifier.starts_with('.') {
+            std::path::Path::new(referrer)
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(""))
+                .join(specifier)
+        } else {
+            std::path::PathBuf::from(specifier)
+        };
+        let path = self.path(&id.to_string_lossy())?;
+        Ok(path
+            .strip_prefix(self.root.as_ref().expect("checked root"))
+            .expect("checked containment")
+            .to_string_lossy()
+            .replace('\\', "/"))
+    }
+    fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
+        if let Ok(source) = self.virtual_loader.load(id) {
+            return Ok(source);
+        }
+        let path = self.path(id)?;
+        let metadata = path.metadata().map_err(|e| VmErr::Msg(e.to_string()))?;
+        if metadata.len() > 32 * 1024 * 1024 {
+            return Err(VmErr::Msg(
+                "ResourceLimit: Module source size exceeded".into(),
+            ));
+        }
+        let source = std::fs::read_to_string(path).map_err(|e| VmErr::Msg(e.to_string()))?;
+        Ok(ModuleSource {
+            id: id.into(),
+            source,
+        })
+    }
 }
 fn default_id() -> String {
     "test.js".into()
 }
 fn done(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let count = vm
-        .global
+        .persistent_global
         .borrow()
         .get("__test262_done_count")
         .map(|v| v.to_number())
         .unwrap_or(0.0);
-    vm.global
+    vm.persistent_global
         .borrow_mut()
         .set("__test262_done_count", Value::Number(count + 1.0));
     if let Some(error) = args.first()
         && !matches!(error, Value::Undefined)
     {
-        vm.global
+        vm.persistent_global
             .borrow_mut()
             .set("__test262_done_error", error.clone());
         return Err(VmErr::Throw(error.clone()));
@@ -79,6 +145,29 @@ fn execute(request: Request) -> Json {
         max_jobs: 10_000,
     });
     vm.set_loop_budget(100_000);
+    let root = match request
+        .corpus_root
+        .as_ref()
+        .map(|root| root.canonicalize())
+        .transpose()
+    {
+        Ok(root) => root,
+        Err(error) => {
+            return json!({"status":"error", "phase":"driver", "message":error.to_string()});
+        }
+    };
+    let loader = CorpusLoader {
+        virtual_loader: VirtualLoader::new(),
+        root,
+        entry: request.id.clone(),
+    };
+    for (id, source) in request.modules {
+        loader.virtual_loader.insert(id, source);
+    }
+    loader
+        .virtual_loader
+        .insert(request.id.clone(), request.source.clone());
+    vm.set_module_loader(Rc::new(loader));
     vm.global.borrow_mut().set(
         "$DONE",
         Value::NativeFunction {
@@ -95,27 +184,26 @@ fn execute(request: Request) -> Json {
             name: "evalScript".into(),
             callable: |vm, _, args| {
                 let source = vm.vs(args.first().unwrap_or(&Value::Undefined))?;
-                vm.eval_source_with_options(
+                let saved = std::mem::replace(&mut vm.global, vm.persistent_global.clone());
+                let result = vm.eval_source_with_options(
                     &source,
                     EvaluationOptions {
                         drain: DrainPolicy::None,
                         ..Default::default()
                     },
-                )
+                );
+                vm.global = saved;
+                result
             },
         },
     )]);
+    host.set_prop("global".into(), Value::GlobalObject)
+        .expect("$262.global");
     vm.global.borrow_mut().set("$262", host);
     if let Err(error) = vm.eval_source(&request.harness) {
         return failure("harness", &error);
     }
     let result = if request.module {
-        let loader = Rc::new(VirtualLoader::new());
-        for (id, source) in request.modules {
-            loader.insert(id, source);
-        }
-        loader.insert(request.id.clone(), request.source);
-        vm.set_module_loader(loader);
         match vm.link_module(&request.id) {
             Ok(true) => {}
             Ok(false) => {
@@ -135,8 +223,11 @@ fn execute(request: Request) -> Json {
     if let Err(error) = result {
         return failure("runtime", &error);
     }
+    if let Some(error) = vm.persistent_global.borrow().get("__test262_done_error") {
+        return failure("runtime", &VmErr::Throw(error));
+    }
     let count = vm
-        .global
+        .persistent_global
         .borrow()
         .get("__test262_done_count")
         .map(|v| v.to_number())

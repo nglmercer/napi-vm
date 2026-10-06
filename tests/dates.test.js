@@ -63,7 +63,9 @@ test("a date serializes to JSON as its ISO form", () => {
 });
 
 test("an invalid date reports itself", () => {
-  expect(runCode("new Date(NaN).toISOString();")).toBe("Invalid Date");
+  expect(() => runCode("new Date(NaN).toISOString();")).toThrow(/RangeError/);
+  expect(runCode("new Date(NaN).toString();")).toBe("Invalid Date");
+  expect(runCode("new Date(NaN).toJSON();")).toBe("null");
 });
 
 test("dates before the epoch work", () => {

@@ -22,6 +22,7 @@ pub(super) fn install(e: &mut Environment) {
         .get("Object")
         .and_then(|object| object.get_prop("prototype"));
     let prototype = Value::Function(Rc::new(FunctionData {
+        native: None,
         identity: Rc::new(0),
         name: Some(Rc::from("")),
         properties: crate::heap::tracked(Rc::new(ObjectCell::new(
@@ -229,6 +230,7 @@ fn function_bind(
     );
 
     Ok(Value::Function(Rc::new(FunctionData {
+        native: None,
         identity: Rc::new(0),
         name: Some(format!("bound {target_name}").into()),
         properties,
@@ -267,7 +269,7 @@ fn is_callable(value: &Value) -> bool {
     }
 }
 
-fn is_constructor(value: &Value) -> bool {
+pub(crate) fn is_constructor(value: &Value) -> bool {
     match value {
         Value::Function(function) => function.is_constructor,
         Value::HostFunction { .. } | Value::Class(_) => true,
@@ -371,6 +373,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
     let needs_hoisting = body_needs_hoisting(&body);
     Ok(Value::Function(Rc::new(FunctionData {
+        native: None,
         identity: Rc::new(0),
         name: Some("anonymous".into()),
         properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),

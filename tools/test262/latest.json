@@ -1,0 +1,64 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "."
+  ],
+  "engine_sha256": "15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 4,
+  "timeout_seconds": 5.0,
+  "total": 102956,
+  "counts": {
+    "pass": 34736,
+    "fail": 67740,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 8,
+    "harness_error": 470
+  },
+  "pass_percentage": 33.73868448657679,
+  "limitations": [
+    "$262.createRealm, agents and detachArrayBuffer are not implemented"
+  ],
+  "build_profile": "release",
+  "notes": [
+    "Development measurement; full Test262 conformance is not achieved.",
+    "Full outcomes and dashboard are generated artifacts; historical baseline is retained.",
+    "Previous run used a different optimization profile, worker count and timeout; pass-count differences include timing changes and corrected async false passes."
+  ],
+  "focused": {
+    "domain": "ECMAScript",
+    "suite": "Test262",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "built-ins/Map",
+      "built-ins/Set",
+      "built-ins/WeakMap",
+      "built-ins/WeakSet",
+      "built-ins/Reflect/construct",
+      "built-ins/Date/UTC",
+      "built-ins/Date/prototype/toISOString"
+    ],
+    "engine_sha256": "15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b",
+    "skip_features": [],
+    "denominator": "all selected variants, including skips and errors",
+    "worker_jobs": 2,
+    "timeout_seconds": 5.0,
+    "total": 1708,
+    "counts": {
+      "pass": 1318,
+      "fail": 390,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "pass_percentage": 77.16627634660422,
+    "limitations": [
+      "$262.createRealm, agents and detachArrayBuffer are not implemented"
+    ]
+  }
+}

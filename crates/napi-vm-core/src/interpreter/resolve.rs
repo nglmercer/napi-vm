@@ -248,7 +248,11 @@ impl Interpreter {
 
     /// Perform ToPrimitive with the requested hint, including the guest's
     /// `Symbol.toPrimitive` hook and ordinary `valueOf`/`toString` order.
-    fn coerce_object_to_primitive(&mut self, value: &Value, hint: &str) -> Result<Value, VmErr> {
+    pub(crate) fn coerce_object_to_primitive(
+        &mut self,
+        value: &Value,
+        hint: &str,
+    ) -> Result<Value, VmErr> {
         let value = value.deref_binding();
         if is_primitive(&value) {
             return Ok(value);

@@ -61,15 +61,11 @@ def run_variant(engine, root, test, source, data, mode, strict, timeout):
     # The engine provides $DONE directly; doneprintHandle.js relies on print.
     harness = [name for name in harness if name != "doneprintHandle.js"]
     modules = {}
-    if mode == "module":
-        # Include sibling fixtures with stable corpus-relative IDs. Cross-folder
-        # fixtures remain explicit loader failures until a full corpus loader lands.
-        for fixture in test.parent.glob("*_FIXTURE.js"):
-            modules[fixture.relative_to(root / "test").as_posix()] = fixture.read_text(encoding="utf-8")
     request = {"source": ('"use strict";\n' if strict else "") + source,
                "harness": "\n".join(safe_harness(root, name) for name in harness),
                "module": mode == "module", "asynchronous": "async" in flags,
-               "modules": modules, "id": test.relative_to(root / "test").as_posix()}
+               "modules": modules, "id": test.relative_to(root / "test").as_posix(),
+               "corpus_root": str(root / "test")}
     try:
         process = subprocess.run([str(engine)], input=json.dumps(request), text=True,
                                  capture_output=True, timeout=timeout, check=False)
@@ -149,8 +145,7 @@ def main():
               "worker_jobs": args.jobs, "timeout_seconds": args.timeout,
               "total": len(results), "counts": counts,
               "pass_percentage": 100 * counts["pass"] / len(results) if results else None,
-              "limitations": ["module fixtures limited to sibling *_FIXTURE.js files",
-                              "$262.createRealm, agents and detachArrayBuffer are not implemented"],
+              "limitations": ["$262.createRealm, agents and detachArrayBuffer are not implemented"],
               "results": results}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in report.items() if key != "results"}, indent=2))
