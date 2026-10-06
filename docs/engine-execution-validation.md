@@ -1,6 +1,6 @@
 # Engine execution and collection changes
 
-Module linking now discovers dependencies and creates live bindings before executing bodies. Missing and ambiguous exports fail during resolution; cyclic reads enforce the temporal dead zone. Module evaluation caches success and the original thrown value. Dynamic imports run as jobs, and concurrent importers share evaluation. Module namespaces use sorted UTF-16 export names, a null prototype, and reject mutation. Imported bindings cannot overwrite local declarations. Module functions retain their defining module as the resolution context.
+Module linking now discovers dependencies and creates live bindings before executing bodies. Missing and ambiguous exports fail during resolution; cyclic reads enforce the temporal dead zone. Module evaluation caches success and the original thrown value. Dynamic imports run as jobs, and concurrent importers share evaluation. Module namespaces share identity across imports and remain rooted during collection. Namespace re-export placeholders receive the completed export set before evaluation. Module namespaces use sorted UTF-16 export names, a null prototype, and reject mutation. Imported bindings cannot overwrite local declarations. Module functions retain their defining module as the resolution context.
 
 `Interpreter::link_module` links without executing bodies. `Interpreter::import_module` returns a Promise; pending module evaluation progresses through the existing event loop. Native stackful execution can suspend dependency evaluation at top-level await and resume after its Promise settles.
 
@@ -10,8 +10,8 @@ WeakMap and WeakSet store weak keys. Collection traces ephemerons to a fixed poi
 
 ## Validation
 
-- Rust workspace, all features: 635 passed, 4 ignored.
-- Native Node binding: 72 passed, including pending dependency evaluation, early import rejection, and finalization.
+- Rust workspace, all features: 637 passed, 4 ignored.
+- Native Node binding: 73 passed, including pending dependency evaluation, early import rejection, and finalization.
 - WebAssembly binding: 14 passed, including thenable await and namespace mutation rejection.
 - Test262 runner unit tests: 3 passed.
 - Broad Bun suite: 1,356 passed and 80 failed; failing test names match the preceding baseline after updating missing-export expectations.

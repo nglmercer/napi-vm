@@ -681,6 +681,8 @@ impl Environment {
 
 #[derive(Clone)]
 pub struct Module {
+    /// Shared namespace identity, also shared by cloned export records.
+    pub namespace: Rc<RefCell<Option<Value>>>,
     pub exports: HashMap<String, Value>,
     pub default: Option<Value>,
     /// The module's own top-level scope.

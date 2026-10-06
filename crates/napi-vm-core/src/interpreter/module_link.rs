@@ -115,6 +115,21 @@ impl Interpreter {
                     }
                 }
             }
+            // Namespace re-exports may have created placeholders before all
+            // indirect exports were installed. Complete those same objects.
+            for id in &created {
+                let module = self.module(id).expect("linked module");
+                let cached = module.namespace.borrow_mut().take();
+                if let Some(Value::Object { props: original }) = &cached {
+                    let completed_namespace = Self::namespace_object(&module)?;
+                    let Value::Object { props: completed } = &completed_namespace else {
+                        unreachable!("namespace is an object");
+                    };
+                    *original.borrow_mut() = completed.borrow().clone();
+                    *original.meta.borrow_mut() = std::mem::take(&mut *completed.meta.borrow_mut());
+                    *module.namespace.borrow_mut() = cached.clone();
+                }
+            }
             for id in &created {
                 self.link_imports(id)?;
             }
@@ -191,6 +206,7 @@ impl Interpreter {
         self.modules.borrow_mut().insert(
             name.into(),
             Module {
+                namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),
                 default: None,
                 scope: Some(scope.clone()),

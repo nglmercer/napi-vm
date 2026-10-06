@@ -32,3 +32,13 @@ test('weak references permit collection and finalization runs at a job checkpoin
   assert.equal(vm.run('finalized;'), 'done');
   vm.dispose();
 });
+
+test('namespace identity survives repeated static and dynamic imports and GC', () => {
+  const vm = new Vm();
+  vm.registerModule('identity', 'export const value=42;');
+  vm.run('import * as first from "identity"; import * as second from "identity"; var third; import("identity").then(m => third=m);');
+  assert.equal(vm.run('first === second && second === third;'), 'true');
+  vm.collectCycles();
+  assert.equal(vm.run('third.value;'), '42');
+  vm.dispose();
+});

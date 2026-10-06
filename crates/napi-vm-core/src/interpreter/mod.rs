@@ -1275,6 +1275,7 @@ impl Interpreter {
             modules.insert(
                 name.clone(),
                 Module {
+                    namespace: Rc::new(RefCell::new(None)),
                     exports: std::collections::HashMap::new(),
                     default: None,
                     scope: None,
@@ -1318,6 +1319,9 @@ impl Interpreter {
     /// Exports keep their live cells, so `ns.count` reflects the exporting
     /// module's current value rather than its value at import time.
     pub(crate) fn namespace_object(module: &Module) -> Result<Value, VmErr> {
+        if let Some(namespace) = module.namespace.borrow().as_ref() {
+            return Ok(namespace.clone());
+        }
         let mut props: Vec<(String, Value)> = module
             .exports
             .iter()
@@ -1346,6 +1350,7 @@ impl Interpreter {
                 );
             }
         }
+        *module.namespace.borrow_mut() = Some(namespace.clone());
         Ok(namespace)
     }
 
@@ -1651,6 +1656,7 @@ impl Interpreter {
         let prior = self.modules.borrow_mut().insert(
             name.to_string(),
             Module {
+                namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),
                 default: None,
                 scope: Some(scope),

@@ -323,3 +323,43 @@ fn modules_have_undefined_this_and_do_not_create_implicit_globals() {
     assert!(error.to_string().contains("ReferenceError"));
     assert!(vm.global_value("unboundModuleName").is_none());
 }
+
+#[test]
+fn module_namespace_identity_is_shared_across_imports_and_collection() {
+    let mut vm = Interpreter::with_builtins();
+    source(&mut vm, "identity", "export let value=42;");
+    vm.load_module("identity").unwrap();
+    vm.eval_source("import * as first from 'identity'; import * as second from 'identity';")
+        .unwrap();
+    assert!(matches!(
+        vm.eval_source("first === second").unwrap(),
+        Value::Bool(true)
+    ));
+    vm.eval_source("var dynamic; import('identity').then(m => dynamic=m);")
+        .unwrap();
+    vm.drain_jobs().unwrap();
+    assert!(matches!(
+        vm.eval_source("first === dynamic").unwrap(),
+        Value::Bool(true)
+    ));
+    vm.collect_cycles();
+    assert!(matches!(
+        vm.eval_source("dynamic.value === 42").unwrap(),
+        Value::Bool(true)
+    ));
+}
+
+#[test]
+fn namespace_reexports_include_indirect_exports_and_share_identity() {
+    let mut vm = Interpreter::with_builtins();
+    source(&mut vm, "leaf", "export const answer=42;");
+    source(&mut vm, "middle", "export {answer} from 'leaf';");
+    source(&mut vm, "outer", "export * as view from 'middle';");
+    vm.load_module("outer").unwrap();
+    number(&mut vm, "import {view} from 'outer'; view.answer", 42.);
+    assert!(matches!(
+        vm.eval_source("import * as same from 'middle'; view === same")
+            .unwrap(),
+        Value::Bool(true)
+    ));
+}

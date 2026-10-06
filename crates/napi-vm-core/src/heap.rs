@@ -280,6 +280,13 @@ impl Marker {
                 continue;
             };
             for module in map.values() {
+                let Ok(namespace) = module.namespace.try_borrow() else {
+                    self.borrowed = true;
+                    continue;
+                };
+                if let Some(value) = namespace.as_ref() {
+                    self.mark_value(value);
+                }
                 for value in module.exports.values() {
                     self.mark_value(value);
                 }
