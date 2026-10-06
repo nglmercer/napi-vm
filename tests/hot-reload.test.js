@@ -88,7 +88,7 @@ test("re-registering a module drops exports the new source removed", () => {
   vm.registerModule("api", "export const keep = 3;");
   expect(vm.run('import { keep } from "api"; keep;')).toBe("3");
   // Exports merged into the old record would leave `removed` alive at 2.
-  expect(vm.run('import { removed } from "api"; removed;')).toBe("undefined");
+  expect(() => vm.run('import { removed } from "api"; removed;')).toThrow(/SyntaxError/);
 });
 
 test("a module body that throws registers nothing", () => {

@@ -150,8 +150,7 @@ def main():
               "total": len(results), "counts": counts,
               "pass_percentage": 100 * counts["pass"] / len(results) if results else None,
               "limitations": ["module fixtures limited to sibling *_FIXTURE.js files",
-                              "$262.createRealm, agents and detachArrayBuffer are not implemented",
-                              "resolution negatives are reported as runtime until separate linking exists"],
+                              "$262.createRealm, agents and detachArrayBuffer are not implemented"],
               "results": results}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in report.items() if key != "results"}, indent=2))

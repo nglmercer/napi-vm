@@ -13,7 +13,7 @@ use crate::parser::{
     AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName, ObjectProp,
     Statement, UnOp, VarKind, arrow_body_references, stmts_reference,
 };
-use crate::value::{ClassData, FunctionData, ObjectCell, PromiseState, PropAttrs, Value};
+use crate::value::{ClassData, FunctionData, ObjectCell, PropAttrs, Value};
 
 /// Convert parser-owned parameter names into interned `Rc<str>` so call-frame
 /// binding is a refcount bump, not a heap allocation.
@@ -683,23 +683,28 @@ impl Interpreter {
         }
         if let Some(md) = resolved_module.as_ref().and_then(|name| self.module(name)) {
             if let Some(d) = default {
-                let v = md.default.clone().unwrap_or(Value::Undefined);
+                let v = md.default.clone().ok_or_else(|| {
+                    VmErr::Msg(format!(
+                        "SyntaxError: Module '{module}' has no default export"
+                    ))
+                })?;
                 self.bind_import(d, v)?;
             }
             for (imported, local) in named {
                 // `import { default as x }` names the default export.
                 let v = if imported == "default" {
-                    md.default.clone().unwrap_or(Value::Undefined)
+                    md.default.clone().ok_or_else(|| {
+                        VmErr::Msg(format!(
+                            "SyntaxError: Module '{module}' has no default export"
+                        ))
+                    })?
                 } else {
                     match md.exports.get(imported).cloned() {
                         Some(entry) => entry,
-                        // Not exported *yet*: in a cycle the exporting
-                        // module is still running, so bind the cell it
-                        // will fill in when its `export` runs.
                         None => {
-                            let target = resolved_module.clone().unwrap_or_default();
-                            self.pending_export(&target, imported)
-                                .unwrap_or(Value::Undefined)
+                            return Err(VmErr::Msg(format!(
+                                "SyntaxError: Module '{module}' has no unambiguous export '{imported}'"
+                            )));
                         }
                     }
                 };
@@ -722,7 +727,12 @@ impl Interpreter {
 
     /// Shared `export default`: publish one value as the default export.
     pub(crate) fn stmt_export_default(&mut self, value: Value) -> Result<Value, VmErr> {
-        self.current_module().default = Some(value);
+        let mut record = self.current_module();
+        if let Some(Value::Binding(cell)) = &record.default {
+            *cell.borrow_mut() = value;
+        } else {
+            record.default = Some(value);
+        }
         Ok(Value::Undefined)
     }
 
@@ -732,6 +742,9 @@ impl Interpreter {
         specifiers: &[(String, String)],
         source: Option<&str>,
     ) -> Result<Value, VmErr> {
+        if self.is_linked_module() {
+            return Ok(Value::Undefined);
+        }
         match source {
             // `export { a, b as c } from 'm'`: forward the *other*
             // module's live bindings without binding anything locally.
@@ -795,6 +808,9 @@ impl Interpreter {
         source: &str,
         alias: Option<&str>,
     ) -> Result<Value, VmErr> {
+        if self.is_linked_module() {
+            return Ok(Value::Undefined);
+        }
         let resolved = self
             .resolve_module_request(source)?
             .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
@@ -825,25 +841,27 @@ impl Interpreter {
 
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
-        let name = self.display_string(&specifier)?.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into()))?;
-        let resolved = self.resolve_module_request(&name)?;
-        if let Some(target) = resolved.as_ref() {
-            let target = target.clone();
-            self.ensure_module(&target)?;
+        let target = Value::pending_promise();
+        let converted = self.display_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
+        match converted {
+            Ok(specifier) => {
+                self.jobs
+                    .borrow_mut()
+                    .push_microtask(super::jobs::Job::DynamicImport {
+                        target: target.clone(),
+                        specifier,
+                        referrer: self.cur_mod.clone(),
+                    })
+            }
+            Err(error) => self.reject_promise(
+                &target,
+                match error {
+                    VmErr::Throw(reason) => reason,
+                    other => crate::error::error_value_from_msg(&other.to_string()),
+                },
+            ),
         }
-        match resolved.and_then(|n| self.module(&n)) {
-            Some(module) => Ok(Value::settled_promise(
-                PromiseState::Fulfilled,
-                Self::namespace_object(&module)?,
-            )),
-            None => Ok(Value::settled_promise(
-                PromiseState::Rejected,
-                Value::Error(crate::value::ErrorData::new(
-                    "TypeError",
-                    format!("Module not found: {}", name),
-                )),
-            )),
-        }
+        Ok(Value::Promise(target))
     }
 
     /// Shared `import.meta`: the current module's URL and main flag.

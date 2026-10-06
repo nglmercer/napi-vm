@@ -5,6 +5,7 @@ pub mod commonjs;
 mod env;
 mod eval;
 pub mod jobs;
+mod module_link;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_addon;
 #[cfg(not(target_arch = "wasm32"))]
@@ -64,6 +65,7 @@ pub struct Realm {
     module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
     module_file_urls: Rc<RefCell<HashMap<String, String>>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
+    module_graph: Rc<RefCell<module_link::ModuleGraph>>,
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
     module_loader: Option<Rc<dyn crate::ModuleLoader>>,
     commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
@@ -71,6 +73,7 @@ pub struct Realm {
     execution: Rc<scheduler::ExecutionState>,
     limits: (u64, u64, usize, usize),
     event_loop_options: EventLoopOptions,
+    module_context: Option<String>,
 }
 
 impl Realm {
@@ -82,12 +85,14 @@ impl Realm {
             module_aliases: interp.module_aliases.clone(),
             module_file_urls: interp.module_file_urls.clone(),
             evaluating: interp.evaluating.clone(),
+            module_graph: interp.module_graph.clone(),
             commonjs_loader: interp.commonjs_loader.clone(),
             module_loader: interp.module_loader.clone(),
             commonjs_cache: interp.commonjs_cache.clone(),
             commonjs_entry: interp.commonjs_entry.clone(),
             execution: interp.execution.clone(),
             event_loop_options: interp.event_loop_options,
+            module_context: interp.cur_mod.clone(),
             limits: (
                 interp.loop_budget,
                 interp.fuel_budget,
@@ -100,6 +105,7 @@ impl Realm {
     pub fn install(self, interp: &mut Interpreter) {
         interp.execution = self.execution;
         interp.event_loop_options = self.event_loop_options;
+        interp.cur_mod = self.module_context;
         (
             interp.loop_budget,
             interp.fuel_budget,
@@ -112,6 +118,7 @@ impl Realm {
         interp.module_aliases = self.module_aliases;
         interp.module_file_urls = self.module_file_urls;
         interp.evaluating = self.evaluating;
+        interp.module_graph = self.module_graph;
         interp.commonjs_loader = self.commonjs_loader;
         interp.module_loader = self.module_loader;
         interp.commonjs_cache = self.commonjs_cache;
@@ -222,6 +229,7 @@ pub struct Interpreter {
     /// Modules whose bodies are currently running, so a cycle is detected
     /// instead of recursing forever.
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
+    module_graph: Rc<RefCell<module_link::ModuleGraph>>,
     /// Optional bridge for calling host (Node.js) functions from inside the VM.
     /// Attached by the N-API layer when functions are exposed via
     /// `Vm.exposeFunction`; `None` for a standalone interpreter.
@@ -406,6 +414,7 @@ impl Interpreter {
             commonjs_cache: Rc::new(RefCell::new(HashMap::new())),
             commonjs_entry: None,
             evaluating: Rc::new(RefCell::new(std::collections::HashSet::new())),
+            module_graph: Rc::new(RefCell::new(module_link::ModuleGraph::default())),
             host: None,
             cur_mod: None,
             is_main: false,
@@ -473,9 +482,12 @@ impl Interpreter {
     }
 
     pub fn load_module(&mut self, specifier: &str) -> Result<String, VmErr> {
-        let id = self
-            .resolve_module_request(specifier)?
-            .ok_or_else(|| VmErr::Msg(format!("Module not found: {specifier}")))?;
+        let id = if self.cur_mod.is_none() && self.has_module(specifier) {
+            specifier.to_string()
+        } else {
+            self.resolve_module_request(specifier)?
+                .ok_or_else(|| VmErr::Msg(format!("Module not found: {specifier}")))?
+        };
         if !self.ensure_module(&id)? {
             return Err(VmErr::Msg(format!("Module not found: {id}")));
         }
@@ -743,6 +755,7 @@ export default { createRequire, isBuiltin, builtinModules };
         // the register VM, everything else keeps the AST evaluator. A
         // verification failure is a compiler bug and fails loudly here —
         // never a silent fallback.
+        let mut fallback_reason = None;
         let executable = match crate::bytecode::compile_program(&statements) {
             Ok(module) => {
                 if let Err(error) = crate::bytecode::verify_module(&module) {
@@ -752,12 +765,16 @@ export default { createRequire, isBuiltin, builtinModules };
                 }
                 Executable::Bytecode(module)
             }
-            Err(_) => Executable::Ast,
+            Err(unsupported) => {
+                fallback_reason = Some(unsupported.reason);
+                Executable::Ast
+            }
         };
         Ok(PreparedProgram {
             source: source.into(),
             statements,
             executable,
+            fallback_reason,
             kind: SourceKind::Script,
         })
     }
@@ -851,14 +868,22 @@ export default { createRequire, isBuiltin, builtinModules };
         self.prepared_cache.insert(program.clone());
         Ok(program)
     }
-    #[cfg(any(feature = "napi", feature = "wasm"))]
-    #[doc(hidden)]
     pub fn eval_module_with_options(
         &mut self,
         source: &str,
         options: EvaluationOptions,
     ) -> Result<Value, VmErr> {
         self.resume_before_evaluation(options)?;
+        if let Some(name) = self.cur_mod.clone() {
+            self.define_module(&name, source.to_string());
+            self.ensure_module(&name)?;
+            match options.drain {
+                DrainPolicy::None => {}
+                DrainPolicy::Microtasks => self.drain_microtasks()?,
+                DrainPolicy::UntilIdle => self.drain_jobs()?,
+            }
+            return Ok(Value::Undefined);
+        }
         let program = self.prepare_source(source, SourceKind::Module)?;
         self.execute_with_options(&program, options)
     }
@@ -912,16 +937,10 @@ export default { createRequire, isBuiltin, builtinModules };
             envs: vec![self.global.clone(), self.persistent_global.clone()],
             values: self.new_target_stack.clone(),
             jobs: vec![self.jobs.clone()],
+            modules: vec![self.modules.clone()],
         };
         if let Some(host) = &self.host {
             host.trace_roots(&mut roots.values, &mut roots.envs);
-        }
-        if let Ok(modules) = self.modules.try_borrow() {
-            for module in modules.values() {
-                roots.values.extend(module.exports.values().cloned());
-                roots.values.extend(module.default.clone());
-                roots.envs.extend(module.scope.clone());
-            }
         }
         if let Ok(cache) = self.commonjs_cache.try_borrow() {
             for entry in cache.values() {
@@ -1080,6 +1099,7 @@ pub struct PreparedProgram {
     source: std::sync::Arc<str>,
     statements: std::sync::Arc<Vec<Statement>>,
     executable: Executable,
+    fallback_reason: Option<&'static str>,
     kind: SourceKind,
 }
 
@@ -1107,6 +1127,12 @@ impl PreparedProgram {
             Executable::Bytecode(_) => ExecutionTier::Bytecode,
             Executable::Ast => ExecutionTier::Ast,
         }
+    }
+
+    /// Why this program uses the AST tier; verification failures are errors,
+    /// never fallback reasons. Nested function fallbacks are independent.
+    pub fn fallback_reason(&self) -> Option<&'static str> {
+        self.fallback_reason
     }
 
     /// Snapshot this program's tier-up and inline-cache counters: `None`
@@ -1297,12 +1323,30 @@ impl Interpreter {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        // A namespace object's keys are sorted, not insertion-ordered.
-        props.sort_by(|a, b| a.0.cmp(&b.0));
         if let Some(default) = &module.default {
-            props.push(("default".to_string(), default.clone()));
+            props.push(("default".into(), default.clone()));
         }
-        Value::checked_object(props)
+        props.sort_by(|a, b| crate::JsString::from_key(&a.0).cmp(&crate::JsString::from_key(&b.0)));
+        if props.len() > crate::value::MAX_OBJECT_PROPS {
+            return Err(crate::value::limit_err("Maximum namespace size exceeded"));
+        }
+        let namespace = Value::object_with_proto(props, None);
+        if let Value::Object { props } = &namespace {
+            let mut meta = props.meta.borrow_mut();
+            meta.non_extensible = true;
+            meta.module_namespace = true;
+            for (key, _) in props.borrow().iter() {
+                meta.set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: true,
+                        enumerable: true,
+                        configurable: false,
+                    },
+                );
+            }
+        }
+        Ok(namespace)
     }
 
     /// Assign an identifier, creating it in the active scope when it does not
@@ -1334,6 +1378,9 @@ impl Interpreter {
             // No such binding: an assignment to an undeclared name creates an
             // implicit `var`-like global, as sloppy-mode JavaScript does.
             AssignOutcome::Missing => {
+                if self.cur_mod.is_some() {
+                    return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
+                }
                 if is_persistent_global {
                     env.try_set(name, value)?;
                 } else {
@@ -1598,7 +1645,9 @@ impl Interpreter {
     /// still answers. The displaced record is returned so a body that fails
     /// part-way through can be rolled back with `restore_module`.
     pub fn begin_module(&mut self, name: &str) -> Option<Module> {
+        self.module_graph.borrow_mut().remove(name);
         let scope = self.new_module_scope();
+        scope.borrow_mut().set_module_context(name);
         let prior = self.modules.borrow_mut().insert(
             name.to_string(),
             Module {
@@ -1611,36 +1660,17 @@ impl Interpreter {
         prior
     }
 
-    /// The live cell an importer should bind for `name` from `module`.
-    ///
-    /// When the module has already exported the name, that is its cell. When
-    /// the module is still evaluating — a cycle — a *pending* cell is created
-    /// and registered as the export, so the importer binds the storage the
-    /// exporting module will fill in when its `export` finally runs. This is
-    /// what makes two mutually recursive modules link.
-    pub(crate) fn pending_export(&mut self, module: &str, name: &str) -> Option<Value> {
-        if !self.evaluating.borrow().contains(module) {
-            return None;
-        }
-        let cell = crate::heap::tracked(Rc::new(RefCell::new(Value::Undefined)));
-        let entry = Value::Binding(cell);
-        self.modules
-            .borrow_mut()
-            .get_mut(module)?
-            .exports
-            .insert(name.to_string(), entry.clone());
-        Some(entry)
-    }
-
     /// A fresh module scope: a child of the *user global* frame.
     ///
     /// Chaining to the user global rather than to the builtins is what keeps
     /// host-exposed globals and anything written through `globalThis` visible
     /// inside a module, while the module's own declarations stay local to it.
     fn new_module_scope(&self) -> Env {
-        Rc::new(RefCell::new(Environment::child(
+        let scope = Rc::new(RefCell::new(Environment::child(
             self.persistent_global.clone(),
-        )))
+        )));
+        scope.borrow_mut().set("this", Value::Undefined);
+        scope
     }
 
     /// Install `scope` as the current one, returning the scope it displaced.
@@ -1661,6 +1691,7 @@ impl Interpreter {
             return scope;
         }
         let scope = self.new_module_scope();
+        scope.borrow_mut().set_module_context(name);
         if let Some(module) = self.modules.borrow_mut().get_mut(name) {
             module.scope = Some(scope.clone());
         }
@@ -1679,6 +1710,8 @@ impl Interpreter {
     /// globals before it throws, and those writes are not unwound here; see
     /// `registerModule` in the N-API layer for what that means for callers.
     pub fn restore_module(&mut self, name: &str, prior: Option<Module>) {
+        self.module_graph.borrow_mut().remove(name);
+        self.module_sources.borrow_mut().remove(name);
         match prior {
             Some(module) => {
                 self.modules.borrow_mut().insert(name.to_string(), module);
@@ -1732,55 +1765,11 @@ impl Interpreter {
     /// a function imported from a half-initialized module still sees the final
     /// value once the body finishes.
     pub fn ensure_module(&mut self, name: &str) -> Result<bool, VmErr> {
-        if self.modules.borrow().contains_key(name) || self.evaluating.borrow().contains(name) {
-            return Ok(true);
-        }
-        if !self.module_sources.borrow().contains_key(name)
-            && let Some(loader) = self.module_loader.clone()
-        {
-            let loaded = loader.load(name)?;
-            if loaded.id != name {
-                return Err(VmErr::Msg(
-                    "module loader changed canonical identity".into(),
-                ));
-            }
-            if name.starts_with("file:") {
-                self.define_module_file_url(name, name.into());
-            }
-            self.define_module(name, loaded.source);
-        }
-        let Some(source) = self.module_sources.borrow().get(name).cloned() else {
+        if !self.link_module(name)? {
             return Ok(false);
-        };
-        let outer = self.cur_mod.take();
-        let displaced = self.begin_module(name);
-        self.evaluating.borrow_mut().insert(name.to_string());
-        let scope = self.module_scope(name);
-        let outer_scope = std::mem::replace(&mut self.global, scope);
-        let result = self.eval_module_source(&source);
-        self.global = outer_scope;
-        self.evaluating.borrow_mut().remove(name);
-        match result {
-            Ok(()) => {
-                self.cur_mod = outer;
-                Ok(true)
-            }
-            Err(error) => {
-                self.restore_module(name, displaced);
-                self.cur_mod = outer;
-                Err(error)
-            }
         }
-    }
-
-    /// Parse and run one module body. Kept beside `ensure_module` so deferred
-    /// evaluation does not have to reach back into the N-API layer. Module
-    /// bodies select the execution tier exactly like scripts, so repeated
-    /// imports of supported modules run the register VM.
-    fn eval_module_source(&mut self, source: &str) -> Result<(), VmErr> {
-        let program = self.prepare_source(source, SourceKind::Module)?;
-        self.execute_prepared_raw(&program)?;
-        Ok(())
+        self.evaluate_linked_module(name)?;
+        Ok(true)
     }
 
     /// Drop a module's export record so `import` can no longer resolve it.
@@ -1790,6 +1779,7 @@ impl Interpreter {
     /// map, so a module left here stays importable no matter what the public
     /// API reports.
     pub fn remove_module(&mut self, name: &str) -> bool {
+        self.module_graph.borrow_mut().remove(name);
         self.module_file_urls.borrow_mut().remove(name);
         let had_source = self.module_sources.borrow_mut().remove(name).is_some();
         let had_module = self.modules.borrow_mut().remove(name).is_some();

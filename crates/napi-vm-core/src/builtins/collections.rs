@@ -15,7 +15,8 @@ use std::rc::Rc;
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter, strict_equals};
-use crate::value::{ArrayCell, Value};
+use crate::value::weak::{WeakStorage, WeakTarget};
+use crate::value::{ArrayCell, ObjectCell, Value};
 
 /// Slot holding a collection's entries: `[key, value]` pairs for a map,
 /// `[value, value]` for a set, so one storage shape serves both.
@@ -145,6 +146,41 @@ fn require(this: &Value, method: &str) -> Result<Rc<ArrayCell>, VmErr> {
     })
 }
 
+fn weak_entries(this: &Value) -> Option<Rc<ObjectCell>> {
+    let Value::Object { props } = this else {
+        return None;
+    };
+    if matches!(*props.weak.borrow(), WeakStorage::Map(_)) {
+        Some(props.clone())
+    } else {
+        None
+    }
+}
+fn weak_insert(
+    interp: &Interpreter,
+    props: &ObjectCell,
+    key: &Value,
+    value: Value,
+) -> Result<(), VmErr> {
+    let target = WeakTarget::new(key, &interp.persistent_global).ok_or_else(|| {
+        VmErr::Msg(
+            "TypeError: Weak collection key must be an object or a non-registered symbol".into(),
+        )
+    })?;
+    let mut storage = props.weak.borrow_mut();
+    let WeakStorage::Map(entries) = &mut *storage else {
+        unreachable!("weak map receiver")
+    };
+    if let Some((_, slot)) = entries.iter_mut().find(|(target, _)| target.matches(key)) {
+        *slot = value;
+    } else {
+        if entries.len() >= crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum collection size exceeded"));
+        }
+        entries.push((target, value));
+    }
+    Ok(())
+}
 /// Index of the entry whose key matches, if any.
 fn position(entries: &Rc<ArrayCell>, key: &Value) -> Option<usize> {
     entries.borrow().iter().position(|entry| {
@@ -302,6 +338,11 @@ fn construct(
         ),
     };
 
+    if matches!(kind, Kind::WeakMap | Kind::WeakSet)
+        && let Value::Object { props } = &collection
+    {
+        *props.weak.borrow_mut() = WeakStorage::Map(Vec::new());
+    }
     if let Some(source) = args.first()
         && !matches!(source, Value::Undefined | Value::Null)
     {
@@ -313,6 +354,19 @@ fn construct(
             } else {
                 (item.clone(), item)
             };
+            if let Some(props) = weak_entries(&collection) {
+                weak_insert(
+                    interp,
+                    &props,
+                    &key,
+                    if kind.keyed() {
+                        value
+                    } else {
+                        Value::Undefined
+                    },
+                )?;
+                continue;
+            }
             if position(&entries, &key).is_none() {
                 if entries.borrow().len() >= crate::value::MAX_ARRAY_LEN {
                     return Err(crate::value::limit_err("Maximum collection size exceeded"));
@@ -365,6 +419,17 @@ fn size_getter(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
 }
 
 fn map_get(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(props) = weak_entries(&this) {
+        let storage = props.weak.borrow();
+        let WeakStorage::Map(entries) = &*storage else {
+            unreachable!()
+        };
+        return Ok(entries
+            .iter()
+            .find(|(key, _)| key.matches(a.first().unwrap_or(&Value::Undefined)))
+            .map(|(_, v)| v.clone())
+            .unwrap_or(Value::Undefined));
+    }
     let entries = require(&this, "Map.prototype.get")?;
     let key = a.first().cloned().unwrap_or(Value::Undefined);
     let Some(index) = position(&entries, &key) else {
@@ -374,7 +439,16 @@ fn map_get(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmE
     Ok(found.get_prop("1").unwrap_or(Value::Undefined))
 }
 
-fn map_set(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn map_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(props) = weak_entries(&this) {
+        weak_insert(
+            interp,
+            &props,
+            a.first().unwrap_or(&Value::Undefined),
+            a.get(1).cloned().unwrap_or(Value::Undefined),
+        )?;
+        return Ok(this);
+    }
     let entries = require(&this, "Map.prototype.set")?;
     let key = a.first().cloned().unwrap_or(Value::Undefined);
     let value = a.get(1).cloned().unwrap_or(Value::Undefined);
@@ -391,7 +465,16 @@ fn map_set(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmE
     Ok(this)
 }
 
-fn set_add(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn set_add(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(props) = weak_entries(&this) {
+        weak_insert(
+            interp,
+            &props,
+            a.first().unwrap_or(&Value::Undefined),
+            Value::Undefined,
+        )?;
+        return Ok(this);
+    }
     let entries = require(&this, "Set.prototype.add")?;
     let value = a.first().cloned().unwrap_or(Value::Undefined);
     if position(&entries, &value).is_none() {
@@ -404,12 +487,30 @@ fn set_add(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmE
 }
 
 fn collection_has(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(props) = weak_entries(&this) {
+        let storage = props.weak.borrow();
+        let WeakStorage::Map(entries) = &*storage else {
+            unreachable!()
+        };
+        return Ok(Value::Bool(entries.iter().any(|(key, _)| {
+            key.matches(a.first().unwrap_or(&Value::Undefined))
+        })));
+    }
     let entries = require(&this, "has")?;
     let key = a.first().cloned().unwrap_or(Value::Undefined);
     Ok(Value::Bool(position(&entries, &key).is_some()))
 }
 
 fn collection_delete(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(props) = weak_entries(&this) {
+        let mut storage = props.weak.borrow_mut();
+        let WeakStorage::Map(entries) = &mut *storage else {
+            unreachable!()
+        };
+        let prior = entries.len();
+        entries.retain(|(key, _)| !key.matches(a.first().unwrap_or(&Value::Undefined)));
+        return Ok(Value::Bool(entries.len() != prior));
+    }
     let entries = require(&this, "delete")?;
     let key = a.first().cloned().unwrap_or(Value::Undefined);
     match position(&entries, &key) {

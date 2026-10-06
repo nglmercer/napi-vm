@@ -44,6 +44,7 @@ pub struct GcRoots {
     pub envs: Vec<Env>,
     pub values: Vec<Value>,
     pub jobs: Vec<crate::interpreter::Jobs>,
+    pub modules: Vec<Rc<RefCell<HashMap<String, crate::interpreter::Module>>>>,
 }
 
 /// Per-collection statistics.
@@ -68,6 +69,8 @@ pub enum SkipReason {
     /// A generator or async task is suspended: its coroutine stack holds
     /// values the tracer cannot see.
     SuspendedTasks,
+    /// A host holds a mutable borrow of a reachable heap cell.
+    BorrowedCells,
 }
 
 struct HeapInner {
@@ -254,6 +257,8 @@ struct Marker {
     work: Vec<MarkItem>,
     host_calls: HashSet<usize>,
     opaque: bool,
+    borrowed: bool,
+    weak_cells: Vec<Rc<ObjectCell>>,
 }
 
 impl Marker {
@@ -263,9 +268,30 @@ impl Marker {
             work: Vec::new(),
             host_calls: HashSet::new(),
             opaque: false,
+            borrowed: false,
+            weak_cells: Vec::new(),
         }
     }
 
+    fn mark_modules(&mut self, maps: &[Rc<RefCell<HashMap<String, crate::interpreter::Module>>>]) {
+        for map in maps {
+            let Ok(map) = map.try_borrow() else {
+                self.borrowed = true;
+                continue;
+            };
+            for module in map.values() {
+                for value in module.exports.values() {
+                    self.mark_value(value);
+                }
+                if let Some(value) = &module.default {
+                    self.mark_value(value);
+                }
+                if let Some(scope) = &module.scope {
+                    self.mark_env(scope);
+                }
+            }
+        }
+    }
     fn mark_env(&mut self, env: &Env) {
         if self.marked.insert(id_of(env)) {
             self.work.push(MarkItem::Env(env.clone()));
@@ -307,7 +333,15 @@ impl Marker {
             Value::AsyncTask(inner) if self.marked.insert(id_of(inner)) => {
                 self.work.push(MarkItem::AsyncTask(inner.clone()));
             }
-            _ => {}
+            Value::TypedArray(view) | Value::DataView(view) => {
+                self.marked.insert(id_of(view));
+                self.marked.insert(view.buffer.identity());
+            }
+            _ => {
+                if let Some(id) = value.weak_identity() {
+                    self.marked.insert(id);
+                }
+            }
         }
     }
 
@@ -319,22 +353,109 @@ impl Marker {
         }
     }
 
+    fn drain_ephemerons(&mut self) {
+        loop {
+            self.drain();
+            let before = self.marked.len();
+            let mut values = Vec::new();
+            for cell in &self.weak_cells {
+                if let crate::value::weak::WeakStorage::Map(entries) = &*cell.weak.borrow() {
+                    values.extend(
+                        entries
+                            .iter()
+                            .filter(|(key, _)| self.marked.contains(&key.id()))
+                            .map(|(_, value)| value.clone()),
+                    );
+                }
+            }
+            for value in values {
+                self.mark_value(&value);
+            }
+            if self.marked.len() == before {
+                break;
+            }
+        }
+    }
+    fn prune_weak(&self) {
+        use crate::value::weak::WeakStorage;
+        for cell in &self.weak_cells {
+            let mut storage = cell.weak.borrow_mut();
+            match &mut *storage {
+                WeakStorage::Map(entries) => {
+                    entries.retain(|(key, _)| self.marked.contains(&key.id()))
+                }
+                WeakStorage::Ref(target) => {
+                    if target
+                        .as_ref()
+                        .is_some_and(|target| !self.marked.contains(&target.id()))
+                    {
+                        *target = None;
+                    }
+                }
+                WeakStorage::Registry {
+                    callback,
+                    records,
+                    jobs,
+                } => {
+                    let mut eligible = Vec::new();
+                    let mut index = 0;
+                    while index < records.len() {
+                        if !self.marked.contains(&records[index].target.id()) {
+                            eligible.push(records.remove(index).held);
+                        } else {
+                            index += 1;
+                        }
+                    }
+                    if let Some(jobs) = jobs.upgrade() {
+                        for held in eligible {
+                            jobs.borrow_mut()
+                                .push_microtask(crate::interpreter::Job::Callback {
+                                    callback: callback.clone(),
+                                    args: vec![held],
+                                });
+                        }
+                    }
+                }
+                WeakStorage::None => {}
+            }
+        }
+    }
+
     /// Drain the worklist iteratively: deep chains never touch the Rust stack.
     fn drain(&mut self) {
         while let Some(item) = self.work.pop() {
             match item {
                 MarkItem::Object(cell) => {
+                    if cell.try_borrow().is_err()
+                        || cell.meta.try_borrow().is_err()
+                        || cell.weak.try_borrow().is_err()
+                    {
+                        self.borrowed = true;
+                        continue;
+                    }
+                    if !matches!(*cell.weak.borrow(), crate::value::weak::WeakStorage::None) {
+                        self.weak_cells.push(cell.clone());
+                    }
                     for child in cell.trace_children() {
                         self.mark_value(&child);
                     }
                 }
                 MarkItem::Array(cell) => {
+                    if cell.try_borrow().is_err()
+                        || cell.meta.try_borrow().is_err()
+                        || cell.named.try_borrow().is_err()
+                        || cell.symbol_keys.try_borrow().is_err()
+                    {
+                        self.borrowed = true;
+                        continue;
+                    }
                     for child in cell.trace_children() {
                         self.mark_value(&child);
                     }
                 }
                 MarkItem::Env(env) => {
                     let Ok(borrowed) = env.try_borrow() else {
+                        self.borrowed = true;
                         continue;
                     };
                     for child in borrowed.trace_values() {
@@ -362,6 +483,7 @@ impl Marker {
                 }
                 MarkItem::Promise(inner) => {
                     let Ok(borrowed) = inner.try_borrow() else {
+                        self.borrowed = true;
                         continue;
                     };
                     self.mark_value(&borrowed.value);
@@ -375,6 +497,7 @@ impl Marker {
                 }
                 MarkItem::Generator(inner) => {
                     let Ok(borrowed) = inner.try_borrow() else {
+                        self.borrowed = true;
                         continue;
                     };
                     if let Some(closure) = &borrowed.closure {
@@ -400,6 +523,7 @@ impl Marker {
                 }
                 MarkItem::Binding(cell) => {
                     let Ok(borrowed) = cell.try_borrow() else {
+                        self.borrowed = true;
                         continue;
                     };
                     self.mark_value(&borrowed);
@@ -423,6 +547,7 @@ impl Marker {
 #[doc(hidden)]
 pub fn reachable_host_calls(roots: GcRoots) -> Option<HashSet<usize>> {
     let mut marker = Marker::new();
+    marker.mark_modules(&roots.modules);
     for env in roots.envs {
         marker.mark_env(&env);
     }
@@ -436,8 +561,8 @@ pub fn reachable_host_calls(roots: GcRoots) -> Option<HashSet<usize>> {
             marker.mark_value(&value);
         }
     }
-    marker.drain();
-    if marker.opaque {
+    marker.drain_ephemerons();
+    if marker.opaque || marker.borrowed {
         None
     } else {
         Some(marker.host_calls)
@@ -582,6 +707,7 @@ pub(crate) fn collect() -> HeapStats {
     HEAP.with(|heap| {
         let heap = heap.borrow();
         for (roots, _) in heap.interps.values() {
+            marker.mark_modules(&roots.modules);
             for env in &roots.envs {
                 marker.mark_env(env);
             }
@@ -603,7 +729,14 @@ pub(crate) fn collect() -> HeapStats {
         marker.mark_value(value);
     }
     drop(queued_roots);
-    marker.drain();
+    marker.drain_ephemerons();
+    if marker.borrowed {
+        return HeapStats {
+            skipped: Some(SkipReason::BorrowedCells),
+            ..Default::default()
+        };
+    }
+    marker.prune_weak();
 
     let mut stats = HeapStats {
         marked: marker.marked.len(),
@@ -834,6 +967,7 @@ mod tests {
             (match stats.skipped {
                 Some(SkipReason::Executing) => "executing",
                 Some(SkipReason::SuspendedTasks) => "suspended",
+                Some(SkipReason::BorrowedCells) => "borrowed",
                 None => "ran",
             }
             .to_string())

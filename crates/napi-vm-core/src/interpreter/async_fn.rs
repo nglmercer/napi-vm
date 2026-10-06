@@ -85,6 +85,13 @@ impl Interpreter {
             };
         }
 
+        let value = if value.as_promise().is_some() {
+            value
+        } else {
+            let wrapper = Value::pending_promise();
+            self.resolve_promise(&wrapper, value)?;
+            Value::Promise(wrapper)
+        };
         self.await_synchronously(value)
     }
 
@@ -157,6 +164,24 @@ pub(crate) fn spawn_async(
     frame: super::Env,
     gen_depth: u32,
 ) -> Result<Value, VmErr> {
+    spawn_body(interp, body, frame, gen_depth, false)
+}
+#[cfg(stackful_coroutines)]
+pub(crate) fn spawn_module(
+    interp: &mut Interpreter,
+    body: Rc<Vec<crate::parser::Statement>>,
+    frame: super::Env,
+) -> Result<Value, VmErr> {
+    spawn_body(interp, body, frame, interp.gen_depth + 1, true)
+}
+#[cfg(stackful_coroutines)]
+fn spawn_body(
+    interp: &mut Interpreter,
+    body: Rc<Vec<crate::parser::Statement>>,
+    frame: super::Env,
+    gen_depth: u32,
+    linked: bool,
+) -> Result<Value, VmErr> {
     use corosensei::Coroutine;
     use corosensei::stack::DefaultStack;
 
@@ -165,6 +190,20 @@ pub(crate) fn spawn_async(
     let builtins_env = interp.global.borrow().parent_env();
     let persistent_global = interp.persistent_global.clone();
     let host = interp.host.clone();
+    let module_context = interp.cur_mod.clone();
+    let compiled = if linked {
+        crate::bytecode::compiler::compile_linked_program(&body)
+    } else {
+        crate::bytecode::compile_program(&body)
+    };
+    let bytecode = match compiled {
+        Ok(code) => {
+            crate::bytecode::verify_module(&code)
+                .map_err(|error| VmErr::Msg(format!("internal error: {error}")))?;
+            Some(code)
+        }
+        Err(_) => None,
+    };
 
     let Ok(stack) = DefaultStack::new(ASYNC_STACK_SIZE) else {
         // Stack allocation failed. Reject rather than abort the process.
@@ -189,6 +228,7 @@ pub(crate) fn spawn_async(
         };
         body_interp.persistent_global = persistent_global;
         body_interp.host = host;
+        body_interp.cur_mod = module_context;
         // One event loop and one module registry across every stack: a promise
         // settled in here must schedule reactions the outer drain will run,
         // and an `import` here must resolve against the same modules.
@@ -200,8 +240,14 @@ pub(crate) fn spawn_async(
         body_interp.await_yielder = Some(unsafe { crate::value::GenYielder::new(yielder) });
         body_interp.global = frame;
 
-        match body_interp.run_program_body(&body) {
-            Ok(v) | Err(VmErr::Ret(v)) => GenOutcome::Returned(v),
+        let outcome = match &bytecode {
+            Some(code) => body_interp.run_bytecode_module(code),
+            None if linked => body_interp.run(&body),
+            None => body_interp.run_program_body(&body),
+        };
+        match outcome {
+            Ok(_) => GenOutcome::Returned(Value::Undefined),
+            Err(VmErr::Ret(v)) => GenOutcome::Returned(v),
             Err(VmErr::Throw(v)) => GenOutcome::Threw(v),
             // Abandoned while suspended: the initiating `Drop` consumes this.
             Err(VmErr::Abandon) => GenOutcome::Abandon,

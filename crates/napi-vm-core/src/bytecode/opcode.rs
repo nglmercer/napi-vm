@@ -503,6 +503,11 @@ pub enum Instr {
         dst: Reg,
         src: Reg,
     },
+    /// Await a value through the interpreter's shared suspension machinery.
+    Await {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst` = this module's `import.meta` object.
     ImportMeta {
         dst: Reg,
@@ -595,6 +600,7 @@ pub enum Opcode {
     ExportNamed,
     ExportAll,
     DynamicImport,
+    Await,
     ImportMeta,
     PushScope,
     PopScope,
@@ -681,6 +687,7 @@ impl Instr {
             Instr::ExportNamed { .. } => Opcode::ExportNamed,
             Instr::ExportAll { .. } => Opcode::ExportAll,
             Instr::DynamicImport { .. } => Opcode::DynamicImport,
+            Instr::Await { .. } => Opcode::Await,
             Instr::ImportMeta { .. } => Opcode::ImportMeta,
             Instr::PushScope => Opcode::PushScope,
             Instr::PopScope => Opcode::PopScope,
@@ -912,6 +919,7 @@ impl fmt::Display for Instr {
             Instr::ExportNamed { tmpl } => write!(f, "EXPORT_NAMED c{tmpl}"),
             Instr::ExportAll { tmpl } => write!(f, "EXPORT_ALL c{tmpl}"),
             Instr::DynamicImport { dst, src } => write!(f, "DYNAMIC_IMPORT r{dst}, r{src}"),
+            Instr::Await { dst, src } => write!(f, "AWAIT r{dst}, r{src}"),
             Instr::ImportMeta { dst } => write!(f, "IMPORT_META r{dst}"),
             Instr::PushScope => write!(f, "PUSH_SCOPE"),
             Instr::PopScope => write!(f, "POP_SCOPE"),

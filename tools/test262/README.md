@@ -42,9 +42,10 @@ HTML dashboard are generated artifacts rather than vendored corpus content.
 The HTML shows independent ECMAScript, Web, Node and npm metrics, and up to 200
 non-passing variants with a link to the full JSON file.
 
+Module linking failures are reported in the resolution phase before evaluation.
+
 Known runner limitations: module fixtures currently load sibling
-`*_FIXTURE.js` files; separate module linking/resolution-negative reporting and
-`$262.createRealm`, agents, GC and detachArrayBuffer hooks are incomplete.
+`*_FIXTURE.js` files; `$262.createRealm`, agents, GC and detachArrayBuffer hooks are incomplete.
 Those limitations contribute failures or harness errors; they are not silently
 removed from the denominator. No stable compatibility claim is made.
 

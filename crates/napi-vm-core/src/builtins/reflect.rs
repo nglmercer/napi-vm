@@ -52,6 +52,11 @@ fn reflect_get(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 
 fn reflect_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(Value::Object { props }) = a.first()
+        && props.meta.borrow().module_namespace
+    {
+        return Ok(Value::Bool(false));
+    }
     interp.assign_member(&arg(&a, 0), &arg(&a, 1), arg(&a, 2))?;
     Ok(Value::Bool(true))
 }

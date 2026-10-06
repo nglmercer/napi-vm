@@ -58,3 +58,16 @@ fn worker_loads_module_fixtures() {
         "modules":{"pkg/value_FIXTURE.js":"export const answer = 42;"}}));
     assert_eq!(result["status"], "ok", "{result}");
 }
+#[test]
+fn worker_distinguishes_module_linking_and_evaluation_errors() {
+    let linked = worker(
+        json!({"id":"pkg/test.js","module":true,"source":"throw 1; import {missing} from './dep_FIXTURE.js';","modules":{"pkg/dep_FIXTURE.js":"export const available=1;"}}),
+    );
+    assert_eq!(linked["phase"], "resolution", "{linked}");
+    assert_eq!(linked["error_type"], "SyntaxError");
+    let evaluated = worker(
+        json!({"id":"pkg/test.js","module":true,"source":"import {available} from './dep_FIXTURE.js';throw new TypeError('body');","modules":{"pkg/dep_FIXTURE.js":"export const available=1;"}}),
+    );
+    assert_eq!(evaluated["phase"], "runtime", "{evaluated}");
+    assert_eq!(evaluated["error_type"], "TypeError");
+}

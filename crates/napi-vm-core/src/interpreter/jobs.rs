@@ -7,7 +7,7 @@
 //! `Rc` to the same queue is what keeps a single event loop across them.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 
 use crate::value::{PromiseInner, PromiseState, Reaction, Value};
@@ -22,6 +22,15 @@ pub const MAX_JOBS_PER_DRAIN: usize = 1_000_000;
 
 /// A unit of deferred work.
 pub enum Job {
+    ModuleEvaluation {
+        id: String,
+        target: Rc<RefCell<PromiseInner>>,
+    },
+    DynamicImport {
+        target: Rc<RefCell<PromiseInner>>,
+        specifier: String,
+        referrer: Option<String>,
+    },
     /// A promise reaction: run `reaction`'s handler for a promise that settled
     /// to `state` with `value`, then settle the derived promise.
     Reaction {
@@ -74,6 +83,8 @@ impl Job {
     /// Values this queued job keeps alive, for the cycle collector.
     pub(crate) fn trace_values(&self, out: &mut Vec<Value>) {
         match self {
+            Job::ModuleEvaluation { target, .. } => out.push(Value::Promise(target.clone())),
+            Job::DynamicImport { target, .. } => out.push(Value::Promise(target.clone())),
             Job::Reaction {
                 value, reaction, ..
             } => out.extend([
@@ -288,6 +299,8 @@ struct Interval {
 
 #[derive(Default)]
 pub struct JobQueue {
+    kept_alive: Vec<Value>,
+    kept_identities: HashSet<usize>,
     microtasks: VecDeque<Job>,
     external_events: VecDeque<Job>,
     // Retain oversized legacy ingress without silently discarding settlements.
@@ -312,9 +325,31 @@ pub struct JobQueue {
 }
 
 impl JobQueue {
+    pub(crate) fn keep_alive(&mut self, value: Value) -> Result<(), crate::VmErr> {
+        let Some(identity) = value.weak_identity() else {
+            return Ok(());
+        };
+        if self.kept_identities.contains(&identity) {
+            return Ok(());
+        }
+        if self.kept_alive.len() >= crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err(
+                "Maximum kept-alive weak targets exceeded",
+            ));
+        }
+        self.kept_identities.insert(identity);
+        self.kept_alive.push(value);
+        Ok(())
+    }
+    pub(crate) fn clear_kept_alive(&mut self) {
+        self.kept_alive.clear();
+        self.kept_identities.clear();
+    }
+
     /// Every value the queued jobs and waiters keep alive, for the cycle
     /// collector's root set.
     pub(crate) fn trace_roots(&self, out: &mut Vec<Value>) {
+        out.extend(self.kept_alive.iter().cloned());
         for job in self
             .microtasks
             .iter()

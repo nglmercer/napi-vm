@@ -1,3 +1,4 @@
+pub(crate) mod weak;
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::ptr::NonNull;
@@ -181,6 +182,8 @@ pub struct ObjectMeta {
     /// Cleared by `Object.preventExtensions`/`seal`/`freeze`: no new own
     /// properties may be added.
     pub non_extensible: bool,
+    /// Module namespaces reject property writes while retaining live cells.
+    pub module_namespace: bool,
     /// Whether `defineProperty` ever installed a getter/setter pair on this
     /// object. Ordinary objects never do, and property assignment checks this
     /// before looking for the companion slot an accessor pair needs — which
@@ -586,6 +589,14 @@ impl ArrayCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.proto.as_deref().cloned());
+            out.extend(
+                meta.symbol_keys
+                    .iter()
+                    .map(|(_, symbol)| Value::Symbol(symbol.clone())),
+            );
+        }
+        if let Ok(keys) = self.symbol_keys.try_borrow() {
+            out.extend(keys.iter().map(|(_, symbol)| Value::Symbol(symbol.clone())));
         }
         out
     }
@@ -624,6 +635,7 @@ impl std::ops::Deref for ArrayCell {
 /// not a new indirection in front of them.
 #[derive(Debug)]
 pub struct ObjectCell {
+    pub(crate) weak: RefCell<weak::WeakStorage>,
     slots: RefCell<Vec<(String, Value)>>,
     pub meta: RefCell<ObjectMeta>,
     /// Cached canonical layout of the slot keys, built lazily on the
@@ -642,6 +654,7 @@ pub struct ObjectCell {
 impl ObjectCell {
     pub fn new(props: Vec<(String, Value)>, proto: Option<Rc<Value>>) -> Self {
         Self {
+            weak: RefCell::new(weak::WeakStorage::None),
             slots: RefCell::new(props),
             meta: RefCell::new(ObjectMeta {
                 proto,
@@ -654,6 +667,7 @@ impl ObjectCell {
 
     pub fn new_with_default_proto(props: Vec<(String, Value)>) -> Self {
         Self {
+            weak: RefCell::new(weak::WeakStorage::None),
             slots: RefCell::new(props),
             meta: RefCell::new(ObjectMeta {
                 uses_default_prototype: true,
@@ -689,6 +703,17 @@ impl ObjectCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.proto.as_deref().cloned());
+            if let Some(BoxedPrimitive::Symbol(symbol)) = &meta.boxed_primitive {
+                out.push(Value::Symbol(symbol.clone()));
+            }
+            out.extend(
+                meta.symbol_keys
+                    .iter()
+                    .map(|(_, symbol)| Value::Symbol(symbol.clone())),
+            );
+        }
+        if let Ok(weak) = self.weak.try_borrow() {
+            weak.strong_values(&mut out);
         }
         out
     }
@@ -703,6 +728,10 @@ impl ObjectCell {
             return false;
         };
         slots.clear();
+        if let Ok(mut weak) = self.weak.try_borrow_mut() {
+            *weak = weak::WeakStorage::None;
+        }
+        meta.symbol_keys.clear();
         meta.proto = None;
         // The layout is empty now; drop the cached shape so a later access
         // rebuilds instead of answering from a stale layout.
@@ -1793,6 +1822,8 @@ impl ErrorData {
 /// allocate a fresh payload on every call; class and error payloads are boxed.
 #[derive(Debug, Clone)]
 pub enum Value {
+    /// Internal live-binding TDZ marker; never exposed to guest code.
+    Uninitialized,
     Undefined,
     Null,
     Bool(bool),
@@ -2839,6 +2870,9 @@ fn drain_array_cell(cell: &Rc<ArrayCell>, work: &mut Vec<Value>) {
 /// Move an object cell's children onto the iterative-drop work stack. Called
 /// only for the last strong owner.
 fn drain_object_cell(cell: &Rc<ObjectCell>, work: &mut Vec<Value>) {
+    if let Ok(mut weak) = cell.weak.try_borrow_mut() {
+        weak.drain_values(work);
+    }
     if let Ok(mut slots) = cell.slots.try_borrow_mut() {
         work.extend(slots.drain(..).map(|(_, value)| value));
     }
