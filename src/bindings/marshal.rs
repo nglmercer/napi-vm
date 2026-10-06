@@ -51,9 +51,9 @@ fn set_str_prop(
     env: sys::napi_env,
     obj: sys::napi_value,
     key: &str,
-    val: &str,
+    val: impl Into<crate::JsString>,
 ) -> Result<(), VmErr> {
-    let sv = make_str(env, val)?;
+    let sv = make_js_str(env, &val.into())?;
     define_named_property(env, obj, key, sv)
 }
 
@@ -66,10 +66,10 @@ fn define_named_property(
     key: &str,
     value: sys::napi_value,
 ) -> Result<(), VmErr> {
-    let key = CString::new(key).map_err(|_| VmErr::Msg("object key contains NUL".to_string()))?;
+    let key = make_js_str(env, &crate::JsString::from_key(key))?;
     let descriptor = sys::napi_property_descriptor {
-        utf8name: key.as_ptr(),
-        name: ptr::null_mut(),
+        utf8name: ptr::null(),
+        name: key,
         method: None,
         getter: None,
         setter: None,
@@ -144,7 +144,7 @@ fn to_napi_d(
                         "RangeError: Maximum string length exceeded".to_string(),
                     ));
                 }
-                return make_str(env, s);
+                return make_js_str(env, s);
             }
             Value::Array(items) => {
                 let identity = std::rc::Rc::as_ptr(items) as usize;
@@ -221,7 +221,7 @@ fn to_napi_d(
             }
             Value::Symbol(symbol) => {
                 let description = match &symbol.description {
-                    Some(text) => make_str(env, text)?,
+                    Some(text) => make_js_str(env, text)?,
                     None => ptr::null_mut(),
                 };
                 chk(sys::napi_create_symbol(env, description, &mut out))?;
@@ -450,10 +450,10 @@ fn make_promise(
 }
 
 /// Read a raw N-API string into a Rust `String`.
-fn read_string(env: sys::napi_env, raw: sys::napi_value) -> Result<String, VmErr> {
+fn read_string(env: sys::napi_env, raw: sys::napi_value) -> Result<crate::JsString, VmErr> {
     unsafe {
         let mut len: usize = 0;
-        chk(sys::napi_get_value_string_utf8(
+        chk(sys::napi_get_value_string_utf16(
             env,
             raw,
             ptr::null_mut(),
@@ -465,16 +465,16 @@ fn read_string(env: sys::napi_env, raw: sys::napi_value) -> Result<String, VmErr
                 "RangeError: Maximum string length exceeded".to_string(),
             ));
         }
-        let mut buf: Vec<u8> = vec![0; len + 1];
+        let mut buf: Vec<u16> = vec![0; len + 1];
         let mut copied: usize = 0;
-        chk(sys::napi_get_value_string_utf8(
+        chk(sys::napi_get_value_string_utf16(
             env,
             raw,
-            buf.as_mut_ptr() as *mut c_char,
+            buf.as_mut_ptr(),
             buf.len(),
             &mut copied,
         ))?;
-        Ok(String::from_utf8_lossy(&buf[..copied]).into_owned())
+        Ok(crate::JsString::from_units(buf[..copied].to_vec()))
     }
 }
 
@@ -485,7 +485,7 @@ pub(super) fn get_named_str(
     env: sys::napi_env,
     obj: sys::napi_value,
     key: &str,
-) -> Result<String, VmErr> {
+) -> Result<crate::JsString, VmErr> {
     unsafe {
         let ck =
             CString::new(key).map_err(|_| VmErr::Msg("object key contains NUL".to_string()))?;
@@ -496,7 +496,7 @@ pub(super) fn get_named_str(
         if t == sys::ValueType::napi_string {
             read_string(env, pv)
         } else {
-            Ok(String::new())
+            Err(VmErr::Msg("TypeError: property is not a string".into()))
         }
     }
 }
@@ -653,7 +653,7 @@ fn from_napi_d(
             // realms have separate registries.
             sys::ValueType::napi_symbol => {
                 let description = get_named_str(env, raw, "description").ok();
-                crate::builtins::new_symbol(description.filter(|d| !d.is_empty()))
+                crate::builtins::new_symbol(description)
             }
             sys::ValueType::napi_object => {
                 let mut is_date = false;
@@ -746,7 +746,7 @@ fn from_napi_d(
                         }
                         let mut pv = ptr::null_mut();
                         chk(sys::napi_get_property(env, raw, key, &mut pv))?;
-                        props.push((key_str, from_napi_d(env, pv, depth + 1, active)?));
+                        props.push((key_str.to_key(), from_napi_d(env, pv, depth + 1, active)?));
                     }
                     active.remove(&identity);
                     Value::checked_object(props)?
@@ -772,10 +772,13 @@ pub(super) enum WireValue {
     Null,
     Bool(bool),
     Number(f64),
-    String(String),
+    String(crate::JsString),
     Array(Vec<WireValue>),
     Object(Vec<(String, WireValue)>),
-    Error { name: String, message: String },
+    Error {
+        name: crate::JsString,
+        message: crate::JsString,
+    },
 }
 
 impl WireValue {
@@ -891,8 +894,23 @@ impl WireValue {
                     .collect(),
             ),
             Self::Error { name, message } => {
-                Value::Error(crate::value::ErrorData::new(&name, message))
+                let mut error = crate::value::ErrorData::new("Error", message);
+                error.name = name;
+                Value::Error(error)
             }
         }
+    }
+}
+
+fn make_js_str(env: sys::napi_env, s: &crate::JsString) -> Result<sys::napi_value, VmErr> {
+    unsafe {
+        let mut out = ptr::null_mut();
+        chk(sys::napi_create_string_utf16(
+            env,
+            s.units().as_ptr(),
+            s.len() as isize,
+            &mut out,
+        ))?;
+        Ok(out)
     }
 }

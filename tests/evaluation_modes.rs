@@ -14,7 +14,7 @@ fn evaluation_tiers_caching_and_drain_policies() {
     assert!(vm.evaluation_diagnostics().contains("bytecode"));
     #[cfg(feature = "runtime")]
     {
-        let mut vm = Interpreter::with_runtime_builtins();
+        let mut vm = napi_vm_runtime::runtime::with_runtime_builtins();
         let clock = VirtualClock::default();
         vm.jobs
             .borrow_mut()

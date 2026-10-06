@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {spawnSync} = require('node:child_process');
 const {threadId} = require('node:worker_threads');
 const {AsyncSession, Vm} = require('../../index.js');
+const runtimeAvailable = (() => {const vm = new Vm();try {vm.enableRuntime({timers:true});return true;}catch{return false;}finally{vm.dispose();}})();
 
 test('persistent owner keeps globals across repeated executions', async () => {
   const s = new AsyncSession();
@@ -25,8 +26,8 @@ test('host functions and Node marshalling execute on Node thread without sync VM
     assert.equal(await s.run('await delayed(40);'),'42');
   } finally {s.dispose();sync.dispose();}
 });
-test('manual virtual turns preserve unfinished checkpoints and absolute timers',async()=>{
-  const s=new AsyncSession({clock:'virtual',autoPoll:false});
+test('manual virtual turns preserve unfinished checkpoints and absolute timers', {skip: !runtimeAvailable},async()=>{
+  const s=new AsyncSession({timers:true,clock:'virtual',autoPoll:false});
   try {
     await s.evaluate("var seen=[];setTimeout(()=>{seen.push('a');queueMicrotask(()=>seen.push('m'));setTimeout(()=>seen.push('nested'),5);},10);setTimeout(()=>seen.push('b'),10);");
     const idle=await s.pollEventLoop(10);assert.equal(idle.executedJobs,0);assert.equal(idle.nextDeadline,10);
@@ -73,11 +74,11 @@ test('shutdown wakes an owner awaiting a never-settled Node completion',async()=
   const s=new AsyncSession();await s.exposeFunction('never',()=>new Promise(()=>{}),true);
   const p=s.run('await never();');setTimeout(()=>s.dispose(),5);await assert.rejects(p,/disposed|cancelled/);
 });
-test('idle sessions and pending completions have correct Node lifetimes',()=>{
+test('idle sessions and pending completions have correct Node lifetimes', {skip: !runtimeAvailable},()=>{
   for(const source of [
     "new AsyncSession();",
-    "const s=new AsyncSession();s.run('40+2;').then(v=>{console.log(v);s.dispose()});",
-    "const s=new AsyncSession();s.evaluate('var values=[];for(var i=0;i<20;i++)setTimeout(()=>values.push(i),5)').then(()=>setTimeout(()=>s.dispose(),20));",
+    "const s=new AsyncSession({timers:true});s.run('40+2;').then(v=>{console.log(v);s.dispose()});",
+    "const s=new AsyncSession({timers:true});s.evaluate('var values=[];for(var i=0;i<20;i++)setTimeout(()=>values.push(i),5)').then(()=>setTimeout(()=>s.dispose(),20));",
   ]) {
     const child=spawnSync(process.execPath,['-e',`const {AsyncSession}=require('./index.js');${source}`],{cwd:require('node:path').resolve(__dirname,'../..'),encoding:'utf8',timeout:2000});
     assert.equal(child.error,undefined,`${child.error} ${child.stderr}`);assert.equal(child.status,0,child.stderr);
@@ -115,8 +116,9 @@ test('Node worker teardown wakes and terminates the persistent guest owner',asyn
   finally {clearTimeout(timer);await worker.terminate();}
 });
 
-test('throwing checkpoint recovers before new guest code', () => {
+test('throwing checkpoint recovers before new guest code', {skip: !runtimeAvailable}, () => {
   const vm = new Vm();
+  vm.enableRuntime({timers:true});
   try {
     assert.throws(() => vm.run("queueMicrotask(() => { throw new Error('boom'); });"), /boom/);
     assert.equal(vm.run('42;'), '42');
@@ -152,8 +154,8 @@ test('unawaited host results do not lock admission and remain awaitable', async 
     await assert.rejects(s.run('await rejected;'), /rejected/);
   } finally { releaseDispatch(); s.dispose(); }
 });
-test('top-level await waits for future and nested real-time timers', async () => {
-  const s = new AsyncSession({ clock: 'real-time' });
+test('top-level await waits for future and nested real-time timers', {skip: !runtimeAvailable}, async () => {
+  const s = new AsyncSession({timers:true, clock: 'real-time' });
   try {
     assert.equal(await s.run('await new Promise(r=>setTimeout(()=>r(42),50));'), '42');
     assert.equal(await s.run('await new Promise(r=>setTimeout(()=>setTimeout(()=>r(7),5),5));'), '7');
@@ -161,9 +163,9 @@ test('top-level await waits for future and nested real-time timers', async () =>
     await assert.rejects(s.run('await new Promise(()=>{});'), /no VM or host event/);
   } finally { s.dispose(); }
 });
-test('cancel and dispose wake a future-timer await after a host barrier', async () => {
+test('cancel and dispose wake a future-timer await after a host barrier', {skip: !runtimeAvailable}, async () => {
   for (const dispose of [false,true]) {
-    const s = new AsyncSession({ clock: 'real-time' });
+    const s = new AsyncSession({timers:true, clock: 'real-time' });
     let started;
     const barrier = new Promise(r => { started = r; });
     await s.exposeFunction('started', () => { started(); return 0; });
@@ -184,8 +186,8 @@ test('abandoned results are retired while closure-held results survive', async (
     assert.equal(await s.run('await read();'), '7');
   } finally { s.dispose(); }
 });
-test('virtual top-level await never advances time and supports host-driven recovery', async () => {
-  const s = new AsyncSession({clock:'virtual', autoPoll:false});
+test('virtual top-level await never advances time and supports host-driven recovery', {skip: !runtimeAvailable}, async () => {
+  const s = new AsyncSession({timers:true,clock:'virtual', autoPoll:false});
   try {
     await s.evaluate('var saved=new Promise(r=>setTimeout(()=>r(42),50));');
     await assert.rejects(s.run('await saved;'), /host-driven timer progress/);
@@ -195,8 +197,8 @@ test('virtual top-level await never advances time and supports host-driven recov
     assert.equal(await s.run('await saved;'), '42');
   } finally { s.dispose(); }
 });
-test('a short execution deadline caps a far-future timer await', {timeout:2000}, async () => {
-  const s = new AsyncSession({clock:'real-time'});
+test('a short execution deadline caps a far-future timer await', {skip: !runtimeAvailable, timeout:2000}, async () => {
+  const s = new AsyncSession({timers:true,clock:'real-time'});
   try {
     await s.setExecutionLimits(1000000000, 5);
     await assert.rejects(s.run('await new Promise(r=>setTimeout(()=>r(42),60000));'), /deadline/);
@@ -269,8 +271,8 @@ test('delayed unawaited callback can reenter after its execution completes', asy
   } finally { s.dispose(); }
 });
 
-test('metadata and configured limits preserve pending timer deadlines', async () => {
-  const s = new AsyncSession({clock:'real-time', autoPoll:false});
+test('metadata and configured limits preserve pending timer deadlines', {skip: !runtimeAvailable}, async () => {
+  const s = new AsyncSession({timers:true,clock:'real-time', autoPoll:false});
   try {
     await s.setExecutionLimits(1_000_000_000, 50);
     await s.evaluate('var answer=42;setTimeout(()=>answer++,1000000);');

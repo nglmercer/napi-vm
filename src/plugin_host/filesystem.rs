@@ -235,7 +235,7 @@ pub(super) fn guest_result(result: Result<Value, GuestCallError>) -> Value {
         Err(error) => Value::object(vec![
             ("ok".into(), Value::Bool(false)),
             ("name".into(), Value::String(error.name.into())),
-            ("message".into(), Value::String(error.message)),
+            ("message".into(), Value::String((error.message).into())),
         ]),
     }
 }

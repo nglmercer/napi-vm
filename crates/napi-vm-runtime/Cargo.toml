@@ -1,0 +1,43 @@
+[package]
+name = "napi-vm-runtime"
+version = "0.1.5"
+edition = "2024"
+license = "MIT"
+[features]
+default = ["runtime"]
+runtime = []
+runtime-cli = ["runtime"]
+runtime-web = ["runtime", "dep:getrandom"]
+runtime-fs = ["runtime"]
+runtime-net = ["runtime", "dep:reqwest", "dep:tungstenite", "dep:tokio"]
+runtime-npm = ["runtime", "dep:semver", "dep:tar", "dep:flate2"]
+runtime-node = ["runtime", "runtime-npm"]
+runtime-typescript = ["runtime", "dep:oxc_allocator", "dep:oxc_parser", "dep:oxc_span", "dep:oxc_codegen", "dep:oxc_transformer", "dep:oxc_semantic"]
+runtime-native-addons = ["runtime-node", "napi-vm-core/node-api-host"]
+[dependencies]
+url = "2"
+napi-vm-core = { path = "../napi-vm-core", version = "0.1.5" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+base64 = "0.22"
+oxc_allocator = { version = "0.95", optional = true }
+oxc_parser = { version = "0.95", optional = true }
+oxc_span = { version = "0.95", optional = true }
+oxc_codegen = { version = "0.95", optional = true }
+oxc_transformer = { version = "0.95", optional = true }
+oxc_semantic = { version = "0.95", optional = true }
+semver = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
+flate2 = { version = "1", optional = true }
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"], optional = true }
+getrandom = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["rt", "time", "net", "macros"], optional = true }
+
+[dev-dependencies]
+static_assertions = "1.1"
+tokio = { version = "1", features = ["rt", "time"] }

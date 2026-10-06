@@ -220,10 +220,10 @@ compatibility measurements remain separate and unmeasured by those corpora.
 
 ## Remaining roadmap work
 
-- Extract actual `napi-vm-core` and `napi-vm-runtime` crates; the current split is
-  feature-gated modules within the existing package.
-- Replace scalar strings with a lossless UTF-16 representation, including lexer,
-  regex, JSON, property keys and bridge semantics. Unicode escapes remain a gap.
+The ordered follow-up PR scopes and acceptance gates are in
+[next-implementations.md](next-implementations.md).
+
+- Expand Unicode and ECMAScript conformance coverage beyond the UTF-16 migration.
 - Complete Test262 host hooks and module linking/negative-phase classification;
   improve bytecode coverage, weak reachability and finalization.
 - Complete Web Platform Test coverage: streaming bodies, Blob/FormData, the full
@@ -241,3 +241,20 @@ compatibility measurements remain separate and unmeasured by those corpora.
 
 The runtime preview checklist remains open. Feature names and passing targeted
 integration tests do not establish Web, Node or npm corpus compatibility.
+
+## Rust crate boundary and string migration
+
+The workspace now has independent `napi-vm-core` and `napi-vm-runtime` packages.
+The root `napi-vm` package remains the N-API/wasm/CLI compatibility facade with
+`default = ["napi"]`. Its runtime dependency is optional. See
+[crate architecture](crate-architecture.md) for ownership and migration examples.
+
+Guest strings, literal/template constants and boxed strings use `JsString`, a
+lossless UTF-16 code-unit value. String indexing and regex offsets count code
+units; string iteration and Unicode regex matching combine valid pairs. JSON
+stringification escapes unpaired surrogates. Property slots use a reversible
+encoding, with decoded keys returned to guest code. N-API structured values,
+wasm host values and native-addon string payloads preserve code units. Host
+UTF-8 text output is an explicit replacement boundary; strict conversion is
+available through `JsString::to_utf8()`. Host JSON conversion rejects unpaired
+surrogates. This migration does not establish overall Test262 conformance.

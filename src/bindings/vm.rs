@@ -477,18 +477,18 @@ impl VM {
             {
                 let mut global = _runtime.interp.global.borrow_mut();
                 if options.console.unwrap_or(false) {
-                    crate::builtins::install_console(&mut global);
+                    crate::runtime::install_console(&mut global);
                 }
                 if options.timers.unwrap_or(false) {
-                    crate::builtins::install_timers(&mut global);
+                    crate::runtime::install_timers(&mut global);
                 }
                 #[cfg(feature = "runtime-web")]
                 if options.web_apis.unwrap_or(false) {
-                    crate::builtins::install_web(&mut global);
+                    crate::runtime::install_web(&mut global);
                 }
                 #[cfg(feature = "runtime-node")]
                 if options.node_compat.unwrap_or(false) {
-                    crate::builtins::install_buffer(&mut global);
+                    crate::runtime::install_buffer(&mut global);
                 }
             }
             Ok(())
@@ -496,11 +496,12 @@ impl VM {
     }
 
     #[napi]
-    pub fn run(&mut self, source: String) -> napi::Result<String> {
+    pub fn run(&mut self, source: napi::bindgen_prelude::Utf16String) -> napi::Result<String> {
+        let source = crate::JsString::from_units(source.to_vec());
         let _busy = self.state.try_start()?;
         let state = self.state.clone();
         state.runtime.with_mut(|runtime| {
-            let result = execute_source(&mut runtime.interp, &source)
+            let result = execute_source_utf16(&mut runtime.interp, &source)
                 .and_then(|value| try_to_string(&value))
                 .map_err(|error| {
                     napi::Error::from_reason(runtime.interp.enrich_error(error, None).to_string())
@@ -517,8 +518,8 @@ impl VM {
     /// side effects. Callers can use it to decide whether optional source
     /// transformation is needed before registration.
     #[napi(js_name = "validateModule")]
-    pub fn validate_module(&self, source: String) -> ValidationResult {
-        validate_module_source(&source)
+    pub fn validate_module(&self, source: napi::bindgen_prelude::Utf16String) -> ValidationResult {
+        validate_module_source(&crate::JsString::from_units(source.to_vec()))
     }
 
     /// Define a guest module *without* evaluating it.
@@ -532,7 +533,13 @@ impl VM {
     /// `registerModule` remains the eager form, and reports a body's error at
     /// registration time; with `defineModule` the error surfaces at the import.
     #[napi]
-    pub fn define_module(&mut self, name: String, source: String) -> napi::Result<()> {
+    pub fn define_module(
+        &mut self,
+        name: napi::bindgen_prelude::Utf16String,
+        source: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<()> {
+        let name = strict_host_text(&name)?;
+        let source = strict_host_text(&source)?;
         let _busy = self.state.try_start()?;
         self.state.runtime.with_mut(|runtime| {
             let source: Arc<str> = source.into();
@@ -555,7 +562,13 @@ impl VM {
     /// arbitrary interpreter state is not something this layer can promise.
     /// Callers who need that isolation should use a fresh `Vm`.
     #[napi]
-    pub fn register_module(&mut self, name: String, source: String) -> napi::Result<()> {
+    pub fn register_module(
+        &mut self,
+        name: napi::bindgen_prelude::Utf16String,
+        source: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<()> {
+        let name = strict_host_text(&name)?;
+        let source = strict_host_text(&source)?;
         let _busy = self.state.try_start()?;
         self.state.runtime.with_mut(|runtime| {
             let displaced = runtime.interp.begin_module(&name);
@@ -592,10 +605,11 @@ impl VM {
     pub fn register_host_module(
         &mut self,
         env: Env,
-        name: String,
+        name: napi::bindgen_prelude::Utf16String,
         exports: Object,
         options: Option<Object>,
     ) -> napi::Result<Vec<String>> {
+        let name = strict_host_text(&name)?;
         let _busy = self.state.try_start()?;
 
         let async_names: Vec<String> = match options.as_ref() {
@@ -850,7 +864,8 @@ impl VM {
     }
 
     #[napi]
-    pub fn get_global(&self, name: String) -> napi::Result<String> {
+    pub fn get_global(&self, name: napi::bindgen_prelude::Utf16String) -> napi::Result<String> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let _busy = self.state.try_start()?;
         self.state
             .runtime
@@ -866,7 +881,13 @@ impl VM {
     }
 
     #[napi]
-    pub fn set_global(&mut self, env: Env, name: String, value: Unknown) -> napi::Result<()> {
+    pub fn set_global(
+        &mut self,
+        env: Env,
+        name: napi::bindgen_prelude::Utf16String,
+        value: Unknown,
+    ) -> napi::Result<()> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let _busy = self.state.try_start()?;
         self.state.runtime.with_mut(|runtime| -> napi::Result<()> {
             let value = from_napi(env.raw(), value.raw())
@@ -888,18 +909,33 @@ impl VM {
     }
 
     #[napi]
-    pub fn expose_function(&mut self, env: Env, name: String, func: Unknown) -> napi::Result<()> {
-        self.expose_function_inner(env, name, func, false)
+    pub fn expose_function(
+        &mut self,
+        env: Env,
+        name: napi::bindgen_prelude::Utf16String,
+        func: Unknown,
+    ) -> napi::Result<()> {
+        self.expose_function_inner(
+            env,
+            crate::JsString::from_units(name.to_vec()).to_key(),
+            func,
+            false,
+        )
     }
 
     #[napi]
     pub fn expose_async_function(
         &mut self,
         env: Env,
-        name: String,
+        name: napi::bindgen_prelude::Utf16String,
         func: Unknown,
     ) -> napi::Result<()> {
-        self.expose_function_inner(env, name, func, true)
+        self.expose_function_inner(
+            env,
+            crate::JsString::from_units(name.to_vec()).to_key(),
+            func,
+            true,
+        )
     }
 
     fn expose_function_inner(
@@ -971,7 +1007,12 @@ impl VM {
     /// the `Arc<VMState>`; the interpreter itself remains under `RuntimeCell`'s
     /// mutex and is never accessed concurrently with a Node method.
     #[napi(ts_return_type = "Promise<string>")]
-    pub fn run_async(&mut self, env: Env, source: String) -> napi::Result<Unknown<'_>> {
+    pub fn run_async(
+        &mut self,
+        env: Env,
+        source: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<Unknown<'_>> {
+        let source = crate::JsString::from_units(source.to_vec());
         let busy = self.state.try_start()?;
         let raw_env = env.raw();
 
@@ -1032,7 +1073,8 @@ impl VM {
             let _busy = busy;
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 worker_state.runtime.with_mut(|runtime| {
-                    let result = match execute_source(&mut runtime.interp, &source_for_worker) {
+                    let result = match execute_source_utf16(&mut runtime.interp, &source_for_worker)
+                    {
                         Ok(value) => async_result_string(value),
                         Err(error) => Err(runtime.interp.enrich_error(error, None).to_string()),
                     };
@@ -1111,7 +1153,11 @@ impl VM {
     ///
     /// Returns whether anything was registered under `name`.
     #[napi]
-    pub fn remove_module(&mut self, name: String) -> napi::Result<bool> {
+    pub fn remove_module(
+        &mut self,
+        name: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<bool> {
+        let name = strict_host_text(&name)?;
         let _busy = self.state.try_start()?;
         Ok(self.state.runtime.with_mut(|runtime| {
             // Two registries have to move together. `runtime.modules` is the
@@ -1137,7 +1183,8 @@ impl VM {
     /// can resolve: registration and removal move the source registry and the
     /// interpreter's export table together.
     #[napi]
-    pub fn has_module(&self, name: String) -> napi::Result<bool> {
+    pub fn has_module(&self, name: napi::bindgen_prelude::Utf16String) -> napi::Result<bool> {
+        let name = strict_host_text(&name)?;
         let _busy = self.state.try_start()?;
         Ok(self
             .state
@@ -1155,7 +1202,11 @@ impl VM {
     }
 
     #[napi]
-    pub fn remove_global(&mut self, name: String) -> napi::Result<bool> {
+    pub fn remove_global(
+        &mut self,
+        name: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<bool> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let _busy = self.state.try_start()?;
         Ok(self
             .state
@@ -1164,7 +1215,8 @@ impl VM {
     }
 
     #[napi]
-    pub fn has_global(&self, name: String) -> napi::Result<bool> {
+    pub fn has_global(&self, name: napi::bindgen_prelude::Utf16String) -> napi::Result<bool> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let _busy = self.state.try_start()?;
         Ok(self
             .state
@@ -1176,9 +1228,10 @@ impl VM {
     pub fn call_function(
         &mut self,
         env: Env,
-        name: String,
+        name: napi::bindgen_prelude::Utf16String,
         args: Vec<Unknown>,
     ) -> napi::Result<Unknown<'_>> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let _busy = self.state.try_start()?;
         let raw_env = env.raw();
         if args.len() > crate::value::MAX_ARRAY_LEN {
@@ -1255,9 +1308,22 @@ pub(super) fn execute_source(interp: &mut Interpreter, source: &str) -> Result<V
     )
 }
 
+pub(super) fn execute_source_utf16(
+    interp: &mut Interpreter,
+    source: &crate::JsString,
+) -> Result<Value, VmErr> {
+    interp.eval_utf16_with_options(
+        source,
+        crate::interpreter::EvaluationOptions {
+            resume_pending_checkpoint: true,
+            ..Default::default()
+        },
+    )
+}
+
 /// Parse module source without touching interpreter state.
-fn validate_module_source(source: &str) -> ValidationResult {
-    let tokens = Lexer::new(source).tokenize_with_spans();
+fn validate_module_source(source: &crate::JsString) -> ValidationResult {
+    let tokens = Lexer::from_js_string(source).tokenize_with_spans();
     let mut parser = Parser::new_with_spans(tokens);
     match parser.parse_program() {
         Ok(_) => ValidationResult {
@@ -1326,13 +1392,20 @@ pub fn create_vm() -> VM {
 }
 
 #[napi]
-pub fn run_code(source: String) -> napi::Result<String> {
-    run_source(&source, false).map_err(|error| napi::Error::from_reason(error.to_string()))
+pub fn run_code(source: napi::bindgen_prelude::Utf16String) -> napi::Result<String> {
+    let text = crate::JsString::from_units(source.to_vec());
+    match text.to_utf8() {
+        Ok(text) => {
+            run_source(&text, false).map_err(|error| napi::Error::from_reason(error.to_string()))
+        }
+        Err(_) => VM::new().run(source),
+    }
 }
 
 #[napi]
-pub fn debug_parse(source: String) -> napi::Result<String> {
-    let mut lexer = Lexer::new(&source);
+pub fn debug_parse(source: napi::bindgen_prelude::Utf16String) -> napi::Result<String> {
+    let source = crate::JsString::from_units(source.to_vec());
+    let mut lexer = Lexer::from_js_string(&source);
     let tokens = lexer.tokenize_with_spans();
     let mut parser = Parser::new_with_spans(tokens);
     let statements = parser.parse();
@@ -1371,7 +1444,7 @@ mod owner_migration_tests {
         // first lease otherwise initializes TLS while installing the owner.
         let outer_shape = shape_identity();
         let outer_heap = crate::heap::counters();
-        let outer_shapes = crate::shape::Shape::created_count();
+        let outer_shapes = crate::shape::created_count();
         let expected = first_symbol(&mut crate::runtime::OwnerContext::default());
         assert_eq!(
             run_source(
@@ -1394,7 +1467,7 @@ mod owner_migration_tests {
             "undefined"
         );
         assert_eq!(crate::heap::counters(), outer_heap);
-        assert_eq!(crate::shape::Shape::created_count(), outer_shapes);
+        assert_eq!(crate::shape::created_count(), outer_shapes);
         assert_eq!(shape_identity(), outer_shape);
     }
 
@@ -1480,7 +1553,7 @@ mod owner_migration_tests {
     }
 
     fn shape_identity() -> usize {
-        Rc::as_ptr(&crate::shape::Shape::root()) as usize
+        crate::shape::root_identity()
     }
     fn arena_identity(runtime: &mut VmRuntime) -> (usize, usize, usize, usize) {
         let symbol = runtime
@@ -1507,7 +1580,7 @@ mod owner_migration_tests {
     #[test]
     fn owner_migration_thread_handoffs_and_drop() {
         let outer_shape = shape_identity();
-        let outer_shapes_created = crate::shape::Shape::created_count();
+        let outer_shapes_created = crate::shape::created_count();
         let outer_heap = crate::heap::counters();
         let state = VM::new_state();
         let (expected, pinned) = state.with_runtime(|runtime| {
@@ -1520,13 +1593,13 @@ mod owner_migration_tests {
             (arena_identity(runtime), pinned)
         });
         assert_eq!(shape_identity(), outer_shape);
-        assert_eq!(crate::shape::Shape::created_count(), outer_shapes_created);
+        assert_eq!(crate::shape::created_count(), outer_shapes_created);
         assert_eq!(crate::heap::counters(), outer_heap);
         for _ in 0..8 {
             let transferred = state.clone();
             std::thread::spawn(move || {
                 let outer = shape_identity();
-                let outer_count = crate::shape::Shape::created_count();
+                let outer_count = crate::shape::created_count();
                 transferred.with_runtime(|runtime| {
                     assert_eq!(arena_identity(runtime), expected);
                     assert_eq!(runtime.interp.collect_cycles().skipped, None);
@@ -1536,7 +1609,7 @@ mod owner_migration_tests {
                     ));
                 });
                 assert_eq!(shape_identity(), outer);
-                assert_eq!(crate::shape::Shape::created_count(), outer_count);
+                assert_eq!(crate::shape::created_count(), outer_count);
             })
             .join()
             .unwrap();
@@ -1553,17 +1626,17 @@ mod owner_migration_tests {
         // No bridge exists: destruction here exercises only Rust state.
         std::thread::spawn(move || drop(state)).join().unwrap();
         assert_eq!(shape_identity(), outer_shape);
-        assert_eq!(crate::shape::Shape::created_count(), outer_shapes_created);
+        assert_eq!(crate::shape::created_count(), outer_shapes_created);
         assert_eq!(crate::heap::counters(), outer_heap);
     }
     #[test]
     fn owner_migration_panic_nested_contexts_restore_tls() {
         let mut ambient = crate::runtime::OwnerContext::default();
         let _ambient = ambient.enter();
-        let ambient_shapes_created = crate::shape::Shape::created_count();
+        let ambient_shapes_created = crate::shape::created_count();
         let first = VM::new_state();
         let second = VM::new_state();
-        assert_eq!(crate::shape::Shape::created_count(), ambient_shapes_created);
+        assert_eq!(crate::shape::created_count(), ambient_shapes_created);
         let first_identity = first.with_runtime(arena_identity);
         let second_identity = second.with_runtime(arena_identity);
         assert_ne!(first_identity.0, second_identity.0);
@@ -1582,7 +1655,7 @@ mod owner_migration_tests {
         }));
         assert!(panic.is_err());
         assert_eq!(shape_identity(), ambient_shape);
-        assert_eq!(crate::shape::Shape::created_count(), ambient_shapes_created);
+        assert_eq!(crate::shape::created_count(), ambient_shapes_created);
         assert_eq!(crate::heap::counters(), ambient_heap);
         assert_eq!(first.with_runtime(arena_identity), first_identity);
         assert_eq!(second.with_runtime(arena_identity), second_identity);
@@ -1666,4 +1739,12 @@ mod runtime_profile {
             serde_json::json!({"profile":"prepared_clone", "operations":100000,"elapsed_ns":started.elapsed().as_nanos()})
         );
     }
+}
+
+fn strict_host_text(text: &napi::bindgen_prelude::Utf16String) -> napi::Result<String> {
+    String::from_utf16(text).map_err(|_| {
+        napi::Error::from_reason(
+            "UTF-8 module source and identifier contracts do not support unpaired surrogates",
+        )
+    })
 }

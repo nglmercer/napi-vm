@@ -34,7 +34,10 @@ export declare class LanguageService {
 
 export declare class Vm {
   constructor()
-  /** Explicit opt-in; the native build must include the corresponding runtime features. */
+  /**
+   * Enable selected globals; compile-time features are required and do not
+   * grant filesystem, network, environment, process or addon permission.
+   */
   enableRuntime(options: RuntimeCapabilities): void
   run(source: string): string
   /**
@@ -145,17 +148,10 @@ export declare class Vm {
 }
 export type VM = Vm
 
-export interface RuntimeCapabilities {
-  console?: boolean
-  timers?: boolean
-  /** Implemented computational Web APIs; does not install fetch. */
-  webApis?: boolean
-  /** Implemented Buffer API; not a complete Node environment. */
-  nodeCompat?: boolean
-}
-
 export interface AsyncSessionOptions {
   commandCapacity?: number
+  /** Explicitly install guest timers; requires the runtime Cargo feature. */
+  timers?: boolean
   /** legacy (default), virtual, or real-time. */
   clock?: string
   /** external-first (default) or alternate. */
@@ -192,6 +188,14 @@ export interface NapiHover {
 }
 
 export declare function runCode(source: string): string
+
+/** Implemented runtime globals are installed only after an explicit request. */
+export interface RuntimeCapabilities {
+  console?: boolean
+  timers?: boolean
+  webApis?: boolean
+  nodeCompat?: boolean
+}
 
 /** One parse-only diagnostic returned by `VM.validateModule`. */
 export interface ValidationDiagnostic {

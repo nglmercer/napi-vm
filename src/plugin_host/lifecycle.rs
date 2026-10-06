@@ -126,7 +126,7 @@ pub(super) fn invoke_plugin_hook(
     let Some(function) = function else {
         return Ok(None);
     };
-    if !crate::interpreter::call::is_callable_value(function) {
+    if !crate::interpreter::is_callable_value(function) {
         return Ok(None);
     }
     let result = interpreter.call_host_function(function, receiver, args)?;
@@ -147,7 +147,7 @@ pub(super) fn resolve_hook(
     name: &str,
 ) -> Result<Option<Value>, PluginHostError> {
     let hook = interpreter.member(instance, name)?;
-    if crate::interpreter::call::is_callable_value(&hook) {
+    if crate::interpreter::is_callable_value(&hook) {
         Ok(Some(hook))
     } else {
         Ok(None)

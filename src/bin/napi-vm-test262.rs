@@ -47,7 +47,7 @@ fn error_type(error: &VmErr) -> String {
     if let VmErr::Throw(value) = error
         && let Some(Value::String(ref name)) = value.get_prop("name")
     {
-        return name.clone();
+        return name.to_string();
     }
     let message = error.to_string();
     for name in [

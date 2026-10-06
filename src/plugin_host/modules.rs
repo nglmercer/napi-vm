@@ -17,7 +17,11 @@ pub(super) fn install_fs_module(
                 "fs.read requires a non-empty path string",
             ))));
         };
-        Ok(guest_result(read_fs.read_text(path).map(Value::String)))
+        Ok(guest_result(
+            read_fs
+                .read_text(path)
+                .map(|value| Value::String(value.into())),
+        ))
     })
     .expect("bootstrap callback registration is bounded");
     let write_fs = filesystem.clone();
@@ -156,7 +160,7 @@ pub(super) fn sanitize_global(value: &str) -> String {
 
 pub(super) fn value_to_guest_string(value: &Value) -> String {
     match value {
-        Value::String(value) => value.clone(),
+        Value::String(value) => value.to_string(),
         Value::Number(value) => crate::format::number_string(*value),
         Value::Bool(value) => value.to_string(),
         Value::Null => "null".into(),

@@ -14,3 +14,6 @@ artifacts/
 
 # Nested workspace/template dependencies are installed, not vendored.
 **/node_modules/
+
+# Generated browser package.
+/playground/pkg/

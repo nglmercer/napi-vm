@@ -70,7 +70,7 @@ fn napi_prebuild_package_roots_stay_inside_the_plugin_directory() {
 
 fn string_value(_interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
     match args.first() {
-        Some(Value::String(value)) => Ok(Value::String(format!("hello {value}"))),
+        Some(Value::String(value)) => Ok(Value::String((format!("hello {value}")).into())),
         _ => Err(VmErr::Msg("expected one string argument".into())),
     }
 }
@@ -1122,7 +1122,7 @@ export default {
     let capability = RustPluginCapability::new("host:echo").export("echo", |interp, args| {
         let value = args.first().cloned().unwrap_or(Value::Undefined);
         let json = crate::convert::value_to_json(interp, &value)?;
-        Ok(Value::String(json.to_string()))
+        Ok(Value::String((json.to_string()).into()))
     });
     let mut host = RustPluginHost::new(RustPluginHostOptions {
         policy: RustPluginPolicy::default().grant("host:echo", JsonValue::Bool(true)),

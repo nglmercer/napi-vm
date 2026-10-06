@@ -1,70 +1,22 @@
-// The NAPI layer is the only Node-specific part of the crate. Gating it behind
-// a feature lets the pure-Rust core (lexer, parser, interpreter, builtins,
-// format) build standalone — as a plain dependency for the language server and
-// GUI frontends, and for the `wasm32` target.
+//! Binding and CLI facade. Engine and runtime implementations live in separate crates.
+pub use napi_vm_core::*;
 #[cfg(feature = "napi")]
 pub mod bindings;
-pub mod builtins;
-pub mod bytecode;
-pub mod convert;
-pub mod error;
-pub mod format;
-pub mod heap;
-pub mod host;
-pub mod interpreter;
-pub mod jit;
-pub mod lang;
-pub mod lexer;
-pub mod module_loader;
-pub use module_loader::{
-    CompositeLoader, DataUrlLoader, ModuleLoader, ModuleSource, VirtualLoader,
-};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod lsp;
-pub mod parser;
 pub mod plugin_host;
-pub mod runtime;
-pub mod shape;
-pub mod span;
-pub mod value;
-// `wasm` also requires the wasm32 target: the module depends on `js-sys`, which
-// is a target-scoped dependency, so `--all-features` on a native host would
-// otherwise fail to compile.
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 pub mod wasm;
-
+pub mod runtime {
+    pub use napi_vm_core::runtime::*;
+    #[cfg(feature = "runtime")]
+    pub use napi_vm_runtime::runtime::*;
+}
 #[cfg(feature = "napi")]
 pub use bindings::{
     AsyncSession, AsyncSessionOptions, LanguageService, RuntimeCapabilities, VM, create_vm,
     debug_parse, run_code,
 };
-pub use builtins::setup_builtins;
-pub use convert::{value_from_json, value_to_json};
-pub use error::VmErr;
-pub use format::{PrintOptions, Printer};
-pub use host::{
-    HostBridge, HostCallback, HostCallbackKind, HostEvent, WakeNotifier, WakeSignal, WakeSlot,
-};
-pub use interpreter::{
-    CancellationToken, Clock, ClockMode, Environment, EventLoopOptions, Fairness, Interpreter,
-    Module, PreparedProgram, RealTimeClock, TurnBudget, TurnOutcome, VirtualClock, YieldReason,
-};
-pub use interpreter::{
-    CommonJsModuleFormat, CommonJsModuleLoader, FileCommonJsLoader, NativeAddonLoader,
-    ResolvedCommonJsModule,
-};
-#[cfg(not(target_arch = "wasm32"))]
-pub use interpreter::{
-    NativeAddonBackendHost, NativeAddonOptions, NativeAddonPolicy, NativeAddonRuntime,
-    NodeAddonOptions, NodeAddonRuntimeInfo, NodeAddonSidecar,
-};
-#[cfg(all(
-    feature = "node-api-host",
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
-pub use interpreter::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions};
-pub use lexer::{Lexer, Token};
-pub use parser::{Expr, Parser, Statement};
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -75,6 +27,3 @@ pub use plugin_host::{
     RustPluginCapability, RustPluginFunction, RustPluginHost, RustPluginHostOptions,
     RustPluginManifest, RustPluginPolicy, RustPluginStatus,
 };
-pub use value::Value;
-pub mod bigint;
-pub mod regex;
