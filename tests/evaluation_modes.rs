@@ -1,5 +1,7 @@
 use napi_vm::interpreter::{DrainPolicy, EvaluationOptions};
-use napi_vm::{ClockMode, Interpreter, Value, VirtualClock};
+#[cfg(feature = "runtime")]
+use napi_vm::{ClockMode, VirtualClock};
+use napi_vm::{Interpreter, Value};
 
 #[test]
 fn evaluation_tiers_caching_and_drain_policies() {
@@ -10,41 +12,45 @@ fn evaluation_tiers_caching_and_drain_policies() {
     let (hits, misses, entries, _) = vm.prepared_cache_stats();
     assert_eq!((hits, misses, entries), (1, 1, 1));
     assert!(vm.evaluation_diagnostics().contains("bytecode"));
-    let clock = VirtualClock::default();
-    vm.jobs
-        .borrow_mut()
-        .set_clock(ClockMode::Virtual(clock.clone()))
+    #[cfg(feature = "runtime")]
+    {
+        let mut vm = Interpreter::with_runtime_builtins();
+        let clock = VirtualClock::default();
+        vm.jobs
+            .borrow_mut()
+            .set_clock(ClockMode::Virtual(clock.clone()))
+            .unwrap();
+        vm.eval_source_with_options(
+            "var seen=0;setTimeout(()=>seen++,10);queueMicrotask(()=>seen+=2);",
+            EvaluationOptions {
+                drain: DrainPolicy::None,
+                ..Default::default()
+            },
+        )
         .unwrap();
-    vm.eval_source_with_options(
-        "var seen=0;setTimeout(()=>seen++,10);queueMicrotask(()=>seen+=2);",
-        EvaluationOptions {
-            drain: DrainPolicy::None,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        vm.global.borrow().get("seen"),
-        Some(Value::Number(0.))
-    ));
-    vm.eval_source_with_options(
-        "",
-        EvaluationOptions {
-            drain: DrainPolicy::Microtasks,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        vm.global.borrow().get("seen"),
-        Some(Value::Number(2.))
-    ));
-    clock.advance(10.).unwrap();
-    vm.drain_jobs().unwrap();
-    assert!(matches!(
-        vm.global.borrow().get("seen"),
-        Some(Value::Number(3.))
-    ));
+        assert!(matches!(
+            vm.global.borrow().get("seen"),
+            Some(Value::Number(0.))
+        ));
+        vm.eval_source_with_options(
+            "",
+            EvaluationOptions {
+                drain: DrainPolicy::Microtasks,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            vm.global.borrow().get("seen"),
+            Some(Value::Number(2.))
+        ));
+        clock.advance(10.).unwrap();
+        vm.drain_jobs().unwrap();
+        assert!(matches!(
+            vm.global.borrow().get("seen"),
+            Some(Value::Number(3.))
+        ));
+    }
     for i in 0..80 {
         vm.eval_source(&format!("{i};")).unwrap();
     }

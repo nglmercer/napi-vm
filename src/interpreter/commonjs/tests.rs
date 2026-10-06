@@ -477,7 +477,7 @@ fn require_is_disabled_until_the_host_configures_a_loader() {
     let mut interp = crate::interpreter::Interpreter::with_builtins();
     assert!(matches!(
         interp.eval_source("typeof require;"),
-        Ok(Value::String(ref kind)) if kind == "object"
+        Ok(Value::String(ref kind)) if kind == "undefined"
     ));
     let error = interp.require_commonjs("./missing.cjs", None).unwrap_err();
     assert!(

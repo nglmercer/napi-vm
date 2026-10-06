@@ -64,6 +64,7 @@ pub struct Realm {
     module_file_urls: Rc<RefCell<HashMap<String, String>>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
+    module_loader: Option<Rc<dyn crate::ModuleLoader>>,
     commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
     commonjs_entry: Option<String>,
     execution: Rc<scheduler::ExecutionState>,
@@ -81,6 +82,7 @@ impl Realm {
             module_file_urls: interp.module_file_urls.clone(),
             evaluating: interp.evaluating.clone(),
             commonjs_loader: interp.commonjs_loader.clone(),
+            module_loader: interp.module_loader.clone(),
             commonjs_cache: interp.commonjs_cache.clone(),
             commonjs_entry: interp.commonjs_entry.clone(),
             execution: interp.execution.clone(),
@@ -110,6 +112,7 @@ impl Realm {
         interp.module_file_urls = self.module_file_urls;
         interp.evaluating = self.evaluating;
         interp.commonjs_loader = self.commonjs_loader;
+        interp.module_loader = self.module_loader;
         interp.commonjs_cache = self.commonjs_cache;
         interp.commonjs_entry = self.commonjs_entry;
         interp.republish_roots();
@@ -209,6 +212,7 @@ pub struct Interpreter {
     /// Host-selected CommonJS source/native module resolver. No filesystem or
     /// native addon access is enabled unless an embedding host installs one.
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
+    module_loader: Option<Rc<dyn crate::ModuleLoader>>,
     /// CommonJS module cache, including the partially initialized record used
     /// to make circular `require()` calls observable.
     commonjs_cache: Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
@@ -396,6 +400,7 @@ impl Interpreter {
             module_aliases: Rc::new(RefCell::new(HashMap::new())),
             module_file_urls: Rc::new(RefCell::new(HashMap::new())),
             commonjs_loader: None,
+            module_loader: None,
             commonjs_cache: Rc::new(RefCell::new(HashMap::new())),
             commonjs_entry: None,
             evaluating: Rc::new(RefCell::new(std::collections::HashSet::new())),
@@ -453,6 +458,50 @@ impl Interpreter {
         interp
     }
 
+    /// Explicitly install implemented runtime globals for host adapters.
+    /// Prefer RuntimeBuilder for selecting capabilities individually.
+    #[cfg(feature = "runtime")]
+    pub fn with_runtime_builtins() -> Self {
+        let interp = Self::with_builtins();
+        {
+            let mut global = interp.global.borrow_mut();
+            crate::builtins::install_console(&mut global);
+            crate::builtins::install_timers(&mut global);
+            #[cfg(feature = "runtime-web")]
+            crate::builtins::install_web(&mut global);
+            #[cfg(feature = "runtime-node")]
+            crate::builtins::install_buffer(&mut global);
+        }
+        interp
+    }
+
+    /// Install a host-selected loader; no ambient file or network loader exists.
+    pub fn set_module_loader(&mut self, loader: Rc<dyn crate::ModuleLoader>) {
+        self.module_loader = Some(loader);
+    }
+
+    pub fn load_module(&mut self, specifier: &str) -> Result<String, VmErr> {
+        let id = self
+            .resolve_module_request(specifier)?
+            .ok_or_else(|| VmErr::Msg(format!("Module not found: {specifier}")))?;
+        if !self.ensure_module(&id)? {
+            return Err(VmErr::Msg(format!("Module not found: {id}")));
+        }
+        Ok(id)
+    }
+
+    fn resolve_module_request(&self, specifier: &str) -> Result<Option<String>, VmErr> {
+        if let Some(name) = self.resolve_module_name(specifier)
+            && (self.has_module(&name) || self.module_sources.borrow().contains_key(&name))
+        {
+            return Ok(Some(name));
+        }
+        if let Some(loader) = &self.module_loader {
+            return loader.resolve(specifier, self.cur_mod.as_deref()).map(Some);
+        }
+        Ok(self.resolve_module_name(specifier))
+    }
+
     /// Attach a host bridge for values such as native addon exports.
     pub fn set_host_bridge(&mut self, bridge: Rc<dyn HostBridge>) {
         let remaining = self.execution.deadline.get().map(|d| {
@@ -492,6 +541,8 @@ impl Interpreter {
     {
         let addon_loader: Rc<dyn NativeAddonLoader> = backend.clone();
         let host_bridge: Rc<dyn HostBridge> = backend.clone();
+        #[cfg(feature = "runtime-node")]
+        crate::builtins::install_buffer(&mut self.global.borrow_mut());
         self.set_commonjs_loader(Rc::new(loader.with_native_addon_loader(addon_loader)))?;
         self.set_host_bridge(host_bridge);
         if let Some(entry) = entry {
@@ -1183,7 +1234,7 @@ impl Interpreter {
         specifiers: &[(String, String)],
     ) -> Result<Vec<(String, Value)>, VmErr> {
         let resolved = self
-            .resolve_module_name(source)
+            .resolve_module_request(source)?
             .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
         self.ensure_module(&resolved)?;
         let other = self
@@ -1646,6 +1697,20 @@ impl Interpreter {
     pub fn ensure_module(&mut self, name: &str) -> Result<bool, VmErr> {
         if self.modules.borrow().contains_key(name) || self.evaluating.borrow().contains(name) {
             return Ok(true);
+        }
+        if !self.module_sources.borrow().contains_key(name)
+            && let Some(loader) = self.module_loader.clone()
+        {
+            let loaded = loader.load(name)?;
+            if loaded.id != name {
+                return Err(VmErr::Msg(
+                    "module loader changed canonical identity".into(),
+                ));
+            }
+            if name.starts_with("file:") {
+                self.define_module_file_url(name, name.into());
+            }
+            self.define_module(name, loaded.source);
         }
         let Some(source) = self.module_sources.borrow().get(name).cloned() else {
             return Ok(false);

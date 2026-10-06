@@ -1,3 +1,4 @@
+#![cfg(feature = "runtime")]
 use napi_vm::interpreter::{ExecutionBudget, Job};
 use napi_vm::{HostBridge, HostEvent, Interpreter, Value, VmErr};
 use std::cell::{Cell, RefCell};
@@ -48,7 +49,7 @@ fn callback(vm: &mut Interpreter, source: &str) -> Value {
 }
 #[test]
 fn hard_job_boundary_keeps_next_job() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "var hits=0; ()=>hits++;");
     for _ in 0..2 {
         vm.jobs.borrow_mut().push_microtask(Job::Callback {
@@ -75,7 +76,7 @@ fn hard_job_boundary_keeps_next_job() {
 #[test]
 fn queued_work_counts_as_progress_without_waiting() {
     for micro in [true, false] {
-        let mut vm = Interpreter::with_builtins();
+        let mut vm = Interpreter::with_runtime_builtins();
         let cb = callback(&mut vm, "()=>1;");
         let p = probe();
         vm.set_host_bridge(p.clone());
@@ -95,7 +96,7 @@ fn queued_work_counts_as_progress_without_waiting() {
 }
 #[test]
 fn host_is_sampled_at_checkpoints_not_per_microtask() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "var hits=0; ()=>hits++;");
     let p = probe();
     vm.set_host_bridge(p.clone());
@@ -114,7 +115,7 @@ fn host_is_sampled_at_checkpoints_not_per_microtask() {
 }
 #[test]
 fn nested_timers_and_recursive_microtasks_keep_order() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     vm.eval_source("var seen=[]; setTimeout(()=>{seen.push('a'); queueMicrotask(()=>{seen.push('micro');queueMicrotask(()=>seen.push('nested'));});setTimeout(()=>seen.push('inner'),0);},1); setTimeout(()=>seen.push('b'),1);").unwrap();
     assert!(
         matches!(vm.eval_source("seen.join(',')").unwrap(),Value::String(ref s) if s=="a,micro,nested,inner,b")
@@ -127,7 +128,7 @@ use napi_vm::{
 };
 #[test]
 fn virtual_deadlines_and_nested_timers_are_absolute() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let clock = VirtualClock::default();
     vm.jobs
         .borrow_mut()
@@ -170,7 +171,7 @@ fn virtual_deadlines_and_nested_timers_are_absolute() {
 }
 #[test]
 fn soft_yield_resumes_microtasks_before_timers_or_new_evaluation() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(
         &mut vm,
         "var seen=[];()=>{seen.push('a');queueMicrotask(()=>{seen.push('m');queueMicrotask(()=>seen.push('n'));});}",
@@ -202,7 +203,7 @@ fn soft_yield_resumes_microtasks_before_timers_or_new_evaluation() {
 }
 #[test]
 fn hard_limits_survive_soft_yields() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "var hits=0;()=>hits++;");
     vm.set_execution_budget(ExecutionBudget {
         max_jobs: 2,
@@ -228,7 +229,7 @@ fn hard_limits_survive_soft_yields() {
 }
 #[test]
 fn zero_and_time_budgets_keep_the_next_job() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "()=>1");
     vm.jobs.borrow_mut().push_timer(0., cb, vec![]);
     let outcome = vm.poll_event_loop(TurnBudget::jobs(0)).unwrap();
@@ -251,7 +252,7 @@ fn zero_and_time_budgets_keep_the_next_job() {
 }
 #[test]
 fn real_time_waits_only_for_due_timers_and_reports_progress() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "var hit=false;()=>{hit=true}");
     vm.jobs
         .borrow_mut()
@@ -293,7 +294,7 @@ impl HostBridge for FloodBridge {
 }
 #[test]
 fn opt_in_alternation_prevents_timer_starvation_under_host_flood() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let e = callback(&mut vm, "var seen=[];()=>seen.push('e')");
     let t = callback(&mut vm, "()=>seen.push('t')");
     vm.set_event_loop_options(EventLoopOptions {
@@ -319,7 +320,7 @@ fn opt_in_alternation_prevents_timer_starvation_under_host_flood() {
 }
 #[test]
 fn oversized_legacy_ingress_reports_backpressure_without_losing_work() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "var hits=0;()=>hits++");
     let p = probe();
     for _ in 0..7 {
@@ -350,7 +351,7 @@ fn oversized_legacy_ingress_reports_backpressure_without_losing_work() {
 }
 #[test]
 fn cancellation_and_deadlines_interrupt_long_callbacks_and_coroutine_bodies() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "()=>{while(true){}};");
     vm.jobs.borrow_mut().push_timer(0., cb, vec![]);
     vm.set_execution_timeout(Some(Duration::from_millis(5)));
@@ -378,7 +379,7 @@ fn cancellation_and_deadlines_interrupt_long_callbacks_and_coroutine_bodies() {
 
 #[test]
 fn published_gc_roots_do_not_retain_a_cancelled_timer() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let value = Value::object(vec![]);
     let weak = match &value {
         Value::Object { props, .. } => Rc::downgrade(props),
@@ -396,7 +397,7 @@ fn published_gc_roots_do_not_retain_a_cancelled_timer() {
 
 #[test]
 fn nested_await_checkpoints_share_the_hard_job_budget() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     vm.set_execution_budget(ExecutionBudget {
         max_jobs: 2,
         ..ExecutionBudget::default()
@@ -410,7 +411,7 @@ fn nested_await_checkpoints_share_the_hard_job_budget() {
 }
 #[test]
 fn soft_yields_do_not_refill_guest_fuel() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let cb = callback(&mut vm, "()=>1+1");
     vm.set_fuel_budget(100);
     for _ in 0..3 {
@@ -436,7 +437,7 @@ fn collection_refuses_while_dequeued_native_job_values_are_on_the_stack() {
         );
         Ok(Value::Undefined)
     }
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     vm.jobs.borrow_mut().push_microtask(Job::Callback {
         callback: Value::NativeFunction {
             name: "gc_probe".into(),
@@ -450,7 +451,7 @@ fn collection_refuses_while_dequeued_native_job_values_are_on_the_stack() {
 
 #[test]
 fn throwing_checkpoint_reconciles_state_without_refilling_jobs() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     let bad = callback(&mut vm, "()=>{throw new Error('boom')}");
     let good = callback(&mut vm, "var hits=0;()=>hits++");
     vm.jobs.borrow_mut().push_microtask(Job::Callback {
@@ -483,7 +484,7 @@ fn throwing_checkpoint_reconciles_state_without_refilling_jobs() {
 
 #[test]
 fn last_throwing_microtask_clears_checkpoint() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     assert!(
         vm.eval_source("queueMicrotask(()=>{throw new Error('boom')});")
             .is_err()
@@ -497,7 +498,7 @@ fn last_throwing_microtask_clears_checkpoint() {
 
 #[test]
 fn future_timer_wait_is_capped_by_execution_deadline() {
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     vm.jobs
         .borrow_mut()
         .set_clock(ClockMode::RealTime(Rc::new(RealTimeClock::default())))
@@ -535,7 +536,7 @@ fn cancellation_between_readiness_check_and_wait_is_latched() {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
-        let mut vm = Interpreter::with_builtins();
+        let mut vm = Interpreter::with_runtime_builtins();
         vm.set_cancellation_token(token);
         vm.set_host_bridge(Rc::new(BarrierBridge {
             ready: ready_tx,
@@ -564,7 +565,7 @@ fn future_await_resumes_before_another_due_timer() {
             if call < 4 { 0.0 } else { 50.0 }
         }
     }
-    let mut vm = Interpreter::with_builtins();
+    let mut vm = Interpreter::with_runtime_builtins();
     vm.jobs
         .borrow_mut()
         .set_clock(ClockMode::RealTime(Rc::new(StepClock(Cell::new(0)))))
@@ -614,7 +615,7 @@ fn blocking_only_bridge_is_polled_before_the_full_timeout() {
     let token = CancellationToken::default();
     let cancel = token.clone();
     let worker = std::thread::spawn(move || {
-        let mut vm = Interpreter::with_builtins();
+        let mut vm = Interpreter::with_runtime_builtins();
         vm.set_cancellation_token(token);
         vm.set_host_bridge(Rc::new(BlockingBridge {
             entered: entered_tx,
@@ -672,7 +673,7 @@ fn blocking_only_waits_bound_cancellation_deadlines_timeouts_and_shutdown() {
         let token = CancellationToken::default();
         let cancel = token.clone();
         let worker = std::thread::spawn(move || {
-            let mut vm = Interpreter::with_builtins();
+            let mut vm = Interpreter::with_runtime_builtins();
             vm.set_host_bridge(Rc::new(Bridge {
                 entered: entered_tx,
                 input: input_rx,
@@ -763,7 +764,7 @@ fn notifier_delivery_between_poll_and_sleep_is_latched() {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
-        let mut vm = Interpreter::with_builtins();
+        let mut vm = Interpreter::with_runtime_builtins();
         vm.set_host_bridge(Rc::new(Bridge {
             ready: ready_tx,
             release: RefCell::new(release_rx),

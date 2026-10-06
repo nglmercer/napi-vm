@@ -51,6 +51,11 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         (Value::Symbol(x), Value::Symbol(y)) => x.id == y.id,
         (Value::BigInt(x), Value::BigInt(y)) => x.compare(y).is_eq(),
         (Value::Date(x), Value::Date(y)) => Rc::ptr_eq(x, y),
+        (Value::ArrayBuffer(x), Value::ArrayBuffer(y)) => x.identity() == y.identity(),
+        (Value::TypedArray(x), Value::TypedArray(y)) | (Value::DataView(x), Value::DataView(y)) => {
+            Rc::ptr_eq(x, y)
+        }
+        (Value::RegExp(x), Value::RegExp(y)) => Rc::ptr_eq(x, y),
         (Value::SharedArrayBuffer(x), Value::SharedArrayBuffer(y)) => x.identity() == y.identity(),
         (Value::Error(x), Value::Error(y)) => Rc::ptr_eq(&x.identity, &y.identity),
         _ => false,
@@ -132,6 +137,13 @@ impl Interpreter {
     }
 
     pub fn bin_op(&self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+        if matches!(op, BinOp::Add)
+            && (matches!(l, Value::Symbol(_)) || matches!(r, Value::Symbol(_)))
+        {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot convert a Symbol value".into(),
+            ));
+        }
         // Fast path: when both operands are already numbers, the arithmetic and
         // comparison operators need no coercion and `+` cannot be string
         // concatenation. This skips the `to_number` dispatch and the string

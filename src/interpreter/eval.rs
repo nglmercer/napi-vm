@@ -676,7 +676,7 @@ impl Interpreter {
         named: &[(String, String)],
         namespace: Option<&str>,
     ) -> Result<Value, VmErr> {
-        let resolved_module = self.resolve_module_name(module);
+        let resolved_module = self.resolve_module_request(module)?;
         if let Some(name) = resolved_module.as_ref() {
             let name = name.clone();
             self.ensure_module(&name)?;
@@ -796,7 +796,7 @@ impl Interpreter {
         alias: Option<&str>,
     ) -> Result<Value, VmErr> {
         let resolved = self
-            .resolve_module_name(source)
+            .resolve_module_request(source)?
             .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
         self.ensure_module(&resolved)?;
         let other = self
@@ -826,7 +826,7 @@ impl Interpreter {
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
         let name = self.vs(&specifier)?;
-        let resolved = self.resolve_module_name(&name);
+        let resolved = self.resolve_module_request(&name)?;
         if let Some(target) = resolved.as_ref() {
             let target = target.clone();
             self.ensure_module(&target)?;

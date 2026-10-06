@@ -1,0 +1,152 @@
+//! One test per process. Corpus orchestration applies a hard process timeout.
+use napi_vm::interpreter::{DrainPolicy, EvaluationOptions, ExecutionBudget};
+use napi_vm::{Interpreter, Value, VirtualLoader, VmErr};
+use serde::Deserialize;
+use serde_json::{Value as Json, json};
+use std::io::{self, Read};
+use std::rc::Rc;
+
+#[derive(Deserialize)]
+struct Request {
+    source: String,
+    #[serde(default)]
+    harness: String,
+    #[serde(default)]
+    module: bool,
+    #[serde(default)]
+    asynchronous: bool,
+    #[serde(default)]
+    modules: std::collections::HashMap<String, String>,
+    #[serde(default = "default_id")]
+    id: String,
+}
+fn default_id() -> String {
+    "test.js".into()
+}
+fn done(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let count = vm
+        .global
+        .borrow()
+        .get("__test262_done_count")
+        .map(|v| v.to_number())
+        .unwrap_or(0.0);
+    vm.global
+        .borrow_mut()
+        .set("__test262_done_count", Value::Number(count + 1.0));
+    if let Some(error) = args.first()
+        && !matches!(error, Value::Undefined)
+    {
+        vm.global
+            .borrow_mut()
+            .set("__test262_done_error", error.clone());
+        return Err(VmErr::Throw(error.clone()));
+    }
+    Ok(Value::Undefined)
+}
+fn error_type(error: &VmErr) -> String {
+    if let VmErr::Throw(value) = error
+        && let Some(Value::String(ref name)) = value.get_prop("name")
+    {
+        return name.clone();
+    }
+    let message = error.to_string();
+    for name in [
+        "Test262Error",
+        "TypeError",
+        "RangeError",
+        "ReferenceError",
+        "SyntaxError",
+        "Error",
+    ] {
+        if message.starts_with(name) {
+            return name.into();
+        }
+    }
+    "EngineError".into()
+}
+fn failure(phase: &str, error: &VmErr) -> Json {
+    json!({"status": "error", "phase": phase, "error_type": error_type(error), "message": error.to_string()})
+}
+fn execute(request: Request) -> Json {
+    // Parse test source separately: a harness failure cannot satisfy a negative test.
+    if let Err(error) = Interpreter::compile(&request.source) {
+        return json!({"status":"error", "phase":"parse", "error_type":"SyntaxError", "message":error.to_string()});
+    }
+    let mut vm = Interpreter::with_builtins();
+    vm.set_execution_budget(ExecutionBudget {
+        fuel: 1_000_000,
+        max_call_depth: 128,
+        max_jobs: 10_000,
+    });
+    vm.set_loop_budget(100_000);
+    vm.global.borrow_mut().set(
+        "$DONE",
+        Value::NativeFunction {
+            name: "$DONE".into(),
+            callable: done,
+        },
+    );
+    vm.global
+        .borrow_mut()
+        .set("__test262_done_count", Value::Number(0.0));
+    let host = Value::object(vec![(
+        "evalScript".into(),
+        Value::NativeFunction {
+            name: "evalScript".into(),
+            callable: |vm, _, args| {
+                let source = vm.vs(args.first().unwrap_or(&Value::Undefined))?;
+                vm.eval_source_with_options(
+                    &source,
+                    EvaluationOptions {
+                        drain: DrainPolicy::None,
+                        ..Default::default()
+                    },
+                )
+            },
+        },
+    )]);
+    vm.global.borrow_mut().set("$262", host);
+    if let Err(error) = vm.eval_source(&request.harness) {
+        return failure("harness", &error);
+    }
+    let result = if request.module {
+        let loader = Rc::new(VirtualLoader::new());
+        for (id, source) in request.modules {
+            loader.insert(id, source);
+        }
+        loader.insert(request.id.clone(), request.source);
+        vm.set_module_loader(loader);
+        vm.load_module(&request.id)
+            .and_then(|_| vm.drain_jobs())
+            .map(|_| Value::Undefined)
+    } else {
+        vm.eval_source(&request.source)
+    };
+    if let Err(error) = result {
+        return failure("runtime", &error);
+    }
+    let count = vm
+        .global
+        .borrow()
+        .get("__test262_done_count")
+        .map(|v| v.to_number())
+        .unwrap_or(0.0);
+    if request.asynchronous && count != 1.0 {
+        return json!({"status":"error", "phase":"runtime", "error_type":"Test262AsyncError", "message":format!("expected one $DONE call, got {count}")});
+    }
+    json!({"status":"ok", "phase":"runtime"})
+}
+fn main() {
+    let mut input = String::new();
+    let report = match io::stdin()
+        .take(32 * 1024 * 1024)
+        .read_to_string(&mut input)
+    {
+        Ok(_) => match serde_json::from_str::<Request>(&input) {
+            Ok(request) => execute(request),
+            Err(error) => json!({"status":"error", "phase":"driver", "message":error.to_string()}),
+        },
+        Err(error) => json!({"status":"error", "phase":"driver", "message":error.to_string()}),
+    };
+    println!("{report}");
+}

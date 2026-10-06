@@ -370,6 +370,24 @@ impl Interpreter {
                 value,
             } => self.settle_host_promise(promise, state, value),
             Job::HostUncaughtException { exception } => self.run_host_uncaught_exception(exception),
+            #[cfg(feature = "runtime")]
+            Job::Interval { id } => {
+                let id = id.get();
+                let callback = self.jobs.borrow().interval_callback(id);
+                if let Some((callback, args)) = callback {
+                    let result = self
+                        .call_this(&callback, Value::Undefined, args)
+                        .map(|_| ());
+                    if result.is_ok() {
+                        self.jobs.borrow_mut().reschedule_interval(id);
+                    } else {
+                        self.jobs.borrow_mut().cancel_timer(id);
+                    }
+                    result
+                } else {
+                    Ok(())
+                }
+            }
             Job::AtomicsWaitTimeout { key, waiter_id } => {
                 super::jobs::settle_atomics_wait_timeout(&self.jobs, key, waiter_id);
                 Ok(())

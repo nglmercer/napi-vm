@@ -1,0 +1,30 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "."
+  ],
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 4,
+  "timeout_seconds": 2.0,
+  "total": 102956,
+  "counts": {
+    "pass": 32359,
+    "fail": 70099,
+    "skip": 0,
+    "timeout": 8,
+    "crash": 20,
+    "harness_error": 470
+  },
+  "pass_percentage": 31.429931232759625,
+  "limitations": [
+    "module fixtures limited to sibling *_FIXTURE.js files",
+    "$262.createRealm, agents and detachArrayBuffer are not implemented",
+    "resolution negatives are reported as runtime until separate linking exists"
+  ],
+  "notes": [
+    "Initial development baseline; worker SHA-256 snapshots were added after this run. No stable-engine compatibility claim."
+  ]
+}

@@ -297,6 +297,7 @@ mod lifecycle_tests {
         ));
     }
 
+    #[cfg(feature = "runtime")]
     #[test]
     fn timers_checkpoints_and_suspended_bodies_keep_the_original_deadline() {
         for source in [
@@ -306,6 +307,7 @@ mod lifecycle_tests {
             "var gate=new Promise(() => {}); async function f(){ await gate; } var suspended=f();",
         ] {
             let (mut vm, clock) = controlled();
+            crate::builtins::install_timers(&mut vm.global.borrow_mut());
             vm.jobs
                 .borrow_mut()
                 .set_clock(ClockMode::Virtual(VirtualClock::default()))

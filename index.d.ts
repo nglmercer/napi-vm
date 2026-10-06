@@ -34,6 +34,8 @@ export declare class LanguageService {
 
 export declare class Vm {
   constructor()
+  /** Explicit opt-in; the native build must include the corresponding runtime features. */
+  enableRuntime(options: RuntimeCapabilities): void
   run(source: string): string
   /**
    * Lex and parse module source without evaluating it or resolving imports.
@@ -142,6 +144,15 @@ export declare class Vm {
   callFunction(name: string, args: Array<unknown>): unknown
 }
 export type VM = Vm
+
+export interface RuntimeCapabilities {
+  console?: boolean
+  timers?: boolean
+  /** Implemented computational Web APIs; does not install fetch. */
+  webApis?: boolean
+  /** Implemented Buffer API; not a complete Node environment. */
+  nodeCompat?: boolean
+}
 
 export interface AsyncSessionOptions {
   commandCapacity?: number

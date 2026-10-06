@@ -39,6 +39,8 @@ pub enum Job {
     },
     /// A plain callback: `queueMicrotask(fn)`, or a timer callback.
     Callback { callback: Value, args: Vec<Value> },
+    #[cfg(feature = "runtime")]
+    Interval { id: Rc<std::cell::Cell<u64>> },
     /// Callback queued by a host runtime after an external event. Unlike
     /// synchronous host calls, this runs at an event-loop checkpoint.
     HostCallback { callback: crate::host::HostCallback },
@@ -93,6 +95,8 @@ impl Job {
             }
             Job::HostUncaughtException { exception } => out.push(exception.clone()),
             Job::AtomicsWaitTimeout { .. } => {}
+            #[cfg(feature = "runtime")]
+            Job::Interval { .. } => {}
         }
     }
 }
@@ -265,6 +269,14 @@ struct AtomicsWaiter {
     promise: Rc<RefCell<PromiseInner>>,
 }
 
+#[cfg(feature = "runtime")]
+struct Interval {
+    delay: f64,
+    callback: Value,
+    args: Vec<Value>,
+    timer_id: u64,
+}
+
 #[derive(Default)]
 pub struct JobQueue {
     microtasks: VecDeque<Job>,
@@ -276,6 +288,10 @@ pub struct JobQueue {
     /// ordering guarantees guest code depends on without a wall clock.
     // Nonnegative finite f64 bit patterns have the same order as their values.
     timers: TimerQueue,
+    #[cfg(feature = "runtime")]
+    intervals: HashMap<u64, Interval>,
+    #[cfg(feature = "runtime")]
+    pub(crate) max_timers: Option<usize>,
     next_timer_id: u64,
     timer_ids_wrapped: bool,
     next_sequence: u128,
@@ -301,6 +317,11 @@ impl JobQueue {
             job.trace_values(out);
         }
         self.timers.trace_roots(out);
+        #[cfg(feature = "runtime")]
+        for interval in self.intervals.values() {
+            out.push(interval.callback.clone());
+            out.extend(interval.args.iter().cloned());
+        }
         for waiters in self.atomics_waiters.values() {
             for waiter in waiters {
                 out.push(Value::Promise(waiter.promise.clone()));
@@ -326,6 +347,64 @@ impl JobQueue {
         self.external_events.pop_front()
     }
 
+    #[cfg(feature = "runtime")]
+    pub(crate) fn check_timer_capacity(&self) -> Result<(), crate::VmErr> {
+        let executing_intervals = self
+            .intervals
+            .values()
+            .filter(|interval| !self.timers.contains_id(interval.timer_id))
+            .count();
+        if self
+            .max_timers
+            .is_some_and(|max| self.timers.len().saturating_add(executing_intervals) >= max)
+        {
+            return Err(crate::value::limit_err("Maximum timer count exceeded"));
+        }
+        Ok(())
+    }
+    #[cfg(feature = "runtime")]
+    pub(crate) fn push_interval(&mut self, delay: f64, callback: Value, args: Vec<Value>) -> u64 {
+        let id_cell = Rc::new(std::cell::Cell::new(0));
+        let id = self.push_timer_job(
+            delay,
+            Job::Interval {
+                id: id_cell.clone(),
+            },
+        );
+        id_cell.set(id);
+        self.intervals.insert(
+            id,
+            Interval {
+                delay,
+                callback,
+                args,
+                timer_id: id,
+            },
+        );
+        id
+    }
+    #[cfg(feature = "runtime")]
+    pub(crate) fn interval_callback(&self, id: u64) -> Option<(Value, Vec<Value>)> {
+        self.intervals
+            .get(&id)
+            .map(|i| (i.callback.clone(), i.args.clone()))
+    }
+    #[cfg(feature = "runtime")]
+    pub(crate) fn reschedule_interval(&mut self, id: u64) {
+        if let Some(interval) = self.intervals.get(&id) {
+            let delay = interval.delay;
+            let timer_id = self.push_timer_job(
+                delay,
+                Job::Interval {
+                    id: Rc::new(std::cell::Cell::new(id)),
+                },
+            );
+            if let Some(interval) = self.intervals.get_mut(&id) {
+                interval.timer_id = timer_id;
+            }
+        }
+    }
+
     /// Schedule a timer callback, returning the id `clearTimeout` cancels.
     pub fn push_timer(&mut self, delay: f64, callback: Value, args: Vec<Value>) -> u64 {
         self.push_timer_job(delay, Job::Callback { callback, args })
@@ -347,7 +426,13 @@ impl JobQueue {
             };
             // Before the first wrap, monotonically minted IDs cannot alias.
             // Once wrapped, keep checking against every live timer.
-            if !self.timer_ids_wrapped || !self.timers.contains_id(self.next_timer_id) {
+            if !self.timer_ids_wrapped {
+                break;
+            }
+            let occupied = self.timers.contains_id(self.next_timer_id);
+            #[cfg(feature = "runtime")]
+            let occupied = occupied || self.intervals.contains_key(&self.next_timer_id);
+            if !occupied {
                 break;
             }
         }
@@ -424,6 +509,10 @@ impl JobQueue {
     }
 
     pub fn cancel_timer(&mut self, id: u64) {
+        #[cfg(feature = "runtime")]
+        if let Some(interval) = self.intervals.remove(&id) {
+            self.timers.cancel(interval.timer_id);
+        }
         self.timers.cancel(id);
     }
 
