@@ -1,0 +1,67 @@
+name: Full Test262 conformance
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test262-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: 1.98.1
+      - name: Configure fast linkers and Rust cache
+        uses: ./.github/actions/setup-build
+        with:
+          cache-group: test262
+      - name: Build isolated worker
+        run: cargo build --release --locked --no-default-features --bin napi-vm-test262
+      - name: Install runner dependencies and pinned corpus
+        run: |
+          python3 -m venv .napi-vm/test262-env
+          .napi-vm/test262-env/bin/python -m pip install -r tools/test262/requirements.txt
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+          lock = json.loads(Path('tools/test262/corpus.lock.json').read_text())
+          root = '.napi-vm/test262'
+          subprocess.run(['git', 'init', root], check=True)
+          subprocess.run(['git', '-C', root, 'fetch', '--depth=1', lock['repository'], lock['revision']], check=True)
+          subprocess.run(['git', '-C', root, 'checkout', '--detach', 'FETCH_HEAD'], check=True)
+          PY
+      - name: Run all variants without feature skips
+        run: |
+          mkdir -p artifacts/test262
+          revision=$(python3 -c 'import json; print(json.load(open("tools/test262/corpus.lock.json"))["revision"])')
+          .napi-vm/test262-env/bin/python tools/test262/run.py .napi-vm/test262 \
+            --engine target/release/napi-vm-test262 --revision "$revision" \
+            --jobs 2 --timeout 10 --output artifacts/test262/full-results.json
+      - name: Generate triage and dashboard
+        if: always()
+        run: |
+          if test -f artifacts/test262/full-results.json; then
+            .napi-vm/test262-env/bin/python tools/test262/triage.py artifacts/test262/full-results.json \
+              --output artifacts/test262/triage.json
+            .napi-vm/test262-env/bin/python tools/test262/dashboard.py artifacts/test262/full-results.json \
+              --output artifacts/test262/compatibility.html
+          fi
+      - name: Upload results even when conformance fails
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test262-${{ github.sha }}
+          path: artifacts/test262/
+          if-no-files-found: warn

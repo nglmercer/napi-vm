@@ -35,6 +35,18 @@ fn worker_separates_parse_runtime_and_harness_errors() {
 #[test]
 fn worker_requires_exact_async_completion() {
     assert_eq!(
+        worker(
+            json!({"source":"Promise.resolve().then(function() { $DONE(); });", "asynchronous":true})
+        )["status"],
+        "ok"
+    );
+    assert_eq!(
+        worker(
+            json!({"source":"Promise.resolve().then(function() { $DONE(new TypeError('failed')); }).catch(function() {});", "asynchronous":true})
+        )["error_type"],
+        "TypeError"
+    );
+    assert_eq!(
         worker(json!({"source":"Promise.resolve().then(() => $DONE());", "asynchronous":true}))["status"],
         "ok"
     );
@@ -70,4 +82,36 @@ fn worker_distinguishes_module_linking_and_evaluation_errors() {
     );
     assert_eq!(evaluated["phase"], "runtime", "{evaluated}");
     assert_eq!(evaluated["error_type"], "TypeError");
+}
+
+#[test]
+fn worker_eval_script_uses_the_global_environment() {
+    let report = worker(
+        json!({"source":"function local() { var hidden = 1; $262.evalScript('var installed=42;'); } local(); if(installed!==42 || $262.global!==globalThis) throw new Error('wrong realm global');"}),
+    );
+    assert_eq!(report["status"], "ok", "{report}");
+}
+
+#[test]
+fn worker_loads_nested_and_dynamic_fixtures_within_the_explicit_root() {
+    let root =
+        std::env::temp_dir().join(format!("napi-vm-test262-fixtures-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("nested/deeper")).unwrap();
+    std::fs::write(root.join("value.js"), "export const answer=42;").unwrap();
+    std::fs::write(
+        root.join("nested/deeper/reexport.js"),
+        "export {answer} from '../../value.js';",
+    )
+    .unwrap();
+    let report = worker(json!({"id":"nested/test.js", "corpus_root":root,
+        "source":"import('./deeper/reexport.js').then(function(m) { if(m.answer!==42) $DONE(new Error('wrong')); else $DONE(); }, $DONE);", "asynchronous":true}));
+    assert_eq!(report["status"], "ok", "{report}");
+    let outside = root.with_extension("outside.js");
+    std::fs::write(&outside, "export default 42;").unwrap();
+    let denied = worker(json!({"id":"test.js", "corpus_root":root, "module":true,
+        "source":format!("import value from {};", serde_json::to_string(&outside.to_string_lossy()).unwrap())}));
+    assert_eq!(denied["status"], "error", "{denied}");
+    assert_eq!(denied["phase"], "resolution");
+    std::fs::remove_file(outside).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
 }

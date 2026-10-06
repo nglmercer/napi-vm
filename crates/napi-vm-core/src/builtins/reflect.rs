@@ -5,7 +5,6 @@
 //! reports failure with `false` instead of throwing, and `Reflect.ownKeys`
 //! lists non-enumerable properties.
 
-use super::nf;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
 use crate::value::Value;
@@ -27,9 +26,31 @@ pub(super) fn install(e: &mut Environment) {
         ("apply", reflect_apply),
         ("construct", reflect_construct),
     ];
+    let function_prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));
     for (name, callable) in methods {
-        r.set_prop(name.to_string(), nf(name, *callable))
-            .expect("built-in Reflect property");
+        let length = match *name {
+            "get" | "set" | "defineProperty" | "apply" => 3,
+            "has"
+            | "deleteProperty"
+            | "getOwnPropertyDescriptor"
+            | "setPrototypeOf"
+            | "construct" => 2,
+            _ => 1,
+        };
+        r.set_prop(
+            name.to_string(),
+            super::native_method(name, length, *callable, function_prototype.clone()),
+        )
+        .expect("built-in Reflect property");
+        if let Value::Object { props } = &r {
+            props.meta.borrow_mut().set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+        }
     }
 }
 
@@ -141,10 +162,32 @@ fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
 }
 
 fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let args = match &arg(&a, 1) {
-        Value::Array(items) => items.borrow().clone(),
-        Value::Undefined | Value::Null => Vec::new(),
-        other => interp.iterate(other)?,
+    let target = arg(&a, 0);
+    let new_target = a.get(2).cloned().unwrap_or_else(|| target.clone());
+    if !super::is_constructor(&target) || !super::is_constructor(&new_target) {
+        return Err(VmErr::Msg(
+            "TypeError: Target and newTarget must be constructors".into(),
+        ));
+    }
+    let list = arg(&a, 1);
+    if !crate::interpreter::call::is_js_object(&list) {
+        return Err(VmErr::Msg(
+            "TypeError: Arguments list must be an object".into(),
+        ));
+    }
+    let length = interp.member(&list, "length")?;
+    let number = interp.ecmascript_to_number(&length)?;
+    let length = if number.is_nan() || number <= 0. {
+        0.
+    } else {
+        number.floor()
     };
-    interp.ctor(&arg(&a, 0), args)
+    if length > crate::value::MAX_ARRAY_LEN as f64 {
+        return Err(crate::value::limit_err("Maximum argument count exceeded"));
+    }
+    let mut args = Vec::with_capacity(length as usize);
+    for index in 0..length as usize {
+        args.push(interp.member(&list, &index.to_string())?);
+    }
+    interp.reflect_constructor(&target, args, new_target)
 }

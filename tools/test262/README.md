@@ -3,15 +3,15 @@
 Build the isolated worker without runtime or Node bindings:
 
 ```sh
-cargo build --no-default-features --bin napi-vm-test262
+cargo build --release --no-default-features --bin napi-vm-test262
 python3 -m pip install -r tools/test262/requirements.txt
 git clone https://github.com/tc39/test262.git .napi-vm/test262
 git -C .napi-vm/test262 checkout 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81
 mkdir -p artifacts/test262
 python3 tools/test262/run.py .napi-vm/test262 \
-  --engine target/debug/napi-vm-test262 \
+  --engine target/release/napi-vm-test262 \
   --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
-  --jobs 4 --timeout 2 --output artifacts/test262/full-results.json
+  --jobs 4 --timeout 5 --output artifacts/test262/full-results.json
 python3 tools/test262/dashboard.py artifacts/test262/full-results.json \
   --output artifacts/test262/compatibility.html
 ```
@@ -35,6 +35,10 @@ failures, timeouts, crashes and harness errors. A selected subset's percentage
 is never advertised as overall ECMAScript compatibility. Empty/non-passing
 runs return exit status 1 while still producing evidence.
 
+The latest complete development measurement is in `latest.json`: 34,736 passes
+out of 102,956 variants (33.74%), with zero feature skips. This does not establish
+full conformance.
+
 The initial full development baseline is in `baseline.json`: 32,359 passes out
 of 102,956 variants, 31.43%. The initial run preceded binary snapshot support;
 future reports include the worker digest. Full individual outcomes and the
@@ -43,9 +47,29 @@ The HTML shows independent ECMAScript, Web, Node and npm metrics, and up to 200
 non-passing variants with a link to the full JSON file.
 
 Module linking failures are reported in the resolution phase before evaluation.
+The isolated worker receives an explicit corpus directory capability. It loads
+nested and dynamically imported fixture files lazily, checks canonical paths
+remain inside that directory, and also accepts virtual modules for worker tests.
+The embeddable engine does not gain ambient filesystem access.
 
-Known runner limitations: module fixtures currently load sibling
-`*_FIXTURE.js` files; `$262.createRealm`, agents, GC and detachArrayBuffer hooks are incomplete.
+Async completion lives in the persistent global environment, so callbacks and
+module scopes cannot lose `$DONE` state. A caught `$DONE(error)` still fails the
+variant. `$262.evalScript` evaluates in the global environment and `$262.global`
+is exposed; cross-realm construction is still incomplete.
+
+Group all outcomes into actionable failure clusters without dropping skips,
+crashes, timeouts, or harness failures:
+
+```sh
+python3 tools/test262/triage.py artifacts/test262/full-results.json \
+  --output artifacts/test262/triage.json
+```
+
+See `docs/test262-conformance-validation.md` for the current validation evidence.
+
+
+Known runner limitations: `$262.createRealm`, agents, GC and
+detachArrayBuffer hooks are incomplete.
 Those limitations contribute failures or harness errors; they are not silently
 removed from the denominator. No stable compatibility claim is made.
 

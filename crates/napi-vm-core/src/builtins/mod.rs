@@ -19,6 +19,7 @@ mod weak;
 pub(crate) use symbol::is_registered as symbol_is_registered;
 
 pub(crate) use function::function_method;
+pub(crate) use function::is_constructor;
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -262,6 +263,45 @@ fn nf(name: &str, callable: NativeFn) -> Value {
         name: name.into(),
         callable,
     }
+}
+
+/// A native method with ordinary, mutable function property descriptors.
+fn native_method(name: &str, length: usize, callable: NativeFn, prototype: Option<Value>) -> Value {
+    let properties = crate::heap::tracked(std::rc::Rc::new(crate::value::ObjectCell::new(
+        vec![
+            ("name".into(), Value::String(name.into())),
+            ("length".into(), Value::Number(length as f64)),
+        ],
+        prototype.map(std::rc::Rc::new),
+    )));
+    for key in ["name", "length"] {
+        properties.meta.borrow_mut().set_attrs(
+            key,
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
+    Value::Function(std::rc::Rc::new(crate::value::FunctionData {
+        native: Some(callable),
+        identity: std::rc::Rc::new(0),
+        name: Some(name.into()),
+        properties,
+        standard_properties_initialized: std::rc::Rc::new(std::cell::Cell::new(true)),
+        params: std::rc::Rc::new(Vec::new()),
+        body: std::rc::Rc::new(Vec::new()),
+        closure: None,
+        is_arrow: false,
+        is_constructor: false,
+        is_async: false,
+        is_generator: false,
+        uses_arguments: false,
+        needs_hoisting: false,
+        bound: None,
+        bytecode: None,
+    }))
 }
 
 /// Make a built-in namespace object callable.

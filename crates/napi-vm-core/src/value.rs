@@ -156,6 +156,14 @@ impl Default for PropAttrs {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CollectionKind {
+    Map,
+    Set,
+    WeakMap,
+    WeakSet,
+}
+
 /// Object state that is *not* the property slots themselves: the prototype
 /// link, per-property attributes, and extensibility.
 ///
@@ -166,6 +174,7 @@ impl Default for PropAttrs {
 /// one binding they were applied to.
 #[derive(Debug, Default)]
 pub struct ObjectMeta {
+    pub(crate) collection_kind: Option<CollectionKind>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
     pub proto: Option<Rc<Value>>,
@@ -926,6 +935,8 @@ pub struct BoundFunctionData {
 /// Payload of `Value::Function`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct FunctionData {
+    /// Native implementation with ordinary function identity and properties.
+    pub native: Option<crate::builtins::NativeFn>,
     /// Shared identity for this function object. Cloning a VM `Value` keeps the
     /// same identity, while evaluating the same function expression again
     /// creates a distinct one.

@@ -112,6 +112,7 @@ impl Regex {
             regex: self,
             input,
             steps: Cell::new(0),
+            depth: Cell::new(0),
         };
         // Unicode matching starts at a code-point boundary even when a
         // caller supplies lastIndex between the halves of a valid pair.
@@ -148,6 +149,14 @@ struct Matcher<'a> {
     regex: &'a Regex,
     input: &'a [u16],
     steps: Cell<usize>,
+    depth: Cell<usize>,
+}
+
+struct MatchDepth<'a>(&'a Cell<usize>);
+impl Drop for MatchDepth<'_> {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
 }
 
 /// The continuation a node calls once it has matched: "the rest of the pattern
@@ -156,6 +165,13 @@ struct Matcher<'a> {
 type Cont<'k> = &'k mut dyn FnMut(usize, &mut Captures) -> bool;
 
 impl Matcher<'_> {
+    fn enter(&self) -> Result<MatchDepth<'_>, String> {
+        if self.depth.get() >= 128 {
+            return Err("RangeError: Regular expression exceeded the nesting budget".into());
+        }
+        self.depth.set(self.depth.get() + 1);
+        Ok(MatchDepth(&self.depth))
+    }
     fn step(&self) -> Result<(), String> {
         let steps = self.steps.get() + 1;
         self.steps.set(steps);
@@ -243,6 +259,7 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
+        let _depth = self.enter()?;
         self.step()?;
         match node {
             Node::Empty => Ok(k(pos, caps)),
@@ -383,6 +400,7 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
+        let _depth = self.enter()?;
         match nodes.split_first() {
             None => Ok(k(pos, caps)),
             Some((head, rest)) => {
@@ -418,6 +436,14 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
+        let _depth = self.enter()?;
+        let mut atom = node;
+        while let Node::Group { index: None, node } = atom {
+            atom = node;
+        }
+        if count == 0 && matches!(atom, Node::Char(_) | Node::AnyChar | Node::Class { .. }) {
+            return self.repeat_atom(atom, min, max, greedy, pos, caps, k);
+        }
         self.step()?;
         let mut error = None;
         // Below the minimum there is no choice: the body must match again.
@@ -480,5 +506,64 @@ impl Matcher<'_> {
         // Greedy: having exhausted the repetitions, hand over to the rest of
         // the pattern. Lazy: the continuation was already tried above.
         Ok(greedy && k(pos, caps))
+    }
+
+    // Character repeats need no capture stack: retain code-point boundaries
+    // for greedy backtracking and consume lazy repeats only when needed.
+    #[allow(clippy::too_many_arguments)]
+    fn repeat_atom(
+        &self,
+        atom: &Node,
+        min: u32,
+        max: Option<u32>,
+        greedy: bool,
+        mut pos: usize,
+        caps: &mut Captures,
+        k: Cont<'_>,
+    ) -> Result<bool, String> {
+        let saved = caps.clone();
+        let mut positions = vec![pos];
+        let mut count = 0;
+        loop {
+            self.step()?;
+            if !greedy && count >= min {
+                if k(pos, caps) {
+                    return Ok(true);
+                }
+                caps.copy_from_slice(&saved);
+            }
+            if max.is_some_and(|max| count >= max) {
+                break;
+            }
+            let matches = match atom {
+                Node::Char(want) => self.scalar(pos).is_some_and(|c| self.same_char(c, *want)),
+                Node::AnyChar => self
+                    .input
+                    .get(pos)
+                    .is_some_and(|c| self.regex.dot_all || !Self::is_line_terminator(*c)),
+                Node::Class { negated, items } => self
+                    .scalar(pos)
+                    .is_some_and(|c| self.class_matches(*negated, items, c)),
+                _ => unreachable!("character atom"),
+            };
+            if !matches {
+                break;
+            }
+            pos = self.advance(pos);
+            count += 1;
+            if greedy {
+                positions.push(pos);
+            }
+        }
+        if greedy && count >= min {
+            for pos in positions.into_iter().skip(min as usize).rev() {
+                self.step()?;
+                if k(pos, caps) {
+                    return Ok(true);
+                }
+                caps.copy_from_slice(&saved);
+            }
+        }
+        Ok(false)
     }
 }

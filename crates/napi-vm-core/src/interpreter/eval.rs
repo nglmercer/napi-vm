@@ -441,6 +441,7 @@ impl Interpreter {
                     // ordinary method.
                     let is_ctor_name = matches!(name, MemberName::Static(n) if n == "constructor");
                     let fn_val = Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -506,6 +507,7 @@ impl Interpreter {
                 } => {
                     let gname = self.member_name(name)?;
                     let getter_fn = Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -547,6 +549,7 @@ impl Interpreter {
                 } => {
                     let sname = self.member_name(name)?;
                     let setter_fn = Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -630,6 +633,7 @@ impl Interpreter {
             .take_while(|parameter| !parameter.starts_with("..."))
             .count();
         let constructor = Value::Function(Rc::new(FunctionData {
+            native: None,
             identity: Rc::new(0),
             name: Some(Rc::from(name)),
             properties: FunctionData::properties_with_default_prototype(&self.persistent_global),
@@ -952,6 +956,7 @@ impl Interpreter {
                 self.set_binding(
                     name,
                     Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -1563,6 +1568,7 @@ impl Interpreter {
                     is_generator,
                 } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -1592,6 +1598,7 @@ impl Interpreter {
                 }
                 ObjectProp::Getter { name, body } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(format!("get {name}").into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -1621,6 +1628,7 @@ impl Interpreter {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        native: None,
                         identity: Rc::new(0),
                         name: Some(format!("set {name}").into()),
                         properties: FunctionData::properties_with_default_prototype(
@@ -2219,6 +2227,7 @@ impl Interpreter {
                 body,
                 is_async,
             } => Ok(Value::Function(Rc::new(FunctionData {
+                native: None,
                 identity: Rc::new(0),
                 name: None,
                 properties: FunctionData::properties_with_default_prototype(
@@ -2248,6 +2257,7 @@ impl Interpreter {
                 is_async,
                 is_generator,
             } => Ok(Value::Function(Rc::new(FunctionData {
+                native: None,
                 identity: Rc::new(0),
                 name: name.as_deref().map(Rc::from),
                 properties: FunctionData::properties_with_default_prototype(

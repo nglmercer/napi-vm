@@ -99,7 +99,7 @@ fn array_property_setter(
     None
 }
 
-fn is_js_object(value: &Value) -> bool {
+pub(crate) fn is_js_object(value: &Value) -> bool {
     if matches!(
         value,
         Value::Undefined
@@ -1236,7 +1236,7 @@ impl Interpreter {
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
         let module = match f {
-            Value::Function(fd) => Some(
+            Value::Function(fd) if fd.native.is_none() => Some(
                 fd.closure
                     .as_ref()
                     .and_then(|env| env.borrow().module_context()),
@@ -1262,6 +1262,9 @@ impl Interpreter {
         }
         match f {
             Value::Function(fd) => {
+                if let Some(native) = fd.native {
+                    return native(self, this_val, args);
+                }
                 if let Some(bound) = &fd.bound {
                     let bound = bound.clone();
                     if bound.arguments.len().saturating_add(args.len())
@@ -1678,6 +1681,18 @@ impl Interpreter {
         let new_target = f.clone();
         self.new_target_stack.push(new_target.clone());
         let result = self.ctor_with_new_target(f, args, new_target);
+        self.new_target_stack.pop();
+        result
+    }
+
+    pub(crate) fn reflect_constructor(
+        &mut self,
+        target: &Value,
+        args: Vec<Value>,
+        new_target: Value,
+    ) -> Result<Value, VmErr> {
+        self.new_target_stack.push(new_target.clone());
+        let result = self.ctor_with_new_target(target, args, new_target);
         self.new_target_stack.pop();
         result
     }
