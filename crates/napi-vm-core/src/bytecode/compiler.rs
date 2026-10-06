@@ -81,7 +81,7 @@ impl Decline {
 /// and must surface loudly, never fall back silently.
 pub fn compile_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupported> {
     let mut compiler = Compiler::top_level();
-    match compiler.compile_top(stmts) {
+    match compiler.compile_top(stmts, false) {
         Ok(main) => Ok(BytecodeModule {
             main: Rc::new(main),
         }),
@@ -89,6 +89,19 @@ pub fn compile_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupporte
             reason: decline.reason(),
         }),
     }
+}
+
+/// Compile a module whose declarations have already been instantiated.
+pub(crate) fn compile_linked_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupported> {
+    let mut compiler = Compiler::top_level();
+    compiler
+        .compile_top(stmts, true)
+        .map(|main| BytecodeModule {
+            main: Rc::new(main),
+        })
+        .map_err(|decline| Unsupported {
+            reason: decline.reason(),
+        })
 }
 
 /// How `this` resolves in the unit being compiled.
@@ -1190,7 +1203,11 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn compile_top(&mut self, stmts: &'a [Statement]) -> Result<BytecodeFunction, Decline> {
+    fn compile_top(
+        &mut self,
+        stmts: &'a [Statement],
+        linked: bool,
+    ) -> Result<BytecodeFunction, Decline> {
         // Register zero is the program completion value.
         let completion = self.alloc_reg()?;
         let undef = self.load_undefined()?;
@@ -1198,7 +1215,9 @@ impl<'a> Compiler<'a> {
             dst: completion,
             src: undef,
         });
-        self.hoist_top(stmts)?;
+        if !linked {
+            self.hoist_top(stmts)?;
+        }
         let checkpoint = self.checkpoint();
         self.restore(checkpoint);
         for stmt in stmts {
@@ -3181,7 +3200,12 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::ImportMeta { dst });
                 Ok(dst)
             }
-            Expr::Await(_) => Err(Decline::Func("async needs Phase G")),
+            Expr::Await(value) => {
+                let src = self.compile_expr(value)?;
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::Await { dst, src });
+                Ok(dst)
+            }
             Expr::Yield(_) | Expr::YieldFrom(_) => Err(Decline::Func("generators need Phase G")),
             Expr::BigIntLiteral(digits) => {
                 match crate::bigint::BigInt::parse(digits) {

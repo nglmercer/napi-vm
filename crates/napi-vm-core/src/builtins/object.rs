@@ -554,7 +554,7 @@ fn object_is_prototype_of(
 
 fn object_to_string_tag(value: &Value) -> String {
     match value {
-        Value::Undefined => "Undefined".into(),
+        Value::Uninitialized | Value::Undefined => "Undefined".into(),
         Value::Null => "Null".into(),
         Value::Bool(_) => "Boolean".into(),
         Value::Number(_) => "Number".into(),
@@ -864,7 +864,7 @@ fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Resu
 /// `setPrototypeOf`: an object, or `null` for a null prototype.
 fn proto_arg(proto: &Value) -> Result<Option<Rc<Value>>, VmErr> {
     match proto {
-        Value::Null | Value::Undefined => Ok(None),
+        Value::Null | Value::Uninitialized | Value::Undefined => Ok(None),
         Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_) => {
             Ok(Some(Rc::new(proto.clone())))
         }
@@ -972,6 +972,29 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     let writable = own_slot(descriptor, "writable");
     let enumerable = own_slot(descriptor, "enumerable");
     let configurable = own_slot(descriptor, "configurable");
+    if c.meta.borrow().module_namespace {
+        let same = match (&old_value, &value) {
+            (_, None) => true,
+            (Some(Value::Number(a)), Some(Value::Number(b))) => {
+                (a.is_nan() && b.is_nan())
+                    || (a == b && (a != &0. || a.is_sign_negative() == b.is_sign_negative()))
+            }
+            (Some(a), Some(b)) => crate::interpreter::strict_equals(a, b),
+            _ => false,
+        };
+        if !existing
+            || getter.is_some()
+            || setter.is_some()
+            || configurable.as_ref().is_some_and(Value::is_truthy)
+            || enumerable.as_ref().is_some_and(|v| !v.is_truthy())
+            || writable.as_ref().is_some_and(|v| !v.is_truthy())
+            || !same
+        {
+            return Err(type_err("Cannot redefine a module namespace export"));
+        }
+        return Ok(());
+    }
+
     let accessor_fields = getter.is_some() || setter.is_some();
     if accessor_fields && (value.is_some() || writable.is_some()) {
         return Err(type_err("Invalid property descriptor"));
