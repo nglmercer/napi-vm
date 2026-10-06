@@ -36,7 +36,7 @@ impl HostBridge for QueuedCallbackBridge {
                 HostEvent::Callback(HostCallback {
                     callback: self.callback.clone(),
                     this_value: Value::Undefined,
-                    args: vec![Value::String(message)],
+                    args: vec![Value::String((message).into())],
                     kind: HostCallbackKind::Call,
                 })
             })

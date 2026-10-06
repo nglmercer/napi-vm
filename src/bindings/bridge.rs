@@ -320,7 +320,7 @@ struct AsyncCallMsg {
     func_id: usize,
     func_ref: usize,
     args: Vec<WireValue>,
-    reply_tx: mpsc::Sender<Result<WireValue, String>>,
+    reply_tx: mpsc::Sender<Result<WireValue, crate::JsString>>,
     cancellation: crate::CancellationToken,
     result_alive: Arc<AtomicBool>,
     reply_signal: Arc<crate::host::WakeSignal>,
@@ -339,7 +339,7 @@ pub(super) struct AsyncState {
 }
 
 struct PendingResult {
-    receiver: Option<mpsc::Receiver<Result<WireValue, String>>>,
+    receiver: Option<mpsc::Receiver<Result<WireValue, crate::JsString>>>,
     alive: Arc<AtomicBool>,
 }
 impl Drop for PendingResult {
@@ -587,7 +587,7 @@ impl NapiHostBridge {
     }
     fn receive_reply(
         state: &AsyncState,
-        receiver: mpsc::Receiver<Result<WireValue, String>>,
+        receiver: mpsc::Receiver<Result<WireValue, crate::JsString>>,
     ) -> Result<Value, VmErr> {
         loop {
             if state.state.shutting_down.load(Ordering::Acquire)
@@ -630,9 +630,9 @@ impl NapiHostBridge {
                 }
                 Ok(reply) => reply,
             };
-            return reply
-                .map(|v| v.into_value())
-                .map_err(|m| VmErr::Msg(format!("Error: {}", m)));
+            return reply.map(|v| v.into_value()).map_err(|message| {
+                VmErr::Throw(Value::Error(crate::value::ErrorData::new("Error", message)))
+            });
         }
     }
 
@@ -645,7 +645,7 @@ impl NapiHostBridge {
         state: Arc<AsyncState>,
         id: usize,
         args: Vec<WireValue>,
-        reply_tx: mpsc::Sender<Result<WireValue, String>>,
+        reply_tx: mpsc::Sender<Result<WireValue, crate::JsString>>,
         result_alive: Arc<AtomicBool>,
     ) -> Result<(), VmErr> {
         if state.state.shutting_down.load(Ordering::Acquire) {
@@ -707,7 +707,7 @@ impl NapiHostBridge {
     ) -> Result<Value, VmErr> {
         let _waiting = state.wait_guard();
         let args = Self::wire_args(&args)?;
-        let (reply_tx, reply_rx) = mpsc::channel::<Result<WireValue, String>>();
+        let (reply_tx, reply_rx) = mpsc::channel::<Result<WireValue, crate::JsString>>();
         self.dispatch(
             state.clone(),
             id,
@@ -835,7 +835,7 @@ impl HostBridge for NapiHostBridge {
         }
 
         let args = Self::wire_args(&args)?;
-        let (reply_tx, reply_rx) = mpsc::channel::<Result<WireValue, String>>();
+        let (reply_tx, reply_rx) = mpsc::channel::<Result<WireValue, crate::JsString>>();
         let alive = Arc::new(AtomicBool::new(true));
         let pending_id = state.next_pending.fetch_add(1, Ordering::Relaxed);
         state
@@ -948,7 +948,9 @@ extern "C" fn tsfn_callback(
         match to_napi(env, &wire.into_value()) {
             Ok(value) => argv.push(value),
             Err(error) => {
-                let _ = msg.reply_tx.send(Err(format!("marshal error: {}", error)));
+                let _ = msg
+                    .reply_tx
+                    .send(Err(format!("marshal error: {}", error).into()));
                 return;
             }
         }
@@ -960,7 +962,8 @@ extern "C" fn tsfn_callback(
         let _ = msg.reply_tx.send(Err(format!(
             "failed to get global receiver (status {})",
             receiver_status
-        )));
+        )
+        .into()));
         return;
     }
 
@@ -976,12 +979,16 @@ extern "C" fn tsfn_callback(
             match from_napi(env, exception) {
                 Ok(value) => match &value {
                     Value::String(value) => value.clone(),
-                    _ => to_string(&value),
+                    Value::Error(error) => error
+                        .name
+                        .concat(&crate::JsString::from(": "))
+                        .concat(&error.message),
+                    _ => to_string(&value).into(),
                 },
-                Err(error) => error.to_string(),
+                Err(error) => error.to_string().into(),
             }
         } else {
-            format!("host function call failed (status {})", call_status)
+            format!("host function call failed (status {})", call_status).into()
         };
         let _ = msg.reply_tx.send(Err(message));
         return;
@@ -997,7 +1004,8 @@ extern "C" fn tsfn_callback(
         let _ = msg.reply_tx.send(Err(format!(
             "failed to create then key (status {})",
             key_status
-        )));
+        )
+        .into()));
         return;
     }
     let mut then_value = ptr::null_mut();
@@ -1006,7 +1014,8 @@ extern "C" fn tsfn_callback(
         let _ = msg.reply_tx.send(Err(format!(
             "failed to inspect thenable (status {})",
             get_then_status
-        )));
+        )
+        .into()));
         return;
     }
     let mut then_type: sys::napi_valuetype = 0;
@@ -1015,7 +1024,8 @@ extern "C" fn tsfn_callback(
         let _ = msg.reply_tx.send(Err(format!(
             "failed to inspect thenable type (status {})",
             typeof_status
-        )));
+        )
+        .into()));
         return;
     }
 
@@ -1025,7 +1035,7 @@ extern "C" fn tsfn_callback(
                 let _ = msg.reply_tx.send(Ok(value));
             }
             Err(error) => {
-                let _ = msg.reply_tx.send(Err(error.to_string()));
+                let _ = msg.reply_tx.send(Err(error.to_string().into()));
             }
         }
         return;
@@ -1034,7 +1044,7 @@ extern "C" fn tsfn_callback(
     let mut promise_ref = ptr::null_mut();
     if let Err(error) = chk(unsafe { sys::napi_create_reference(env, result, 1, &mut promise_ref) })
     {
-        let _ = msg.reply_tx.send(Err(error.to_string()));
+        let _ = msg.reply_tx.send(Err(error.to_string().into()));
         return;
     }
     let promise_id = msg.state.next_promise.fetch_add(1, Ordering::Relaxed);
@@ -1058,14 +1068,14 @@ extern "C" fn tsfn_callback(
     let resolve = match create_settlement_callback(env, settlement.clone(), false) {
         Ok(value) => value,
         Err(error) => {
-            settlement.reject(error.to_string());
+            settlement.reject(error.to_string().into());
             return;
         }
     };
     let reject = match create_settlement_callback(env, settlement.clone(), true) {
         Ok(value) => value,
         Err(error) => {
-            settlement.reject(error.to_string());
+            settlement.reject(error.to_string().into());
             return;
         }
     };
@@ -1082,7 +1092,7 @@ extern "C" fn tsfn_callback(
         )
     };
     if then_status != sys::Status::napi_ok {
-        settlement.reject(format!("thenable callback failed (status {})", then_status));
+        settlement.reject(format!("thenable callback failed (status {})", then_status).into());
     }
 }
 
@@ -1093,11 +1103,11 @@ struct Settlement {
     state: Arc<BridgeState>,
     promise_id: usize,
     wake: Arc<crate::host::WakeSlot>,
-    reply_tx: Mutex<Option<mpsc::Sender<Result<WireValue, String>>>>,
+    reply_tx: Mutex<Option<mpsc::Sender<Result<WireValue, crate::JsString>>>>,
 }
 
 impl Settlement {
-    fn resolve(&self, value: Result<WireValue, String>) {
+    fn resolve(&self, value: Result<WireValue, crate::JsString>) {
         let sender = self
             .reply_tx
             .lock()
@@ -1115,7 +1125,7 @@ impl Settlement {
         }
     }
 
-    fn reject(&self, message: String) {
+    fn reject(&self, message: crate::JsString) {
         self.resolve(Err(message));
     }
 }
@@ -1222,7 +1232,7 @@ extern "C" fn promise_resolve_cb(
             Err(error) => {
                 context
                     .settlement
-                    .reject(format!("marshal error in resolve: {}", error));
+                    .reject(format!("marshal error in resolve: {}", error).into());
                 return ptr::null_mut();
             }
         }
@@ -1260,8 +1270,15 @@ extern "C" fn promise_reject_cb(
             property
         } else {
             match from_napi(env, argv[0]) {
-                Ok(value) => to_string(&value),
-                Err(error) => error.to_string(),
+                Ok(value) => match &value {
+                    Value::String(text) => text.clone(),
+                    Value::Error(error) => error
+                        .name
+                        .concat(&crate::JsString::from(": "))
+                        .concat(&error.message),
+                    _ => to_string(&value).into(),
+                },
+                Err(error) => error.to_string().into(),
             }
         }
     } else {

@@ -58,7 +58,7 @@ fn value_to_js_d(v: &Value, depth: usize) -> Result<JsValue, VmErr> {
         Value::Null => JsValue::NULL,
         Value::Bool(b) => JsValue::from_bool(*b),
         Value::Number(n) => JsValue::from_f64(*n),
-        Value::String(s) => JsValue::from_str(s),
+        Value::String(s) => js_string_to_host(s),
         Value::Array(items) => {
             let arr = js_sys::Array::new();
             for item in items.borrow().iter() {
@@ -73,8 +73,12 @@ fn value_to_js_d(v: &Value, depth: usize) -> Result<JsValue, VmErr> {
             let null_prototype: js_sys::Object = JsValue::NULL.unchecked_into();
             let obj = js_sys::Object::create(&null_prototype);
             for (k, val) in props.borrow().iter() {
-                js_sys::Reflect::set(&obj, &JsValue::from_str(k), &value_to_js_d(val, depth + 1)?)
-                    .map_err(|_| VmErr::Msg("failed to set object property".to_string()))?;
+                js_sys::Reflect::set(
+                    &obj,
+                    &js_string_to_host(&crate::JsString::from_key(k)),
+                    &value_to_js_d(val, depth + 1)?,
+                )
+                .map_err(|_| VmErr::Msg("failed to set object property".to_string()))?;
             }
             obj.into()
         }
@@ -84,12 +88,12 @@ fn value_to_js_d(v: &Value, depth: usize) -> Result<JsValue, VmErr> {
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("name"),
-                &JsValue::from_str(&e.name),
+                &js_string_to_host(&e.name),
             );
             let _ = js_sys::Reflect::set(
                 &obj,
                 &JsValue::from_str("message"),
-                &JsValue::from_str(&e.message),
+                &js_string_to_host(&e.message),
             );
             obj.into()
         }
@@ -121,11 +125,12 @@ fn js_to_value_d(j: &JsValue, depth: usize) -> Result<Value, VmErr> {
     if let Some(n) = j.as_f64() {
         return Ok(Value::Number(n));
     }
-    if let Some(s) = j.as_string() {
+    if j.is_string() {
+        let s = js_string_from_host(j);
         if s.len() > MAX_STRING_LEN {
             return Err(limit_err("Maximum string length exceeded"));
         }
-        return Ok(Value::String(s));
+        return Ok(Value::String((s).into()));
     }
     // A JS function has no callable VM representation in v1.
     if j.is_instance_of::<js_sys::Function>() {
@@ -134,11 +139,18 @@ fn js_to_value_d(j: &JsValue, depth: usize) -> Result<Value, VmErr> {
     // A JS `Error` carries `message` non-enumerably, so surface it explicitly —
     // the same shape the VM's own errors use, so `catch (e) { e.message }` works.
     if j.is_instance_of::<js_sys::Error>() {
-        let name = read_str_prop(j, "name").unwrap_or_else(|| "Error".to_string());
-        let message = read_str_prop(j, "message").unwrap_or_default();
+        let read = |key: &str, fallback: &str| {
+            js_sys::Reflect::get(j, &JsValue::from_str(key))
+                .ok()
+                .filter(JsValue::is_string)
+                .map(|value| js_string_from_host(&value))
+                .unwrap_or_else(|| crate::JsString::from(fallback))
+        };
+        let name = read("name", "Error");
+        let message = read("message", "");
         return Value::checked_object(vec![
-            ("name".to_string(), Value::String(name)),
-            ("message".to_string(), Value::String(message)),
+            ("name".to_string(), Value::String((name).into())),
+            ("message".to_string(), Value::String((message).into())),
         ]);
     }
     if js_sys::Array::is_array(j) {
@@ -153,7 +165,7 @@ fn js_to_value_d(j: &JsValue, depth: usize) -> Result<Value, VmErr> {
         }
         return Value::checked_array(items);
     }
-    if j.is_instance_of::<js_sys::Object>() {
+    if j.is_object() {
         let keys = js_sys::Object::keys(j.unchecked_ref::<js_sys::Object>());
         let n = keys.length();
         if n as usize > MAX_OBJECT_PROPS {
@@ -162,7 +174,7 @@ fn js_to_value_d(j: &JsValue, depth: usize) -> Result<Value, VmErr> {
         let mut props = Vec::with_capacity(n as usize);
         for i in 0..n {
             let k = keys.get(i);
-            let key = k.as_string().unwrap_or_default();
+            let key = js_string_from_host(&k).to_key();
             let val = js_sys::Reflect::get(j, &k)
                 .map_err(|_| VmErr::Msg("failed to read object property".to_string()))?;
             props.push((key, js_to_value_d(&val, depth + 1)?));
@@ -220,26 +232,14 @@ fn host_function_info_from_js(name: &str, metadata: &JsValue) -> Result<HostFunc
     })
 }
 
-/// Best-effort error message from a thrown `JsValue`.
-fn js_error_message(e: &JsValue) -> String {
-    if e.is_instance_of::<js_sys::Error>()
-        && let Some(m) = read_str_prop(e, "message")
-        && !m.is_empty()
-    {
-        return m;
-    }
-    e.as_string().unwrap_or_else(|| "unknown error".to_string())
-}
-
-/// Set a named property on an object, ignoring failure (keys are always valid
-/// strings here, so this only fails on a frozen target — not our concern).
-fn set_prop(obj: &js_sys::Object, key: &str, val: &JsValue) {
-    let _ = js_sys::Reflect::set(obj, &JsValue::from_str(key), val);
-}
-
 // ---------------------------------------------------------------------------
 // Host bridge
 // ---------------------------------------------------------------------------
+
+/// Set a property on a fresh host object using a trusted field name.
+fn set_prop(obj: &js_sys::Object, key: &str, val: &JsValue) {
+    let _ = js_sys::Reflect::set(obj, &JsValue::from_str(key), val);
+}
 
 /// Bridge that lets the VM call back into browser (JavaScript) functions
 /// exposed via [`WasmVm::expose_function`]. Holds persisted `js_sys::Function`
@@ -277,7 +277,7 @@ impl HostBridge for WasmBridge {
         }
         match func.apply(&JsValue::UNDEFINED, &js_args) {
             Ok(ret) => js_to_value(&ret),
-            Err(e) => Err(VmErr::Msg(format!("Error: {}", js_error_message(&e)))),
+            Err(e) => Err(VmErr::Throw(js_to_value(&e)?)),
         }
     }
 }
@@ -425,6 +425,19 @@ impl WasmVm {
         }
     }
 
+    /// Install guest timers explicitly; requires a runtime-enabled wasm build.
+    pub fn enable_timers(&mut self) -> Result<(), JsValue> {
+        #[cfg(feature = "runtime")]
+        {
+            crate::runtime::install_timers(&mut self.interp.global.borrow_mut());
+            Ok(())
+        }
+        #[cfg(not(feature = "runtime"))]
+        Err(JsValue::from_str(
+            "timers require the runtime Cargo feature",
+        ))
+    }
+
     /// Opt into absolute virtual or real-time deadlines; legacy remains default.
     pub fn set_clock(&mut self, mode: &str) -> Result<(), JsValue> {
         let (clock, virtual_clock) = match mode {
@@ -478,7 +491,7 @@ impl WasmVm {
             ),
             (
                 "yieldReason".into(),
-                Value::String(format!("{:?}", o.yield_reason)),
+                Value::String((format!("{:?}", o.yield_reason)).into()),
             ),
         ]))
         .map_err(|e| JsValue::from_str(&e.to_string()))
@@ -486,18 +499,18 @@ impl WasmVm {
 
     /// Execute a script. Returns `{ ok, value, error, logs }`. `value` is the
     /// pretty-printed result (empty on error); `error` is empty on success.
-    pub fn run(&mut self, source: &str) -> JsValue {
-        self.run_source(None, source)
+    pub fn run(&mut self, source: js_sys::JsString) -> JsValue {
+        self.run_source(None, &js_string_from_host(source.as_ref()))
     }
 
     /// Execute a source file with its workspace path as the module context.
     /// Relative imports are resolved from this path, without assuming a
     /// particular entry-file name.
     pub fn run_file(&mut self, name: &str, source: &str) -> JsValue {
-        self.run_source(Some(name), source)
+        self.run_source(Some(name), &source.into())
     }
 
-    fn run_source(&mut self, module_name: Option<&str>, source: &str) -> JsValue {
+    fn run_source(&mut self, module_name: Option<&str>, source: &crate::JsString) -> JsValue {
         if let Err(e) = self.interp.ensure_can_evaluate() {
             return self.build_run_result(Err(e));
         }
@@ -505,7 +518,7 @@ impl WasmVm {
         self.interp.cur_mod = module_name.map(ToString::to_string);
         let result = self
             .interp
-            .eval_source(source)
+            .eval_utf16(source)
             .map_err(|e| self.interp.enrich_error(e, None));
         self.interp.cur_mod = None;
         let output = self.build_run_result(result);
@@ -517,8 +530,13 @@ impl WasmVm {
     /// the return value are marshalled across the boundary; a thrown error
     /// propagates into the VM as a catchable exception. The name also becomes a
     /// completion candidate.
-    pub fn expose_function(&mut self, name: &str, func: js_sys::Function) -> Result<(), JsValue> {
-        self.register_exposed_function(name, func, HostFunctionInfo::unknown(name))
+    pub fn expose_function(
+        &mut self,
+        name: js_sys::JsString,
+        func: js_sys::Function,
+    ) -> Result<(), JsValue> {
+        let name = js_string_from_host(&name).to_key();
+        self.register_exposed_function(&name, func, HostFunctionInfo::unknown(&name))
     }
 
     /// Expose a browser function and provide language-service metadata.
@@ -526,12 +544,13 @@ impl WasmVm {
     /// `{ params: [{ name, type }], returns, documentation?, async? }`.
     pub fn expose_function_with_info(
         &mut self,
-        name: &str,
+        name: js_sys::JsString,
         func: js_sys::Function,
         metadata: JsValue,
     ) -> Result<(), JsValue> {
-        let info = host_function_info_from_js(name, &metadata)?;
-        self.register_exposed_function(name, func, info)
+        let name = js_string_from_host(&name).to_key();
+        let info = host_function_info_from_js(&name, &metadata)?;
+        self.register_exposed_function(&name, func, info)
     }
 
     fn register_exposed_function(
@@ -561,7 +580,17 @@ impl WasmVm {
 
     /// Register an importable module. Its `export`s are recorded so that
     /// `import * as ns from 'name'` completions can offer them.
-    pub fn register_module(&mut self, name: &str, source: &str) -> Result<(), JsValue> {
+    pub fn register_module(
+        &mut self,
+        name: js_sys::JsString,
+        source: js_sys::JsString,
+    ) -> Result<(), JsValue> {
+        let name_text = js_string_from_host(&name)
+            .to_utf8()
+            .map_err(|_| JsValue::from_str("Module identifiers require valid Unicode"))?;
+        let source_text = js_string_from_host(&source).to_utf8().map_err(|_| JsValue::from_str("Module source requires valid Unicode; use Unicode escapes for unpaired surrogate literals"))?;
+        let name = name_text.as_str();
+        let source = source_text.as_str();
         self.interp
             .ensure_can_evaluate()
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -601,8 +630,9 @@ impl WasmVm {
     }
 
     /// Read a global as its pretty-printed string (`"undefined"` if absent).
-    pub fn get_global(&self, name: &str) -> String {
-        match self.interp.global_value(name) {
+    pub fn get_global(&self, name: js_sys::JsString) -> String {
+        let name = js_string_from_host(&name).to_key();
+        match self.interp.global_value(&name) {
             Some(val) => {
                 crate::format::try_to_string(&val).unwrap_or_else(|error| error.to_string())
             }
@@ -783,4 +813,20 @@ fn sev_str(s: DiagnosticSeverity) -> &'static str {
         DiagnosticSeverity::Warning => "warning",
         DiagnosticSeverity::Hint => "hint",
     }
+}
+
+fn js_string_to_host(s: &crate::JsString) -> JsValue {
+    let mut out = js_sys::JsString::from("");
+    for units in s.units().chunks(4096) {
+        out = out.concat(&js_sys::JsString::from_char_code(units));
+    }
+    out.into()
+}
+fn js_string_from_host(s: &JsValue) -> crate::JsString {
+    let text: js_sys::JsString = s.clone().unchecked_into();
+    crate::JsString::from_units(
+        (0..text.length())
+            .map(|i| text.char_code_at(i) as u16)
+            .collect::<Vec<_>>(),
+    )
 }

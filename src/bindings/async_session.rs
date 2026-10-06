@@ -20,6 +20,8 @@ use std::sync::{Arc, Mutex, mpsc};
 #[derive(Default)]
 pub struct AsyncSessionOptions {
     pub command_capacity: Option<u32>,
+    /// Explicitly install guest timers; requires the runtime Cargo feature.
+    pub timers: Option<bool>,
     /// legacy (default), virtual, or real-time.
     pub clock: Option<String>,
     /// external-first (default) or alternate.
@@ -113,7 +115,7 @@ struct Reply {
 enum Operation {
     Diagnostics,
     Collect,
-    Run(String, bool),
+    Run(crate::JsString, bool),
     Expose {
         name: String,
         id: usize,
@@ -167,7 +169,7 @@ fn turn_wire(o: crate::TurnOutcome) -> WireValue {
         ),
         (
             "yieldReason".into(),
-            WireValue::String(format!("{:?}", o.yield_reason)),
+            WireValue::String(format!("{:?}", o.yield_reason).into()),
         ),
         (
             "nextDeadline".into(),
@@ -265,6 +267,10 @@ fn owner(
 ) {
     let bridge = Rc::new(NapiHostBridge::from_owner_seed(seed));
     let mut vm = Interpreter::with_builtins();
+    #[cfg(feature = "runtime")]
+    if options.timers == Some(true) {
+        crate::runtime::install_timers(&mut vm.global.borrow_mut());
+    }
     vm.set_host_bridge(bridge.clone());
     bridge.set_owner_wake(state.wake.clone());
     let wake = state.wake.clone();
@@ -327,7 +333,7 @@ fn owner(
                         }
                         match operation {
                             Operation::Diagnostics => {
-                                Ok(WireValue::String(vm.evaluation_diagnostics()))
+                                Ok(WireValue::String(vm.evaluation_diagnostics().into()))
                             }
                             Operation::Collect => {
                                 Ok(WireValue::Number(vm.collect_cycles().collected as f64))
@@ -351,9 +357,9 @@ fn owner(
                                 }
                                 bridge.set_owner_execution_active(true);
                                 let value = if drain {
-                                    super::vm::execute_source(&mut vm, &source)
+                                    super::vm::execute_source_utf16(&mut vm, &source)
                                 } else {
-                                    vm.eval_source_with_options(
+                                    vm.eval_utf16_with_options(
                                         &source,
                                         crate::interpreter::EvaluationOptions {
                                             drain: crate::interpreter::DrainPolicy::None,
@@ -362,7 +368,8 @@ fn owner(
                                     )
                                 }
                                 .map_err(|e| vm.enrich_error(e, None).to_string())?;
-                                super::vm::async_result_string(value).map(WireValue::String)
+                                super::vm::async_result_string(value)
+                                    .map(|v| WireValue::String(v.into()))
                             }
                             Operation::Expose { name, id, is_async } => {
                                 bridge.mark_owner_function(id, is_async);
@@ -378,7 +385,8 @@ fn owner(
                                     .map(|v| crate::format::try_to_string(&v))
                                     .transpose()
                                     .map_err(|e| e.to_string())?
-                                    .unwrap_or_else(|| "undefined".into()),
+                                    .unwrap_or_else(|| "undefined".into())
+                                    .into(),
                             )),
                             Operation::SetGlobal(name, value) => {
                                 vm.global.borrow_mut().set(&name, value.into_value());
@@ -482,6 +490,12 @@ impl AsyncSession {
     #[napi(constructor)]
     pub fn new(env: Env, options: Option<AsyncSessionOptions>) -> napi::Result<Self> {
         let options = options.unwrap_or_default();
+        #[cfg(not(feature = "runtime"))]
+        if options.timers == Some(true) {
+            return Err(napi::Error::from_reason(
+                "timers require the runtime Cargo feature",
+            ));
+        }
         let capacity = options.command_capacity.unwrap_or(64) as usize;
         if !(1..=4096).contains(&capacity) || options.max_jobs_per_turn == Some(0) {
             return Err(napi::Error::from_reason(
@@ -636,21 +650,36 @@ impl AsyncSession {
         self.submit(env, Operation::Collect)
     }
     #[napi(ts_return_type = "Promise<string>")]
-    pub fn run(&self, env: Env, source: String) -> napi::Result<Unknown<'_>> {
-        self.submit(env, Operation::Run(source, true))
+    pub fn run(
+        &self,
+        env: Env,
+        source: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<Unknown<'_>> {
+        self.submit(
+            env,
+            Operation::Run(crate::JsString::from_units(source.to_vec()), true),
+        )
     }
     #[napi(ts_return_type = "Promise<string>")]
-    pub fn evaluate(&self, env: Env, source: String) -> napi::Result<Unknown<'_>> {
-        self.submit(env, Operation::Run(source, false))
+    pub fn evaluate(
+        &self,
+        env: Env,
+        source: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<Unknown<'_>> {
+        self.submit(
+            env,
+            Operation::Run(crate::JsString::from_units(source.to_vec()), false),
+        )
     }
     #[napi(ts_return_type = "Promise<void>")]
     pub fn expose_function(
         &self,
         env: Env,
-        name: String,
+        name: napi::bindgen_prelude::Utf16String,
         #[napi(ts_arg_type = "(...args: any[]) => any")] callback: Unknown,
         is_async: Option<bool>,
     ) -> napi::Result<Unknown<'_>> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let id = self
             .main_bridge
             .register(callback.raw())
@@ -671,11 +700,22 @@ impl AsyncSession {
         }
     }
     #[napi(ts_return_type = "Promise<string>")]
-    pub fn get_global(&self, env: Env, name: String) -> napi::Result<Unknown<'_>> {
+    pub fn get_global(
+        &self,
+        env: Env,
+        name: napi::bindgen_prelude::Utf16String,
+    ) -> napi::Result<Unknown<'_>> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         self.submit(env, Operation::GetGlobal(name))
     }
     #[napi(ts_return_type = "Promise<void>")]
-    pub fn set_global(&self, env: Env, name: String, value: Unknown) -> napi::Result<Unknown<'_>> {
+    pub fn set_global(
+        &self,
+        env: Env,
+        name: napi::bindgen_prelude::Utf16String,
+        value: Unknown,
+    ) -> napi::Result<Unknown<'_>> {
+        let name = crate::JsString::from_units(name.to_vec()).to_key();
         let value = WireValue::from_napi(env.raw(), value.raw())
             .map_err(|e| napi::Error::from_reason(e.to_string()))?;
         self.submit(env, Operation::SetGlobal(name, value))
@@ -684,9 +724,12 @@ impl AsyncSession {
     pub fn define_module(
         &self,
         env: Env,
-        name: String,
-        source: String,
+        name: napi::bindgen_prelude::Utf16String,
+        source: napi::bindgen_prelude::Utf16String,
     ) -> napi::Result<Unknown<'_>> {
+        let name = String::from_utf16(&name)
+            .map_err(|_| napi::Error::from_reason("Module identifiers require valid Unicode"))?;
+        let source = String::from_utf16(&source).map_err(|_| napi::Error::from_reason("Module source requires valid Unicode; use Unicode escapes for unpaired surrogate literals"))?;
         self.submit(env, Operation::DefineModule(name, source))
     }
     #[napi(ts_return_type = "Promise<void>")]

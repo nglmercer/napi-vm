@@ -1,0 +1,30 @@
+[package]
+name = "napi-vm-core"
+version = "0.1.5"
+edition = "2024"
+license = "MIT"
+[features]
+test-hooks = []
+default = []
+napi = []
+node-api-host = ["dep:libloading"]
+wasm = []
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+smallvec = "1"
+ahash = { version = "0.8.12", default-features = false, features = ["std"] }
+stacker = "0.1.25"
+regex-syntax = "0.8"
+url = "2"
+base64 = "0.22"
+libloading = { version = "0.9", optional = true }
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+[target.'cfg(any(target_arch = "x86_64", target_arch = "x86"))'.dependencies]
+corosensei = "0.3.4"
+[target.'cfg(all(not(target_os = "windows"), any(target_arch = "aarch64", target_arch = "riscv32", target_arch = "riscv64", target_arch = "loongarch64")))'.dependencies]
+corosensei = "0.3.4"
+[dev-dependencies]
+static_assertions = "1.1"

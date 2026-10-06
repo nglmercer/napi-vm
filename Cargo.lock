@@ -1113,37 +1113,40 @@ dependencies = [
 name = "napi-vm"
 version = "0.1.5"
 dependencies = [
+ "corosensei",
+ "criterion",
+ "js-sys",
+ "libc",
+ "napi",
+ "napi-derive",
+ "napi-vm-core",
+ "napi-vm-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+ "static_assertions",
+ "tokio",
+ "url",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "napi-vm-core"
+version = "0.1.5"
+dependencies = [
  "ahash",
  "base64 0.22.1",
  "corosensei",
- "criterion",
- "flate2",
- "getrandom 0.3.4",
  "js-sys",
- "libc",
  "libloading",
- "napi",
- "napi-derive",
- "oxc_allocator",
- "oxc_codegen",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "oxc_transformer",
  "regex-syntax",
- "reqwest",
- "semver",
  "serde",
  "serde_json",
  "sha2",
  "smallvec",
  "stacker",
  "static_assertions",
- "tar",
- "tokio",
- "tungstenite",
  "url",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1191,6 +1194,33 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "napi-vm-runtime"
+version = "0.1.5"
+dependencies = [
+ "base64 0.22.1",
+ "flate2",
+ "getrandom 0.3.4",
+ "libc",
+ "napi-vm-core",
+ "oxc_allocator",
+ "oxc_codegen",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "oxc_transformer",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "static_assertions",
+ "tar",
+ "tokio",
+ "tungstenite",
+ "url",
 ]
 
 [[package]]

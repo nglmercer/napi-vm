@@ -5,6 +5,11 @@ WebAssembly integrations. It includes a shared language service, browser
 playground, local LSP, optional Zed extension, live VM metadata, and an
 IPC-style command/event bridge for deterministic tests.
 
+Rust embedding is split into `napi-vm-core` (engine only) and the optional
+`napi-vm-runtime` (explicit capabilities and permissions). The `napi-vm` facade
+keeps `default = ["napi"]`. Guest strings use lossless UTF-16 code units. See
+[crate architecture and Rust migration](docs/crate-architecture.md).
+
 ## Quick start
 
 Prerequisites: **Rust** (1.96+), **Node.js** (22+) and **[Bun](https://bun.sh)**.

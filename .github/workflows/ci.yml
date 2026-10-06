@@ -55,7 +55,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       # `plugins/` implements the filesystem permission checks. Type errors
       # there are security-relevant, so the compiler is a required gate.

@@ -261,7 +261,7 @@ impl RustLoadedPlugin {
             )));
         }
         let call = self.interpreter.member(&instance, "call")?;
-        if !crate::interpreter::call::is_callable_value(&call) {
+        if !crate::interpreter::is_callable_value(&call) {
             return Err(PluginHostError::Vm(crate::VmErr::Msg(
                 "Error: Plugin must export call(request, context)".to_string(),
             )));
@@ -614,6 +614,8 @@ impl RustPluginHost {
     fn instantiate(&self, prepared: PreparedPlugin) -> Result<RustLoadedPlugin, PluginHostError> {
         let bridge = Rc::new(PluginHostBridge::default());
         let mut interpreter = Interpreter::with_builtins();
+        #[cfg(feature = "runtime-node")]
+        crate::runtime::install_buffer(&mut interpreter.global.borrow_mut());
         interpreter.set_host_bridge(bridge.clone());
         let host_fs_permissions = compile_host_fs_permissions(&self.options.policy)?;
         let fs = Rc::new(PluginFileSystem::new(

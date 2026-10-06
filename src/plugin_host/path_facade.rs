@@ -13,17 +13,16 @@ pub(super) fn path_operation(operation: usize, parts: &[String]) -> Value {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(&sep.to_string());
-            Value::String(normalize_host_path(&joined))
+            Value::String((normalize_host_path(&joined)).into())
         }
-        1 => Value::String(normalize_host_path(first)),
-        2 => Value::String(host_dirname(first)),
-        3 => Value::String(host_basename(first, parts.get(1).map(String::as_str))),
-        4 => Value::String(host_extname(first)),
-        5 => Value::String(host_resolve(parts)),
-        6 => Value::String(host_relative(
-            first,
-            parts.get(1).map(String::as_str).unwrap_or(""),
-        )),
+        1 => Value::String((normalize_host_path(first)).into()),
+        2 => Value::String((host_dirname(first)).into()),
+        3 => Value::String((host_basename(first, parts.get(1).map(String::as_str))).into()),
+        4 => Value::String((host_extname(first)).into()),
+        5 => Value::String((host_resolve(parts)).into()),
+        6 => Value::String(
+            (host_relative(first, parts.get(1).map(String::as_str).unwrap_or(""))).into(),
+        ),
         7 => Value::Bool(Path::new(first).is_absolute()),
         _ => Value::Undefined,
     }

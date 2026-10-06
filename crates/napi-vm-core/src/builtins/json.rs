@@ -1,0 +1,670 @@
+//! `JSON.stringify` / `JSON.parse`
+
+use super::nf;
+use crate::error::{VmErr, vm_err};
+use crate::interpreter::{Environment, Interpreter};
+use crate::value::{BoxedPrimitive, Value};
+
+pub(super) fn install(e: &mut Environment) {
+    if let Some(j) = e.get("JSON") {
+        j.set_prop("stringify".to_string(), nf("stringify", json_stringify))
+            .expect("built-in JSON property");
+        j.set_prop("parse".to_string(), nf("parse", json_parse))
+            .expect("built-in JSON property");
+    }
+}
+
+/// Maximum nesting `JSON.stringify` / `JSON.parse` will walk. Real engines
+/// throw a `RangeError` here; without a limit a million-deep structure
+/// overflows the native stack. Shared with the host conversion layer so
+/// both directions enforce the same bound.
+pub(crate) const MAX_JSON_DEPTH: usize = 512;
+
+fn json_stringify(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let v = a.first().cloned().unwrap_or(Value::Undefined);
+    if matches!(v, Value::Undefined) {
+        return Ok(Value::Undefined);
+    }
+    let mut out = String::new();
+    // Path-based visited set (Rc pointer identity) so cyclic structures
+    // throw a catchable TypeError — matching `JSON.stringify` in V8 —
+    // instead of recursing until the native stack overflows.
+    let mut visited: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
+    json_serialize(interp, &v, &mut out, &mut visited, 0)?;
+
+    // The third argument indents the output: a number of spaces, or a literal
+    // string. Re-indenting the compact form keeps one serializer.
+    let indent: crate::JsString = match a.get(2) {
+        Some(Value::Number(n)) if *n >= 1.0 => " ".repeat((*n as usize).min(10)).into(),
+        Some(Value::String(s)) => s.slice(0, s.len().min(10)),
+        _ => crate::JsString::default(),
+    };
+    if indent.is_empty() {
+        return Ok(Value::String((out).into()));
+    }
+    Value::checked_string(reindent(&out, &indent)?)
+}
+
+/// Expand compact JSON onto indented lines.
+///
+/// Operating on the finished text rather than threading a width through the
+/// serializer keeps one code path for both forms; the input is JSON this
+/// module just produced, so the scan only has to respect string literals.
+fn reindent(compact: &str, indent: impl Into<crate::JsString>) -> Result<crate::JsString, VmErr> {
+    let indent = indent.into();
+    let mut out = crate::JsString::default();
+    let mut depth = 0usize;
+    // One cached pad string per nesting depth, built on demand. The loop
+    // below touches a pad on every structural character; rebuilding
+    // `indent.repeat(depth)` there costs an allocation per character.
+    let mut pads: Vec<crate::JsString> = vec![crate::JsString::default()];
+    let mut in_string = false;
+    let mut escaped = false;
+    for c in compact.chars() {
+        if out.len() > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+        if in_string {
+            out.push(c);
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        // Every arm below indexes at most `depth + 1` (`{` increments first).
+        while pads.len() <= depth + 1 {
+            pads.push(pads[pads.len() - 1].concat(&indent));
+        }
+        match c {
+            '"' => {
+                in_string = true;
+                out.push(c);
+            }
+            '{' | '[' => {
+                depth += 1;
+                out.push(c);
+                out.push('\n');
+                out.push_str(&pads[depth]);
+            }
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                // An empty object or array stays on one line: the output ends
+                // with a newline plus the deeper pad. This byte check is
+                // exactly `out.ends_with("\n" + pad)` without the `format!`.
+                let pad = &pads[depth + 1];
+                let suffix_len = 1 + pad.len();
+                let is_empty = out.len() >= suffix_len
+                    && out.units()[out.len() - suffix_len] == 10
+                    && out.units().ends_with(pad.units());
+                if is_empty {
+                    out.truncate(out.len() - suffix_len);
+                } else {
+                    out.push('\n');
+                    out.push_str(&pads[depth]);
+                }
+                out.push(c);
+            }
+            ',' => {
+                out.push(c);
+                out.push('\n');
+                out.push_str(&pads[depth]);
+            }
+            ':' => {
+                out.push(c);
+                out.push(' ');
+            }
+            other => out.push(other),
+        }
+    }
+    Ok(out)
+}
+
+fn append_json_str(out: &mut String, value: &str) -> Result<(), VmErr> {
+    if out.len().saturating_add(value.len()) > crate::value::MAX_STRING_LEN {
+        return Err(crate::value::limit_err("Maximum string length exceeded"));
+    }
+    out.push_str(value);
+    Ok(())
+}
+
+fn append_json_char(out: &mut String, value: char) -> Result<(), VmErr> {
+    if out.len().saturating_add(value.len_utf8()) > crate::value::MAX_STRING_LEN {
+        return Err(crate::value::limit_err("Maximum string length exceeded"));
+    }
+    out.push(value);
+    Ok(())
+}
+
+fn json_serialize(
+    interp: &mut Interpreter,
+    v: &Value,
+    out: &mut String,
+    visited: &mut std::collections::HashSet<*const ()>,
+    depth: usize,
+) -> Result<(), VmErr> {
+    if depth > MAX_JSON_DEPTH {
+        return Err(VmErr::Msg(
+            "RangeError: Maximum JSON depth exceeded".to_string(),
+        ));
+    }
+    match v {
+        Value::Null | Value::Undefined => append_json_str(out, "null")?,
+        Value::Bool(b) => append_json_str(out, if *b { "true" } else { "false" })?,
+        Value::Number(n) => {
+            let text = if n.is_nan() || n.is_infinite() {
+                "null".to_string()
+            } else if n.fract() == 0.0 && n.abs() < 1e15 {
+                format!("{n:.0}")
+            } else {
+                n.to_string()
+            };
+            append_json_str(out, &text)?;
+        }
+        Value::String(s) => {
+            append_json_char(out, '"')?;
+            escape_json(s, out)?;
+            append_json_char(out, '"')?;
+        }
+        Value::TypedArray(view) if view.is_buffer => {
+            let to_json = interp.member(v, "toJSON")?;
+            if crate::interpreter::call::is_callable_value(&to_json) {
+                let converted = interp.call_this(&to_json, v.clone(), Vec::new())?;
+                return json_serialize(interp, &converted, out, visited, depth + 1);
+            }
+            json_serialize_typed_array(interp, view, out, visited, depth)?;
+        }
+        Value::TypedArray(view) => {
+            json_serialize_typed_array(interp, view, out, visited, depth)?;
+        }
+        Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_) | Value::DataView(_) => {
+            append_json_str(out, "{}")?;
+        }
+        Value::Array(items) => {
+            let ptr = std::rc::Rc::as_ptr(items) as *const ();
+            if !visited.insert(ptr) {
+                return Err(VmErr::Msg(
+                    "TypeError: Converting circular structure to JSON".to_string(),
+                ));
+            }
+            append_json_char(out, '[')?;
+            let items = items.borrow();
+            for (i, it) in items.iter().enumerate() {
+                if i > 0 {
+                    append_json_char(out, ',')?;
+                }
+                json_serialize(interp, it, out, visited, depth + 1)?;
+            }
+            append_json_char(out, ']')?;
+            visited.remove(&ptr);
+        }
+        // A `Date` serializes as its ISO string, which is what its `toJSON`
+        // returns.
+        Value::Date(ms) => {
+            append_json_char(out, '"')?;
+            escape_json(crate::builtins::iso_string(ms.get()), out)?;
+            append_json_char(out, '"')?;
+        }
+        // A proxy serializes as its target. Routing this through the `get`
+        // trap would need the interpreter, which the serializer does not have.
+        Value::Proxy(proxy) => {
+            let target = proxy.target.clone();
+            return json_serialize(interp, &target, out, visited, depth);
+        }
+        Value::Object { props, .. } => {
+            let to_json = interp.member(v, "toJSON")?;
+            if crate::interpreter::call::is_callable_value(&to_json) {
+                let converted = interp.call_this(&to_json, v.clone(), Vec::new())?;
+                return json_serialize(interp, &converted, out, visited, depth + 1);
+            }
+            match props.meta.borrow().boxed_primitive.clone() {
+                Some(BoxedPrimitive::Bool(value)) => {
+                    return json_serialize(interp, &Value::Bool(value), out, visited, depth + 1);
+                }
+                Some(BoxedPrimitive::Number(value)) => {
+                    return json_serialize(interp, &Value::Number(value), out, visited, depth + 1);
+                }
+                Some(BoxedPrimitive::String(value)) => {
+                    return json_serialize(interp, &Value::String(value), out, visited, depth + 1);
+                }
+                Some(BoxedPrimitive::BigInt(_)) => {
+                    return Err(VmErr::Msg(
+                        "TypeError: Do not know how to serialize a BigInt".into(),
+                    ));
+                }
+                Some(BoxedPrimitive::Symbol(_)) | None => {}
+            }
+            json_serialize_object(interp, v, props, out, visited, depth)?;
+        }
+        _ => append_json_str(out, "null")?,
+    }
+    Ok(())
+}
+
+fn json_serialize_object(
+    interp: &mut Interpreter,
+    value: &Value,
+    props: &std::rc::Rc<crate::value::ObjectCell>,
+    out: &mut String,
+    visited: &mut std::collections::HashSet<*const ()>,
+    depth: usize,
+) -> Result<(), VmErr> {
+    let ptr = std::rc::Rc::as_ptr(props) as *const ();
+    if !visited.insert(ptr) {
+        return Err(VmErr::Msg(
+            "TypeError: Converting circular structure to JSON".to_string(),
+        ));
+    }
+    append_json_char(out, '{')?;
+    let meta = props.meta.borrow();
+    // `JSON.stringify` walks own enumerable string keys only, skipping the
+    // VM's internal slots. Snapshot before getters execute guest code.
+    let entries: Vec<(String, Value)> = props
+        .borrow()
+        .iter()
+        .filter(|(key, _)| {
+            !crate::interpreter::is_internal_key(key) && meta.attrs_of(key).enumerable
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    drop(meta);
+    let mut first = true;
+    for (key, slot) in entries {
+        let is_getter = matches!(&slot, Value::Function(function)
+        if function.name.as_ref().is_some_and(|name| {
+            name.strip_prefix("get ").is_some_and(|rest| rest == key)
+        }));
+        let property = if is_getter {
+            interp.member(value, &key)?
+        } else {
+            slot.deref_binding()
+        };
+        if matches!(property, Value::Undefined) {
+            continue;
+        }
+        if !first {
+            append_json_char(out, ',')?;
+        }
+        first = false;
+        append_json_char(out, '"')?;
+        escape_json(crate::JsString::from_key(&key), out)?;
+        append_json_str(out, "\":")?;
+        json_serialize(interp, &property, out, visited, depth + 1)?;
+    }
+    append_json_char(out, '}')?;
+    visited.remove(&ptr);
+    Ok(())
+}
+
+fn json_serialize_typed_array(
+    interp: &mut Interpreter,
+    view: &std::rc::Rc<crate::value::TypedArrayData>,
+    out: &mut String,
+    visited: &mut std::collections::HashSet<*const ()>,
+    depth: usize,
+) -> Result<(), VmErr> {
+    append_json_char(out, '{')?;
+    for index in 0..view.effective_length() {
+        if index > 0 {
+            append_json_char(out, ',')?;
+        }
+        append_json_char(out, '"')?;
+        append_json_str(out, &index.to_string())?;
+        append_json_str(out, "\":")?;
+        let value = crate::builtins::read_element(view, index).unwrap_or(Value::Undefined);
+        json_serialize(interp, &value, out, visited, depth + 1)?;
+    }
+    append_json_char(out, '}')
+}
+
+fn escape_json(s: impl Into<crate::JsString>, out: &mut String) -> Result<(), VmErr> {
+    let s = s.into();
+    for decoded in char::decode_utf16(s.units().iter().copied()) {
+        let c = match decoded {
+            Ok(c) => c,
+            Err(e) => {
+                append_json_str(out, &format!("\\u{:04x}", e.unpaired_surrogate()))?;
+                continue;
+            }
+        };
+        match c {
+            '"' => append_json_str(out, "\\\"")?,
+            '\\' => append_json_str(out, "\\\\")?,
+            '\n' => append_json_str(out, "\\n")?,
+            '\t' => append_json_str(out, "\\t")?,
+            '\r' => append_json_str(out, "\\r")?,
+            '\u{08}' => append_json_str(out, "\\b")?,
+            '\u{0C}' => append_json_str(out, "\\f")?,
+            c if (c as u32) < 0x20 => {
+                append_json_str(out, &format!("\\u{:04x}", c as u32))?;
+            }
+            c => append_json_char(out, c)?,
+        }
+    }
+    Ok(())
+}
+
+fn json_parse(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let s = match a.first() {
+        Some(Value::String(s)) => s,
+        _ => return vm_err("JSON.parse requires a string argument"),
+    };
+    if s.len() > crate::value::MAX_STRING_LEN {
+        return Err(crate::value::limit_err("Maximum string length exceeded"));
+    }
+    let mut encoded = String::new();
+    for decoded in char::decode_utf16(s.units().iter().copied()) {
+        match decoded {
+            Ok(ch) => encoded.push(ch),
+            Err(e) => encoded.push_str(&format!("\\u{:04x}", e.unpaired_surrogate())),
+        }
+    }
+    JsonParser::new(&encoded).parse()
+}
+
+/// A small recursive-descent JSON parser producing `Value`s directly, with no
+/// token or AST allocation. Accepts strict JSON only (quoted keys, no trailing
+/// commas), matching the semantics the previous lexer/parser-reuse approach
+/// provided for well-formed JSON input.
+struct JsonParser<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+    /// Current container nesting; bounded by `MAX_JSON_DEPTH` so a deeply
+    /// nested document errors out instead of overflowing the native stack.
+    depth: usize,
+}
+
+impl<'a> JsonParser<'a> {
+    fn new(s: &'a str) -> Self {
+        Self {
+            bytes: s.as_bytes(),
+            pos: 0,
+            depth: 0,
+        }
+    }
+
+    fn parse(mut self) -> Result<Value, VmErr> {
+        let v = self.value()?;
+        self.skip_ws();
+        if self.pos != self.bytes.len() {
+            return vm_err("Invalid JSON");
+        }
+        Ok(v)
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.pos).copied()
+    }
+
+    fn skip_ws(&mut self) {
+        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
+            self.pos += 1;
+        }
+    }
+
+    fn expect(&mut self, c: u8) -> Result<(), VmErr> {
+        if self.peek() == Some(c) {
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(VmErr::Msg("Invalid JSON".to_string()))
+        }
+    }
+
+    fn push_str(&mut self, out: &mut crate::JsString, value: &str) -> Result<(), VmErr> {
+        if out.len().saturating_add(value.len()) > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+        out.push_str(value);
+        Ok(())
+    }
+
+    fn push_char(&mut self, out: &mut crate::JsString, value: char) -> Result<(), VmErr> {
+        if out.len().saturating_add(value.len_utf8()) > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+        out.push(value);
+        Ok(())
+    }
+
+    fn value(&mut self) -> Result<Value, VmErr> {
+        self.depth += 1;
+        if self.depth > MAX_JSON_DEPTH {
+            return Err(VmErr::Msg(
+                "RangeError: Maximum JSON depth exceeded".to_string(),
+            ));
+        }
+        let r = self.value_inner();
+        self.depth -= 1;
+        r
+    }
+
+    fn value_inner(&mut self) -> Result<Value, VmErr> {
+        self.skip_ws();
+        match self.peek() {
+            Some(b'{') => self.object(),
+            Some(b'[') => self.array(),
+            Some(b'"') => Ok(Value::String(self.string()?)),
+            Some(b't') => self.literal(b"true", Value::Bool(true)),
+            Some(b'f') => self.literal(b"false", Value::Bool(false)),
+            Some(b'n') => self.literal(b"null", Value::Null),
+            Some(c) if c == b'-' || c.is_ascii_digit() => self.number(),
+            _ => vm_err("Invalid JSON"),
+        }
+    }
+
+    fn literal(&mut self, lit: &[u8], v: Value) -> Result<Value, VmErr> {
+        if self.bytes.get(self.pos..self.pos + lit.len()) == Some(lit) {
+            self.pos += lit.len();
+            Ok(v)
+        } else {
+            vm_err("Invalid JSON")
+        }
+    }
+
+    fn number(&mut self) -> Result<Value, VmErr> {
+        let start = self.pos;
+        if self.peek() == Some(b'-') {
+            self.pos += 1;
+        }
+        while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+            self.pos += 1;
+        }
+        if self.peek() == Some(b'.') {
+            self.pos += 1;
+            while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                self.pos += 1;
+            }
+        }
+        if matches!(self.peek(), Some(b'e' | b'E')) {
+            self.pos += 1;
+            if matches!(self.peek(), Some(b'+' | b'-')) {
+                self.pos += 1;
+            }
+            while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                self.pos += 1;
+            }
+        }
+        // The scanned range is ASCII-only (digits and punctuation), hence a
+        // valid UTF-8 slice of the original input.
+        let s = std::str::from_utf8(&self.bytes[start..self.pos])
+            .map_err(|_| VmErr::Msg("Invalid JSON".to_string()))?;
+        s.parse::<f64>()
+            .map(Value::Number)
+            .map_err(|_| VmErr::Msg("Invalid JSON".to_string()))
+    }
+
+    fn string(&mut self) -> Result<crate::JsString, VmErr> {
+        self.pos += 1; // opening quote
+        let mut out = crate::JsString::default();
+        loop {
+            match self.peek() {
+                None => return Err(VmErr::Msg("Invalid JSON".to_string())),
+                Some(b'"') => {
+                    self.pos += 1;
+                    return Ok(out);
+                }
+                Some(b'\\') => {
+                    self.pos += 1;
+                    match self.peek() {
+                        Some(b'"') => self.push_char(&mut out, '"')?,
+                        Some(b'\\') => self.push_char(&mut out, '\\')?,
+                        Some(b'/') => self.push_char(&mut out, '/')?,
+                        Some(b'b') => self.push_char(&mut out, '\u{08}')?,
+                        Some(b'f') => self.push_char(&mut out, '\u{0C}')?,
+                        Some(b'n') => self.push_char(&mut out, '\n')?,
+                        Some(b'r') => self.push_char(&mut out, '\r')?,
+                        Some(b't') => self.push_char(&mut out, '\t')?,
+                        Some(b'u') => {
+                            self.pos += 1;
+                            let hi = self.hex4()?;
+                            out.push_str(crate::JsString::from_units(vec![hi as u16]));
+                            continue;
+                        }
+                        _ => return Err(VmErr::Msg("Invalid JSON".to_string())),
+                    }
+                    self.pos += 1;
+                }
+                Some(c) if c < 0x20 => return Err(VmErr::Msg("SyntaxError: Invalid JSON".into())),
+                Some(_) => {
+                    // Fast path: copy a run of bytes with no quote/backslash.
+                    // UTF-8 continuation bytes are >= 0x80 and can never be
+                    // 0x22 or 0x5C, so the run ends on a char boundary.
+                    let start = self.pos;
+                    while matches!(self.peek(), Some(c) if c != b'"' && c != b'\\') {
+                        self.pos += 1;
+                    }
+                    let run = std::str::from_utf8(&self.bytes[start..self.pos])
+                        .map_err(|_| VmErr::Msg("Invalid JSON".to_string()))?;
+                    if run.chars().any(|c| (c as u32) < 0x20) {
+                        return Err(VmErr::Msg("SyntaxError: Invalid JSON".into()));
+                    }
+                    self.push_str(&mut out, run)?;
+                }
+            }
+        }
+    }
+
+    fn hex4(&mut self) -> Result<u32, VmErr> {
+        let mut v = 0u32;
+        for _ in 0..4 {
+            let c = self
+                .peek()
+                .ok_or_else(|| VmErr::Msg("Invalid JSON".to_string()))?;
+            self.pos += 1;
+            v = v * 16
+                + match c {
+                    b'0'..=b'9' => (c - b'0') as u32,
+                    b'a'..=b'f' => (c - b'a' + 10) as u32,
+                    b'A'..=b'F' => (c - b'A' + 10) as u32,
+                    _ => return Err(VmErr::Msg("Invalid JSON".to_string())),
+                };
+        }
+        Ok(v)
+    }
+
+    fn array(&mut self) -> Result<Value, VmErr> {
+        self.pos += 1; // [
+        let mut items = Vec::new();
+        self.skip_ws();
+        if self.peek() == Some(b']') {
+            self.pos += 1;
+            return Value::checked_array(items);
+        }
+        loop {
+            if items.len() >= crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            }
+            items.push(self.value()?);
+            self.skip_ws();
+            match self.peek() {
+                Some(b',') => self.pos += 1,
+                Some(b']') => {
+                    self.pos += 1;
+                    return Value::checked_array(items);
+                }
+                _ => return vm_err("Invalid JSON"),
+            }
+        }
+    }
+
+    fn object(&mut self) -> Result<Value, VmErr> {
+        self.pos += 1; // {
+        let mut props = Vec::new();
+        self.skip_ws();
+        if self.peek() == Some(b'}') {
+            self.pos += 1;
+            return Value::checked_object(props);
+        }
+        loop {
+            self.skip_ws();
+            if self.peek() != Some(b'"') {
+                return vm_err("Invalid JSON");
+            }
+            let key = self.string()?;
+            self.skip_ws();
+            self.expect(b':')?;
+            if props.len() >= crate::value::MAX_OBJECT_PROPS {
+                return Err(crate::value::limit_err(
+                    "Maximum object property count exceeded",
+                ));
+            }
+            let v = self.value()?;
+            props.push((key.to_key(), v));
+            self.skip_ws();
+            match self.peek() {
+                Some(b',') => self.pos += 1,
+                Some(b'}') => {
+                    self.pos += 1;
+                    return Value::checked_object(props);
+                }
+                _ => return vm_err("Invalid JSON"),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reindent_nests_objects_and_arrays() {
+        assert_eq!(reindent(r#"{"a":1}"#, "  ").unwrap(), "{\n  \"a\": 1\n}");
+        assert_eq!(
+            reindent(r#"{"a":[1,2]}"#, "  ").unwrap(),
+            "{\n  \"a\": [\n    1,\n    2\n  ]\n}"
+        );
+    }
+
+    #[test]
+    fn reindent_keeps_empty_containers_on_one_line() {
+        assert_eq!(reindent("{}", "  ").unwrap(), "{}");
+        assert_eq!(reindent("[]", "  ").unwrap(), "[]");
+        assert_eq!(
+            reindent(r#"{"a":{},"b":[]}"#, "  ").unwrap(),
+            "{\n  \"a\": {},\n  \"b\": []\n}"
+        );
+    }
+
+    #[test]
+    fn reindent_ignores_structure_inside_strings() {
+        assert_eq!(
+            reindent(r#"{"a":"{x},[y]"}"#, "  ").unwrap(),
+            "{\n  \"a\": \"{x},[y]\"\n}"
+        );
+        // Trailing spaces inside a string must not read as an empty body.
+        assert_eq!(
+            reindent(r#"{"a":"  "}"#, "  ").unwrap(),
+            "{\n  \"a\": \"  \"\n}"
+        );
+    }
+
+    #[test]
+    fn reindent_accepts_string_indent() {
+        assert_eq!(reindent(r#"{"a":1}"#, "\t").unwrap(), "{\n\t\"a\": 1\n}");
+    }
+}

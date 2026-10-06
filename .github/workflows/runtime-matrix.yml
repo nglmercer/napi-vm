@@ -53,8 +53,10 @@ jobs:
         shell: bash
         run: |
           cargo test --profile ci --locked
-          cargo test --profile ci --locked --all-features
+          cargo test --workspace --profile ci --locked --all-features
           cargo test --profile ci --locked --no-default-features
+          cargo test -p napi-vm-core --profile ci --locked --no-default-features
+          cargo test -p napi-vm-runtime --profile ci --locked --no-default-features --features runtime
           npm run lint
       - name: Serialized memory regression
         if: matrix.os == 'ubuntu-24.04'

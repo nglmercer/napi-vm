@@ -19,12 +19,14 @@ const pkg = join(root, "playground", "pkg");
 const built = existsSync(join(pkg, "napi_vm_bg.wasm"));
 
 let vm;
+let timersAvailable = false;
 
 before(async () => {
   if (!built) return;
   const module = await import(join(pkg, "napi_vm.js"));
   module.initSync({ module: readFileSync(join(pkg, "napi_vm_bg.wasm")) });
   vm = new module.WasmVm();
+  try { vm.enable_timers(); timersAvailable = true; } catch {}
 });
 
 /// Run one program and return its value, asserting that it succeeded.
@@ -35,6 +37,20 @@ function run(source) {
 }
 
 describe("browser build", { skip: built ? false : "playground/pkg is not built" }, () => {
+  test("UTF-16 host callbacks preserve surrogate strings and keys", () => {
+    assert.equal(run("'" + '\ud800' + "'.charCodeAt(0)"), '55296');
+    vm.expose_function('\ud800', value => value);
+    assert.equal(run("globalThis['\\ud800'](42)"), '42');
+    assert.match(vm.get_global('\ud800'), /Function/);
+    assert.throws(() => vm.register_module('bad', "export default '" + '\ud800' + "';"), /valid Unicode/);
+    vm.expose_function('utfEcho', value => value);
+    assert.equal(run("utfEcho('\\ud800').charCodeAt(0)"), '55296');
+    assert.equal(run("utfEcho({'\\ud800':'\\udc00'})['\\ud800'].charCodeAt(0)"), '56320');
+    assert.equal(run("'😀'.length"), '2');
+    vm.expose_function('utfThrow', () => { throw new Error('\ud800'); });
+    assert.equal(run("try { utfThrow(); } catch(e) { e.message.charCodeAt(0); }"), '55296');
+  });
+
   test("numeric builtin regressions also work in the browser target", () => {
     assert.equal(run('Number.isNaN(parseInt("12", 1));'), "true");
     assert.equal(run('parseInt("0xff", 16);'), "255");
@@ -118,7 +134,8 @@ describe("browser build", { skip: built ? false : "playground/pkg is not built" 
       "abc",
     );
   });
-  test("virtual clock polling resumes checkpoints without blocking", () => {
+  test("virtual clock polling resumes checkpoints without blocking", (t) => {
+    if (!timersAvailable) { t.skip("runtime feature is not compiled"); return; }
     vm.set_clock("virtual");
     run("var scheduled=[];setTimeout(()=>{scheduled.push('timer');queueMicrotask(()=>scheduled.push('micro'));},10);");
     assert.equal(vm.poll_event_loop(10).executedJobs,0);
@@ -131,7 +148,8 @@ describe("browser build", { skip: built ? false : "playground/pkg is not built" 
     assert.throws(()=>vm.advance_clock(-1));
     vm.set_clock("legacy");
   });
-  test("real-time clock polling leaves future timers pending",async()=>{
+  test("real-time clock polling leaves future timers pending", async(t)=>{
+    if (!timersAvailable) { t.skip("runtime feature is not compiled"); return; }
     vm.set_clock("real-time");
     run("var fired=false;setTimeout(()=>{fired=true},20)");
     const turn=vm.poll_event_loop(10);

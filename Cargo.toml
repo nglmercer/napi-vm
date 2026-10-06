@@ -10,93 +10,36 @@ crate-type = ["cdylib", "lib"]
 
 [features]
 default = ["napi"]
-runtime = []
-runtime-cli = ["runtime"]
-runtime-web = ["runtime", "dep:getrandom"]
-runtime-fs = ["runtime"]
-runtime-net = ["runtime", "dep:reqwest", "dep:tungstenite", "dep:tokio"]
-runtime-npm = ["runtime", "dep:semver", "dep:tar", "dep:flate2"]
-runtime-node = ["runtime", "runtime-npm"]
-runtime-typescript = ["runtime", "dep:oxc_allocator", "dep:oxc_parser", "dep:oxc_span", "dep:oxc_codegen", "dep:oxc_transformer", "dep:oxc_semantic"]
-runtime-native-addons = ["runtime-node", "node-api-host"]
-# The Node.js N-API layer. Turn off (`--no-default-features`) to build the
-# pure-Rust core alone — for the language server, native GUI frontends, or the
-# `wasm32` target.
-napi = ["dep:napi", "dep:napi-derive"]
-# Experimental in-process loader for addons that use only the Node-API C ABI.
-# The in-process backend supports Linux, macOS, and Windows; macOS and Windows
-# still need native CI verification. The sidecar covers other addon ABIs.
-node-api-host = ["dep:libloading", "runtime-node"]
-# The browser layer: a `#[wasm_bindgen]` `WasmVm` that runs the VM in-page and
-# exposes the shared language services (completion/diagnostics/symbols). Build
-# with `--no-default-features --features wasm --target wasm32-unknown-unknown`.
-wasm = ["dep:wasm-bindgen"]
+napi = ["dep:napi", "dep:napi-derive", "napi-vm-core/napi"]
+wasm = ["dep:wasm-bindgen", "napi-vm-core/wasm"]
+node-api-host = ["napi-vm-core/node-api-host", "runtime-node"]
+runtime = ["dep:napi-vm-runtime", "napi-vm-runtime/runtime"]
+runtime-cli = ["runtime", "napi-vm-runtime/runtime-cli"]
+runtime-web = ["runtime", "napi-vm-runtime/runtime-web"]
+runtime-fs = ["runtime", "napi-vm-runtime/runtime-fs"]
+runtime-net = ["runtime", "napi-vm-runtime/runtime-net"]
+runtime-npm = ["runtime", "napi-vm-runtime/runtime-npm"]
+runtime-node = ["runtime", "napi-vm-runtime/runtime-node"]
+runtime-typescript = ["runtime", "napi-vm-runtime/runtime-typescript"]
+runtime-native-addons = ["runtime", "napi-vm-runtime/runtime-native-addons", "node-api-host"]
 
 [dependencies]
+napi-vm-core = { path = "crates/napi-vm-core", version = "0.1.5" }
+napi-vm-runtime = { path = "crates/napi-vm-runtime", version = "0.1.5", optional = true }
 napi = { version = "3.12.2", features = ["napi8"], optional = true }
 napi-derive = { version = "3.6.3", optional = true }
-libloading = { version = "0.9", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
-smallvec = "1"
-# Binding maps use explicit seeds derived from std's randomized hasher, including
-# on wasm; no platform-specific entropy dependency is needed here.
-ahash = { version = "0.8.12", default-features = false, features = ["std"] }
-stacker = "0.1.25"
-regex-syntax = "0.8"
-# `file://` URI parsing for the language server and for module file URLs
-# recorded by the plugin host. Unconditional (including wasm32): the plugin
-# host compiles for the browser target and needs it there too.
 url = "2"
-base64 = "0.22"
-oxc_allocator = { version = "0.95", optional = true }
-oxc_parser = { version = "0.95", optional = true }
-oxc_span = { version = "0.95", optional = true }
-oxc_codegen = { version = "0.95", optional = true }
-oxc_transformer = { version = "0.95", optional = true }
-oxc_semantic = { version = "0.95", optional = true }
-semver = { version = "1", optional = true }
-tar = { version = "0.4", optional = true }
-flate2 = { version = "1", optional = true }
-# Browser ↔ Rust bindings for the `wasm` feature. `js-sys` (below, target-scoped)
-# provides the typed wrappers over JS built-ins used by the marshalling layer.
 wasm-bindgen = { version = "0.2", optional = true }
-
-# Browser host APIs (Date.now, console) for the wasm32 target. Scoped to the
-# target so native builds never pull it in.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 
-# O_NOFOLLOW is used only by the Unix filesystem capability facade.
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"], optional = true }
-getrandom = { version = "0.3", optional = true }
-tokio = { version = "1", features = ["rt", "time", "net", "macros"], optional = true }
-
-# `corosensei` provides the stackful coroutines that back generators and async
-# function bodies. It needs hand-written stack-switching assembly and
-# `compile_error!`s on any target it has no backend for, so it is scoped to
-# exactly the targets it supports rather than to `not(wasm32)`.
-#
-# These two sections are the authority; `build.rs` mirrors them into the
-# `stackful_coroutines` cfg that the source reads. Keep them in sync.
-#
-# x86_64/x86 have both a SysV and a Windows backend.
-[target.'cfg(any(target_arch = "x86_64", target_arch = "x86"))'.dependencies]
-corosensei = "0.3.4"
-
-# These have a SysV backend only: `corosensei`'s aarch64/riscv/loongarch
-# modules are all gated `not(windows)`. `aarch64-pc-windows-msvc` therefore
-# takes the buffered generator path, as wasm32 does.
-[target.'cfg(all(not(target_os = "windows"), any(target_arch = "aarch64", target_arch = "riscv32", target_arch = "riscv64", target_arch = "loongarch64")))'.dependencies]
-corosensei = "0.3.4"
-
 [dev-dependencies]
+napi-vm-core = { path = "crates/napi-vm-core", features = ["test-hooks"] }
 static_assertions = "1.1"
 criterion = "0.5"
 tokio = { version = "1", features = ["rt", "time"] }
@@ -162,7 +105,7 @@ inherits = "dev"
 debug = 0
 incremental = false
 
-# Preserve opt-level=3 and release assertions for stack-switching checks, but
+# Preserve opt-level = 3 and release assertions for stack-switching checks, but
 # avoid whole-program LTO and single-unit codegen for every CI executable.
 # CI LSP artifacts use this too; published release binaries still use release.
 # Line tables keep Windows debugger crash reports useful without full PDBs.

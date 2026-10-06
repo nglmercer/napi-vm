@@ -19,25 +19,24 @@ loaders, registry installation with cache/lockfile/integrity, Oxc TS/TSX
 transformation, Unix process resource limits and initial Node module subsets. See
 [the implementation and remaining work](optional-runtime.md). The initial full
 Test262 development baseline is 31.43%; the runtime preview and stable engine
-gates are not met. Actual crate extraction and later roadmap milestones remain
-pending.
+gates are not met. Lossless UTF-16 strings and actual core/runtime crate
+extraction are implemented; later roadmap milestones remain pending.
 
 ## Repository baseline before implementation
 
-The current `napi-vm` crate defaults to `napi`; `--no-default-features` removes
-the Node binding layer. It does not yet establish the proposed runtime boundary.
-`src/runtime.rs` contains an interpreter configuration builder rather than a
-standalone OS-backed runtime. Builtin setup currently includes console, timers,
-and some computational Web APIs and placeholders.
+The `napi-vm` facade defaults to `napi`; `--no-default-features` removes the
+Node binding layer. Engine implementation and configuration live in
+`crates/napi-vm-core`; capabilities and OS adapters live in the optional
+`crates/napi-vm-runtime`. Core initialization exposes only engine builtins.
 
 Reuse the existing bytecode engine and AST fallback, promises, module graph,
 CommonJS resolver, scheduler clocks and bounded turns, host-event bridge, heap
 collector, and plugin capability policies. Their presence does not establish
 Test262, Web Platform Test, Node, or npm ecosystem conformance.
 
-Strings currently use Rust `String`; indexing counts Unicode scalar values.
-Full ECMAScript semantics require representing UTF-16 code units, including
-unpaired surrogates, throughout the engine and bridges.
+Guest strings now use lossless UTF-16 `JsString` values, including unpaired
+surrogates. AST and bytecode execution, JSON, regex offsets and structured
+host bridges share this representation. See [crate architecture](crate-architecture.md).
 
 ## Architecture and feature contract
 
@@ -81,6 +80,9 @@ let runtime = RuntimeBuilder::new()
 ```
 
 ## Ordered milestones
+
+For the concrete sequence after the current implementation, see
+[next-implementations.md](next-implementations.md).
 
 ### M0 — P0 engine/runtime boundary and permissions
 
