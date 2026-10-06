@@ -53,7 +53,8 @@ pub(super) fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, 
         Value::Error(error) => Ok(NapiObjectIdentity::Error(
             Rc::as_ptr(&error.identity) as usize
         )),
-        Value::Undefined
+        Value::Uninitialized
+        | Value::Undefined
         | Value::Null
         | Value::Bool(_)
         | Value::Number(_)
@@ -116,6 +117,7 @@ pub(super) fn napi_reference_value_strong_count(value: &Value) -> Option<usize> 
         // lifetime rules or are internal sentinels rather than guest objects.
         Value::GlobalObject
         | Value::Symbol(_)
+        | Value::Uninitialized
         | Value::Undefined
         | Value::Null
         | Value::Bool(_)

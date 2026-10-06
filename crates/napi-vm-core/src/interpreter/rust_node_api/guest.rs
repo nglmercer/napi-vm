@@ -968,7 +968,8 @@ pub(super) fn napi_direct_all_property_keys(
         Value::Proxy(_) | Value::NativeFunction { .. } | Value::GlobalObject => {
             return Err(NAPI_GENERIC_FAILURE);
         }
-        Value::Undefined
+        Value::Uninitialized
+        | Value::Undefined
         | Value::Null
         | Value::Bool(_)
         | Value::Number(_)

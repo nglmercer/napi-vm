@@ -710,7 +710,7 @@ impl Checker<'_> {
             Instr::ExportAll { tmpl } => {
                 self.check_const_is(address, *tmpl, "export-all-template")?;
             }
-            Instr::DynamicImport { dst, src } => {
+            Instr::DynamicImport { dst, src } | Instr::Await { dst, src } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }

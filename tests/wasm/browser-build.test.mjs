@@ -51,6 +51,15 @@ describe("browser build", { skip: built ? false : "playground/pkg is not built" 
     assert.equal(run("try { utfThrow(); } catch(e) { e.message.charCodeAt(0); }"), '55296');
   });
 
+  test("await assimilates thenables and module namespaces reject mutation", () => {
+    assert.equal(run('await { then(resolve) { resolve(42); } };'), '42');
+    vm.register_module('linked-order', 'export const z = 3; export default 1;');
+    assert.equal(run('import * as linked from "linked-order"; Object.keys(linked).join();'), 'default,z');
+    assert.equal(run('Reflect.set(linked, "z", 9);'), 'false');
+    assert.equal(run('linked.z;'), '3');
+    assert.equal(run('var weakTarget = {}; var weakRef = new WeakRef(weakTarget); weakRef.deref() === weakTarget;'), 'true');
+  });
+
   test("numeric builtin regressions also work in the browser target", () => {
     assert.equal(run('Number.isNaN(parseInt("12", 1));'), "true");
     assert.equal(run('parseInt("0xff", 16);'), "255");

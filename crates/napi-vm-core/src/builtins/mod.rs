@@ -15,6 +15,8 @@ pub(crate) mod regexp;
 mod string;
 mod symbol;
 mod typedarray;
+mod weak;
+pub(crate) use symbol::is_registered as symbol_is_registered;
 
 pub(crate) use function::function_method;
 #[cfg(all(
@@ -60,6 +62,8 @@ pub fn setup_builtins(env: &Env) {
         "Set",
         "WeakMap",
         "WeakSet",
+        "WeakRef",
+        "FinalizationRegistry",
         "ArrayBuffer",
         "DataView",
         "SharedArrayBuffer",
@@ -160,6 +164,7 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     promise::install(e);
     reflect::install(e);
     collections::install(e);
+    weak::install(e);
     regexp::install(e);
     bigint::install(e);
     typedarray::install(e);

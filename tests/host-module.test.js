@@ -73,15 +73,10 @@ test("re-registering with fewer exports revokes the dropped bridge global", () =
   vm.registerModule("app", `import { read } from "fs-test";
     export function go() { return read(); }`);
   expect(vm.run(`import { go } from "app"; go();`)).toBe("r");
-  // The dropped export is gone from the module itself, not merely pointing at
-  // a revoked global: importing it binds `undefined`, and calling it fails.
-  vm.registerModule("bad", `import { write } from "fs-test";
+  // A missing export is rejected during linking, before the body can run.
+  expect(() => vm.registerModule("bad", `import { write } from "fs-test";
     export function probe() { return typeof write; }
-    export function go() { return write(); }`);
-  expect(vm.run(`import { probe } from "bad"; probe();`)).toBe("undefined");
-  expect(() => vm.run(`import { go } from "bad"; go();`)).toThrow(
-    /TypeError: undefined is not a function/,
-  );
+    export function go() { return write(); }`)).toThrow(/SyntaxError/);
 });
 
 test("a failed re-registration leaves the previous exports intact", () => {

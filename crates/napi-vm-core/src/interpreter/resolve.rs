@@ -367,7 +367,13 @@ impl Interpreter {
     /// Read a string-keyed property, running a getter if one is installed.
     #[doc(hidden)]
     pub fn member(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
-        self.get_prop_value_str(o, key)
+        let value = self.get_prop_value_str(o, key)?;
+        if matches!(value, Value::Uninitialized) {
+            return Err(VmErr::Msg(format!(
+                "ReferenceError: Cannot access '{key}' before initialization"
+            )));
+        }
+        Ok(value)
     }
 
     /// Test whether a property exists, using the proxy `has` trap when one is
@@ -478,6 +484,15 @@ impl Interpreter {
     /// `&str` end to end: no key `String` and no key `Value` is allocated.
     /// Proxy targets still allocate the trap key, exactly as before.
     pub(crate) fn get_prop_value_str(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
+        let value = self.get_prop_value_str_inner(o, key)?;
+        if matches!(value, Value::Uninitialized) {
+            return Err(VmErr::Msg(format!(
+                "ReferenceError: Cannot access '{key}' before initialization"
+            )));
+        }
+        Ok(value)
+    }
+    fn get_prop_value_str_inner(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
         if let Some(proxy) = o.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "get") {

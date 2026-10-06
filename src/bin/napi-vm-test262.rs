@@ -116,6 +116,16 @@ fn execute(request: Request) -> Json {
         }
         loader.insert(request.id.clone(), request.source);
         vm.set_module_loader(loader);
+        match vm.link_module(&request.id) {
+            Ok(true) => {}
+            Ok(false) => {
+                return failure(
+                    "resolution",
+                    &VmErr::Msg("SyntaxError: Module not found".into()),
+                );
+            }
+            Err(error) => return failure("resolution", &error),
+        }
         vm.load_module(&request.id)
             .and_then(|_| vm.drain_jobs())
             .map(|_| Value::Undefined)
