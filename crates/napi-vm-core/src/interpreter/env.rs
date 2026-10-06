@@ -146,7 +146,12 @@ impl Vars {
     fn try_set(&mut self, n: &str, v: Value) -> Result<(), Value> {
         match self.get_mut(n) {
             Some(binding) => {
-                binding.value.assign_for_execution(v);
+                match &binding.value {
+                    Value::Binding(cell) if !matches!(v, Value::Binding(_)) => {
+                        cell.borrow_mut().assign_for_execution(v)
+                    }
+                    _ => binding.value.assign_for_execution(v),
+                }
                 binding.initialized = true;
                 Ok(())
             }
@@ -210,6 +215,7 @@ pub struct Environment {
     /// Only the persistent user-global frame has a binding quota. Local
     /// function/catch frames and the trusted builtins frame leave this unset.
     global_limit: Option<usize>,
+    module_context: Option<String>,
 }
 
 impl std::fmt::Debug for Environment {
@@ -225,11 +231,22 @@ impl Default for Environment {
 }
 
 impl Environment {
+    pub(crate) fn set_module_context(&mut self, name: &str) {
+        self.module_context = Some(name.into());
+    }
+    pub(crate) fn module_context(&self) -> Option<String> {
+        self.module_context.clone().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|p| p.borrow().module_context())
+        })
+    }
     pub fn new() -> Self {
         Self {
             vars: Vars::Small(SmallVec::new()),
             parent: None,
             global_limit: None,
+            module_context: None,
         }
     }
 
@@ -238,6 +255,7 @@ impl Environment {
             vars: Vars::Small(SmallVec::new()),
             parent: Some(p),
             global_limit: None,
+            module_context: None,
         }
     }
 
@@ -249,6 +267,7 @@ impl Environment {
             vars: Vars::Small(SmallVec::new()),
             parent,
             global_limit: Some(MAX_GLOBAL_BINDINGS),
+            module_context: None,
         }
     }
 
@@ -272,6 +291,7 @@ impl Environment {
             vars,
             parent: Some(p),
             global_limit: None,
+            module_context: None,
         }
     }
 
@@ -295,7 +315,12 @@ impl Environment {
                 // A module import is an indirection to the exporting binding,
                 // so reading it must follow the link rather than hand back the
                 // link itself.
-                Lookup::Value(binding.value.deref_binding())
+                let value = binding.value.deref_binding();
+                if matches!(value, Value::Uninitialized) {
+                    Lookup::Uninitialized
+                } else {
+                    Lookup::Value(value)
+                }
             } else {
                 Lookup::Uninitialized
             };
@@ -317,7 +342,21 @@ impl Environment {
             initialized,
         };
         match self.vars.get_mut(n) {
-            Some(slot) => *slot = binding,
+            Some(slot) => {
+                if let Value::Binding(cell) = &slot.value
+                    && !matches!(binding.value, Value::Binding(_))
+                {
+                    *cell.borrow_mut() = if initialized {
+                        binding.value
+                    } else {
+                        Value::Uninitialized
+                    };
+                    slot.kind = kind;
+                    slot.initialized = initialized;
+                } else {
+                    *slot = binding;
+                }
+            }
             None => self.vars.insert_new(n, binding),
         }
     }
@@ -348,7 +387,10 @@ impl Environment {
     pub fn initialize(&mut self, n: &str, value: Value) -> bool {
         match self.vars.get_mut(n) {
             Some(binding) => {
-                binding.value = value;
+                match &binding.value {
+                    Value::Binding(cell) => *cell.borrow_mut() = value,
+                    _ => binding.value = value,
+                }
                 binding.initialized = true;
                 true
             }
@@ -367,12 +409,13 @@ impl Environment {
         if let Value::Binding(cell) = &binding.value {
             return Some(cell.clone());
         }
-        let cell = crate::heap::tracked(Rc::new(RefCell::new(std::mem::replace(
-            &mut binding.value,
-            Value::Undefined,
-        ))));
+        let value = std::mem::replace(&mut binding.value, Value::Undefined);
+        let cell = crate::heap::tracked(Rc::new(RefCell::new(if binding.initialized {
+            value
+        } else {
+            Value::Uninitialized
+        })));
         binding.value = Value::Binding(cell.clone());
-        binding.initialized = true;
         Some(cell)
     }
 
@@ -390,6 +433,11 @@ impl Environment {
     /// the exporting module had run, and when the export finally executes the
     /// value must land in *that* cell rather than a fresh one.
     pub fn adopt_cell(&mut self, n: &str, cell: Rc<RefCell<Value>>) {
+        if let Some(Value::Binding(ref existing)) = self.own_binding(n)
+            && Rc::ptr_eq(existing, &cell)
+        {
+            return;
+        }
         let current = self
             .vars
             .get(n)
@@ -633,6 +681,8 @@ impl Environment {
 
 #[derive(Clone)]
 pub struct Module {
+    /// Shared namespace identity, also shared by cloned export records.
+    pub namespace: Rc<RefCell<Option<Value>>>,
     pub exports: HashMap<String, Value>,
     pub default: Option<Value>,
     /// The module's own top-level scope.

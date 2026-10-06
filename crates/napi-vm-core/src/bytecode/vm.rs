@@ -219,12 +219,15 @@ pub(crate) fn run_function(
         }
         seed_captured(&fe, code, args)?;
     }
+    let module_context = fe.borrow().module_context();
+    let saved_module = std::mem::replace(&mut interp.cur_mod, module_context);
     let saved = std::mem::replace(&mut interp.global, fe);
     let mut frame = CallFrame::setup(interp, code, this_value, args);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         run_loop(interp, &mut frame, false)
     }));
     interp.global = saved;
+    interp.cur_mod = saved_module;
     recycle_activation(interp, frame);
     result.unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
@@ -314,7 +317,13 @@ fn get_prop_cached(
         && let Some(value) = props.slot_verified(index, name)
         && !is_accessor_for(&value, name)
     {
-        return Ok(value.deref_binding());
+        let value = value.deref_binding();
+        if matches!(value, Value::Uninitialized) {
+            return Err(VmErr::Msg(format!(
+                "ReferenceError: Cannot access '{name}' before initialization"
+            )));
+        }
+        return Ok(value);
     }
     let value = interp.get_prop_value(obj, key)?;
     // Fill only once a layout exists (`own_index` builds it on the second
@@ -350,7 +359,8 @@ fn set_prop_cached(
     let name = encoded_name.as_str();
     // Writability gates the probe: readonly properties always slow-path,
     // so the hit below never has to reproduce refusal semantics.
-    if props.meta.borrow().attrs_of(name).writable
+    if !props.meta.borrow().module_namespace
+        && props.meta.borrow().attrs_of(name).writable
         && let Some(index) = function.caches[site].probe(props.shape_id())
         && let Some(current) = props.slot_verified(index, name)
         && !is_accessor_for(&current, name)
@@ -359,7 +369,8 @@ fn set_prop_cached(
         return Ok(());
     }
     interp.assign_member(obj, key, val)?;
-    if props.meta.borrow().attrs_of(name).writable
+    if !props.meta.borrow().module_namespace
+        && props.meta.borrow().attrs_of(name).writable
         && let Some(index) = props.own_index(name)
         && let Some(shape_id) = props.shape_id()
         && let Some(slot) = props.slot_verified(index, name)
@@ -1019,6 +1030,10 @@ fn run_loop(
                 Instr::DynamicImport { dst, src } => {
                     let specifier = frame.registers[src as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.eval_dynamic_import(specifier)?;
+                }
+                Instr::Await { dst, src } => {
+                    let value = frame.registers[src as usize].clone_for_execution();
+                    frame.registers[dst as usize] = interp.perform_await(value)?;
                 }
                 Instr::ImportMeta { dst } => {
                     frame.registers[dst as usize] = interp.eval_import_meta()?;

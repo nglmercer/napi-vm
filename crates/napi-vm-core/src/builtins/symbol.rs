@@ -203,3 +203,7 @@ fn symbol_receiver(this: &Value) -> Result<Rc<SymbolData>, VmErr> {
         )),
     }
 }
+
+pub(crate) fn is_registered(id: u64) -> bool {
+    SYMBOL_REGISTRY.with(|registry| registry.borrow().values().any(|symbol| symbol.id == id))
+}

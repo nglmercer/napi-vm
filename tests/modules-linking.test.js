@@ -51,7 +51,7 @@ test("a namespace exposes the default under 'default'", () => {
 test("a namespace lists its exports", () => {
   const vm = new Vm();
   vm.registerModule("a", "export const v = 1; export const w = 2; export default 9;");
-  expect(vm.run("import * as ns from 'a'; Object.keys(ns).join();")).toBe("v,w,default");
+  expect(vm.run("import * as ns from 'a'; Object.keys(ns).join();")).toBe("default,v,w");
 });
 
 // --- Renamed imports --------------------------------------------------------

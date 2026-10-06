@@ -491,7 +491,7 @@ impl Interpreter {
             }
             UnOp::Typeof => Value::String(
                 (match v {
-                    Value::Undefined => "undefined",
+                    Value::Uninitialized | Value::Undefined => "undefined",
                     Value::Null => "object",
                     Value::Bool(_) => "boolean",
                     Value::Number(_) => "number",
@@ -704,7 +704,7 @@ impl Interpreter {
             Value::DataView(_) => output.push_str("[object DataView]"),
             #[cfg(stackful_coroutines)]
             Value::AsyncTask(_) => output.push_str("[object AsyncTask]"),
-            Value::Undefined => output.push_str("undefined"),
+            Value::Uninitialized | Value::Undefined => output.push_str("undefined"),
             Value::Null => output.push_str("null"),
             Value::Bool(b) => output.push_str(if *b { "true" } else { "false" }),
             Value::Number(n) => output.push_str(&crate::format::number_string(*n)),

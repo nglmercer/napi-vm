@@ -225,7 +225,7 @@ fn render_plain_value(
         }
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => output.push_str("[object AsyncTask]"),
-        Value::Undefined => output.push_str("undefined"),
+        Value::Uninitialized | Value::Undefined => output.push_str("undefined"),
         Value::Null => output.push_str("null"),
         Value::Bool(b) => output.push_str(if *b { "true" } else { "false" }),
         Value::Number(n) => output.push_str(&number_string(*n)),
@@ -465,7 +465,9 @@ fn render_inspect_value(
         ),
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => painter.write_wrapped(context.output, "2;37", "[object AsyncTask]"),
-        Value::Undefined => painter.write_wrapped(context.output, "2;37", "undefined"),
+        Value::Uninitialized | Value::Undefined => {
+            painter.write_wrapped(context.output, "2;37", "undefined")
+        }
         Value::Null => painter.write_wrapped(context.output, "1;90", "null"),
         Value::Bool(b) => {
             painter.write_wrapped(context.output, "33", if *b { "true" } else { "false" })

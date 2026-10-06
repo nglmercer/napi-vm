@@ -97,7 +97,7 @@ test("a plugin without a default export is rejected", () => {
     manifest: manifestWith({}),
     entry: "export function onLoad() {}",
   });
-  expect(() => makeHost().load(dir)).toThrow(/must default-export an object or a class/);
+  expect(() => makeHost().load(dir)).toThrow(/has no default export/);
 });
 
 // ── hook order ───────────────────────────────────────────────────────

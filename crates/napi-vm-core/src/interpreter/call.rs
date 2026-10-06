@@ -529,6 +529,15 @@ impl Interpreter {
         key: &str,
         value: Value,
     ) -> Result<(), VmErr> {
+        if props.meta.borrow().module_namespace {
+            return if self.cur_mod.is_some() {
+                Err(VmErr::Msg(
+                    "TypeError: Cannot assign to a module namespace".into(),
+                ))
+            } else {
+                Ok(())
+            };
+        }
         let is_setter = |value: &Value| match value {
             Value::Function(function) => {
                 function
@@ -1226,6 +1235,27 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        let module = match f {
+            Value::Function(fd) => Some(
+                fd.closure
+                    .as_ref()
+                    .and_then(|env| env.borrow().module_context()),
+            ),
+            _ => None,
+        };
+        let saved = module.map(|module| std::mem::replace(&mut self.cur_mod, module));
+        let result = self.call_this_in_context(f, this_val, args);
+        if let Some(saved) = saved {
+            self.cur_mod = saved;
+        }
+        result
+    }
+    fn call_this_in_context(
+        &mut self,
+        f: &Value,
+        this_val: Value,
+        args: Vec<Value>,
+    ) -> Result<Value, VmErr> {
         self.execution.check()?;
         if args.len() > crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum argument count exceeded"));
@@ -1848,7 +1878,8 @@ fn make_generator_coroutine(
             interp.global = fe;
 
             match interp.run_program_body(&body) {
-                Ok(v) | Err(VmErr::Ret(v)) => GenOutcome::Returned(v),
+                Ok(_) => GenOutcome::Returned(Value::Undefined),
+                Err(VmErr::Ret(v)) => GenOutcome::Returned(v),
                 Err(VmErr::Throw(v)) => GenOutcome::Threw(v),
                 // Abandoned while suspended: the initiating `Drop` consumes
                 // this; it is never reported to the driver.
@@ -2038,7 +2069,8 @@ fn run_buffered_generator(
     interp.global = saved_scope;
 
     let returned = match outcome {
-        Ok(value) | Err(VmErr::Ret(value)) => value,
+        Ok(_) => Value::Undefined,
+        Err(VmErr::Ret(value)) => value,
         Err(error) => return Err(error),
     };
     let produced = Rc::try_unwrap(sink)
