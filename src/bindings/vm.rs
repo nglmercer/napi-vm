@@ -28,6 +28,15 @@ pub use super::async_session::{AsyncSession, AsyncSessionOptions};
 use super::bridge::{NapiHostBridge, run_async_done_cb};
 use super::marshal::{chk, from_napi, make_str, to_napi};
 
+/// Implemented runtime globals are installed only after an explicit request.
+#[napi(object)]
+pub struct RuntimeCapabilities {
+    pub console: Option<bool>,
+    pub timers: Option<bool>,
+    pub web_apis: Option<bool>,
+    pub node_compat: Option<bool>,
+}
+
 /// Encode a module name into a global-name prefix.
 ///
 /// The encoding is injective: alphanumerics pass through and every other byte
@@ -441,6 +450,49 @@ impl VM {
         Self {
             state: Self::new_state(),
         }
+    }
+
+    /// Enable selected globals; compile-time features are required and do not
+    /// grant filesystem, network, environment, process or addon permission.
+    #[napi]
+    pub fn enable_runtime(&mut self, options: RuntimeCapabilities) -> napi::Result<()> {
+        if (options.console.unwrap_or(false) || options.timers.unwrap_or(false))
+            && !cfg!(feature = "runtime")
+        {
+            return Err(napi::Error::from_reason(
+                "runtime globals require the runtime Cargo feature",
+            ));
+        }
+        if options.web_apis.unwrap_or(false) && !cfg!(feature = "runtime-web") {
+            return Err(napi::Error::from_reason("Web globals require runtime-web"));
+        }
+        if options.node_compat.unwrap_or(false) && !cfg!(feature = "runtime-node") {
+            return Err(napi::Error::from_reason(
+                "Node Buffer requires runtime-node",
+            ));
+        }
+        let _busy = self.state.try_start()?;
+        self.state.runtime.with_mut(|_runtime| {
+            #[cfg(feature = "runtime")]
+            {
+                let mut global = _runtime.interp.global.borrow_mut();
+                if options.console.unwrap_or(false) {
+                    crate::builtins::install_console(&mut global);
+                }
+                if options.timers.unwrap_or(false) {
+                    crate::builtins::install_timers(&mut global);
+                }
+                #[cfg(feature = "runtime-web")]
+                if options.web_apis.unwrap_or(false) {
+                    crate::builtins::install_web(&mut global);
+                }
+                #[cfg(feature = "runtime-node")]
+                if options.node_compat.unwrap_or(false) {
+                    crate::builtins::install_buffer(&mut global);
+                }
+            }
+            Ok(())
+        })
     }
 
     #[napi]

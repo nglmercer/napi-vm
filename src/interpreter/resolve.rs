@@ -282,7 +282,7 @@ impl Interpreter {
             ));
         }
 
-        let order = if hint == "string" {
+        let order = if hint == "string" || (hint == "default" && matches!(value, Value::Date(_))) {
             ["toString", "valueOf"]
         } else {
             ["valueOf", "toString"]
@@ -328,10 +328,7 @@ impl Interpreter {
     /// the string `"2"` before the operator sees it. Everything else is
     /// already primitive, and `bin_op` handles it directly.
     pub(crate) fn needs_concat_coercion(value: &Value) -> bool {
-        matches!(
-            value,
-            Value::Object { .. } | Value::Array(_) | Value::Error(_) | Value::Proxy(_)
-        )
+        !is_primitive(value)
     }
 
     /// Reduce an operand of `+` to a primitive, the way `ToPrimitive` with no
@@ -345,24 +342,7 @@ impl Interpreter {
     /// has no way to call guest code. Doing it here, before the operator sees
     /// the values, keeps that restriction.
     pub(crate) fn coerce_for_concat(&mut self, value: &Value) -> Result<Value, VmErr> {
-        if !Self::needs_concat_coercion(value) {
-            return Ok(value.clone());
-        }
-        for method in ["valueOf", "toString"] {
-            let callable = self.member(value, method)?;
-            if !matches!(
-                callable,
-                Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-            ) {
-                continue;
-            }
-            let produced = self.call_this(&callable, value.clone(), vec![])?;
-            if !Self::needs_concat_coercion(&produced) {
-                return Ok(produced);
-            }
-        }
-        // Neither yielded a primitive: fall back to the built-in rendering.
-        Ok(Value::String(self.vs(value)?))
+        self.coerce_object_to_primitive(value, "default")
     }
 
     /// Render a template literal from its cooked chunks and evaluated
@@ -984,6 +964,11 @@ impl Interpreter {
                 "stack" => Ok(Value::String(e.stack.clone())),
                 "code" => Ok(e.code.clone().map_or(Value::Undefined, Value::String)),
                 "toString" => Ok(crate::builtins::error_to_string()),
+                "constructor" => Ok(self
+                    .persistent_global
+                    .borrow()
+                    .get(&e.name)
+                    .unwrap_or(Value::Undefined)),
                 _ => Ok(Value::Undefined),
             },
             // Booleans, null, undefined, proxies (handled by the caller), and

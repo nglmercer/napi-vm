@@ -25,6 +25,9 @@ pub use crate::format::{
     try_to_string, try_to_string_pretty, try_to_string_pretty_colored, try_to_string_with_limit,
 };
 pub use language_service::LanguageService;
-pub use vm::{AsyncSession, AsyncSessionOptions, VM, create_vm, debug_parse, run_code, run_source};
+pub use vm::{
+    AsyncSession, AsyncSessionOptions, RuntimeCapabilities, VM, create_vm, debug_parse, run_code,
+    run_source,
+};
 
 mod export_slots;

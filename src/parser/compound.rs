@@ -152,7 +152,7 @@ impl Parser {
                             _ => return None,
                         }
                     }
-                    _ => return None,
+                    _ => self.ident_or_keyword()?,
                 };
                 MemberName::Static(name)
             };

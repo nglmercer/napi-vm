@@ -15,6 +15,10 @@ pub mod interpreter;
 pub mod jit;
 pub mod lang;
 pub mod lexer;
+pub mod module_loader;
+pub use module_loader::{
+    CompositeLoader, DataUrlLoader, ModuleLoader, ModuleSource, VirtualLoader,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod lsp;
 pub mod parser;
@@ -31,7 +35,8 @@ pub mod wasm;
 
 #[cfg(feature = "napi")]
 pub use bindings::{
-    AsyncSession, AsyncSessionOptions, LanguageService, VM, create_vm, debug_parse, run_code,
+    AsyncSession, AsyncSessionOptions, LanguageService, RuntimeCapabilities, VM, create_vm,
+    debug_parse, run_code,
 };
 pub use builtins::setup_builtins;
 pub use convert::{value_from_json, value_to_json};

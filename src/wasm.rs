@@ -335,6 +335,12 @@ const CONSOLE_SETUP: &str = r#"
 
 /// Run a snippet on the interpreter, ignoring its result. Used for console setup.
 fn run_setup(interp: &mut Interpreter) {
+    // The browser adapter explicitly owns this output capability; core builtin
+    // setup no longer creates a console namespace.
+    interp
+        .global
+        .borrow_mut()
+        .set("console", Value::object(vec![]));
     interp
         .eval_source(CONSOLE_SETUP)
         .expect("console setup must compile and execute");

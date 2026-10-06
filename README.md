@@ -39,6 +39,8 @@ console.log(vm.run("answer;")); // 42
 - [Scheduler benchmarks](docs/scheduler-benchmarks.md) — reproducible baseline comparison and verification
 - [Development](docs/development.md) — quality gate, scripts, benchmarks, and project structure
 - [Roadmap](docs/roadmap.md) — implemented features and known boundaries
+- [Optional runtime foundations](docs/optional-runtime.md) — opt-in capabilities, CLI, permissions, and measured compatibility
+- [Optional runtime plan](docs/runtime-plan.md) — engine/runtime separation, permissions, milestones, and compatibility gates
 - [Native addon loader plan](docs/native-addon-loader-plan.md) — roadmap for Node-API and `.node` compatibility in Rust desktop hosts
 
 ## Rust embedding and CommonJS

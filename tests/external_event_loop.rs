@@ -56,7 +56,7 @@ fn tokio_current_thread_loop_delivers_host_callbacks_and_keeps_ticking() {
         let mut vm = Interpreter::with_builtins();
         let callback = vm
             .eval_source(
-                "globalThis.delivered = []; value => { delivered.push(value); queueMicrotask(() => delivered.push('microtask')); }",
+                "globalThis.delivered = []; value => { delivered.push(value); Promise.resolve().then(() => delivered.push('microtask')); }",
             )
             .unwrap();
         let (sender, receiver) = mpsc::channel();
@@ -135,7 +135,7 @@ fn tokio_loop_delivers_real_rdev_node_events_on_both_backends() {
                 )
             };
             let native_runtime = vm.enable_native_addons(options).unwrap();
-            vm.eval_source("globalThis.rdev = require('./node-rdev.linux-x64-gnu.node'); globalThis.received = []; rdev.startListener(event => { received.push(event); queueMicrotask(() => { globalThis.microtasks = (globalThis.microtasks || 0) + 1; }); });").unwrap();
+            vm.eval_source("globalThis.rdev = require('./node-rdev.linux-x64-gnu.node'); globalThis.received = []; rdev.startListener(event => { received.push(event); Promise.resolve().then(() => { globalThis.microtasks = (globalThis.microtasks || 0) + 1; }); });").unwrap();
 
             // Input originates outside the VM, as it would in a desktop app.
             // Keep synchronous native calls off the Tokio owner thread.

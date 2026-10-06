@@ -1,5 +1,6 @@
 mod array;
 mod bigint;
+#[cfg(feature = "runtime-node")]
 mod buffer;
 mod collections;
 mod date;
@@ -16,6 +17,7 @@ pub(crate) mod regexp;
 mod string;
 mod symbol;
 mod typedarray;
+#[cfg(feature = "runtime-web")]
 mod web;
 
 pub(crate) use function::function_method;
@@ -56,7 +58,7 @@ use std::rc::Rc;
 pub fn setup_builtins(env: &Env) {
     let mut e = env.borrow_mut();
 
-    let simple: &[&str] = &[
+    for name in [
         "Boolean",
         "Map",
         "Set",
@@ -65,35 +67,9 @@ pub fn setup_builtins(env: &Env) {
         "ArrayBuffer",
         "DataView",
         "SharedArrayBuffer",
-        "Buffer",
         "Atomics",
         "RegExp",
         "Function",
-        "globalThis",
-        "self",
-        "window",
-        "URLSearchParams",
-        "Headers",
-        "Request",
-        "Event",
-        "EventTarget",
-        "CustomEvent",
-        "AbortController",
-        "AbortSignal",
-        "TextEncoder",
-        "TextDecoder",
-        "ReadableStream",
-        "WritableStream",
-        "TransformStream",
-        "Blob",
-        "File",
-        "FormData",
-        "queueMicrotask",
-        "setTimeout",
-        "setInterval",
-        "clearTimeout",
-        "clearInterval",
-        "structuredClone",
         "Proxy",
         "undefined",
         "isNaN",
@@ -107,299 +83,20 @@ pub fn setup_builtins(env: &Env) {
         "escape",
         "unescape",
         "eval",
-        "require",
-        "exports",
-        "__dirname",
-        "__filename",
-        "Worker",
-        "SharedWorker",
-        "MessageChannel",
-        "MessagePort",
-        "BroadcastChannel",
-        "EventSource",
-        "ByteLengthQueuingStrategy",
-        "CountQueuingStrategy",
-        "CompressionStream",
-        "DecompressionStream",
-        "DOMException",
-        "Lock",
-        "LockManager",
-        "Navigation",
-        "Navigator",
-        "Notification",
-        "PermissionStatus",
-        "Permissions",
-        "PushManager",
-        "PushSubscription",
-        "PushSubscriptionOptions",
-        "Scheduler",
-        "StorageManager",
-        "Worklet",
-        "CryptoKey",
-        "GPU",
-        "GPUAdapter",
-        "GPUBindGroup",
-        "GPUBuffer",
-        "GPUCanvasContext",
-        "GPUCommandBuffer",
-        "GPUCommandEncoder",
-        "GPUComputePassEncoder",
-        "GPUComputePipeline",
-        "GPUDevice",
-        "GPUExternalTexture",
-        "GPUPipelineLayout",
-        "GPUQuerySet",
-        "GPUQueue",
-        "GPURenderBundle",
-        "GPURenderBundleEncoder",
-        "GPURenderPassEncoder",
-        "GPURenderPipeline",
-        "GPUSampler",
-        "GPUShaderModule",
-        "GPUTexture",
-        "GPUTextureView",
-        "WGSLLanguageFeatures",
-        "importScripts",
-        "close",
-        "postMessage",
-        "parentPort",
-        "threadId",
-        "workerData",
-        "isMainThread",
-        "WritableStreamDefaultWriter",
-        "WritableStreamDefaultController",
-        "ReadableStreamDefaultReader",
-        "ReadableStreamBYOBReader",
-        "ReadableStreamDefaultController",
-        "ReadableByteStreamController",
-        "TransformStreamDefaultController",
-        "AudioData",
-        "EncodedAudioChunk",
-        "EncodedVideoChunk",
-        "ImageBitmap",
-        "OffscreenCanvas",
-        "VideoFrame",
-        "WebSocketStream",
-        "Serial",
-        "USB",
-        "HID",
-        "Bluetooth",
-        "Clipboard",
-        "Credential",
-        "CredentialsContainer",
-        "Geolocation",
-        "GeolocationPosition",
-        "GeolocationCoordinates",
-        "GeolocationPositionError",
-        "ServiceWorker",
-        "ServiceWorkerContainer",
-        "ServiceWorkerRegistration",
-        "ServiceWorkerGlobalScope",
-        "DedicatedWorkerGlobalScope",
-        "SharedWorkerGlobalScope",
-        "WorkerGlobalScope",
-        "UnloadEvent",
-    ];
-    for name in simple {
+        "Object",
+        "Array",
+        "String",
+        "Number",
+        "Promise",
+        "Date",
+        "BigInt",
+        "Reflect",
+        "Intl",
+        "JSON",
+    ] {
         e.set(name, Value::object(vec![]));
     }
-
-    // `globalThis`, `self` and `window` are not plain empty objects: they all
-    // denote the global scope itself, so member access on them reads and writes
-    // real globals (see `Interpreter::prop` / `assign_member`).
     e.set("globalThis", Value::GlobalObject);
-    e.set("self", Value::GlobalObject);
-    e.set("window", Value::GlobalObject);
-
-    let with_members: &[(&str, &[&str])] = &[
-        ("console", &["log", "error", "warn", "info", "debug", "dir"]),
-        ("Object", &["keys", "values", "entries", "assign"]),
-        ("Array", &["isArray", "from", "of"]),
-        ("String", &["fromCharCode"]),
-        ("Number", &["isNaN", "isFinite", "parseInt", "parseFloat"]),
-        ("Promise", &["resolve", "reject", "all", "race"]),
-        ("ArrayBuffer", &["isView"]),
-        ("Date", &["now", "parse", "UTC"]),
-        ("URL", &["createObjectURL", "revokeObjectURL"]),
-        ("Response", &["json", "text", "redirect"]),
-        ("WebSocket", &["CONNECTING", "OPEN", "CLOSING", "CLOSED"]),
-        ("crypto", &["getRandomValues", "randomUUID", "subtle"]),
-        ("navigator", &["userAgent", "language", "platform"]),
-        ("performance", &["now"]),
-        ("BigInt", &["asIntN", "asUintN"]),
-        (
-            "Reflect",
-            &[
-                "apply",
-                "construct",
-                "defineProperty",
-                "deleteProperty",
-                "get",
-                "has",
-                "set",
-            ],
-        ),
-        ("Intl", &["DateTimeFormat", "NumberFormat"]),
-        ("module", &["exports"]),
-        (
-            "process",
-            &["env", "argv", "cwd", "pid", "platform", "version"],
-        ),
-        ("Buffer", &["alloc", "from", "concat", "isBuffer"]),
-        (
-            "location",
-            &[
-                "href", "protocol", "host", "pathname", "search", "hash", "origin",
-            ],
-        ),
-        (
-            "history",
-            &[
-                "length",
-                "go",
-                "back",
-                "forward",
-                "pushState",
-                "replaceState",
-            ],
-        ),
-        ("screen", &["width", "height"]),
-        (
-            "localStorage",
-            &["getItem", "setItem", "removeItem", "clear"],
-        ),
-        (
-            "sessionStorage",
-            &["getItem", "setItem", "removeItem", "clear"],
-        ),
-        ("indexedDB", &["open", "deleteDatabase"]),
-        ("caches", &["open", "has", "delete", "keys", "match"]),
-        ("Cache", &["match", "add", "put", "delete", "keys"]),
-        ("CacheStorage", &["open", "has", "delete", "keys"]),
-        (
-            "SubtleCrypto",
-            &[
-                "encrypt",
-                "decrypt",
-                "sign",
-                "verify",
-                "digest",
-                "generateKey",
-                "deriveKey",
-                "deriveBits",
-                "importKey",
-                "exportKey",
-                "wrapKey",
-                "unwrapKey",
-            ],
-        ),
-        (
-            "MessageEvent",
-            &["data", "origin", "lastEventId", "source", "ports"],
-        ),
-        (
-            "ErrorEvent",
-            &["message", "filename", "lineno", "colno", "error"],
-        ),
-        ("PromiseRejectionEvent", &["promise", "reason"]),
-        ("CloseEvent", &["code", "reason", "wasClean"]),
-        ("HashChangeEvent", &["oldURL", "newURL"]),
-        ("PopStateEvent", &["state"]),
-        (
-            "StorageEvent",
-            &["key", "oldValue", "newValue", "url", "storageArea"],
-        ),
-        ("SubmitEvent", &["submitter"]),
-        ("FormDataEvent", &["formData"]),
-        ("ProgressEvent", &["lengthComputable", "loaded", "total"]),
-        ("PageTransitionEvent", &["persisted"]),
-        ("BeforeUnloadEvent", &["returnValue"]),
-        ("UIEvent", &["detail", "view", "which"]),
-        (
-            "MouseEvent",
-            &[
-                "screenX",
-                "screenY",
-                "clientX",
-                "clientY",
-                "ctrlKey",
-                "shiftKey",
-                "altKey",
-                "metaKey",
-                "button",
-                "buttons",
-                "relatedTarget",
-            ],
-        ),
-        (
-            "KeyboardEvent",
-            &[
-                "key",
-                "code",
-                "location",
-                "ctrlKey",
-                "shiftKey",
-                "altKey",
-                "metaKey",
-                "repeat",
-                "isComposing",
-            ],
-        ),
-        (
-            "TouchEvent",
-            &["touches", "targetTouches", "changedTouches"],
-        ),
-        (
-            "Touch",
-            &[
-                "identifier",
-                "target",
-                "screenX",
-                "screenY",
-                "clientX",
-                "clientY",
-                "pageX",
-                "pageY",
-            ],
-        ),
-        ("WheelEvent", &["deltaX", "deltaY", "deltaZ", "deltaMode"]),
-        ("DragEvent", &["dataTransfer"]),
-        ("FocusEvent", &["relatedTarget"]),
-        ("InputEvent", &["data", "inputType", "isComposing"]),
-        ("CompositionEvent", &["data"]),
-        (
-            "PointerEvent",
-            &[
-                "pointerId",
-                "width",
-                "height",
-                "pressure",
-                "pointerType",
-                "isPrimary",
-            ],
-        ),
-        (
-            "AnimationEvent",
-            &["animationName", "elapsedTime", "pseudoElement"],
-        ),
-        (
-            "TransitionEvent",
-            &["propertyName", "elapsedTime", "pseudoElement"],
-        ),
-        ("ClipboardEvent", &["clipboardData"]),
-        (
-            "SecurityPolicyViolationEvent",
-            &["documentURI", "referrer", "blockedURI", "violatedDirective"],
-        ),
-        ("JSON", &["parse", "stringify"]),
-    ];
-    for (name, members) in with_members {
-        let props: Vec<(String, Value)> = members
-            .iter()
-            .map(|m| (m.to_string(), Value::Undefined))
-            .collect();
-        e.set(name, Value::object(props));
-    }
 
     e.set(
         "Math",
@@ -434,6 +131,21 @@ pub fn setup_builtins(env: &Env) {
 
     e.set("Infinity", Value::Number(f64::INFINITY));
     e.set("NaN", Value::Number(f64::NAN));
+    e.set("undefined", Value::Undefined);
+    e.set(
+        "eval",
+        nf("eval", |interp, _, args| match args.first() {
+            Some(Value::String(source)) => interp.eval_source_with_options(
+                source,
+                crate::interpreter::EvaluationOptions {
+                    drain: crate::interpreter::DrainPolicy::None,
+                    ..Default::default()
+                },
+            ),
+            Some(value) => Ok(value.clone()),
+            None => Ok(Value::Undefined),
+        }),
+    );
 }
 
 /// Overwrite the placeholder members above with real native implementations.
@@ -453,16 +165,18 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     regexp::install(e);
     bigint::install(e);
     typedarray::install(e);
-    buffer::install(e);
     proxy::install(e);
-    web::install(e);
     symbol::install(e);
     // Global functions.
     e.set("parseInt", nf("parseInt", number::parse_int));
     e.set("parseFloat", nf("parseFloat", number::parse_float));
     e.set("isNaN", nf("isNaN", global_is_nan));
     e.set("isFinite", nf("isFinite", global_is_finite));
+}
 
+#[cfg(feature = "runtime")]
+pub(crate) fn install_console(e: &mut Environment) {
+    e.set("console", Value::object(vec![]));
     // console: route output to the host's stdout/stderr.
     if let Some(c) = e.get("console") {
         c.set_prop("log".to_string(), nf("log", console_out))
@@ -637,6 +351,7 @@ fn global_is_finite(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 
 /// Format console arguments the way `console.log` does: each value stringified
 /// and joined with a single space.
+#[cfg(feature = "runtime")]
 fn console_fmt(interp: &mut Interpreter, a: &[Value]) -> Result<String, VmErr> {
     let mut output = crate::format::BoundedOutput::new(crate::value::MAX_STRING_LEN);
     for (index, value) in a.iter().enumerate() {
@@ -649,11 +364,13 @@ fn console_fmt(interp: &mut Interpreter, a: &[Value]) -> Result<String, VmErr> {
     Ok(output.finish())
 }
 
+#[cfg(feature = "runtime")]
 fn console_out(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     println!("{}", console_fmt(interp, &a)?);
     Ok(Value::Undefined)
 }
 
+#[cfg(feature = "runtime")]
 fn console_err(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     eprintln!("{}", console_fmt(interp, &a)?);
     Ok(Value::Undefined)
@@ -670,6 +387,7 @@ fn console_err(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 /// `NO_COLOR`/`FORCE_COLOR`. Like Node, an options object overrides the
 /// auto-detection: `console.dir(obj, { colors: true })` forces ANSI codes
 /// even into a pipe, `{ colors: false }` suppresses them.
+#[cfg(feature = "runtime")]
 fn console_dir(_interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     // Read the boolean options out of a trailing options object, if present.
     let colors_opt = match a.get(1) {
@@ -710,3 +428,22 @@ fn console_dir(_interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
 pub(crate) use collections::{CollectionContext, clear_collection_cache};
 #[cfg(feature = "napi")]
 pub(crate) use symbol::SymbolContext;
+
+#[cfg(feature = "runtime")]
+pub(crate) fn install_timers(e: &mut Environment) {
+    promise::install_timers(e);
+}
+
+#[cfg(feature = "runtime-web")]
+pub(crate) fn install_web(e: &mut Environment) {
+    for name in ["TextEncoder", "TextDecoder", "URLSearchParams"] {
+        e.set(name, Value::object(vec![]));
+    }
+    web::install(e);
+}
+
+#[cfg(feature = "runtime-node")]
+pub(crate) fn install_buffer(e: &mut Environment) {
+    e.set("Buffer", Value::object(vec![]));
+    buffer::install(e);
+}

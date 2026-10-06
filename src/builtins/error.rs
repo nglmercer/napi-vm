@@ -23,9 +23,21 @@ pub(super) fn install(e: &mut Environment) {
         Value::Class(class) => Some(class.prototype.clone()),
         _ => unreachable!("Error constructor is a class"),
     };
+    if let Value::Class(class) = &error_class {
+        class
+            .prototype
+            .set_prop("constructor".into(), error_class.clone())
+            .expect("Error.prototype.constructor");
+    }
     e.set("Error", error_class);
     for name in &ERROR_TYPES[1..] {
-        e.set(name, make_error_class(name, base_prototype.clone()));
+        let class = make_error_class(name, base_prototype.clone());
+        if let Value::Class(data) = &class {
+            data.prototype
+                .set_prop("constructor".into(), class.clone())
+                .expect("Error.prototype.constructor");
+        }
+        e.set(name, class);
     }
 }
 

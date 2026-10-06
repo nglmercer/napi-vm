@@ -1,9 +1,34 @@
 //! Runtime construction and observability.
 //!
-//! [`RuntimeBuilder`] configures an interpreter in one place — budgets,
+//! [`EngineBuilder`] configures an interpreter in one place — budgets,
 //! the JIT backend and policy, module specs, loaders — instead of a
 //! sequence of setter calls at every embedding site. [`RuntimeStats`]
 //! snapshots the thread-global counters (heap, shapes) for monitoring.
+
+#[cfg(feature = "runtime")]
+mod builder;
+#[cfg(feature = "runtime")]
+mod optional;
+#[cfg(feature = "runtime")]
+pub use builder::RuntimeBuilder;
+#[cfg(feature = "runtime")]
+pub use optional::{ExternalEventQueue, ExternalEventSender, Runtime, RuntimeLimits};
+#[cfg(any(feature = "runtime-fs", feature = "runtime-net"))]
+pub mod loaders;
+#[cfg(all(feature = "runtime-net", not(target_arch = "wasm32")))]
+mod network;
+#[cfg(feature = "runtime-node")]
+pub mod node;
+#[cfg(feature = "runtime-npm")]
+pub mod npm;
+#[cfg(feature = "runtime")]
+pub mod permissions;
+#[cfg(all(feature = "runtime-net", not(target_arch = "wasm32")))]
+mod sockets;
+#[cfg(feature = "runtime-typescript")]
+pub mod typescript;
+#[cfg(feature = "runtime-web")]
+mod web;
 
 use std::path::Path;
 use std::rc::Rc;
@@ -34,9 +59,9 @@ pub struct RuntimeStats {
 /// bridge, module loaders, and preloaded module specs.
 ///
 /// ```rust
-/// use napi_vm::runtime::RuntimeBuilder;
+/// use napi_vm::runtime::EngineBuilder;
 ///
-/// let mut interp = RuntimeBuilder::new()
+/// let mut interp = EngineBuilder::new()
 ///     .loop_budget(10_000)
 ///     .load_spec("constants", "export const ANSWER = 42;")
 ///     .build()
@@ -45,7 +70,7 @@ pub struct RuntimeStats {
 /// assert!(matches!(answer, Ok(napi_vm::Value::Number(n)) if n == 42.0));
 /// ```
 #[derive(Default)]
-pub struct RuntimeBuilder {
+pub struct EngineBuilder {
     loop_budget: Option<u64>,
     fuel_budget: Option<u64>,
     jit_backend: Option<crate::jit::BackendRef>,
@@ -55,7 +80,7 @@ pub struct RuntimeBuilder {
     specs: Vec<(String, String)>,
 }
 
-impl RuntimeBuilder {
+impl EngineBuilder {
     /// Start from interpreter defaults with no specs loaded.
     pub fn new() -> Self {
         Self::default()
@@ -162,7 +187,7 @@ mod tests {
 
     #[test]
     fn spec_is_importable_after_build() {
-        let mut interp = RuntimeBuilder::new()
+        let mut interp = EngineBuilder::new()
             .load_spec("constants", "export const ANSWER = 42;")
             .build()
             .unwrap();
@@ -177,7 +202,7 @@ mod tests {
 
     #[test]
     fn loop_budget_applies() {
-        let mut interp = RuntimeBuilder::new().loop_budget(5).build().unwrap();
+        let mut interp = EngineBuilder::new().loop_budget(5).build().unwrap();
         let result = interp.eval_source("let s = 0; for (let i = 0; i < 100; i++) { s += i; } s;");
         assert!(
             matches!(&result, Err(VmErr::Msg(m)) if m.contains("loop")),
@@ -188,7 +213,7 @@ mod tests {
     #[test]
     fn missing_spec_file_errors() {
         let result =
-            RuntimeBuilder::new().load_spec_file(Path::new("/nonexistent-dir-7f3a/spec.js"));
+            EngineBuilder::new().load_spec_file(Path::new("/nonexistent-dir-7f3a/spec.js"));
         assert!(result.is_err());
     }
 
@@ -198,7 +223,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("greeting.js");
         std::fs::write(&path, "export const WORD = 'hi';").unwrap();
-        let mut interp = RuntimeBuilder::new()
+        let mut interp = EngineBuilder::new()
             .load_spec_file(&path)
             .unwrap()
             .build()
@@ -219,7 +244,7 @@ mod tests {
         use crate::interpreter::Interpreter;
         let program =
             Interpreter::compile("let s = 0; for (let i = 0; i < 5; i++) { s += i; } s;").unwrap();
-        let mut interp = RuntimeBuilder::new().build().unwrap();
+        let mut interp = EngineBuilder::new().build().unwrap();
         interp.set_tier_tracking(crate::jit::TierTracking::CountersOnly);
         interp.execute(&program).unwrap();
         let stats = program
@@ -232,7 +257,7 @@ mod tests {
 
     #[test]
     fn runtime_stats_snapshot() {
-        let interp = RuntimeBuilder::new().build().unwrap();
+        let interp = EngineBuilder::new().build().unwrap();
         let stats = interp.runtime_stats();
         // A fresh runtime tracks hundreds of builtin containers and has
         // already minted shapes for them; exact counts don't matter.

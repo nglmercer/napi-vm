@@ -469,6 +469,11 @@ fn atomics_wait_async(
         ));
     }
 
+    #[cfg(feature = "runtime")]
+    if timeout.is_finite() {
+        interp.jobs.borrow().check_timer_capacity()?;
+    }
+
     let promise = Value::pending_promise();
     let key = (shared.wait_identity(), offset);
     let waiter_id = interp
@@ -1630,6 +1635,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "runtime")]
     #[test]
     fn atomics_wait_async_and_notify_match_node_and_bun() {
         let fixture = r#"async function runWaiters() {
@@ -1658,7 +1664,7 @@ mod tests {
   });
 }
 runWaiters()"#;
-        let mut interpreter = Interpreter::with_builtins();
+        let mut interpreter = Interpreter::with_runtime_builtins();
         let result = interpreter.eval_source(fixture).unwrap();
         let Some(promise) = result.as_promise() else {
             panic!("waitAsync fixture did not return a Promise: {result:?}");
@@ -1706,6 +1712,7 @@ runWaiters()"#;
         }
     }
 
+    #[cfg(feature = "runtime-web")]
     #[test]
     fn atomics_wait_async_tracks_structured_cloned_shared_data() {
         let fixture = r#"async function runClonedWaiter() {
@@ -1719,7 +1726,7 @@ runWaiters()"#;
   return JSON.stringify({ notified, value });
 }
 runClonedWaiter()"#;
-        let mut interpreter = Interpreter::with_builtins();
+        let mut interpreter = Interpreter::with_runtime_builtins();
         let result = interpreter.eval_source(fixture).unwrap();
         let Some(promise) = result.as_promise() else {
             panic!("cloned-buffer waitAsync fixture did not return a Promise: {result:?}");

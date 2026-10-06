@@ -10,6 +10,15 @@ crate-type = ["cdylib", "lib"]
 
 [features]
 default = ["napi"]
+runtime = []
+runtime-cli = ["runtime"]
+runtime-web = ["runtime", "dep:getrandom"]
+runtime-fs = ["runtime"]
+runtime-net = ["runtime", "dep:reqwest", "dep:tungstenite", "dep:tokio"]
+runtime-npm = ["runtime", "dep:semver", "dep:tar", "dep:flate2"]
+runtime-node = ["runtime", "runtime-npm"]
+runtime-typescript = ["runtime", "dep:oxc_allocator", "dep:oxc_parser", "dep:oxc_span", "dep:oxc_codegen", "dep:oxc_transformer", "dep:oxc_semantic"]
+runtime-native-addons = ["runtime-node", "node-api-host"]
 # The Node.js N-API layer. Turn off (`--no-default-features`) to build the
 # pure-Rust core alone — for the language server, native GUI frontends, or the
 # `wasm32` target.
@@ -17,7 +26,7 @@ napi = ["dep:napi", "dep:napi-derive"]
 # Experimental in-process loader for addons that use only the Node-API C ABI.
 # The in-process backend supports Linux, macOS, and Windows; macOS and Windows
 # still need native CI verification. The sidecar covers other addon ABIs.
-node-api-host = ["dep:libloading"]
+node-api-host = ["dep:libloading", "runtime-node"]
 # The browser layer: a `#[wasm_bindgen]` `WasmVm` that runs the VM in-page and
 # exposes the shared language services (completion/diagnostics/symbols). Build
 # with `--no-default-features --features wasm --target wasm32-unknown-unknown`.
@@ -40,6 +49,16 @@ regex-syntax = "0.8"
 # recorded by the plugin host. Unconditional (including wasm32): the plugin
 # host compiles for the browser target and needs it there too.
 url = "2"
+base64 = "0.22"
+oxc_allocator = { version = "0.95", optional = true }
+oxc_parser = { version = "0.95", optional = true }
+oxc_span = { version = "0.95", optional = true }
+oxc_codegen = { version = "0.95", optional = true }
+oxc_transformer = { version = "0.95", optional = true }
+oxc_semantic = { version = "0.95", optional = true }
+semver = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
+flate2 = { version = "1", optional = true }
 # Browser ↔ Rust bindings for the `wasm` feature. `js-sys` (below, target-scoped)
 # provides the typed wrappers over JS built-ins used by the marshalling layer.
 wasm-bindgen = { version = "0.2", optional = true }
@@ -52,6 +71,12 @@ js-sys = "0.3"
 # O_NOFOLLOW is used only by the Unix filesystem capability facade.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"], optional = true }
+tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"], optional = true }
+getrandom = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["rt", "time", "net", "macros"], optional = true }
 
 # `corosensei` provides the stackful coroutines that back generators and async
 # function bodies. It needs hand-written stack-switching assembly and
@@ -88,6 +113,16 @@ corosensei = "0.3.4"
 [[bin]]
 name = "napi-vm-lsp"
 path = "src/bin/napi-vm-lsp.rs"
+required-features = []
+
+[[bin]]
+name = "napi-vm"
+path = "src/bin/napi-vm.rs"
+required-features = ["runtime-cli"]
+
+[[bin]]
+name = "napi-vm-test262"
+path = "src/bin/napi-vm-test262.rs"
 required-features = []
 
 [[bench]]

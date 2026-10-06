@@ -671,7 +671,7 @@ mod tests {
     allocUnsafeLength: Buffer.allocUnsafe(3).length,
   });
 })()"#;
-        let mut interpreter = Interpreter::with_builtins();
+        let mut interpreter = Interpreter::with_runtime_builtins();
         let result = interpreter.eval_source(fixture).unwrap();
         let Value::String(ref result) = result else {
             panic!("Buffer fixture returned {result:?}");
