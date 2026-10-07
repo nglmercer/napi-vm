@@ -1781,7 +1781,8 @@ impl Interpreter {
                 if n == "undefined" {
                     return Ok(Value::Undefined);
                 }
-                match self.global.borrow().lookup(n) {
+                let scope = self.global.clone();
+                match self.lookup_binding_in(&scope, n)? {
                     Lookup::Value(v) => Ok(v),
                     // Declared in this block but the declaration has not run:
                     // the temporal dead zone. JavaScript distinguishes this
@@ -2081,11 +2082,17 @@ impl Interpreter {
             Expr::Member {
                 object,
                 property,
-                computed: _,
+                computed,
             } => {
                 let o = self.eval_expr(object)?;
                 if let Expr::String(key) = property.as_ref() {
                     checked_static_key(key)?;
+                    if !computed
+                        && key.to_key().starts_with('#')
+                        && !self.has_property(&o, &Value::String(key.clone()))?
+                    {
+                        return vm_err("TypeError: receiver does not contain the private member");
+                    }
                     return self.get_prop_value_str(&o, &key.to_key());
                 }
                 let p = self.eval_expr(property)?;

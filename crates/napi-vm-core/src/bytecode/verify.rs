@@ -489,6 +489,7 @@ impl Checker<'_> {
                 obj,
                 key,
                 cache,
+                ..
             } => {
                 if *cache as usize >= self.function.caches.len() {
                     return Err(VerifyError::BadCache {

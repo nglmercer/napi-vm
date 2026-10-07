@@ -346,3 +346,16 @@ fn class_strictness_does_not_escape_and_accessors_are_paired() {
     check_both("class C{get x(){return this._x;}set x(v){this._x=v;}}var c=new C();c.x=7;c.x===7;");
     check_both("class C{set x(v){this._x=v;}get x(){return this._x;}}var c=new C();c.x=9;c.x===9;");
 }
+
+#[test]
+fn global_parser_aliases_inherited_names_and_missing_private_receivers() {
+    check_both("Number.parseFloat===parseFloat && Number.parseInt===parseInt;");
+    check_both(
+        "'use strict';toString=Object.prototype.toString;toString===Object.prototype.toString;",
+    );
+    check_both("'use strict';Object.prototype.inheritedName=7;inheritedName===7;");
+    check_both(
+        "var rejected=false;try{class C{get #x(){throw 1;}[this.#x]=1;}}catch(e){rejected=e instanceof TypeError;}rejected;",
+    );
+    check_both("var object={'#x':7};object['#x']===7;");
+}

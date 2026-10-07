@@ -152,6 +152,13 @@ pub fn setup_builtins(env: &Env) {
             },
         );
     }
+    if let Some(number) = e.get("Number") {
+        for name in ["parseInt", "parseFloat"] {
+            number
+                .set_prop(name.into(), e.get(name).expect("global numeric parser"))
+                .expect("Number numeric parser alias");
+        }
+    }
     e.snapshot_intrinsics();
 }
 

@@ -1688,6 +1688,7 @@ impl<'a> Compiler<'a> {
                     let key = self.load_const(position)?;
                     let found = self.alloc_reg()?;
                     self.emit(Instr::GetProp {
+                        private: false,
                         cache: 0,
                         dst: found,
                         obj: arr,
@@ -1742,6 +1743,7 @@ impl<'a> Compiler<'a> {
                     taken.push(key_reg);
                     let found = self.alloc_reg()?;
                     self.emit(Instr::GetProp {
+                        private: false,
                         cache: 0,
                         dst: found,
                         obj: val,
@@ -2477,6 +2479,7 @@ impl<'a> Compiler<'a> {
         let length_key = self.load_const(length_key)?;
         let len = self.alloc_reg()?;
         self.emit(Instr::GetProp {
+            private: false,
             cache: 0,
             dst: len,
             obj: keys,
@@ -2509,6 +2512,7 @@ impl<'a> Compiler<'a> {
         });
         let key = self.alloc_reg()?;
         self.emit(Instr::GetProp {
+            private: false,
             cache: 0,
             dst: key,
             obj: keys,
@@ -3070,7 +3074,9 @@ impl<'a> Compiler<'a> {
             } => self.compile_unary(*op, operand, *prefix),
             Expr::Call { callee, args } => self.compile_call(callee, args),
             Expr::Member {
-                object, property, ..
+                object,
+                property,
+                computed,
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     let key = self.compile_expr(property)?;
@@ -3082,6 +3088,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: !computed && matches!(property.as_ref(), Expr::String(key) if key.to_key().starts_with('#')),
                     cache: 0,
                     dst,
                     obj,
@@ -3688,6 +3695,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: false,
                     cache: 0,
                     dst: callee,
                     obj,
@@ -3881,6 +3889,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: false,
                     cache: 0,
                     dst: callee,
                     obj,
@@ -3987,6 +3996,7 @@ impl<'a> Compiler<'a> {
                     let key = self.compile_expr(property)?;
                     let callee = self.alloc_reg()?;
                     self.emit(Instr::GetProp {
+                        private: false,
                         cache: 0,
                         dst: callee,
                         obj,
@@ -4034,6 +4044,7 @@ impl<'a> Compiler<'a> {
         let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
         let key = self.compile_expr(property)?;
         self.emit(Instr::GetProp {
+            private: false,
             cache: 0,
             dst: join,
             obj,
@@ -4170,6 +4181,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let current = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: false,
                     cache: 0,
                     dst: current,
                     obj,

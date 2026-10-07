@@ -9,6 +9,31 @@ use crate::value::{BoxedPrimitive, FunctionData, Value};
 use std::rc::Rc;
 
 impl Interpreter {
+    pub(crate) fn inherited_global_has(&self, name: &str) -> bool {
+        self.prototype_of(&self.realm_global_object())
+            .is_some_and(|prototype| prototype.has_prop(name))
+    }
+
+    pub(crate) fn lookup_binding_in(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<super::Lookup, VmErr> {
+        let lookup = scope.borrow().lookup(name);
+        if !matches!(lookup, super::Lookup::Missing) {
+            return Ok(lookup);
+        }
+        let global = self.realm_global_object();
+        if let Some(prototype) = self.prototype_of(&global)
+            && prototype.has_prop(name)
+        {
+            return self
+                .get_prop_value_str_with_receiver(&prototype, name, &global)
+                .map(super::Lookup::Value);
+        }
+        Ok(super::Lookup::Missing)
+    }
+
     /// Resolve an object's represented [[Prototype]], including the realm's
     /// default Object.prototype and Function.prototype links that are stored
     /// as defaults rather than copied into every property cell.

@@ -240,6 +240,8 @@ pub enum Instr {
     // -- properties, calls, allocation -----------------------------------
     /// `dst = obj[key]` through the full lookup chain (proxies included).
     GetProp {
+        /// Private syntax requires an existing receiver member.
+        private: bool,
         cache: u32,
         dst: Reg,
         obj: Reg,

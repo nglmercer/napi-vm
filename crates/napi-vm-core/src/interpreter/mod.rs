@@ -1427,10 +1427,11 @@ impl Interpreter {
             // No such binding: an assignment to an undeclared name creates an
             // implicit `var`-like global, as sloppy-mode JavaScript does.
             AssignOutcome::Missing => {
-                if self.cur_mod.is_some() || env.strict() {
+                let strict = self.cur_mod.is_some() || env.strict();
+                drop(env);
+                if strict && !self.inherited_global_has(name) {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
                 }
-                drop(env);
                 self.persistent_global.borrow_mut().try_set(name, value)?;
                 Ok(())
             }

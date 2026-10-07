@@ -471,10 +471,8 @@ fn run_loop(
                         // Lookup cannot run guest code or change the active
                         // scope. Borrow its existing root instead of bumping
                         // the environment's Rc count for every global read.
-                        let lookup = {
-                            let scope = frame.scopes.last().unwrap_or(&interp.global);
-                            scope.borrow().lookup(name)
-                        };
+                        let scope = current_scope(interp, frame);
+                        let lookup = interp.lookup_binding_in(&scope, name)?;
                         match lookup {
                             Lookup::Value(v) => {
                                 frame.registers[dst as usize].assign_for_execution(v)
@@ -706,11 +704,22 @@ fn run_loop(
                     ));
                 }
                 Instr::GetProp {
+                    private,
                     dst,
                     obj,
                     key,
                     cache,
                 } => {
+                    if private
+                        && !interp.has_property(
+                            &frame.registers[obj as usize],
+                            &frame.registers[key as usize],
+                        )?
+                    {
+                        return Err(VmErr::Msg(
+                            "TypeError: receiver does not contain the private member".into(),
+                        ));
+                    }
                     let value = get_prop_cached(
                         interp,
                         frame.function,
