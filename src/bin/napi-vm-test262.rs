@@ -136,9 +136,9 @@ fn request_gc(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmE
 }
 
 fn eval_realm_script(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let source = vm.vs(args.first().unwrap_or(&Value::Undefined))?;
+    let source = vm.to_js_string(args.first().unwrap_or(&Value::Undefined))?;
     let global = vm.realm_global_object();
-    vm.eval_in_realm(&global, &source)
+    vm.eval_in_realm_utf16(&global, &source)
 }
 
 fn create_realm(vm: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {

@@ -356,8 +356,7 @@ impl Parser {
             Some(format!("({})", p.join(", "))),
         );
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
-        let mut body = defaults;
-        body.extend(b);
+        let body = Self::function_body(&p, defaults, b);
         Some(Statement::FnDecl {
             name: n,
             params: p,

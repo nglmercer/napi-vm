@@ -355,7 +355,9 @@ pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
 pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
-        Statement::FnDecl { .. } | Statement::ClassDecl { .. } => true,
+        Statement::ParameterInitialization { .. }
+        | Statement::FnDecl { .. }
+        | Statement::ClassDecl { .. } => true,
         Statement::Declarations(inner) => block_needs_lexical_scope(inner),
         _ => false,
     })
@@ -383,7 +385,9 @@ pub(crate) fn body_needs_hoisting(body: &[Statement]) -> bool {
 fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
-        Statement::FnDecl { .. } | Statement::ClassDecl { .. } => true,
+        Statement::ParameterInitialization { .. }
+        | Statement::FnDecl { .. }
+        | Statement::ClassDecl { .. } => true,
         Statement::Declarations(inner) => body_needs_lexical_hoist(inner),
         _ => false,
     })
@@ -755,15 +759,28 @@ export default { createRequire, isBuiltin, builtinModules };
     /// Compile JavaScript source supplied as UTF-16, without replacing lone
     /// surrogates inside literals. Valid UTF-8 retains the shared parse cache.
     pub fn compile_utf16(source: &crate::JsString) -> Result<PreparedProgram, VmErr> {
+        Self::compile_utf16_with_goal(source, crate::parser::ParseGoal::Auto)
+    }
+
+    /// Compile UTF-16 source with an explicit grammar goal.
+    pub fn compile_utf16_with_goal(
+        source: &crate::JsString,
+        goal: crate::parser::ParseGoal,
+    ) -> Result<PreparedProgram, VmErr> {
         if let Ok(text) = source.to_utf8() {
-            return Self::compile(&text);
+            return Self::compile_with_goal(&text, goal);
         }
         let mut lexer = crate::Lexer::from_js_string(source);
         let mut parser = crate::Parser::new_with_spans(lexer.tokenize_with_spans());
         let statements = parser
-            .parse_program()
+            .parse_program_with_goal(goal)
             .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
-        Self::compile_statements(source.as_str(), std::sync::Arc::new(statements))
+        let mut program =
+            Self::compile_statements(source.as_str(), std::sync::Arc::new(statements))?;
+        if goal == crate::parser::ParseGoal::Module {
+            program.kind = SourceKind::Module;
+        }
+        Ok(program)
     }
 
     fn compile_statements(
@@ -1520,6 +1537,161 @@ impl Interpreter {
         result
     }
 
+    pub(crate) fn prepare_parameter_body(
+        &mut self,
+        params: &[String],
+        initializers: &[Statement],
+        body: &[Statement],
+    ) -> Result<Env, VmErr> {
+        let function_scope = self.global.clone();
+        let parameter_scope = Rc::new(RefCell::new(Environment::parameter_child(
+            function_scope.clone(),
+        )));
+        for name in params {
+            let name = name.trim_start_matches("...");
+            if let Some(value) = function_scope.borrow().own_binding(name) {
+                parameter_scope
+                    .borrow_mut()
+                    .declare(name, value, BindKind::Var, true);
+            }
+        }
+        if let Some(arguments) = function_scope.borrow().own_binding("arguments") {
+            parameter_scope
+                .borrow_mut()
+                .declare("arguments", arguments, BindKind::Var, true);
+        }
+        self.global = parameter_scope;
+        let result = self.initialize_parameter_body(params, initializers, body);
+        self.global = function_scope;
+        result
+    }
+
+    fn initialize_parameter_body(
+        &mut self,
+        params: &[String],
+        initializers: &[Statement],
+        body: &[Statement],
+    ) -> Result<Env, VmErr> {
+        use crate::parser::{AssignOp, Expr};
+        let depth = self.guest_execution_depth.clone();
+        depth.set(depth.get().saturating_add(1));
+        let _execution_guard = GuestExecutionGuard(depth);
+        let parameter_scope = self.global.clone();
+        let arguments: Vec<_> = params
+            .iter()
+            .map(|name| {
+                let name = name.trim_start_matches("...");
+                parameter_scope
+                    .borrow()
+                    .own_binding(name)
+                    .unwrap_or(Value::Undefined)
+            })
+            .collect();
+        // Every parameter starts in its TDZ, including destructured names.
+        for name in params {
+            self.declare_binding(
+                name.trim_start_matches("..."),
+                Value::Undefined,
+                BindKind::Var,
+                false,
+            )?;
+        }
+        for initializer in initializers {
+            if let Statement::VarDecl {
+                destructuring: Some(pattern),
+                ..
+            } = initializer
+            {
+                for name in pattern_names(pattern) {
+                    self.declare_binding(&name, Value::Undefined, BindKind::Var, false)?;
+                }
+            }
+        }
+        for (parameter, mut value) in params.iter().zip(arguments) {
+            let name = parameter.trim_start_matches("...");
+            for initializer in initializers {
+                if let Statement::If { then, .. } = initializer
+                    && let Some(Statement::Expr(Expr::Assignment {
+                        target,
+                        op: AssignOp::Assign,
+                        value: default,
+                    })) = then.first()
+                    && matches!(target.as_ref(), Expr::Identifier(target) if target == name)
+                    && matches!(value, Value::Undefined)
+                {
+                    value = self.eval_expr(default)?;
+                }
+            }
+            self.declare_binding(name, value, BindKind::Var, true)?;
+            for initializer in initializers {
+                if let Statement::VarDecl {
+                    init: Some(init),
+                    destructuring: Some(pattern),
+                    ..
+                } = initializer
+                    && matches!(init.as_ref(), Expr::Identifier(slot) if slot == name)
+                {
+                    let value = parameter_scope
+                        .borrow()
+                        .get(name)
+                        .unwrap_or(Value::Undefined);
+                    self.destructure(pattern, &value)?;
+                }
+            }
+        }
+        // Body var bindings copy parameter values instead of changing cells
+        // captured by closures created by parameter defaults.
+        let body_scope = Rc::new(RefCell::new(Environment::function_child(
+            parameter_scope.clone(),
+        )));
+        let mut names = Vec::new();
+        collect_var_names(body, &mut names);
+        for name in names {
+            if let Some(value) = parameter_scope.borrow().own_binding(&name) {
+                body_scope
+                    .borrow_mut()
+                    .declare(&name, value.deref_binding(), BindKind::Var, true);
+            }
+        }
+        Ok(body_scope)
+    }
+
+    fn run_parameterized_body(
+        &mut self,
+        params: &[String],
+        initializers: &[Statement],
+        fields: &[Statement],
+        body: &[Statement],
+    ) -> Result<Value, VmErr> {
+        if !fields.is_empty() {
+            let function_scope = self.global.clone();
+            let defining = function_scope
+                .borrow()
+                .parent_env()
+                .unwrap_or_else(|| self.persistent_global.clone());
+            let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
+            field_scope.borrow_mut().set(
+                "this",
+                function_scope
+                    .borrow()
+                    .get("this")
+                    .unwrap_or(Value::Undefined),
+            );
+            field_scope.borrow_mut().replace_strict(Some(true));
+            field_scope.borrow_mut().set_new_target(Value::Undefined);
+            self.global = field_scope;
+            let result = self.run_program_body(fields);
+            self.global = function_scope;
+            result?;
+        }
+        let parameter_scope = self.global.clone();
+        let body_scope = self.prepare_parameter_body(params, initializers, body)?;
+        self.global = body_scope;
+        let result = self.run_program_body(body);
+        self.global = parameter_scope;
+        result
+    }
+
     /// Execute a statement list as a block *in the current scope*, hoisting
     /// its lexical declarations but not creating a new frame.
     ///
@@ -1536,6 +1708,14 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
+        if let Some(Statement::ParameterInitialization {
+            params,
+            initializers,
+            fields,
+        }) = stmts.first()
+        {
+            return self.run_parameterized_body(params, initializers, fields, &stmts[1..]);
+        }
         let _allocation_realm = realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
         let scope = self.global.clone();
         let strict =

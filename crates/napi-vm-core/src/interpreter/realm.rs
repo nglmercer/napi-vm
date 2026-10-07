@@ -171,6 +171,15 @@ impl Interpreter {
 
     /// Evaluate a script in a realm while keeping the shared agent scheduler.
     pub fn eval_in_realm(&mut self, global: &Value, source: &str) -> Result<Value, VmErr> {
+        self.eval_in_realm_utf16(global, &crate::JsString::from(source))
+    }
+
+    /// Evaluate realm script source without replacing unpaired surrogates.
+    pub fn eval_in_realm_utf16(
+        &mut self,
+        global: &Value,
+        source: &crate::JsString,
+    ) -> Result<Value, VmErr> {
         let target = self
             .global_scope_of(global)
             .ok_or_else(|| VmErr::Msg("TypeError: expected a realm global".into()))?;
@@ -179,8 +188,8 @@ impl Interpreter {
         let saved_persistent = std::mem::replace(&mut self.persistent_global, target.clone());
         let saved_scope = std::mem::replace(&mut self.global, target);
         let saved_module = self.cur_mod.take();
-        let result =
-            Self::compile_with_goal(source, crate::parser::ParseGoal::Script).and_then(|program| {
+        let result = Self::compile_utf16_with_goal(source, crate::parser::ParseGoal::Script)
+            .and_then(|program| {
                 self.execute_with_options(
                     &program,
                     super::EvaluationOptions {

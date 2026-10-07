@@ -300,6 +300,13 @@ pub enum Statement {
     /// environment, so the names land in the enclosing scope. It exists
     /// because one statement can only return one `Statement`.
     Declarations(Vec<Statement>),
+    /// Non-simple formal parameters run before body declaration instantiation.
+    ParameterInitialization {
+        params: Vec<String>,
+        initializers: Vec<Statement>,
+        /// Base-class fields run before constructor parameter initialization.
+        fields: Vec<Statement>,
+    },
     Labeled {
         label: String,
         body: Box<Statement>,
@@ -578,6 +585,7 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
             }
         }
         Statement::Expr(_)
+        | Statement::ParameterInitialization { .. }
         | Statement::Return(_)
         | Statement::Break
         | Statement::Continue
@@ -735,6 +743,14 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .as_deref()
                     .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
                 || statements_capture_identifier(body, name)
+        }
+        Statement::ParameterInitialization {
+            initializers,
+            fields,
+            ..
+        } => {
+            statements_capture_identifier(initializers, name)
+                || statements_capture_identifier(fields, name)
         }
         Statement::Block(stmts) | Statement::Declarations(stmts) => {
             statements_capture_identifier(stmts, name)
@@ -1023,6 +1039,11 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
         Statement::ForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)
         }
+        Statement::ParameterInitialization {
+            initializers,
+            fields,
+            ..
+        } => stmts_reference(initializers, name) || stmts_reference(fields, name),
         Statement::Block(b) | Statement::Declarations(b) => stmts_reference(b, name),
         Statement::Labeled { body, .. } => stmt_references(body, name),
         Statement::Throw(e) => expr_references(e, name),
@@ -1234,4 +1255,18 @@ fn pattern_references(p: &Pattern, name: &str) -> bool {
             pattern_references(inner, name) || expr_references(default, name)
         }
     }
+}
+
+/// ExpectedArgumentCount stops before the first default or rest parameter.
+pub(crate) fn formal_parameter_length<S: AsRef<str>>(params: &[S], body: &[Statement]) -> usize {
+    let initializers = match body.first() {
+        Some(Statement::ParameterInitialization { initializers, .. }) => initializers.as_slice(),
+        _ => &[],
+    };
+    params.iter().take_while(|parameter| {
+        let name = parameter.as_ref();
+        !name.starts_with("...") && !initializers.iter().any(|initializer| {
+            matches!(initializer, Statement::If { then, .. } if matches!(then.first(), Some(Statement::Expr(Expr::Assignment { target, .. })) if matches!(target.as_ref(), Expr::Identifier(target) if target == name)))
+        })
+    }).count()
 }

@@ -1365,6 +1365,9 @@ impl<'a> Compiler<'a> {
                 }
                 self.load_undefined()
             }
+            Statement::ParameterInitialization { .. } => {
+                Err(Decline::Func("separate parameter environment"))
+            }
             Statement::Declarations(inner) => {
                 for stmt in inner {
                     let _ = self.compile_stmt(stmt)?;
@@ -1999,10 +2002,7 @@ impl<'a> Compiler<'a> {
 
         let (ctor_params, ctor_body) =
             Self::class_ctor_body(superclass.is_some(), ctor, &instance_fields);
-        let ctor_length = ctor_params
-            .iter()
-            .take_while(|param| !param.starts_with("..."))
-            .count();
+        let ctor_length = crate::parser::formal_parameter_length(&ctor_params, &ctor_body);
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
             FuncDef {
@@ -2104,7 +2104,17 @@ impl<'a> Compiler<'a> {
                 value: Box::new(init.cloned().unwrap_or(Expr::Undefined)),
             }));
         }
-        full.extend(body.iter().cloned());
+        let body_start = if let Some(Statement::ParameterInitialization { .. }) = body.first() {
+            let mut prefix = body[0].clone();
+            if let Statement::ParameterInitialization { fields, .. } = &mut prefix {
+                fields.append(&mut full);
+            }
+            full.push(prefix);
+            1
+        } else {
+            0
+        };
+        full.extend(body.iter().skip(body_start).cloned());
         (params, SharedSlice::Owned(Rc::from(full)))
     }
 

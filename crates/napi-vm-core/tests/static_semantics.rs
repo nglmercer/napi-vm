@@ -428,3 +428,79 @@ fn class_static_blocks_own_separate_variable_environments() {
         "var x=1;class C{static{var x=2;eval('var x=3;');this.x=x;}static{this.y=x;}}x===1&&C.x===2&&C.y===1;",
     );
 }
+
+#[test]
+fn parameter_defaults_run_before_body_declarations() {
+    check_both(
+        "var old=globalThis.arguments;var count=0;const f=(p=eval(\"var arguments='param'\"))=>{let arguments='local';if(arguments==='local')count++;};f();count===1&&globalThis.arguments===old;",
+    );
+    check_both("var x='outer';function f(a=()=>x){let x='body';return a();}f()==='outer';");
+    check_both(
+        "function f(a=1,read=()=>a){var a=2;return [a,read()];}var r=f();r[0]===2&&r[1]===1;",
+    );
+    check_both("function f(a=1,b=a+1){return b;}f()===2;");
+    check_both("function f({x}={x:1},b=x+1){var x=7;return b===2&&x===7;}f();");
+    check_both(
+        "var caught=false;try{(function(a=a){return a;})();}catch(e){caught=e instanceof ReferenceError;}caught;",
+    );
+    check_both(
+        "var caught=false;try{(function(a=b,b=1){return a;})();}catch(e){caught=e instanceof ReferenceError;}caught;",
+    );
+    check_both(
+        "var outer=1;function f(a=eval('var outer=2;'),read=()=>outer){var outer=3;return read()===2&&outer===3;}f()&&outer===1;",
+    );
+    assert!(Interpreter::compile("function f({x}){let x;}").is_err());
+}
+
+#[test]
+fn generators_initialize_parameters_at_creation_and_retain_their_scope() {
+    check_both(
+        "var calls=0;function* g(a=(calls++,1),read=()=>a){var a=2;yield read();yield a;}var iterator=g();var before=calls;before===1&&iterator.next().value===1&&iterator.next().value===2&&calls===1;",
+    );
+    check_both(
+        "var caught=false;try{(function* g(a=a){yield a;})();}catch(e){caught=e instanceof ReferenceError;}caught;",
+    );
+    check_both(
+        "var calls=0;function* g({x}={x:(calls++,7)}){yield x;}var iterator=g();calls===1&&iterator.next().value===7&&calls===1;",
+    );
+    check_both(
+        "var seen=0;class C{field=seen;constructor(a=(seen=3)){this.a=a;}}var c=new C();c.a===3&&c.field===0;",
+    );
+}
+
+#[test]
+fn function_lengths_stop_before_default_and_rest_parameters() {
+    check_both(
+        "function a(x,y=1,z){}function b({x},y=1){}function c(x,...rest){}class C{field=1;constructor(x,y=1){}}a.length===1&&b.length===1&&c.length===1&&C.length===1&&((x=1)=>x).length===0;",
+    );
+}
+
+#[test]
+fn non_simple_parameter_bindings_block_sloppy_eval_redeclarations() {
+    check_both(
+        "var caught=false;try{(function(p=eval('var arguments')){let arguments;})();}catch(e){caught=e instanceof SyntaxError;}caught&&typeof globalThis.arguments==='undefined';",
+    );
+    check_both(
+        "var caught=false;try{(function(p=eval('var p')){})();}catch(e){caught=e instanceof SyntaxError;}caught;",
+    );
+    check_both(
+        "var caught=false;try{({f(p=eval('var arguments=1')){let arguments;}}).f();}catch(e){caught=e instanceof SyntaxError;}caught;",
+    );
+}
+
+#[test]
+fn formal_arguments_parameters_replace_the_implicit_arguments_binding() {
+    check_both("function f(arguments=1){return arguments;}f(7)===7&&f()===1;");
+    check_both("function f({arguments}={arguments:9}){return arguments;}f()===9;");
+}
+
+#[test]
+fn base_fields_initialize_before_parameter_defaults_in_their_defining_scope() {
+    check_both("class A{#x='hello';constructor(p=this.#x){this.value=p;}}new A().value==='hello';");
+    check_both(
+        "function field(){throw 10;}function parameter(){throw 20;}class A{x=field();constructor(p=parameter()){}}var result;try{new A();}catch(e){result=e;}result===10;",
+    );
+    check_both(
+        "var x='outer';class A{field=x;constructor(x='parameter'){this.argument=x;}}var a=new A();a.field==='outer'&&a.argument==='parameter';",
+    );
+}

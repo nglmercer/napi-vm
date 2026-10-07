@@ -223,6 +223,7 @@ pub struct Environment {
     isolated_realm: bool,
     variable_scope: bool,
     eval_scope: bool,
+    parameter_scope: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
     intrinsics: HashMap<String, Value>,
 }
@@ -359,6 +360,7 @@ impl Environment {
             isolated_realm: false,
             variable_scope: false,
             eval_scope: false,
+            parameter_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -375,6 +377,7 @@ impl Environment {
             isolated_realm: false,
             variable_scope: false,
             eval_scope: false,
+            parameter_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -394,6 +397,7 @@ impl Environment {
             isolated_realm: false,
             variable_scope: false,
             eval_scope: false,
+            parameter_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -425,6 +429,7 @@ impl Environment {
             isolated_realm: false,
             variable_scope: true,
             eval_scope: false,
+            parameter_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -449,7 +454,13 @@ impl Environment {
     pub(crate) fn has_lexical_binding(&self, name: &str) -> bool {
         self.vars
             .get(name)
-            .is_some_and(|binding| binding.kind != BindKind::Var)
+            .is_some_and(|binding| self.parameter_scope || binding.kind != BindKind::Var)
+    }
+
+    pub(crate) fn parameter_child(parent: Env) -> Self {
+        let mut scope = Self::child(parent);
+        scope.parameter_scope = true;
+        scope
     }
 
     pub(crate) fn variable_environment(scope: &Env) -> Env {

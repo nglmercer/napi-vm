@@ -1030,6 +1030,32 @@ impl FunctionData {
         properties
     }
 
+    pub(crate) fn needs_arguments_object(&self) -> bool {
+        if self.is_arrow
+            || self
+                .params
+                .iter()
+                .any(|name| name.trim_start_matches("...") == "arguments")
+        {
+            return false;
+        }
+        let non_simple = if let Some(Statement::ParameterInitialization { initializers, .. }) =
+            self.body.first()
+        {
+            if initializers.iter().any(|initializer| {
+                matches!(initializer,
+                Statement::VarDecl { destructuring: Some(pattern), .. }
+                if crate::parser::pattern_names(pattern).iter().any(|name| name == "arguments"))
+            }) {
+                return false;
+            }
+            true
+        } else {
+            false
+        };
+        self.uses_arguments || non_simple
+    }
+
     pub fn ensure_name_length_properties(&self) {
         if self.standard_properties_initialized.replace(true) {
             return;
@@ -1039,10 +1065,7 @@ impl FunctionData {
             properties.push((
                 "length".to_string(),
                 Value::Number(
-                    self.params
-                        .iter()
-                        .take_while(|parameter| !parameter.starts_with("..."))
-                        .count() as f64,
+                    crate::parser::formal_parameter_length(&self.params, &self.body) as f64,
                 ),
             ));
             self.properties.meta.borrow_mut().set_attrs(
@@ -2179,6 +2202,8 @@ impl GenYielder {
 /// closed. A coroutine keeps everything on one thread, so the question does not
 /// arise: there is no `Send` bound and no `unsafe` in this path.
 pub struct GeneratorInner {
+    /// Formal parameter initialization already ran at generator creation.
+    pub parameters_initialized: bool,
     pub body: Rc<Vec<Statement>>,
     pub closure: Option<Env>,
     pub params: Rc<Vec<Rc<str>>>,

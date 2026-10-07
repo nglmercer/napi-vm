@@ -624,6 +624,9 @@ impl Interpreter {
                 value: Box::new(value),
             }));
         }
+        if let Some(Statement::ParameterInitialization { fields, .. }) = ctor_body.first_mut() {
+            fields.append(&mut full_ctor_body);
+        }
         full_ctor_body.extend(ctor_body);
 
         // For a derived class, expose the superclass constructor to the
@@ -639,10 +642,8 @@ impl Interpreter {
             None => self.global.clone(),
         };
 
-        let constructor_length = ctor_params
-            .iter()
-            .take_while(|parameter| !parameter.starts_with("..."))
-            .count();
+        let constructor_length =
+            crate::parser::formal_parameter_length(&ctor_params, &full_ctor_body);
         let constructor = Value::Function(Rc::new(FunctionData {
             strict: true,
             native: None,
@@ -1193,6 +1194,9 @@ impl Interpreter {
             Statement::Block(s) => self.run_block(s),
             // A declarator group shares the enclosing scope: no new frame.
             Statement::Declarations(s) => self.run(s),
+            Statement::ParameterInitialization { .. } => Err(VmErr::Msg(
+                "Invalid parameter initialization position".into(),
+            )),
             Statement::Labeled { label, body } => {
                 // Make the label available to a directly-wrapped loop, which
                 // takes it on entry.

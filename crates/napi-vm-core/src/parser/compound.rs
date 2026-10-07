@@ -179,8 +179,7 @@ impl Parser {
                 self.expect(&Token::RBrace);
                 self.pop_scope(method_scope);
                 self.check_parameters(&p, &defaults, &bd, true);
-                let mut body = defaults;
-                body.extend(bd);
+                let body = Self::function_body(&p, defaults, bd);
                 if is_getter {
                     b.push(ClassMember::Getter {
                         name: mn,
@@ -530,6 +529,24 @@ impl Parser {
             }
         }
         s
+    }
+
+    pub(crate) fn function_body(
+        params: &[String],
+        initializers: Vec<Statement>,
+        mut body: Vec<Statement>,
+    ) -> Vec<Statement> {
+        if !initializers.is_empty() {
+            body.insert(
+                0,
+                Statement::ParameterInitialization {
+                    params: params.to_vec(),
+                    initializers,
+                    fields: vec![],
+                },
+            );
+        }
+        body
     }
 
     /// Build the guard statement implementing a parameter default value:

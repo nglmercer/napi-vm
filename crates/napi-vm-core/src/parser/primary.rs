@@ -150,8 +150,7 @@ impl Parser {
                                     let b = self.block_body();
                                     self.expect(&Token::RBrace);
                                     self.check_parameters(&params, &defaults, &b, true);
-                                    let mut body = defaults;
-                                    body.extend(b);
+                                    let body = Self::function_body(&params, defaults, b);
                                     // If the computed key is a simple literal,
                                     // use the named Method/Getter/Setter forms.
                                     // Otherwise, emit a Computed property whose
@@ -235,8 +234,7 @@ impl Parser {
                         let b = self.block_body();
                         self.expect(&Token::RBrace);
                         self.check_parameters(&params, &defaults, &b, true);
-                        let mut body = defaults;
-                        body.extend(b);
+                        let body = Self::function_body(&params, defaults, b);
                         if is_method {
                             p.push(ObjectProp::Getter { name: key, body });
                         } else {
@@ -516,8 +514,7 @@ impl Parser {
         let b = self.block_body();
         self.expect(&Token::RBrace);
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
-        let mut body = defaults;
-        body.extend(b);
+        let body = Self::function_body(&p, defaults, b);
         Some(Expr::FnExpr {
             name: n,
             params: p,
@@ -555,8 +552,7 @@ impl Parser {
             let b = self.block_body();
             self.expect(&Token::RBrace);
             self.check_parameters(&params, &defaults, &b, true);
-            let mut body = defaults;
-            body.extend(b);
+            let body = Self::function_body(&params, defaults, b);
             Expr::ArrowFn {
                 params,
                 body: Box::new(ExprOrBlock::Block(body)),
@@ -572,8 +568,11 @@ impl Parser {
                     is_async,
                 }
             } else {
-                let mut body = defaults;
-                body.push(Statement::Return(Some(Box::new(e))));
+                let body = Self::function_body(
+                    &params,
+                    defaults,
+                    vec![Statement::Return(Some(Box::new(e)))],
+                );
                 Expr::ArrowFn {
                     params,
                     body: Box::new(ExprOrBlock::Block(body)),

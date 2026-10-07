@@ -152,3 +152,18 @@ fn foreign_generators_and_async_resumes_allocate_in_the_defining_realm() {
         "var result=await otherGlobal.f();Object.getPrototypeOf(result)===otherGlobal.Array.prototype;",
     );
 }
+
+#[test]
+fn realm_script_sources_preserve_unpaired_utf16_surrogates() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    let global = child.realm_global_object();
+    let source = napi_vm_core::JsString::from_units(vec![39, 0xd800, 39]);
+    let result = vm.eval_in_realm_utf16(&global, &source).unwrap();
+    assert!(matches!(result, Value::String(ref value) if value.units() == [0xd800]));
+    let mut units: Vec<u16> = "import.meta; '".encode_utf16().collect();
+    units.extend([0xd800, 39]);
+    let source = napi_vm_core::JsString::from_units(units);
+    assert!(vm.eval_in_realm_utf16(&global, &source).is_err());
+    truth(&mut vm, "this===globalThis;");
+}

@@ -1356,17 +1356,55 @@ impl Interpreter {
                 if fd.is_generator {
                     let receiver = self.function_this(fd, this_val);
                     let defining = fd.closure.clone().unwrap_or_else(|| self.global.clone());
-                    let context = Rc::new(RefCell::new(Environment::child(defining)));
+                    let context = Rc::new(RefCell::new(Environment::function_child(defining)));
                     context.borrow_mut().set("this", receiver);
                     context.borrow_mut().replace_strict(Some(fd.strict));
-                    if fd.uses_arguments {
+                    if fd.needs_arguments_object() {
                         context
                             .borrow_mut()
                             .set("arguments", Value::arguments_object(&args)?);
                     }
+                    let (body, closure, parameters_initialized) =
+                        if let Some(Statement::ParameterInitialization {
+                            params,
+                            initializers,
+                            ..
+                        }) = fd.body.first()
+                        {
+                            if self.get_stack().len() >= self.max_call_depth {
+                                return vm_err("RangeError: Maximum call stack size exceeded");
+                            }
+                            context.borrow_mut().set_new_target(Value::Undefined);
+                            for (index, parameter) in fd.params.iter().enumerate() {
+                                let value = if parameter.starts_with("...") {
+                                    Value::checked_array(args.get(index..).unwrap_or(&[]).to_vec())?
+                                } else {
+                                    args.get(index).cloned().unwrap_or(Value::Undefined)
+                                };
+                                context
+                                    .borrow_mut()
+                                    .set(parameter.trim_start_matches("..."), value);
+                            }
+                            let saved = std::mem::replace(&mut self.global, context.clone());
+                            self.push_frame(
+                                fd.name.clone().unwrap_or_else(|| Rc::from("<anonymous>")),
+                                Span::unknown(),
+                            );
+                            let result = stacker::maybe_grow(
+                                RECURSION_STACK_RED_ZONE,
+                                RECURSION_STACK_SEGMENT,
+                                || self.prepare_parameter_body(params, initializers, &fd.body[1..]),
+                            );
+                            self.pop_frame();
+                            self.global = saved;
+                            (Rc::new(fd.body[1..].to_vec()), result?, true)
+                        } else {
+                            (fd.body.clone(), context, false)
+                        };
                     let inner = GeneratorInner {
-                        body: fd.body.clone(),
-                        closure: Some(crate::heap::capture_env(&context)),
+                        parameters_initialized,
+                        body,
+                        closure: Some(crate::heap::capture_env(&closure)),
                         params: fd.params.clone(),
                         args,
                         #[cfg(stackful_coroutines)]
@@ -1427,7 +1465,7 @@ impl Interpreter {
                         // the body actually reads it; most functions never do.
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
-                        if fd.uses_arguments && !fd.is_arrow {
+                        if fd.needs_arguments_object() {
                             let args_obj = Value::arguments_object(args.as_slice())?;
                             vars.push((Key::from("arguments"), args_obj));
                         }
@@ -1465,7 +1503,7 @@ impl Interpreter {
                         }
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
-                        if fd.uses_arguments && !fd.is_arrow {
+                        if fd.needs_arguments_object() {
                             let args_obj = Value::arguments_object(args.as_slice())?;
                             fe.borrow_mut().set("arguments", args_obj);
                         }
@@ -1944,7 +1982,7 @@ const GENERATOR_STACK_SIZE: usize = 8 * 1024 * 1024;
 fn make_generator_coroutine(
     body: Rc<Vec<Statement>>,
     closure: Option<super::Env>,
-    params: Rc<Vec<Rc<str>>>,
+    parameters: (Rc<Vec<Rc<str>>>, bool),
     args: Vec<Value>,
     builtins_env: Option<super::Env>,
     gen_depth: u32,
@@ -1953,6 +1991,7 @@ fn make_generator_coroutine(
     use corosensei::Coroutine;
     use corosensei::stack::DefaultStack;
 
+    let (params, parameters_initialized) = parameters;
     let stack = DefaultStack::new(GENERATOR_STACK_SIZE).ok()?;
 
     // The first `next()` only starts the body; JS discards its argument, since
@@ -1990,9 +2029,17 @@ fn make_generator_coroutine(
 
             // Bind parameters in a child of the defining scope.
             let parent_env = closure.unwrap_or_else(|| interp.global.clone());
-            let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
+            let fe = if parameters_initialized {
+                parent_env
+            } else {
+                Rc::new(RefCell::new(Environment::function_child(parent_env)))
+            };
             fe.borrow_mut().set_new_target(Value::Undefined);
-            for (i, p) in params.iter().enumerate() {
+            for (i, p) in params
+                .iter()
+                .enumerate()
+                .filter(|_| !parameters_initialized)
+            {
                 let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
                 fe.borrow_mut().set(p, arg);
             }
@@ -2061,9 +2108,17 @@ pub(crate) fn generator_next(
                 let closure = inner.closure.clone();
                 let params = inner.params.clone();
                 let args = inner.args.clone();
+                let parameters_initialized = inner.parameters_initialized;
                 drop(inner);
                 interp.gen_depth += 1;
-                let outcome = run_buffered_generator(interp, body, closure, params, args);
+                let outcome = run_buffered_generator(
+                    interp,
+                    body,
+                    closure,
+                    params,
+                    args,
+                    parameters_initialized,
+                );
                 interp.gen_depth -= 1;
                 let (produced, returned) = outcome?;
                 let mut inner = inner_rc.borrow_mut();
@@ -2108,7 +2163,7 @@ pub(crate) fn generator_next(
                 inner.coroutine = make_generator_coroutine(
                     inner.body.clone(),
                     inner.closure.clone(),
-                    inner.params.clone(),
+                    (inner.params.clone(), inner.parameters_initialized),
                     inner.args.clone(),
                     builtins_env,
                     interp.gen_depth + 1,
@@ -2180,12 +2235,21 @@ fn run_buffered_generator(
     closure: Option<super::Env>,
     params: Rc<Vec<Rc<str>>>,
     args: Vec<Value>,
+    parameters_initialized: bool,
 ) -> Result<(std::collections::VecDeque<Value>, Value), VmErr> {
     let sink: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
     let parent_env = closure.unwrap_or_else(|| interp.global.clone());
-    let frame = Rc::new(RefCell::new(Environment::function_child(parent_env)));
+    let frame = if parameters_initialized {
+        parent_env
+    } else {
+        Rc::new(RefCell::new(Environment::function_child(parent_env)))
+    };
     frame.borrow_mut().set_new_target(Value::Undefined);
-    for (index, param) in params.iter().enumerate() {
+    for (index, param) in params
+        .iter()
+        .enumerate()
+        .filter(|_| !parameters_initialized)
+    {
         let arg = args.get(index).cloned().unwrap_or(Value::Undefined);
         frame.borrow_mut().set(param, arg);
     }

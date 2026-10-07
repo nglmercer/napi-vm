@@ -110,10 +110,22 @@ fn function(
     )?;
     // Parameters cannot collide with direct lexical declarations in the body.
     let lexical = lexical_names(body)?;
-    if params
+    let mut parameter_names: Vec<_> = params
         .iter()
-        .any(|p| lexical.contains(p.trim_start_matches("...")))
-    {
+        .map(|p| p.trim_start_matches("...").to_owned())
+        .collect();
+    if let Some(Statement::ParameterInitialization { initializers, .. }) = body.first() {
+        for initializer in initializers {
+            if let Statement::VarDecl {
+                destructuring: Some(pattern),
+                ..
+            } = initializer
+            {
+                parameter_names.extend(pattern_names(pattern));
+            }
+        }
+    }
+    if parameter_names.iter().any(|p| lexical.contains(p)) {
         return Err("parameter conflicts with lexical declaration".into());
     }
     statements(body, &ctx)
@@ -343,7 +355,10 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             )
         }
         Statement::Block(body) => nested_statements(body, ctx),
-        Statement::Declarations(body) => {
+        Statement::ParameterInitialization {
+            initializers: body, ..
+        }
+        | Statement::Declarations(body) => {
             for stmt in body {
                 statement(stmt, ctx)?;
             }

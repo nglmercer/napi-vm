@@ -80,7 +80,7 @@ The focused comparison contains 45 formerly passing variants that now fail. Corr
 ## Next implementation order
 
 1. Complete global object storage and declaration instantiation: global lexical/property coexistence, accessor/symbol descriptors, strict writes/deletes/updates for all receiver kinds, and eval variable/lexical environment separation.
-2. Complete realm coverage: realm-owned exotic instances and Reflect construction, per-realm module caches, primary global identity and UTF-16 host evalScript inputs.
+2. Complete realm coverage: realm-owned exotic instances and Reflect construction, per-realm module caches, primary global identity. The UTF-16 host evalScript path is implemented in the parameter continuation below.
 3. Implement real Test262 agents with shared-memory transport and scheduler ownership; external threads must never enter an interpreter.
 4. Expand contextual grammar/early errors for async, generators, super and private names, then use complete-corpus failure clusters to drive the next fixes.
 
@@ -152,8 +152,77 @@ tests, eight minimal worker tests, four Python tests, formatting and Clippy.
 The scoped Bun suite remains at 1,356 passes and the same 80 baseline failures,
 with no changed failing test names.
 
-Parameter defaults still share a desugared function-body statement list. A
-separate parameter-initialization phase is needed to prevent body lexical
-bindings from appearing during default evaluation. Complete global object
+At the measurement above, parameter defaults still shared a desugared
+function-body statement list. The parameter-initialization continuation below
+addresses this gap. Complete global object
 storage, realm/agent coverage and contextual grammar remain open; these changes
 do not complete phases 1–3.
+
+## Parameter initialization and UTF-16 realm sources
+
+Non-simple parameter lists now retain an explicit `ParameterInitialization`
+AST boundary. Parameter expressions execute before body declaration
+instantiation, using a declarative parameter environment inside the function
+environment. Self and later parameter reads observe their temporal dead zones;
+destructured bindings initialize in order. Implicit `arguments` bindings are
+created for non-simple ordinary functions, while formal `arguments` parameters
+replace that binding and arrows retain inherited `arguments` behavior. Eval
+checks parameter bindings before creating variables in the function environment.
+
+The body receives its own variable environment and copies parameter values into
+body variable bindings. Closures created during defaults retain the parameter
+scope. Generators initialize parameters when called, propagate initialization
+errors at that point, and reuse the prepared body scope on resume. Base-class constructors with non-simple parameter lists
+initialize instance fields in their defining scope before parameter defaults.
+Derived-class field and `super()` ordering still require further work. Function
+length stops before the first default or rest parameter.
+
+Bytecode programs retain AST function fallback for non-simple parameter
+initialization (`separate parameter environment`); the compiler must implement
+these environments before removing that fallback. The regression tests exercise
+both AST and compiled entry paths. Parameter execution retains guest-execution
+accounting so collection cannot run over active, unpublished guest frames.
+
+`compile_utf16_with_goal` and `eval_in_realm_utf16` preserve unpaired surrogates
+while enforcing the selected grammar goal. The Test262 realm host uses the
+UTF-16 source path. UTF-8 inputs retain the parse cache; rendered diagnostic
+source text remains a host-facing UTF-8 view.
+
+Public AST consumers must handle `Statement::ParameterInitialization`, and direct
+`GeneratorInner` initializers must supply `parameters_initialized`. Phases 1–3
+remain incomplete: global object storage, additional descriptors and Proxy
+invariants, realm-owned exotic objects and independent module caches, agents,
+and contextual grammar still require work.
+
+Final release measurement on the pinned corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`:
+
+| Result | Count |
+| --- | ---: |
+| All variants | 102,956 |
+| Pass | 40,107 (38.9555%) |
+| Fail | 62,561 |
+| Timeout | 2 |
+| Crash | 2 |
+| Harness error | 284 |
+| Skip | 0 |
+
+The worker SHA-256 is
+`3b5b5515385e22da7da424e7404b61d4e47c0ccba432e27ac1e65444b06cc58f`.
+The complete run gains 1,291 passes with zero lost passes against the previous
+eval/descriptor continuation. Against merged main, 5,371 gain a pass and zero
+lose a pass, resolving the previously recorded merged-main regressions. The
+expanded focused selection passes 5,903 of 13,273 variants, gaining 629 with
+zero lost passes against the previous complete report; the existing two String
+subclassing crashes remain in that focused denominator. All full reports use
+four workers, five-second per-variant timeouts and no feature skips.
+
+Generated evidence is under `artifacts/test262/phases-1-3-parameters-*`, and the
+compact result is in `tools/test262/latest.json`. Validation passes 691 workspace
+Rust tests (four ignored), 73 native Node tests, 14 WebAssembly tests, eight
+minimal worker tests, four Python tests, formatting and Clippy with warnings
+denied. These results are a continuation measurement, not phase completion or
+full ECMAScript conformance.
+
+The scoped Bun suite retains 1,356 passes and the same 80 baseline failures,
+with unchanged failing test names.
