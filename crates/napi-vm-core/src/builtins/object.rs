@@ -1528,6 +1528,12 @@ fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Res
                 if matches!(name, "enumerable" | "configurable" | "writable") {
                     value = Value::Bool(value.is_truthy());
                 }
+                if matches!(name, "get" | "set")
+                    && !matches!(value, Value::Undefined)
+                    && !is_callable(&value)
+                {
+                    return Err(type_err("Property descriptor accessor must be callable"));
+                }
                 fields.push((name.into(), value));
             }
         }

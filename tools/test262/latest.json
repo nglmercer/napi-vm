@@ -5,21 +5,21 @@
   "selection": [
     "."
   ],
-  "engine_sha256": "3b5b5515385e22da7da424e7404b61d4e47c0ccba432e27ac1e65444b06cc58f",
+  "engine_sha256": "892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
   "timeout_seconds": 5.0,
   "total": 102956,
   "counts": {
-    "pass": 40107,
-    "fail": 62561,
+    "pass": 40145,
+    "fail": 62523,
     "skip": 0,
     "timeout": 2,
     "crash": 2,
     "harness_error": 284
   },
-  "pass_percentage": 38.95547612572361,
+  "pass_percentage": 38.992385096546094,
   "limitations": [
     "Agents are not implemented; GC requests run at quiescent host boundaries"
   ],
@@ -30,19 +30,19 @@
     "The focused selection expanded; percentages from previous focused reports are not directly comparable."
   ],
   "baseline": {
-    "engine_sha256": "db902525f920314f36668e8e88c32dc4c986913a40581db779dc92eff908f4ba",
+    "engine_sha256": "3b5b5515385e22da7da424e7404b61d4e47c0ccba432e27ac1e65444b06cc58f",
     "total": 102956,
     "counts": {
-      "pass": 38816,
-      "fail": 63852,
+      "pass": 40107,
+      "fail": 62561,
       "skip": 0,
       "timeout": 2,
       "crash": 2,
       "harness_error": 284
     },
-    "pass_percentage": 37.701542406464895,
+    "pass_percentage": 38.95547612572361,
     "transitions": {
-      "new_passes": 1291,
+      "new_passes": 38,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -59,7 +59,7 @@
     },
     "pass_percentage": 35.81529973969462,
     "transitions": {
-      "new_passes": 3233,
+      "new_passes": 3271,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -76,7 +76,7 @@
     },
     "pass_percentage": 33.73868448657679,
     "transitions": {
-      "new_passes": 5371,
+      "new_passes": 5409,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -85,44 +85,36 @@
     "suite": "Test262",
     "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
     "selection": [
-      "language/eval-code",
-      "language/statements/function",
-      "language/expressions/function",
-      "language/expressions/arrow-function",
-      "language/statements/generators",
-      "language/expressions/generators",
-      "language/statements/async-function",
-      "language/expressions/async-function",
-      "language/statements/class",
-      "built-ins/Function",
-      "staging/sm/PrivateName/constructor-args.js",
-      "staging/sm/fields/init-order.js"
+      "built-ins/Proxy/construct",
+      "built-ins/Proxy/getOwnPropertyDescriptor",
+      "built-ins/Reflect/construct",
+      "language/statements/class"
     ],
-    "engine_sha256": "3b5b5515385e22da7da424e7404b61d4e47c0ccba432e27ac1e65444b06cc58f",
+    "engine_sha256": "892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617",
     "skip_features": [],
     "denominator": "all selected variants, including skips and errors",
     "worker_jobs": 4,
     "timeout_seconds": 5.0,
-    "total": 13273,
+    "total": 8782,
     "counts": {
-      "pass": 5903,
-      "fail": 7368,
+      "pass": 2937,
+      "fail": 5843,
       "skip": 0,
       "timeout": 0,
       "crash": 2,
       "harness_error": 0
     },
-    "pass_percentage": 44.47374369019815,
+    "pass_percentage": 33.44340696879982,
     "limitations": [
       "Agents are not implemented; GC requests run at quiescent host boundaries"
     ],
     "transitions_against_previous_full": {
-      "new_passes": 629,
+      "new_passes": 32,
       "former_passes_now_nonpassing": 0
     }
   },
   "transitions": {
-    "new_passes": 1291,
+    "new_passes": 38,
     "former_passes_now_nonpassing": 0
   }
 }

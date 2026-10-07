@@ -226,3 +226,42 @@ full ECMAScript conformance.
 
 The scoped Bun suite retains 1,356 passes and the same 80 baseline failures,
 with unchanged failing test names.
+
+
+## Constructor and descriptor continuation
+
+Class construction now resolves the prototype from `newTarget`, including
+`Reflect.construct` with a different constructor and intrinsic fallback.
+Proxy construction rejects nonconstructible targets before reading the handler,
+propagates trap getter exceptions, rejects noncallable traps, accepts null or
+undefined as an absent trap, and requires an object result. Descriptor conversion
+rejects an invalid getter immediately, before reading the setter. Regression
+tests cover compiled entry and AST execution. No public APIs change in this batch.
+
+The complete pinned corpus passes **40,145 / 102,956 variants (38.9924%)**,
+with **38 newly passing variants and zero lost passes** against the parameter
+continuation. Against merged main, 5,409 variants gain a pass and zero lose one.
+Remaining outcomes are 62,523 failures, 284 harness errors, two crashes and two
+timeouts, with zero skips. The focused class/Reflect/Proxy selection passes
+2,937 / 8,782 variants, gaining 32 with zero lost passes; both existing String
+subclassing crashes remain included. This selection differs from earlier focused
+runs, so their percentages are not directly comparable.
+
+Both reports use release worker SHA-256
+`892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617`,
+the same pinned corpus, four workers and five-second timeouts. Complete reports,
+transitions and triage are under `artifacts/test262/phases-1-3-constructors-*`;
+compact results are versioned in `tools/test262/latest.json`.
+
+Validation passes 694 workspace Rust tests (four ignored), 73 native Node tests,
+14 WebAssembly tests, eight minimal worker tests, four Python tests, formatting
+and Clippy with warnings denied. **Phases 1–3 and full conformance remain
+incomplete.** The next constructor work needs a proper activation record:
+uninitialized derived `this`, superclass object returns, derived fields after
+successful `super()`, base fields in the defining scope for simple parameters,
+DefineField rather than assignment, and lexical private brands. The existing
+constructor still preallocates derived receivers; the prototype fix does not
+claim to implement those rules.
+
+The scoped Bun suite retains 1,356 passes and the same 80 baseline failures,
+with unchanged failing test names and multiplicities.

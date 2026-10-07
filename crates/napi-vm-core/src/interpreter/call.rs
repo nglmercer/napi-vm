@@ -1868,13 +1868,29 @@ impl Interpreter {
         }
         if let Some(proxy) = f.as_proxy() {
             let target = proxy.target.clone();
-            return match self.proxy_trap(&proxy, "construct") {
-                Some(trap) => {
+            // A construct trap cannot make a non-constructible target into a
+            // constructor. Reject it before even reading the handler.
+            if !crate::builtins::is_constructor(&target) {
+                return vm_err("TypeError: Proxy target is not a constructor");
+            }
+            let trap = self.get_prop_value_str(&proxy.handler, "construct")?;
+            return match trap {
+                Value::Undefined | Value::Null => {
+                    self.ctor_with_new_target(&target, args, new_target)
+                }
+                trap => {
+                    if !is_callable_value(&trap) {
+                        return vm_err("TypeError: Proxy construct trap must be callable");
+                    }
                     let handler = proxy.handler.clone();
                     let arg_list = Value::checked_array(args)?;
-                    self.call_this(&trap, handler, vec![target, arg_list, new_target])
+                    let result =
+                        self.call_this(&trap, handler, vec![target, arg_list, new_target])?;
+                    if !is_js_object(&result) {
+                        return vm_err("TypeError: Proxy construct trap must return an object");
+                    }
+                    Ok(result)
                 }
-                None => self.ctor_with_new_target(&target, args, new_target),
             };
         }
         self.execution.check()?;
@@ -1904,9 +1920,11 @@ impl Interpreter {
                 }
             }
             Value::Class(c) => {
-                // The instance's prototype is the class prototype (shared Rc, so
-                // `instanceof` can compare identity).
-                let inst = Value::object_with_proto(vec![], Some(c.prototype.clone()));
+                // Reflect.construct may supply a different newTarget. Resolve
+                // its prototype before entering the constructor body, including
+                // getters and the newTarget realm's fallback intrinsic.
+                let prototype = self.constructor_prototype(&new_target, "Object")?;
+                let inst = Value::object_with_proto(vec![], prototype);
                 let r = self.invoke_constructor_with_new_target(
                     c.constructor.as_ref(),
                     inst.clone(),

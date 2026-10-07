@@ -22,6 +22,49 @@ fn check_both(source: &str) {
 }
 
 #[test]
+fn class_construction_uses_new_target_prototype() {
+    check_both(
+        "class Base {constructor(){this.target=new.target;}} function Other(){} var value=Reflect.construct(Base,[],Other);Object.getPrototypeOf(value)===Other.prototype&&value.target===Other;",
+    );
+    check_both(
+        "class Base {} class Child extends Base {} function Other(){} var value=Reflect.construct(Child,[],Other);Object.getPrototypeOf(value)===Other.prototype;",
+    );
+    check_both(
+        "class Base {} function Other(){} Object.defineProperty(Other,'prototype',{value:1});Object.getPrototypeOf(Reflect.construct(Base,[],Other))===Object.prototype;",
+    );
+}
+
+#[test]
+fn proxy_construct_requires_an_object_result() {
+    check_both(
+        "var reads=0;var p=new Proxy(()=>{}, {get construct(){reads++;return function(){return {};};}});var caught=false;try{new p();}catch(e){caught=e instanceof TypeError;}caught&&reads===0;",
+    );
+    check_both(
+        "var p=new Proxy(function(){},{construct(){return 1;}});var caught=false;try{new p();}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+    check_both(
+        "var result={ok:true};var p=new Proxy(function(){},{construct(){return result;}});new p()===result;",
+    );
+    check_both("function Target(){this.ok=true;}var p=new Proxy(Target,{});new p().ok===true;");
+    check_both(
+        "var handler={get construct(){throw new Error('trap getter');}};var p=new Proxy(function(){},handler);var caught=false;try{new p();}catch(e){caught=e.message==='trap getter';}caught;",
+    );
+    check_both(
+        "var p=new Proxy(function(){},{construct:1});var caught=false;try{new p();}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+    check_both(
+        "function Target(){this.ok=true;}var p=new Proxy(Target,{construct:null});new p().ok===true;",
+    );
+}
+
+#[test]
+fn invalid_descriptor_getter_stops_before_reading_setter() {
+    check_both(
+        "var reads=0;var p=new Proxy({}, {getOwnPropertyDescriptor(){return {get:1,get set(){reads++;throw new Error('setter read');}};}});var caught=false;try{Object.getOwnPropertyDescriptor(p,'x');}catch(e){caught=e instanceof TypeError;}caught&&reads===0;",
+    );
+}
+
+#[test]
 fn new_target_tracks_construction_without_leaking_to_ordinary_calls() {
     check_both(
         "function F(){this.target=new.target;} var instance=new F(); instance.target===F && F.call({})===undefined;",
