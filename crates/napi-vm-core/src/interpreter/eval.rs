@@ -439,6 +439,9 @@ impl Interpreter {
         // superclass prototype, so `super.method()` inside one can find it.
         // The constructor gets `__super_ctor` separately, below.
         let member_scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+        member_scope
+            .borrow_mut()
+            .declare_private_declarations(crate::parser::class_private_declarations(body));
         for member in body {
             if let ClassMember::Field {
                 name: MemberName::Static(name),

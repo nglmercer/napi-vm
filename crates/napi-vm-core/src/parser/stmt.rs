@@ -23,7 +23,7 @@ impl Parser {
             Token::KwFunction => self.fn_decl(false),
             Token::KwAsync => {
                 // `async function name(...) { ... }`
-                if matches!(self.peek(), Token::KwFunction) {
+                if !self.line_break_after_current() && matches!(self.peek(), Token::KwFunction) {
                     self.adv(); // consume `async`
                     self.fn_decl(true)
                 } else {
@@ -343,11 +343,7 @@ impl Parser {
         // parameters and body belong to a new one.
         let outer = self.push_scope(true);
         self.eat(&Token::LParen);
-        let (p, defaults) = self.params();
-        self.expect(&Token::RParen);
-        self.eat(&Token::LBrace);
-        let b = self.block_body();
-        self.expect(&Token::RBrace);
+        let (p, defaults, b) = self.callable_parts(is_async, is_generator);
         self.pop_scope(outer);
         self.record(
             &n,
@@ -368,7 +364,9 @@ impl Parser {
 
     fn ret(&mut self) -> Option<Statement> {
         self.adv();
-        let e = if matches!(self.cur(), Token::Semicolon) || matches!(self.cur(), Token::RBrace) {
+        let e = if self.line_break_before_current()
+            || matches!(self.cur(), Token::Semicolon | Token::RBrace | Token::EOF)
+        {
             None
         } else {
             Some(Box::new(self.expr()?))
@@ -504,6 +502,14 @@ impl Parser {
             && !matches!(self.cur(), Token::Semicolon)
         {
             if self.eat(&Token::KwIn) {
+                if is_await {
+                    self.record_error("for await requires of".into());
+                }
+                if let ForInit::Var { decls, .. } = init.as_ref()
+                    && decls.len() != 1
+                {
+                    self.record_error("multiple declarations in for-in".into());
+                }
                 let o = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
                 let b = self.block_or_stmt();
@@ -518,6 +524,11 @@ impl Parser {
                 });
             }
             if self.eat(&Token::KwOf) {
+                if let ForInit::Var { decls, .. } = init.as_ref()
+                    && (decls.len() != 1 || decls[0].1.is_some())
+                {
+                    self.record_error("invalid for-of declaration".into());
+                }
                 let i = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
                 let b = self.block_or_stmt();
@@ -534,13 +545,16 @@ impl Parser {
                 });
             }
         }
-        self.semi();
+        if is_await {
+            self.record_error("for await requires of".into());
+        }
+        self.expect(&Token::Semicolon);
         let t = if !matches!(self.cur(), Token::Semicolon) {
             Some(Box::new(self.expr()?))
         } else {
             None
         };
-        self.semi();
+        self.expect(&Token::Semicolon);
         let u = if !matches!(self.cur(), Token::RParen) {
             Some(Box::new(self.expr()?))
         } else {
@@ -558,6 +572,9 @@ impl Parser {
 
     fn throw(&mut self) -> Option<Statement> {
         self.adv();
+        if self.line_break_before_current() {
+            self.record_error("line terminator after throw".into());
+        }
         let e = self.expr()?;
         self.semi();
         Some(Statement::Throw(Box::new(e)))
@@ -646,7 +663,24 @@ impl Parser {
         while self.until(&Token::RParen) {
             if self.eat(&Token::DotDotDot) {
                 let span = self.cur_span();
-                if let Some(name) = self.ident() {
+                if matches!(self.cur(), Token::LBracket | Token::LBrace) {
+                    let Some(pattern) = self.pattern() else {
+                        break;
+                    };
+                    let slot = format!("*pattern{}*", names.len());
+                    defaults.push(Statement::VarDecl {
+                        kind: VarKind::Let,
+                        name: String::new(),
+                        init: Some(Box::new(Expr::Identifier(slot.clone()))),
+                        destructuring: Some(Box::new(pattern)),
+                    });
+                    names.push(format!("...{slot}"));
+                    if !matches!(self.cur(), Token::RParen) {
+                        self.record_error(
+                            "rest parameter must be last without a trailing comma".into(),
+                        );
+                    }
+                } else if let Some(name) = self.ident() {
                     self.record(
                         &name,
                         span,
@@ -654,6 +688,13 @@ impl Parser {
                         None,
                     );
                     names.push(format!("...{}", name));
+                    if !matches!(self.cur(), Token::RParen) {
+                        self.record_error(
+                            "rest parameter must be last without a trailing comma".into(),
+                        );
+                    }
+                } else {
+                    self.record_error("expected rest parameter binding".into());
                 }
             } else if matches!(self.cur(), Token::LBracket | Token::LBrace) {
                 // A destructured parameter — `function f({ a, b })`. The
@@ -696,11 +737,12 @@ impl Parser {
                     }
                     names.push(name);
                 } else {
+                    self.record_error("expected parameter binding".into());
                     self.adv();
                 }
             }
             if !matches!(self.cur(), Token::RParen) {
-                self.eat(&Token::Comma);
+                self.expect(&Token::Comma);
             }
         }
         (names, defaults)
@@ -718,6 +760,8 @@ impl Parser {
             // (async functions, accessors and module syntax), while binding
             // positions may still use them as identifiers.
             Token::KwAs => self.consume_contextual_identifier("as"),
+            Token::KwAwait if !self.await_expression => self.consume_contextual_identifier("await"),
+            Token::KwYield if !self.yield_expression => self.consume_contextual_identifier("yield"),
             Token::KwAsync => self.consume_contextual_identifier("async"),
             Token::KwConstructor => self.consume_contextual_identifier("constructor"),
             Token::KwFrom => self.consume_contextual_identifier("from"),

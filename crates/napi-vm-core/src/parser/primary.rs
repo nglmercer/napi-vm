@@ -61,7 +61,7 @@ impl Parser {
             }
             Token::LParen => {
                 // Speculatively try to parse an arrow-function parameter list.
-                if let Some(arrow) = self.try_arrow() {
+                if let Some(arrow) = self.try_arrow(false) {
                     return Some(arrow);
                 }
                 // Otherwise it is a parenthesized expression.
@@ -106,6 +106,7 @@ impl Parser {
                     // contextual for the same reason `get` is: `{ async: 1 }`
                     // names a property.
                     let is_async = matches!(self.cur(), Token::KwAsync)
+                        && !self.line_break_after_current()
                         && !matches!(
                             self.peek(),
                             Token::Colon | Token::LParen | Token::Comma | Token::RBrace
@@ -117,6 +118,9 @@ impl Parser {
                     // the property name themselves.
                     let is_method = self.starts_accessor(&Token::KwGet) && self.eat(&Token::KwGet);
                     let is_setter = self.starts_accessor(&Token::KwSet) && self.eat(&Token::KwSet);
+                    if (is_method || is_setter) && (is_async || is_generator) {
+                        self.record_error("accessor cannot be async or a generator".into());
+                    }
                     let key = match self.cur() {
                         Token::String(s) | Token::EscapedString(s) => {
                             let v = s.to_key();
@@ -144,11 +148,11 @@ impl Parser {
                                 }
                                 Token::LParen => {
                                     self.adv();
-                                    let (params, defaults) = self.params();
-                                    self.expect(&Token::RParen);
-                                    self.eat(&Token::LBrace);
-                                    let b = self.block_body();
-                                    self.expect(&Token::RBrace);
+                                    let (params, defaults, b) =
+                                        self.callable_parts(is_async, is_generator);
+                                    self.check_accessor_parameters(
+                                        &params, &defaults, is_method, is_setter,
+                                    );
                                     self.check_parameters(&params, &defaults, &b, true);
                                     let body = Self::function_body(&params, defaults, b);
                                     // If the computed key is a simple literal,
@@ -217,22 +221,18 @@ impl Parser {
                     };
                     if is_setter {
                         self.eat(&Token::LParen);
-                        let param = self.ident()?;
-                        self.expect(&Token::RParen);
-                        self.eat(&Token::LBrace);
-                        let b = self.block_body();
-                        self.expect(&Token::RBrace);
+                        let (params, defaults, b) = self.callable_parts(false, false);
+                        self.check_parameters(&params, &defaults, &b, true);
+                        self.check_accessor_parameters(&params, &defaults, false, true);
+                        let param = params.first().cloned().unwrap_or_default();
                         p.push(ObjectProp::Setter {
                             name: key,
                             param,
-                            body: b,
+                            body: Self::function_body(&params, defaults, b),
                         });
                     } else if self.eat(&Token::LParen) {
-                        let (params, defaults) = self.params();
-                        self.expect(&Token::RParen);
-                        self.eat(&Token::LBrace);
-                        let b = self.block_body();
-                        self.expect(&Token::RBrace);
+                        let (params, defaults, b) = self.callable_parts(is_async, is_generator);
+                        self.check_accessor_parameters(&params, &defaults, is_method, false);
                         self.check_parameters(&params, &defaults, &b, true);
                         let body = Self::function_body(&params, defaults, b);
                         if is_method {
@@ -308,10 +308,11 @@ impl Parser {
                         if let Some(arg) = self.assign() {
                             ag.push(arg);
                         } else {
+                            self.record_error("expected call argument".into());
                             self.adv();
                         }
                         if !matches!(self.cur(), Token::RParen) {
-                            self.eat(&Token::Comma);
+                            self.expect(&Token::Comma);
                         }
                     }
                     self.expect(&Token::RParen);
@@ -342,6 +343,19 @@ impl Parser {
                 }
                 self.semi();
                 Some(Expr::Undefined)
+            }
+            Token::KwAwait if !self.await_expression => {
+                self.adv();
+                Some(Expr::Identifier("await".into()))
+            }
+            Token::KwYield if !self.yield_expression => {
+                self.adv();
+                Some(Expr::Identifier("yield".into()))
+            }
+            Token::Hash => {
+                self.adv();
+                let name = self.ident_or_keyword()?;
+                Some(Expr::Identifier(format!("#{name}")))
             }
             Token::Identifier(_)
             | Token::KwAs
@@ -431,7 +445,15 @@ impl Parser {
 
     /// Speculatively parse `( params ) =>`. On any failure, restore the parser
     /// position and return `None` so the caller can parse a parenthesized expr.
-    fn try_arrow(&mut self) -> Option<Expr> {
+    fn try_arrow(&mut self, is_async: bool) -> Option<Expr> {
+        let saved = self.await_expression;
+        self.await_expression |= is_async;
+        let result = self.try_arrow_parameters(is_async);
+        self.await_expression = saved;
+        result
+    }
+
+    fn try_arrow_parameters(&mut self, is_async: bool) -> Option<Expr> {
         let save = self.pos;
         if !self.eat(&Token::LParen) {
             return None;
@@ -440,7 +462,7 @@ impl Parser {
         let mut defaults = Vec::new();
         if self.eat(&Token::RParen) {
             if self.eat(&Token::Arrow) {
-                return Some(self.arrow_body(params, defaults));
+                return Some(self.arrow_body_async(params, defaults, is_async));
             }
             self.pos = save;
             return None;
@@ -497,22 +519,26 @@ impl Parser {
                 break;
             }
         }
-        if !self.eat(&Token::RParen) || !self.eat(&Token::Arrow) {
+        if !self.eat(&Token::RParen) {
             self.pos = save;
             return None;
         }
-        Some(self.arrow_body(params, defaults))
+        let newline = self.line_break_before_current();
+        if !self.eat(&Token::Arrow) {
+            self.pos = save;
+            return None;
+        }
+        if newline {
+            self.record_error("line terminator before arrow".into());
+        }
+        Some(self.arrow_body_async(params, defaults, is_async))
     }
 
     /// Parse a function expression after its `function` (and any `*`) token.
     fn fn_expr_tail(&mut self, is_generator: bool, is_async: bool) -> Option<Expr> {
-        let n = self.ident();
+        let n = self.with_grammar(is_async, is_generator, Self::ident);
         self.eat(&Token::LParen);
-        let (p, defaults) = self.params();
-        self.expect(&Token::RParen);
-        self.eat(&Token::LBrace);
-        let b = self.block_body();
-        self.expect(&Token::RBrace);
+        let (p, defaults, b) = self.callable_parts(is_async, is_generator);
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
         let body = Self::function_body(&p, defaults, b);
         Some(Expr::FnExpr {
@@ -537,7 +563,9 @@ impl Parser {
         // The parameters were consumed before the scope existed, so they are
         // recorded here, in the body's scope, where they belong.
         let arrow_scope = self.push_scope(true);
-        let expr = self.arrow_body_in_scope(params, defaults, is_async);
+        let expr = self.with_grammar(is_async, false, |parser| {
+            parser.arrow_body_in_scope(params, defaults, is_async)
+        });
         self.pop_scope(arrow_scope);
         expr
     }
@@ -589,7 +617,11 @@ impl Parser {
     /// actually named `async` — falls back to the identifier.
     fn async_expr(&mut self) -> Option<Expr> {
         let save = self.pos;
+        let newline = self.line_break_after_current();
         self.adv();
+        if newline {
+            return Some(Expr::Identifier("async".into()));
+        }
         match self.cur() {
             Token::KwFunction => {
                 self.adv();
@@ -605,7 +637,7 @@ impl Parser {
                 }
             }
             Token::LParen => {
-                if let Some(Expr::ArrowFn { params, body, .. }) = self.try_arrow() {
+                if let Some(Expr::ArrowFn { params, body, .. }) = self.try_arrow(true) {
                     return Some(Expr::ArrowFn {
                         params,
                         body,

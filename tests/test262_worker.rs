@@ -32,6 +32,26 @@ fn worker_separates_parse_runtime_and_harness_errors() {
         "harness"
     );
 }
+
+#[test]
+fn contextual_early_errors_precede_harness_or_runtime_execution() {
+    for source in [
+        "function f(){await 1;}",
+        "class C{constructor(){}constructor(){}}",
+        "class C{#x;static #x;}",
+        "class C{m(){return this.#missing;}}",
+        "class C{get x(a){}}",
+        "class C{constructor(){super();}}",
+        "try{}catch(x){let x;}",
+    ] {
+        let report =
+            worker(json!({"source":source,"harness":"throw new Error('harness must not run');"}));
+        assert_eq!(report["phase"], "parse", "{source}: {report}");
+        assert_eq!(report["error_type"], "SyntaxError");
+    }
+    let report = worker(json!({"source":"export {missing};","module":true}));
+    assert_eq!(report["phase"], "parse");
+}
 #[test]
 fn worker_requires_exact_async_completion() {
     assert_eq!(

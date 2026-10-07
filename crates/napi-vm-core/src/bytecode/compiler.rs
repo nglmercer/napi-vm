@@ -2051,6 +2051,7 @@ impl<'a> Compiler<'a> {
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
             private_fields,
+            private_declarations: crate::parser::class_private_declarations(body),
             name: name.to_string(),
             expr_name,
             superclass,

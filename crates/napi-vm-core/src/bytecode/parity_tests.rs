@@ -500,7 +500,7 @@ fn classes() {
     // Errors agree across tiers.
     check("class C { m(){ return super.m(); } } new C().m()", true);
     check("class C extends null {} 1", true);
-    check("class C { constructor(){ super(); } } new C()", true);
+    assert!(parse_cached("class C { constructor(){ super(); } } new C()").is_err());
 }
 
 #[test]
@@ -1226,8 +1226,8 @@ fn arrow_super_uses_lexical_receiver() {
         "class A { method(){ return this.x; } } class B extends A { constructor(){super();this.x=7;} method(){return (()=>super.method())();} } new B().method();",
         "class A { method(){ return this.x; } } class B extends A { constructor(){super();this.x=7;} method(){return (()=>(()=>super.method())())();} } new B().method();",
         "class A { constructor(){this.x=1;} } class B extends A { constructor(){super();function inner(){return this;}this.y=inner();} } new B().y;",
-        "class A { method(){return this.x;} } class B extends A { constructor(){super();this.x=7;} method(){function inner(){return super.method();}return inner.call({x:9});} } new B().method();",
     ] {
         check(source, true);
     }
+    assert!(parse_cached("class A { method(){return this.x;} } class B extends A { method(){function inner(){return super.method();}return inner.call({x:9});} }").is_err());
 }

@@ -1,6 +1,39 @@
 //! Static semantics shared by cached parsing, eval and compilation.
 use super::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Copy, Default)]
+enum FunctionKind {
+    #[default]
+    Ordinary,
+    Arrow,
+    Async,
+    AsyncArrow,
+    Generator,
+    AsyncGenerator,
+}
+
+impl FunctionKind {
+    fn of(arrow: bool, asynchronous: bool, generator: bool) -> Self {
+        match (arrow, asynchronous, generator) {
+            (true, true, _) => Self::AsyncArrow,
+            (true, false, _) => Self::Arrow,
+            (false, true, true) => Self::AsyncGenerator,
+            (false, true, false) => Self::Async,
+            (false, false, true) => Self::Generator,
+            _ => Self::Ordinary,
+        }
+    }
+    fn arrow(self) -> bool {
+        matches!(self, Self::Arrow | Self::AsyncArrow)
+    }
+    fn asynchronous(self) -> bool {
+        matches!(self, Self::Async | Self::AsyncArrow | Self::AsyncGenerator)
+    }
+    fn generator(self) -> bool {
+        matches!(self, Self::Generator | Self::AsyncGenerator)
+    }
+}
 
 #[derive(Clone, Default)]
 struct Context {
@@ -9,6 +42,16 @@ struct Context {
     import_meta: bool,
     top_level: bool,
     function: bool,
+    kind: FunctionKind,
+    await_allowed: bool,
+    await_reserved: bool,
+    yield_allowed: bool,
+    parameters: bool,
+    super_call: bool,
+    super_property: bool,
+    private_names: Vec<HashSet<String>>,
+    forbid_arguments: bool,
+    lexical_functions: bool,
     new_target: bool,
     loops: usize,
     switches: usize,
@@ -16,6 +59,15 @@ struct Context {
 }
 
 type Check = Result<(), String>;
+
+#[derive(Default)]
+pub(crate) struct EvalContext {
+    pub new_target: bool,
+    pub strict: bool,
+    pub super_call: bool,
+    pub super_property: bool,
+    pub private_names: HashSet<String>,
+}
 
 pub(crate) fn use_strict(body: &[Statement]) -> bool {
     body.iter()
@@ -28,6 +80,7 @@ pub(super) fn validate(
     new_target: bool,
     strict: bool,
     goal: ParseGoal,
+    eval: Option<&EvalContext>,
 ) -> Check {
     fn module_declaration(statement: &Statement) -> bool {
         match statement {
@@ -41,6 +94,9 @@ pub(super) fn validate(
     }
     let inferred_module = body.iter().any(module_declaration);
     let module = goal == ParseGoal::Module || goal == ParseGoal::Auto && inferred_module;
+    if module {
+        module_exports(body)?;
+    }
     statements(
         body,
         &Context {
@@ -49,12 +105,69 @@ pub(super) fn validate(
             import_meta: goal != ParseGoal::Script,
             top_level: true,
             new_target,
+            await_allowed: goal != ParseGoal::Script,
+            lexical_functions: module,
+            super_call: eval.is_some_and(|context| context.super_call),
+            super_property: eval.is_some_and(|context| context.super_property),
+            private_names: eval
+                .map(|context| vec![context.private_names.clone()])
+                .unwrap_or_default(),
             ..Context::default()
         },
     )
 }
 
+fn module_exports(body: &[Statement]) -> Check {
+    fn direct<'a>(body: &'a [Statement], out: &mut Vec<&'a Statement>) {
+        for stmt in body {
+            if let Statement::Declarations(body) = stmt {
+                direct(body, out);
+            } else {
+                out.push(stmt);
+            }
+        }
+    }
+    let mut declarations = Vec::new();
+    direct(body, &mut declarations);
+    let mut bound = lexical_names(body, true, false)?;
+    let mut vars = Vec::new();
+    collect_var_declaration_names(body, &mut vars);
+    bound.extend(vars);
+    let mut exports = HashSet::new();
+    for stmt in declarations {
+        match stmt {
+            Statement::ExportDefault(_) => {
+                if !exports.insert("default".to_owned()) {
+                    return Err("duplicate default export".into());
+                }
+            }
+            Statement::ExportNamed { specifiers, source } => {
+                for (local, exported) in specifiers {
+                    if !exports.insert(exported.clone()) {
+                        return Err(format!("duplicate export: {exported}"));
+                    }
+                    if source.is_none() && !bound.contains(local) {
+                        return Err(format!("export of undeclared binding: {local}"));
+                    }
+                }
+            }
+            Statement::ExportAll {
+                alias: Some(alias), ..
+            } if !exports.insert(alias.clone()) => {
+                return Err(format!("duplicate export: {alias}"));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn binding(name: &str, ctx: &Context) -> Check {
+    if name == "await" && (ctx.module || ctx.kind.asynchronous() || ctx.await_reserved)
+        || name == "yield" && ctx.kind.generator()
+    {
+        return Err(format!("reserved contextual binding: {name}"));
+    }
     if ctx.strict
         && matches!(
             name,
@@ -92,24 +205,32 @@ fn function(
     params: &[String],
     body: &[Statement],
     outer: &Context,
-    arrow: bool,
+    kind: FunctionKind,
     unique: bool,
+    method: bool,
 ) -> Check {
     let ctx = Context {
         strict: outer.strict || use_strict(body),
         function: true,
+        kind,
         module: outer.module,
         import_meta: outer.import_meta,
-        new_target: !arrow || outer.new_target,
+        new_target: !kind.arrow() || outer.new_target,
+        await_allowed: kind.asynchronous(),
+        yield_allowed: kind.generator(),
+        super_call: (kind.arrow() || method) && outer.super_call,
+        super_property: method || kind.arrow() && outer.super_property,
+        private_names: outer.private_names.clone(),
+        forbid_arguments: kind.arrow() && outer.forbid_arguments,
         ..Context::default()
     };
     parameters(
         params,
         &ctx,
-        unique || arrow || params.iter().any(|p| p.starts_with("...")),
+        unique || kind.arrow() || params.iter().any(|p| p.starts_with("...")),
     )?;
     // Parameters cannot collide with direct lexical declarations in the body.
-    let lexical = lexical_names(body)?;
+    let lexical = lexical_names(body, ctx.lexical_functions, !ctx.strict && !ctx.module)?;
     let mut parameter_names: Vec<_> = params
         .iter()
         .map(|p| p.trim_start_matches("...").to_owned())
@@ -128,15 +249,33 @@ fn function(
     if parameter_names.iter().any(|p| lexical.contains(p)) {
         return Err("parameter conflicts with lexical declaration".into());
     }
+    for stmt in body {
+        if let Statement::ParameterInitialization { initializers, .. } = stmt {
+            for initializer in initializers {
+                statement(
+                    initializer,
+                    &Context {
+                        parameters: true,
+                        ..ctx.clone()
+                    },
+                )?;
+            }
+        }
+    }
     statements(body, &ctx)
 }
 
-fn lexical_names(body: &[Statement]) -> Result<HashSet<String>, String> {
+fn lexical_names(
+    body: &[Statement],
+    functions: bool,
+    sloppy: bool,
+) -> Result<HashSet<String>, String> {
     let mut names = HashSet::new();
+    let mut ordinary_functions = HashSet::new();
     for stmt in body {
         match stmt {
             Statement::Declarations(decls) => {
-                for name in lexical_names(decls)? {
+                for name in lexical_names(decls, functions, sloppy)? {
                     if !names.insert(name.clone()) {
                         return Err(format!("duplicate lexical binding: {name}"));
                     }
@@ -158,6 +297,38 @@ fn lexical_names(body: &[Statement]) -> Result<HashSet<String>, String> {
                     }
                 }
             }
+            Statement::FnDecl {
+                name,
+                is_async,
+                is_generator,
+                ..
+            } if functions => {
+                let ordinary = !is_async && !is_generator;
+                if !names.insert(name.clone())
+                    && !(sloppy && ordinary && ordinary_functions.contains(name))
+                {
+                    return Err(format!("duplicate lexical binding: {name}"));
+                }
+                if ordinary {
+                    ordinary_functions.insert(name.clone());
+                }
+            }
+            Statement::Import {
+                default,
+                named,
+                namespace,
+                ..
+            } => {
+                for name in default
+                    .iter()
+                    .chain(namespace.iter())
+                    .chain(named.iter().map(|(_, name)| name))
+                {
+                    if !names.insert(name.clone()) {
+                        return Err(format!("duplicate import binding: {name}"));
+                    }
+                }
+            }
             Statement::ClassDecl { name, .. } if !names.insert(name.clone()) => {
                 return Err(format!("duplicate lexical binding: {name}"));
             }
@@ -168,11 +339,13 @@ fn lexical_names(body: &[Statement]) -> Result<HashSet<String>, String> {
 }
 
 fn statements(body: &[Statement], ctx: &Context) -> Check {
-    let lexical = lexical_names(body)?;
+    let lexical = lexical_names(body, ctx.lexical_functions, !ctx.strict && !ctx.module)?;
     let mut vars = Vec::new();
     collect_var_declaration_names(body, &mut vars);
     for statement in body {
-        if let Statement::FnDecl { name, .. } = statement {
+        if !ctx.lexical_functions
+            && let Statement::FnDecl { name, .. } = statement
+        {
             vars.push(name.clone());
         }
     }
@@ -192,6 +365,7 @@ fn nested_statements(body: &[Statement], ctx: &Context) -> Check {
         body,
         &Context {
             top_level: false,
+            lexical_functions: true,
             ..ctx.clone()
         },
     )
@@ -222,8 +396,18 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             name,
             init,
             destructuring,
-            ..
+            kind,
         } => {
+            if matches!(kind, VarKind::Let | VarKind::Const)
+                && destructuring
+                    .as_deref()
+                    .map(pattern_names)
+                    .unwrap_or_else(|| vec![name.clone()])
+                    .iter()
+                    .any(|name| name == "let")
+            {
+                return Err("let is not a lexical binding name".into());
+            }
             if let Some(pattern) = destructuring {
                 pattern_check(pattern, ctx)?;
             } else {
@@ -241,7 +425,14 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             let mut own = ctx.clone();
             own.strict |= use_strict(body);
             binding(name, &own)?;
-            function(params, body, ctx, false, *is_async || *is_generator)
+            function(
+                params,
+                body,
+                ctx,
+                FunctionKind::of(false, *is_async, *is_generator),
+                *is_async || *is_generator,
+                false,
+            )
         }
         Statement::ClassDecl {
             name,
@@ -255,8 +446,14 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                     ..ctx.clone()
                 },
             )?;
-            optional(superclass.as_deref(), ctx)?;
-            class(body, ctx)
+            optional(
+                superclass.as_deref(),
+                &Context {
+                    strict: true,
+                    ..ctx.clone()
+                },
+            )?;
+            class(body, ctx, superclass.is_some())
         }
         Statement::Return(expr) => {
             if !ctx.function {
@@ -338,8 +535,11 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             pattern,
             iter,
             body,
-            ..
+            is_await,
         } => {
+            if *is_await && (!ctx.await_allowed || ctx.parameters) {
+                return Err("for await outside an async context".into());
+            }
             if let Some(pattern) = pattern {
                 pattern_check(pattern, ctx)?;
             } else {
@@ -408,6 +608,9 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             nested_statements(body, ctx)?;
             if let Some((name, body)) = catch {
                 binding(name, ctx)?;
+                if lexical_names(body, true, false)?.contains(name) {
+                    return Err("catch parameter conflicts with a lexical declaration".into());
+                }
                 nested_statements(body, ctx)?;
             }
             if let Some(body) = finally {
@@ -428,7 +631,14 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 .iter()
                 .flat_map(|case| case.body.iter().cloned())
                 .collect();
-            lexical_names(&body)?;
+            statements(
+                &body,
+                &Context {
+                    top_level: false,
+                    lexical_functions: true,
+                    ..next.clone()
+                },
+            )?;
             for case in cases {
                 optional(case.test.as_ref(), ctx)?;
                 nested_statements(&case.body, &next)?;
@@ -549,6 +759,21 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
 
 fn expression(expr: &Expr, ctx: &Context) -> Check {
     match expr {
+        Expr::Identifier(name) if name == "arguments" && ctx.forbid_arguments => {
+            Err("arguments in class initialization".into())
+        }
+        Expr::Identifier(name)
+            if name == "await" && (ctx.module || ctx.kind.asynchronous() || ctx.await_reserved) =>
+        {
+            Err("await used as an identifier".into())
+        }
+        Expr::Identifier(name) if name == "yield" && (ctx.strict || ctx.kind.generator()) => {
+            Err("yield used as an identifier".into())
+        }
+        Expr::Identifier(name) if name.starts_with('#') => {
+            Err("private name must be the left operand of in".into())
+        }
+        Expr::Super => Err("bare super expression".into()),
         Expr::ImportMeta if !ctx.import_meta => Err("import.meta outside a module".into()),
         Expr::NewTarget if !ctx.new_target => Err("new.target outside a function".into()),
         Expr::Array(items) | Expr::Template { exprs: items, .. } => {
@@ -568,16 +793,44 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                         expression(key, ctx)?;
                         expression(value, ctx)?;
                     }
-                    ObjectProp::Method { params, body, .. } => {
-                        function(params, body, ctx, false, true)?
+                    ObjectProp::Method {
+                        params,
+                        body,
+                        is_async,
+                        is_generator,
+                        ..
+                    } => function(
+                        params,
+                        body,
+                        ctx,
+                        FunctionKind::of(false, *is_async, *is_generator),
+                        true,
+                        true,
+                    )?,
+                    ObjectProp::Getter { body, .. } => {
+                        function(&[], body, ctx, FunctionKind::Ordinary, true, true)?
                     }
-                    ObjectProp::Getter { body, .. } => function(&[], body, ctx, false, true)?,
-                    ObjectProp::Setter { param, body, .. } => {
-                        function(std::slice::from_ref(param), body, ctx, false, true)?
-                    }
+                    ObjectProp::Setter { param, body, .. } => function(
+                        std::slice::from_ref(param),
+                        body,
+                        ctx,
+                        FunctionKind::Ordinary,
+                        true,
+                        true,
+                    )?,
                 }
             }
             Ok(())
+        }
+        Expr::Binary {
+            op: BinOp::In,
+            left,
+            right,
+        } if matches!(left.as_ref(), Expr::Identifier(name) if name.starts_with('#')) => {
+            if let Expr::Identifier(name) = left.as_ref() {
+                private_reference(name, ctx)?;
+            }
+            expression(right, ctx)
         }
         Expr::Binary { left, right, .. } => {
             expression(left, ctx)?;
@@ -593,13 +846,28 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             property,
             computed,
         } => {
-            expression(object, ctx)?;
+            if matches!(object.as_ref(), Expr::Super) {
+                if !ctx.super_property
+                    || matches!(expr, Expr::OptionalChain { .. })
+                    || private_member(expr).is_some()
+                {
+                    return Err("invalid super property access".into());
+                }
+            } else {
+                expression(object, ctx)?;
+            }
+            if let Some(name) = private_member(expr) {
+                private_reference(&name, ctx)?;
+            }
             if *computed {
                 expression(property, ctx)?;
             }
             Ok(())
         }
         Expr::Unary { op, operand, .. } => {
+            if *op == UnOp::Delete && private_member(operand).is_some() {
+                return Err("delete of a private element".into());
+            }
             if ctx.strict && *op == UnOp::Delete && matches!(operand.as_ref(), Expr::Identifier(_))
             {
                 return Err("delete of an unqualified identifier in strict mode".into());
@@ -632,7 +900,13 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             expression(alternate, ctx)
         }
         Expr::Call { callee, args } | Expr::New { callee, args } => {
-            expression(callee, ctx)?;
+            if matches!(callee.as_ref(), Expr::Super) {
+                if !ctx.super_call || matches!(expr, Expr::New { .. }) {
+                    return Err("super call outside a derived constructor".into());
+                }
+            } else {
+                expression(callee, ctx)?;
+            }
             for arg in args {
                 expression(arg, ctx)?;
             }
@@ -645,14 +919,37 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
             Ok(())
         }
-        Expr::ArrowFn { params, body, .. } => match body.as_ref() {
-            ExprOrBlock::Block(body) => function(params, body, ctx, true, true),
+        Expr::ArrowFn {
+            params,
+            body,
+            is_async,
+        } => match body.as_ref() {
+            ExprOrBlock::Block(body) => function(
+                params,
+                body,
+                ctx,
+                FunctionKind::of(true, *is_async, false),
+                true,
+                false,
+            ),
             ExprOrBlock::Expr(expr) => {
-                parameters(params, ctx, true)?;
+                parameters(
+                    params,
+                    &Context {
+                        kind: FunctionKind::of(true, *is_async, false),
+                        ..ctx.clone()
+                    },
+                    true,
+                )?;
                 expression(
                     expr,
                     &Context {
                         function: true,
+                        kind: FunctionKind::of(true, *is_async, false),
+                        await_allowed: *is_async,
+                        await_reserved: false,
+                        yield_allowed: false,
+                        parameters: false,
                         loops: 0,
                         switches: 0,
                         labels: Vec::new(),
@@ -670,10 +967,19 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         } => {
             let mut own = ctx.clone();
             own.strict |= use_strict(body);
+            own.await_reserved = false;
+            own.kind = FunctionKind::of(false, *is_async, *is_generator);
             if let Some(name) = name {
                 binding(name, &own)?;
             }
-            function(params, body, ctx, false, *is_async || *is_generator)
+            function(
+                params,
+                body,
+                ctx,
+                FunctionKind::of(false, *is_async, *is_generator),
+                *is_async || *is_generator,
+                false,
+            )
         }
         Expr::ClassExpr {
             name,
@@ -689,14 +995,34 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                     },
                 )?;
             }
-            optional(superclass.as_deref(), ctx)?;
-            class(body, ctx)
+            optional(
+                superclass.as_deref(),
+                &Context {
+                    strict: true,
+                    ..ctx.clone()
+                },
+            )?;
+            class(body, ctx, superclass.is_some())
         }
-        Expr::Spread(value)
-        | Expr::Await(value)
-        | Expr::YieldFrom(value)
-        | Expr::DynamicImport(value) => expression(value, ctx),
-        Expr::Yield(value) => optional(value.as_deref(), ctx),
+        Expr::Await(value) => {
+            if !ctx.await_allowed || ctx.parameters {
+                return Err("await outside an async context or in parameters".into());
+            }
+            expression(value, ctx)
+        }
+        Expr::YieldFrom(value) => {
+            if !ctx.yield_allowed || ctx.parameters {
+                return Err("yield outside a generator or in parameters".into());
+            }
+            expression(value, ctx)
+        }
+        Expr::Yield(value) => {
+            if !ctx.yield_allowed || ctx.parameters {
+                return Err("yield outside a generator or in parameters".into());
+            }
+            optional(value.as_deref(), ctx)
+        }
+        Expr::Spread(value) | Expr::DynamicImport(value) => expression(value, ctx),
         Expr::Number(_)
         | Expr::BigIntLiteral(_)
         | Expr::String(_)
@@ -707,17 +1033,104 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         | Expr::Undefined
         | Expr::Identifier(_)
         | Expr::This
-        | Expr::Super
         | Expr::ImportMeta
         | Expr::NewTarget => Ok(()),
     }
 }
 
-fn class(body: &[ClassMember], outer: &Context) -> Check {
-    let ctx = Context {
+fn private_reference(name: &str, ctx: &Context) -> Check {
+    if !ctx
+        .private_names
+        .iter()
+        .rev()
+        .any(|scope| scope.contains(name))
+    {
+        return Err(format!("undeclared private name: {name}"));
+    }
+    Ok(())
+}
+
+fn private_member(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Member {
+            property,
+            computed: false,
+            ..
+        }
+        | Expr::OptionalChain {
+            property,
+            computed: false,
+            ..
+        } => match property.as_ref() {
+            Expr::String(name) if name.starts_with("#") => Some(name.to_key()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
+    let mut ctx = Context {
         strict: true,
         ..outer.clone()
     };
+    let mut private = HashMap::new();
+    let mut constructors = 0;
+    for member in body {
+        let (name, is_static, accessor) = match member {
+            ClassMember::Method {
+                name, is_static, ..
+            }
+            | ClassMember::Field {
+                name, is_static, ..
+            } => (name, *is_static, 0),
+            ClassMember::Getter {
+                name, is_static, ..
+            } => (name, *is_static, 1),
+            ClassMember::Setter {
+                name, is_static, ..
+            } => (name, *is_static, 2),
+            ClassMember::StaticBlock { .. } => continue,
+        };
+        if let MemberName::Static(name) = name {
+            if name.starts_with('#') {
+                if name == "#constructor" {
+                    return Err("private constructor name is forbidden".into());
+                }
+                if let Some((previous_static, previous_accessor)) = private.get(name) {
+                    if *previous_static != is_static
+                        || accessor == 0
+                        || *previous_accessor == 0
+                        || *previous_accessor & accessor != 0
+                    {
+                        return Err(format!("duplicate private name: {name}"));
+                    }
+                    private.insert(name.clone(), (is_static, *previous_accessor | accessor));
+                } else {
+                    private.insert(name.clone(), (is_static, accessor));
+                }
+            }
+            if is_static && name == "prototype" {
+                return Err("static prototype element is forbidden".into());
+            }
+            if !is_static && name == "constructor" {
+                match member {
+                    ClassMember::Method {
+                        is_async: false,
+                        is_generator: false,
+                        ..
+                    } => {
+                        constructors += 1;
+                        if constructors > 1 {
+                            return Err("duplicate constructor".into());
+                        }
+                    }
+                    _ => return Err("invalid constructor element".into()),
+                }
+            }
+        }
+    }
+    ctx.private_names.push(private.into_keys().collect());
     for member in body {
         let name = match member {
             ClassMember::Method { name, .. }
@@ -730,15 +1143,52 @@ fn class(body: &[ClassMember], outer: &Context) -> Check {
             expression(expr, &ctx)?;
         }
         match member {
-            ClassMember::Method { params, body, .. } => function(params, body, &ctx, false, true)?,
-            ClassMember::Getter { body, .. } => function(&[], body, &ctx, false, true)?,
-            ClassMember::Setter { param, body, .. } => {
-                function(std::slice::from_ref(param), body, &ctx, false, true)?
+            ClassMember::Method {
+                name,
+                is_static,
+                params,
+                body,
+                is_async,
+                is_generator,
+            } => {
+                let constructor =
+                    !is_static && matches!(name, MemberName::Static(name) if name == "constructor");
+                let method_ctx = Context {
+                    super_call: constructor && derived,
+                    ..ctx.clone()
+                };
+                function(
+                    params,
+                    body,
+                    &method_ctx,
+                    FunctionKind::of(false, *is_async, *is_generator),
+                    true,
+                    true,
+                )?;
             }
+            ClassMember::Getter { body, .. } => {
+                function(&[], body, &ctx, FunctionKind::Ordinary, true, true)?
+            }
+            ClassMember::Setter { param, body, .. } => function(
+                std::slice::from_ref(param),
+                body,
+                &ctx,
+                FunctionKind::Ordinary,
+                true,
+                true,
+            )?,
             ClassMember::Field { init, .. } => optional(
                 init.as_ref(),
                 &Context {
                     new_target: true,
+                    super_property: true,
+                    super_call: false,
+                    await_allowed: false,
+                    await_reserved: false,
+                    yield_allowed: false,
+                    forbid_arguments: true,
+                    kind: FunctionKind::Ordinary,
+                    parameters: false,
                     ..ctx.clone()
                 },
             )?,
@@ -747,9 +1197,18 @@ fn class(body: &[ClassMember], outer: &Context) -> Check {
                 &Context {
                     new_target: true,
                     function: false,
+                    super_property: true,
+                    super_call: false,
+                    await_allowed: false,
+                    await_reserved: true,
+                    yield_allowed: false,
+                    forbid_arguments: true,
+                    kind: FunctionKind::Ordinary,
+                    parameters: false,
                     loops: 0,
                     switches: 0,
                     labels: Vec::new(),
+                    top_level: false,
                     ..ctx.clone()
                 },
             )?,

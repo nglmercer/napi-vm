@@ -396,10 +396,9 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                 crate::Lexer::from_js_string(source).tokenize_with_spans(),
             );
             let body = parser
-                .parse_eval_context(
-                    interp.global.borrow().new_target().is_some(),
-                    interp.global.borrow().strict(),
-                )
+                .parse_eval_context(crate::interpreter::Environment::eval_context(
+                    &interp.global,
+                ))
                 .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
             let strict = interp.global.borrow().strict() || crate::parser::use_strict(&body);
             let saved = interp.global.clone();

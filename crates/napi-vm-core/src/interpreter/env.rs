@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::rc::Rc;
 
@@ -224,6 +224,7 @@ pub struct Environment {
     constructor_this: Option<Option<Value>>,
     constructor_fields: Option<Rc<Vec<crate::parser::Statement>>>,
     private_names: HashMap<String, u64>,
+    private_declarations: HashSet<String>,
     strict: Option<bool>,
     isolated_realm: bool,
     variable_scope: bool,
@@ -246,6 +247,47 @@ impl Default for Environment {
 }
 
 impl Environment {
+    pub(crate) fn eval_context(scope: &Env) -> crate::parser::EvalContext {
+        let mut context = crate::parser::EvalContext {
+            new_target: scope.borrow().new_target().is_some(),
+            strict: scope.borrow().strict(),
+            ..Default::default()
+        };
+        let mut current = Some(scope.clone());
+        let mut found_this = false;
+        while let Some(frame) = current {
+            let environment = frame.borrow();
+            context
+                .private_names
+                .extend(environment.private_names.keys().cloned());
+            context
+                .private_names
+                .extend(environment.private_declarations.iter().cloned());
+            if !found_this && environment.own_binding("this").is_some() {
+                found_this = true;
+                let mut closure = environment.parent.clone();
+                let mut derived = false;
+                while let Some(parent) = closure {
+                    let parent = parent.borrow();
+                    if parent.own_binding("this").is_some() {
+                        break;
+                    }
+                    derived |= parent.own_binding("__super_ctor").is_some();
+                    context.super_property |=
+                        parent.own_binding(super::eval::SUPER_PROTO).is_some();
+                    closure = parent.parent.clone();
+                }
+                context.super_call = environment.constructor_this.is_some() && derived;
+            }
+            current = environment.parent.clone();
+        }
+        context
+    }
+
+    pub(crate) fn declare_private_declarations(&mut self, names: impl IntoIterator<Item = String>) {
+        self.private_declarations.extend(names);
+    }
+
     pub(crate) fn declare_private_field(&mut self, name: &str) {
         if !self.private_names.contains_key(name) {
             let Value::Symbol(ref symbol) = crate::builtins::new_symbol(None) else {
@@ -435,6 +477,7 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
+            private_declarations: HashSet::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: false,
@@ -456,6 +499,7 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
+            private_declarations: HashSet::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: false,
@@ -480,6 +524,7 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
+            private_declarations: HashSet::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: false,
@@ -516,6 +561,7 @@ impl Environment {
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
+            private_declarations: HashSet::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: true,

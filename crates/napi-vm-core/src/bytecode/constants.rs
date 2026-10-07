@@ -104,6 +104,8 @@ pub enum ClassMemberKind {
 #[derive(Debug, Clone)]
 pub struct ClassTemplate {
     pub private_fields: Vec<String>,
+    /// Lexically declared names for direct eval's static semantics.
+    pub private_declarations: Vec<String>,
     pub name: String,
     /// A class *expression's* own name, bound in a child scope around the
     /// definition (declarations bind in the enclosing scope instead).

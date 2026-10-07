@@ -421,6 +421,26 @@ pub enum ClassMember {
     },
 }
 
+/// Source declarations for eval's lexical validation, independent of which
+/// private storage forms the runtime currently installs.
+pub(crate) fn class_private_declarations(body: &[ClassMember]) -> Vec<String> {
+    body.iter()
+        .filter_map(|member| {
+            let name = match member {
+                ClassMember::Method { name, .. }
+                | ClassMember::Field { name, .. }
+                | ClassMember::Getter { name, .. }
+                | ClassMember::Setter { name, .. } => name,
+                ClassMember::StaticBlock { .. } => return None,
+            };
+            match name {
+                MemberName::Static(name) if name.starts_with('#') => Some(name.clone()),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// An object-pattern key: a static name, or `[expr]` evaluated at bind time.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PatternKey {

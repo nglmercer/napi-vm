@@ -280,7 +280,7 @@ fn imported_names_cannot_collide_with_module_declarations() {
             vm.link_module(id)
                 .unwrap_err()
                 .to_string()
-                .contains("Duplicate module binding")
+                .contains("SyntaxError")
         );
     }
     vm.load_module("dep").unwrap();

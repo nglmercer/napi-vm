@@ -75,6 +75,9 @@ impl Parser {
         let class_scope = self.push_scope(true);
         let mut b = Vec::new();
         while self.until(&Token::RBrace) {
+            if self.eat(&Token::Semicolon) {
+                continue;
+            }
             if self.eof() {
                 break;
             }
@@ -84,12 +87,12 @@ impl Parser {
             // `static { … }`: a static initialization block, not a member.
             if st && matches!(self.cur(), Token::LBrace) {
                 self.adv();
-                let body = self.block_body();
+                let body = self.with_grammar(false, false, Self::block_body);
                 self.expect(&Token::RBrace);
                 b.push(ClassMember::StaticBlock { body });
                 continue;
             }
-            let is_async = self.eat_modifier(&Token::KwAsync);
+            let is_async = !self.line_break_after_current() && self.eat_modifier(&Token::KwAsync);
             let is_generator = self.eat(&Token::Star);
             let is_getter = self.eat_modifier(&Token::KwGet);
             let is_setter = self.eat_modifier(&Token::KwSet);
@@ -143,14 +146,7 @@ impl Parser {
                     // outside the class body.
                     Token::Hash => {
                         self.adv();
-                        match self.cur() {
-                            Token::Identifier(x) => {
-                                let v = format!("#{}", x);
-                                self.adv();
-                                v
-                            }
-                            _ => return None,
-                        }
+                        format!("#{}", self.ident_or_keyword()?)
                     }
                     _ => self.ident_or_keyword()?,
                 };
@@ -172,11 +168,11 @@ impl Parser {
             }
             if self.eat(&Token::LParen) {
                 let method_scope = self.push_scope(true);
-                let (p, defaults) = self.params();
-                self.expect(&Token::RParen);
-                self.eat(&Token::LBrace);
-                let bd = self.block_body();
-                self.expect(&Token::RBrace);
+                let (p, defaults, bd) = self.callable_parts(is_async, is_generator);
+                self.check_accessor_parameters(&p, &defaults, is_getter, is_setter);
+                if (is_getter || is_setter) && (is_async || is_generator) {
+                    self.record_error("accessor cannot be async or a generator".into());
+                }
                 self.pop_scope(method_scope);
                 self.check_parameters(&p, &defaults, &bd, true);
                 let body = Self::function_body(&p, defaults, bd);
@@ -205,8 +201,11 @@ impl Parser {
                     });
                 }
             } else {
+                if is_async || is_generator || is_getter || is_setter {
+                    self.record_error("method modifier on a field".into());
+                }
                 let i = if self.eat(&Token::Equal) {
-                    Some(self.assign()?)
+                    Some(self.with_grammar(false, false, Self::assign)?)
                 } else {
                     None
                 };

@@ -1231,6 +1231,9 @@ fn build_class_from_template(
         .map(|reg| frame.registers[reg as usize].clone_for_execution());
     let super_proto = interp.super_proto_for(&super_cls)?;
     let member_scope = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+    member_scope
+        .borrow_mut()
+        .declare_private_declarations(template.private_declarations.clone());
     for name in &template.private_fields {
         member_scope.borrow_mut().declare_private_field(name);
     }

@@ -37,22 +37,24 @@ impl Parser {
     pub(crate) fn assign(&mut self) -> Option<Expr> {
         // `yield` sits at assignment precedence. A bare `yield` (followed by a
         // terminator) yields `undefined`; otherwise it yields the operand.
-        if matches!(self.cur(), Token::KwYield) {
+        if self.yield_expression && matches!(self.cur(), Token::KwYield) {
             self.adv();
+            let newline = self.pos > 0 && self.cur_span().line > self.toks[self.pos - 1].1.line;
             // `yield* iterable` delegates to another iterator.
-            if self.eat(&Token::Star) {
+            if !newline && self.eat(&Token::Star) {
                 let inner = self.assign()?;
                 return Some(Expr::YieldFrom(Box::new(inner)));
             }
-            let arg = if matches!(
-                self.cur(),
-                Token::Semicolon
-                    | Token::RParen
-                    | Token::RBrace
-                    | Token::RBracket
-                    | Token::Comma
-                    | Token::EOF
-            ) {
+            let arg = if newline
+                || matches!(
+                    self.cur(),
+                    Token::Semicolon
+                        | Token::RParen
+                        | Token::RBrace
+                        | Token::RBracket
+                        | Token::Comma
+                        | Token::EOF
+                ) {
                 None
             } else {
                 Some(Box::new(self.assign()?))
@@ -583,7 +585,7 @@ impl Parser {
                     prefix: true,
                 })
             }
-            Token::KwAwait => {
+            Token::KwAwait if self.await_expression => {
                 self.adv();
                 let o = self.unary()?;
                 Some(Expr::Await(Box::new(o)))
@@ -603,10 +605,11 @@ impl Parser {
                         if let Some(arg) = self.assign() {
                             a.push(arg);
                         } else {
+                            self.record_error("expected call argument".into());
                             self.adv();
                         }
                         if !matches!(self.cur(), Token::RParen) {
-                            self.eat(&Token::Comma);
+                            self.expect(&Token::Comma);
                         }
                     }
                     self.expect(&Token::RParen);
@@ -621,7 +624,7 @@ impl Parser {
                     // property name, so nothing outside the class body can
                     // name it — that is the whole of the privacy.
                     if self.eat(&Token::Hash) {
-                        let p = self.ident()?;
+                        let p = self.ident_or_keyword()?;
                         e = Expr::Member {
                             object: Box::new(e),
                             property: Box::new(Expr::String((format!("#{}", p)).into())),
@@ -656,7 +659,7 @@ impl Parser {
                         computed: true,
                     };
                 }
-                Token::PlusPlus => {
+                Token::PlusPlus if !self.line_break_before_current() => {
                     self.adv();
                     e = Expr::Unary {
                         op: UnOp::Inc,
@@ -664,7 +667,7 @@ impl Parser {
                         prefix: false,
                     };
                 }
-                Token::MinusMinus => {
+                Token::MinusMinus if !self.line_break_before_current() => {
                     self.adv();
                     e = Expr::Unary {
                         op: UnOp::Dec,
@@ -684,7 +687,7 @@ impl Parser {
                                 self.adv();
                             }
                             if !matches!(self.cur(), Token::RParen) {
-                                self.eat(&Token::Comma);
+                                self.expect(&Token::Comma);
                             }
                         }
                         self.expect(&Token::RParen);
@@ -707,7 +710,9 @@ impl Parser {
                         };
                     } else {
                         // Optional member: obj?.prop
+                        let private = self.eat(&Token::Hash);
                         let p = self.ident_or_keyword()?;
+                        let p = if private { format!("#{p}") } else { p };
                         e = Expr::OptionalChain {
                             object: Box::new(e),
                             property: Box::new(Expr::String((p).into())),
@@ -729,6 +734,9 @@ impl Parser {
                     };
                 }
                 Token::Arrow => {
+                    if self.line_break_before_current() {
+                        self.record_error("line terminator before arrow".into());
+                    }
                     if let Expr::Identifier(n) = e {
                         self.adv();
                         e = self.arrow_body(vec![n], vec![]);
