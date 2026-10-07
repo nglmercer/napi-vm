@@ -19,6 +19,7 @@ pub use scheduler::{
     CancellationToken, Clock, ClockMode, EventLoopOptions, Fairness, RealTimeClock, TurnBudget,
     TurnOutcome, VirtualClock, YieldReason,
 };
+pub(crate) mod realm;
 mod resolve;
 #[cfg(all(
     feature = "node-api-host",
@@ -461,12 +462,14 @@ impl Interpreter {
     /// frame, so hot-path variable lookups hit immediately instead of scanning
     /// the large builtins table; builtins still resolve via the parent chain.
     pub fn with_builtins() -> Self {
+        let _allocation_realm = realm::AllocationRealm::enter(None);
         let mut interp = Self::new();
         let builtins = Rc::new(RefCell::new(Environment::new()));
         crate::builtins::setup_builtins(&builtins);
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
+        realm::own_intrinsics(&interp.persistent_global);
         interp.republish_roots();
         #[cfg(all(test, feature = "node-api-host"))]
         crate::test_support::install_buffer(&mut interp.global.borrow_mut());
@@ -735,6 +738,20 @@ export default { createRequire, isBuiltin, builtinModules };
         Self::compile_statements(source, statements)
     }
 
+    /// Compile with an explicit ECMAScript grammar goal.
+    pub fn compile_with_goal(
+        source: &str,
+        goal: crate::parser::ParseGoal,
+    ) -> Result<PreparedProgram, VmErr> {
+        let statements = crate::parser::parse_cached_with_goal(source, goal)
+            .map_err(|error| error.into_vm_err())?;
+        let mut program = Self::compile_statements(source, statements)?;
+        if goal == crate::parser::ParseGoal::Module {
+            program.kind = SourceKind::Module;
+        }
+        Ok(program)
+    }
+
     /// Compile JavaScript source supplied as UTF-16, without replacing lone
     /// surrogates inside literals. Valid UTF-8 retains the shared parse cache.
     pub fn compile_utf16(source: &crate::JsString) -> Result<PreparedProgram, VmErr> {
@@ -865,7 +882,14 @@ export default { createRequire, isBuiltin, builtinModules };
         if let Some(program) = self.prepared_cache.get(source, kind) {
             return Ok(program);
         }
-        let mut program = Self::compile(source)?;
+        let mut program = Self::compile_with_goal(
+            source,
+            if kind == SourceKind::Module {
+                crate::parser::ParseGoal::Module
+            } else {
+                crate::parser::ParseGoal::Auto
+            },
+        )?;
         program.kind = kind;
         self.prepared_cache.insert(program.clone());
         Ok(program)
@@ -977,12 +1001,17 @@ export default { createRequire, isBuiltin, builtinModules };
         &mut self,
         module: &crate::bytecode::BytecodeModule,
     ) -> Result<Value, VmErr> {
+        let _allocation_realm = realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
+        let scope = self.global.clone();
+        let strict = scope.borrow().strict() || module.main.strict || self.cur_mod.is_some();
+        let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
         let result = {
             let _execution_guard = GuestExecutionGuard(depth.clone());
             crate::bytecode::vm::run_module(self, module)
         };
+        scope.borrow_mut().replace_strict(saved_strict);
         if depth.get() == 0 {
             self.republish_roots();
         }
@@ -1377,10 +1406,18 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let is_persistent_global = Rc::ptr_eq(scope, &self.persistent_global);
         let mut env = scope.borrow_mut();
         match env.assign(name, value.clone()) {
             AssignOutcome::Assigned => Ok(()),
+            AssignOutcome::ReadOnly => {
+                if env.strict() {
+                    Err(VmErr::Msg(format!(
+                        "TypeError: Cannot assign to read-only property {name}"
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
             AssignOutcome::Const => Err(VmErr::Msg(format!(
                 "TypeError: Assignment to constant variable '{name}'"
             ))),
@@ -1390,14 +1427,11 @@ impl Interpreter {
             // No such binding: an assignment to an undeclared name creates an
             // implicit `var`-like global, as sloppy-mode JavaScript does.
             AssignOutcome::Missing => {
-                if self.cur_mod.is_some() {
+                if self.cur_mod.is_some() || env.strict() {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
                 }
-                if is_persistent_global {
-                    env.try_set(name, value)?;
-                } else {
-                    env.set(name, value);
-                }
+                drop(env);
+                self.persistent_global.borrow_mut().try_set(name, value)?;
                 Ok(())
             }
         }
@@ -1408,6 +1442,7 @@ impl Interpreter {
     /// is currently executing inside a function/catch environment.
     #[doc(hidden)]
     pub fn set_global_checked(&mut self, name: &str, value: Value) -> Result<(), VmErr> {
+        let strict = self.global.borrow().strict();
         let mut global = self.persistent_global.borrow_mut();
         // An explicit write through the global object creates or updates an
         // own user-global binding. Do not use `assign` here: it walks into the
@@ -1415,7 +1450,13 @@ impl Interpreter {
         // `Math` instead of creating a user shadow.
         let attributes = global.global_property(name).map(|(_, attrs)| attrs);
         if attributes.is_some_and(|attrs| !attrs.writable) {
-            return Ok(());
+            return if strict {
+                Err(VmErr::Msg(format!(
+                    "TypeError: Cannot assign to read-only property {name}"
+                )))
+            } else {
+                Ok(())
+            };
         }
         global.try_set(name, value)?;
         if let Some(attrs) = attributes {
@@ -1494,6 +1535,11 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
+        let _allocation_realm = realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
+        let scope = self.global.clone();
+        let strict =
+            scope.borrow().strict() || crate::parser::use_strict(stmts) || self.cur_mod.is_some();
+        let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
         let result = {
@@ -1502,6 +1548,7 @@ impl Interpreter {
                 .and_then(|()| self.hoist_lexical(stmts))
                 .and_then(|()| self.run(stmts))
         };
+        scope.borrow_mut().replace_strict(saved_strict);
         if depth.get() == 0 {
             self.republish_roots();
         }

@@ -334,12 +334,11 @@ fn instance_proto(interp: &mut Interpreter, kind: Kind) -> Result<Rc<Value>, VmE
         .new_target_stack
         .last()
         .cloned()
-        .or_else(|| interp.global.borrow().get(kind.tag()));
+        .or_else(|| interp.persistent_global.borrow().intrinsic(kind.tag()));
     if let Some(namespace) = namespace
-        && let Ok(proto) = interp.member(&namespace, "prototype")
-        && matches!(proto, Value::Object { .. })
+        && let Some(prototype) = interp.constructor_prototype(&namespace, kind.tag())?
     {
-        return Ok(Rc::new(proto));
+        return Ok(prototype);
     }
     prototype_for(kind)
 }
@@ -358,7 +357,7 @@ fn in_place_target(
     if !matches!(this, Value::Object { .. }) || entries_of(this).is_some() {
         return Ok(None);
     }
-    let namespace = interp.global.borrow().get(kind.tag());
+    let namespace = interp.persistent_global.borrow().intrinsic(kind.tag());
     let Some(namespace) = namespace else {
         return Ok(None);
     };

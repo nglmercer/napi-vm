@@ -135,6 +135,13 @@ pub fn setup_builtins(env: &Env) {
     e.set("undefined", Value::Undefined);
     e.set("eval", nf("eval", eval_indirect));
     for name in e.own_keys() {
+        if let Some(Value::NativeFunction { callable, .. }) = e.get(&name) {
+            let length = if name == "parseInt" { 2 } else { 1 };
+            let prototype = e
+                .get("Function")
+                .and_then(|function| function.get_prop("prototype"));
+            e.set(&name, native_method(&name, length, callable, prototype));
+        }
         let immutable = matches!(name.as_str(), "Infinity" | "NaN" | "undefined");
         e.set_property_attributes(
             &name,
@@ -282,6 +289,7 @@ fn native_method(name: &str, length: usize, callable: NativeFn, prototype: Optio
         );
     }
     Value::Function(std::rc::Rc::new(crate::value::FunctionData {
+        strict: false,
         native: Some(callable),
         identity: std::rc::Rc::new(0),
         name: Some(name.into()),
@@ -359,8 +367,19 @@ fn join_str(interp: &Interpreter, v: &Value) -> Result<crate::JsString, VmErr> {
 
 // --- Global functions -------------------------------------------------------
 
-pub(crate) fn is_intrinsic_eval(value: &Value) -> bool {
-    matches!(value, Value::NativeFunction { callable, .. } if std::ptr::fn_addr_eq(*callable, eval_indirect as NativeFn))
+pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {
+    let intrinsic = match value {
+        Value::NativeFunction { callable, .. } => {
+            std::ptr::fn_addr_eq(*callable, eval_indirect as NativeFn)
+        }
+        Value::Function(function) => function
+            .native
+            .is_some_and(|callable| std::ptr::fn_addr_eq(callable, eval_indirect as NativeFn)),
+        _ => false,
+    };
+    intrinsic
+        && crate::interpreter::realm::value_realm(value)
+            .is_none_or(|owner| std::rc::Rc::ptr_eq(&owner, global))
 }
 
 pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
@@ -370,9 +389,22 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                 crate::Lexer::from_js_string(source).tokenize_with_spans(),
             );
             let body = parser
-                .parse_program_in_context(interp.global.borrow().new_target().is_some())
+                .parse_eval_context(
+                    interp.global.borrow().new_target().is_some(),
+                    interp.global.borrow().strict(),
+                )
                 .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
-            interp.run_program_body(&body)
+            let strict = interp.global.borrow().strict() || crate::parser::use_strict(&body);
+            let saved = interp.global.clone();
+            if strict {
+                interp.global = std::rc::Rc::new(std::cell::RefCell::new(
+                    crate::interpreter::Environment::child(saved.clone()),
+                ));
+                interp.global.borrow_mut().replace_strict(Some(true));
+            }
+            let result = interp.run_program_body(&body);
+            interp.global = saved;
+            result
         }
         Some(value) => Ok(value.clone()),
         None => Ok(Value::Undefined),
@@ -382,7 +414,10 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
 fn eval_indirect(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let saved_global = std::mem::replace(&mut interp.global, interp.persistent_global.clone());
     let saved_module = interp.cur_mod.take();
+    let scope = interp.global.clone();
+    let saved_strict = scope.borrow_mut().replace_strict(Some(false));
     let result = eval_direct(interp, args);
+    scope.borrow_mut().replace_strict(saved_strict);
     interp.global = saved_global;
     interp.cur_mod = saved_module;
     result

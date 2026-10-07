@@ -131,3 +131,11 @@ fn worker_detaches_buffers_and_accepts_gc_requests() {
         assert_eq!(result["error_type"], "TypeError", "{result}");
     }
 }
+
+#[test]
+fn worker_create_realm_has_distinct_globals_and_intrinsics() {
+    let report = worker(
+        json!({"source": "var realm=$262.createRealm();if(realm.global===globalThis || realm.global.Object===Object) throw new Error('shared realm');realm.evalScript('var realmSecret=17;');if(realm.global.realmSecret!==17 || typeof realmSecret!=='undefined') throw new Error('leaked global');var evalScript=realm.evalScript;if(evalScript('this')!==realm.global) throw new Error('lost host realm');var nested=realm.createRealm();if(nested.global===realm.global || nested.global.Array===realm.global.Array) throw new Error('shared nested realm');"}),
+    );
+    assert_eq!(report["status"], "ok", "{report}");
+}

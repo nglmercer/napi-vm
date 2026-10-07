@@ -22,6 +22,7 @@ pub(super) fn install(e: &mut Environment) {
         .get("Object")
         .and_then(|object| object.get_prop("prototype"));
     let prototype = Value::Function(Rc::new(FunctionData {
+        strict: false,
         native: None,
         identity: Rc::new(0),
         name: Some(Rc::from("")),
@@ -230,6 +231,7 @@ fn function_bind(
     );
 
     Ok(Value::Function(Rc::new(FunctionData {
+        strict: false,
         native: None,
         identity: Rc::new(0),
         name: Some(format!("bound {target_name}").into()),
@@ -367,6 +369,7 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
     let needs_hoisting = body_needs_hoisting(&body);
     Ok(Value::Function(Rc::new(FunctionData {
+        strict: crate::parser::use_strict(&body),
         native: None,
         identity: Rc::new(0),
         name: Some("anonymous".into()),

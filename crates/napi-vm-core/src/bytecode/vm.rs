@@ -205,15 +205,14 @@ pub(crate) fn run_function(
     parent_env: Env,
     this_value: Value,
     args: &[Value],
+    strict: bool,
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
-    let fe = if code.needs_frame_environment || !code.is_arrow {
-        Rc::new(RefCell::new(Environment::child(parent_env)))
-    } else {
-        parent_env
-    };
+    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+    fe.borrow_mut().replace_strict(Some(strict));
     if !code.is_arrow {
+        fe.borrow_mut().set("this", this_value.clone());
         fe.borrow_mut()
             .set_new_target(interp.pending_new_target.take().unwrap_or(Value::Undefined));
     }
@@ -546,7 +545,7 @@ fn run_loop(
                             if interp.cur_mod.is_some() {
                                 Value::Undefined
                             } else {
-                                Value::GlobalObject
+                                interp.realm_global_object()
                             }
                         });
                 }
@@ -745,21 +744,23 @@ fn run_loop(
                 } => {
                     let argv = take_range(frame, args, argc)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
-                    frame.registers[dst as usize] = if crate::builtins::is_intrinsic_eval(&callee) {
-                        crate::builtins::eval_direct(interp, argv)?
-                    } else {
-                        interp.call_this(&callee, Value::Undefined, argv)?
-                    };
+                    frame.registers[dst as usize] =
+                        if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
+                            crate::builtins::eval_direct(interp, argv)?
+                        } else {
+                            interp.call_this(&callee, Value::Undefined, argv)?
+                        };
                 }
                 Instr::DirectEvalSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
                     let argv = spread_argv(frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
-                    frame.registers[dst as usize] = if crate::builtins::is_intrinsic_eval(&callee) {
-                        crate::builtins::eval_direct(interp, argv)?
-                    } else {
-                        interp.call_this(&callee, Value::Undefined, argv)?
-                    };
+                    frame.registers[dst as usize] =
+                        if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
+                            crate::builtins::eval_direct(interp, argv)?
+                        } else {
+                            interp.call_this(&callee, Value::Undefined, argv)?
+                        };
                 }
                 Instr::Call {
                     dst,
@@ -1199,6 +1200,8 @@ fn class_function(
     closure: Env,
     name_override: Option<Rc<str>>,
 ) -> Result<Value, VmErr> {
+    let closure = Rc::new(RefCell::new(Environment::child(closure)));
+    closure.borrow_mut().replace_strict(Some(true));
     match frame.function.constants.get(index as usize) {
         Some(Constant::Function(code)) => Ok(make_function(interp, code, closure, name_override)),
         Some(Constant::AstFunction(ast)) => {
@@ -1228,7 +1231,9 @@ fn build_class_from_template(
         .superclass
         .map(|reg| frame.registers[reg as usize].clone_for_execution());
     let super_proto = interp.super_proto_for(&super_cls)?;
-    let member_closure = Interpreter::member_closure_env(&def_scope, &super_proto);
+    let member_scope = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+    let member_closure = Interpreter::member_closure_env(&member_scope, &super_proto);
+    member_closure.borrow_mut().replace_strict(Some(true));
 
     let mut proto_props = Vec::new();
     let mut statics = vec![(
@@ -1303,7 +1308,7 @@ fn build_class_from_template(
                     ));
                     static_has_accessors = true;
                 } else {
-                    proto_props.push((key, fn_val));
+                    insert_class_accessor(&mut proto_props, &key, fn_val);
                 }
             }
             ClassMemberKind::Field => {
@@ -1659,6 +1664,7 @@ fn make_function(
         .map(|slot| slot.name.clone())
         .collect();
     Value::Function(Rc::new(FunctionData {
+        strict: closure.borrow().strict() || code.strict,
         native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| code.name.as_deref().map(Rc::from)),
@@ -1697,6 +1703,7 @@ fn make_ast_function(
     name_override: Option<Rc<str>>,
 ) -> Value {
     Value::Function(Rc::new(FunctionData {
+        strict: closure.borrow().strict() || crate::parser::use_strict(&ast.body),
         native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| ast.name.as_deref().map(Rc::from)),

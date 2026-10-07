@@ -1,10 +1,11 @@
 //! One test per process. Corpus orchestration applies a hard process timeout.
-use napi_vm::interpreter::{DrainPolicy, EvaluationOptions, ExecutionBudget};
+use napi_vm::interpreter::ExecutionBudget;
 use napi_vm::{Interpreter, ModuleLoader, ModuleSource, Value, VirtualLoader, VmErr};
 use serde::Deserialize;
 use serde_json::{Value as Json, json};
 use std::io::{self, Read};
 use std::rc::Rc;
+thread_local! { static GC_REQUESTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
 #[derive(Deserialize)]
 struct Request {
@@ -127,13 +128,46 @@ fn detach_array_buffer(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
     Ok(Value::Undefined)
 }
 
-fn request_gc(vm: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+fn request_gc(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     // Collection is only safe at a host boundary: defer requests made while
     // guest frames are live until execute() has returned from evaluation.
-    vm.persistent_global
-        .borrow_mut()
-        .set("__test262_gc_requested", Value::Bool(true));
+    GC_REQUESTED.with(|requested| requested.set(true));
     Ok(Value::Undefined)
+}
+
+fn eval_realm_script(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let source = vm.vs(args.first().unwrap_or(&Value::Undefined))?;
+    let global = vm.realm_global_object();
+    vm.eval_in_realm(&global, &source)
+}
+
+fn create_realm(vm: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let mut child = vm.create_realm();
+    let host = realm_host(&mut child);
+    child.global.borrow_mut().set("$262", host.clone());
+    Ok(host)
+}
+
+fn realm_host(vm: &mut Interpreter) -> Value {
+    let host = Value::object(vec![
+        ("global".into(), vm.realm_global_object()),
+        (
+            "evalScript".into(),
+            vm.native_function_in_realm("evalScript", eval_realm_script),
+        ),
+        (
+            "createRealm".into(),
+            vm.native_function_in_realm("createRealm", create_realm),
+        ),
+        (
+            "detachArrayBuffer".into(),
+            vm.native_function_in_realm("detachArrayBuffer", detach_array_buffer),
+        ),
+        ("gc".into(), vm.native_function_in_realm("gc", request_gc)),
+    ]);
+    let gc = vm.native_function_in_realm("gc", request_gc);
+    vm.global.borrow_mut().set("gc", gc);
+    host
 }
 
 fn error_type(error: &VmErr) -> String {
@@ -162,7 +196,12 @@ fn failure(phase: &str, error: &VmErr) -> Json {
 }
 fn execute(request: Request) -> Json {
     // Parse test source separately: a harness failure cannot satisfy a negative test.
-    if let Err(error) = Interpreter::compile(&request.source) {
+    let goal = if request.module {
+        napi_vm::parser::ParseGoal::Module
+    } else {
+        napi_vm::parser::ParseGoal::Script
+    };
+    if let Err(error) = Interpreter::compile_with_goal(&request.source, goal) {
         return json!({"status":"error", "phase":"parse", "error_type":"SyntaxError", "message":error.to_string()});
     }
     let mut vm = Interpreter::with_builtins();
@@ -205,41 +244,7 @@ fn execute(request: Request) -> Json {
     vm.global
         .borrow_mut()
         .set("__test262_done_count", Value::Number(0.0));
-    let host = Value::object(vec![(
-        "evalScript".into(),
-        Value::NativeFunction {
-            name: "evalScript".into(),
-            callable: |vm, _, args| {
-                let source = vm.vs(args.first().unwrap_or(&Value::Undefined))?;
-                let saved = std::mem::replace(&mut vm.global, vm.persistent_global.clone());
-                let result = vm.eval_source_with_options(
-                    &source,
-                    EvaluationOptions {
-                        drain: DrainPolicy::None,
-                        ..Default::default()
-                    },
-                );
-                vm.global = saved;
-                result
-            },
-        },
-    )]);
-    host.set_prop(
-        "detachArrayBuffer".into(),
-        Value::NativeFunction {
-            name: "detachArrayBuffer".into(),
-            callable: detach_array_buffer,
-        },
-    )
-    .expect("$262.detachArrayBuffer");
-    let gc = Value::NativeFunction {
-        name: "gc".into(),
-        callable: request_gc,
-    };
-    host.set_prop("gc".into(), gc.clone()).expect("$262.gc");
-    vm.global.borrow_mut().set("gc", gc);
-    host.set_prop("global".into(), Value::GlobalObject)
-        .expect("$262.global");
+    let host = realm_host(&mut vm);
     vm.global.borrow_mut().set("$262", host);
     if let Err(error) = vm.eval_source(&request.harness) {
         return failure("harness", &error);
@@ -261,10 +266,7 @@ fn execute(request: Request) -> Json {
     } else {
         vm.eval_source(&request.source)
     };
-    if matches!(
-        vm.persistent_global.borrow().get("__test262_gc_requested"),
-        Some(Value::Bool(true))
-    ) {
+    if GC_REQUESTED.with(|requested| requested.replace(false)) {
         vm.collect_cycles();
     }
     if let Err(error) = result {

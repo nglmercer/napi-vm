@@ -96,6 +96,7 @@ impl WeakTarget {
                     }))
                 })
             }
+            Value::RealmGlobal(env) => Self::rc(env, |env| Value::RealmGlobal(env.clone())),
             Value::GlobalObject => Self::rc(global, |_| Value::GlobalObject),
             _ => return None,
         })

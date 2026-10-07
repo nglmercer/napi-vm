@@ -307,6 +307,7 @@ impl Marker {
 
     fn mark_value(&mut self, value: &Value) {
         match value {
+            Value::RealmGlobal(global) => self.mark_env(global),
             Value::HostPending { id } => {
                 self.host_calls.insert(*id);
             }
@@ -539,9 +540,14 @@ impl Marker {
                 MarkItem::AsyncTask(inner) => {
                     // The result promise is tracked in its own right; the
                     // coroutine stack is opaque, hence the suspend barrier.
-                    self.opaque |= inner
-                        .try_borrow()
-                        .map_or(true, |task| task.suspends_values());
+                    if let Ok(task) = inner.try_borrow() {
+                        self.opaque |= task.suspends_values();
+                        if let Some(owner) = task.owner() {
+                            self.mark_env(&owner);
+                        }
+                    } else {
+                        self.opaque = true;
+                    }
                 }
             }
         }

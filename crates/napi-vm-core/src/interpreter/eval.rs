@@ -309,7 +309,11 @@ impl Interpreter {
             static_has_accessors,
             static_blocks,
         } = asm;
+        let prototype_has_accessors = proto_props.iter().any(|(key, value)| key.starts_with("__setter:") || matches!(value, Value::Function(function) if function.name.as_deref().is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))));
         let prototype = Value::object_with_proto(proto_props, super_proto);
+        if let Value::Object { props } = &prototype {
+            props.meta.borrow_mut().has_accessors = prototype_has_accessors;
+        }
         prototype.set_prop("constructor".to_string(), constructor.clone())?;
 
         statics.push((
@@ -442,6 +446,7 @@ impl Interpreter {
                     // ordinary method.
                     let is_ctor_name = matches!(name, MemberName::Static(n) if n == "constructor");
                     let fn_val = Value::Function(Rc::new(FunctionData {
+                        strict: true,
                         native: None,
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
@@ -508,6 +513,7 @@ impl Interpreter {
                 } => {
                     let gname = self.member_name(name)?;
                     let getter_fn = Value::Function(Rc::new(FunctionData {
+                        strict: true,
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
@@ -539,7 +545,7 @@ impl Interpreter {
                         ));
                         static_has_accessors = true;
                     } else {
-                        proto_props.push((gname.clone(), getter_fn));
+                        insert_class_accessor(&mut proto_props, &gname, getter_fn);
                     }
                 }
                 ClassMember::Setter {
@@ -550,6 +556,7 @@ impl Interpreter {
                 } => {
                     let sname = self.member_name(name)?;
                     let setter_fn = Value::Function(Rc::new(FunctionData {
+                        strict: true,
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
@@ -581,7 +588,7 @@ impl Interpreter {
                         ));
                         static_has_accessors = true;
                     } else {
-                        proto_props.push((sname.clone(), setter_fn));
+                        insert_class_accessor(&mut proto_props, &sname, setter_fn);
                     }
                 }
             }
@@ -634,6 +641,7 @@ impl Interpreter {
             .take_while(|parameter| !parameter.starts_with("..."))
             .count();
         let constructor = Value::Function(Rc::new(FunctionData {
+            strict: true,
             native: None,
             identity: Rc::new(0),
             name: Some(Rc::from(name)),
@@ -957,6 +965,7 @@ impl Interpreter {
                 self.set_binding(
                     name,
                     Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
@@ -1569,6 +1578,7 @@ impl Interpreter {
                     is_generator,
                 } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
@@ -1599,6 +1609,7 @@ impl Interpreter {
                 }
                 ObjectProp::Getter { name, body } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("get {name}").into()),
@@ -1629,6 +1640,7 @@ impl Interpreter {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("set {name}").into()),
@@ -2047,7 +2059,9 @@ impl Interpreter {
                             Some(value) => value,
                             None => self.eval_expr(callee)?,
                         };
-                        if direct_eval && crate::builtins::is_intrinsic_eval(&c) {
+                        if direct_eval
+                            && crate::builtins::is_intrinsic_eval(&c, &self.persistent_global)
+                        {
                             crate::builtins::eval_direct(self, a)
                         } else {
                             self.call_this(&c, Value::Undefined, a)
@@ -2244,6 +2258,8 @@ impl Interpreter {
                 body,
                 is_async,
             } => Ok(Value::Function(Rc::new(FunctionData {
+                strict: self.global.borrow().strict()
+                    || matches!(body.as_ref(), ExprOrBlock::Block(s) if crate::parser::use_strict(s)),
                 native: None,
                 identity: Rc::new(0),
                 name: None,
@@ -2274,6 +2290,7 @@ impl Interpreter {
                 is_async,
                 is_generator,
             } => Ok(Value::Function(Rc::new(FunctionData {
+                strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                 native: None,
                 identity: Rc::new(0),
                 name: name.as_deref().map(Rc::from),
@@ -2306,7 +2323,7 @@ impl Interpreter {
                 if self.cur_mod.is_some() {
                     Value::Undefined
                 } else {
-                    Value::GlobalObject
+                    self.realm_global_object()
                 }
             })),
             // `import(specifier)`. Module registration is synchronous in this

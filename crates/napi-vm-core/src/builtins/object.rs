@@ -193,13 +193,15 @@ fn own_names_for(
     value: &Value,
     enumerable_only: bool,
 ) -> Result<Vec<String>, VmErr> {
-    if matches!(value, Value::GlobalObject) {
-        return Ok(interp
-            .global_keys()
+    if let Some(global) = interp.global_scope_of(value) {
+        return Ok(global
+            .borrow()
+            .global_property_keys()
             .into_iter()
             .filter(|name| {
                 !enumerable_only
-                    || interp
+                    || global
+                        .borrow()
                         .global_property(name)
                         .is_some_and(|(_, attrs)| attrs.enumerable)
             })
@@ -388,8 +390,8 @@ fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
         return Err(type_err("Cannot convert undefined or null to object"));
     }
     let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
-    let found = if matches!(v, Value::GlobalObject) {
-        interp.global_keys().iter().any(|name| name == &key)
+    let found = if let Some(global) = interp.global_scope_of(&v) {
+        global.borrow().global_property(&key).is_some()
     } else {
         object_property_attributes(&v, &key).is_some()
     };
@@ -417,6 +419,7 @@ fn is_ecmascript_object(value: &Value) -> bool {
             | Value::NativeFunction { .. }
             | Value::HostFunction { .. }
             | Value::GlobalObject
+            | Value::RealmGlobal(_)
             | Value::Class(_)
             | Value::Promise(_)
             | Value::Generator { .. }
@@ -536,9 +539,10 @@ fn object_property_is_enumerable(
 ) -> Result<Value, VmErr> {
     let receiver = to_object_receiver(&this)?;
     let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
-    if matches!(receiver, Value::GlobalObject) {
+    if let Some(global) = interp.global_scope_of(&receiver) {
         return Ok(Value::Bool(
-            interp
+            global
+                .borrow()
                 .global_property(&key)
                 .is_some_and(|(_, attrs)| attrs.enumerable),
         ));
@@ -596,7 +600,7 @@ fn object_to_string_tag(value: &Value) -> String {
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => "Function".into(),
-        Value::GlobalObject => "global".into(),
+        Value::GlobalObject | Value::RealmGlobal(_) => "global".into(),
         Value::Promise(_) => "Promise".into(),
         Value::Generator { .. } => "Generator".into(),
         Value::StringIterator { .. } => "String Iterator".into(),
@@ -1468,8 +1472,9 @@ fn object_get_own_descriptors(
 /// Build the descriptor object for one own property, or `undefined` when the
 /// property does not exist.
 fn descriptor_for_in(interp: &Interpreter, target: &Value, key: &str) -> Value {
-    if matches!(target, Value::GlobalObject) {
-        return interp
+    if let Some(global) = interp.global_scope_of(target) {
+        return global
+            .borrow()
             .global_property(key)
             .map(|(value, attrs)| {
                 Value::object(vec![

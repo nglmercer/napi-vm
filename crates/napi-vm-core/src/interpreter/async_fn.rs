@@ -29,6 +29,7 @@ use crate::value::{PromiseState, Value};
 pub struct AsyncTask {
     execution: Rc<super::scheduler::ExecutionState>,
     counted: bool,
+    owner: Option<super::Env>,
     coroutine: Option<crate::value::GenCoroutine>,
     /// The promise the call returned, settled when the body finishes.
     result: Rc<RefCell<PromiseInner>>,
@@ -50,6 +51,10 @@ impl AsyncTask {
     }
 
     /// The promise the call returned, for the iterative `Drop` of `Value`.
+    pub(crate) fn owner(&self) -> Option<super::Env> {
+        self.owner.clone()
+    }
+
     pub(crate) fn result_promise(&self) -> Rc<RefCell<PromiseInner>> {
         self.result.clone()
     }
@@ -264,6 +269,7 @@ fn spawn_body(
     let task = crate::heap::tracked(Rc::new(RefCell::new(AsyncTask {
         execution: interp.execution.clone(),
         counted: true,
+        owner: Some(interp.persistent_global.clone()),
         coroutine: Some(coroutine),
         result: result.clone(),
     })));
@@ -283,6 +289,7 @@ fn step(
     let Some(mut coroutine) = task.borrow_mut().coroutine.take() else {
         return Ok(());
     };
+    let _allocation_boundary = super::realm::AllocationRealm::enter(task.borrow().owner());
     let outcome = coroutine.resume(resume);
     if matches!(&outcome, corosensei::CoroutineResult::Return(_)) {
         let mut task = task.borrow_mut();
@@ -290,6 +297,7 @@ fn step(
             .continuations
             .set(task.execution.continuations.get() - 1);
         task.counted = false;
+        task.owner = None;
     }
     let result = task.borrow().result.clone();
     match outcome {

@@ -145,7 +145,7 @@ def main():
               "worker_jobs": args.jobs, "timeout_seconds": args.timeout,
               "total": len(results), "counts": counts,
               "pass_percentage": 100 * counts["pass"] / len(results) if results else None,
-              "limitations": ["$262.createRealm and agents are not implemented; GC requests run at quiescent host boundaries"],
+              "limitations": ["Agents are not implemented; GC requests run at quiescent host boundaries"],
               "results": results}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in report.items() if key != "results"}, indent=2))

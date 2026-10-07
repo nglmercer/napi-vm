@@ -563,21 +563,19 @@ fn modules() {
         true,
         &[("m", "export const x = 1;")],
     );
-    check("let m = import.meta; m.main === false", true);
+    check("export {}; let m = import.meta; m.main === false", true);
     // Errors agree across tiers.
     check("import x from 'missing';", true);
     check("import { x } from 'missing';", true);
     check("export * from 'missing';", true);
-    // An unscoped block shares the enclosing scope, so it compiles.
-    check_with_modules(
+    // Module declarations are only valid at module top level.
+    for source in [
         "{ import x from 'm'; x }",
-        true,
-        &[("m", "export default 3;")],
-    );
-    // Scoped bindings stay on the AST tier.
-    check("{ let y = 1; import x from 'm'; }", false);
-    // A nested scoped export falls back per-function; the unit compiles.
-    check("function f(){ let x = 1; export { x }; }", true);
+        "{ let y=1; import x from 'm'; }",
+        "function f(){let x=1;export {x};}",
+    ] {
+        assert!(parse_cached(source).is_err(), "{source}");
+    }
 }
 
 #[test]
@@ -948,9 +946,9 @@ fn destructuring_assignment() {
     // Nullish object sources throw; array sources tolerate anything.
     check("let a; ({a} = null); 1", true);
     check("let a; [a] = null; a === undefined", true);
-    // Non-plain assignment and invalid targets fail on the AST tier.
-    check("let a; [a] += [1]; 1", false);
-    check("let a; [a()] = [1]; 1", false);
+    // These targets are syntax errors, before either execution tier.
+    assert!(parse_cached("let a; [a] += [1]; 1").is_err());
+    assert!(parse_cached("let a; [a()] = [1]; 1").is_err());
 }
 
 #[test]

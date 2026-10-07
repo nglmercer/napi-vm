@@ -16,6 +16,9 @@ use super::{NAPI_GENERIC_FAILURE, NAPI_OBJECT_EXPECTED, NapiAsyncCleanupHookHand
 
 pub(super) fn napi_object_identity(value: &Value) -> Result<NapiObjectIdentity, i32> {
     match value {
+        Value::RealmGlobal(global) => {
+            Ok(NapiObjectIdentity::RealmGlobal(Rc::as_ptr(global) as usize))
+        }
         Value::GlobalObject => Ok(NapiObjectIdentity::Global),
         Value::Object { props } => Ok(NapiObjectIdentity::Object(Rc::as_ptr(props) as usize)),
         Value::Array(array) => Ok(NapiObjectIdentity::Array(Rc::as_ptr(array) as usize)),
@@ -89,6 +92,7 @@ pub(super) fn napi_reference_identity(
 
 pub(super) fn napi_reference_value_strong_count(value: &Value) -> Option<usize> {
     match value {
+        Value::RealmGlobal(global) => Some(Rc::strong_count(global)),
         Value::Object { props } => Some(Rc::strong_count(props)),
         Value::Array(array) => Some(Rc::strong_count(array)),
         Value::Function(function) => Some(Rc::strong_count(&function.identity)),

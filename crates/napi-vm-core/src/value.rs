@@ -172,8 +172,10 @@ pub(crate) enum CollectionKind {
 /// makes `Object.setPrototypeOf`, `Object.freeze` and `defineProperty`
 /// observable through every reference to the object rather than through the
 /// one binding they were applied to.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ObjectMeta {
+    /// The realm that owns native methods and implicit intrinsic prototypes.
+    pub(crate) realm_global: Option<Env>,
     pub(crate) collection_kind: Option<CollectionKind>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
@@ -209,6 +211,22 @@ pub struct ObjectMeta {
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
     /// property cell so that value remains compact.
     pub(crate) host_function_id: Option<usize>,
+}
+
+// Prototype and realm edges form cycles. Debug output must not traverse them.
+impl std::fmt::Debug for ObjectMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectMeta")
+            .field("has_prototype", &self.proto.is_some())
+            .field("uses_default_prototype", &self.uses_default_prototype)
+            .field("attrs", &self.attrs)
+            .field("symbol_keys", &self.symbol_keys)
+            .field("non_extensible", &self.non_extensible)
+            .field("module_namespace", &self.module_namespace)
+            .field("has_accessors", &self.has_accessors)
+            .field("boxed_primitive", &self.boxed_primitive)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ObjectMeta {
@@ -282,6 +300,8 @@ pub struct ArrayCell {
 fn array_meta() -> ObjectMeta {
     let mut meta = ObjectMeta {
         uses_default_prototype: true,
+        proto: crate::interpreter::realm::allocation_prototype("Array"),
+        realm_global: crate::interpreter::realm::allocation_global(),
         ..ObjectMeta::default()
     };
     meta.set_attrs(
@@ -598,6 +618,7 @@ impl ArrayCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.proto.as_deref().cloned());
+            out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             out.extend(
                 meta.symbol_keys
                     .iter()
@@ -624,6 +645,7 @@ impl ArrayCell {
         elements.clear();
         named.clear();
         meta.proto = None;
+        meta.realm_global = None;
         true
     }
 }
@@ -667,6 +689,7 @@ impl ObjectCell {
             slots: RefCell::new(props),
             meta: RefCell::new(ObjectMeta {
                 proto,
+                realm_global: crate::interpreter::realm::allocation_global(),
                 ..ObjectMeta::default()
             }),
             shape: RefCell::new(None),
@@ -680,6 +703,8 @@ impl ObjectCell {
             slots: RefCell::new(props),
             meta: RefCell::new(ObjectMeta {
                 uses_default_prototype: true,
+                proto: crate::interpreter::realm::allocation_prototype("Object"),
+                realm_global: crate::interpreter::realm::allocation_global(),
                 ..ObjectMeta::default()
             }),
             shape: RefCell::new(None),
@@ -712,6 +737,7 @@ impl ObjectCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.proto.as_deref().cloned());
+            out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             if let Some(BoxedPrimitive::Symbol(symbol)) = &meta.boxed_primitive {
                 out.push(Value::Symbol(symbol.clone()));
             }
@@ -742,6 +768,7 @@ impl ObjectCell {
         }
         meta.symbol_keys.clear();
         meta.proto = None;
+        meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access
         // rebuilds instead of answering from a stale layout.
         if let Ok(mut shape) = self.shape.try_borrow_mut() {
@@ -935,6 +962,8 @@ pub struct BoundFunctionData {
 /// Payload of `Value::Function`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct FunctionData {
+    /// Strictness captured at function creation, independent of its caller.
+    pub strict: bool,
     /// Native implementation with ordinary function identity and properties.
     pub native: Option<crate::builtins::NativeFn>,
     /// Shared identity for this function object. Cloning a VM `Value` keeps the
@@ -1864,6 +1893,8 @@ pub enum Value {
     /// `window`; member access on it reads and writes real globals (handled in
     /// `Interpreter::prop` / `assign_member`, which have scope access).
     GlobalObject,
+    /// A global object with realm identity and realm-owned environment storage.
+    RealmGlobal(Env),
     Class(Box<ClassData>),
     Promise(Rc<RefCell<PromiseInner>>),
     Generator {
@@ -2039,6 +2070,11 @@ pub enum GenOutcome {
 /// fallback, because `Drop` implementations must never panic.
 #[cfg(stackful_coroutines)]
 pub(crate) fn force_abandon(coroutine: GenCoroutine) {
+    // A suspended stack can hold an allocation guard from an earlier resume.
+    // Its teardown must not restore that stale realm into the host thread.
+    let _allocation_boundary = crate::interpreter::realm::AllocationRealm::enter(
+        crate::interpreter::realm::allocation_global(),
+    );
     struct LeakOnPanic<'a>(&'a mut Option<GenCoroutine>);
     impl Drop for LeakOnPanic<'_> {
         fn drop(&mut self) {
@@ -2212,6 +2248,11 @@ impl GeneratorInner {
         if coroutine.done() {
             return;
         }
+        let owner = self
+            .closure
+            .as_ref()
+            .and_then(crate::interpreter::Environment::find_global);
+        let _allocation_boundary = crate::interpreter::realm::AllocationRealm::enter(owner);
         match coroutine.resume(GenResume::Return) {
             corosensei::CoroutineResult::Return(_) => {}
             corosensei::CoroutineResult::Yield(_) => {
@@ -2376,7 +2417,17 @@ impl Value {
         };
         let object = Self::object(Vec::new());
         if let Value::Object { props } = &object {
-            props.meta.borrow_mut().boxed_primitive = Some(boxed);
+            let builtin = match &boxed {
+                BoxedPrimitive::Bool(_) => "Boolean",
+                BoxedPrimitive::Number(_) => "Number",
+                BoxedPrimitive::String(_) => "String",
+                BoxedPrimitive::Symbol(_) => "Symbol",
+                BoxedPrimitive::BigInt(_) => "BigInt",
+            };
+            let prototype = crate::interpreter::realm::allocation_prototype(builtin);
+            let mut meta = props.meta.borrow_mut();
+            meta.proto = prototype;
+            meta.boxed_primitive = Some(boxed);
         }
         Some(object)
     }

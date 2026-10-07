@@ -6,9 +6,18 @@ mod index;
 mod primary;
 mod stmt;
 mod validate;
+pub(crate) use validate::use_strict;
 
 pub use ast::*;
-pub use cache::parse_cached;
+pub use cache::{parse_cached, parse_cached_with_goal};
+
+/// Grammar goal; Auto preserves the existing embedding API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseGoal {
+    Auto,
+    Script,
+    Module,
+}
 pub use index::{DeclKind, Entry, Occurrence, ScopeNode, SymbolIndex};
 
 use crate::lexer::Token;
@@ -155,6 +164,30 @@ impl Parser {
         &mut self,
         new_target: bool,
     ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_with_goal_context(ParseGoal::Auto, new_target, false)
+    }
+
+    pub fn parse_program_with_goal(
+        &mut self,
+        goal: ParseGoal,
+    ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_with_goal_context(goal, false, false)
+    }
+
+    pub(crate) fn parse_eval_context(
+        &mut self,
+        new_target: bool,
+        strict: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_with_goal_context(ParseGoal::Script, new_target, strict)
+    }
+
+    fn parse_with_goal_context(
+        &mut self,
+        goal: ParseGoal,
+        new_target: bool,
+        strict: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
         #[cfg(any(test, feature = "test-hooks"))]
         PARSE_PROGRAM_COUNT.with(|count| count.set(count.get() + 1));
         let stmts = self.parse();
@@ -167,9 +200,11 @@ impl Parser {
         match self.error.take() {
             Some(error) => Err(error),
             None => {
-                validate::validate(&stmts, new_target).map_err(|message| ParseError {
-                    message,
-                    span: Span::unknown(),
+                validate::validate(&stmts, new_target, strict, goal).map_err(|message| {
+                    ParseError {
+                        message,
+                        span: Span::unknown(),
+                    }
                 })?;
                 Ok(stmts)
             }

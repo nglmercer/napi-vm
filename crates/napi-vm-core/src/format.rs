@@ -286,7 +286,7 @@ fn render_plain_value(
             output.push_str(name)?;
             output.push_str(" [native]]")
         }
-        Value::GlobalObject => output.push_str("[object global]"),
+        Value::GlobalObject | Value::RealmGlobal(_) => output.push_str("[object global]"),
         Value::Class(c) => {
             output.push_str("[class ")?;
             output.push_str(&c.name)?;
@@ -602,7 +602,9 @@ fn render_inspect_value(
             }
             Ok(())
         }
-        Value::GlobalObject => painter.write_wrapped(context.output, "2;37", "[object global]"),
+        Value::GlobalObject | Value::RealmGlobal(_) => {
+            painter.write_wrapped(context.output, "2;37", "[object global]")
+        }
         Value::Class(c) => {
             if context.colors && pretty {
                 context.output.push_str("\x1b[2;37m")?;

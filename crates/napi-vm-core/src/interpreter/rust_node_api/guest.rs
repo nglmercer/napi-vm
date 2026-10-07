@@ -965,7 +965,10 @@ pub(super) fn napi_direct_all_property_keys(
         | Value::DataView(_)
         | Value::StringIterator { .. }
         | Value::Generator { .. } => {}
-        Value::Proxy(_) | Value::NativeFunction { .. } | Value::GlobalObject => {
+        Value::Proxy(_)
+        | Value::NativeFunction { .. }
+        | Value::GlobalObject
+        | Value::RealmGlobal(_) => {
             return Err(NAPI_GENERIC_FAILURE);
         }
         Value::Uninitialized

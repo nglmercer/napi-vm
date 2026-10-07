@@ -489,12 +489,21 @@ fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
 /// declarations are collected too: they are `var`-scoped, and the interpreter
 /// defines them eagerly during hoisting.
 pub fn collect_var_names(stmts: &[Statement], out: &mut Vec<String>) {
+    collect_scoped_var_names(stmts, out, true);
+}
+
+/// Var declaration names without Annex B block-function hoisting.
+pub(crate) fn collect_var_declaration_names(stmts: &[Statement], out: &mut Vec<String>) {
+    collect_scoped_var_names(stmts, out, false);
+}
+
+fn collect_scoped_var_names(stmts: &[Statement], out: &mut Vec<String>, functions: bool) {
     for stmt in stmts {
-        collect_stmt_var_names(stmt, out);
+        collect_stmt_var_names(stmt, out, functions);
     }
 }
 
-fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
+fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bool) {
     match stmt {
         Statement::VarDecl {
             kind: VarKind::Var,
@@ -508,18 +517,24 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
         // Other declaration kinds are lexical: block-scoped, handled elsewhere.
         Statement::VarDecl { .. } | Statement::ClassDecl { .. } => {}
         // A function declaration's *name* is var-scoped; its body is not.
-        Statement::FnDecl { name, .. } => out.push(name.clone()),
-        Statement::Block(body) | Statement::Declarations(body) => collect_var_names(body, out),
+        Statement::FnDecl { name, .. } => {
+            if functions {
+                out.push(name.clone());
+            }
+        }
+        Statement::Block(body) | Statement::Declarations(body) => {
+            collect_scoped_var_names(body, out, functions)
+        }
         Statement::If { then, else_, .. } => {
-            collect_var_names(then, out);
+            collect_scoped_var_names(then, out, functions);
             if let Some(else_) = else_ {
-                collect_var_names(else_, out);
+                collect_scoped_var_names(else_, out, functions);
             }
         }
         Statement::While { body, .. }
         | Statement::DoWhile { body, .. }
         | Statement::ForIn { body, .. }
-        | Statement::ForOf { body, .. } => collect_var_names(body, out),
+        | Statement::ForOf { body, .. } => collect_scoped_var_names(body, out, functions),
         Statement::For { init, body, .. } => {
             if let Some(init) = init {
                 match &**init {
@@ -541,25 +556,25 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
                     _ => {}
                 }
             }
-            collect_var_names(body, out);
+            collect_scoped_var_names(body, out, functions);
         }
-        Statement::Labeled { body, .. } => collect_stmt_var_names(body, out),
+        Statement::Labeled { body, .. } => collect_stmt_var_names(body, out, functions),
         Statement::Try {
             body,
             catch,
             finally,
         } => {
-            collect_var_names(body, out);
+            collect_scoped_var_names(body, out, functions);
             if let Some((_, catch_body)) = catch {
-                collect_var_names(catch_body, out);
+                collect_scoped_var_names(catch_body, out, functions);
             }
             if let Some(finally) = finally {
-                collect_var_names(finally, out);
+                collect_scoped_var_names(finally, out, functions);
             }
         }
         Statement::Switch { cases, .. } => {
             for case in cases {
-                collect_var_names(&case.body, out);
+                collect_scoped_var_names(&case.body, out, functions);
             }
         }
         Statement::Expr(_)

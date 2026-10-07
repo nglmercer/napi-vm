@@ -9,7 +9,9 @@ Implemented:
 - `$262.gc` and `gc` requests deferred to a safe quiescent host boundary. Collection never runs over invisible live guest frames; this hook does not promise synchronous reclamation or finalization.
 - An intrinsic registry independent of mutable global constructor bindings, traced and cleared by the cycle collector. It preserves default prototypes when guest code replaces or deletes global constructor properties.
 
-Remaining: isolated realm/global identity and cross-realm calls, `$262.createRealm`, agents/shared-memory coordination, and more complete GC/finalization observation. The current `Realm` type shares execution state; it does not implement separate ECMAScript realms.
+Continuation implemented fresh child globals/intrinsics, retained realm ownership, `$262.createRealm`, detached realm host functions and cross-realm calls. Escaped object/array/function values keep their realm after the child interpreter is dropped, and realm edges participate in GC tracing. GC requests use host state rather than a guest-visible sentinel.
+
+Remaining: agents/shared-memory coordination, broader cross-realm exotic-object coverage, separate module caches per realm, primary interpreter global identity across independent embeddings, and more complete GC/finalization observation. The existing `Realm` type remains an agent execution-state handle; `Interpreter::create_realm` constructs fresh child globals/intrinsics on that agent.
 
 ## Phase 2: parser and early errors
 
@@ -23,7 +25,9 @@ Implemented:
 - `new.target` syntax, lexical-context early errors and rejection as an assignment/update target.
 - Dynamic Function construction parses parameters and body separately, rejects delimiter injection, and validates their combined grammar and strict semantics.
 
-Remaining: comprehensive declaration-instantiation and binding-conflict rules, assignment-target validation, explicit script/module parse goals, full async/generator/super/private-name grammar contexts, and remaining lexical/grammar conformance.
+Continuation implemented assignment/update-target validation, destructuring assignment-target checks, `var`/lexical conflicts and explicit `ParseGoal::{Script, Module, Auto}` with separate caches. Script eval rejects module declarations and import.meta; Module validation enforces strict semantics even without import/export declarations. Each goal cache has its own 1,024-program / 8 MiB bound.
+
+Remaining: comprehensive declaration-instantiation and binding-conflict rules, full async/generator/super/private-name grammar contexts, and remaining lexical/grammar conformance.
 
 ## Phase 3: object/function foundations
 
@@ -36,9 +40,11 @@ Implemented:
 - Top-level script `this` resolves to the global object; numeric unary operations perform object coercion and reject inappropriate Symbol/BigInt conversions.
 - Super property reads and Reflect.get preserve the explicit receiver through getters and Proxy traps.
 
-Remaining: full global object storage with lexical/property coexistence, accessors and symbols, complete descriptor mutations, strict runtime writes and this binding, cross-realm construction, class-field initialization contexts, coercion, exotic objects and Proxy invariants.
+Continuation captures strictness on AST and bytecode functions, scopes Script/module/eval execution contexts, normalizes sloppy `this` (including primitive boxing), and retains strict receivers for ordinary, generator and async execution. Direct strict eval isolates declarations; indirect eval clears caller strictness and uses its owning realm. Strict writes reject readonly object properties, getter-only properties, nonextensible objects and false Proxy set results. Class creation no longer leaks strictness; instance getter/setter pairs work in either declaration order. Ordinary and collection constructor fallback prototypes use the new.target realm, including bound constructors. Generator next/throw/close and async continuations select their defining allocation realm on each resume; abandoned stacks restore the host allocation context.
 
-## Validation
+Remaining: full global object storage with lexical/property coexistence, accessors and symbols, complete descriptor mutations, complete strict write/delete/update behavior for every exotic receiver, eval declaration instantiation, class-field initialization contexts, coercion, exotic objects and Proxy invariants. The exploratory global-storage migration is deferred; environment-backed global descriptors are retained in this batch.
+
+## Foundation baseline validation
 
 The selected and complete Test262 measurements use the pinned corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`. Results include every selected variant and all failures, timeouts, crashes and harness errors. Subset percentages are not overall compatibility claims.
 
@@ -73,7 +79,11 @@ The focused comparison contains 45 formerly passing variants that now fail. Corr
 
 ## Next implementation order
 
-1. Resolve the recorded transition failures: strict/sloppy function this binding, lexical arrows and eval declaration instantiation; introduce explicit script/module/eval goals and strict execution metadata.
-2. Complete global object descriptor storage and lexical/property coexistence.
-3. Isolated realm identity and realm-owned globals/intrinsics, followed by real createRealm and cross-realm constructor/default-prototype tests.
-4. Expand early-error validation against the failure clusters from the complete report.
+1. Complete global object storage and declaration instantiation: global lexical/property coexistence, accessor/symbol descriptors, strict writes/deletes/updates for all receiver kinds, and eval variable/lexical environment separation.
+2. Complete realm coverage: realm-owned exotic instances and Reflect construction, per-realm module caches, primary global identity and UTF-16 host evalScript inputs.
+3. Implement real Test262 agents with shared-memory transport and scheduler ownership; external threads must never enter an interpreter.
+4. Expand contextual grammar/early errors for async, generators, super and private names, then use complete-corpus failure clusters to drive the next fixes.
+
+Phase exit criteria remain unmet: phase 1 requires agents and full realm/GC host behavior; phase 2 requires comprehensive grammar and early-error coverage; phase 3 requires complete descriptors, declaration instantiation, exotic objects and Proxy invariants. Runtime features remain disabled by default.
+
+Public API additions include `ParseGoal`, `compile_with_goal`, `create_realm`, `realm_global_object`, `eval_in_realm`, and `native_function_in_realm`. Exhaustive `Value` matches must handle `RealmGlobal`; direct initializers of `FunctionData` and `BytecodeFunction` must supply `strict`, and `AssignOutcome` matches must handle `ReadOnly`. Foreign realm globals are experimental at native-addon boundaries.

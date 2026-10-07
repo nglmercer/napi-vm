@@ -233,3 +233,116 @@ fn escaped_accessor_names_and_global_enumeration_keep_property_semantics() {
         "var leaked=false;for(var key in this){if(key==='Math'||key==='Infinity'||key==='Object')leaked=true;}!leaked;",
     );
 }
+
+#[test]
+fn function_this_mode_is_captured_and_eval_strictness_is_scoped() {
+    for source in [
+        "function f(){return this;}f()===globalThis && f.call(null)===globalThis;",
+        "function f(){'use strict';return this;}f()===undefined && f.call(null)===null && f.call(42)===42;",
+        "'use strict';function f(){return this;}f()===undefined;",
+        "function strictOuter(){'use strict';return function(){return this;};}var f=strictOuter();f()===undefined;",
+        "function loose(){return this;}function strict(){'use strict';return loose();}strict()===globalThis;",
+        "function f(){return this;}var n=f.call(42);typeof n==='object' && n.valueOf()===42 && Object.getPrototypeOf(n)===Number.prototype;",
+        "var arrow=()=>this;arrow.call({})===globalThis;",
+        "function f(){'use strict';return ()=>this;}var arrow=f.call(42);arrow.call({})===42;",
+        "Function('return this')()===globalThis && Function('\"use strict\";return this')()===undefined;",
+        "function f(){'use strict';var x=1;eval('var x=2');return x;}f()===1;",
+        "function f(){var x=1;eval('\"use strict\";var x=2');return x;}f()===1;",
+        "function f(){'use strict';try{eval('var eval=1');}catch(e){return e.name==='SyntaxError';}return false;}f();",
+        "'use strict';var indirect=eval;indirect('var evalResult=17');evalResult===17;",
+        "function f(){var x=1;eval('x=2');return x;}f()===2;",
+        "class C {method(){return this;}}var method=new C().method;method()===undefined;",
+    ] {
+        check_both(source);
+    }
+}
+
+#[test]
+fn generator_receiver_and_strict_writes_preserve_execution_context() {
+    for source in [
+        "function* f(){yield this;}f().next().value===globalThis;",
+        "function* f(){'use strict';yield this;}f().next().value===undefined && f.call(17).next().value===17;",
+        "function* f(){yield arguments[0];}f(17).next().value===17;",
+        "function f(){createdBySloppyCall=17;}f();globalThis.createdBySloppyCall===17;",
+        "function f(){'use strict';try{undeclaredStrictName=1;}catch(e){return e.name==='ReferenceError';}return false;}f();",
+        "Infinity=17;Infinity===1/0;",
+        "function f(){'use strict';try{Infinity=17;}catch(e){return e.name==='TypeError';}return false;}f();",
+        "function f(){'use strict';try{globalThis.Infinity=17;}catch(e){return e.name==='TypeError';}return false;}f();",
+        "var obj=Object.defineProperty({},'x',{value:1});function f(){'use strict';try{obj.x=2;}catch(e){return e.name==='TypeError';}return false;}f() && obj.x===1;",
+        "var obj=Object.preventExtensions({});function f(){'use strict';try{obj.x=2;}catch(e){return e.name==='TypeError';}return false;}f();",
+        "var obj=new Proxy({}, {set:function(){return false;}});function f(){'use strict';try{obj.x=2;}catch(e){return e.name==='TypeError';}return false;}f();",
+    ] {
+        check_both(source);
+    }
+}
+
+#[test]
+fn assignment_targets_and_var_lexical_conflicts_are_early_errors() {
+    for source in [
+        "1=2;",
+        "true++;",
+        "++null;",
+        "f()=1;",
+        "this=1;",
+        "(a+b)=1;",
+        "obj?.x=1;",
+        "[a]+=b;",
+        "({a})&&=b;",
+        "[...a,b]=values;",
+        "({method(){}}=obj);",
+        "let x;var x;",
+        "const x=1;{var x;}",
+        "{let x;{var x;}}",
+        "let f;function f(){}",
+        "function f(){let x;var x;}",
+    ] {
+        assert!(Interpreter::compile(source).is_err(), "accepted: {source}");
+    }
+    for source in [
+        "var x=1;{let x=2;}",
+        "let x=1;function f(){var x=2;}",
+        "var a,b;[a,b]=[1,2];",
+        "var a;({a}= {a:1});",
+        "var a;[a=1]=[];",
+    ] {
+        assert!(Interpreter::compile(source).is_ok(), "rejected: {source}");
+    }
+}
+
+#[test]
+fn parse_goals_keep_validation_and_caches_separate() {
+    use napi_vm_core::parser::{ParseGoal, parse_cached_with_goal};
+    for source in ["export const goalProbe=1;", "import.meta;"] {
+        assert!(parse_cached_with_goal(source, ParseGoal::Module).is_ok());
+        assert!(parse_cached_with_goal(source, ParseGoal::Script).is_err());
+        assert!(parse_cached_with_goal(source, ParseGoal::Module).is_ok());
+    }
+    assert!(Interpreter::compile("export default class Example {}").is_ok());
+    assert!(Interpreter::compile("export const grouped=1;").is_ok());
+    let sloppy = "var eval=1;";
+    assert!(parse_cached_with_goal(sloppy, ParseGoal::Script).is_ok());
+    assert!(parse_cached_with_goal(sloppy, ParseGoal::Module).is_err());
+    for source in [
+        "if(true){export const x=1;}",
+        "function f(){import.meta; import 'x';}",
+    ] {
+        assert!(parse_cached_with_goal(source, ParseGoal::Module).is_err());
+    }
+    let script = parse_cached_with_goal("var cachedGoal=1;", ParseGoal::Script).unwrap();
+    let module = parse_cached_with_goal("var cachedGoal=1;", ParseGoal::Module).unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&script, &module));
+    assert!(std::sync::Arc::ptr_eq(
+        &script,
+        &parse_cached_with_goal("var cachedGoal=1;", ParseGoal::Script).unwrap()
+    ));
+}
+
+#[test]
+fn class_strictness_does_not_escape_and_accessors_are_paired() {
+    check_both("class C{};classSloppy=1;classSloppy===1;");
+    check_both(
+        "class C{constructor(){this.receiver=this;try{classMissing=1;}catch(e){this.strict=e instanceof ReferenceError;}}}var c=new C();c.strict && c.receiver===c;",
+    );
+    check_both("class C{get x(){return this._x;}set x(v){this._x=v;}}var c=new C();c.x=7;c.x===7;");
+    check_both("class C{set x(v){this._x=v;}get x(){return this._x;}}var c=new C();c.x=9;c.x===9;");
+}

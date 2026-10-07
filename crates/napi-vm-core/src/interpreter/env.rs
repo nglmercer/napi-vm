@@ -90,6 +90,8 @@ pub enum Lookup {
 #[derive(PartialEq, Eq, Debug)]
 pub enum AssignOutcome {
     Assigned,
+    /// A non-writable global data property.
+    ReadOnly,
     /// No binding of this name; the caller decides whether to create one.
     Missing,
     /// Assignment to a `const`.
@@ -217,6 +219,8 @@ pub struct Environment {
     global_limit: Option<usize>,
     module_context: Option<String>,
     new_target: Option<Value>,
+    strict: Option<bool>,
+    isolated_realm: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
     intrinsics: HashMap<String, Value>,
 }
@@ -305,6 +309,22 @@ impl Environment {
             .collect()
     }
 
+    pub(crate) fn set_isolated_realm(&mut self) {
+        self.isolated_realm = true;
+    }
+    pub(crate) fn is_isolated_realm(&self) -> bool {
+        self.isolated_realm
+    }
+
+    pub(crate) fn strict(&self) -> bool {
+        self.strict
+            .unwrap_or_else(|| self.parent.as_ref().is_some_and(|p| p.borrow().strict()))
+    }
+
+    pub(crate) fn replace_strict(&mut self, strict: Option<bool>) -> Option<bool> {
+        std::mem::replace(&mut self.strict, strict)
+    }
+
     pub(crate) fn set_new_target(&mut self, target: Value) {
         self.new_target = Some(target);
     }
@@ -332,6 +352,8 @@ impl Environment {
             global_limit: None,
             module_context: None,
             new_target: None,
+            strict: None,
+            isolated_realm: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -344,6 +366,8 @@ impl Environment {
             global_limit: None,
             module_context: None,
             new_target: None,
+            strict: None,
+            isolated_realm: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -359,6 +383,8 @@ impl Environment {
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
             new_target: None,
+            strict: None,
+            isolated_realm: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -386,6 +412,8 @@ impl Environment {
             global_limit: None,
             module_context: None,
             new_target: None,
+            strict: None,
+            isolated_realm: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -604,6 +632,13 @@ impl Environment {
     /// instead of silently creating an implicit global.
     pub fn assign(&mut self, n: &str, v: Value) -> AssignOutcome {
         if let Some(binding) = self.vars.get_mut(n) {
+            if self
+                .property_attributes
+                .get(n)
+                .is_some_and(|attrs| !attrs.writable)
+            {
+                return AssignOutcome::ReadOnly;
+            }
             if binding.kind == BindKind::Const {
                 // A `const` in its dead zone is still a `const`: JavaScript
                 // reports the TDZ first, since the declaration has not run.

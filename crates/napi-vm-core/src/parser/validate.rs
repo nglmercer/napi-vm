@@ -5,6 +5,9 @@ use std::collections::HashSet;
 #[derive(Clone, Default)]
 struct Context {
     strict: bool,
+    module: bool,
+    import_meta: bool,
+    top_level: bool,
     function: bool,
     new_target: bool,
     loops: usize,
@@ -14,26 +17,37 @@ struct Context {
 
 type Check = Result<(), String>;
 
-pub(super) fn use_strict(body: &[Statement]) -> bool {
+pub(crate) fn use_strict(body: &[Statement]) -> bool {
     body.iter()
         .take_while(|s| matches!(s, Statement::Expr(Expr::String(_) | Expr::EscapedString(_))))
         .any(|s| matches!(s, Statement::Expr(Expr::String(text)) if text == "use strict"))
 }
 
-pub(super) fn validate(body: &[Statement], new_target: bool) -> Check {
-    let module = body.iter().any(|s| {
-        matches!(
-            s,
+pub(super) fn validate(
+    body: &[Statement],
+    new_target: bool,
+    strict: bool,
+    goal: ParseGoal,
+) -> Check {
+    fn module_declaration(statement: &Statement) -> bool {
+        match statement {
             Statement::Import { .. }
-                | Statement::ExportNamed { .. }
-                | Statement::ExportAll { .. }
-                | Statement::ExportDefault(_)
-        )
-    });
+            | Statement::ExportNamed { .. }
+            | Statement::ExportAll { .. }
+            | Statement::ExportDefault(_) => true,
+            Statement::Declarations(body) => body.iter().any(module_declaration),
+            _ => false,
+        }
+    }
+    let inferred_module = body.iter().any(module_declaration);
+    let module = goal == ParseGoal::Module || goal == ParseGoal::Auto && inferred_module;
     statements(
         body,
         &Context {
-            strict: module || use_strict(body),
+            strict: strict || module || use_strict(body),
+            module,
+            import_meta: goal != ParseGoal::Script,
+            top_level: true,
             new_target,
             ..Context::default()
         },
@@ -84,6 +98,8 @@ fn function(
     let ctx = Context {
         strict: outer.strict || use_strict(body),
         function: true,
+        module: outer.module,
+        import_meta: outer.import_meta,
         new_target: !arrow || outer.new_target,
         ..Context::default()
     };
@@ -140,11 +156,33 @@ fn lexical_names(body: &[Statement]) -> Result<HashSet<String>, String> {
 }
 
 fn statements(body: &[Statement], ctx: &Context) -> Check {
-    lexical_names(body)?;
+    let lexical = lexical_names(body)?;
+    let mut vars = Vec::new();
+    collect_var_declaration_names(body, &mut vars);
+    for statement in body {
+        if let Statement::FnDecl { name, .. } = statement {
+            vars.push(name.clone());
+        }
+    }
+    if let Some(name) = vars.iter().find(|name| lexical.contains(*name)) {
+        return Err(format!(
+            "var/function declaration conflicts with lexical binding: {name}"
+        ));
+    }
     for stmt in body {
         statement(stmt, ctx)?;
     }
     Ok(())
+}
+
+fn nested_statements(body: &[Statement], ctx: &Context) -> Check {
+    statements(
+        body,
+        &Context {
+            top_level: false,
+            ..ctx.clone()
+        },
+    )
 }
 
 fn optional(expr: Option<&Expr>, ctx: &Context) -> Check {
@@ -155,6 +193,16 @@ fn optional(expr: Option<&Expr>, ctx: &Context) -> Check {
 }
 
 fn statement(stmt: &Statement, ctx: &Context) -> Check {
+    if matches!(
+        stmt,
+        Statement::Import { .. }
+            | Statement::ExportNamed { .. }
+            | Statement::ExportAll { .. }
+            | Statement::ExportDefault(_)
+    ) && (!ctx.module || !ctx.top_level)
+    {
+        return Err("import/export declaration outside module top level".into());
+    }
     match stmt {
         Statement::Expr(expr) => expression(expr, ctx),
         Statement::Throw(expr) | Statement::ExportDefault(expr) => expression(expr, ctx),
@@ -206,15 +254,15 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
         }
         Statement::If { test, then, else_ } => {
             expression(test, ctx)?;
-            statements(then, ctx)?;
+            nested_statements(then, ctx)?;
             if let Some(body) = else_ {
-                statements(body, ctx)?;
+                nested_statements(body, ctx)?;
             }
             Ok(())
         }
         Statement::While { test, body } | Statement::DoWhile { test, body } => {
             expression(test, ctx)?;
-            statements(
+            nested_statements(
                 body,
                 &Context {
                     loops: ctx.loops + 1,
@@ -254,7 +302,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             }
             optional(test.as_deref(), ctx)?;
             optional(update.as_deref(), ctx)?;
-            statements(
+            nested_statements(
                 body,
                 &Context {
                     loops: ctx.loops + 1,
@@ -265,7 +313,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
         Statement::ForIn { name, obj, body } => {
             binding(name, ctx)?;
             expression(obj, ctx)?;
-            statements(
+            nested_statements(
                 body,
                 &Context {
                     loops: ctx.loops + 1,
@@ -286,7 +334,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 binding(name, ctx)?;
             }
             expression(iter, ctx)?;
-            statements(
+            nested_statements(
                 body,
                 &Context {
                     loops: ctx.loops + 1,
@@ -294,7 +342,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 },
             )
         }
-        Statement::Block(body) => statements(body, ctx),
+        Statement::Block(body) => nested_statements(body, ctx),
         Statement::Declarations(body) => {
             for stmt in body {
                 statement(stmt, ctx)?;
@@ -341,13 +389,13 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             catch,
             finally,
         } => {
-            statements(body, ctx)?;
+            nested_statements(body, ctx)?;
             if let Some((name, body)) = catch {
                 binding(name, ctx)?;
-                statements(body, ctx)?;
+                nested_statements(body, ctx)?;
             }
             if let Some(body) = finally {
-                statements(body, ctx)?;
+                nested_statements(body, ctx)?;
             }
             Ok(())
         }
@@ -367,7 +415,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             lexical_names(&body)?;
             for case in cases {
                 optional(case.test.as_ref(), ctx)?;
-                statements(&case.body, &next)?;
+                nested_statements(&case.body, &next)?;
             }
             Ok(())
         }
@@ -429,18 +477,61 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
     }
 }
 
+fn simple_assignment_target(target: &Expr, ctx: &Context) -> Check {
+    match target {
+        Expr::Identifier(name) => binding(name, ctx),
+        Expr::Member { .. } => expression(target, ctx),
+        _ => Err("invalid assignment target".into()),
+    }
+}
+
 fn assignment_target(target: &Expr, ctx: &Context) -> Check {
-    if matches!(target, Expr::NewTarget) {
-        return Err("new.target is not an assignment target".into());
+    match target {
+        Expr::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                match item {
+                    Expr::Undefined => {}
+                    Expr::Spread(inner) if index + 1 == items.len() => {
+                        assignment_target(inner, ctx)?
+                    }
+                    Expr::Spread(_) => return Err("rest element must be last".into()),
+                    _ => assignment_target(item, ctx)?,
+                }
+            }
+            Ok(())
+        }
+        Expr::Object(props) => {
+            for (index, prop) in props.iter().enumerate() {
+                match prop {
+                    ObjectProp::Shorthand(name) => binding(name, ctx)?,
+                    ObjectProp::KeyValue(_, target) => assignment_target(target, ctx)?,
+                    ObjectProp::Computed(key, target) => {
+                        expression(key, ctx)?;
+                        assignment_target(target, ctx)?;
+                    }
+                    ObjectProp::Spread(target) if index + 1 == props.len() => {
+                        simple_assignment_target(target, ctx)?
+                    }
+                    _ => return Err("invalid object assignment pattern".into()),
+                }
+            }
+            Ok(())
+        }
+        Expr::Assignment {
+            target,
+            value,
+            op: AssignOp::Assign,
+        } => {
+            assignment_target(target, ctx)?;
+            expression(value, ctx)
+        }
+        _ => simple_assignment_target(target, ctx),
     }
-    if let Expr::Identifier(name) = target {
-        binding(name, ctx)?;
-    }
-    expression(target, ctx)
 }
 
 fn expression(expr: &Expr, ctx: &Context) -> Check {
     match expr {
+        Expr::ImportMeta if !ctx.import_meta => Err("import.meta outside a module".into()),
         Expr::NewTarget if !ctx.new_target => Err("new.target outside a function".into()),
         Expr::Array(items) | Expr::Template { exprs: items, .. } => {
             for item in items {
@@ -496,13 +587,21 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                 return Err("delete of an unqualified identifier in strict mode".into());
             }
             if matches!(op, UnOp::Inc | UnOp::Dec) {
-                assignment_target(operand, ctx)
+                simple_assignment_target(operand, ctx)
             } else {
                 expression(operand, ctx)
             }
         }
-        Expr::Assignment { target, value, .. } | Expr::LogicalAssignment { target, value, .. } => {
-            assignment_target(target, ctx)?;
+        Expr::Assignment { target, value, op } => {
+            if *op == AssignOp::Assign {
+                assignment_target(target, ctx)?;
+            } else {
+                simple_assignment_target(target, ctx)?;
+            }
+            expression(value, ctx)
+        }
+        Expr::LogicalAssignment { target, value, .. } => {
+            simple_assignment_target(target, ctx)?;
             expression(value, ctx)
         }
         Expr::Conditional {

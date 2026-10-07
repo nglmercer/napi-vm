@@ -6,12 +6,20 @@ use crate::error::VmErr;
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use crate::lang::CompletionKind;
 use crate::value::{BoxedPrimitive, FunctionData, Value};
+use std::rc::Rc;
 
 impl Interpreter {
     /// Resolve an object's represented [[Prototype]], including the realm's
     /// default Object.prototype and Function.prototype links that are stored
     /// as defaults rather than copied into every property cell.
     pub(crate) fn prototype_of(&self, object: &Value) -> Option<std::rc::Rc<Value>> {
+        if let Value::RealmGlobal(global) = object {
+            return global
+                .borrow()
+                .intrinsic("Object")?
+                .get_prop("prototype")
+                .map(Rc::new);
+        }
         if let Some(prototype) = object.proto_of() {
             return Some(prototype);
         }
@@ -52,13 +60,22 @@ impl Interpreter {
         if !uses_default {
             return None;
         }
-        let prototype = self
-            .persistent_global
+        let owner =
+            super::realm::value_realm(object).unwrap_or_else(|| self.persistent_global.clone());
+        let prototype = owner
             .borrow()
             .intrinsic(builtin)
             .and_then(|constructor| constructor.get_prop("prototype"))?;
         if crate::interpreter::strict_equals(object, &prototype) {
-            return None;
+            return if builtin == "Object" {
+                None
+            } else {
+                owner
+                    .borrow()
+                    .intrinsic("Object")
+                    .and_then(|constructor| constructor.get_prop("prototype"))
+                    .map(Rc::new)
+            };
         }
         Some(std::rc::Rc::new(prototype))
     }
@@ -428,6 +445,11 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        if let Value::RealmGlobal(global) = o {
+            return self.with_global_storage(global.clone(), |vm| {
+                vm.get_prop_value_with_receiver(&Value::GlobalObject, p, receiver)
+            });
+        }
         // String keys take the borrowed-key path below, which never allocates
         // a key `Value`. Only symbols, numbers, and exotic keys stay here.
         if let Value::String(key) = p {
@@ -506,6 +528,11 @@ impl Interpreter {
         key: &str,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        if let Value::RealmGlobal(global) = o {
+            return self.with_global_storage(global.clone(), |vm| {
+                vm.get_prop_value_str_with_receiver(&Value::GlobalObject, key, receiver)
+            });
+        }
         let value = self.get_prop_value_str_inner(o, key, receiver)?;
         if matches!(value, Value::Uninitialized) {
             return Err(VmErr::Msg(format!(

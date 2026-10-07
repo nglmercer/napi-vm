@@ -82,9 +82,12 @@ impl Decline {
 pub fn compile_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupported> {
     let mut compiler = Compiler::top_level();
     match compiler.compile_top(stmts, false) {
-        Ok(main) => Ok(BytecodeModule {
-            main: Rc::new(main),
-        }),
+        Ok(mut main) => {
+            main.strict = crate::parser::use_strict(stmts);
+            Ok(BytecodeModule {
+                main: Rc::new(main),
+            })
+        }
         Err(decline) => Err(Unsupported {
             reason: decline.reason(),
         }),
@@ -1105,6 +1108,7 @@ impl<'a> Compiler<'a> {
                 )
             });
         Ok(BytecodeFunction {
+            strict: false,
             name,
             code,
             constants: std::mem::take(&mut self.constants),
@@ -1267,7 +1271,10 @@ impl<'a> Compiler<'a> {
             }
         }
         self.finish_functions()?;
-        self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)
+        let mut code =
+            self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)?;
+        code.strict = matches!(body, FuncBody::Stmts(stmts) if crate::parser::use_strict(stmts));
+        Ok(code)
     }
 
     // -- blocks and statements ---------------------------------------------

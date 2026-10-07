@@ -31,6 +31,7 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         // The global aliases all denote the one global scope.
         (Value::GlobalObject, Value::GlobalObject) => true,
+        (Value::RealmGlobal(a), Value::RealmGlobal(b)) => Rc::ptr_eq(a, b),
         (Value::Object { props: x }, Value::Object { props: y }) => Rc::ptr_eq(x, y),
         (Value::Proxy(x), Value::Proxy(y)) => Rc::ptr_eq(x, y),
         (Value::Array(x), Value::Array(y)) => Rc::ptr_eq(x, y),
@@ -508,6 +509,7 @@ impl Interpreter {
                     Value::Object { .. }
                     | Value::Array(_)
                     | Value::GlobalObject
+                    | Value::RealmGlobal(_)
                     | Value::StringIterator { .. } => "object",
                     Value::Function(_)
                     | Value::NativeFunction { .. }
@@ -562,6 +564,17 @@ impl Interpreter {
                 .filter(|index| i.has_index(*index))
                 .map(|x| x.to_string())
                 .collect(),
+            Value::RealmGlobal(global) => global
+                .borrow()
+                .global_property_keys()
+                .into_iter()
+                .filter(|key| {
+                    global
+                        .borrow()
+                        .global_property(key)
+                        .is_some_and(|(_, attrs)| attrs.enumerable)
+                })
+                .collect(),
             Value::GlobalObject => self
                 .global_keys()
                 .into_iter()
@@ -592,6 +605,7 @@ impl Interpreter {
         match (a, b) {
             (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => true,
             (Value::GlobalObject, Value::GlobalObject) => true,
+            (Value::RealmGlobal(a), Value::RealmGlobal(b)) => Rc::ptr_eq(a, b),
             (Value::Number(a), Value::String(b)) => {
                 if let Ok(parsed) = b.parse::<f64>() {
                     *a == parsed
@@ -729,7 +743,7 @@ impl Interpreter {
                 Some(rendered) => output.push_str(&rendered),
                 None => output.push_str("[object Object]"),
             },
-            Value::GlobalObject => output.push_str("[object global]"),
+            Value::GlobalObject | Value::RealmGlobal(_) => output.push_str("[object global]"),
             Value::Array(i) => {
                 if depth >= Self::MAX_PRINT_DEPTH {
                     return output.push_str("...");
