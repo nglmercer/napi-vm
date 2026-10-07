@@ -1,6 +1,10 @@
 import copy
+import gzip
+import json
 import unittest
-from compare import compare
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from compare import compare, read_report
 
 
 def report(statuses):
@@ -11,6 +15,13 @@ def report(statuses):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_compressed_full_evidence_preserves_every_outcome(self):
+        expected = report(['pass', 'timeout', 'crash', 'harness_error'])
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'report.json.gz'
+            path.write_bytes(gzip.compress(json.dumps(expected).encode(), mtime=0))
+            self.assertEqual(read_report(path), expected)
+
     def test_retains_failures_harness_errors_crashes_timeouts_and_regressions(self):
         result = compare(report(['pass', 'fail', 'crash', 'timeout', 'harness_error']),
                          report(['timeout', 'pass', 'fail', 'harness_error', 'pass']))

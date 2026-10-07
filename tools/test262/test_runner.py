@@ -1,5 +1,6 @@
 import unittest
-from run import metadata, outcome, variants, selected_files
+from run import metadata, outcome, variants, selected_files, resume_checkpoint
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -36,5 +37,22 @@ class RunnerTests(unittest.TestCase):
 
     def test_missing_metadata_fails(self):
         with self.assertRaises(ValueError): metadata("var x;")
+
+    def test_checkpoint_preserves_outcomes_and_rejects_drift(self):
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'journal.jsonl'
+            config = {'engine_sha256': 'original', 'worker_jobs': 4}
+            row = {'test': 'a.js', 'variant': 'strict', 'status': 'timeout'}
+            complete = json.dumps(config) + '\n' + json.dumps({'test': 'a.js', 'rows': [row]}) + '\n'
+            path.write_text(complete + '{"test": "b.js"')
+            self.assertEqual(resume_checkpoint(path, config, ['a.js', 'b.js']), (1, [row]))
+            self.assertEqual(path.read_text(), complete)
+            with self.assertRaises(ValueError):
+                resume_checkpoint(path, {**config, 'engine_sha256': 'changed'}, ['a.js', 'b.js'])
+            with self.assertRaises(ValueError):
+                resume_checkpoint(path, config, ['b.js', 'a.js'])
+            path.write_text(json.dumps(config) + '\n' + json.dumps({'test': 'a.js', 'rows': [row, row]}) + '\n')
+            with self.assertRaises(ValueError):
+                resume_checkpoint(path, config, ['a.js'])
 
 if __name__ == "__main__": unittest.main()

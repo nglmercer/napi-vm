@@ -106,7 +106,59 @@ The first exploratory focused comparison covered 2,030 variants: 1,357 passes,
 673 failures, and zero harness errors, timeouts, crashes, or skips. Compared with
 the identical baseline selection it gained 254 passes and lost zero. That worker
 predates the final ownership/deadline fixes and is not final-source evidence.
-Final-source checks and corpus measurements must be recorded before merge.
+These exploratory results are superseded by the final-source evidence below.
+
+The final-source focused rerun at `1a8162a` covered the same 2,030 variants:
+1,435 passes, 595 failures, and zero harness errors, timeouts, crashes, or skips.
+The exact outcome comparison gained 332 passes and lost zero; all gains are in
+Atomics. Its worker SHA-256 is
+`7c572cffae742ab4d231bcb5acc22fd934a6a03d1a9780f28e5b473ad4ca0cdb`.
+Full outcome files and transitions are retained under `artifacts/test262/`.
+This focused result does not establish phase completion.
+
+## Full-corpus evidence for this Phase 1 commit
+
+The final pinned run and an additional PR #23 baseline run used four workers,
+five-second timeouts, and the unchanged budgets above, without competing builds.
+
+| Outcome | PR #23 baseline | Phase 1 continuation |
+| --- | ---: | ---: |
+| Pass | 41,407 | 41,742 |
+| Fail | 61,263 | 61,152 |
+| Harness error | 284 | 60 |
+| Timeout | 2 | 2 |
+| Crash | 0 | 0 |
+| Skip | 0 | 0 |
+| Total | 102,956 | 102,956 |
+
+The exact comparison gains **335 passes and loses zero**. The pass rate is
+40.5435%; this is development evidence, not foundation completion or conformance.
+The first baseline run passed 41,409 and produced two apparent losses. Both are
+variants of `language/expressions/dynamic-import/await-import-evaluation.js`:
+its fixture spins for 100 ms and can exhaust the unchanged fuel budget when the
+host executes more iterations in that interval. The first baseline ran alongside
+builds; the later idle baseline and final implementation both fail these variants
+with instruction-fuel exhaustion. Both baseline reports are retained, including
+the first comparison's two losses. No outcomes were edited or excluded.
+
+The remaining harness errors are 46 missing-`EvalError` failures and 14 staging
+Set harness parse failures. Both timeouts are variants of the existing deep
+WeakMap fixture. Non-passing outcomes are reported as 53,666 runtime, 7,440 parse,
+46 resolution, 60 harness, and two timeout outcomes. These are observed runner
+phases; complete parser/static-semantics correctness remains pending Phase 2.
+
+Required checks passed: formatting, strict all-features Clippy, workspace tests
+(728 passed, four ignored), no-default tests (156 passed), Node (73 passed), WASM
+(14 passed), and runner/tooling tests (nine passed). A real-worker checkpoint
+smoke test preserves all 14 outcomes across resume. The Atomics differential test
+compares two raw-AST/verified-bytecode fixtures with zero mismatches; full-corpus
+AST/bytecode mismatch measurement remains pending.
+
+Compressed full outcome reports, digests, configuration, checks, and remaining
+gates are versioned in
+[`tools/test262/evidence/foundations-phase1`](../tools/test262/evidence/foundations-phase1/README.md).
+The runner's durable checkpoint journal preserves completed outcomes across
+execution-server disconnects. The successful final run completed without resume.
 
 ## Remaining implementation gates
 
@@ -130,5 +182,8 @@ The new Atomics differential tests assert verified bytecode execution and compar
 against raw AST execution through the same native operations. They do not
 establish full-corpus AST/bytecode parity.
 
-Gaps outside Phases 1–3 must be classified from the final full triage. Existing
-broader ECMAScript and runtime incompatibilities remain failures, not exclusions.
+Outside the requested foundation work, Temporal and Temporal Intl algorithms
+remain unsupported: the final triage records 9,210 non-passing built-in Temporal
+variants and 4,058 Intl Temporal variants. Broader RegExp, Array, String, and
+Iterator failures also remain; these clusters mix algorithm and foundation
+failures and require individual classification. They remain in the denominator.

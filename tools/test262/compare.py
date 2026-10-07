@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Compare every selected variant without hiding missing outcomes or regressions."""
 import argparse
+import gzip
 import json
 from pathlib import Path
+
+
+def read_report(path):
+    contents = gzip.decompress(path.read_bytes()) if path.suffix == '.gz' else path.read_bytes()
+    return json.loads(contents)
 
 
 def indexed(report):
@@ -51,7 +57,7 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     try:
-        result = compare(json.loads(args.baseline.read_text()), json.loads(args.current.read_text()))
+        result = compare(read_report(args.baseline), read_report(args.current))
     except (KeyError, ValueError) as error:
         parser.error(str(error))
     args.output.parent.mkdir(parents=True, exist_ok=True)

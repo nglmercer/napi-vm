@@ -4,6 +4,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import hashlib
+import os
 import shutil
 from tempfile import TemporaryDirectory
 import re
@@ -107,6 +108,32 @@ def selected_files(root, paths, groups, catalog):
     return tests
 
 
+def resume_checkpoint(path, configuration, names):
+    """Restore a verified ordered prefix; an interrupted final write is rerun."""
+    contents = path.read_bytes()
+    end = contents.rfind(b'\n') + 1
+    lines = contents[:end].splitlines()
+    if not lines or json.loads(lines[0]) != configuration:
+        raise ValueError('checkpoint configuration or worker digest mismatch')
+    results = []
+    for index, line in enumerate(lines[1:]):
+        record = json.loads(line)
+        if index >= len(names) or record['test'] != names[index]:
+            raise ValueError('checkpoint is not an ordered selection prefix')
+        rows = record['rows']
+        if not rows or len({row['variant'] for row in rows}) != len(rows):
+            raise ValueError('checkpoint contains empty or duplicate variants')
+        for row in rows:
+            if row['test'] != names[index] or row['status'] not in (
+                    'pass', 'fail', 'skip', 'timeout', 'crash', 'harness_error'):
+                raise ValueError('invalid checkpoint outcome')
+        results.extend(rows)
+    if end != len(contents):
+        with path.open('r+b') as checkpoint:
+            checkpoint.truncate(end)
+    return len(lines) - 1, results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=Path)
@@ -118,11 +145,15 @@ def main():
     parser.add_argument("--jobs", type=int, default=1, help="isolated worker processes in parallel")
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--output", type=Path, default=Path("test262-results.json"))
+    parser.add_argument("--checkpoint", type=Path, help="durable per-file outcome journal")
+    parser.add_argument("--resume", action="store_true", help="resume a matching checkpoint")
     args = parser.parse_args()
     if args.jobs <= 0:
         parser.error("jobs must be positive")
     if args.timeout <= 0:
         parser.error("timeout must be positive")
+    if args.resume and not args.checkpoint:
+        parser.error("--resume requires --checkpoint")
     root = args.corpus.resolve()
     revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if revision != args.revision:
@@ -158,20 +189,53 @@ def main():
         engine = Path(temporary) / "worker"
         shutil.copy2(args.engine.resolve(), engine)
         engine_sha256 = hashlib.sha256(engine.read_bytes()).hexdigest()
-        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            for index, rows in enumerate(pool.map(run_test, selected_tests), 1):
-                results.extend(rows)
-                if index % 1000 == 0:
-                    print(f"Test262: {index}/{len(selected_tests)} files", flush=True)
+        names = [test.relative_to(root / 'test').as_posix() for test in selected_tests]
+        configuration = {'revision': revision, 'engine_sha256': engine_sha256,
+                         'worker_jobs': args.jobs, 'timeout_seconds': args.timeout,
+                         'skip_features': args.skip_feature, 'selection': selections,
+                         'groups': args.group,
+                         'selection_sha256': hashlib.sha256(json.dumps(names).encode()).hexdigest()}
+        resumed_files = 0
+        if args.resume:
+            try:
+                resumed_files, results = resume_checkpoint(args.checkpoint, configuration, names)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                parser.error(str(error))
+            print(f'Test262: restored {resumed_files}/{len(selected_tests)} files', flush=True)
+        checkpoint = None
+        if args.checkpoint:
+            args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint = args.checkpoint.open('a' if args.resume else 'w', encoding='utf-8')
+            if not args.resume:
+                checkpoint.write(json.dumps(configuration) + '\n')
+                checkpoint.flush()
+                os.fsync(checkpoint.fileno())
+        try:
+            with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+                for index, rows in enumerate(pool.map(run_test, selected_tests[resumed_files:]), resumed_files + 1):
+                    results.extend(rows)
+                    if checkpoint:
+                        checkpoint.write(json.dumps({'test': names[index - 1], 'rows': rows}) + '\n')
+                        checkpoint.flush()
+                    if index % 1000 == 0:
+                        if checkpoint:
+                            os.fsync(checkpoint.fileno())
+                        print(f"Test262: {index}/{len(selected_tests)} files", flush=True)
+        finally:
+            if checkpoint:
+                checkpoint.flush()
+                os.fsync(checkpoint.fileno())
+                checkpoint.close()
     counts = {status: sum(r["status"] == status for r in results)
               for status in ("pass", "fail", "skip", "timeout", "crash", "harness_error")}
     report = {"domain": "ECMAScript", "suite": "Test262", "revision": revision,
               "selection": selections, "groups": args.group, "engine_sha256": engine_sha256, "skip_features": args.skip_feature,
               "denominator": "all selected variants, including skips and errors",
               "worker_jobs": args.jobs, "timeout_seconds": args.timeout,
+              "resumed_files": resumed_files,
               "total": len(results), "counts": counts,
               "pass_percentage": 100 * counts["pass"] / len(results) if results else None,
-              "limitations": ["Agents use isolated owner-thread VMs and shared data blocks; GC requests run at quiescent host boundaries"],
+              "limitations": ["Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"],
               "results": results}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in report.items() if key != "results"}, indent=2))
