@@ -359,3 +359,72 @@ fn global_parser_aliases_inherited_names_and_missing_private_receivers() {
     );
     check_both("var object={'#x':7};object['#x']===7;");
 }
+
+#[test]
+fn eval_variables_use_the_enclosing_variable_environment() {
+    check_both(
+        "var before=function(){return x;};var run=true;var test,body,increment;for(var _=eval('var x=1;');run&&(test=function(){return x;});increment=function(){return x;}){body=function(){return x;};run=false;}var x=2;before()===2&&test()===2&&body()===2&&increment()===2;",
+    );
+    check_both(
+        "function f(){let marker=0;{let inner=1;eval('var x=7;let hidden=9;function g(){return x;}');}return x===7&&g()===7&&typeof hidden==='undefined';}f();",
+    );
+    check_both(
+        "function f(){var x=1;eval('\"use strict\";var x=2;function local(){}');return x===1&&typeof local==='undefined';}f();",
+    );
+    check_both("var old=NaN;eval('var NaN;');Number.isNaN(NaN)&&Number.isNaN(old);");
+    check_both(
+        "let conflict=1;var caught=false;try{eval('var newBinding;var conflict;');}catch(e){caught=e instanceof SyntaxError;}caught&&typeof newBinding==='undefined'&&conflict===1;",
+    );
+}
+
+#[test]
+fn eval_global_declarations_validate_before_creating_bindings() {
+    check_both(
+        "var threw=false;try{eval('var shouldNotExist;function earlier(){}function NaN(){}');}catch(e){threw=e instanceof TypeError;}threw&&Object.getOwnPropertyDescriptor(globalThis,'shouldNotExist')===undefined&&Object.getOwnPropertyDescriptor(globalThis,'earlier')===undefined;",
+    );
+    check_both(
+        "var indirect=eval;var threw=false;try{indirect('function earlier(){}function NaN(){}');}catch(e){threw=e instanceof TypeError;}threw&&Object.getOwnPropertyDescriptor(globalThis,'earlier')===undefined;",
+    );
+}
+
+#[test]
+fn proxy_descriptors_run_traps_and_omit_absent_properties() {
+    check_both(
+        "var calls=0;var p=new Proxy({}, {ownKeys(){return ['missing'];},getOwnPropertyDescriptor(target,key){calls++;return undefined;}});var d=Object.getOwnPropertyDescriptors(p);calls===1&&!('missing' in d);",
+    );
+    check_both(
+        "var target={x:1};var p=new Proxy(target,{});Object.getOwnPropertyDescriptor(p,'x').value===1;",
+    );
+    check_both(
+        "var proto={enumerable:1,configurable:1,value:42,writable:1};var p=new Proxy({}, {getOwnPropertyDescriptor(){return Object.create(proto);}});var d=Object.getOwnPropertyDescriptor(p,'x');d!==proto&&d.value===42&&d.enumerable===true&&d.configurable===true&&d.writable===true;",
+    );
+    check_both(
+        "var target={};Object.defineProperty(target,'x',{value:1});var p=new Proxy(target,{getOwnPropertyDescriptor(){return undefined;}});var caught=false;try{Object.getOwnPropertyDescriptor(p,'x');}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+    check_both(
+        "var p=new Proxy({}, {getOwnPropertyDescriptor:1});var caught=false;try{Object.getOwnPropertyDescriptor(p,'x');}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+    check_both(
+        "var p=new Proxy({}, {getOwnPropertyDescriptor(){throw new Error('trap');}});var caught=false;try{Object.getOwnPropertyDescriptors(new Proxy(p,{ownKeys(){return ['x'];}}));}catch(e){caught=e.message==='trap';}caught;",
+    );
+}
+
+#[test]
+fn proxy_descriptor_completion_preserves_undefined_accessors() {
+    check_both(
+        "var p=new Proxy({}, {getOwnPropertyDescriptor(){return {get:undefined,configurable:true};}});var d=Object.getOwnPropertyDescriptor(p,'x');('get' in d)&&('set' in d)&&!('value' in d)&&!('writable' in d)&&d.get===undefined&&d.set===undefined&&d.enumerable===false;",
+    );
+    check_both(
+        "var getter=function original(){return 1;};var p=new Proxy({}, {getOwnPropertyDescriptor(){return {get:getter,configurable:true};}});var d=Object.getOwnPropertyDescriptor(p,'x');d.get===getter&&d.get.name==='original';",
+    );
+}
+
+#[test]
+fn class_static_blocks_own_separate_variable_environments() {
+    check_both(
+        "var x='outer';var first,second;class C{static{var x='first';first=function(){return x;};}static{var x='second';second=function(){return x;};}}x==='outer'&&first()==='first'&&second()==='second';",
+    );
+    check_both(
+        "var x=1;class C{static{var x=2;eval('var x=3;');this.x=x;}static{this.y=x;}}x===1&&C.x===2&&C.y===1;",
+    );
+}

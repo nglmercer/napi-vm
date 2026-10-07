@@ -99,3 +99,61 @@ The final focused run passes **3,009 / 4,991 variants (60.29%)**, with 191 new p
 Both complete and focused reports use release worker SHA-256 `0f900a18269295f2f6fee60dcd38fb931614e56eb10df2ff8d1cbb370733a6cf`, the same pinned corpus, four jobs and a five-second timeout. Generated evidence is in `artifacts/test262/phases-1-3-continuation-full.json`, `phases-1-3-continuation-focused.json`, the transition report, triage report and compatibility dashboard. Compact results, including both baseline comparisons, are versioned in `tools/test262/latest.json`.
 
 Final verification: **679 Rust workspace tests pass** with all features (four ignored), 73 native Node tests, 14 WebAssembly tests, eight no-default-feature worker tests and four Python runner/triage tests pass. Formatting and all-target/all-feature workspace Clippy with warnings denied pass. The scoped Bun suite records 1,356 passes and the same 80 failing test names as the phase foundation baseline. Bun's existing failures remain unresolved and are not described as a passing suite.
+
+## Eval and descriptor continuation
+
+This continuation separates variable environments from lexical blocks for both
+AST and bytecode function frames. Sloppy eval uses a fresh lexical environment
+while hoisting its variables and top-level functions into the enclosing variable
+environment; strict eval keeps both local. Declaration checks reject intervening
+lexical conflicts and non-definable global functions before creating bindings.
+Global builtin values survive bare `var` redeclarations. Class static blocks
+retain independent strict variable environments and cannot leak `var` bindings
+into the surrounding scope.
+
+`Object.getOwnPropertyDescriptor` now invokes proxy descriptor traps, propagates
+getter/trap errors, reads inherited descriptor fields in specification order,
+completes descriptors, and checks protected target properties without mutating
+them. `Object.getOwnPropertyDescriptors` omits keys whose descriptor is undefined.
+Descriptor completion preserves undefined accessor fields and callable names.
+Reflect delegates to the same operation. Proxy revocation and broader exotic and
+symbol invariants still require implementation.
+
+The expanded focused run covers 2,130 variants and gains 66 passes with no lost
+passes against the previous complete-corpus report. Its selection differs from
+the previous focused report, so their percentages are not directly comparable.
+The final release-worker measurement uses the same pinned corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, four workers and a five-second
+per-variant timeout. Worker SHA-256:
+`db902525f920314f36668e8e88c32dc4c986913a40581db779dc92eff908f4ba`.
+
+| Result | Count |
+| --- | ---: |
+| All selected variants | 102,956 |
+| Pass | 38,816 (37.7015%) |
+| Fail | 63,852 |
+| Timeout | 2 |
+| Crash | 2 |
+| Harness error | 284 |
+| Skip | 0 |
+
+Compared with the previous continuation report, 83 variants gained a pass and
+zero previously passing variants became nonpassing. Compared with merged main,
+4,081 gained a pass and one became nonpassing: the default-parameter eval case
+below. This fixes 11 of the 12 previously recorded merged-main regressions.
+The remaining errors and crashes stay in the denominator.
+
+Reproduce the report with `tools/test262/run.py` and the pinned corpus, using
+`--jobs 4 --timeout 5` and the release minimal worker. Complete reports and
+transition rows are generated under `artifacts/test262/phases-1-3-completion-*`;
+`tools/test262/latest.json` stores the compact measurement. Validation passes
+684 workspace Rust tests (four ignored), 73 native Node tests, 14 WebAssembly
+tests, eight minimal worker tests, four Python tests, formatting and Clippy.
+The scoped Bun suite remains at 1,356 passes and the same 80 baseline failures,
+with no changed failing test names.
+
+Parameter defaults still share a desugared function-body statement list. A
+separate parameter-initialization phase is needed to prevent body lexical
+bindings from appearing during default evaluation. Complete global object
+storage, realm/agent coverage and contextual grammar remain open; these changes
+do not complete phases 1–3.

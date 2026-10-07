@@ -1436,7 +1436,7 @@ impl Interpreter {
                     // Slow path: rest parameters need positional fixups that
                     // are not worth special-casing into the batch builder.
                     Some(rest_idx) => {
-                        let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+                        let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
                         if !fd.is_arrow {
                             fe.borrow_mut().set("this", this_val);
                         }
@@ -1990,7 +1990,7 @@ fn make_generator_coroutine(
 
             // Bind parameters in a child of the defining scope.
             let parent_env = closure.unwrap_or_else(|| interp.global.clone());
-            let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+            let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
             fe.borrow_mut().set_new_target(Value::Undefined);
             for (i, p) in params.iter().enumerate() {
                 let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
@@ -2183,7 +2183,7 @@ fn run_buffered_generator(
 ) -> Result<(std::collections::VecDeque<Value>, Value), VmErr> {
     let sink: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
     let parent_env = closure.unwrap_or_else(|| interp.global.clone());
-    let frame = Rc::new(RefCell::new(Environment::child(parent_env)));
+    let frame = Rc::new(RefCell::new(Environment::function_child(parent_env)));
     frame.borrow_mut().set_new_target(Value::Undefined);
     for (index, param) in params.iter().enumerate() {
         let arg = args.get(index).cloned().unwrap_or(Value::Undefined);

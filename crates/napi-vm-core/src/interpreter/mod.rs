@@ -1690,12 +1690,24 @@ impl Interpreter {
     fn hoist_vars(&mut self, stmts: &[Statement]) -> Result<(), VmErr> {
         let mut names = Vec::new();
         collect_var_names(stmts, &mut names);
+        let variable_scope = Environment::variable_environment(&self.global);
         for name in names {
             // Only create the binding if nothing already provides it: a
             // parameter of the same name keeps its argument value, and a
             // repeated `var` must not erase an earlier assignment.
-            if !self.global.borrow().has(&name) {
-                self.declare_binding(&name, Value::Undefined, BindKind::Var, true)?;
+            let exists = {
+                let scope = variable_scope.borrow();
+                scope.own_binding(&name).is_some()
+                    || (scope.is_global_scope() && scope.global_property(&name).is_some())
+            };
+            if !exists {
+                self.declare_binding_in(
+                    &variable_scope,
+                    &name,
+                    Value::Undefined,
+                    BindKind::Var,
+                    true,
+                )?;
             }
         }
         Ok(())

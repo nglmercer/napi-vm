@@ -380,7 +380,10 @@ impl Interpreter {
         // The class binds its own name inside static blocks and
         // method bodies, so `static { A.y = … }` can reach it.
         for block in static_blocks {
-            let scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+            let scope = Rc::new(RefCell::new(Environment::function_child(
+                self.global.clone(),
+            )));
+            scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
             scope.borrow_mut().set(&name, class_val.clone());
             let saved = std::mem::replace(&mut self.global, scope);
@@ -962,7 +965,13 @@ impl Interpreter {
                 is_async,
                 is_generator,
             } => {
-                self.set_binding(
+                let scope = if self.global.borrow().is_eval_scope() {
+                    Environment::variable_environment(&self.global)
+                } else {
+                    self.global.clone()
+                };
+                self.set_binding_in(
+                    &scope,
                     name,
                     Value::Function(Rc::new(FunctionData {
                         strict: self.global.borrow().strict() || crate::parser::use_strict(body),

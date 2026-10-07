@@ -403,12 +403,65 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                 .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
             let strict = interp.global.borrow().strict() || crate::parser::use_strict(&body);
             let saved = interp.global.clone();
-            if strict {
-                interp.global = std::rc::Rc::new(std::cell::RefCell::new(
-                    crate::interpreter::Environment::child(saved.clone()),
-                ));
-                interp.global.borrow_mut().replace_strict(Some(true));
+            // EvalDeclarationInstantiation validates global function names
+            // before creating *any* bindings. A failed declaration must not
+            // leave earlier functions or variables behind.
+            let variable_scope = crate::interpreter::Environment::variable_environment(&saved);
+            if !strict {
+                let mut names = Vec::new();
+                crate::parser::collect_var_names(&body, &mut names);
+                let mut scope = saved.clone();
+                loop {
+                    if names
+                        .iter()
+                        .any(|name| scope.borrow().has_lexical_binding(name))
+                    {
+                        return Err(VmErr::Msg(
+                            "SyntaxError: Eval variable conflicts with a lexical binding".into(),
+                        ));
+                    }
+                    if std::rc::Rc::ptr_eq(&scope, &variable_scope) {
+                        break;
+                    }
+                    let parent = scope.borrow().parent_env();
+                    match parent {
+                        Some(parent) => scope = parent,
+                        None => break,
+                    }
+                }
             }
+            if !strict && std::rc::Rc::ptr_eq(&variable_scope, &interp.persistent_global) {
+                fn validate(
+                    body: &[crate::parser::Statement],
+                    scope: &crate::interpreter::Env,
+                ) -> Result<(), VmErr> {
+                    for statement in body {
+                        match statement {
+                            crate::parser::Statement::FnDecl { name, .. } => {
+                                if let Some((_, attributes)) = scope.borrow().global_property(name)
+                                    && !attributes.configurable
+                                    && !(attributes.writable && attributes.enumerable)
+                                {
+                                    return Err(VmErr::Msg(format!(
+                                        "TypeError: Cannot declare global function {name}"
+                                    )));
+                                }
+                            }
+                            crate::parser::Statement::Declarations(inner) => {
+                                validate(inner, scope)?
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(())
+                }
+                validate(&body, &variable_scope)?;
+            }
+            interp.global = std::rc::Rc::new(std::cell::RefCell::new(
+                crate::interpreter::Environment::child(saved.clone()),
+            ));
+            interp.global.borrow_mut().mark_eval_scope(strict);
+            interp.global.borrow_mut().replace_strict(Some(strict));
             let result = interp.run_program_body(&body);
             interp.global = saved;
             result

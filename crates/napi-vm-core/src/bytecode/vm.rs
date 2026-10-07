@@ -209,7 +209,7 @@ pub(crate) fn run_function(
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
-    let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+    let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
     fe.borrow_mut().replace_strict(Some(strict));
     if !code.is_arrow {
         fe.borrow_mut().set("this", this_value.clone());

@@ -221,6 +221,8 @@ pub struct Environment {
     new_target: Option<Value>,
     strict: Option<bool>,
     isolated_realm: bool,
+    variable_scope: bool,
+    eval_scope: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
     intrinsics: HashMap<String, Value>,
 }
@@ -336,6 +338,7 @@ impl Environment {
     }
 
     pub(crate) fn set_module_context(&mut self, name: &str) {
+        self.variable_scope = true;
         self.module_context = Some(name.into());
     }
     pub(crate) fn module_context(&self) -> Option<String> {
@@ -354,6 +357,8 @@ impl Environment {
             new_target: None,
             strict: None,
             isolated_realm: false,
+            variable_scope: false,
+            eval_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -368,6 +373,8 @@ impl Environment {
             new_target: None,
             strict: None,
             isolated_realm: false,
+            variable_scope: false,
+            eval_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -385,6 +392,8 @@ impl Environment {
             new_target: None,
             strict: None,
             isolated_realm: false,
+            variable_scope: false,
+            eval_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -414,8 +423,49 @@ impl Environment {
             new_target: None,
             strict: None,
             isolated_realm: false,
+            variable_scope: true,
+            eval_scope: false,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+        }
+    }
+
+    /// Function bodies own a variable environment; lexical blocks do not.
+    pub(crate) fn function_child(parent: Env) -> Self {
+        let mut frame = Self::child(parent);
+        frame.variable_scope = true;
+        frame
+    }
+
+    pub(crate) fn mark_eval_scope(&mut self, strict: bool) {
+        self.eval_scope = true;
+        self.variable_scope = strict;
+    }
+
+    pub(crate) fn is_eval_scope(&self) -> bool {
+        self.eval_scope
+    }
+
+    pub(crate) fn has_lexical_binding(&self, name: &str) -> bool {
+        self.vars
+            .get(name)
+            .is_some_and(|binding| binding.kind != BindKind::Var)
+    }
+
+    pub(crate) fn variable_environment(scope: &Env) -> Env {
+        let mut frame = scope.clone();
+        loop {
+            let next = {
+                let environment = frame.borrow();
+                if environment.variable_scope || environment.is_global_scope() {
+                    return frame.clone();
+                }
+                environment.parent.clone()
+            };
+            match next {
+                Some(parent) => frame = parent,
+                None => return frame,
+            }
         }
     }
 
