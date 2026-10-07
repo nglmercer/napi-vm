@@ -1037,6 +1037,28 @@ impl FunctionData {
         properties
     }
 
+    pub(crate) fn properties_with_function_kind(
+        global: &Env,
+        asynchronous: bool,
+        generator: bool,
+    ) -> Rc<ObjectCell> {
+        let properties = Self::properties_with_default_prototype(global);
+        let kind = match (asynchronous, generator) {
+            (true, true) => "%AsyncGeneratorFunction%",
+            (true, false) => "%AsyncFunction%",
+            (false, true) => "%GeneratorFunction%",
+            _ => return properties,
+        };
+        if let Some(prototype) = global
+            .borrow()
+            .intrinsic(kind)
+            .and_then(|constructor| constructor.get_prop("prototype"))
+        {
+            properties.set_proto(Some(Rc::new(prototype)));
+        }
+        properties
+    }
+
     pub(crate) fn needs_arguments_object(&self) -> bool {
         if self.is_arrow
             || self

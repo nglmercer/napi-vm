@@ -131,7 +131,65 @@ pub(super) fn install(e: &mut Environment) {
                 configurable: false,
             },
         );
-        props.set_proto(Some(Rc::new(prototype)));
+        props.set_proto(Some(Rc::new(prototype.clone())));
+    }
+    for (name, callable) in [
+        ("AsyncFunction", new_async_function as super::NativeFn),
+        (
+            "GeneratorFunction",
+            new_generator_function as super::NativeFn,
+        ),
+        (
+            "AsyncGeneratorFunction",
+            new_async_generator_function as super::NativeFn,
+        ),
+    ] {
+        let constructor = Value::object_with_proto(
+            vec![
+                ("name".into(), Value::String(name.into())),
+                ("length".into(), Value::Number(1.0)),
+            ],
+            Some(Rc::new(namespace.clone())),
+        );
+        super::make_callable(&constructor, callable, None);
+        let kind_prototype = Value::object_with_proto(
+            vec![("constructor".into(), constructor.clone())],
+            Some(Rc::new(prototype.clone())),
+        );
+        constructor
+            .set_prop("prototype".into(), kind_prototype.clone())
+            .expect("function-kind prototype");
+        if let Value::Object { props } = &constructor {
+            for key in ["name", "length"] {
+                props.meta.borrow_mut().set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+            props.meta.borrow_mut().set_attrs(
+                "prototype",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+        if let Value::Object { props } = &kind_prototype {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        e.install_intrinsic(&format!("%{name}%"), constructor);
     }
 }
 
@@ -348,6 +406,37 @@ fn function_apply(
 }
 
 fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    new_function_kind(interp, a, false, false)
+}
+
+fn new_async_function(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    new_function_kind(interp, args, true, false)
+}
+fn new_generator_function(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    new_function_kind(interp, args, false, true)
+}
+fn new_async_generator_function(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    new_function_kind(interp, args, true, true)
+}
+
+fn new_function_kind(
+    interp: &mut Interpreter,
+    a: Vec<Value>,
+    asynchronous: bool,
+    generator: bool,
+) -> Result<Value, VmErr> {
     let mut parameter_source = crate::JsString::default();
     for (index, value) in a.iter().take(a.len().saturating_sub(1)).enumerate() {
         if index != 0 {
@@ -362,9 +451,20 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     // Parse each grammar component separately to prevent a parameter/body
     // string from escaping its delimiters, then parse together for strict
     // parameter/body early errors. Preserve original UTF-16 code units.
-    parse_dynamic_function(&parameter_source, &crate::JsString::default())?;
-    parse_dynamic_function(&crate::JsString::default(), &body_source)?;
-    let (params, body) = parse_dynamic_function(&parameter_source, &body_source)?;
+    parse_dynamic_function(
+        &parameter_source,
+        &crate::JsString::default(),
+        asynchronous,
+        generator,
+    )?;
+    parse_dynamic_function(
+        &crate::JsString::default(),
+        &body_source,
+        asynchronous,
+        generator,
+    )?;
+    let (params, body) =
+        parse_dynamic_function(&parameter_source, &body_source, asynchronous, generator)?;
 
     let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
     let needs_hoisting = body_needs_hoisting(&body);
@@ -373,7 +473,11 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         native: None,
         identity: Rc::new(0),
         name: Some("anonymous".into()),
-        properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
+        properties: FunctionData::properties_with_function_kind(
+            &interp.persistent_global,
+            asynchronous,
+            generator,
+        ),
         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
         params: Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect()),
         body: Rc::new(body.to_vec()),
@@ -381,9 +485,9 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         // must not capture bindings its source never named.
         closure: Some(crate::heap::capture_env(&interp.persistent_global)),
         is_arrow: false,
-        is_constructor: true,
-        is_async: false,
-        is_generator: false,
+        is_constructor: !asynchronous && !generator,
+        is_async: asynchronous,
+        is_generator: generator,
         uses_arguments,
         bytecode: None,
         needs_hoisting,
@@ -394,8 +498,15 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
 fn parse_dynamic_function(
     params: &crate::JsString,
     body: &crate::JsString,
+    asynchronous: bool,
+    generator: bool,
 ) -> Result<(Vec<String>, Vec<crate::parser::Statement>), VmErr> {
-    let mut source = crate::JsString::from("function anonymous(\n");
+    let mut source = crate::JsString::from(match (asynchronous, generator) {
+        (true, true) => "async function* anonymous(\n",
+        (true, false) => "async function anonymous(\n",
+        (false, true) => "function* anonymous(\n",
+        _ => "function anonymous(\n",
+    });
     source.push_str(params.clone());
     source.push_str("\n) {\n");
     source.push_str(body.clone());

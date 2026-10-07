@@ -187,6 +187,8 @@ pub enum PropKind {
 /// variables must still resolve lexically, not through the caller's frame.
 #[derive(Debug, Clone)]
 pub struct AstFunction {
+    /// An explicit expression name owns an immutable lexical self binding.
+    pub named_expression: bool,
     pub name: Option<String>,
     pub params: Vec<String>,
     pub body: Rc<Vec<Statement>>,

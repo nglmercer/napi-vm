@@ -66,7 +66,7 @@ impl Parser {
                 }
                 // Otherwise it is a parenthesized expression.
                 self.adv();
-                let e = self.expr()?;
+                let e = self.with_in(true, Self::expr)?;
                 self.expect(&Token::RParen);
                 Some(e)
             }
@@ -327,22 +327,27 @@ impl Parser {
             }
             Token::KwImport => {
                 self.adv();
-                if self.eat(&Token::Dot)
-                    && let Token::Identifier(m) = self.cur()
-                    && m == "meta"
-                {
-                    self.adv();
-                    return Some(Expr::ImportMeta);
-                }
-                // `import(specifier)`: the dynamic form, an expression rather
-                // than a declaration.
-                if self.eat(&Token::LParen) {
-                    let specifier = self.assign()?;
-                    self.expect(&Token::RParen);
-                    return Some(Expr::DynamicImport(Box::new(specifier)));
-                }
-                self.semi();
-                Some(Expr::Undefined)
+                let phase = if self.eat(&Token::Dot) {
+                    let name = self.ident()?;
+                    match name.as_str() {
+                        "meta" => return Some(Expr::ImportMeta),
+                        "source" => super::ImportPhase::Source,
+                        "defer" => super::ImportPhase::Deferred,
+                        _ => {
+                            self.record_error("invalid import phase".into());
+                            return None;
+                        }
+                    }
+                } else {
+                    super::ImportPhase::Evaluation
+                };
+                self.expect(&Token::LParen);
+                let specifier = self.assign()?;
+                self.expect(&Token::RParen);
+                Some(Expr::DynamicImport {
+                    specifier: Box::new(specifier),
+                    phase,
+                })
             }
             Token::KwAwait if !self.await_expression => {
                 self.adv();

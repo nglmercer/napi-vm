@@ -731,6 +731,7 @@ impl Builder<'_> {
                 default,
                 named,
                 namespace,
+                ..
             } => {
                 let exports = self.module_exports(module);
                 if let Some(name) = default {
@@ -786,13 +787,16 @@ impl Builder<'_> {
                     self.statements(body, env);
                 }
             }
-            Statement::While { body, .. } | Statement::DoWhile { body, .. } => {
-                self.statements(body, env)
+            Statement::With { body, .. }
+            | Statement::ResourceDeclaration {
+                declarations: body, ..
             }
+            | Statement::While { body, .. }
+            | Statement::DoWhile { body, .. } => self.statements(body, env),
             Statement::For { body, .. } => self.statements(body, env),
-            Statement::ForIn { body, .. } | Statement::ForOf { body, .. } => {
-                self.statements(body, env)
-            }
+            Statement::ForIn { body, .. }
+            | Statement::ForOf { body, .. }
+            | Statement::ResourceForOf { body, .. } => self.statements(body, env),
             Statement::Try {
                 body,
                 catch,
@@ -817,7 +821,9 @@ impl Builder<'_> {
                 let ty = self.expr(value, env);
                 self.exports.insert("default".into(), ty);
             }
-            Statement::ExportNamed { specifiers, source } => {
+            Statement::ExportNamed {
+                specifiers, source, ..
+            } => {
                 let source_exports = source.as_deref().map(|module| self.module_exports(module));
                 for (local, exported) in specifiers {
                     let ty = source_exports
@@ -913,7 +919,7 @@ impl Builder<'_> {
             // A tag can return anything, so its call site is unconstrained.
             Expr::TaggedTemplate { .. } => Type::Unknown,
             // `import(…)` resolves to a namespace object.
-            Expr::DynamicImport(_) => Type::Unknown,
+            Expr::DynamicImport { .. } => Type::Unknown,
             Expr::ClassExpr { .. } => Type::Unknown,
             Expr::Regex(_, _) | Expr::BigIntLiteral(_) => Type::Unknown,
             // A logical assignment evaluates to either operand.
@@ -1228,11 +1234,16 @@ impl Builder<'_> {
                 }
                 Statement::Block(body)
                 | Statement::Declarations(body)
+                | Statement::With { body, .. }
+                | Statement::ResourceDeclaration {
+                    declarations: body, ..
+                }
                 | Statement::While { body, .. }
                 | Statement::DoWhile { body, .. }
                 | Statement::For { body, .. }
                 | Statement::ForIn { body, .. }
-                | Statement::ForOf { body, .. } => {
+                | Statement::ForOf { body, .. }
+                | Statement::ResourceForOf { body, .. } => {
                     self.collect_instance_fields(body, env, fields);
                 }
                 _ => self.statement(statement, env),

@@ -82,6 +82,7 @@ pub struct Parser {
     current_scope: usize,
     await_expression: bool,
     yield_expression: bool,
+    in_expression: bool,
 }
 
 /// A syntax error, with the source position of the token that caused it.
@@ -118,6 +119,7 @@ impl Parser {
             current_scope: 0,
             await_expression: true,
             yield_expression: false,
+            in_expression: true,
         }
     }
 
@@ -133,6 +135,7 @@ impl Parser {
             current_scope: 0,
             await_expression: true,
             yield_expression: false,
+            in_expression: true,
         }
     }
 
@@ -285,12 +288,60 @@ impl Parser {
         generator: bool,
         operation: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let saved = (self.await_expression, self.yield_expression);
+        let saved = (
+            self.await_expression,
+            self.yield_expression,
+            self.in_expression,
+        );
         self.await_expression = asynchronous;
         self.yield_expression = generator;
+        self.in_expression = true;
         let result = operation(self);
-        (self.await_expression, self.yield_expression) = saved;
+        (
+            self.await_expression,
+            self.yield_expression,
+            self.in_expression,
+        ) = saved;
         result
+    }
+
+    pub(crate) fn with_in<R>(
+        &mut self,
+        allowed: bool,
+        operation: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let saved = self.in_expression;
+        self.in_expression = allowed;
+        let result = operation(self);
+        self.in_expression = saved;
+        result
+    }
+
+    /// Arrow parameters cannot start an unparenthesized ShiftExpression.
+    pub(crate) fn arrow_head_here(&self) -> bool {
+        if matches!(self.cur(), Token::Identifier(_)) && matches!(self.peek(), Token::Arrow) {
+            return true;
+        }
+        if !matches!(self.cur(), Token::LParen) {
+            return false;
+        }
+        let mut depth = 0;
+        for (index, (token, _)) in self.toks[self.pos..].iter().enumerate() {
+            match token {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self
+                            .toks
+                            .get(self.pos + index + 1)
+                            .is_some_and(|(token, _)| matches!(token, Token::Arrow));
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
     }
 
     /// The opening parenthesis has already been consumed by the caller.

@@ -161,7 +161,37 @@ fn create_realm(vm: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, 
     Ok(host)
 }
 
+fn host_set_timeout(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let callback = args.first().cloned().unwrap_or(Value::Undefined);
+    if !napi_vm::interpreter::is_callable_value(&callback) {
+        return Err(VmErr::Msg(
+            "TypeError: timer callback must be callable".into(),
+        ));
+    }
+    let delay = args.get(1).map_or(0.0, Value::to_number);
+    vm.jobs.borrow().check_timer_capacity()?;
+    let id = vm
+        .jobs
+        .borrow_mut()
+        .push_timer(delay, callback, args.into_iter().skip(2).collect());
+    Ok(Value::Number(id as f64))
+}
+
+fn host_clear_timeout(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let id = args.first().map_or(0.0, Value::to_number);
+    if id.is_finite() && id > 0.0 {
+        vm.jobs.borrow_mut().cancel_timer(id as u64);
+    }
+    Ok(Value::Undefined)
+}
+
 fn realm_host(vm: &mut Interpreter) -> Value {
+    // An explicit host timer uses the owner queue and its real-time clock.
+    // No runtime capability or foreign-thread callback entry is required.
+    let timeout = vm.native_function_in_realm("setTimeout", host_set_timeout);
+    let clear = vm.native_function_in_realm("clearTimeout", host_clear_timeout);
+    vm.global.borrow_mut().set("setTimeout", timeout);
+    vm.global.borrow_mut().set("clearTimeout", clear);
     let agent = agents::host(vm);
     let host = Value::object(vec![
         ("agent".into(), agent),

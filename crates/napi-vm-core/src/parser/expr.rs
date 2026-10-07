@@ -387,8 +387,13 @@ impl Parser {
                         right: Box::new(r),
                     };
                 }
-                Token::KwIn => {
+                Token::KwIn if self.in_expression => {
                     self.adv();
+                    if self.arrow_head_here() {
+                        self.record_error(
+                            "arrow expression requires parentheses as an in operand".into(),
+                        );
+                    }
                     let r = self.shift()?;
                     l = Expr::Binary {
                         op: BinOp::In,

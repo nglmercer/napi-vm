@@ -165,6 +165,7 @@ impl<T> std::ops::Deref for SharedSlice<'_, T> {
 /// A function definition to compile, borrowed from the parsed unit.
 #[derive(Clone)]
 struct FuncDef<'a> {
+    named_expression: bool,
     name: Option<String>,
     params: SharedSlice<'a, String>,
     body: FuncBody<'a>,
@@ -964,6 +965,7 @@ impl<'a> Compiler<'a> {
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
             let value = self.defer_function(FuncDef {
+                named_expression: false,
                 name: Some(decl.name.to_string()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
@@ -1014,6 +1016,7 @@ impl<'a> Compiler<'a> {
         for decl in fns {
             let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
             let value = self.defer_function(FuncDef {
+                named_expression: false,
                 name: Some(decl.name.to_string()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
@@ -1069,6 +1072,7 @@ impl<'a> Compiler<'a> {
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
             let value = self.defer_function(FuncDef {
+                named_expression: false,
                 name: Some(decl.name.to_string()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
@@ -1124,6 +1128,7 @@ impl<'a> Compiler<'a> {
                 )
             });
         Ok(BytecodeFunction {
+            named_expression: false,
             strict: false,
             name,
             code,
@@ -1289,6 +1294,7 @@ impl<'a> Compiler<'a> {
         self.finish_functions()?;
         let mut code =
             self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)?;
+        code.named_expression = def.named_expression;
         code.strict = matches!(body, FuncBody::Stmts(stmts) if crate::parser::use_strict(stmts));
         Ok(code)
     }
@@ -1361,6 +1367,7 @@ impl<'a> Compiler<'a> {
                 is_generator,
             } => {
                 let value = self.defer_function(FuncDef {
+                    named_expression: false,
                     name: Some(name.clone()),
                     params: SharedSlice::Borrowed(params),
                     body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -1395,6 +1402,10 @@ impl<'a> Compiler<'a> {
             }
             Statement::Block(stmts) => self.compile_scoped_block(stmts),
             Statement::If { test, then, else_ } => self.compile_if(test, then, else_.as_deref()),
+            Statement::ResourceForOf { .. } | Statement::ResourceDeclaration { .. } => {
+                Err(Decline::Func("resource disposal execution"))
+            }
+            Statement::With { .. } => Err(Decline::Func("with object environment")),
             Statement::While { test, body } => self.compile_while(test, body),
             Statement::DoWhile { test, body } => self.compile_do_while(test, body),
             Statement::For {
@@ -1555,7 +1566,11 @@ impl<'a> Compiler<'a> {
                 default,
                 named,
                 namespace,
+                attributes,
             } => {
+                if !attributes.is_empty() {
+                    return Err(Decline::Func("import attributes"));
+                }
                 // Imports bind into the running scope, which a block-level
                 // import would leak out of (the VM has no block frames).
                 let bound = default
@@ -1578,7 +1593,14 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::ExportDefault { src });
                 self.load_undefined()
             }
-            Statement::ExportNamed { specifiers, source } => {
+            Statement::ExportNamed {
+                specifiers,
+                source,
+                attributes,
+            } => {
+                if !attributes.is_empty() {
+                    return Err(Decline::Func("export attributes"));
+                }
                 // Local exports publish scope cells; slots are invisible to
                 // them, so only environment-bound lists compile.
                 if source.is_none() {
@@ -1593,7 +1615,14 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::ExportNamed { tmpl });
                 self.load_undefined()
             }
-            Statement::ExportAll { source, alias } => {
+            Statement::ExportAll {
+                source,
+                alias,
+                attributes,
+            } => {
+                if !attributes.is_empty() {
+                    return Err(Decline::Func("export attributes"));
+                }
                 let tmpl = self.push_const(Constant::ExportAllTemplate(ExportAllTemplate {
                     source: source.clone(),
                     alias: alias.clone(),
@@ -1891,6 +1920,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(params),
                             body: FuncBody::Stmts(SharedSlice::Borrowed(method_body)),
@@ -1959,6 +1989,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(&[]),
                             body: FuncBody::Stmts(SharedSlice::Borrowed(getter_body)),
@@ -1993,6 +2024,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(std::slice::from_ref(param)),
                             body: FuncBody::Stmts(SharedSlice::Borrowed(setter_body)),
@@ -2019,6 +2051,7 @@ impl<'a> Compiler<'a> {
                         self.captures_arguments = true;
                     }
                     let ast = build_ast_function(&FuncDef {
+                        named_expression: false,
                         name: None,
                         params: SharedSlice::Borrowed(&[]),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(block_body)),
@@ -2038,6 +2071,7 @@ impl<'a> Compiler<'a> {
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
             FuncDef {
+                named_expression: false,
                 // The evaluator names the constructor after the class.
                 name: Some(name.to_string()),
                 params: ctor_params,
@@ -3188,6 +3222,7 @@ impl<'a> Compiler<'a> {
                     ExprOrBlock::Expr(expr) => FuncBody::Expr(expr),
                 };
                 self.defer_function(FuncDef {
+                    named_expression: false,
                     name: None,
                     params: SharedSlice::Borrowed(params),
                     body,
@@ -3204,6 +3239,7 @@ impl<'a> Compiler<'a> {
                 is_async,
                 is_generator,
             } => self.defer_function(FuncDef {
+                named_expression: name.is_some(),
                 name: name.clone(),
                 params: SharedSlice::Borrowed(params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3260,7 +3296,10 @@ impl<'a> Compiler<'a> {
             } => self.compile_tagged(tag, cooked, raw, exprs),
             Expr::Super => self.raise_bare_super(),
             Expr::Spread(inner) => self.compile_expr(inner),
-            Expr::DynamicImport(specifier) => {
+            Expr::DynamicImport { specifier, phase } => {
+                if *phase != crate::parser::ImportPhase::Evaluation {
+                    return Err(Decline::Func("non-evaluation import phases"));
+                }
                 let src = self.compile_expr(specifier)?;
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::DynamicImport { dst, src });
@@ -3419,6 +3458,7 @@ impl<'a> Compiler<'a> {
                     is_generator,
                 } => {
                     let val = self.defer_function(FuncDef {
+                        named_expression: false,
                         name: Some(name.clone()),
                         params: SharedSlice::Borrowed(params),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3437,6 +3477,7 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::Getter { name, body } => {
                     let val = self.defer_function(FuncDef {
+                        named_expression: false,
                         name: Some(format!("get {name}")),
                         params: SharedSlice::Borrowed(&[]),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3454,6 +3495,7 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let val = self.defer_function(FuncDef {
+                        named_expression: false,
                         name: Some(format!("set {name}")),
                         params: SharedSlice::Borrowed(std::slice::from_ref(param)),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -4401,6 +4443,7 @@ fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
         stmts_reference(&body, "arguments")
     };
     Rc::new(AstFunction {
+        named_expression: def.named_expression,
         name: def.name.clone(),
         params: def.params.to_vec(),
         body: Rc::new(body),

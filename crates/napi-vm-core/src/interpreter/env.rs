@@ -58,6 +58,7 @@ pub enum BindKind {
 /// `const` and the temporal dead zone.
 #[derive(Clone)]
 struct Binding {
+    silent_immutable: bool,
     value: Value,
     kind: BindKind,
     /// `false` while a `let`/`const` is hoisted but not yet initialized --
@@ -69,6 +70,7 @@ struct Binding {
 impl Binding {
     fn initialized(value: Value, kind: BindKind) -> Self {
         Self {
+            silent_immutable: false,
             value,
             kind,
             initialized: true,
@@ -103,6 +105,7 @@ pub enum AssignOutcome {
 /// Result of a read-modify-write on an existing binding.
 pub enum ModifyOutcome {
     Updated(Value),
+    ReadOnly(Value),
     Missing,
     Const,
     Uninitialized,
@@ -212,6 +215,7 @@ impl Vars {
 
 #[derive(Clone)]
 pub struct Environment {
+    pub(crate) with_object: Option<Value>,
     vars: Vars,
     parent: Option<Env>,
     /// Only the persistent user-global frame has a binding quota. Local
@@ -346,11 +350,16 @@ impl Environment {
     }
 
     pub(crate) fn snapshot_intrinsics(&mut self) {
-        self.intrinsics = self
+        let globals = self
             .own_keys()
             .into_iter()
             .filter_map(|name| self.own_binding(&name).map(|value| (name, value)))
-            .collect();
+            .collect::<HashMap<_, _>>();
+        self.intrinsics.extend(globals);
+    }
+
+    pub(crate) fn install_intrinsic(&mut self, name: &str, value: Value) {
+        self.intrinsics.insert(name.into(), value);
     }
 
     pub(crate) fn intrinsic(&self, name: &str) -> Option<Value> {
@@ -483,6 +492,7 @@ impl Environment {
             variable_scope: false,
             eval_scope: false,
             parameter_scope: false,
+            with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -505,6 +515,7 @@ impl Environment {
             variable_scope: false,
             eval_scope: false,
             parameter_scope: false,
+            with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -530,6 +541,7 @@ impl Environment {
             variable_scope: false,
             eval_scope: false,
             parameter_scope: false,
+            with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -567,6 +579,7 @@ impl Environment {
             variable_scope: true,
             eval_scope: false,
             parameter_scope: false,
+            with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
         }
@@ -592,6 +605,27 @@ impl Environment {
         self.vars
             .get(name)
             .is_some_and(|binding| self.parameter_scope || binding.kind != BindKind::Var)
+    }
+
+    /// Named function expressions own a lexical scope, distinct from declarations
+    /// and inferred display names. Assignment is ignored in sloppy code.
+    pub(crate) fn named_function_scope(parent: Env, name: Option<&str>) -> Env {
+        let Some(name) = name else {
+            return parent;
+        };
+        let mut scope = Self::child(parent);
+        scope.declare(name, Value::Undefined, BindKind::Let, false);
+        std::rc::Rc::new(std::cell::RefCell::new(scope))
+    }
+
+    pub(crate) fn initialize_function_name(scope: &Env, name: Option<&str>, value: &Value) {
+        if let Some(name) = name {
+            let mut scope = scope.borrow_mut();
+            scope.initialize(name, value.clone());
+            if let Some(binding) = scope.vars.get_mut(name) {
+                binding.silent_immutable = true;
+            }
+        }
     }
 
     pub(crate) fn parameter_child(parent: Env) -> Self {
@@ -677,6 +711,7 @@ impl Environment {
             self.property_attributes.entry(n.into()).or_insert(attrs);
         }
         let binding = Binding {
+            silent_immutable: false,
             value,
             kind,
             initialized,
@@ -845,6 +880,9 @@ impl Environment {
             {
                 return AssignOutcome::ReadOnly;
             }
+            if binding.silent_immutable {
+                return AssignOutcome::ReadOnly;
+            }
             if binding.kind == BindKind::Const {
                 // A `const` in its dead zone is still a `const`: JavaScript
                 // reports the TDZ first, since the declaration has not run.
@@ -899,6 +937,9 @@ impl Environment {
                 return ModifyOutcome::Uninitialized;
             }
             let value = f(binding.value.deref_binding());
+            if binding.silent_immutable {
+                return ModifyOutcome::ReadOnly(value);
+            }
             match &binding.value {
                 Value::Binding(cell) => cell
                     .borrow_mut()
@@ -970,6 +1011,7 @@ impl Environment {
     /// Bound values for the cycle collector's marker.
     pub(crate) fn trace_values(&self) -> Vec<Value> {
         let mut values = self.vars.values_cloned();
+        values.extend(self.with_object.iter().cloned());
         values.extend(self.new_target.iter().cloned());
         values.extend(self.constructor_this.iter().flatten().cloned());
         values.extend(self.intrinsics.values().cloned());
@@ -986,6 +1028,7 @@ impl Environment {
     #[doc(hidden)]
     pub fn clear_edges(&mut self) {
         self.vars.clear();
+        self.with_object = None;
         self.property_attributes.clear();
         self.intrinsics.clear();
         self.new_target = None;
@@ -1002,6 +1045,7 @@ impl Environment {
                 Ok(cell) => {
                     let mut env = cell.into_inner();
                     env.vars.drain_into(work);
+                    work.extend(env.with_object.take());
                     work.extend(env.new_target.take());
                     work.extend(env.constructor_this.take().flatten());
                     work.extend(env.intrinsics.drain().map(|(_, value)| value));

@@ -2,9 +2,13 @@ use napi_vm_core::parser::ParseGoal;
 use napi_vm_core::{Lexer, Parser};
 
 fn parses(source: &str, goal: ParseGoal) -> bool {
-    Parser::new_with_spans(Lexer::new(source).tokenize_with_spans())
-        .parse_program_with_goal(goal)
-        .is_ok()
+    Parser::new_with_spans(
+        Lexer::new(source)
+            .with_module_goal(goal == ParseGoal::Module)
+            .tokenize_with_spans(),
+    )
+    .parse_program_with_goal(goal)
+    .is_ok()
 }
 
 #[test]
@@ -223,4 +227,120 @@ fn line_terminators_and_parameter_delimiters_are_grammar_boundaries() {
     ] {
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
+}
+
+#[test]
+fn annex_b_comments_follow_the_lexical_goal_and_function_parameter_goal() {
+    assert!(parses("<!-- comment\nvar x;", ParseGoal::Script));
+    assert!(parses("\n--> comment\nvar x;", ParseGoal::Script));
+    assert!(!parses("<!-- comment\nvar x;", ParseGoal::Module));
+    assert!(!parses("\n--> comment\nvar x;", ParseGoal::Module));
+    let mut vm = napi_vm_core::Interpreter::with_builtins();
+    assert!(
+        vm.eval_source("Function('<!--','');Function('\\n-->','');")
+            .is_ok()
+    );
+    assert!(!parses("throw\u{2028}1;", ParseGoal::Script));
+    assert!(parses("var x=1\u{2029}var y=2;", ParseGoal::Script));
+}
+
+#[test]
+fn named_function_expressions_and_dynamic_function_kinds_keep_their_own_context() {
+    for source in [
+        "var f=function loop(n){return n ? loop(n-1) : 7;}; f(3)===7 && typeof loop==='undefined';",
+        "var f=function loop(){loop=1;return typeof loop;};f()==='function';",
+        "var f=function loop(){'use strict';try{loop=1;}catch(e){return e instanceof TypeError;}};f();",
+        "function f(){return f;}var old=f;f=7;old()===7;",
+        "var A=(async function(){}).constructor;A('a','await a').length===1 && typeof AsyncFunction==='undefined';",
+        "var G=(function*(){}).constructor;G('yield 7')().next().value===7 && typeof GeneratorFunction==='undefined';",
+        "var G=(async function*(){}).constructor;G('yield await 7').length===0;",
+        "try{Function('await 1');false;}catch(e){e instanceof SyntaxError;}",
+        "try{(async function(){}).constructor('a=await 1','');false;}catch(e){e instanceof SyntaxError;}",
+        "Function(undefined,'return 7')()===7;",
+    ] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn full_corpus_grammar_regressions_have_explicit_boundaries() {
+    for source in [
+        "class C{#x;constructor(){for(#x in value;;)break;}}",
+        "class C{#x;m(){#x in ()=>{};}}",
+        "class C{static{((x=await)=>0);}}",
+        "'use strict';({yield});",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "do{}while(false) var x;",
+        "foo(.1_2e1_0);",
+        "var a=1;/*\u{2028}*/a++;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn with_syntax_uses_object_records_and_restores_lexical_scope() {
+    assert!(!parses("'use strict';with({}){}", ParseGoal::Script));
+    for source in [
+        "var x=1;var o={x:2};with(o){x=3;x++;}x===1 && o.x===4;",
+        "var x=1;var o={x:2,[Symbol.unscopables]:{x:true}};with(o){x=3;}x===3 && o.x===2;",
+        "var x=1;var o={x:2};try{with(o){throw x;}}catch(e){}x===1;",
+        "var o={x:7,f(){return this.x;}};var r;with(o){r=f();}r===7;",
+        "var o={x:1};with(o){delete x;}!('x' in o);",
+        "var x=1;with({x:2}){let x=3;}x===1;",
+        "var x=1;var o={get x(){return 7;}};var r;with(o){r=x;}r===7;",
+    ] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn newer_syntax_retains_metadata_and_reports_runtime_gaps_explicitly() {
+    for source in [
+        "async function f(){await using x=null,y=null;}",
+        "{using x=null;}",
+        "(async()=>{await import.defer('x');});",
+        "(()=>import.source('x'));",
+        "for(using x of []){}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "import x from 'x' with {type:'json'};",
+        "import 'x' with {type:'json',};",
+    ] {
+        assert!(parses(source, ParseGoal::Module), "rejected {source}");
+    }
+    for source in [
+        "import x from 'x' with {type:'json',type:'json'};",
+        "import 'x' with {type:1};",
+    ] {
+        assert!(!parses(source, ParseGoal::Module), "accepted {source}");
+    }
+    for source in ["{x;using x=null;}", "let x={};for(using x of [x]){}"] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            result.is_err_and(|e| e.to_string().contains("ReferenceError")),
+            "{source}"
+        );
+    }
+    let mut vm = napi_vm_core::Interpreter::with_builtins();
+    assert!(vm.eval_source("{using x=null;}").is_err_and(|e| {
+        e.to_string()
+            .contains("resource disposal execution is not implemented")
+    }));
 }

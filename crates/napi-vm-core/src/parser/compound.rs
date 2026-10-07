@@ -272,8 +272,10 @@ impl Parser {
                 }
                 _ => return None,
             };
+            let attributes = self.import_attributes()?;
             self.semi();
             Some(Statement::ExportAll {
+                attributes,
                 source: self.module_specifier(source)?,
                 alias,
             })
@@ -314,8 +316,14 @@ impl Parser {
             } else {
                 None
             };
+            let attributes = if s.is_some() {
+                self.import_attributes()?
+            } else {
+                Vec::new()
+            };
             self.semi();
             Some(Statement::ExportNamed {
+                attributes,
                 specifiers: sp,
                 source: s.and_then(|value| self.module_specifier(value)),
             })
@@ -363,6 +371,7 @@ impl Parser {
             }
             _ => {
                 return Some(Statement::ExportNamed {
+                    attributes: Vec::new(),
                     specifiers: vec![],
                     source: None,
                 });
@@ -374,6 +383,7 @@ impl Parser {
         Some(Statement::Declarations(vec![
             decl,
             Statement::ExportNamed {
+                attributes: Vec::new(),
                 specifiers,
                 source: None,
             },
@@ -412,6 +422,7 @@ impl Parser {
                     self.expect(&Token::RBrace);
                     let m = self.from()?;
                     Some(Statement::Import {
+                        attributes: Vec::new(),
                         module: m,
                         default: Some(nm),
                         named: nd,
@@ -423,6 +434,7 @@ impl Parser {
             } else if self.eat(&Token::KwFrom) {
                 let m = self.from()?;
                 Some(Statement::Import {
+                    attributes: Vec::new(),
                     module: m,
                     default: Some(nm),
                     named: vec![],
@@ -436,6 +448,7 @@ impl Parser {
             let ns = self.ident()?;
             let m = self.from()?;
             Some(Statement::Import {
+                attributes: Vec::new(),
                 module: m,
                 default: None,
                 named: vec![],
@@ -458,6 +471,7 @@ impl Parser {
             self.expect(&Token::RBrace);
             let m = self.from()?;
             Some(Statement::Import {
+                attributes: Vec::new(),
                 module: m,
                 default: None,
                 named: nd,
@@ -466,8 +480,8 @@ impl Parser {
         } else if let Token::String(s) | Token::EscapedString(s) = self.cur() {
             let m = self.module_specifier(s.clone())?;
             self.adv();
-            self.semi();
             Some(Statement::Import {
+                attributes: Vec::new(),
                 module: m,
                 default: None,
                 named: vec![],
@@ -476,8 +490,56 @@ impl Parser {
         } else {
             None
         };
+        let attributes = self.import_attributes()?;
+        let def = def.map(|mut declaration| {
+            if let Statement::Import {
+                attributes: stored, ..
+            } = &mut declaration
+            {
+                *stored = attributes;
+            }
+            declaration
+        });
         self.semi();
         def
+    }
+
+    fn import_attributes(&mut self) -> Option<Vec<(String, crate::JsString)>> {
+        let mut attributes = Vec::new();
+        if !matches!(self.cur(), Token::KwWith) {
+            return Some(attributes);
+        }
+        self.adv();
+        self.expect(&Token::LBrace);
+        while self.until(&Token::RBrace) {
+            let key = match self.cur().clone() {
+                Token::String(value) | Token::EscapedString(value) => {
+                    self.adv();
+                    value.to_key()
+                }
+                _ => self.ident_or_keyword()?,
+            };
+            self.expect(&Token::Colon);
+            let value = match self.cur().clone() {
+                Token::String(value) | Token::EscapedString(value) => {
+                    self.adv();
+                    value
+                }
+                _ => {
+                    self.record_error("import attribute values must be strings".into());
+                    return None;
+                }
+            };
+            if attributes.iter().any(|(name, _)| name == &key) {
+                self.record_error("duplicate import attribute".into());
+            }
+            attributes.push((key, value));
+            if !matches!(self.cur(), Token::RBrace) {
+                self.expect(&Token::Comma);
+            }
+        }
+        self.expect(&Token::RBrace);
+        Some(attributes)
     }
 
     // Module loader identifiers are a UTF-8 host contract. Reject rather than

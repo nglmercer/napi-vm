@@ -1132,6 +1132,17 @@ impl Interpreter {
         } else {
             v
         };
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            let current = self.get_prop_value_str(&object, name)?;
+            let current = if bin == BinOp::Add {
+                self.coerce_for_concat(&current)?
+            } else {
+                current
+            };
+            let combined = self.bin_op(bin, &current, &v)?;
+            self.assign_member_str(&object, name, combined.clone())?;
+            return Ok(combined);
+        }
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
         // read borrow then a write borrow. `bin_op` can still fail (e.g.
         // string-length cap); capture the error and leave the slot unchanged.
@@ -1168,6 +1179,15 @@ impl Interpreter {
         }
         match res {
             ModifyOutcome::Updated(v) => Ok(v),
+            ModifyOutcome::ReadOnly(v) => {
+                if scope.borrow().strict() {
+                    vm_err(format!(
+                        "TypeError: Cannot assign to read-only binding {name}"
+                    ))
+                } else {
+                    Ok(v)
+                }
+            }
             ModifyOutcome::Missing => vm_err(format!("ReferenceError: {name} is not defined")),
             ModifyOutcome::Const => vm_err(format!(
                 "TypeError: Assignment to constant variable '{name}'"
@@ -1199,6 +1219,10 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            let key = Value::String(name.into());
+            return self.inc_prop_value(&object, &key, inc, prefix);
+        }
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
         // read borrow followed by a separate write borrow. `old` captures
         // the value before the update so postfix can return it.
@@ -1213,6 +1237,14 @@ impl Interpreter {
         };
         let new_val = match new_val {
             ModifyOutcome::Updated(v) => v,
+            ModifyOutcome::ReadOnly(v) => {
+                if scope.borrow().strict() {
+                    return vm_err(format!(
+                        "TypeError: Cannot assign to read-only binding {name}"
+                    ));
+                }
+                v
+            }
             ModifyOutcome::Missing => {
                 return vm_err(format!("ReferenceError: {name} is not defined"));
             }

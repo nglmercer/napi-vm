@@ -267,3 +267,17 @@ fn cached_module_rejections_are_traced_without_permanent_pins() {
     assert!(vm.collect_cycles().skipped.is_none());
     yes(&mut vm, "reference.deref()===undefined;");
 }
+
+#[test]
+fn with_object_environment_keeps_captured_receivers_alive() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var read;var receiver={answer:42};receiver.self=receiver;var weak=new WeakRef(receiver);with(receiver){read=function(){return answer;};}receiver=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "read()===42&&weak.deref().answer===42;");
+    run(&mut vm, "read=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "weak.deref()===undefined;");
+}

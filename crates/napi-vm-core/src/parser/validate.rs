@@ -141,7 +141,9 @@ fn module_exports(body: &[Statement]) -> Check {
                     return Err("duplicate default export".into());
                 }
             }
-            Statement::ExportNamed { specifiers, source } => {
+            Statement::ExportNamed {
+                specifiers, source, ..
+            } => {
                 for (local, exported) in specifiers {
                     if !exports.insert(exported.clone()) {
                         return Err(format!("duplicate export: {exported}"));
@@ -256,6 +258,7 @@ fn function(
                     initializer,
                     &Context {
                         parameters: true,
+                        await_reserved: kind.arrow() && outer.await_reserved,
                         ..ctx.clone()
                     },
                 )?;
@@ -274,7 +277,11 @@ fn lexical_names(
     let mut ordinary_functions = HashSet::new();
     for stmt in body {
         match stmt {
-            Statement::Declarations(decls) => {
+            Statement::Declarations(decls)
+            | Statement::ResourceDeclaration {
+                declarations: decls,
+                ..
+            } => {
                 for name in lexical_names(decls, functions, sloppy)? {
                     if !names.insert(name.clone()) {
                         return Err(format!("duplicate lexical binding: {name}"));
@@ -433,6 +440,45 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 *is_async || *is_generator,
                 false,
             )
+        }
+        Statement::ResourceForOf {
+            name,
+            iter,
+            body,
+            is_await,
+            await_disposal,
+        } => {
+            if (*is_await || *await_disposal) && !ctx.await_allowed {
+                return Err("async resource loop outside async context".into());
+            }
+            binding(name, ctx)?;
+            expression(iter, ctx)?;
+            statements(
+                body,
+                &Context {
+                    loops: ctx.loops + 1,
+                    ..ctx.clone()
+                },
+            )
+        }
+        Statement::ResourceDeclaration {
+            declarations,
+            is_await,
+        } => {
+            if *is_await && !ctx.await_allowed {
+                return Err("await using outside async context".into());
+            }
+            for declaration in declarations {
+                statement(declaration, ctx)?;
+            }
+            Ok(())
+        }
+        Statement::With { object, body } => {
+            if ctx.strict {
+                return Err("with statement in strict code".into());
+            }
+            expression(object, ctx)?;
+            statements(body, ctx)
         }
         Statement::ClassDecl {
             name,
@@ -770,6 +816,22 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         Expr::Identifier(name) if name == "yield" && (ctx.strict || ctx.kind.generator()) => {
             Err("yield used as an identifier".into())
         }
+        Expr::Identifier(name)
+            if ctx.strict
+                && matches!(
+                    name.as_str(),
+                    "implements"
+                        | "interface"
+                        | "let"
+                        | "package"
+                        | "private"
+                        | "protected"
+                        | "public"
+                        | "static"
+                ) =>
+        {
+            Err(format!("reserved strict identifier: {name}"))
+        }
         Expr::Identifier(name) if name.starts_with('#') => {
             Err("private name must be the left operand of in".into())
         }
@@ -785,7 +847,9 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         Expr::Object(props) => {
             for prop in props {
                 match prop {
-                    ObjectProp::Shorthand(_) => {}
+                    ObjectProp::Shorthand(name) => {
+                        expression(&Expr::Identifier(name.clone()), ctx)?;
+                    }
                     ObjectProp::KeyValue(_, value) | ObjectProp::Spread(value) => {
                         expression(value, ctx)?
                     }
@@ -1022,7 +1086,10 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
             optional(value.as_deref(), ctx)
         }
-        Expr::Spread(value) | Expr::DynamicImport(value) => expression(value, ctx),
+        Expr::Spread(value)
+        | Expr::DynamicImport {
+            specifier: value, ..
+        } => expression(value, ctx),
         Expr::Number(_)
         | Expr::BigIntLiteral(_)
         | Expr::String(_)

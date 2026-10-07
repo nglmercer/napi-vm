@@ -320,3 +320,12 @@ fn worker_agents_parse_source_with_script_goal() {
         "{result}"
     );
 }
+
+#[test]
+fn conformance_host_timers_use_the_owner_queue_and_can_be_cancelled() {
+    let result = worker(json!({
+        "source":"var start=Date.now();var cancelled=setTimeout(()=>{throw new Error('cancelled timer ran');},1);clearTimeout(cancelled);setTimeout((value)=>{if(value!==7||Date.now()-start<10)throw new Error('timer fired incorrectly');$DONE();},20,7);",
+        "asynchronous":true
+    }));
+    assert_eq!(result["status"], "ok", "{result}");
+}

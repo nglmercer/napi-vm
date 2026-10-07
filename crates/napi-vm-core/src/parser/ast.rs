@@ -96,6 +96,13 @@ impl AssignOp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportPhase {
+    Evaluation,
+    Source,
+    Deferred,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(f64),
@@ -188,7 +195,10 @@ pub enum Expr {
     ImportMeta,
     NewTarget,
     /// `import(specifier)`: resolves to the module's namespace object.
-    DynamicImport(Box<Expr>),
+    DynamicImport {
+        specifier: Box<Expr>,
+        phase: ImportPhase,
+    },
     Template {
         quasis: Vec<crate::JsString>,
         exprs: Vec<Expr>,
@@ -237,6 +247,17 @@ pub enum ExprOrBlock {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    ResourceForOf {
+        name: String,
+        iter: Box<Expr>,
+        body: Vec<Statement>,
+        is_await: bool,
+        await_disposal: bool,
+    },
+    ResourceDeclaration {
+        declarations: Vec<Statement>,
+        is_await: bool,
+    },
     Expr(Expr),
     VarDecl {
         kind: VarKind,
@@ -261,6 +282,10 @@ pub enum Statement {
         test: Box<Expr>,
         then: Vec<Statement>,
         else_: Option<Vec<Statement>>,
+    },
+    With {
+        object: Box<Expr>,
+        body: Vec<Statement>,
     },
     While {
         test: Box<Expr>,
@@ -332,6 +357,7 @@ pub enum Statement {
     },
     ExportDefault(Box<Expr>),
     ExportNamed {
+        attributes: Vec<(String, crate::JsString)>,
         specifiers: Vec<(String, String)>,
         source: Option<String>,
     },
@@ -339,10 +365,12 @@ pub enum Statement {
     /// other module's namespace object is exported under that one name;
     /// without it, every named export of `m` is re-exported.
     ExportAll {
+        attributes: Vec<(String, crate::JsString)>,
         source: String,
         alias: Option<String>,
     },
     Import {
+        attributes: Vec<(String, crate::JsString)>,
         module: String,
         default: Option<String>,
         named: Vec<(String, String)>,
@@ -555,9 +583,12 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
                 out.push(name.clone());
             }
         }
-        Statement::Block(body) | Statement::Declarations(body) => {
-            collect_scoped_var_names(body, out, functions)
+        Statement::Block(body)
+        | Statement::Declarations(body)
+        | Statement::ResourceDeclaration {
+            declarations: body, ..
         }
+        | Statement::With { body, .. } => collect_scoped_var_names(body, out, functions),
         Statement::If { then, else_, .. } => {
             collect_scoped_var_names(then, out, functions);
             if let Some(else_) = else_ {
@@ -567,7 +598,8 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
         Statement::While { body, .. }
         | Statement::DoWhile { body, .. }
         | Statement::ForIn { body, .. }
-        | Statement::ForOf { body, .. } => collect_scoped_var_names(body, out, functions),
+        | Statement::ForOf { body, .. }
+        | Statement::ResourceForOf { body, .. } => collect_scoped_var_names(body, out, functions),
         Statement::For { init, body, .. } => {
             if let Some(init) = init {
                 match &**init {
@@ -737,7 +769,9 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .as_ref()
                     .is_some_and(|stmts| statements_capture_identifier(stmts, name))
         }
-        Statement::While { test, body } | Statement::DoWhile { test, body } => {
+        Statement::With { object: test, body }
+        | Statement::While { test, body }
+        | Statement::DoWhile { test, body } => {
             expr_captures_identifier(test, name) || statements_capture_identifier(body, name)
         }
         Statement::For {
@@ -758,6 +792,9 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
         }
         Statement::ForIn { obj, body, .. } => {
             expr_captures_identifier(obj, name) || statements_capture_identifier(body, name)
+        }
+        Statement::ResourceForOf { iter, body, .. } => {
+            expr_captures_identifier(iter, name) || statements_capture_identifier(body, name)
         }
         Statement::ForOf {
             iter,
@@ -782,9 +819,12 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
             statements_capture_identifier(initializers, name)
                 || statements_capture_identifier(fields, name)
         }
-        Statement::Block(stmts) | Statement::Declarations(stmts) => {
-            statements_capture_identifier(stmts, name)
-        }
+        Statement::Block(stmts)
+        | Statement::Declarations(stmts)
+        | Statement::ResourceDeclaration {
+            declarations: stmts,
+            ..
+        } => statements_capture_identifier(stmts, name),
         Statement::Labeled { body, .. } => {
             statements_capture_identifier(std::slice::from_ref(body.as_ref()), name)
         }
@@ -885,7 +925,7 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
                 || expr_captures_identifier(consequent, name)
                 || expr_captures_identifier(alternate, name)
         }
-        Expr::DynamicImport(specifier) | Expr::YieldFrom(specifier) => {
+        Expr::DynamicImport { specifier, .. } | Expr::YieldFrom(specifier) => {
             expr_captures_identifier(specifier, name)
         }
         Expr::Template { exprs, .. } => exprs
@@ -1020,7 +1060,9 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                     .map(|b| stmts_reference(b, name))
                     .unwrap_or(false)
         }
-        Statement::While { test, body } | Statement::DoWhile { test, body } => {
+        Statement::With { object: test, body }
+        | Statement::While { test, body }
+        | Statement::DoWhile { test, body } => {
             expr_references(test, name) || stmts_reference(body, name)
         }
         Statement::For {
@@ -1066,7 +1108,7 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
         Statement::ForIn { obj, body, .. } => {
             expr_references(obj, name) || stmts_reference(body, name)
         }
-        Statement::ForOf { iter, body, .. } => {
+        Statement::ForOf { iter, body, .. } | Statement::ResourceForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)
         }
         Statement::ClassInitialization { fields, .. } => stmts_reference(fields, name),
@@ -1075,7 +1117,11 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
             fields,
             ..
         } => stmts_reference(initializers, name) || stmts_reference(fields, name),
-        Statement::Block(b) | Statement::Declarations(b) => stmts_reference(b, name),
+        Statement::Block(b)
+        | Statement::Declarations(b)
+        | Statement::ResourceDeclaration {
+            declarations: b, ..
+        } => stmts_reference(b, name),
         Statement::Labeled { body, .. } => stmt_references(body, name),
         Statement::Throw(e) => expr_references(e, name),
         Statement::Try {
@@ -1207,7 +1253,7 @@ fn expr_references(e: &Expr, name: &str) -> bool {
         | Expr::Super
         | Expr::ImportMeta
         | Expr::NewTarget => false,
-        Expr::DynamicImport(specifier) => expr_references(specifier, name),
+        Expr::DynamicImport { specifier, .. } => expr_references(specifier, name),
     }
 }
 

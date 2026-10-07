@@ -138,7 +138,12 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
                 walk_stmts(e, scope, runtime_handlers);
             }
         }
-        Statement::While { body, .. } | Statement::DoWhile { body, .. } => {
+        Statement::With { body, .. }
+        | Statement::ResourceDeclaration {
+            declarations: body, ..
+        }
+        | Statement::While { body, .. }
+        | Statement::DoWhile { body, .. } => {
             walk_stmts(body, scope, runtime_handlers);
         }
         Statement::For { init, body, .. } => {
@@ -164,7 +169,9 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             }
             walk_stmts(body, scope, runtime_handlers);
         }
-        Statement::ForIn { name, body, .. } | Statement::ForOf { name, body, .. } => {
+        Statement::ForIn { name, body, .. }
+        | Statement::ForOf { name, body, .. }
+        | Statement::ResourceForOf { name, body, .. } => {
             push(scope, name, CompletionKind::Variable, None);
             walk_stmts(body, scope, runtime_handlers);
         }
@@ -196,6 +203,7 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             default,
             named,
             namespace,
+            ..
         } => {
             scope.modules.push(module.clone());
             if let Some(d) = default {

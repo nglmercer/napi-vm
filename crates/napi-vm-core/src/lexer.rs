@@ -69,6 +69,7 @@ pub enum Token {
     KwElse,
     KwFor,
     KwWhile,
+    KwWith,
     KwDo,
     KwSwitch,
     KwCase,
@@ -157,6 +158,8 @@ pub struct Lexer {
     /// literal.
     previous: Option<Token>,
     encoded_source: bool,
+    module_goal: bool,
+    line_has_token: bool,
 }
 
 impl Lexer {
@@ -170,7 +173,15 @@ impl Lexer {
             pending_spans: Vec::new(),
             previous: None,
             encoded_source: false,
+            module_goal: false,
+            line_has_token: false,
         }
+    }
+
+    /// Annex B HTML comments belong to Script/Function goals, never Module.
+    pub fn with_module_goal(mut self, module: bool) -> Self {
+        self.module_goal = module;
+        self
     }
 
     /// Parse source supplied by JavaScript without replacing lone surrogates.
@@ -216,6 +227,7 @@ impl Lexer {
                     .pop()
                     .unwrap_or(crate::span::Span::unknown());
                 toks.push((t, span));
+                self.line_has_token = true;
                 continue;
             }
             self.skip_ws();
@@ -224,6 +236,7 @@ impl Lexer {
             }
             if let Some((t, span)) = self.next_with_span() {
                 self.previous = Some(t.clone());
+                self.line_has_token = true;
                 toks.push((t, span));
             }
         }
@@ -235,18 +248,34 @@ impl Lexer {
     fn skip_ws(&mut self) {
         while self.pos < self.src.len() {
             let c = self.src[self.pos];
-            if c == '\n' {
+            let html_open = self.src[self.pos..].starts_with(&['<', '!', '-', '-']);
+            let html_close =
+                !self.line_has_token && self.src[self.pos..].starts_with(&['-', '-', '>']);
+            if !self.module_goal && (html_open || html_close) {
+                while self.pos < self.src.len()
+                    && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+                {
+                    self.pos += 1;
+                    self.col += 1;
+                }
+            } else if matches!(c, '\n' | '\u{2028}' | '\u{2029}') {
                 self.pos += 1;
                 self.line += 1;
                 self.col = 1;
+                self.line_has_token = false;
             } else if c == '\r' {
                 self.pos += 1;
                 self.line += 1;
                 self.col = 1;
+                self.line_has_token = false;
                 if self.pos < self.src.len() && self.src[self.pos] == '\n' {
                     self.pos += 1;
                 }
-            } else if c == '\t' || c == ' ' {
+            } else if matches!(
+                c,
+                '\t' | '\u{b}' | '\u{c}' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+                    ..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+            ) {
                 self.pos += 1;
                 self.col += 1;
             } else if c == '/' && self.pos + 1 < self.src.len() {
@@ -254,7 +283,9 @@ impl Lexer {
                 if n == '/' {
                     self.pos += 2;
                     self.col += 2;
-                    while self.pos < self.src.len() && self.src[self.pos] != '\n' {
+                    while self.pos < self.src.len()
+                        && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+                    {
                         self.pos += 1;
                         self.col += 1;
                     }
@@ -267,9 +298,10 @@ impl Lexer {
                             self.col += 2;
                             break;
                         }
-                        if self.src[self.pos] == '\n' {
+                        if matches!(self.src[self.pos], '\n' | '\u{2028}' | '\u{2029}') {
                             self.line += 1;
                             self.col = 1;
+                            self.line_has_token = false;
                         } else {
                             self.col += 1;
                         }
@@ -489,6 +521,7 @@ impl Lexer {
                     self.read_ident()
                 }
             }
+            '.' if self.src.get(self.pos + 1).is_some_and(char::is_ascii_digit) => self.read_num(),
             '.' => {
                 if self.pos + 2 < self.src.len()
                     && self.src[self.pos + 1] == '.'
@@ -1027,7 +1060,9 @@ impl Lexer {
             }
             if la < self.src.len() && self.src[la].is_ascii_digit() {
                 self.pos = la;
-                while self.pos < self.src.len() && self.src[self.pos].is_ascii_digit() {
+                while self.pos < self.src.len()
+                    && (self.src[self.pos].is_ascii_digit() || self.src[self.pos] == '_')
+                {
                     self.pos += 1;
                     self.col += 1;
                 }
@@ -1071,6 +1106,7 @@ impl Lexer {
             "else" => Token::KwElse,
             "for" => Token::KwFor,
             "while" => Token::KwWhile,
+            "with" => Token::KwWith,
             "do" => Token::KwDo,
             "switch" => Token::KwSwitch,
             "case" => Token::KwCase,

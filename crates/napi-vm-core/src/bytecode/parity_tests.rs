@@ -1231,3 +1231,18 @@ fn arrow_super_uses_lexical_receiver() {
     }
     assert!(parse_cached("class A { method(){return this.x;} } class B extends A { method(){function inner(){return super.method();}return inner.call({x:9});} }").is_err());
 }
+
+#[test]
+fn named_expression_bindings_are_lexical_and_immutable_in_both_tiers() {
+    for source in [
+        "var f=function self(n){return n ? self(n-1) : 7;};f(4)",
+        "var f=function self(){self=1;return typeof self;};f()",
+        "var f=function self(){'use strict';self=1;};f()",
+        "var f=function self(){self+=1;return typeof self;};f()",
+        "function f(){return f;}var old=f;f=7;old()",
+        "var f=function self(){return self;};typeof self",
+        "var f=async function self(){return typeof self;};f().then(v=>{if(v!=='function')throw 1;})",
+    ] {
+        check(source, true);
+    }
+}

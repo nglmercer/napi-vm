@@ -19,9 +19,27 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
-        let lookup = scope.borrow().lookup(name);
-        if !matches!(lookup, super::Lookup::Missing) {
-            return Ok(lookup);
+        let mut frame = Some(scope.clone());
+        while let Some(environment) = frame {
+            let (local, object, parent) = {
+                let environment = environment.borrow();
+                (
+                    environment.kind_of(name).is_some(),
+                    environment.with_object.clone(),
+                    environment.parent_env(),
+                )
+            };
+            if local {
+                return Ok(environment.borrow().lookup(name));
+            }
+            if let Some(object) = object
+                && self.with_has_binding(&object, name)?
+            {
+                return self
+                    .get_prop_value_str(&object, name)
+                    .map(super::Lookup::Value);
+            }
+            frame = parent;
         }
         let global = self.realm_global_object();
         if let Some(prototype) = self.prototype_of(&global)
@@ -32,6 +50,52 @@ impl Interpreter {
                 .map(super::Lookup::Value);
         }
         Ok(super::Lookup::Missing)
+    }
+
+    fn with_has_binding(&mut self, object: &Value, name: &str) -> Result<bool, VmErr> {
+        if !self.has_property(object, &Value::String(name.into()))? {
+            return Ok(false);
+        }
+        if let Some(symbol) = crate::builtins::well_known("unscopables") {
+            let exclusions = self.get_prop_value(object, &symbol)?;
+            if super::call::is_js_object(&exclusions) {
+                let excluded = self.get_prop_value_str(&exclusions, name)?;
+                if self.truthy(&excluded) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    /// Resolve object-backed bindings without holding an environment borrow
+    /// across guest accessors or Proxy operations.
+    pub(crate) fn with_binding_object(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<Option<Value>, VmErr> {
+        let mut frame = Some(scope.clone());
+        while let Some(environment) = frame {
+            let (local, object, parent) = {
+                let environment = environment.borrow();
+                (
+                    environment.kind_of(name).is_some(),
+                    environment.with_object.clone(),
+                    environment.parent_env(),
+                )
+            };
+            if local {
+                return Ok(None);
+            }
+            if let Some(object) = object
+                && self.with_has_binding(&object, name)?
+            {
+                return Ok(Some(object));
+            }
+            frame = parent;
+        }
+        Ok(None)
     }
 
     /// Resolve an object's represented [[Prototype]], including the realm's

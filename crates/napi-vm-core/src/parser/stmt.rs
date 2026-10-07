@@ -17,7 +17,46 @@ impl Parser {
 
     fn stmt_inner(&mut self) -> Option<Statement> {
         match self.cur() {
+            Token::Identifier(name)
+                if name == "using"
+                    && !self.line_break_after_current()
+                    && matches!(self.peek(), Token::Identifier(_)) =>
+            {
+                self.resource_declaration(false)
+            }
+            Token::KwAwait
+                if matches!(self.peek(), Token::Identifier(name) if name == "using")
+                    && !self.line_break_after_current() =>
+            {
+                self.adv();
+                self.resource_declaration(true)
+            }
+            Token::KwWith => {
+                self.adv();
+                self.expect(&Token::LParen);
+                let object = self.expr()?;
+                self.expect(&Token::RParen);
+                let body = self.block_or_stmt();
+                Some(Statement::With {
+                    object: Box::new(object),
+                    body,
+                })
+            }
             Token::KwVar => self.var_decl(VarKind::Var),
+            Token::KwLet
+                if !matches!(
+                    self.peek(),
+                    Token::Identifier(_)
+                        | Token::LBracket
+                        | Token::LBrace
+                        | Token::KwAwait
+                        | Token::KwYield
+                ) || self.line_break_after_current() && matches!(self.peek(), Token::LBrace) =>
+            {
+                self.adv();
+                self.semi();
+                Some(Statement::Expr(Expr::Identifier("let".into())))
+            }
             Token::KwLet => self.var_decl(VarKind::Let),
             Token::KwConst => self.var_decl(VarKind::Const),
             Token::KwFunction => self.fn_decl(false),
@@ -40,7 +79,9 @@ impl Parser {
             Token::KwFor => self.for_(),
             Token::KwBreak => {
                 self.adv();
-                let label = if let Token::Identifier(n) = self.cur() {
+                let label = if !self.line_break_before_current()
+                    && let Token::Identifier(n) = self.cur()
+                {
                     let l = n.clone();
                     self.adv();
                     Some(l)
@@ -56,7 +97,9 @@ impl Parser {
             }
             Token::KwContinue => {
                 self.adv();
-                let label = if let Token::Identifier(n) = self.cur() {
+                let label = if !self.line_break_before_current()
+                    && let Token::Identifier(n) = self.cur()
+                {
                     let l = n.clone();
                     self.adv();
                     Some(l)
@@ -95,7 +138,7 @@ impl Parser {
                     return Some(Statement::Expr(expr));
                 }
                 // `import('m')` at statement position is an expression.
-                if matches!(self.cur(), Token::LParen) {
+                if matches!(self.cur(), Token::LParen | Token::Dot) {
                     self.pos = saved_pos;
                     let e = self.expr()?;
                     self.semi();
@@ -144,6 +187,30 @@ impl Parser {
                 Some(Statement::Expr(e))
             }
         }
+    }
+
+    fn resource_declaration(&mut self, is_await: bool) -> Option<Statement> {
+        self.adv();
+        let mut declarations = Vec::new();
+        loop {
+            let name = self.ident()?;
+            self.expect(&Token::Equal);
+            let init = self.assign()?;
+            declarations.push(Statement::VarDecl {
+                kind: VarKind::Const,
+                name,
+                init: Some(Box::new(init)),
+                destructuring: None,
+            });
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+        }
+        self.semi();
+        Some(Statement::ResourceDeclaration {
+            declarations,
+            is_await,
+        })
     }
 
     pub(crate) fn var_decl(&mut self, k: VarKind) -> Option<Statement> {
@@ -430,7 +497,7 @@ impl Parser {
         self.eat(&Token::LParen);
         let t = Box::new(self.expr()?);
         self.expect(&Token::RParen);
-        self.semi();
+        self.eat(&Token::Semicolon);
         Some(Statement::DoWhile { test: t, body: b })
     }
 
@@ -439,6 +506,28 @@ impl Parser {
         // `for await (… of …)`.
         let is_await = self.eat(&Token::KwAwait);
         self.eat(&Token::LParen);
+        let await_using = matches!(self.cur(), Token::KwAwait)
+            && matches!(self.peek(), Token::Identifier(name) if name == "using");
+        if await_using {
+            self.adv();
+        }
+        if matches!(self.cur(), Token::Identifier(name) if name == "using")
+            && matches!(self.peek(), Token::Identifier(_))
+        {
+            self.adv();
+            let name = self.ident()?;
+            self.expect(&Token::KwOf);
+            let iter = Box::new(self.expr()?);
+            self.expect(&Token::RParen);
+            let body = self.block_or_stmt();
+            return Some(Statement::ResourceForOf {
+                name,
+                iter,
+                body,
+                is_await,
+                await_disposal: await_using,
+            });
+        }
         // `for (const [k, v] of pairs)` / `for (const { id } of rows)`: the
         // head binds a pattern, which the loop destructures per iteration.
         let mut head_pattern: Option<Box<Pattern>> = None;
@@ -496,7 +585,7 @@ impl Parser {
         } else if matches!(self.cur(), Token::Semicolon) {
             None
         } else {
-            Some(Box::new(ForInit::Expr(self.expr()?)))
+            Some(Box::new(ForInit::Expr(self.with_in(false, Self::expr)?)))
         };
         if let Some(init) = init.as_ref()
             && !matches!(self.cur(), Token::Semicolon)
@@ -760,6 +849,7 @@ impl Parser {
             // (async functions, accessors and module syntax), while binding
             // positions may still use them as identifiers.
             Token::KwAs => self.consume_contextual_identifier("as"),
+            Token::KwUndefined => self.consume_contextual_identifier("undefined"),
             Token::KwAwait if !self.await_expression => self.consume_contextual_identifier("await"),
             Token::KwYield if !self.yield_expression => self.consume_contextual_identifier("yield"),
             Token::KwAsync => self.consume_contextual_identifier("async"),
@@ -842,6 +932,10 @@ impl Parser {
             Token::KwElse => {
                 self.adv();
                 Some("else".to_string())
+            }
+            Token::KwWith => {
+                self.adv();
+                Some("with".to_string())
             }
             Token::KwFrom => {
                 self.adv();

@@ -362,7 +362,11 @@ pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
         | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
-        Statement::Declarations(inner) => block_needs_lexical_scope(inner),
+        Statement::Declarations(inner)
+        | Statement::ResourceDeclaration {
+            declarations: inner,
+            ..
+        } => block_needs_lexical_scope(inner),
         _ => false,
     })
 }
@@ -393,7 +397,11 @@ fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
         | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
-        Statement::Declarations(inner) => body_needs_lexical_hoist(inner),
+        Statement::Declarations(inner)
+        | Statement::ResourceDeclaration {
+            declarations: inner,
+            ..
+        } => body_needs_lexical_hoist(inner),
         _ => false,
     })
 }
@@ -780,7 +788,8 @@ export default { createRequire, isBuiltin, builtinModules };
         if let Ok(text) = source.to_utf8() {
             return Self::compile_with_goal(&text, goal);
         }
-        let mut lexer = crate::Lexer::from_js_string(source);
+        let mut lexer = crate::Lexer::from_js_string(source)
+            .with_module_goal(goal == crate::parser::ParseGoal::Module);
         let mut parser = crate::Parser::new_with_spans(lexer.tokenize_with_spans());
         let statements = parser
             .parse_program_with_goal(goal)
@@ -1433,6 +1442,9 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            return self.assign_member_str(&object, name, value);
+        }
         let mut env = scope.borrow_mut();
         match env.assign(name, value.clone()) {
             AssignOutcome::Assigned => Ok(()),
@@ -1968,7 +1980,11 @@ impl Interpreter {
                     // declarations works.
                 }
                 // Transparent: its declarators belong to this scope.
-                Statement::Declarations(inner) => self.hoist_lexical(inner)?,
+                Statement::Declarations(inner)
+                | Statement::ResourceDeclaration {
+                    declarations: inner,
+                    ..
+                } => self.hoist_lexical(inner)?,
                 _ => {}
             }
         }

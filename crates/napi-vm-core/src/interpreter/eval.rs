@@ -494,8 +494,10 @@ impl Interpreter {
                         native: None,
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
-                        properties: FunctionData::properties_with_default_prototype(
+                        properties: FunctionData::properties_with_function_kind(
                             &self.persistent_global,
+                            *is_async,
+                            *is_generator,
                         ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(mp),
@@ -1030,8 +1032,10 @@ impl Interpreter {
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
-                        properties: FunctionData::properties_with_default_prototype(
+                        properties: FunctionData::properties_with_function_kind(
                             &self.persistent_global,
+                            *is_async,
+                            *is_generator,
                         ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
@@ -1074,6 +1078,49 @@ impl Interpreter {
                 } else {
                     Ok(Value::Undefined)
                 }
+            }
+            Statement::ResourceForOf { name, iter, .. } => {
+                let mut environment = Environment::child(self.global.clone());
+                environment.declare(name, Value::Undefined, BindKind::Const, false);
+                let saved = std::mem::replace(&mut self.global, Rc::new(RefCell::new(environment)));
+                let source = self.eval_expr(iter);
+                self.global = saved;
+                source?;
+                vm_err("TypeError: resource disposal execution is not implemented")
+            }
+            Statement::ResourceDeclaration { declarations, .. } => {
+                // Initializers precede acquisition of a disposal method and
+                // can fail against the already-instantiated lexical TDZ.
+                if let Some(Statement::VarDecl {
+                    init: Some(init), ..
+                }) = declarations.first()
+                {
+                    self.eval_expr(init)?;
+                }
+                vm_err("TypeError: resource disposal execution is not implemented")
+            }
+            Statement::With { object, body } => {
+                let object = self.eval_expr(object)?;
+                if matches!(object, Value::Null | Value::Undefined) {
+                    return vm_err("TypeError: with object is null or undefined");
+                }
+                let object = if super::call::is_js_object(&object) {
+                    object
+                } else {
+                    let constructor = self
+                        .persistent_global
+                        .borrow()
+                        .intrinsic("Object")
+                        .expect("Object intrinsic");
+                    self.call_this(&constructor, Value::Undefined, vec![object])?
+                };
+                let mut environment = Environment::child(self.global.clone());
+                environment.with_object = Some(object);
+                let scope = Rc::new(RefCell::new(environment));
+                let saved = std::mem::replace(&mut self.global, scope);
+                let result = self.run_block(body);
+                self.global = saved;
+                result
             }
             Statement::While { test, body } => {
                 let body_needs_scope = block_needs_lexical_scope(body);
@@ -1331,10 +1378,10 @@ impl Interpreter {
                 let v = self.eval_expr(e)?;
                 self.stmt_export_default(v)
             }
-            Statement::ExportNamed { specifiers, source } => {
-                self.stmt_export_named(specifiers, source.as_deref())
-            }
-            Statement::ExportAll { source, alias } => {
+            Statement::ExportNamed {
+                specifiers, source, ..
+            } => self.stmt_export_named(specifiers, source.as_deref()),
+            Statement::ExportAll { source, alias, .. } => {
                 self.stmt_export_all(source, alias.as_deref())
             }
             Statement::Import {
@@ -1342,6 +1389,7 @@ impl Interpreter {
                 default,
                 named,
                 namespace,
+                ..
             } => self.stmt_import(module, default.as_deref(), named, namespace.as_deref()),
             Statement::Empty => Ok(Value::Undefined),
         }
@@ -1654,8 +1702,10 @@ impl Interpreter {
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
-                        properties: FunctionData::properties_with_default_prototype(
+                        properties: FunctionData::properties_with_function_kind(
                             &self.persistent_global,
+                            *is_async,
+                            *is_generator,
                         ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
@@ -1972,7 +2022,13 @@ impl Interpreter {
                         // reference at all, so it deletes vacuously — and does
                         // not raise the `ReferenceError` that reading it would.
                         Expr::Identifier(name) => {
-                            let bound = self.global.borrow().get(name).is_some();
+                            let scope = self.global.clone();
+                            if let Some(object) = self.with_binding_object(&scope, name)? {
+                                return self
+                                    .delete_member(&object, &Value::String(name.as_str().into()));
+                            }
+                            let bound = self.global.borrow().kind_of(name).is_some()
+                                || self.global.borrow().get(name).is_some();
                             return Ok(Value::Bool(!bound));
                         }
                         // `delete 42`: not a reference, so nothing to remove.
@@ -2029,7 +2085,18 @@ impl Interpreter {
                         if n == "undefined" {
                             Value::Undefined
                         } else {
-                            self.global.borrow().get(n).unwrap_or(Value::Undefined)
+                            {
+                                let scope = self.global.clone();
+                                match self.lookup_binding_in(&scope, n)? {
+                                    Lookup::Value(value) => value,
+                                    Lookup::Missing => Value::Undefined,
+                                    Lookup::Uninitialized => {
+                                        return vm_err(format!(
+                                            "ReferenceError: Cannot access {n} before initialization"
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     } else {
                         self.eval_expr(operand)?
@@ -2150,7 +2217,14 @@ impl Interpreter {
                         {
                             crate::builtins::eval_direct(self, a)
                         } else {
-                            self.call_this(&c, Value::Undefined, a)
+                            let scope = self.global.clone();
+                            let receiver = if let Expr::Identifier(name) = callee.as_ref() {
+                                self.with_binding_object(&scope, name)?
+                                    .unwrap_or(Value::Undefined)
+                            } else {
+                                Value::Undefined
+                            };
+                            self.call_this(&c, receiver, a)
                         }
                     }
                 }
@@ -2378,8 +2452,10 @@ impl Interpreter {
                 native: None,
                 identity: Rc::new(0),
                 name: None,
-                properties: FunctionData::properties_with_default_prototype(
+                properties: FunctionData::properties_with_function_kind(
                     &self.persistent_global,
+                    *is_async,
+                    false,
                 ),
                 standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                 params: intern_params(params),
@@ -2404,27 +2480,35 @@ impl Interpreter {
                 body,
                 is_async,
                 is_generator,
-            } => Ok(Value::Function(Rc::new(FunctionData {
-                strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                native: None,
-                identity: Rc::new(0),
-                name: name.as_deref().map(Rc::from),
-                properties: FunctionData::properties_with_default_prototype(
-                    &self.persistent_global,
-                ),
-                standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                params: intern_params(params),
-                body: Rc::new(body.clone()),
-                closure: Some(crate::heap::capture_env(&self.global)),
-                is_arrow: false,
-                is_constructor: !*is_async && !*is_generator,
-                is_async: *is_async,
-                is_generator: *is_generator,
-                uses_arguments: stmts_reference(body, "arguments"),
-                bytecode: None,
-                needs_hoisting: body_needs_hoisting(body),
-                bound: None,
-            }))),
+            } => {
+                let closure =
+                    Environment::named_function_scope(self.global.clone(), name.as_deref());
+                let function = Value::Function(Rc::new(FunctionData {
+                    strict: self.global.borrow().strict() || crate::parser::use_strict(body),
+                    native: None,
+                    identity: Rc::new(0),
+                    name: name.as_deref().map(Rc::from),
+                    properties: FunctionData::properties_with_function_kind(
+                        &self.persistent_global,
+                        *is_async,
+                        *is_generator,
+                    ),
+                    standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
+                    params: intern_params(params),
+                    body: Rc::new(body.clone()),
+                    closure: Some(crate::heap::capture_env(&closure)),
+                    is_arrow: false,
+                    is_constructor: !*is_async && !*is_generator,
+                    is_async: *is_async,
+                    is_generator: *is_generator,
+                    uses_arguments: stmts_reference(body, "arguments"),
+                    bytecode: None,
+                    needs_hoisting: body_needs_hoisting(body),
+                    bound: None,
+                }));
+                Environment::initialize_function_name(&closure, name.as_deref(), &function);
+                Ok(function)
+            }
             Expr::New { callee, args } => {
                 let mut a = Vec::new();
                 for x in args {
@@ -2438,7 +2522,10 @@ impl Interpreter {
             // `import(specifier)`. Module registration is synchronous in this
             // VM, so the promise is already settled when it is handed back;
             // `await import(…)` and `.then(…)` both work.
-            Expr::DynamicImport(specifier) => {
+            Expr::DynamicImport { specifier, phase } => {
+                if *phase != crate::parser::ImportPhase::Evaluation {
+                    return vm_err("TypeError: non-evaluation import phases are not implemented");
+                }
                 let specifier = self.eval_expr(specifier)?;
                 self.eval_dynamic_import(specifier)
             }

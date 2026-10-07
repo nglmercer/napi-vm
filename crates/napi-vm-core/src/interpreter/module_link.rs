@@ -243,6 +243,7 @@ impl Interpreter {
                     Statement::ExportNamed {
                         specifiers,
                         source: None,
+                        ..
                     } => {
                         for (local, export) in specifiers {
                             if !explicit.insert(export.clone()) {
@@ -377,6 +378,7 @@ impl Interpreter {
                     Statement::ExportAll {
                         source,
                         alias: Some(alias),
+                        ..
                     } => {
                         let _ = source;
                         names.insert(alias.clone());
@@ -384,6 +386,7 @@ impl Interpreter {
                     Statement::ExportAll {
                         source,
                         alias: None,
+                        ..
                     } => {
                         if let Some(target) = self.request_target(id, source) {
                             names.extend(
@@ -433,7 +436,9 @@ impl Interpreter {
                 Statement::ExportDefault(_) if name == "default" => {
                     return Ok(self.module(id).and_then(|m| m.default));
                 }
-                Statement::ExportNamed { specifiers, source } => {
+                Statement::ExportNamed {
+                    specifiers, source, ..
+                } => {
                     if let Some((local, _)) =
                         specifiers.iter().find(|(_, exported)| exported == name)
                     {
@@ -456,6 +461,7 @@ impl Interpreter {
                                 default,
                                 named,
                                 namespace,
+                                ..
                             } = imported
                             {
                                 let target =
@@ -486,6 +492,7 @@ impl Interpreter {
                 Statement::ExportAll {
                     source,
                     alias: Some(alias),
+                    ..
                 } if alias == name => {
                     let target = self.request_target(id, source).expect("resolved request");
                     return self
@@ -504,6 +511,7 @@ impl Interpreter {
             if let Statement::ExportAll {
                 source,
                 alias: None,
+                ..
             } = stmt
             {
                 let target = self.request_target(id, source).expect("resolved star");
@@ -534,6 +542,7 @@ impl Interpreter {
                     default,
                     named,
                     namespace,
+                    ..
                 } = stmt
                 {
                     let mut locals = named

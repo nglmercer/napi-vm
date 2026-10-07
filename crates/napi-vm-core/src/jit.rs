@@ -273,6 +273,7 @@ mod tests {
     /// the mocks ignore it; the real call site passes the running function.
     fn fake_func() -> BytecodeFunction {
         BytecodeFunction {
+            named_expression: false,
             strict: false,
             name: None,
             code: Vec::new(),

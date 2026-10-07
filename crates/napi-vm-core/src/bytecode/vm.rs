@@ -1668,7 +1668,9 @@ fn make_function(
         .iter()
         .map(|slot| slot.name.clone())
         .collect();
-    Value::Function(Rc::new(FunctionData {
+    let expression_name = code.name.as_deref().filter(|_| code.named_expression);
+    let closure = Environment::named_function_scope(closure, expression_name);
+    let function = Value::Function(Rc::new(FunctionData {
         strict: closure.borrow().strict() || code.strict,
         native: None,
         identity: Rc::new(0),
@@ -1693,7 +1695,9 @@ fn make_function(
         // The AST body is an empty placeholder (calls dispatch on
         // `bytecode`), and an empty body needs no hoisting.
         needs_hoisting: false,
-    }))
+    }));
+    Environment::initialize_function_name(&closure, expression_name, &function);
+    function
 }
 
 /// Instantiate a per-function AST fallback: the evaluator's own function
@@ -1707,12 +1711,18 @@ fn make_ast_function(
     closure: Env,
     name_override: Option<Rc<str>>,
 ) -> Value {
-    Value::Function(Rc::new(FunctionData {
+    let expression_name = ast.name.as_deref().filter(|_| ast.named_expression);
+    let closure = Environment::named_function_scope(closure, expression_name);
+    let function = Value::Function(Rc::new(FunctionData {
         strict: closure.borrow().strict() || crate::parser::use_strict(&ast.body),
         native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| ast.name.as_deref().map(Rc::from)),
-        properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
+        properties: FunctionData::properties_with_function_kind(
+            &interp.persistent_global,
+            ast.is_async,
+            ast.is_generator,
+        ),
         standard_properties_initialized: Rc::new(Cell::new(false)),
         params: intern_params(&ast.params),
         body: ast.body.clone(),
@@ -1725,7 +1735,9 @@ fn make_ast_function(
         bound: None,
         bytecode: None,
         needs_hoisting: crate::interpreter::body_needs_hoisting(&ast.body),
-    }))
+    }));
+    Environment::initialize_function_name(&closure, expression_name, &function);
+    function
 }
 
 #[cfg(test)]
