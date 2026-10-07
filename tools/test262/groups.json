@@ -1,0 +1,13 @@
+{
+  "agents": {"paths": ["built-ins/Atomics", "built-ins/SharedArrayBuffer"]},
+  "shared-memory": {"paths": ["built-ins/SharedArrayBuffer", "built-ins/Atomics", "built-ins/TypedArrayConstructors"]},
+  "realms": {"paths": ["."], "pattern": "(?:realm|proto-from-ctor)"},
+  "gc-weak": {"paths": ["built-ins/WeakRef", "built-ins/FinalizationRegistry", "built-ins/WeakMap", "built-ins/WeakSet"]},
+  "async-generator-grammar": {"paths": ["language/expressions/async-function", "language/expressions/async-generator", "language/expressions/generators", "language/statements/async-function", "language/statements/async-generator", "language/statements/generators", "language/expressions/await"]},
+  "super": {"paths": ["language/expressions/super", "language/expressions/new.target"]},
+  "private-names": {"paths": ["language/expressions/class", "language/statements/class"], "pattern": "(?:private|name|early)"},
+  "eval-globals": {"paths": ["language/eval-code", "language/global-code", "language/block-scope", "language/statements/variable", "language/statements/let", "language/statements/const"]},
+  "classes-private": {"paths": ["language/expressions/class", "language/statements/class"]},
+  "object-reflect-proxy": {"paths": ["built-ins/Object", "built-ins/Reflect", "built-ins/Proxy"]},
+  "typedarray-exotics": {"paths": ["built-ins/TypedArray", "built-ins/TypedArrayConstructors", "built-ins/DataView", "built-ins/ArrayBuffer", "built-ins/SharedArrayBuffer"]}
+}

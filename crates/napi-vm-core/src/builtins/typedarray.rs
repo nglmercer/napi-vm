@@ -60,25 +60,56 @@ pub(super) fn install(e: &mut Environment) {
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
     if let Some(namespace) = e.get("Atomics") {
-        for (name, method) in [
-            ("isLockFree", atomics_is_lock_free as _),
-            ("load", atomics_load as _),
-            ("store", atomics_store as _),
-            ("add", atomics_add as _),
-            ("sub", atomics_sub as _),
-            ("and", atomics_and as _),
-            ("or", atomics_or as _),
-            ("xor", atomics_xor as _),
-            ("exchange", atomics_exchange as _),
-            ("compareExchange", atomics_compare_exchange as _),
-            ("wait", atomics_wait as _),
-            ("waitAsync", atomics_wait_async as _),
-            ("notify", atomics_notify as _),
+        let function_prototype = e
+            .get("Function")
+            .and_then(|constructor| constructor.get_prop("prototype"));
+        for (name, length, method) in [
+            ("isLockFree", 1, atomics_is_lock_free as _),
+            ("load", 2, atomics_load as _),
+            ("store", 3, atomics_store as _),
+            ("add", 3, atomics_add as _),
+            ("sub", 3, atomics_sub as _),
+            ("and", 3, atomics_and as _),
+            ("or", 3, atomics_or as _),
+            ("xor", 3, atomics_xor as _),
+            ("exchange", 3, atomics_exchange as _),
+            ("compareExchange", 4, atomics_compare_exchange as _),
+            ("wait", 4, atomics_wait as _),
+            ("waitAsync", 4, atomics_wait_async as _),
+            ("notify", 3, atomics_notify as _),
         ] {
             namespace
-                .set_prop(name.to_string(), super::nf(name, method))
+                .set_prop(
+                    name.to_string(),
+                    super::native_method(name, length, method, function_prototype.clone()),
+                )
                 .expect("built-in Atomics property");
+            if let Value::Object { props } = &namespace {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
         }
+    }
+    if let Some(Value::Object { props }) = &e.get("Atomics")
+        && let Some(Value::Symbol(symbol)) = &super::well_known("toStringTag")
+    {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        props
+            .borrow_mut()
+            .push((key.clone(), Value::String("Atomics".into())));
+        props.meta.borrow_mut().set_attrs(
+            &key,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
     }
     if let Some(namespace) = e.get("DataView") {
         super::make_callable(&namespace, new_data_view, None);
@@ -443,7 +474,7 @@ fn atomics_is_lock_free(
             "TypeError: cannot convert value to a lock-free size".into(),
         ));
     }
-    let size = interp.tn(value).trunc();
+    let size = interp.ecmascript_to_number(value)?.trunc();
     let size = if size.is_finite() && size >= 0.0 {
         size as usize
     } else {
@@ -493,30 +524,32 @@ fn atomics_compare_exchange(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
     atomics(i, &a, AtomicsMethod::CompareExchange)
 }
 
-/// `Atomics.wait` can only block the current agent. napi-vm does not yet have
-/// guest worker agents, so report the unsupported blocking case clearly while
-/// still handling the specification's immediate `not-equal` and zero-timeout
-/// results. Async waits are backed by the VM's ordinary job/timer queues.
 fn atomics_wait(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
-    let expected = atomics_argument_bits(
-        interp,
-        kind,
-        args.get(2)
-            .ok_or_else(|| VmErr::Msg("TypeError: Atomics expected value is required".into()))?,
-    )?;
+    let (kind, shared, offset) = atomics_wait_location(interp, &args, true)?;
+    let shared = shared.expect("shared wait location");
+    let expected = atomics_argument_bits(interp, kind, args.get(2).unwrap_or(&Value::Undefined))?;
     let timeout = atomics_timeout(interp, &args, 3)?;
-    let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
-        VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
-    })?;
-    if observed != expected {
-        return Ok(Value::String("not-equal".into()));
+    if !interp.can_block() {
+        return Err(VmErr::Msg("TypeError: This agent cannot suspend".into()));
     }
-    if timeout == 0.0 {
-        return Ok(Value::String("timed-out".into()));
-    }
-    Err(VmErr::Msg(
-        "TypeError: Atomics.wait requires worker-agent support; use Atomics.waitAsync".into(),
+    let result = shared
+        .wait_interruptible(offset, kind.size(), expected, timeout, || {
+            interp.check_execution_interrupt().is_err()
+        })
+        .ok_or_else(|| {
+            VmErr::Msg("TypeError: blocking wait is unavailable for this backing store".into())
+        })?;
+    Ok(Value::String(
+        match result {
+            crate::value::SharedWaitResult::Cancelled => {
+                interp.check_execution_interrupt()?;
+                return Err(VmErr::Msg("Error: Guest execution interrupted".into()));
+            }
+            crate::value::SharedWaitResult::NotEqual => "not-equal",
+            crate::value::SharedWaitResult::TimedOut => "timed-out",
+            crate::value::SharedWaitResult::Ok => "ok",
+        }
+        .into(),
     ))
 }
 
@@ -525,29 +558,48 @@ fn atomics_wait_async(
     _: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
-    let expected = atomics_argument_bits(
-        interp,
-        kind,
-        args.get(2)
-            .ok_or_else(|| VmErr::Msg("TypeError: Atomics expected value is required".into()))?,
-    )?;
+    let (kind, shared, offset) = atomics_wait_location(interp, &args, true)?;
+    let shared = shared.expect("shared wait location");
+    let expected = atomics_argument_bits(interp, kind, args.get(2).unwrap_or(&Value::Undefined))?;
     let timeout = atomics_timeout(interp, &args, 3)?;
-    let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
-        VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
-    })?;
-    if observed != expected {
-        return Ok(atomics_wait_result(
-            false,
-            Value::String("not-equal".into()),
-        ));
-    }
-    if timeout == 0.0 {
-        return Ok(atomics_wait_result(
-            false,
-            Value::String("timed-out".into()),
-        ));
-    }
+    let native = match shared.register_wait(offset, kind.size(), expected, timeout) {
+        Some(Ok(native)) => {
+            native.set_owner_wake(&interp.owner_wake_signal());
+            Some(native)
+        }
+        Some(Err(result)) => {
+            return Ok(atomics_wait_result(
+                false,
+                Value::String(
+                    match result {
+                        crate::value::SharedWaitResult::NotEqual => "not-equal",
+                        _ => "timed-out",
+                    }
+                    .into(),
+                ),
+            ));
+        }
+        None => {
+            let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
+                VmErr::Msg(
+                    "TypeError: atomic access is unaligned or unavailable on this target".into(),
+                )
+            })?;
+            if observed != expected {
+                return Ok(atomics_wait_result(
+                    false,
+                    Value::String("not-equal".into()),
+                ));
+            }
+            if timeout == 0.0 {
+                return Ok(atomics_wait_result(
+                    false,
+                    Value::String("timed-out".into()),
+                ));
+            }
+            None
+        }
+    };
 
     if timeout.is_finite() {
         interp.jobs.borrow().check_timer_capacity()?;
@@ -555,10 +607,12 @@ fn atomics_wait_async(
 
     let promise = Value::pending_promise();
     let key = (shared.wait_identity(), offset);
-    let waiter_id = interp
-        .jobs
-        .borrow_mut()
-        .register_atomics_waiter(key, promise.clone());
+    let waiter_id = interp.jobs.borrow_mut().register_shared_atomics_waiter(
+        key,
+        promise.clone(),
+        shared.clone(),
+        native,
+    );
     if timeout.is_finite() {
         interp.jobs.borrow_mut().push_timer_job(
             timeout,
@@ -569,7 +623,7 @@ fn atomics_wait_async(
 }
 
 fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
+    let (kind, shared, offset) = atomics_wait_location(interp, &args, false)?;
     let count = match args.get(2) {
         None | Some(Value::Undefined) => usize::MAX,
         Some(Value::BigInt(_) | Value::Symbol(_)) => {
@@ -578,7 +632,7 @@ fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
             ));
         }
         Some(value) => {
-            let count = interp.tn(value);
+            let count = interp.ecmascript_to_number(value)?;
             if count.is_nan() || count <= 0.0 {
                 0
             } else if count.is_infinite() || count >= usize::MAX as f64 {
@@ -589,11 +643,14 @@ fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
         }
     };
     let _ = kind;
+    let Some(shared) = shared else {
+        return Ok(Value::Number(0.0));
+    };
     let waiters = interp
         .jobs
         .borrow_mut()
         .take_atomics_waiters((shared.wait_identity(), offset), count);
-    let notified = waiters.len();
+    let notified = waiters.len() + shared.notify(offset, count.saturating_sub(waiters.len()));
     for promise in waiters {
         crate::interpreter::jobs::settle(
             &interp.jobs,
@@ -602,6 +659,7 @@ fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
             Value::String("ok".into()),
         );
     }
+    crate::interpreter::jobs::settle_notified_atomics_waiters(&interp.jobs);
     Ok(Value::Number(notified as f64))
 }
 
@@ -615,7 +673,8 @@ fn atomics_wait_result(async_: bool, value: Value) -> Value {
 fn atomics_wait_location(
     interp: &mut Interpreter,
     args: &[Value],
-) -> Result<(TypedKind, SharedBuffer, usize), VmErr> {
+    require_shared: bool,
+) -> Result<(TypedKind, Option<SharedBuffer>, usize), VmErr> {
     let Some(Value::TypedArray(view)) = args.first() else {
         return Err(VmErr::Msg(
             "TypeError: Atomics wait requires an Int32Array or BigInt64Array".into(),
@@ -626,31 +685,29 @@ fn atomics_wait_location(
             "TypeError: Atomics wait requires an Int32Array or BigInt64Array".into(),
         ));
     }
-    let BufferBacking::Shared(shared) = &view.buffer else {
-        return Err(VmErr::Msg(
-            "TypeError: Atomics wait requires a SharedArrayBuffer".into(),
-        ));
+    let shared = match &view.buffer {
+        BufferBacking::Shared(shared) => Some(shared.clone()),
+        _ if require_shared || view.buffer.is_detached() => {
+            return Err(VmErr::Msg(
+                "TypeError: Atomics wait requires a SharedArrayBuffer".into(),
+            ));
+        }
+        _ => None,
     };
-    let index_value = args
-        .get(1)
-        .ok_or_else(|| VmErr::Msg("TypeError: Atomics index is required".into()))?;
-    if matches!(index_value, Value::BigInt(_) | Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: cannot convert value to an Atomics index".into(),
-        ));
-    }
-    let index = interp.tn(index_value).trunc();
-    if !index.is_finite() || index < 0.0 || index >= view.effective_length() as f64 {
+    let length = view.effective_length();
+    let index = constructor_index(interp, args.get(1))?;
+    if index >= length {
         return Err(range_err("Atomics index is outside the typed array"));
     }
+
     let offset = view
         .effective_byte_offset()
-        .checked_add(index as usize * view.kind.size())
+        .checked_add(index * view.kind.size())
         .ok_or_else(|| range_err("Atomics index is outside the typed array"))?;
-    Ok((view.kind, shared.clone(), offset))
+    Ok((view.kind, shared, offset))
 }
 
-fn atomics_timeout(interp: &Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
+fn atomics_timeout(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
     let Some(value) = args.get(index) else {
         return Ok(f64::INFINITY);
     };
@@ -662,7 +719,7 @@ fn atomics_timeout(interp: &Interpreter, args: &[Value], index: usize) -> Result
             "TypeError: cannot convert value to an Atomics timeout".into(),
         ));
     }
-    let timeout = interp.tn(value);
+    let timeout = interp.ecmascript_to_number(value)?;
     if timeout.is_nan() {
         Ok(f64::INFINITY)
     } else if timeout <= 0.0 {
@@ -697,20 +754,12 @@ fn atomics(
             "TypeError: Atomics requires an integer typed array".into(),
         ));
     }
-    let index_value = args
-        .get(1)
-        .ok_or_else(|| VmErr::Msg("TypeError: Atomics index is required".into()))?;
-    if matches!(index_value, Value::BigInt(_) | Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: cannot convert value to an Atomics index".into(),
-        ));
+    if view.buffer.is_detached() {
+        return Err(VmErr::Msg("TypeError: Detached buffer".into()));
     }
-    let index = interp.tn(index_value).trunc();
-    if !index.is_finite() || index < 0.0 {
-        return Err(range_err("Atomics index is outside the typed array"));
-    }
-    let index = index as usize;
-    if index >= view.effective_length() {
+    let length = view.effective_length();
+    let index = constructor_index(interp, args.get(1))?;
+    if index >= length {
         return Err(range_err("Atomics index is outside the typed array"));
     }
     let width = view.kind.size();
@@ -718,35 +767,24 @@ fn atomics(
     let result = match method {
         AtomicsMethod::Load => atomics_load_bits(&view.buffer, offset, width),
         AtomicsMethod::Store => {
-            let value = atomics_argument_bits(
+            let converted = atomics_coerce_argument(
                 interp,
                 view.kind,
-                args.get(2).ok_or_else(|| {
-                    VmErr::Msg("TypeError: Atomics store value is required".into())
-                })?,
+                args.get(2).unwrap_or(&Value::Undefined),
             )?;
+            let value = atomics_argument_bits(interp, view.kind, &converted)?;
             if !atomics_store_bits(&view.buffer, offset, width, value) {
                 return Err(VmErr::Msg(
                     "TypeError: atomic access is unaligned or unavailable on this target".into(),
                 ));
             }
-            return Ok(atomics_value(view.kind, value));
+            return Ok(converted);
         }
         operation => {
-            let value = atomics_argument_bits(
-                interp,
-                view.kind,
-                args.get(2)
-                    .ok_or_else(|| VmErr::Msg("TypeError: Atomics value is required".into()))?,
-            )?;
+            let value =
+                atomics_argument_bits(interp, view.kind, args.get(2).unwrap_or(&Value::Undefined))?;
             let replacement = if matches!(operation, AtomicsMethod::CompareExchange) {
-                atomics_argument_bits(
-                    interp,
-                    view.kind,
-                    args.get(3).ok_or_else(|| {
-                        VmErr::Msg("TypeError: Atomics replacement value is required".into())
-                    })?,
-                )?
+                atomics_argument_bits(interp, view.kind, args.get(3).unwrap_or(&Value::Undefined))?
             } else {
                 0
             };
@@ -828,14 +866,15 @@ fn atomics_rmw_bits(
     Some(previous)
 }
 
-fn atomics_argument_bits(
-    interp: &Interpreter,
+fn atomics_coerce_argument(
+    interp: &mut Interpreter,
     kind: TypedKind,
     value: &Value,
-) -> Result<u64, VmErr> {
+) -> Result<Value, VmErr> {
     if matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64) {
-        let bigint = match value {
-            Value::BigInt(value) => value.as_ref().clone(),
+        let primitive = interp.coerce_object_to_primitive(value, "number")?;
+        let bigint = match &primitive {
+            Value::BigInt(value) => return Ok(Value::BigInt(value.clone())),
             Value::Bool(false) => crate::bigint::BigInt::zero(),
             Value::Bool(true) => crate::bigint::BigInt::from_i64(1),
             Value::String(value) => crate::bigint::BigInt::parse(value)
@@ -846,18 +885,29 @@ fn atomics_argument_bits(
                 ));
             }
         };
-        let wrapped = bigint.as_n_bit(64, false).map_err(VmErr::Msg)?;
-        return wrapped
+        Ok(Value::BigInt(Rc::new(bigint)))
+    } else {
+        Ok(Value::Number(crate::value::to_integer_or_infinity(
+            interp.ecmascript_to_number(value)?,
+        )))
+    }
+}
+
+fn atomics_argument_bits(
+    interp: &mut Interpreter,
+    kind: TypedKind,
+    value: &Value,
+) -> Result<u64, VmErr> {
+    let converted = atomics_coerce_argument(interp, kind, value)?;
+    if let Value::BigInt(bigint) = &converted {
+        return bigint
+            .as_n_bit(64, false)
+            .map_err(VmErr::Msg)?
             .to_decimal()
             .parse()
             .map_err(|_| VmErr::Msg("RangeError: invalid Atomics BigInt value".into()));
     }
-    if matches!(value, Value::BigInt(_) | Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: cannot convert value to an Atomics Number element".into(),
-        ));
-    }
-    let bits = to_int(interp.tn(value)) as u32 as u64;
+    let bits = to_int(converted.to_number()) as u32 as u64;
     let width = kind.size();
     Ok(if width == 4 {
         bits

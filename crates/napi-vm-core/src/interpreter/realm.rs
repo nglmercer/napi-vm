@@ -176,6 +176,13 @@ impl Interpreter {
         }
     }
 
+    /// Import native shared backing memory as a fresh SAB in this realm.
+    /// The data block is transferable; its guest wrapper and realm are not.
+    pub fn shared_array_buffer_from_memory(&self, memory: crate::value::SharedMemory) -> Value {
+        let _allocation_realm = AllocationRealm::enter(Some(self.persistent_global.clone()));
+        Value::SharedArrayBuffer(crate::value::SharedBuffer::from_shared_memory(memory))
+    }
+
     /// Evaluate a script in a realm while keeping the shared agent scheduler.
     pub fn eval_in_realm(&mut self, global: &Value, source: &str) -> Result<Value, VmErr> {
         self.eval_in_realm_utf16(global, &crate::JsString::from(source))

@@ -1,4 +1,6 @@
 //! One test per process. Corpus orchestration applies a hard process timeout.
+#[path = "test262/agents.rs"]
+mod agents;
 use napi_vm::interpreter::ExecutionBudget;
 use napi_vm::{Interpreter, ModuleLoader, ModuleSource, Value, VirtualLoader, VmErr};
 use serde::Deserialize;
@@ -10,6 +12,8 @@ thread_local! { static GC_REQUESTED: std::cell::Cell<bool> = const { std::cell::
 #[derive(Deserialize)]
 struct Request {
     source: String,
+    #[serde(default = "default_can_block")]
+    can_block: bool,
     #[serde(default)]
     harness: String,
     #[serde(default)]
@@ -87,6 +91,9 @@ impl ModuleLoader for CorpusLoader {
         })
     }
 }
+fn default_can_block() -> bool {
+    true
+}
 fn default_id() -> String {
     "test.js".into()
 }
@@ -135,6 +142,12 @@ fn request_gc(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmE
     Ok(Value::Undefined)
 }
 
+fn collect_requested_gc(vm: &mut Interpreter) {
+    if GC_REQUESTED.with(|requested| requested.replace(false)) {
+        vm.collect_cycles();
+    }
+}
+
 fn eval_realm_script(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let source = vm.to_js_string(args.first().unwrap_or(&Value::Undefined))?;
     let global = vm.realm_global_object();
@@ -149,7 +162,9 @@ fn create_realm(vm: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, 
 }
 
 fn realm_host(vm: &mut Interpreter) -> Value {
+    let agent = agents::host(vm);
     let host = Value::object(vec![
+        ("agent".into(), agent),
         ("global".into(), vm.realm_global_object()),
         (
             "evalScript".into(),
@@ -195,6 +210,7 @@ fn failure(phase: &str, error: &VmErr) -> Json {
     json!({"status": "error", "phase": phase, "error_type": error_type(error), "message": error.to_string()})
 }
 fn execute(request: Request) -> Json {
+    let agents = agents::Session::new();
     // Parse test source separately: a harness failure cannot satisfy a negative test.
     let goal = if request.module {
         napi_vm::parser::ParseGoal::Module
@@ -205,6 +221,13 @@ fn execute(request: Request) -> Json {
         return json!({"status":"error", "phase":"parse", "error_type":"SyntaxError", "message":error.to_string()});
     }
     let mut vm = Interpreter::with_builtins();
+    vm.set_can_block(request.can_block);
+    vm.jobs
+        .borrow_mut()
+        .set_clock(napi_vm::ClockMode::RealTime(Rc::new(
+            napi_vm::RealTimeClock::default(),
+        )))
+        .expect("fresh job queue");
     vm.set_execution_budget(ExecutionBudget {
         fuel: 1_000_000,
         max_call_depth: 128,
@@ -266,11 +289,30 @@ fn execute(request: Request) -> Json {
     } else {
         vm.eval_source(&request.source)
     };
-    if GC_REQUESTED.with(|requested| requested.replace(false)) {
-        vm.collect_cycles();
-    }
+    collect_requested_gc(&mut vm);
     if let Err(error) = result {
         return failure("runtime", &error);
+    }
+    if request.asynchronous {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let count = vm
+                .persistent_global
+                .borrow()
+                .get("__test262_done_count")
+                .map_or(0.0, |value| value.to_number());
+            if count != 0.0
+                || !vm.jobs.borrow().has_outstanding_work()
+                || std::time::Instant::now() >= deadline
+            {
+                break;
+            }
+            if let Err(error) = vm.poll_event_loop(napi_vm::TurnBudget::jobs(10_000)) {
+                return failure("runtime", &error);
+            }
+            collect_requested_gc(&mut vm);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
     }
     if let Some(error) = vm.persistent_global.borrow().get("__test262_done_error") {
         return failure("runtime", &VmErr::Throw(error));
@@ -283,6 +325,9 @@ fn execute(request: Request) -> Json {
         .unwrap_or(0.0);
     if request.asynchronous && count != 1.0 {
         return json!({"status":"error", "phase":"runtime", "error_type":"Test262AsyncError", "message":format!("expected one $DONE call, got {count}")});
+    }
+    if let Err(error) = agents.finish() {
+        return failure("runtime", &error);
     }
     json!({"status":"ok", "phase":"runtime"})
 }

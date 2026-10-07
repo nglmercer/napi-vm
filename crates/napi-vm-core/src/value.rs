@@ -1,5 +1,6 @@
+mod shared;
 pub(crate) mod weak;
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+pub use shared::{SharedMemory, SharedWaitRegistration, SharedWaitResult};
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -1329,15 +1330,8 @@ impl Buffer {
 /// and synchronization contract as external ArrayBuffers.
 #[derive(Debug)]
 enum SharedByteStorage {
-    Owned {
-        data: NonNull<u8>,
-        length: usize,
-        layout: Layout,
-    },
-    External {
-        data: NonNull<u8>,
-        length: usize,
-    },
+    Owned(SharedMemory),
+    External { data: NonNull<u8>, length: usize },
 }
 
 unsafe fn load_shared_byte(pointer: *mut u8) -> u8 {
@@ -1371,17 +1365,20 @@ unsafe fn store_shared_byte(pointer: *mut u8, value: u8) {
 impl SharedByteStorage {
     fn data(&self) -> NonNull<u8> {
         match self {
-            Self::Owned { data, .. } | Self::External { data, .. } => *data,
+            Self::Owned(memory) => memory.data(),
+            Self::External { data, .. } => *data,
         }
     }
 
     fn len(&self) -> usize {
         match self {
-            Self::Owned { length, .. } | Self::External { length, .. } => *length,
+            Self::Owned(memory) => memory.len(),
+            Self::External { length, .. } => *length,
         }
     }
 
     fn snapshot(&self) -> Vec<u8> {
+        let _access = self.access();
         (0..self.len())
             .map(|index| {
                 // SAFETY: the allocation covers `len` bytes and AtomicU8 has
@@ -1393,6 +1390,7 @@ impl SharedByteStorage {
     }
 
     fn read(&self, offset: usize, length: usize) -> Option<Vec<u8>> {
+        let _access = self.access();
         let end = offset.checked_add(length)?;
         if end > self.len() {
             return None;
@@ -1409,6 +1407,7 @@ impl SharedByteStorage {
     }
 
     fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+        let _access = self.access();
         let Some(end) = offset.checked_add(bytes.len()) else {
             return false;
         };
@@ -1424,12 +1423,11 @@ impl SharedByteStorage {
     }
 }
 
-impl Drop for SharedByteStorage {
-    fn drop(&mut self) {
-        if let Self::Owned { data, layout, .. } = self {
-            // SAFETY: this pointer and layout are the exact pair returned by
-            // `alloc_zeroed` in `SharedBuffer::zeroed`.
-            unsafe { dealloc(data.as_ptr(), *layout) };
+impl SharedByteStorage {
+    fn access(&self) -> Option<std::sync::MutexGuard<'_, ()>> {
+        match self {
+            Self::Owned(memory) => Some(memory.access()),
+            Self::External { .. } => None,
         }
     }
 }
@@ -1458,21 +1456,26 @@ pub enum SharedAtomicOp {
 
 impl SharedBuffer {
     pub fn zeroed(length: usize) -> Option<Self> {
-        // Pad the allocation so Atomics can address aligned 16/32/64-bit
-        // elements through the pointer returned by Node-API.
-        let allocation_length = length.max(1).checked_add(7)? & !7;
-        let layout = Layout::from_size_align(allocation_length, 8).ok()?;
-        // SAFETY: layout is non-zero and valid; the storage is deallocated by
-        // SharedByteStorage::drop.
-        let data = NonNull::new(unsafe { alloc_zeroed(layout) })?;
-        Some(Self(Rc::new(SharedArrayBufferData {
+        let memory = SharedMemory::zeroed(length)?;
+        Some(Self::from_shared_memory(memory))
+    }
+
+    /// Create a realm-local SAB wrapper from an owned, thread-safe data block.
+    /// No guest properties, realm state or Interpreter crosses the boundary.
+    pub fn from_shared_memory(memory: SharedMemory) -> Self {
+        Self(Rc::new(SharedArrayBufferData {
             properties: Value::instance_properties(),
-            bytes: Rc::new(SharedByteStorage::Owned {
-                data,
-                length,
-                layout,
-            }),
-        })))
+            bytes: Rc::new(SharedByteStorage::Owned(memory)),
+        }))
+    }
+
+    /// Export only owned backing memory. Addon-owned external memory cannot
+    /// be transferred because its finalizer belongs to its original host.
+    pub fn shared_memory(&self) -> Option<SharedMemory> {
+        match &*self.0.bytes {
+            SharedByteStorage::Owned(memory) => Some(memory.clone()),
+            SharedByteStorage::External { .. } => None,
+        }
     }
 
     /// Wrap addon-owned bytes as a shared buffer without copying them.
@@ -1525,7 +1528,82 @@ impl SharedBuffer {
     /// Identity of the shared data block, which remains the same when a
     /// SharedArrayBuffer object is structured-cloned into another wrapper.
     pub fn wait_identity(&self) -> usize {
-        Rc::as_ptr(&self.0.bytes) as usize
+        match &*self.0.bytes {
+            SharedByteStorage::Owned(memory) => memory.identity(),
+            SharedByteStorage::External { .. } => Rc::as_ptr(&self.0.bytes) as usize,
+        }
+    }
+
+    /// Block only the calling owner thread, coordinating through native state.
+    pub fn wait(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+    ) -> Option<SharedWaitResult> {
+        self.atomic_pointer(offset, width)?;
+        let memory = self.shared_memory()?;
+        Some(memory.wait(
+            offset,
+            timeout_ms,
+            || self.atomic_load(offset, width) == Some(expected),
+            || false,
+        ))
+    }
+
+    pub fn wait_cancellable(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+        cancellation: &crate::CancellationToken,
+    ) -> Option<SharedWaitResult> {
+        self.atomic_pointer(offset, width)?;
+        let memory = self.shared_memory()?;
+        Some(memory.wait(
+            offset,
+            timeout_ms,
+            || self.atomic_load(offset, width) == Some(expected),
+            || cancellation.is_cancelled(),
+        ))
+    }
+
+    /// The interruption predicate runs only on the calling VM owner thread.
+    pub fn wait_interruptible(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+        interrupted: impl Fn() -> bool,
+    ) -> Option<SharedWaitResult> {
+        self.atomic_pointer(offset, width)?;
+        Some(self.shared_memory()?.wait(
+            offset,
+            timeout_ms,
+            || self.atomic_load(offset, width) == Some(expected),
+            interrupted,
+        ))
+    }
+
+    pub fn register_wait(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+    ) -> Option<Result<SharedWaitRegistration, SharedWaitResult>> {
+        self.atomic_pointer(offset, width)?;
+        Some(self.shared_memory()?.register_wait(offset, timeout_ms, || {
+            self.atomic_load(offset, width) == Some(expected)
+        }))
+    }
+
+    pub fn notify(&self, offset: usize, count: usize) -> usize {
+        self.shared_memory()
+            .map_or(0, |memory| memory.notify(offset, count))
     }
 
     fn atomic_pointer(&self, offset: usize, width: usize) -> Option<*mut u8> {
@@ -1546,6 +1624,7 @@ impl SharedBuffer {
         target_has_atomic = "64"
     ))]
     pub fn atomic_load(&self, offset: usize, width: usize) -> Option<u64> {
+        let _access = self.0.bytes.access();
         let pointer = self.atomic_pointer(offset, width)?;
         // SAFETY: `atomic_pointer` checks bounds and alignment. The shared
         // allocation is initialized to zero and VM/native concurrent access
@@ -1578,6 +1657,7 @@ impl SharedBuffer {
         target_has_atomic = "64"
     ))]
     pub fn atomic_store(&self, offset: usize, width: usize, value: u64) -> bool {
+        let _access = self.0.bytes.access();
         let Some(pointer) = self.atomic_pointer(offset, width) else {
             return false;
         };
@@ -1619,6 +1699,7 @@ impl SharedBuffer {
         value: u64,
         replacement: u64,
     ) -> Option<u64> {
+        let _access = self.0.bytes.access();
         let pointer = self.atomic_pointer(offset, width)?;
         // SAFETY: `atomic_pointer` checks bounds and alignment. All concurrent
         // VM/native accesses to this shared allocation are atomic.

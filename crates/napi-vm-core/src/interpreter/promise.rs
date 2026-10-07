@@ -483,6 +483,7 @@ impl Interpreter {
             {
                 return Ok(self.outcome(executed, YieldReason::TimeBudget));
             }
+            super::jobs::settle_notified_atomics_waiters(&self.jobs);
             let micro = self.jobs.borrow().has_microtasks();
             if !micro {
                 self.jobs.borrow_mut().checkpoint_pending = false;

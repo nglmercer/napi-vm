@@ -2282,6 +2282,24 @@ impl Interpreter {
         self.event_loop_options = options;
         Ok(())
     }
+    pub(crate) fn owner_wake_signal(&self) -> std::sync::Arc<crate::host::WakeSignal> {
+        self.execution.wake.clone()
+    }
+
+    /// Opt-in host permission to suspend this agent with Atomics.wait.
+    pub fn set_can_block(&mut self, can_block: bool) {
+        self.execution.can_block.set(can_block);
+    }
+
+    pub(crate) fn can_block(&self) -> bool {
+        self.execution.can_block.get()
+    }
+
+    /// Native blocking operations observe the same owner execution cancellation.
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.execution.cancellation.borrow().clone()
+    }
+
     pub fn set_cancellation_token(&mut self, token: CancellationToken) {
         if let Some(host) = &self.host {
             let remaining = self.execution.deadline.get().map(|d| {

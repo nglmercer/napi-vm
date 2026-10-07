@@ -64,6 +64,7 @@ def run_variant(engine, root, test, source, data, mode, strict, timeout):
     request = {"source": ('"use strict";\n' if strict else "") + source,
                "harness": "\n".join(safe_harness(root, name) for name in harness),
                "module": mode == "module", "asynchronous": "async" in flags,
+               "can_block": "CanBlockIsFalse" not in flags,
                "modules": modules, "id": test.relative_to(root / "test").as_posix(),
                "corpus_root": str(root / "test")}
     try:
@@ -81,12 +82,38 @@ def run_variant(engine, root, test, source, data, mode, strict, timeout):
     return {"status": outcome(report, data), "engine": report}
 
 
+def selected_files(root, paths, groups, catalog):
+    """Union explicit focused selections; errors never become silent omissions."""
+    tests = set()
+    selections = [(path, None) for path in paths]
+    for group in groups:
+        if group not in catalog:
+            raise ValueError(f"unknown focused group: {group}")
+        entry = catalog[group]
+        pattern = re.compile(entry["pattern"]) if "pattern" in entry else None
+        selections.extend((path, pattern) for path in entry["paths"])
+    if not selections:
+        selections = [(".", None)]
+    for selection, pattern in selections:
+        selected = (root / "test" / selection).resolve()
+        if not selected.is_relative_to(root / "test"):
+            raise ValueError("selection escapes test directory")
+        if not selected.exists():
+            raise ValueError(f"selection does not exist: {selection}")
+        files = [selected] if selected.is_file() else selected.rglob("*.js")
+        for test in files:
+            if pattern is None or pattern.search(test.relative_to(root / "test").as_posix()):
+                tests.add(test)
+    return tests
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=Path)
     parser.add_argument("--engine", required=True, type=Path)
     parser.add_argument("--revision", required=True, help="exact checked-out Test262 commit SHA")
     parser.add_argument("--path", action="append", default=[], help="test-relative subset path (repeatable)")
+    parser.add_argument("--group", action="append", default=[], help="named focused group from groups.json (repeatable)")
     parser.add_argument("--skip-feature", action="append", default=[])
     parser.add_argument("--jobs", type=int, default=1, help="isolated worker processes in parallel")
     parser.add_argument("--timeout", type=float, default=5.0)
@@ -103,13 +130,12 @@ def main():
     dirty = subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"], text=True)
     if dirty:
         parser.error("corpus has modified tracked files")
-    selections = args.path or ["."]
-    tests = set()
-    for selection in selections:
-        selected = (root / "test" / selection).resolve()
-        if not selected.is_relative_to(root / "test"):
-            parser.error("selection escapes test directory")
-        tests.update([selected] if selected.is_file() else selected.rglob("*.js"))
+    catalog = json.loads(Path(__file__).with_name("groups.json").read_text())
+    try:
+        tests = selected_files(root, args.path, args.group, catalog)
+    except (ValueError, re.error) as error:
+        parser.error(str(error))
+    selections = args.path or (["."] if not args.group else [])
     def run_test(test):
         rows = []
         name = test.relative_to(root / "test").as_posix()
@@ -140,12 +166,12 @@ def main():
     counts = {status: sum(r["status"] == status for r in results)
               for status in ("pass", "fail", "skip", "timeout", "crash", "harness_error")}
     report = {"domain": "ECMAScript", "suite": "Test262", "revision": revision,
-              "selection": selections, "engine_sha256": engine_sha256, "skip_features": args.skip_feature,
+              "selection": selections, "groups": args.group, "engine_sha256": engine_sha256, "skip_features": args.skip_feature,
               "denominator": "all selected variants, including skips and errors",
               "worker_jobs": args.jobs, "timeout_seconds": args.timeout,
               "total": len(results), "counts": counts,
               "pass_percentage": 100 * counts["pass"] / len(results) if results else None,
-              "limitations": ["Agents are not implemented; GC requests run at quiescent host boundaries"],
+              "limitations": ["Agents use isolated owner-thread VMs and shared data blocks; GC requests run at quiescent host boundaries"],
               "results": results}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in report.items() if key != "results"}, indent=2))

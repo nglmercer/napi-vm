@@ -1,5 +1,7 @@
 import unittest
-from run import metadata, outcome, variants
+from run import metadata, outcome, variants, selected_files
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 class RunnerTests(unittest.TestCase):
     def test_yaml_metadata_and_variants(self):
@@ -16,6 +18,22 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(outcome({"status": "error", "phase": "parse", "error_type": "TypeError"}, data), "fail")
         self.assertEqual(outcome({"status": "ok"}, data), "fail")
         self.assertEqual(outcome({"status": "error", "phase": "harness", "error_type": "SyntaxError"}, data), "harness_error")
+    def test_focused_groups_union_and_validate_selections(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            directory = root / "test" / "built-ins" / "Object"
+            directory.mkdir(parents=True)
+            realm = directory / "realm.js"
+            ordinary = directory / "ordinary.js"
+            realm.write_text("")
+            ordinary.write_text("")
+            groups = {"realms": {"paths": ["."], "pattern": "realm"}}
+            self.assertEqual(selected_files(root, [], ["realms"], groups), {realm})
+            self.assertEqual(selected_files(root, ["built-ins/Object"], ["realms"], groups), {realm, ordinary})
+            with self.assertRaises(ValueError): selected_files(root, [], ["unknown"], groups)
+            with self.assertRaises(ValueError): selected_files(root, ["../escape"], [], groups)
+            with self.assertRaises(ValueError): selected_files(root, ["missing"], [], groups)
+
     def test_missing_metadata_fails(self):
         with self.assertRaises(ValueError): metadata("var x;")
 
