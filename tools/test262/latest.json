@@ -5,32 +5,49 @@
   "selection": [
     "."
   ],
-  "engine_sha256": "ed9dc3ee79a84b078508c2b1966aa92f37f65e8a86d6f4cff836a887aaaadffb",
+  "engine_sha256": "0f900a18269295f2f6fee60dcd38fb931614e56eb10df2ff8d1cbb370733a6cf",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
   "timeout_seconds": 5.0,
   "total": 102956,
   "counts": {
-    "pass": 36874,
-    "fail": 65794,
+    "pass": 38733,
+    "fail": 63935,
     "skip": 0,
     "timeout": 2,
     "crash": 2,
     "harness_error": 284
   },
-  "pass_percentage": 35.81529973969462,
+  "pass_percentage": 37.62092544387894,
   "limitations": [
-    "$262.createRealm and agents are not implemented; GC requests run at quiescent host boundaries"
+    "Agents are not implemented; GC requests run at quiescent host boundaries"
   ],
   "build_profile": "release",
   "notes": [
-    "Development measurement; phases 1\u20133 are started, not complete; full Test262 conformance is not achieved.",
-    "Same pinned corpus, release profile, four workers and five-second timeout as the merged baseline.",
+    "Development measurement; phases 1\u20133 remain incomplete; full Test262 conformance is not achieved.",
+    "Same pinned corpus, release profile, four workers and five-second timeout as the phase foundation baseline.",
     "Complete results and transition rows are generated artifacts; no feature skips.",
-    "Formerly passing variants that now fail remain counted and require follow-up."
+    "No formerly passing variants regress relative to the phase foundation batch; 12 regressions remain relative to merged main and are retained in the full denominator."
   ],
   "baseline": {
+    "engine_sha256": "ed9dc3ee79a84b078508c2b1966aa92f37f65e8a86d6f4cff836a887aaaadffb",
+    "total": 102956,
+    "counts": {
+      "pass": 36874,
+      "fail": 65794,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 2,
+      "harness_error": 284
+    },
+    "pass_percentage": 35.81529973969462
+  },
+  "transitions": {
+    "new_passes": 1859,
+    "former_passes_now_nonpassing": 0
+  },
+  "merged_baseline": {
     "engine_sha256": "15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b",
     "total": 102956,
     "counts": {
@@ -41,11 +58,11 @@
       "crash": 8,
       "harness_error": 470
     },
-    "pass_percentage": 33.73868448657679
-  },
-  "transitions": {
-    "new_passes": 2217,
-    "former_passes_now_nonpassing": 79
+    "pass_percentage": 33.73868448657679,
+    "transitions": {
+      "new_passes": 4009,
+      "former_passes_now_nonpassing": 12
+    }
   },
   "focused": {
     "domain": "ECMAScript",
@@ -67,23 +84,27 @@
       "built-ins/ArrayBuffer",
       "built-ins/DataView"
     ],
-    "engine_sha256": "ed9dc3ee79a84b078508c2b1966aa92f37f65e8a86d6f4cff836a887aaaadffb",
+    "engine_sha256": "0f900a18269295f2f6fee60dcd38fb931614e56eb10df2ff8d1cbb370733a6cf",
     "skip_features": [],
     "denominator": "all selected variants, including skips and errors",
     "worker_jobs": 4,
     "timeout_seconds": 5.0,
     "total": 4991,
     "counts": {
-      "pass": 2818,
-      "fail": 2173,
+      "pass": 3009,
+      "fail": 1982,
       "skip": 0,
       "timeout": 0,
       "crash": 0,
       "harness_error": 0
     },
-    "pass_percentage": 56.461630935684234,
+    "pass_percentage": 60.28851933480264,
     "limitations": [
-      "$262.createRealm and agents are not implemented; GC requests run at quiescent host boundaries"
-    ]
+      "Agents are not implemented; GC requests run at quiescent host boundaries"
+    ],
+    "transitions": {
+      "new_passes": 191,
+      "former_passes_now_nonpassing": 0
+    }
   }
 }
