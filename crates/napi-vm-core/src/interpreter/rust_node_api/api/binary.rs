@@ -4,6 +4,7 @@ pub(super) fn create_napi_buffer(bytes: Vec<u8>) -> Result<(Value, *mut c_void),
     }
     let length = bytes.len();
     let value = Value::TypedArray(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
         kind: TypedKind::Uint8,
         buffer: Buffer::owned(bytes).into(),
         byte_offset: 0,
@@ -131,6 +132,7 @@ pub(super) unsafe extern "C" fn api_create_external_buffer(
         let backing =
             unsafe { Buffer::external(data.cast::<u8>(), length) }.ok_or(NAPI_INVALID_ARG)?;
         let value = Value::TypedArray(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
             kind: TypedKind::Uint8,
             buffer: backing.into(),
             byte_offset: 0,
@@ -191,6 +193,7 @@ pub(super) unsafe extern "C" fn api_create_buffer_from_arraybuffer(
             return Err(NAPI_GENERIC_FAILURE);
         }
         let value = Value::TypedArray(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
             kind: TypedKind::Uint8,
             buffer: buffer.clone().into(),
             byte_offset,
@@ -769,6 +772,7 @@ pub(super) unsafe extern "C" fn api_create_typedarray(
             return Err(NAPI_INVALID_ARG);
         }
         let value = Value::TypedArray(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
             kind,
             buffer: buffer.clone().into(),
             byte_offset,
@@ -847,6 +851,7 @@ pub(super) unsafe extern "C" fn api_create_dataview(
         }
         validate_arraybuffer_window(buffer, byte_offset, byte_length, 1)?;
         let value = Value::DataView(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
             kind: TypedKind::Uint8,
             buffer: buffer.clone().into(),
             byte_offset,

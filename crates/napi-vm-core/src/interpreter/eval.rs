@@ -215,6 +215,32 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 pub(crate) const SUPER_PROTO: &str = "__super_proto__";
 
 impl Interpreter {
+    fn close_guest_iterator(&mut self, iterator: &Value, asynchronous: bool) -> Result<(), VmErr> {
+        if matches!(iterator, Value::Generator { .. }) {
+            close_iterator(iterator);
+            return Ok(());
+        }
+        let method = self.get_prop_value_str(iterator, "return")?;
+        if matches!(method, Value::Undefined | Value::Null) {
+            return Ok(());
+        }
+        if !super::call::is_callable_value(&method) {
+            return Err(VmErr::Msg(
+                "TypeError: iterator return must be callable".into(),
+            ));
+        }
+        let mut result = self.call_this(&method, iterator.clone(), vec![])?;
+        if asynchronous {
+            result = self.perform_await(result)?;
+        }
+        if !super::call::is_js_object(&result) {
+            return Err(VmErr::Msg(
+                "TypeError: iterator return must return an object".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Resolve `super.<key>` — a lookup on the superclass prototype.
     fn super_member(&mut self, key: &Value) -> Result<Value, VmErr> {
         let proto = self
@@ -222,7 +248,8 @@ impl Interpreter {
             .borrow()
             .get(SUPER_PROTO)
             .ok_or_else(|| VmErr::Msg("'super' used outside a derived class".to_string()))?;
-        self.get_prop_value(&proto, key)
+        let receiver = self.resolve_this(&self.global)?;
+        self.get_prop_value_with_receiver(&proto, key, &receiver)
     }
 
     /// Build a class value from its parts: prototype methods and accessors,
@@ -272,7 +299,7 @@ impl Interpreter {
     /// constructor, or a callable native heritage itself.
     pub(crate) fn super_ctor_for(super_cls: &Option<Value>) -> Option<Value> {
         match super_cls {
-            Some(Value::Class(sc)) => Some(sc.constructor.as_ref().clone()),
+            Some(Value::Class(_)) => super_cls.clone(),
             Some(other) if super::call::is_callable_value(other) => Some(other.clone()),
             _ => None,
         }
@@ -308,7 +335,11 @@ impl Interpreter {
             static_has_accessors,
             static_blocks,
         } = asm;
+        let prototype_has_accessors = proto_props.iter().any(|(key, value)| key.starts_with("__setter:") || matches!(value, Value::Function(function) if function.name.as_deref().is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))));
         let prototype = Value::object_with_proto(proto_props, super_proto);
+        if let Value::Object { props } = &prototype {
+            props.meta.borrow_mut().has_accessors = prototype_has_accessors;
+        }
         prototype.set_prop("constructor".to_string(), constructor.clone())?;
 
         statics.push((
@@ -375,7 +406,10 @@ impl Interpreter {
         // The class binds its own name inside static blocks and
         // method bodies, so `static { A.y = … }` can reach it.
         for block in static_blocks {
-            let scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+            let scope = Rc::new(RefCell::new(Environment::function_child(
+                self.global.clone(),
+            )));
+            scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
             scope.borrow_mut().set(&name, class_val.clone());
             let saved = std::mem::replace(&mut self.global, scope);
@@ -404,13 +438,25 @@ impl Interpreter {
         // Methods, getters and setters close over a scope carrying the
         // superclass prototype, so `super.method()` inside one can find it.
         // The constructor gets `__super_ctor` separately, below.
-        let member_closure = Self::member_closure_env(&self.global, &super_proto);
+        let member_scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+        for member in body {
+            if let ClassMember::Field {
+                name: MemberName::Static(name),
+                is_static: false,
+                ..
+            } = member
+                && name.starts_with('#')
+            {
+                member_scope.borrow_mut().declare_private_field(name);
+            }
+        }
+        let member_closure = Self::member_closure_env(&member_scope, &super_proto);
 
         // Gather the constructor, instance fields, and methods.
         let mut ctor_params: Vec<String> = Vec::new();
         let mut ctor_body: Vec<Statement> = Vec::new();
         let mut has_own_constructor = false;
-        let mut instance_fields: Vec<(String, Option<Expr>)> = Vec::new();
+        let mut instance_fields: Vec<(String, Option<Expr>, bool)> = Vec::new();
         let mut proto_props: Vec<(String, Value)> = Vec::new();
         let mut statics: Vec<(String, Value)> =
             vec![("name".to_string(), Value::String((name.to_string()).into()))];
@@ -441,6 +487,7 @@ impl Interpreter {
                     // ordinary method.
                     let is_ctor_name = matches!(name, MemberName::Static(n) if n == "constructor");
                     let fn_val = Value::Function(Rc::new(FunctionData {
+                        strict: true,
                         native: None,
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
@@ -497,7 +544,11 @@ impl Interpreter {
                         statics.push((fname.clone(), init_val));
                         static_attrs.push((fname.clone(), PropAttrs::default()));
                     } else {
-                        instance_fields.push((fname.clone(), init.clone()));
+                        instance_fields.push((
+                            fname.clone(),
+                            init.clone(),
+                            matches!(name, MemberName::Computed(_)),
+                        ));
                     }
                 }
                 ClassMember::Getter {
@@ -507,6 +558,7 @@ impl Interpreter {
                 } => {
                     let gname = self.member_name(name)?;
                     let getter_fn = Value::Function(Rc::new(FunctionData {
+                        strict: true,
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("get {}", gname).into()),
@@ -538,7 +590,7 @@ impl Interpreter {
                         ));
                         static_has_accessors = true;
                     } else {
-                        proto_props.push((gname.clone(), getter_fn));
+                        insert_class_accessor(&mut proto_props, &gname, getter_fn);
                     }
                 }
                 ClassMember::Setter {
@@ -549,6 +601,7 @@ impl Interpreter {
                 } => {
                     let sname = self.member_name(name)?;
                     let setter_fn = Value::Function(Rc::new(FunctionData {
+                        strict: true,
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("set {}", sname).into()),
@@ -580,7 +633,7 @@ impl Interpreter {
                         ));
                         static_has_accessors = true;
                     } else {
-                        proto_props.push((sname.clone(), setter_fn));
+                        insert_class_accessor(&mut proto_props, &sname, setter_fn);
                     }
                 }
             }
@@ -598,20 +651,28 @@ impl Interpreter {
             })];
         }
 
-        // Desugar instance fields into `this.<field> = <init>;` statements
-        // prepended to the constructor body.
+        // Store fields separately from the body so constructor entry/super
+        // controls their initialization rather than ordinary statement order.
         let mut full_ctor_body = Vec::new();
-        for (fname, init) in instance_fields {
+        for (fname, init, computed) in instance_fields {
             let value = init.unwrap_or(Expr::Undefined);
             full_ctor_body.push(Statement::Expr(Expr::Assignment {
                 target: Box::new(Expr::Member {
                     object: Box::new(Expr::This),
                     property: Box::new(Expr::String((fname.clone()).into())),
-                    computed: false,
+                    computed,
                 }),
                 op: AssignOp::Assign,
                 value: Box::new(value),
             }));
+        }
+        let fields = full_ctor_body;
+        let mut full_ctor_body = Vec::new();
+        if super_cls.is_some() || !fields.is_empty() {
+            full_ctor_body.push(Statement::ClassInitialization {
+                derived: super_cls.is_some(),
+                fields,
+            });
         }
         full_ctor_body.extend(ctor_body);
 
@@ -621,18 +682,17 @@ impl Interpreter {
         let super_ctor_value = Self::super_ctor_for(&super_cls);
         let ctor_closure = match super_ctor_value {
             Some(target) => {
-                let env = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+                let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
                 env.borrow_mut().set("__super_ctor", target);
                 env
             }
-            None => self.global.clone(),
+            None => member_closure.clone(),
         };
 
-        let constructor_length = ctor_params
-            .iter()
-            .take_while(|parameter| !parameter.starts_with("..."))
-            .count();
+        let constructor_length =
+            crate::parser::formal_parameter_length(&ctor_params, &full_ctor_body);
         let constructor = Value::Function(Rc::new(FunctionData {
+            strict: true,
             native: None,
             identity: Rc::new(0),
             name: Some(Rc::from(name)),
@@ -846,12 +906,13 @@ impl Interpreter {
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
         let target = Value::pending_promise();
-        let converted = self.display_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
+        let converted = self.ecmascript_to_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
         match converted {
             Ok(specifier) => {
                 self.jobs
                     .borrow_mut()
                     .push_microtask(super::jobs::Job::DynamicImport {
+                        realm: self.persistent_global.clone(),
                         target: target.clone(),
                         specifier,
                         referrer: self.cur_mod.clone(),
@@ -953,9 +1014,16 @@ impl Interpreter {
                 is_async,
                 is_generator,
             } => {
-                self.set_binding(
+                let scope = if self.global.borrow().is_eval_scope() {
+                    Environment::variable_environment(&self.global)
+                } else {
+                    self.global.clone()
+                };
+                self.set_binding_in(
+                    &scope,
                     name,
                     Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
@@ -1141,7 +1209,7 @@ impl Interpreter {
                                 // An abandon teardown runs no handlers — and
                                 // closing is a handler. Anything else closes.
                                 if !error.is_abandon() {
-                                    close_iterator(&iterator);
+                                    let _ = self.close_guest_iterator(&iterator, *is_await);
                                 }
                                 return Err(error);
                             }
@@ -1159,7 +1227,13 @@ impl Interpreter {
                         // handlers, so it must not close either.
                         Err(error) => {
                             if !error.is_abandon() {
-                                close_iterator(&iterator);
+                                let closed = self.close_guest_iterator(&iterator, *is_await);
+                                if matches!(
+                                    error,
+                                    VmErr::Ret(_) | VmErr::Break(_) | VmErr::Continue(_)
+                                ) {
+                                    closed?;
+                                }
                             }
                             return Err(error);
                         }
@@ -1167,13 +1241,18 @@ impl Interpreter {
                     }
                 }
                 if !exhausted {
-                    close_iterator(&iterator);
+                    self.close_guest_iterator(&iterator, *is_await)?;
                 }
                 Ok(r)
             }
             Statement::Block(s) => self.run_block(s),
             // A declarator group shares the enclosing scope: no new frame.
             Statement::Declarations(s) => self.run(s),
+            Statement::ParameterInitialization { .. } | Statement::ClassInitialization { .. } => {
+                Err(VmErr::Msg(
+                    "Invalid parameter initialization position".into(),
+                ))
+            }
             Statement::Labeled { label, body } => {
                 // Make the label available to a directly-wrapped loop, which
                 // takes it on entry.
@@ -1568,6 +1647,7 @@ impl Interpreter {
                     is_generator,
                 } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
@@ -1598,6 +1678,7 @@ impl Interpreter {
                 }
                 ObjectProp::Getter { name, body } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("get {name}").into()),
@@ -1628,6 +1709,7 @@ impl Interpreter {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let function = Value::Function(Rc::new(FunctionData {
+                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                         native: None,
                         identity: Rc::new(0),
                         name: Some(format!("set {name}").into()),
@@ -1747,7 +1829,7 @@ impl Interpreter {
         self.consume_fuel(1)?;
         match e {
             Expr::Number(n) => Ok(Value::Number(*n)),
-            Expr::String(s) => {
+            Expr::String(s) | Expr::EscapedString(s) => {
                 if s.len() > crate::value::MAX_STRING_LEN {
                     return Err(crate::value::limit_err("Maximum string length exceeded"));
                 }
@@ -1768,7 +1850,8 @@ impl Interpreter {
                 if n == "undefined" {
                     return Ok(Value::Undefined);
                 }
-                match self.global.borrow().lookup(n) {
+                let scope = self.global.clone();
+                match self.lookup_binding_in(&scope, n)? {
                     Lookup::Value(v) => Ok(v),
                     // Declared in this block but the declaration has not run:
                     // the temporal dead zone. JavaScript distinguishes this
@@ -1906,18 +1989,27 @@ impl Interpreter {
                         Expr::Member {
                             object,
                             property,
-                            computed: _,
+                            computed,
                         } => {
                             let obj = self.eval_expr(object)?;
                             if let Expr::String(key) = property.as_ref() {
                                 checked_static_key(key)?;
-                                let cur = self.get_prop_value_str(&obj, &key.to_key())?;
+                                let private = !computed && key.to_key().starts_with('#');
+                                let cur = if private {
+                                    self.get_private_member(&obj, &key.to_key())?
+                                } else {
+                                    self.get_prop_value_str(&obj, &key.to_key())?
+                                };
                                 let new_val = if *op == UnOp::Inc {
                                     Value::Number(self.tn(&cur) + 1.0)
                                 } else {
                                     Value::Number(self.tn(&cur) - 1.0)
                                 };
-                                self.assign_member_str(&obj, &key.to_key(), new_val.clone())?;
+                                if private {
+                                    self.set_private_member(&obj, &key.to_key(), new_val.clone())?;
+                                } else {
+                                    self.assign_member_str(&obj, &key.to_key(), new_val.clone())?;
+                                }
                                 return if *prefix { Ok(new_val) } else { Ok(cur) };
                             }
                             let prop = self.eval_expr(property)?;
@@ -1946,6 +2038,15 @@ impl Interpreter {
                 }
             }
             Expr::Call { callee, args } => {
+                // Direct eval is determined by syntax and the original intrinsic,
+                // not by a function's display name. Resolve before arguments.
+                let direct_eval =
+                    matches!(callee.as_ref(), Expr::Identifier(name) if name == "eval");
+                let evaluated_eval = if direct_eval {
+                    Some(self.eval_expr(callee)?)
+                } else {
+                    None
+                };
                 let mut a = Vec::new();
                 for x in args {
                     match x {
@@ -1973,7 +2074,7 @@ impl Interpreter {
                     // `super(...)` invokes the superclass constructor on the
                     // current `this`.
                     Expr::Super => {
-                        let this_val = self.global.borrow().get("this").unwrap_or(Value::Undefined);
+                        let this_val = Value::Undefined;
                         let super_ctor =
                             self.global.borrow().get("__super_ctor").ok_or_else(|| {
                                 VmErr::Msg("super used outside a derived class".to_string())
@@ -1987,7 +2088,7 @@ impl Interpreter {
                         property,
                         computed: _,
                     } if matches!(object.as_ref(), Expr::Super) => {
-                        let this_val = self.global.borrow().get("this").unwrap_or(Value::Undefined);
+                        let this_val = self.resolve_this(&self.global)?;
                         let prop = self.eval_expr(property)?;
                         let method = self.super_member(&prop)?;
                         self.call_this(&method, this_val, a)
@@ -1996,7 +2097,7 @@ impl Interpreter {
                     Expr::Member {
                         object,
                         property,
-                        computed: _,
+                        computed,
                     } => {
                         let obj = self.eval_expr(object)?;
                         // `o.key(...)`: a static property parses as
@@ -2004,7 +2105,11 @@ impl Interpreter {
                         // the key value on every call.
                         let f = if let Expr::String(key) = property.as_ref() {
                             checked_static_key(key)?;
-                            self.get_prop_value_str(&obj, &key.to_key())?
+                            if !computed && key.to_key().starts_with('#') {
+                                self.get_private_member(&obj, &key.to_key())?
+                            } else {
+                                self.get_prop_value_str(&obj, &key.to_key())?
+                            }
                         } else {
                             let prop = self.eval_expr(property)?;
                             self.get_prop_value(&obj, &prop)?
@@ -2033,8 +2138,17 @@ impl Interpreter {
                         self.call_this(&f, obj, a)
                     }
                     _ => {
-                        let c = self.eval_expr(callee)?;
-                        self.call_this(&c, Value::Undefined, a)
+                        let c = match evaluated_eval {
+                            Some(value) => value,
+                            None => self.eval_expr(callee)?,
+                        };
+                        if direct_eval
+                            && crate::builtins::is_intrinsic_eval(&c, &self.persistent_global)
+                        {
+                            crate::builtins::eval_direct(self, a)
+                        } else {
+                            self.call_this(&c, Value::Undefined, a)
+                        }
                     }
                 }
             }
@@ -2050,11 +2164,20 @@ impl Interpreter {
             Expr::Member {
                 object,
                 property,
-                computed: _,
+                computed,
             } => {
                 let o = self.eval_expr(object)?;
                 if let Expr::String(key) = property.as_ref() {
                     checked_static_key(key)?;
+                    if !computed && key.to_key().starts_with('#') {
+                        return self.get_private_member(&o, &key.to_key());
+                    }
+                    if !computed
+                        && key.to_key().starts_with('#')
+                        && !self.has_property(&o, &Value::String(key.clone()))?
+                    {
+                        return vm_err("TypeError: receiver does not contain the private member");
+                    }
                     return self.get_prop_value_str(&o, &key.to_key());
                 }
                 let p = self.eval_expr(property)?;
@@ -2084,13 +2207,20 @@ impl Interpreter {
                 // Static member target: skip the key allocation on both the
                 // read and the conditional write.
                 if let Expr::Member {
-                    object, property, ..
+                    object,
+                    property,
+                    computed,
                 } = target.as_ref()
                     && let Expr::String(key) = property.as_ref()
                 {
                     checked_static_key(key)?;
                     let receiver = self.eval_expr(object)?;
-                    let current = self.get_prop_value_str(&receiver, &key.to_key())?;
+                    let private = !computed && key.to_key().starts_with('#');
+                    let current = if private {
+                        self.get_private_member(&receiver, &key.to_key())?
+                    } else {
+                        self.get_prop_value_str(&receiver, &key.to_key())?
+                    };
                     let should_assign = match op {
                         LogicalAssignOp::And => self.truthy(&current),
                         LogicalAssignOp::Or => !self.truthy(&current),
@@ -2102,7 +2232,11 @@ impl Interpreter {
                         return Ok(current);
                     }
                     let assigned = self.eval_expr(value)?;
-                    self.assign_member_str(&receiver, &key.to_key(), assigned.clone())?;
+                    if private {
+                        self.set_private_member(&receiver, &key.to_key(), assigned.clone())?;
+                    } else {
+                        self.assign_member_str(&receiver, &key.to_key(), assigned.clone())?;
+                    }
                     return Ok(assigned);
                 }
                 let (receiver, key, current) = match target.as_ref() {
@@ -2159,18 +2293,27 @@ impl Interpreter {
                     Expr::Member {
                         object,
                         property,
-                        computed: _,
+                        computed,
                     } => {
                         let obj = self.eval_expr(object)?;
                         if let Expr::String(key) = property.as_ref() {
                             checked_static_key(key)?;
+                            let private = !computed && key.to_key().starts_with('#');
                             let fv = if let Some(bin) = op.bin_op() {
-                                let c = self.get_prop_value_str(&obj, &key.to_key())?;
+                                let c = if private {
+                                    self.get_private_member(&obj, &key.to_key())?
+                                } else {
+                                    self.get_prop_value_str(&obj, &key.to_key())?
+                                };
                                 self.bin_op(bin, &c, &v)?
                             } else {
                                 v
                             };
-                            self.assign_member_str(&obj, &key.to_key(), fv.clone())?;
+                            if private {
+                                self.set_private_member(&obj, &key.to_key(), fv.clone())?;
+                            } else {
+                                self.assign_member_str(&obj, &key.to_key(), fv.clone())?;
+                            }
                             return Ok(fv);
                         }
                         let prop = self.eval_expr(property)?;
@@ -2227,6 +2370,8 @@ impl Interpreter {
                 body,
                 is_async,
             } => Ok(Value::Function(Rc::new(FunctionData {
+                strict: self.global.borrow().strict()
+                    || matches!(body.as_ref(), ExprOrBlock::Block(s) if crate::parser::use_strict(s)),
                 native: None,
                 identity: Rc::new(0),
                 name: None,
@@ -2257,6 +2402,7 @@ impl Interpreter {
                 is_async,
                 is_generator,
             } => Ok(Value::Function(Rc::new(FunctionData {
+                strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                 native: None,
                 identity: Rc::new(0),
                 name: name.as_deref().map(Rc::from),
@@ -2285,7 +2431,7 @@ impl Interpreter {
                 self.ctor(&c, a)
             }
             Expr::Spread(i) => self.eval_expr(i),
-            Expr::This => Ok(self.global.borrow().get("this").unwrap_or(Value::Undefined)),
+            Expr::This => self.resolve_this(&self.global),
             // `import(specifier)`. Module registration is synchronous in this
             // VM, so the promise is already settled when it is handed back;
             // `await import(…)` and `.then(…)` both work.
@@ -2294,6 +2440,11 @@ impl Interpreter {
                 self.eval_dynamic_import(specifier)
             }
             Expr::ImportMeta => self.eval_import_meta(),
+            Expr::NewTarget => self
+                .global
+                .borrow()
+                .new_target()
+                .ok_or_else(|| VmErr::Msg("SyntaxError: new.target outside a function".into())),
             // `` tag`a${x}b` ``: the tag receives the literal chunks as an
             // array carrying a `raw` companion, then the interpolated values.
             Expr::TaggedTemplate {

@@ -121,18 +121,12 @@ pub(super) fn install(e: &mut Environment) {
 
 // --- Shared helpers ---------------------------------------------------------
 
-fn cell(v: &Value) -> Option<&Rc<ObjectCell>> {
-    match v {
-        Value::Object { props } => Some(props),
-        Value::Class(class) => Some(&class.statics),
-        Value::Function(function) => {
-            function.ensure_name_length_properties();
-            function.prototype_value(v);
-            Some(&function.properties)
-        }
-        Value::HostFunction { properties, .. } => Some(properties),
-        _ => None,
+fn cell(v: &Value) -> Option<Rc<ObjectCell>> {
+    if let Value::Function(function) = v {
+        function.ensure_name_length_properties();
+        function.prototype_value(v);
     }
+    v.property_cell()
 }
 
 fn type_err(msg: &str) -> VmErr {
@@ -173,7 +167,9 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
             );
             names
         }
-        _ => Vec::new(),
+        _ => cell(v).map_or_else(Vec::new, |properties| {
+            own_object_names(&properties, enumerable_only)
+        }),
     }
 }
 
@@ -193,6 +189,20 @@ fn own_names_for(
     value: &Value,
     enumerable_only: bool,
 ) -> Result<Vec<String>, VmErr> {
+    if let Some(global) = interp.global_scope_of(value) {
+        return Ok(global
+            .borrow()
+            .global_property_keys()
+            .into_iter()
+            .filter(|name| {
+                !enumerable_only
+                    || global
+                        .borrow()
+                        .global_property(name)
+                        .is_some_and(|(_, attrs)| attrs.enumerable)
+            })
+            .collect());
+    }
     if matches!(value, Value::Proxy(_)) {
         // The current Proxy model exposes ownKeys as a string array. Native
         // addon proxies return the host object's enumerable own keys here.
@@ -376,8 +386,8 @@ fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
         return Err(type_err("Cannot convert undefined or null to object"));
     }
     let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
-    let found = if matches!(v, Value::GlobalObject) {
-        interp.global_keys().iter().any(|name| name == &key)
+    let found = if let Some(global) = interp.global_scope_of(&v) {
+        global.borrow().global_property(&key).is_some()
     } else {
         object_property_attributes(&v, &key).is_some()
     };
@@ -405,6 +415,7 @@ fn is_ecmascript_object(value: &Value) -> bool {
             | Value::NativeFunction { .. }
             | Value::HostFunction { .. }
             | Value::GlobalObject
+            | Value::RealmGlobal(_)
             | Value::Class(_)
             | Value::Promise(_)
             | Value::Generator { .. }
@@ -524,6 +535,14 @@ fn object_property_is_enumerable(
 ) -> Result<Value, VmErr> {
     let receiver = to_object_receiver(&this)?;
     let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
+    if let Some(global) = interp.global_scope_of(&receiver) {
+        return Ok(Value::Bool(
+            global
+                .borrow()
+                .global_property(&key)
+                .is_some_and(|(_, attrs)| attrs.enumerable),
+        ));
+    }
     Ok(Value::Bool(
         object_property_attributes(&receiver, &key).is_some_and(|attributes| attributes.enumerable),
     ))
@@ -577,7 +596,7 @@ fn object_to_string_tag(value: &Value) -> String {
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => "Function".into(),
-        Value::GlobalObject => "global".into(),
+        Value::GlobalObject | Value::RealmGlobal(_) => "global".into(),
         Value::Promise(_) => "Promise".into(),
         Value::Generator { .. } => "Generator".into(),
         Value::StringIterator { .. } => "String Iterator".into(),
@@ -962,6 +981,36 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     };
     if cell(descriptor).is_none() {
         return Err(type_err("Property description must be an object"));
+    }
+
+    if let Value::TypedArray(view) = target {
+        // Integer-indexed elements never become ordinary property slots.
+        let numeric = key.parse::<f64>().ok();
+        let canonical = key == "-0"
+            || key == "NaN"
+            || key == "Infinity"
+            || key == "-Infinity"
+            || numeric.is_some_and(|index| index.to_string() == key);
+        if canonical {
+            let index = numeric.unwrap_or(f64::NAN);
+            if key == "-0"
+                || !index.is_finite()
+                || index < 0.0
+                || index.fract() != 0.0
+                || index >= view.effective_length() as f64
+                || own_slot(descriptor, "get").is_some()
+                || own_slot(descriptor, "set").is_some()
+                || ["configurable", "enumerable", "writable"]
+                    .iter()
+                    .any(|name| own_slot(descriptor, name).is_some_and(|value| !value.is_truthy()))
+            {
+                return Err(type_err("Cannot redefine a typed array element"));
+            }
+            if let Some(value) = own_slot(descriptor, "value") {
+                crate::builtins::write_element(view, index as usize, &value)?;
+            }
+            return Ok(());
+        }
     }
 
     let old_value = own_slot(target, key);
@@ -1427,27 +1476,166 @@ fn object_get_own_descriptor(
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
     let key = interp.property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
-    Ok(descriptor_for(&target, &key))
+    descriptor_for_in(interp, &target, &key)
 }
 
 fn object_get_own_descriptors(
-    _: &mut Interpreter,
+    interp: &mut Interpreter,
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let props = own_names(&target, false)
-        .into_iter()
-        .map(|key| {
-            let descriptor = descriptor_for(&target, &key);
-            (key, descriptor)
-        })
-        .collect();
+    let mut props = Vec::new();
+    for key in own_names_for(interp, &target, false)? {
+        let descriptor = descriptor_for_in(interp, &target, &key)?;
+        if !matches!(descriptor, Value::Undefined) {
+            props.push((key, descriptor));
+        }
+    }
     Value::checked_object(props)
 }
 
 /// Build the descriptor object for one own property, or `undefined` when the
 /// property does not exist.
+fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Result<Value, VmErr> {
+    if let Value::Proxy(proxy) = target {
+        let handler = proxy.handler.clone();
+        let target = proxy.target.clone();
+        let trap = interp.get_prop_value_str(&handler, "getOwnPropertyDescriptor")?;
+        if matches!(trap, Value::Undefined | Value::Null) {
+            return descriptor_for_in(interp, &target, key);
+        }
+        if !is_callable(&trap) {
+            return Err(type_err(
+                "Proxy getOwnPropertyDescriptor trap must be callable",
+            ));
+        }
+        let result = interp.call_this(
+            &trap,
+            handler,
+            vec![
+                target.clone(),
+                Value::String(crate::JsString::from_key(key)),
+            ],
+        )?;
+        if !matches!(result, Value::Undefined) && !is_ecmascript_object(&result) {
+            return Err(type_err(
+                "Proxy descriptor trap must return an object or undefined",
+            ));
+        }
+        let previous = descriptor_for_in(interp, &target, key)?;
+        let exists = !matches!(previous, Value::Undefined);
+        let extensible = match &target {
+            Value::GlobalObject | Value::RealmGlobal(_) => true,
+            _ => object_is_extensible_value(&target),
+        };
+        let configurable = previous
+            .get_prop("configurable")
+            .is_some_and(|v| v.is_truthy());
+        if matches!(result, Value::Undefined) {
+            if exists && (!configurable || !extensible) {
+                return Err(type_err("Proxy cannot hide a protected target property"));
+            }
+            return Ok(Value::Undefined);
+        }
+        // ToPropertyDescriptor reads inherited fields and invokes getters in
+        // specification order. Never expose the handler's raw descriptor.
+        let mut fields = Vec::new();
+        for name in [
+            "enumerable",
+            "configurable",
+            "value",
+            "writable",
+            "get",
+            "set",
+        ] {
+            if interp.has_property(&result, &Value::String(name.into()))? {
+                let mut value = interp.get_prop_value_str(&result, name)?;
+                if matches!(name, "enumerable" | "configurable" | "writable") {
+                    value = Value::Bool(value.is_truthy());
+                }
+                if matches!(name, "get" | "set")
+                    && !matches!(value, Value::Undefined)
+                    && !is_callable(&value)
+                {
+                    return Err(type_err("Property descriptor accessor must be callable"));
+                }
+                fields.push((name.into(), value));
+            }
+        }
+        // CompletePropertyDescriptor preserves accessor fields even when
+        // both are undefined. Ordinary storage cannot represent that case
+        // solely by the callable name of its property slot.
+        let accessor = fields
+            .iter()
+            .any(|(name, _)| name == "get" || name == "set");
+        let defaults = if accessor {
+            vec![("get", Value::Undefined), ("set", Value::Undefined)]
+        } else {
+            vec![
+                ("value", Value::Undefined),
+                ("writable", Value::Bool(false)),
+            ]
+        };
+        for (name, value) in defaults.into_iter().chain([
+            ("enumerable", Value::Bool(false)),
+            ("configurable", Value::Bool(false)),
+        ]) {
+            if !fields.iter().any(|(field, _)| field == name) {
+                fields.push((name.into(), value));
+            }
+        }
+        let descriptor = Value::object(fields);
+        // Validate descriptor shape without changing the target or returning
+        // a reconstructed accessor whose callable name was rewritten.
+        let scratch = Value::object(vec![]);
+        define_property(&scratch, key, &descriptor)?;
+        if !exists && !extensible {
+            return Err(type_err(
+                "Proxy cannot add a property to a non-extensible target",
+            ));
+        }
+        if exists {
+            let scratch = Value::object(vec![]);
+            define_property(&scratch, key, &previous)?;
+            define_property(&scratch, key, &descriptor)?;
+        }
+        if !descriptor
+            .get_prop("configurable")
+            .is_some_and(|v| v.is_truthy())
+        {
+            if !exists || configurable {
+                return Err(type_err("Proxy cannot invent a non-configurable property"));
+            }
+            if previous.get_prop("writable").is_some_and(|v| v.is_truthy())
+                && descriptor
+                    .get_prop("writable")
+                    .is_some_and(|v| !v.is_truthy())
+            {
+                return Err(type_err(
+                    "Proxy cannot report a writable property as frozen",
+                ));
+            }
+        }
+        return Ok(descriptor);
+    }
+    if let Some(global) = interp.global_scope_of(target) {
+        return Ok(global
+            .borrow()
+            .global_property(key)
+            .map(|(value, attrs)| {
+                Value::object(vec![
+                    ("value".into(), value),
+                    ("writable".into(), Value::Bool(attrs.writable)),
+                    ("enumerable".into(), Value::Bool(attrs.enumerable)),
+                    ("configurable".into(), Value::Bool(attrs.configurable)),
+                ])
+            })
+            .unwrap_or(Value::Undefined));
+    }
+    Ok(descriptor_for(target, key))
+}
+
 fn descriptor_for(target: &Value, key: &str) -> Value {
     if let Value::Array(items) = target {
         let array = items;

@@ -349,14 +349,17 @@ impl Interpreter {
         self.jobs.borrow_mut().dispatch_depth += 1;
         let _guard = DispatchGuard(self.jobs.clone());
         match job {
-            Job::ModuleEvaluation { id, target } => self.run_module_evaluation_job(&id, &target),
+            Job::ModuleEvaluation { realm, id, target } => {
+                self.with_global_storage(realm, |vm| vm.run_module_evaluation_job(&id, &target))
+            }
             Job::DynamicImport {
+                realm,
                 target,
                 specifier,
                 referrer,
             } => {
                 let outer = std::mem::replace(&mut self.cur_mod, referrer);
-                let result = self.import_module(&specifier);
+                let result = self.with_global_storage(realm, |vm| vm.import_module(&specifier));
                 self.cur_mod = outer;
                 match result {
                     Ok(promise) => self.resolve_promise(&target, promise),

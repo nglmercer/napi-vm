@@ -31,6 +31,7 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
         (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
         // The global aliases all denote the one global scope.
         (Value::GlobalObject, Value::GlobalObject) => true,
+        (Value::RealmGlobal(a), Value::RealmGlobal(b)) => Rc::ptr_eq(a, b),
         (Value::Object { props: x }, Value::Object { props: y }) => Rc::ptr_eq(x, y),
         (Value::Proxy(x), Value::Proxy(y)) => Rc::ptr_eq(x, y),
         (Value::Array(x), Value::Array(y)) => Rc::ptr_eq(x, y),
@@ -452,7 +453,16 @@ impl Interpreter {
         }
     }
 
-    pub fn un_op(&self, op: UnOp, v: &Value) -> Result<Value, VmErr> {
+    pub fn un_op(&mut self, op: UnOp, v: &Value) -> Result<Value, VmErr> {
+        let primitive = if matches!(
+            op,
+            UnOp::Neg | UnOp::Pos | UnOp::BitNot | UnOp::Inc | UnOp::Dec
+        ) {
+            Some(self.coerce_object_to_primitive(v, "number")?)
+        } else {
+            None
+        };
+        let v = primitive.as_ref().unwrap_or(v);
         // `-`, `~`, `++` and `--` stay in the BigInt domain; `+` on a BigInt
         // is a TypeError, since it would have to narrow to a Number.
         if let Some(value) = v.as_bigint() {
@@ -480,9 +490,9 @@ impl Interpreter {
         }
         Ok(match op {
             UnOp::Not => Value::Bool(!self.truthy(v)),
-            UnOp::Neg => Value::Number(-self.tn(v)),
-            UnOp::Pos => Value::Number(self.tn(v)),
-            UnOp::BitNot => Value::Number(!to_int32(self.tn(v)) as f64),
+            UnOp::Neg => Value::Number(-self.ecmascript_to_number(v)?),
+            UnOp::Pos => Value::Number(self.ecmascript_to_number(v)?),
+            UnOp::BitNot => Value::Number(!to_int32(self.ecmascript_to_number(v)?) as f64),
             UnOp::Typeof if super::call::callable_slot(v, super::call::CALL_SLOT).is_some() => {
                 Value::String(("function".to_string()).into())
             }
@@ -499,6 +509,7 @@ impl Interpreter {
                     Value::Object { .. }
                     | Value::Array(_)
                     | Value::GlobalObject
+                    | Value::RealmGlobal(_)
                     | Value::StringIterator { .. } => "object",
                     Value::Function(_)
                     | Value::NativeFunction { .. }
@@ -553,7 +564,25 @@ impl Interpreter {
                 .filter(|index| i.has_index(*index))
                 .map(|x| x.to_string())
                 .collect(),
-            Value::GlobalObject => self.global_keys(),
+            Value::RealmGlobal(global) => global
+                .borrow()
+                .global_property_keys()
+                .into_iter()
+                .filter(|key| {
+                    global
+                        .borrow()
+                        .global_property(key)
+                        .is_some_and(|(_, attrs)| attrs.enumerable)
+                })
+                .collect(),
+            Value::GlobalObject => self
+                .global_keys()
+                .into_iter()
+                .filter(|key| {
+                    self.global_property(key)
+                        .is_some_and(|(_, attrs)| attrs.enumerable)
+                })
+                .collect(),
             _ => vec![],
         }
     }
@@ -576,6 +605,7 @@ impl Interpreter {
         match (a, b) {
             (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => true,
             (Value::GlobalObject, Value::GlobalObject) => true,
+            (Value::RealmGlobal(a), Value::RealmGlobal(b)) => Rc::ptr_eq(a, b),
             (Value::Number(a), Value::String(b)) => {
                 if let Ok(parsed) = b.parse::<f64>() {
                     *a == parsed
@@ -681,9 +711,11 @@ impl Interpreter {
     ) -> Result<(), VmErr> {
         match v {
             Value::Binding(cell) => self.vs_rec(&cell.borrow(), visited, depth, output),
-            Value::RegExp(re) => {
-                output.push_str(&format!("/{}/{}", re.regex.source, re.regex.flags))
-            }
+            Value::RegExp(re) => output.push_str(&format!(
+                "/{}/{}",
+                re.regex.borrow().source,
+                re.regex.borrow().flags
+            )),
             Value::BigInt(value) => output.push_str(&value.to_decimal()),
             // A typed array stringifies as its elements, like an array.
             Value::TypedArray(view) => {
@@ -713,7 +745,7 @@ impl Interpreter {
                 Some(rendered) => output.push_str(&rendered),
                 None => output.push_str("[object Object]"),
             },
-            Value::GlobalObject => output.push_str("[object global]"),
+            Value::GlobalObject | Value::RealmGlobal(_) => output.push_str("[object global]"),
             Value::Array(i) => {
                 if depth >= Self::MAX_PRINT_DEPTH {
                     return output.push_str("...");

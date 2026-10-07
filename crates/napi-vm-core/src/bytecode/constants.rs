@@ -103,6 +103,7 @@ pub enum ClassMemberKind {
 /// placeholders the deferred pass overwrites once each method compiles.
 #[derive(Debug, Clone)]
 pub struct ClassTemplate {
+    pub private_fields: Vec<String>,
     pub name: String,
     /// A class *expression's* own name, bound in a child scope around the
     /// definition (declarations bind in the enclosing scope instead).

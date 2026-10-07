@@ -306,7 +306,13 @@ impl Marker {
     }
 
     fn mark_value(&mut self, value: &Value) {
+        if let Some(properties) = value.exotic_properties()
+            && self.marked.insert(id_of(&properties))
+        {
+            self.work.push(MarkItem::Object(properties));
+        }
         match value {
+            Value::RealmGlobal(global) => self.mark_env(global),
             Value::HostPending { id } => {
                 self.host_calls.insert(*id);
             }
@@ -342,7 +348,7 @@ impl Marker {
             }
             Value::TypedArray(view) | Value::DataView(view) => {
                 self.marked.insert(id_of(view));
-                self.marked.insert(view.buffer.identity());
+                self.mark_value(&view.buffer.to_value());
             }
             _ => {
                 if let Some(id) = value.weak_identity() {
@@ -465,6 +471,17 @@ impl Marker {
                         self.borrowed = true;
                         continue;
                     };
+                    if let Some(modules) = &borrowed.module_realm {
+                        match modules.roots() {
+                            Ok(roots) => {
+                                self.mark_modules(&roots.modules);
+                                for value in roots.values {
+                                    self.mark_value(&value);
+                                }
+                            }
+                            Err(()) => self.borrowed = true,
+                        }
+                    }
                     for child in borrowed.trace_values() {
                         self.mark_value(&child);
                     }
@@ -539,9 +556,14 @@ impl Marker {
                 MarkItem::AsyncTask(inner) => {
                     // The result promise is tracked in its own right; the
                     // coroutine stack is opaque, hence the suspend barrier.
-                    self.opaque |= inner
-                        .try_borrow()
-                        .map_or(true, |task| task.suspends_values());
+                    if let Ok(task) = inner.try_borrow() {
+                        self.opaque |= task.suspends_values();
+                        if let Some(owner) = task.owner() {
+                            self.mark_env(&owner);
+                        }
+                    } else {
+                        self.opaque = true;
+                    }
                 }
             }
         }

@@ -230,8 +230,8 @@ fn to_napi_d(
                 // No `napi_create_regexp` exists, so the pattern crosses as a
                 // plain object the host can feed to its own `RegExp`.
                 chk(sys::napi_create_object(env, &mut out))?;
-                set_str_prop(env, out, "source", &re.regex.source)?;
-                set_str_prop(env, out, "flags", &re.regex.flags)?;
+                set_str_prop(env, out, "source", &re.regex.borrow().source)?;
+                set_str_prop(env, out, "flags", &re.regex.borrow().flags)?;
             }
             Value::ArrayBuffer(bytes) => {
                 out = make_array_buffer(env, &bytes.borrow())?;
@@ -567,6 +567,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
         let bytes = std::slice::from_raw_parts(data as *const u8, byte_length).to_vec();
         Ok(Value::TypedArray(std::rc::Rc::new(
             crate::value::TypedArrayData {
+                properties: Value::instance_properties(),
                 kind,
                 buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
@@ -661,7 +662,7 @@ fn from_napi_d(
                 if is_date {
                     let mut ms = 0.0;
                     chk(sys::napi_get_date_value(env, raw, &mut ms))?;
-                    return Ok(Value::Date(std::rc::Rc::new(std::cell::Cell::new(ms))));
+                    return Ok(Value::date(ms));
                 }
 
                 let mut is_buffer = false;

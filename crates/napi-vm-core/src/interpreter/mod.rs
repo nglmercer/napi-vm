@@ -6,6 +6,8 @@ mod env;
 mod eval;
 pub mod jobs;
 mod module_link;
+mod module_realm;
+use module_realm::ModuleRealm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_addon;
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,6 +21,7 @@ pub use scheduler::{
     CancellationToken, Clock, ClockMode, EventLoopOptions, Fairness, RealTimeClock, TurnBudget,
     TurnOutcome, VirtualClock, YieldReason,
 };
+pub(crate) mod realm;
 mod resolve;
 #[cfg(all(
     feature = "node-api-host",
@@ -123,6 +126,7 @@ impl Realm {
         interp.module_loader = self.module_loader;
         interp.commonjs_cache = self.commonjs_cache;
         interp.commonjs_entry = self.commonjs_entry;
+        interp.publish_module_realm();
         interp.republish_roots();
     }
 }
@@ -139,7 +143,7 @@ use std::rc::Rc;
 
 use crate::error::{StackFrame, VmErr};
 use crate::host::HostBridge;
-use crate::parser::{Statement, VarKind, collect_var_names, pattern_names};
+use crate::parser::{Expr, Statement, VarKind, collect_var_names, pattern_names};
 use crate::span::Span;
 use crate::value::Value;
 
@@ -266,6 +270,7 @@ pub struct Interpreter {
     /// inherits the original `new.target` when it calls a host constructor
     /// through `super()`.
     pub(crate) new_target_stack: Vec<Value>,
+    pub(crate) pending_new_target: Option<Value>,
     /// The source code for the current module/script, used to extract
     /// source lines for error context. Stored as lines for efficient lookup.
     source_lines: SourceContext,
@@ -353,7 +358,10 @@ pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
 pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
-        Statement::FnDecl { .. } | Statement::ClassDecl { .. } => true,
+        Statement::ParameterInitialization { .. }
+        | Statement::ClassInitialization { .. }
+        | Statement::FnDecl { .. }
+        | Statement::ClassDecl { .. } => true,
         Statement::Declarations(inner) => block_needs_lexical_scope(inner),
         _ => false,
     })
@@ -381,7 +389,10 @@ pub(crate) fn body_needs_hoisting(body: &[Statement]) -> bool {
 fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
-        Statement::FnDecl { .. } | Statement::ClassDecl { .. } => true,
+        Statement::ParameterInitialization { .. }
+        | Statement::ClassInitialization { .. }
+        | Statement::FnDecl { .. }
+        | Statement::ClassDecl { .. } => true,
         Statement::Declarations(inner) => body_needs_lexical_hoist(inner),
         _ => false,
     })
@@ -430,6 +441,7 @@ impl Interpreter {
             this_binding_key: None,
             anonymous_frame_name: None,
             new_target_stack: Vec::new(),
+            pending_new_target: None,
             source_lines: SourceContext::default(),
             prepared_cache: PreparedCache::default(),
             collection_threshold: 4096,
@@ -449,6 +461,7 @@ impl Interpreter {
             activation_pool: Vec::new(),
             jit_backend: None,
         };
+        interp.publish_module_realm();
         interp.gc_id =
             crate::heap::register_interp(interp.gc_roots(), interp.guest_execution_depth.clone());
         interp
@@ -459,12 +472,15 @@ impl Interpreter {
     /// frame, so hot-path variable lookups hit immediately instead of scanning
     /// the large builtins table; builtins still resolve via the parent chain.
     pub fn with_builtins() -> Self {
+        let _allocation_realm = realm::AllocationRealm::enter(None);
         let mut interp = Self::new();
         let builtins = Rc::new(RefCell::new(Environment::new()));
         crate::builtins::setup_builtins(&builtins);
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
+        interp.publish_module_realm();
+        realm::own_intrinsics(&interp.persistent_global);
         interp.republish_roots();
         #[cfg(all(test, feature = "node-api-host"))]
         crate::test_support::install_buffer(&mut interp.global.borrow_mut());
@@ -479,6 +495,7 @@ impl Interpreter {
     /// Install a host-selected loader; no ambient file or network loader exists.
     pub fn set_module_loader(&mut self, loader: Rc<dyn crate::ModuleLoader>) {
         self.module_loader = Some(loader);
+        self.publish_module_realm();
     }
 
     pub fn load_module(&mut self, specifier: &str) -> Result<String, VmErr> {
@@ -562,6 +579,7 @@ impl Interpreter {
         let require = commonjs::make_require(self, None)?;
         self.set_global_checked("require", require)?;
         self.commonjs_loader = Some(loader);
+        self.publish_module_realm();
         self.commonjs_cache.borrow_mut().clear();
         self.define_module(
             "node:module",
@@ -707,6 +725,7 @@ export default { createRequire, isBuiltin, builtinModules };
     /// Module-local `require()` calls retain their own filename automatically.
     pub fn set_commonjs_entry(&mut self, filename: impl Into<String>) {
         self.commonjs_entry = Some(filename.into());
+        self.publish_module_realm();
     }
 
     /// Remove all cached CommonJS modules. A subsequent `require()` reloads
@@ -733,18 +752,45 @@ export default { createRequire, isBuiltin, builtinModules };
         Self::compile_statements(source, statements)
     }
 
+    /// Compile with an explicit ECMAScript grammar goal.
+    pub fn compile_with_goal(
+        source: &str,
+        goal: crate::parser::ParseGoal,
+    ) -> Result<PreparedProgram, VmErr> {
+        let statements = crate::parser::parse_cached_with_goal(source, goal)
+            .map_err(|error| error.into_vm_err())?;
+        let mut program = Self::compile_statements(source, statements)?;
+        if goal == crate::parser::ParseGoal::Module {
+            program.kind = SourceKind::Module;
+        }
+        Ok(program)
+    }
+
     /// Compile JavaScript source supplied as UTF-16, without replacing lone
     /// surrogates inside literals. Valid UTF-8 retains the shared parse cache.
     pub fn compile_utf16(source: &crate::JsString) -> Result<PreparedProgram, VmErr> {
+        Self::compile_utf16_with_goal(source, crate::parser::ParseGoal::Auto)
+    }
+
+    /// Compile UTF-16 source with an explicit grammar goal.
+    pub fn compile_utf16_with_goal(
+        source: &crate::JsString,
+        goal: crate::parser::ParseGoal,
+    ) -> Result<PreparedProgram, VmErr> {
         if let Ok(text) = source.to_utf8() {
-            return Self::compile(&text);
+            return Self::compile_with_goal(&text, goal);
         }
         let mut lexer = crate::Lexer::from_js_string(source);
         let mut parser = crate::Parser::new_with_spans(lexer.tokenize_with_spans());
         let statements = parser
-            .parse_program()
+            .parse_program_with_goal(goal)
             .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
-        Self::compile_statements(source.as_str(), std::sync::Arc::new(statements))
+        let mut program =
+            Self::compile_statements(source.as_str(), std::sync::Arc::new(statements))?;
+        if goal == crate::parser::ParseGoal::Module {
+            program.kind = SourceKind::Module;
+        }
+        Ok(program)
     }
 
     fn compile_statements(
@@ -863,7 +909,14 @@ export default { createRequire, isBuiltin, builtinModules };
         if let Some(program) = self.prepared_cache.get(source, kind) {
             return Ok(program);
         }
-        let mut program = Self::compile(source)?;
+        let mut program = Self::compile_with_goal(
+            source,
+            if kind == SourceKind::Module {
+                crate::parser::ParseGoal::Module
+            } else {
+                crate::parser::ParseGoal::Auto
+            },
+        )?;
         program.kind = kind;
         self.prepared_cache.insert(program.clone());
         Ok(program)
@@ -935,7 +988,12 @@ export default { createRequire, isBuiltin, builtinModules };
     pub fn gc_roots(&self) -> crate::heap::GcRoots {
         let mut roots = crate::heap::GcRoots {
             envs: vec![self.global.clone(), self.persistent_global.clone()],
-            values: self.new_target_stack.clone(),
+            values: self
+                .new_target_stack
+                .iter()
+                .cloned()
+                .chain(self.pending_new_target.iter().cloned())
+                .collect(),
             jobs: vec![self.jobs.clone()],
             modules: vec![self.modules.clone()],
         };
@@ -970,12 +1028,17 @@ export default { createRequire, isBuiltin, builtinModules };
         &mut self,
         module: &crate::bytecode::BytecodeModule,
     ) -> Result<Value, VmErr> {
+        let _allocation_realm = realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
+        let scope = self.global.clone();
+        let strict = scope.borrow().strict() || module.main.strict || self.cur_mod.is_some();
+        let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
         let result = {
             let _execution_guard = GuestExecutionGuard(depth.clone());
             crate::bytecode::vm::run_module(self, module)
         };
+        scope.borrow_mut().replace_strict(saved_strict);
         if depth.get() == 0 {
             self.republish_roots();
         }
@@ -1370,10 +1433,18 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let is_persistent_global = Rc::ptr_eq(scope, &self.persistent_global);
         let mut env = scope.borrow_mut();
         match env.assign(name, value.clone()) {
             AssignOutcome::Assigned => Ok(()),
+            AssignOutcome::ReadOnly => {
+                if env.strict() {
+                    Err(VmErr::Msg(format!(
+                        "TypeError: Cannot assign to read-only property {name}"
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
             AssignOutcome::Const => Err(VmErr::Msg(format!(
                 "TypeError: Assignment to constant variable '{name}'"
             ))),
@@ -1383,14 +1454,12 @@ impl Interpreter {
             // No such binding: an assignment to an undeclared name creates an
             // implicit `var`-like global, as sloppy-mode JavaScript does.
             AssignOutcome::Missing => {
-                if self.cur_mod.is_some() {
+                let strict = self.cur_mod.is_some() || env.strict();
+                drop(env);
+                if strict && !self.inherited_global_has(name) {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
                 }
-                if is_persistent_global {
-                    env.try_set(name, value)?;
-                } else {
-                    env.set(name, value);
-                }
+                self.persistent_global.borrow_mut().try_set(name, value)?;
                 Ok(())
             }
         }
@@ -1401,12 +1470,26 @@ impl Interpreter {
     /// is currently executing inside a function/catch environment.
     #[doc(hidden)]
     pub fn set_global_checked(&mut self, name: &str, value: Value) -> Result<(), VmErr> {
+        let strict = self.global.borrow().strict();
         let mut global = self.persistent_global.borrow_mut();
         // An explicit write through the global object creates or updates an
         // own user-global binding. Do not use `assign` here: it walks into the
         // trusted builtins parent and would mutate (for example) builtin
         // `Math` instead of creating a user shadow.
+        let attributes = global.global_property(name).map(|(_, attrs)| attrs);
+        if attributes.is_some_and(|attrs| !attrs.writable) {
+            return if strict {
+                Err(VmErr::Msg(format!(
+                    "TypeError: Cannot assign to read-only property {name}"
+                )))
+            } else {
+                Ok(())
+            };
+        }
         global.try_set(name, value)?;
+        if let Some(attrs) = attributes {
+            global.set_property_attributes(name, attrs);
+        }
         Ok(())
     }
 
@@ -1464,6 +1547,262 @@ impl Interpreter {
         result
     }
 
+    pub(crate) fn prepare_parameter_body(
+        &mut self,
+        params: &[String],
+        initializers: &[Statement],
+        body: &[Statement],
+    ) -> Result<Env, VmErr> {
+        let function_scope = self.global.clone();
+        let parameter_scope = Rc::new(RefCell::new(Environment::parameter_child(
+            function_scope.clone(),
+        )));
+        for name in params {
+            let name = name.trim_start_matches("...");
+            if let Some(value) = function_scope.borrow().own_binding(name) {
+                parameter_scope
+                    .borrow_mut()
+                    .declare(name, value, BindKind::Var, true);
+            }
+        }
+        if let Some(arguments) = function_scope.borrow().own_binding("arguments") {
+            parameter_scope
+                .borrow_mut()
+                .declare("arguments", arguments, BindKind::Var, true);
+        }
+        self.global = parameter_scope;
+        let result = self.initialize_parameter_body(params, initializers, body);
+        self.global = function_scope;
+        result
+    }
+
+    fn initialize_parameter_body(
+        &mut self,
+        params: &[String],
+        initializers: &[Statement],
+        body: &[Statement],
+    ) -> Result<Env, VmErr> {
+        use crate::parser::{AssignOp, Expr};
+        let depth = self.guest_execution_depth.clone();
+        depth.set(depth.get().saturating_add(1));
+        let _execution_guard = GuestExecutionGuard(depth);
+        let parameter_scope = self.global.clone();
+        let arguments: Vec<_> = params
+            .iter()
+            .map(|name| {
+                let name = name.trim_start_matches("...");
+                parameter_scope
+                    .borrow()
+                    .own_binding(name)
+                    .unwrap_or(Value::Undefined)
+            })
+            .collect();
+        // Every parameter starts in its TDZ, including destructured names.
+        for name in params {
+            self.declare_binding(
+                name.trim_start_matches("..."),
+                Value::Undefined,
+                BindKind::Var,
+                false,
+            )?;
+        }
+        for initializer in initializers {
+            if let Statement::VarDecl {
+                destructuring: Some(pattern),
+                ..
+            } = initializer
+            {
+                for name in pattern_names(pattern) {
+                    self.declare_binding(&name, Value::Undefined, BindKind::Var, false)?;
+                }
+            }
+        }
+        for (parameter, mut value) in params.iter().zip(arguments) {
+            let name = parameter.trim_start_matches("...");
+            for initializer in initializers {
+                if let Statement::If { then, .. } = initializer
+                    && let Some(Statement::Expr(Expr::Assignment {
+                        target,
+                        op: AssignOp::Assign,
+                        value: default,
+                    })) = then.first()
+                    && matches!(target.as_ref(), Expr::Identifier(target) if target == name)
+                    && matches!(value, Value::Undefined)
+                {
+                    value = self.eval_expr(default)?;
+                }
+            }
+            self.declare_binding(name, value, BindKind::Var, true)?;
+            for initializer in initializers {
+                if let Statement::VarDecl {
+                    init: Some(init),
+                    destructuring: Some(pattern),
+                    ..
+                } = initializer
+                    && matches!(init.as_ref(), Expr::Identifier(slot) if slot == name)
+                {
+                    let value = parameter_scope
+                        .borrow()
+                        .get(name)
+                        .unwrap_or(Value::Undefined);
+                    self.destructure(pattern, &value)?;
+                }
+            }
+        }
+        // Body var bindings copy parameter values instead of changing cells
+        // captured by closures created by parameter defaults.
+        let body_scope = Rc::new(RefCell::new(Environment::function_child(
+            parameter_scope.clone(),
+        )));
+        let mut names = Vec::new();
+        collect_var_names(body, &mut names);
+        for name in names {
+            if let Some(value) = parameter_scope.borrow().own_binding(&name) {
+                body_scope
+                    .borrow_mut()
+                    .declare(&name, value.deref_binding(), BindKind::Var, true);
+            }
+        }
+        Ok(body_scope)
+    }
+
+    fn run_parameterized_body(
+        &mut self,
+        params: &[String],
+        initializers: &[Statement],
+        fields: &[Statement],
+        body: &[Statement],
+    ) -> Result<Value, VmErr> {
+        if !fields.is_empty() {
+            let function_scope = self.global.clone();
+            let defining = function_scope
+                .borrow()
+                .parent_env()
+                .unwrap_or_else(|| self.persistent_global.clone());
+            let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
+            field_scope.borrow_mut().set(
+                "this",
+                function_scope
+                    .borrow()
+                    .get("this")
+                    .unwrap_or(Value::Undefined),
+            );
+            field_scope.borrow_mut().replace_strict(Some(true));
+            field_scope.borrow_mut().set_new_target(Value::Undefined);
+            self.global = field_scope;
+            let result = self.run_program_body(fields);
+            self.global = function_scope;
+            result?;
+        }
+        let parameter_scope = self.global.clone();
+        let body_scope = self.prepare_parameter_body(params, initializers, body)?;
+        self.global = body_scope;
+        let result = self.run_program_body(body);
+        self.global = parameter_scope;
+        result
+    }
+
+    pub(crate) fn resolve_this(&self, scope: &Env) -> Result<Value, VmErr> {
+        match scope.borrow().lookup("this") {
+            env::Lookup::Value(value) => Ok(value),
+            env::Lookup::Uninitialized => Err(VmErr::Msg(
+                "ReferenceError: this is uninitialized before super()".into(),
+            )),
+            env::Lookup::Missing => Ok(if self.cur_mod.is_some() {
+                Value::Undefined
+            } else {
+                self.realm_global_object()
+            }),
+        }
+    }
+
+    pub(crate) fn get_private_member(
+        &mut self,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        let id = self.global.borrow().private_name(name);
+        if let Some(id) = id {
+            return receiver.private_field(id);
+        }
+        // Private methods/accessors still use their legacy class slots.
+        if !self.has_property(receiver, &Value::String(name.into()))? {
+            return Err(VmErr::Msg(
+                "TypeError: receiver does not contain the private member".into(),
+            ));
+        }
+        self.get_prop_value_str(receiver, name)
+    }
+
+    pub(crate) fn set_private_member(
+        &mut self,
+        receiver: &Value,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        if let Some(id) = self.global.borrow().private_name(name) {
+            return receiver.set_private_field(id, value);
+        }
+        self.assign_member_str(receiver, name, value)
+    }
+
+    /// Initialize fields in their defining lexical scope. DefineField creates
+    /// own data properties and must not invoke an inherited setter.
+    pub(crate) fn initialize_instance_fields(
+        &mut self,
+        constructor_scope: &Env,
+    ) -> Result<(), VmErr> {
+        let (fields, defining) = {
+            let scope = constructor_scope.borrow();
+            (
+                scope.constructor_fields(),
+                scope
+                    .parent_env()
+                    .unwrap_or_else(|| self.persistent_global.clone()),
+            )
+        };
+        if fields.is_empty() {
+            return Ok(());
+        }
+        let receiver = self.resolve_this(constructor_scope)?;
+        let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
+        field_scope.borrow_mut().set("this", receiver.clone());
+        field_scope.borrow_mut().replace_strict(Some(true));
+        field_scope.borrow_mut().set_new_target(Value::Undefined);
+        let saved = std::mem::replace(&mut self.global, field_scope);
+        let result = (|| {
+            for field in fields.iter() {
+                self.execution.check()?;
+                let Statement::Expr(Expr::Assignment { target, value, .. }) = field else {
+                    return Err(VmErr::Msg("Invalid instance field initializer".into()));
+                };
+                let Expr::Member {
+                    property, computed, ..
+                } = target.as_ref()
+                else {
+                    return Err(VmErr::Msg("Invalid instance field target".into()));
+                };
+                let name = self.eval_expr(property)?;
+                let key = self.property_key(&name)?;
+                let value = self.eval_expr(value)?;
+                if !computed && let Some(id) = self.global.borrow().private_name(&key) {
+                    receiver.initialize_private_field(id, value)?;
+                    continue;
+                }
+                let descriptor = Value::object(vec![
+                    ("value".into(), value),
+                    ("writable".into(), Value::Bool(true)),
+                    ("enumerable".into(), Value::Bool(true)),
+                    ("configurable".into(), Value::Bool(true)),
+                ]);
+                crate::builtins::object::define_property(&receiver, &key, &descriptor)?;
+            }
+            Ok(())
+        })();
+        self.global = saved;
+        result
+    }
+
     /// Execute a statement list as a block *in the current scope*, hoisting
     /// its lexical declarations but not creating a new frame.
     ///
@@ -1480,6 +1819,30 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
+        if let Some(Statement::ClassInitialization { derived, fields }) = stmts.first() {
+            let depth = self.guest_execution_depth.clone();
+            depth.set(depth.get().saturating_add(1));
+            let _execution_guard = GuestExecutionGuard(depth);
+            let scope = self.global.clone();
+            scope.borrow_mut().enter_constructor(*derived, fields);
+            if !derived {
+                self.initialize_instance_fields(&scope)?;
+            }
+            return self.run_program_body(&stmts[1..]);
+        }
+        if let Some(Statement::ParameterInitialization {
+            params,
+            initializers,
+            fields,
+        }) = stmts.first()
+        {
+            return self.run_parameterized_body(params, initializers, fields, &stmts[1..]);
+        }
+        let _allocation_realm = realm::AllocationRealm::enter(Some(self.persistent_global.clone()));
+        let scope = self.global.clone();
+        let strict =
+            scope.borrow().strict() || crate::parser::use_strict(stmts) || self.cur_mod.is_some();
+        let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
         let result = {
@@ -1488,6 +1851,7 @@ impl Interpreter {
                 .and_then(|()| self.hoist_lexical(stmts))
                 .and_then(|()| self.run(stmts))
         };
+        scope.borrow_mut().replace_strict(saved_strict);
         if depth.get() == 0 {
             self.republish_roots();
         }
@@ -1628,12 +1992,24 @@ impl Interpreter {
     fn hoist_vars(&mut self, stmts: &[Statement]) -> Result<(), VmErr> {
         let mut names = Vec::new();
         collect_var_names(stmts, &mut names);
+        let variable_scope = Environment::variable_environment(&self.global);
         for name in names {
             // Only create the binding if nothing already provides it: a
             // parameter of the same name keeps its argument value, and a
             // repeated `var` must not erase an earlier assignment.
-            if !self.global.borrow().has(&name) {
-                self.declare_binding(&name, Value::Undefined, BindKind::Var, true)?;
+            let exists = {
+                let scope = variable_scope.borrow();
+                scope.own_binding(&name).is_some()
+                    || (scope.is_global_scope() && scope.global_property(&name).is_some())
+            };
+            if !exists {
+                self.declare_binding_in(
+                    &variable_scope,
+                    &name,
+                    Value::Undefined,
+                    BindKind::Var,
+                    true,
+                )?;
             }
         }
         Ok(())
@@ -2093,7 +2469,11 @@ impl Interpreter {
     /// Return all global variable names (user-defined + builtins). Used by
     /// `Object.getOwnPropertyNames(window)`.
     pub fn global_keys(&self) -> Vec<String> {
-        self.persistent_global.borrow().all_keys()
+        self.persistent_global.borrow().global_property_keys()
+    }
+
+    pub(crate) fn global_property(&self, name: &str) -> Option<(Value, crate::value::PropAttrs)> {
+        self.persistent_global.borrow().global_property(name)
     }
 
     /// Enumerate a proxy through its `ownKeys` trap when one is installed.

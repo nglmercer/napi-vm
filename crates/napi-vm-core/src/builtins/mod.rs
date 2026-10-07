@@ -133,22 +133,33 @@ pub fn setup_builtins(env: &Env) {
     e.set("Infinity", Value::Number(f64::INFINITY));
     e.set("NaN", Value::Number(f64::NAN));
     e.set("undefined", Value::Undefined);
-    e.set(
-        "eval",
-        nf("eval", |interp, _, args| match args.first() {
-            Some(Value::String(source)) => {
-                let mut parser = crate::Parser::new_with_spans(
-                    crate::Lexer::from_js_string(source).tokenize_with_spans(),
-                );
-                let body = parser
-                    .parse_program()
-                    .map_err(|e| VmErr::Msg(format!("SyntaxError: {}", e.message)))?;
-                interp.run_program_body(&body)
-            }
-            Some(value) => Ok(value.clone()),
-            None => Ok(Value::Undefined),
-        }),
-    );
+    e.set("eval", nf("eval", eval_indirect));
+    for name in e.own_keys() {
+        if let Some(Value::NativeFunction { callable, .. }) = e.get(&name) {
+            let length = if name == "parseInt" { 2 } else { 1 };
+            let prototype = e
+                .get("Function")
+                .and_then(|function| function.get_prop("prototype"));
+            e.set(&name, native_method(&name, length, callable, prototype));
+        }
+        let immutable = matches!(name.as_str(), "Infinity" | "NaN" | "undefined");
+        e.set_property_attributes(
+            &name,
+            PropAttrs {
+                writable: !immutable,
+                enumerable: false,
+                configurable: !immutable,
+            },
+        );
+    }
+    if let Some(number) = e.get("Number") {
+        for name in ["parseInt", "parseFloat"] {
+            number
+                .set_prop(name.into(), e.get(name).expect("global numeric parser"))
+                .expect("Number numeric parser alias");
+        }
+    }
+    e.snapshot_intrinsics();
 }
 
 /// Overwrite the placeholder members above with real native implementations.
@@ -285,6 +296,7 @@ fn native_method(name: &str, length: usize, callable: NativeFn, prototype: Optio
         );
     }
     Value::Function(std::rc::Rc::new(crate::value::FunctionData {
+        strict: false,
         native: Some(callable),
         identity: std::rc::Rc::new(0),
         name: Some(name.into()),
@@ -361,6 +373,115 @@ fn join_str(interp: &Interpreter, v: &Value) -> Result<crate::JsString, VmErr> {
 }
 
 // --- Global functions -------------------------------------------------------
+
+pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {
+    let intrinsic = match value {
+        Value::NativeFunction { callable, .. } => {
+            std::ptr::fn_addr_eq(*callable, eval_indirect as NativeFn)
+        }
+        Value::Function(function) => function
+            .native
+            .is_some_and(|callable| std::ptr::fn_addr_eq(callable, eval_indirect as NativeFn)),
+        _ => false,
+    };
+    intrinsic
+        && crate::interpreter::realm::value_realm(value)
+            .is_none_or(|owner| std::rc::Rc::ptr_eq(&owner, global))
+}
+
+pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<Value, VmErr> {
+    match args.first() {
+        Some(Value::String(source)) => {
+            let mut parser = crate::Parser::new_with_spans(
+                crate::Lexer::from_js_string(source).tokenize_with_spans(),
+            );
+            let body = parser
+                .parse_eval_context(
+                    interp.global.borrow().new_target().is_some(),
+                    interp.global.borrow().strict(),
+                )
+                .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
+            let strict = interp.global.borrow().strict() || crate::parser::use_strict(&body);
+            let saved = interp.global.clone();
+            // EvalDeclarationInstantiation validates global function names
+            // before creating *any* bindings. A failed declaration must not
+            // leave earlier functions or variables behind.
+            let variable_scope = crate::interpreter::Environment::variable_environment(&saved);
+            if !strict {
+                let mut names = Vec::new();
+                crate::parser::collect_var_names(&body, &mut names);
+                let mut scope = saved.clone();
+                loop {
+                    if names
+                        .iter()
+                        .any(|name| scope.borrow().has_lexical_binding(name))
+                    {
+                        return Err(VmErr::Msg(
+                            "SyntaxError: Eval variable conflicts with a lexical binding".into(),
+                        ));
+                    }
+                    if std::rc::Rc::ptr_eq(&scope, &variable_scope) {
+                        break;
+                    }
+                    let parent = scope.borrow().parent_env();
+                    match parent {
+                        Some(parent) => scope = parent,
+                        None => break,
+                    }
+                }
+            }
+            if !strict && std::rc::Rc::ptr_eq(&variable_scope, &interp.persistent_global) {
+                fn validate(
+                    body: &[crate::parser::Statement],
+                    scope: &crate::interpreter::Env,
+                ) -> Result<(), VmErr> {
+                    for statement in body {
+                        match statement {
+                            crate::parser::Statement::FnDecl { name, .. } => {
+                                if let Some((_, attributes)) = scope.borrow().global_property(name)
+                                    && !attributes.configurable
+                                    && !(attributes.writable && attributes.enumerable)
+                                {
+                                    return Err(VmErr::Msg(format!(
+                                        "TypeError: Cannot declare global function {name}"
+                                    )));
+                                }
+                            }
+                            crate::parser::Statement::Declarations(inner) => {
+                                validate(inner, scope)?
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(())
+                }
+                validate(&body, &variable_scope)?;
+            }
+            interp.global = std::rc::Rc::new(std::cell::RefCell::new(
+                crate::interpreter::Environment::child(saved.clone()),
+            ));
+            interp.global.borrow_mut().mark_eval_scope(strict);
+            interp.global.borrow_mut().replace_strict(Some(strict));
+            let result = interp.run_program_body(&body);
+            interp.global = saved;
+            result
+        }
+        Some(value) => Ok(value.clone()),
+        None => Ok(Value::Undefined),
+    }
+}
+
+fn eval_indirect(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let saved_global = std::mem::replace(&mut interp.global, interp.persistent_global.clone());
+    let saved_module = interp.cur_mod.take();
+    let scope = interp.global.clone();
+    let saved_strict = scope.borrow_mut().replace_strict(Some(false));
+    let result = eval_direct(interp, args);
+    scope.borrow_mut().replace_strict(saved_strict);
+    interp.global = saved_global;
+    interp.cur_mod = saved_module;
+    result
+}
 
 fn global_is_nan(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let n = a.first().map(|v| v.to_number()).unwrap_or(f64::NAN);

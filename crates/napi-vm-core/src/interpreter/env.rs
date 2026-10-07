@@ -90,6 +90,8 @@ pub enum Lookup {
 #[derive(PartialEq, Eq, Debug)]
 pub enum AssignOutcome {
     Assigned,
+    /// A non-writable global data property.
+    ReadOnly,
     /// No binding of this name; the caller decides whether to create one.
     Missing,
     /// Assignment to a `const`.
@@ -216,6 +218,19 @@ pub struct Environment {
     /// function/catch frames and the trusted builtins frame leave this unset.
     global_limit: Option<usize>,
     module_context: Option<String>,
+    pub(crate) module_realm: Option<super::ModuleRealm>,
+    new_target: Option<Value>,
+    /// None outside a constructor; Some(None) is an uninitialized derived this.
+    constructor_this: Option<Option<Value>>,
+    constructor_fields: Option<Rc<Vec<crate::parser::Statement>>>,
+    private_names: HashMap<String, u64>,
+    strict: Option<bool>,
+    isolated_realm: bool,
+    variable_scope: bool,
+    eval_scope: bool,
+    parameter_scope: bool,
+    property_attributes: HashMap<String, crate::value::PropAttrs>,
+    intrinsics: HashMap<String, Value>,
 }
 
 impl std::fmt::Debug for Environment {
@@ -231,7 +246,175 @@ impl Default for Environment {
 }
 
 impl Environment {
+    pub(crate) fn declare_private_field(&mut self, name: &str) {
+        if !self.private_names.contains_key(name) {
+            let Value::Symbol(ref symbol) = crate::builtins::new_symbol(None) else {
+                unreachable!()
+            };
+            self.private_names.insert(name.into(), symbol.id);
+        }
+    }
+
+    pub(crate) fn private_name(&self, name: &str) -> Option<u64> {
+        self.private_names.get(name).copied().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.borrow().private_name(name))
+        })
+    }
+    pub(crate) fn enter_constructor(&mut self, derived: bool, fields: &[crate::parser::Statement]) {
+        self.constructor_this = Some(if derived { None } else { self.get("this") });
+        self.constructor_fields = Some(Rc::new(fields.to_vec()));
+    }
+
+    /// Arrows and lexical/eval scopes inherit constructor state. An ordinary
+    /// function's own this binding stops the search.
+    pub(crate) fn constructor_environment(scope: &Env) -> Option<Env> {
+        let mut current = scope.clone();
+        loop {
+            let parent = {
+                let env = current.borrow();
+                if env.constructor_this.is_some() {
+                    return Some(current.clone());
+                }
+                if env.own_binding("this").is_some() {
+                    return None;
+                }
+                env.parent.clone()
+            };
+            current = parent?;
+        }
+    }
+
+    pub(crate) fn bind_constructor_this(
+        &mut self,
+        value: Value,
+    ) -> Result<(), crate::error::VmErr> {
+        if !matches!(self.constructor_this, Some(None)) {
+            return Err(crate::error::VmErr::Msg(
+                "ReferenceError: super() has already initialized this".into(),
+            ));
+        }
+        self.constructor_this = Some(Some(value));
+        Ok(())
+    }
+
+    pub(crate) fn constructor_fields(&self) -> Rc<Vec<crate::parser::Statement>> {
+        self.constructor_fields.clone().unwrap_or_default()
+    }
+
+    pub(crate) fn snapshot_intrinsics(&mut self) {
+        self.intrinsics = self
+            .own_keys()
+            .into_iter()
+            .filter_map(|name| self.own_binding(&name).map(|value| (name, value)))
+            .collect();
+    }
+
+    pub(crate) fn intrinsic(&self, name: &str) -> Option<Value> {
+        self.intrinsics
+            .get(name)
+            .cloned()
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|parent| parent.borrow().intrinsic(name))
+            })
+            .or_else(|| self.get(name))
+    }
+
+    pub(crate) fn intrinsic_name(&self, value: &Value) -> Option<String> {
+        self.intrinsics
+            .iter()
+            .find_map(|(name, constructor)| {
+                super::strict_equals(constructor, value).then(|| name.clone())
+            })
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|parent| parent.borrow().intrinsic_name(value))
+            })
+    }
+
+    pub(crate) fn set_property_attributes(&mut self, name: &str, attrs: crate::value::PropAttrs) {
+        self.property_attributes.insert(name.into(), attrs);
+    }
+
+    pub(crate) fn global_property(&self, name: &str) -> Option<(Value, crate::value::PropAttrs)> {
+        if let Some(binding) = self.vars.get(name)
+            && (binding.kind == BindKind::Var || self.property_attributes.contains_key(name))
+        {
+            return Some((
+                binding.value.deref_binding(),
+                self.property_attributes
+                    .get(name)
+                    .copied()
+                    .unwrap_or_default(),
+            ));
+        }
+        self.parent
+            .as_ref()
+            .and_then(|p| p.borrow().global_property(name))
+    }
+
+    pub(crate) fn delete_global_property(&mut self, name: &str) -> bool {
+        let Some((_, attrs)) = self.global_property(name) else {
+            return true;
+        };
+        if !attrs.configurable {
+            return false;
+        }
+        if self
+            .vars
+            .get(name)
+            .is_some_and(|binding| binding.kind == BindKind::Var)
+        {
+            self.remove(name);
+        }
+        self.property_attributes.remove(name);
+        // User shadows and the builtin parent represent one global property;
+        // deleting it must not reveal an earlier value from that parent.
+        if let Some(parent) = &self.parent {
+            parent.borrow_mut().delete_global_property(name);
+        }
+        true
+    }
+
+    pub(crate) fn global_property_keys(&self) -> Vec<String> {
+        self.all_keys()
+            .into_iter()
+            .filter(|name| self.global_property(name).is_some())
+            .collect()
+    }
+
+    pub(crate) fn set_isolated_realm(&mut self) {
+        self.isolated_realm = true;
+    }
+    pub(crate) fn is_isolated_realm(&self) -> bool {
+        self.isolated_realm
+    }
+
+    pub(crate) fn strict(&self) -> bool {
+        self.strict
+            .unwrap_or_else(|| self.parent.as_ref().is_some_and(|p| p.borrow().strict()))
+    }
+
+    pub(crate) fn replace_strict(&mut self, strict: Option<bool>) -> Option<bool> {
+        std::mem::replace(&mut self.strict, strict)
+    }
+
+    pub(crate) fn set_new_target(&mut self, target: Value) {
+        self.new_target = Some(target);
+    }
+
+    pub(crate) fn new_target(&self) -> Option<Value> {
+        self.new_target
+            .clone()
+            .or_else(|| self.parent.as_ref().and_then(|p| p.borrow().new_target()))
+    }
+
     pub(crate) fn set_module_context(&mut self, name: &str) {
+        self.variable_scope = true;
         self.module_context = Some(name.into());
     }
     pub(crate) fn module_context(&self) -> Option<String> {
@@ -247,6 +430,18 @@ impl Environment {
             parent: None,
             global_limit: None,
             module_context: None,
+            module_realm: None,
+            new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
+            strict: None,
+            isolated_realm: false,
+            variable_scope: false,
+            eval_scope: false,
+            parameter_scope: false,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -256,6 +451,18 @@ impl Environment {
             parent: Some(p),
             global_limit: None,
             module_context: None,
+            module_realm: None,
+            new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
+            strict: None,
+            isolated_realm: false,
+            variable_scope: false,
+            eval_scope: false,
+            parameter_scope: false,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -268,6 +475,18 @@ impl Environment {
             parent,
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
+            module_realm: None,
+            new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
+            strict: None,
+            isolated_realm: false,
+            variable_scope: false,
+            eval_scope: false,
+            parameter_scope: false,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
         }
     }
 
@@ -292,6 +511,63 @@ impl Environment {
             parent: Some(p),
             global_limit: None,
             module_context: None,
+            module_realm: None,
+            new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
+            strict: None,
+            isolated_realm: false,
+            variable_scope: true,
+            eval_scope: false,
+            parameter_scope: false,
+            property_attributes: HashMap::new(),
+            intrinsics: HashMap::new(),
+        }
+    }
+
+    /// Function bodies own a variable environment; lexical blocks do not.
+    pub(crate) fn function_child(parent: Env) -> Self {
+        let mut frame = Self::child(parent);
+        frame.variable_scope = true;
+        frame
+    }
+
+    pub(crate) fn mark_eval_scope(&mut self, strict: bool) {
+        self.eval_scope = true;
+        self.variable_scope = strict;
+    }
+
+    pub(crate) fn is_eval_scope(&self) -> bool {
+        self.eval_scope
+    }
+
+    pub(crate) fn has_lexical_binding(&self, name: &str) -> bool {
+        self.vars
+            .get(name)
+            .is_some_and(|binding| self.parameter_scope || binding.kind != BindKind::Var)
+    }
+
+    pub(crate) fn parameter_child(parent: Env) -> Self {
+        let mut scope = Self::child(parent);
+        scope.parameter_scope = true;
+        scope
+    }
+
+    pub(crate) fn variable_environment(scope: &Env) -> Env {
+        let mut frame = scope.clone();
+        loop {
+            let next = {
+                let environment = frame.borrow();
+                if environment.variable_scope || environment.is_global_scope() {
+                    return frame.clone();
+                }
+                environment.parent.clone()
+            };
+            match next {
+                Some(parent) => frame = parent,
+                None => return frame,
+            }
         }
     }
 
@@ -310,6 +586,14 @@ impl Environment {
     /// Resolve a name through the scope chain, distinguishing an undeclared
     /// name from one in its temporal dead zone.
     pub fn lookup(&self, n: &str) -> Lookup {
+        if n == "this"
+            && let Some(value) = &self.constructor_this
+        {
+            return match value {
+                Some(value) => Lookup::Value(value.clone()),
+                None => Lookup::Uninitialized,
+            };
+        }
         if let Some(binding) = self.vars.get(n) {
             return if binding.initialized {
                 // A module import is an indirection to the exporting binding,
@@ -336,6 +620,16 @@ impl Environment {
     /// `initialized: false` puts a `let`/`const` into its temporal dead zone;
     /// the declaration statement later calls [`Environment::initialize`].
     pub fn declare(&mut self, n: &str, value: Value, kind: BindKind, initialized: bool) {
+        if self.global_limit.is_some() && kind == BindKind::Var {
+            let attrs = self.global_property(n).map(|(_, attrs)| attrs).unwrap_or(
+                crate::value::PropAttrs {
+                    writable: true,
+                    enumerable: true,
+                    configurable: false,
+                },
+            );
+            self.property_attributes.entry(n.into()).or_insert(attrs);
+        }
         let binding = Binding {
             value,
             kind,
@@ -498,6 +792,13 @@ impl Environment {
     /// instead of silently creating an implicit global.
     pub fn assign(&mut self, n: &str, v: Value) -> AssignOutcome {
         if let Some(binding) = self.vars.get_mut(n) {
+            if self
+                .property_attributes
+                .get(n)
+                .is_some_and(|attrs| !attrs.writable)
+            {
+                return AssignOutcome::ReadOnly;
+            }
             if binding.kind == BindKind::Const {
                 // A `const` in its dead zone is still a `const`: JavaScript
                 // reports the TDZ first, since the declaration has not run.
@@ -622,7 +923,11 @@ impl Environment {
     /// shared frame (shared scopes stay alive and drop themselves later).
     /// Bound values for the cycle collector's marker.
     pub(crate) fn trace_values(&self) -> Vec<Value> {
-        self.vars.values_cloned()
+        let mut values = self.vars.values_cloned();
+        values.extend(self.new_target.iter().cloned());
+        values.extend(self.constructor_this.iter().flatten().cloned());
+        values.extend(self.intrinsics.values().cloned());
+        values
     }
 
     /// Parent link for the cycle collector's marker.
@@ -635,7 +940,13 @@ impl Environment {
     #[doc(hidden)]
     pub fn clear_edges(&mut self) {
         self.vars.clear();
+        self.property_attributes.clear();
+        self.intrinsics.clear();
+        self.new_target = None;
+        self.constructor_this = None;
+        self.constructor_fields = None;
         self.parent = None;
+        self.module_realm = None;
     }
 
     pub(crate) fn drain_chain(env: Env, work: &mut Vec<Value>) {
@@ -645,6 +956,9 @@ impl Environment {
                 Ok(cell) => {
                     let mut env = cell.into_inner();
                     env.vars.drain_into(work);
+                    work.extend(env.new_target.take());
+                    work.extend(env.constructor_this.take().flatten());
+                    work.extend(env.intrinsics.drain().map(|(_, value)| value));
                     cur = env.parent.take();
                 }
                 Err(_) => break,

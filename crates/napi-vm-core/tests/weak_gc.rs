@@ -9,6 +9,50 @@ fn yes(vm: &mut Interpreter, text: &str) {
     assert!(matches!(value, Value::Bool(true)), "{text}: {value:?}");
 }
 #[test]
+fn private_field_chains_drop_without_native_recursion() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "class Node{#next;constructor(next){this.#next=next;}}var head;for(var i=0;i<10000;i++){head=new Node(head);}head=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+}
+
+#[test]
+fn private_fields_and_exotic_properties_trace_their_children() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "class Holder{#value={answer:42};read(){return this.#value;}}var holder=new Holder();var child=holder.read();child.self=child;var privateRef=new WeakRef(child);child=undefined;var buffer=new ArrayBuffer(4);buffer.child={answer:7};buffer.child.self=buffer.child;var view=new Uint8Array(buffer);var bufferRef=new WeakRef(buffer.child);buffer=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "holder.read()===privateRef.deref()&&view.buffer.child===bufferRef.deref()",
+    );
+    run(&mut vm, "holder=undefined;view=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(
+        &mut vm,
+        "privateRef.deref()===undefined&&bufferRef.deref()===undefined",
+    );
+}
+
+#[test]
+fn escaped_constructor_arrows_trace_and_release_the_bound_receiver() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "class Base{}class Child extends Base{constructor(){super();this.answer=42;this.self=this;return ()=>this;}}var get=new Child();var ref=new WeakRef(get());",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "get()===ref.deref()&&get().answer===42");
+    run(&mut vm, "get=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "ref.deref()===undefined");
+}
+
+#[test]
 fn weak_map_value_backreferences_do_not_keep_dead_keys_alive() {
     let mut vm = Interpreter::with_builtins();
     run(
@@ -183,4 +227,43 @@ fn live_module_maps_are_roots_across_interpreters_without_snapshot_updates() {
     owner.remove_module("host");
     drop(value);
     assert!(collector.collect_cycles().collected > 0);
+}
+
+#[test]
+fn cached_module_rejections_are_traced_without_permanent_pins() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "bad",
+        "var reason={answer:42};reason.self=reason;throw reason;".into(),
+    );
+    vm.define_module(
+        "bridge",
+        "export function load(){return import('bad');}".into(),
+    );
+    let mut child = vm.create_realm();
+    child.load_module("bridge").unwrap();
+    vm.set_global_checked(
+        "loadChild",
+        child.module("bridge").unwrap().exports["load"].deref_binding(),
+    )
+    .unwrap();
+    drop(child);
+    run(
+        &mut vm,
+        "var failure;loadChild().catch(reason=>{failure=reason;});",
+    );
+    run(
+        &mut vm,
+        "var reference=new WeakRef(failure);failure=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "reference.deref().answer===42;");
+    run(
+        &mut vm,
+        "var again;loadChild().catch(reason=>{again=reason;});",
+    );
+    yes(&mut vm, "again===reference.deref();");
+    run(&mut vm, "loadChild=undefined;again=undefined;");
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "reference.deref()===undefined;");
 }

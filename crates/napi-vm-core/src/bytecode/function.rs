@@ -36,6 +36,8 @@ pub struct SlotInfo {
 /// zero-parameter function whose outer scope is the global environment).
 #[derive(Debug, Clone)]
 pub struct BytecodeFunction {
+    /// Own strict directive; inherited strictness is captured at instantiation.
+    pub strict: bool,
     /// Function name for stack traces; `None` for anonymous/top-level.
     pub name: Option<String>,
     /// Instruction stream. Jump targets are indices into this vector.

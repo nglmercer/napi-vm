@@ -221,6 +221,7 @@ impl Interpreter {
 
     pub(super) fn destructure(&mut self, pat: &Pattern, val: &Value) -> Result<Value, VmErr> {
         match pat {
+            Pattern::Elision => Ok(Value::Undefined),
             Pattern::Ident(name) => {
                 // A *declaration* pre-declares its names in this scope, still
                 // in their temporal dead zone; giving one its value is an
@@ -233,10 +234,19 @@ impl Interpreter {
                 self.assign_or_set_binding(name, val.clone())?;
                 Ok(val.clone())
             }
-            Pattern::Member { object, property } => {
+            Pattern::Member {
+                object,
+                property,
+                private,
+            } => {
                 let receiver = self.eval_expr(object)?;
                 let key = self.eval_expr(property)?;
-                self.assign_member(&receiver, &key, val.clone())?;
+                if *private {
+                    let name = self.property_key(&key)?;
+                    self.set_private_member(&receiver, &name, val.clone())?;
+                } else {
+                    self.assign_member(&receiver, &key, val.clone())?;
+                }
                 Ok(val.clone())
             }
             Pattern::Array(elements) => {
@@ -270,7 +280,7 @@ impl Interpreter {
                 if let Some(rest_idx) = rest_target
                     && let Pattern::Rest(rest_pat) = &elements[rest_idx]
                 {
-                    let rest_vals = values[rest_idx..].to_vec();
+                    let rest_vals = values.get(rest_idx..).unwrap_or(&[]).to_vec();
                     let rest_val = Value::array(rest_vals);
                     self.destructure(rest_pat, &rest_val)?;
                 }
@@ -396,6 +406,20 @@ impl Interpreter {
             return self.delete_member(&target, key);
         }
         match obj {
+            Value::RealmGlobal(global) => {
+                let key = self.property_key(key)?;
+                Ok(Value::Bool(
+                    global.borrow_mut().delete_global_property(&key),
+                ))
+            }
+            Value::GlobalObject => {
+                let key = self.property_key(key)?;
+                Ok(Value::Bool(
+                    self.persistent_global
+                        .borrow_mut()
+                        .delete_global_property(&key),
+                ))
+            }
             Value::Object { props } => {
                 let slot = self.property_key(key)?;
                 if !props.meta.borrow().attrs_of(&slot).configurable
@@ -507,7 +531,12 @@ impl Interpreter {
                 }
                 Ok(Value::Bool(true))
             }
-            _ => Ok(Value::Bool(true)),
+            _ => {
+                if let Some(properties) = obj.exotic_properties() {
+                    return self.delete_member(&Value::Object { props: properties }, key);
+                }
+                Ok(Value::Bool(true))
+            }
         }
     }
 
@@ -594,11 +623,13 @@ impl Interpreter {
         if let Some((_, _, true)) = existing {
             // A getter without a setter is an accessor, not a writable data
             // property. Accessors with a setter returned above.
-            return Ok(());
+            return self.reject_property_write(key);
         }
         if let Some((index, _, _)) = existing {
             if props.meta.borrow().attrs_of(key).writable {
                 props.borrow_mut()[index].1.assign_for_execution(value);
+            } else {
+                return self.reject_property_write(key);
             }
             return Ok(());
         }
@@ -608,7 +639,7 @@ impl Interpreter {
             return Ok(());
         }
         if props.meta.borrow().non_extensible {
-            return Ok(());
+            return self.reject_property_write(key);
         }
         {
             let mut slots = props.borrow_mut();
@@ -700,7 +731,11 @@ impl Interpreter {
                 if is_getter(property)
                     || has_accessors && slots.iter().any(|(name, _)| name == &companion)
                 {
+                    self.reject_property_write(key)?;
                     return Ok(true);
+                }
+                if !attributes.writable {
+                    self.reject_property_write(key)?;
                 }
                 return Ok(!attributes.writable);
             }
@@ -716,19 +751,38 @@ impl Interpreter {
     /// Static member writes (`o.key = v`) resolve through `&str` end to end:
     /// no key `String` and no key `Value` is allocated. Typed arrays, exotic
     /// receivers, and primitives keep the general path, exactly as before.
+    fn reject_property_write(&self, key: &str) -> Result<(), VmErr> {
+        if self.global.borrow().strict() {
+            Err(VmErr::Msg(format!(
+                "TypeError: Cannot assign to property {key}"
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn assign_member_str(
         &mut self,
         obj: &Value,
         key: &str,
         val: Value,
     ) -> Result<(), VmErr> {
+        if let Value::RealmGlobal(global) = obj {
+            return self.with_global_storage(global.clone(), |vm| {
+                vm.assign_member_str(&Value::GlobalObject, key, val)
+            });
+        }
         if let Some(proxy) = obj.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "set") {
                 let prop = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&prop)?;
                 let handler = proxy.handler.clone();
-                self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
+                let accepted =
+                    self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
+                if !accepted.is_truthy() {
+                    self.reject_property_write(key)?;
+                }
                 return Ok(());
             }
             return self.assign_member_str(&target, key, val);
@@ -808,6 +862,11 @@ impl Interpreter {
         prop: &Value,
         val: Value,
     ) -> Result<(), VmErr> {
+        if let Value::RealmGlobal(global) = obj {
+            return self.with_global_storage(global.clone(), |vm| {
+                vm.assign_member(&Value::GlobalObject, prop, val)
+            });
+        }
         // A proxy's `set` trap replaces the write; without one it falls
         // through to the target.
         if let Some(proxy) = obj.as_proxy() {
@@ -815,7 +874,11 @@ impl Interpreter {
             if let Some(trap) = self.proxy_trap(&proxy, "set") {
                 let key = self.proxy_property_key(prop)?;
                 let handler = proxy.handler.clone();
-                self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
+                let accepted =
+                    self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
+                if !accepted.is_truthy() {
+                    self.reject_property_write("proxy property")?;
+                }
                 return Ok(());
             }
             return self.assign_member(&target, prop, val);
@@ -896,6 +959,18 @@ impl Interpreter {
             // Writing an element of a typed array converts and wraps it to
             // the element type; an out-of-range index is ignored, not grown.
             (Value::TypedArray(view), key) => {
+                let slot = self.property_key(key)?;
+                if slot.parse::<f64>().is_err() {
+                    let properties = view.properties.clone();
+                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    if let Value::Symbol(symbol) = key {
+                        properties
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&slot, symbol.clone());
+                    }
+                    return Ok(());
+                }
                 let index = self.tn(key);
                 if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
                     crate::builtins::write_element(view, index as usize, &val)?;
@@ -1006,7 +1081,21 @@ impl Interpreter {
                 }
                 Ok(())
             }
-            _ => Err(VmErr::Msg("Invalid assignment target".to_string())),
+            _ => {
+                if let Some(properties) = obj.exotic_properties() {
+                    let slot = self.property_key(prop)?;
+                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    if let Value::Symbol(symbol) = prop {
+                        properties
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&slot, symbol.clone());
+                    }
+                    Ok(())
+                } else {
+                    Err(VmErr::Msg("Invalid assignment target".to_string()))
+                }
+            }
         }
     }
 
@@ -1180,6 +1269,16 @@ impl Interpreter {
         if prefix { Ok(new_val) } else { Ok(cur) }
     }
 
+    fn function_this(&self, fd: &crate::value::FunctionData, value: Value) -> Value {
+        if fd.is_arrow || fd.strict {
+            return value;
+        }
+        match value {
+            Value::Null | Value::Undefined => self.realm_global_object(),
+            other => Value::boxed_primitive(other.clone()).unwrap_or(other),
+        }
+    }
+
     pub(crate) fn call_this_borrowed(
         &mut self,
         f: &Value,
@@ -1197,6 +1296,17 @@ impl Interpreter {
                     "RangeError: Maximum call stack size exceeded".into(),
                 ));
             }
+            let owner =
+                super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+            let saved_modules = self.enter_module_realm(&owner);
+            let saved_module = std::mem::replace(
+                &mut self.cur_mod,
+                fd.closure
+                    .as_ref()
+                    .and_then(|env| env.borrow().module_context()),
+            );
+            let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
+            let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
             let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
             let fname = fd.name.clone().unwrap_or_else(|| {
                 self.anonymous_frame_name
@@ -1206,9 +1316,19 @@ impl Interpreter {
             self.push_frame(fname, Span::unknown());
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
-                    crate::bytecode::vm::run_function(self, code, parent_env, this_val, args)
+                    crate::bytecode::vm::run_function(
+                        self,
+                        code,
+                        parent_env,
+                        self.function_this(fd, this_val),
+                        args,
+                        fd.strict,
+                    )
                 })
             }));
+            self.persistent_global = saved_persistent;
+            self.cur_mod = saved_module;
+            saved_modules.install(self);
             if let Err(panic) = outcome {
                 self.pop_frame();
                 std::panic::resume_unwind(panic);
@@ -1235,6 +1355,10 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+        let saved_modules = self.enter_module_realm(&owner);
+        let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
+        let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
         let module = match f {
             Value::Function(fd) if fd.native.is_none() => Some(
                 fd.closure
@@ -1248,6 +1372,8 @@ impl Interpreter {
         if let Some(saved) = saved {
             self.cur_mod = saved;
         }
+        self.persistent_global = saved_persistent;
+        saved_modules.install(self);
         result
     }
     fn call_this_in_context(
@@ -1279,9 +1405,57 @@ impl Interpreter {
                 // Calling a generator function does not run its body; it returns
                 // a generator object whose `next()` method drives execution.
                 if fd.is_generator {
+                    let receiver = self.function_this(fd, this_val);
+                    let defining = fd.closure.clone().unwrap_or_else(|| self.global.clone());
+                    let context = Rc::new(RefCell::new(Environment::function_child(defining)));
+                    context.borrow_mut().set("this", receiver);
+                    context.borrow_mut().replace_strict(Some(fd.strict));
+                    if fd.needs_arguments_object() {
+                        context
+                            .borrow_mut()
+                            .set("arguments", Value::arguments_object(&args)?);
+                    }
+                    let (body, closure, parameters_initialized) =
+                        if let Some(Statement::ParameterInitialization {
+                            params,
+                            initializers,
+                            ..
+                        }) = fd.body.first()
+                        {
+                            if self.get_stack().len() >= self.max_call_depth {
+                                return vm_err("RangeError: Maximum call stack size exceeded");
+                            }
+                            context.borrow_mut().set_new_target(Value::Undefined);
+                            for (index, parameter) in fd.params.iter().enumerate() {
+                                let value = if parameter.starts_with("...") {
+                                    Value::checked_array(args.get(index..).unwrap_or(&[]).to_vec())?
+                                } else {
+                                    args.get(index).cloned().unwrap_or(Value::Undefined)
+                                };
+                                context
+                                    .borrow_mut()
+                                    .set(parameter.trim_start_matches("..."), value);
+                            }
+                            let saved = std::mem::replace(&mut self.global, context.clone());
+                            self.push_frame(
+                                fd.name.clone().unwrap_or_else(|| Rc::from("<anonymous>")),
+                                Span::unknown(),
+                            );
+                            let result = stacker::maybe_grow(
+                                RECURSION_STACK_RED_ZONE,
+                                RECURSION_STACK_SEGMENT,
+                                || self.prepare_parameter_body(params, initializers, &fd.body[1..]),
+                            );
+                            self.pop_frame();
+                            self.global = saved;
+                            (Rc::new(fd.body[1..].to_vec()), result?, true)
+                        } else {
+                            (fd.body.clone(), context, false)
+                        };
                     let inner = GeneratorInner {
-                        body: fd.body.clone(),
-                        closure: fd.closure.clone(),
+                        parameters_initialized,
+                        body,
+                        closure: Some(crate::heap::capture_env(&closure)),
                         params: fd.params.clone(),
                         args,
                         #[cfg(stackful_coroutines)]
@@ -1313,6 +1487,8 @@ impl Interpreter {
                 if fd.bytecode.is_some() {
                     return self.call_this_borrowed(f, this_val, &args);
                 }
+                let this_val = self.function_this(fd, this_val);
+                let new_target = self.pending_new_target.take().unwrap_or(Value::Undefined);
                 let rest_idx = fd.params.iter().position(|p| p.starts_with("..."));
                 let fe = match rest_idx {
                     // Fast path (the overwhelming majority of calls): no rest
@@ -1340,7 +1516,7 @@ impl Interpreter {
                         // the body actually reads it; most functions never do.
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
-                        if fd.uses_arguments && !fd.is_arrow {
+                        if fd.needs_arguments_object() {
                             let args_obj = Value::arguments_object(args.as_slice())?;
                             vars.push((Key::from("arguments"), args_obj));
                         }
@@ -1349,7 +1525,7 @@ impl Interpreter {
                     // Slow path: rest parameters need positional fixups that
                     // are not worth special-casing into the batch builder.
                     Some(rest_idx) => {
-                        let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
+                        let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
                         if !fd.is_arrow {
                             fe.borrow_mut().set("this", this_val);
                         }
@@ -1378,13 +1554,18 @@ impl Interpreter {
                         }
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
-                        if fd.uses_arguments && !fd.is_arrow {
+                        if fd.needs_arguments_object() {
                             let args_obj = Value::arguments_object(args.as_slice())?;
                             fe.borrow_mut().set("arguments", args_obj);
                         }
                         fe
                     }
                 };
+
+                fe.borrow_mut().replace_strict(Some(fd.strict));
+                if !fd.is_arrow {
+                    fe.borrow_mut().set_new_target(new_target);
+                }
 
                 // An async body runs on its own stack so `await` can suspend
                 // it. The frame is already built, so the coroutine starts
@@ -1402,6 +1583,7 @@ impl Interpreter {
                     );
                 }
 
+                let constructor_scope = fe.clone();
                 let s = std::mem::replace(&mut self.global, fe);
                 // `name` is an `Rc<str>`: cloning it for the stack frame is a
                 // refcount bump, so the hot path allocates nothing here.
@@ -1442,6 +1624,21 @@ impl Interpreter {
                         stack: self.get_stack().to_vec(),
                     }))),
                     other => other,
+                };
+                let result = if matches!(
+                    fd.body.first(),
+                    Some(Statement::ClassInitialization { derived: true, .. })
+                ) {
+                    match result {
+                        Ok(value) if is_js_object(&value) => Ok(value),
+                        Ok(Value::Undefined) => self.resolve_this(&constructor_scope),
+                        Ok(_) => vm_err(
+                            "TypeError: derived constructor must return an object or undefined",
+                        ),
+                        error => error,
+                    }
+                } else {
+                    result
                 };
                 self.pop_frame();
                 self.global = s;
@@ -1573,21 +1770,23 @@ impl Interpreter {
         }
     }
 
-    /// Run a constructor (class or function) against an already-created `this`,
-    /// as done by `super(...)`. Returns `this`.
+    /// Construct the superclass, bind the owning derived constructor's this,
+    /// then initialize that class's fields. Arrows share the owning activation.
     pub(crate) fn invoke_ctor(
         &mut self,
         f: &Value,
-        this_val: Value,
+        _this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
-        let new_target = self
-            .new_target_stack
-            .last()
-            .cloned()
-            .unwrap_or_else(|| f.clone());
-        self.invoke_constructor_with_new_target(f, this_val.clone(), args, new_target)?;
-        Ok(this_val)
+        let scope = Environment::constructor_environment(&self.global)
+            .ok_or_else(|| VmErr::Msg("ReferenceError: super() outside a constructor".into()))?;
+        let target = scope.borrow().new_target().unwrap_or_else(|| f.clone());
+        // Construct first: a repeated super call still runs the superclass's
+        // side effects before BindThisValue rejects the second initialization.
+        let receiver = self.reflect_constructor(f, args, target)?;
+        scope.borrow_mut().bind_constructor_this(receiver.clone())?;
+        self.initialize_instance_fields(&scope)?;
+        Ok(receiver)
     }
 
     fn invoke_constructor_with_new_target(
@@ -1624,7 +1823,7 @@ impl Interpreter {
                         new_target,
                     )
                 } else {
-                    self.call_this(f, this_val, args)
+                    self.call_constructor_body(f, this_val, args, new_target)
                 }
             }
             // The built-in error types have native constructors, so
@@ -1677,7 +1876,28 @@ impl Interpreter {
         }
     }
 
+    fn call_constructor_body(
+        &mut self,
+        f: &Value,
+        this: Value,
+        args: Vec<Value>,
+        target: Value,
+    ) -> Result<Value, VmErr> {
+        let saved = self.pending_new_target.replace(target);
+        let result = self.call_this(f, this, args);
+        self.pending_new_target = saved;
+        result
+    }
+
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
+        let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+        self.with_global_storage(owner.clone(), |vm| {
+            let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
+            vm.ctor_in_realm(f, args)
+        })
+    }
+
+    fn ctor_in_realm(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
         let new_target = f.clone();
         self.new_target_stack.push(new_target.clone());
         let result = self.ctor_with_new_target(f, args, new_target);
@@ -1710,20 +1930,101 @@ impl Interpreter {
             && let Some(target) =
                 callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
         {
-            // The namespace object is the receiver, so a shared implementation
-            // can tell which built-in it was reached through — `Int8Array` and
-            // `Float64Array` differ only by what their namespace carries.
-            return self.call_this(&target, f.clone(), args);
+            let owner =
+                super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+            let builtin = owner
+                .borrow()
+                .intrinsic_name(f)
+                .unwrap_or_else(|| "Object".into());
+            if matches!(builtin.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet") {
+                // Collections already perform OrdinaryCreateFromConstructor
+                // using the active newTarget. Do not read prototype twice.
+                return self.call_this(&target, f.clone(), args);
+            }
+            let is_object = builtin == "Object";
+            if is_object && crate::interpreter::strict_equals(f, &new_target) {
+                // Object(value) retains an existing object's identity and
+                // prototype when constructed with its own newTarget.
+                return self.call_this(&target, f.clone(), args);
+            }
+            let prototype_after_arguments = (builtin.ends_with("Array")
+                && args.first().is_some_and(|value| !is_js_object(value)))
+                || matches!(
+                    builtin.as_str(),
+                    "RegExp"
+                        | "Number"
+                        | "Boolean"
+                        | "String"
+                        | "Date"
+                        | "ArrayBuffer"
+                        | "SharedArrayBuffer"
+                        | "DataView"
+                        | "Function"
+                        | "WeakRef"
+                        | "FinalizationRegistry"
+                );
+            if builtin == "Promise" && !args.first().is_some_and(is_callable_value) {
+                return vm_err("TypeError: Promise executor must be callable");
+            }
+            let prototype = if prototype_after_arguments {
+                None
+            } else {
+                Some(self.constructor_prototype(&new_target, &builtin)?)
+            };
+            // Object's subclass construction ignores its value argument.
+            let args = if is_object { Vec::new() } else { args };
+            // Native constructors use the construction stack for newTarget;
+            // do not let pending function-entry state leak into callbacks.
+            let result = self.call_this(&target, f.clone(), args)?;
+            let prototype = match prototype {
+                Some(prototype) => prototype,
+                None => self.constructor_prototype(&new_target, &builtin)?,
+            };
+            if let Value::RegExp(data) = &result {
+                data.legacy_enabled
+                    .set(crate::interpreter::strict_equals(f, &new_target));
+            }
+            if let Value::DataView(view) = &result
+                && view.buffer.is_detached()
+            {
+                return vm_err(
+                    "TypeError: Cannot construct a DataView from a detached ArrayBuffer",
+                );
+            }
+            if let Value::Array(array) = &result {
+                array.set_proto(prototype);
+            } else if let Some(properties) = result.property_cell() {
+                properties.set_proto(prototype);
+            } else if !is_js_object(&result) {
+                return vm_err("TypeError: builtin constructor must return an object");
+            }
+            return Ok(result);
         }
         if let Some(proxy) = f.as_proxy() {
             let target = proxy.target.clone();
-            return match self.proxy_trap(&proxy, "construct") {
-                Some(trap) => {
+            // A construct trap cannot make a non-constructible target into a
+            // constructor. Reject it before even reading the handler.
+            if !crate::builtins::is_constructor(&target) {
+                return vm_err("TypeError: Proxy target is not a constructor");
+            }
+            let trap = self.get_prop_value_str(&proxy.handler, "construct")?;
+            return match trap {
+                Value::Undefined | Value::Null => {
+                    self.ctor_with_new_target(&target, args, new_target)
+                }
+                trap => {
+                    if !is_callable_value(&trap) {
+                        return vm_err("TypeError: Proxy construct trap must be callable");
+                    }
                     let handler = proxy.handler.clone();
                     let arg_list = Value::checked_array(args)?;
-                    self.call_this(&trap, handler, vec![target, arg_list, new_target])
+                    let result =
+                        self.call_this(&trap, handler, vec![target, arg_list, new_target])?;
+                    if !is_js_object(&result) {
+                        return vm_err("TypeError: Proxy construct trap must return an object");
+                    }
+                    Ok(result)
                 }
-                None => self.ctor_with_new_target(&target, args, new_target),
             };
         }
         self.execution.check()?;
@@ -1734,12 +2035,8 @@ impl Interpreter {
                     .borrow()
                     .host_function_id
                     .expect("host function identity is initialized");
-                let prototype = self.get_prop_value_str(&new_target, "prototype")?;
-                let instance = if is_js_object(&prototype) {
-                    Value::object_with_proto(vec![], Some(Rc::new(prototype)))
-                } else {
-                    Value::object(vec![])
-                };
+                let prototype = self.constructor_prototype(&new_target, "Object")?;
+                let instance = Value::object_with_proto(vec![], prototype);
                 let bridge = self.host.clone().ok_or_else(|| {
                     VmErr::Msg("cannot construct host function: no bridge attached".to_string())
                 })?;
@@ -1757,9 +2054,17 @@ impl Interpreter {
                 }
             }
             Value::Class(c) => {
-                // The instance's prototype is the class prototype (shared Rc, so
-                // `instanceof` can compare identity).
-                let inst = Value::object_with_proto(vec![], Some(c.prototype.clone()));
+                // Reflect.construct may supply a different newTarget. Resolve
+                // its prototype before entering the constructor body, including
+                // getters and the newTarget realm's fallback intrinsic.
+                let derived = matches!(c.constructor.as_ref(), Value::Function(fd)
+                    if matches!(fd.body.first(), Some(Statement::ClassInitialization { derived: true, .. })));
+                let inst = if derived {
+                    Value::Undefined
+                } else {
+                    let prototype = self.constructor_prototype(&new_target, "Object")?;
+                    Value::object_with_proto(vec![], prototype)
+                };
                 let r = self.invoke_constructor_with_new_target(
                     c.constructor.as_ref(),
                     inst.clone(),
@@ -1791,16 +2096,12 @@ impl Interpreter {
                 if !fd.is_constructor {
                     return vm_err("TypeError: function is not a constructor");
                 }
-                let prototype = self.get_prop_value_str(&new_target, "prototype")?;
-                let inst = if is_js_object(&prototype) {
-                    Value::object_with_proto(vec![], Some(Rc::new(prototype)))
-                } else {
-                    Value::object(vec![])
-                };
+                let prototype = self.constructor_prototype(&new_target, "Object")?;
+                let inst = Value::object_with_proto(vec![], prototype);
                 // Constructors share ordinary function call admission, stack
                 // growth and error propagation. Only their return-value rule
                 // differs: an explicit object replaces the fresh instance.
-                match self.call_this(f, inst.clone(), args) {
+                match self.call_constructor_body(f, inst.clone(), args, new_target) {
                     Ok(value) if is_js_object(&value) => Ok(value),
                     Ok(_) => Ok(inst),
                     Err(error) => Err(error),
@@ -1839,7 +2140,7 @@ const GENERATOR_STACK_SIZE: usize = 8 * 1024 * 1024;
 fn make_generator_coroutine(
     body: Rc<Vec<Statement>>,
     closure: Option<super::Env>,
-    params: Rc<Vec<Rc<str>>>,
+    parameters: (Rc<Vec<Rc<str>>>, bool),
     args: Vec<Value>,
     builtins_env: Option<super::Env>,
     gen_depth: u32,
@@ -1848,6 +2149,7 @@ fn make_generator_coroutine(
     use corosensei::Coroutine;
     use corosensei::stack::DefaultStack;
 
+    let (params, parameters_initialized) = parameters;
     let stack = DefaultStack::new(GENERATOR_STACK_SIZE).ok()?;
 
     // The first `next()` only starts the body; JS discards its argument, since
@@ -1885,8 +2187,17 @@ fn make_generator_coroutine(
 
             // Bind parameters in a child of the defining scope.
             let parent_env = closure.unwrap_or_else(|| interp.global.clone());
-            let fe = Rc::new(RefCell::new(Environment::child(parent_env)));
-            for (i, p) in params.iter().enumerate() {
+            let fe = if parameters_initialized {
+                parent_env
+            } else {
+                Rc::new(RefCell::new(Environment::function_child(parent_env)))
+            };
+            fe.borrow_mut().set_new_target(Value::Undefined);
+            for (i, p) in params
+                .iter()
+                .enumerate()
+                .filter(|_| !parameters_initialized)
+            {
                 let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
                 fe.borrow_mut().set(p, arg);
             }
@@ -1955,9 +2266,17 @@ pub(crate) fn generator_next(
                 let closure = inner.closure.clone();
                 let params = inner.params.clone();
                 let args = inner.args.clone();
+                let parameters_initialized = inner.parameters_initialized;
                 drop(inner);
                 interp.gen_depth += 1;
-                let outcome = run_buffered_generator(interp, body, closure, params, args);
+                let outcome = run_buffered_generator(
+                    interp,
+                    body,
+                    closure,
+                    params,
+                    args,
+                    parameters_initialized,
+                );
                 interp.gen_depth -= 1;
                 let (produced, returned) = outcome?;
                 let mut inner = inner_rc.borrow_mut();
@@ -2002,7 +2321,7 @@ pub(crate) fn generator_next(
                 inner.coroutine = make_generator_coroutine(
                     inner.body.clone(),
                     inner.closure.clone(),
-                    inner.params.clone(),
+                    (inner.params.clone(), inner.parameters_initialized),
                     inner.args.clone(),
                     builtins_env,
                     interp.gen_depth + 1,
@@ -2024,6 +2343,12 @@ pub(crate) fn generator_next(
             }
         };
 
+        let owner = inner_rc
+            .borrow()
+            .closure
+            .as_ref()
+            .and_then(Environment::find_global);
+        let _allocation_boundary = super::realm::AllocationRealm::enter(owner);
         let outcome = coroutine.resume(GenResume::Next(args.first().cloned()));
 
         let mut inner = inner_rc.borrow_mut();
@@ -2068,11 +2393,21 @@ fn run_buffered_generator(
     closure: Option<super::Env>,
     params: Rc<Vec<Rc<str>>>,
     args: Vec<Value>,
+    parameters_initialized: bool,
 ) -> Result<(std::collections::VecDeque<Value>, Value), VmErr> {
     let sink: Rc<RefCell<Vec<Value>>> = Rc::new(RefCell::new(Vec::new()));
     let parent_env = closure.unwrap_or_else(|| interp.global.clone());
-    let frame = Rc::new(RefCell::new(Environment::child(parent_env)));
-    for (index, param) in params.iter().enumerate() {
+    let frame = if parameters_initialized {
+        parent_env
+    } else {
+        Rc::new(RefCell::new(Environment::function_child(parent_env)))
+    };
+    frame.borrow_mut().set_new_target(Value::Undefined);
+    for (index, param) in params
+        .iter()
+        .enumerate()
+        .filter(|_| !parameters_initialized)
+    {
         let arg = args.get(index).cloned().unwrap_or(Value::Undefined);
         frame.borrow_mut().set(param, arg);
     }
@@ -2123,6 +2458,12 @@ pub(crate) fn generator_throw(
         };
         // Cloned so the defensive `Abandon` arm below can still re-throw
         // the caller's value.
+        let owner = inner
+            .borrow()
+            .closure
+            .as_ref()
+            .and_then(Environment::find_global);
+        let _allocation_boundary = super::realm::AllocationRealm::enter(owner);
         let outcome = coroutine.resume(GenResume::Throw(thrown.clone()));
         let mut state = inner.borrow_mut();
         match outcome {

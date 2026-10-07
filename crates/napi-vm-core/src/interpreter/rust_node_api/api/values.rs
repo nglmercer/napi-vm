@@ -581,7 +581,7 @@ pub(super) unsafe extern "C" fn api_create_date(env: NapiEnv, time: f64, result:
         let handle = environment
             .handles
             .borrow_mut()
-            .create(Value::Date(Rc::new(Cell::new(time))))?;
+            .create(Value::date(time))?;
         unsafe { result.write(handle) };
         Ok(())
     })

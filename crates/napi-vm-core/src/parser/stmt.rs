@@ -128,7 +128,18 @@ impl Parser {
                         body: Box::new(body),
                     });
                 }
-                let e = self.expr()?;
+                let literal_start =
+                    matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
+                let mut e = self.expr()?;
+                if !literal_start && matches!(e, Expr::String(_) | Expr::EscapedString(_)) {
+                    // Parentheses are erased elsewhere in the AST. Preserve
+                    // their non-directive status without changing completion.
+                    e = Expr::Binary {
+                        op: super::BinOp::Comma,
+                        left: Box::new(Expr::Undefined),
+                        right: Box::new(e),
+                    };
+                }
                 self.semi();
                 Some(Statement::Expr(e))
             }
@@ -196,12 +207,17 @@ impl Parser {
                 let mut elements = Vec::new();
                 while self.until(&Token::RBracket) {
                     if self.eat(&Token::Comma) {
-                        elements.push(Pattern::Rest(Box::new(Pattern::Ident("hole".to_string()))));
+                        elements.push(Pattern::Elision);
                         continue;
                     }
                     if self.eat(&Token::DotDotDot) {
                         let p = self.pattern()?;
                         elements.push(Pattern::Rest(Box::new(p)));
+                        if !matches!(self.cur(), Token::RBracket) {
+                            self.record_error(
+                                "rest element must be last without a trailing comma".into(),
+                            );
+                        }
                     } else {
                         elements.push(self.pattern()?);
                     }
@@ -237,7 +253,7 @@ impl Parser {
                         PatternKey::Computed(expr)
                     } else {
                         match self.cur() {
-                            Token::String(s) => {
+                            Token::String(s) | Token::EscapedString(s) => {
                                 let key = PatternKey::Name(s.to_key());
                                 self.adv();
                                 key
@@ -339,8 +355,8 @@ impl Parser {
             crate::parser::Occurrence::Declaration(crate::parser::DeclKind::Function),
             Some(format!("({})", p.join(", "))),
         );
-        let mut body = defaults;
-        body.extend(b);
+        self.check_parameters(&p, &defaults, &b, is_async || is_generator);
+        let body = Self::function_body(&p, defaults, b);
         Some(Statement::FnDecl {
             name: n,
             params: p,

@@ -6,12 +6,50 @@ use crate::error::VmErr;
 #[cfg(all(feature = "wasm", target_arch = "wasm32"))]
 use crate::lang::CompletionKind;
 use crate::value::{BoxedPrimitive, FunctionData, Value};
+use std::rc::Rc;
 
 impl Interpreter {
+    pub(crate) fn inherited_global_has(&self, name: &str) -> bool {
+        self.prototype_of(&self.realm_global_object())
+            .is_some_and(|prototype| prototype.has_prop(name))
+    }
+
+    pub(crate) fn lookup_binding_in(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<super::Lookup, VmErr> {
+        let lookup = scope.borrow().lookup(name);
+        if !matches!(lookup, super::Lookup::Missing) {
+            return Ok(lookup);
+        }
+        let global = self.realm_global_object();
+        if let Some(prototype) = self.prototype_of(&global)
+            && prototype.has_prop(name)
+        {
+            return self
+                .get_prop_value_str_with_receiver(&prototype, name, &global)
+                .map(super::Lookup::Value);
+        }
+        Ok(super::Lookup::Missing)
+    }
+
     /// Resolve an object's represented [[Prototype]], including the realm's
     /// default Object.prototype and Function.prototype links that are stored
     /// as defaults rather than copied into every property cell.
     pub(crate) fn prototype_of(&self, object: &Value) -> Option<std::rc::Rc<Value>> {
+        if let Some(properties) = object.exotic_properties()
+            && !properties.meta.borrow().uses_default_prototype
+        {
+            return properties.proto();
+        }
+        if let Value::RealmGlobal(global) = object {
+            return global
+                .borrow()
+                .intrinsic("Object")?
+                .get_prop("prototype")
+                .map(Rc::new);
+        }
         if let Some(prototype) = object.proto_of() {
             return Some(prototype);
         }
@@ -52,13 +90,22 @@ impl Interpreter {
         if !uses_default {
             return None;
         }
-        let prototype = self
-            .persistent_global
+        let owner =
+            super::realm::value_realm(object).unwrap_or_else(|| self.persistent_global.clone());
+        let prototype = owner
             .borrow()
-            .get(builtin)
+            .intrinsic(builtin)
             .and_then(|constructor| constructor.get_prop("prototype"))?;
         if crate::interpreter::strict_equals(object, &prototype) {
-            return None;
+            return if builtin == "Object" {
+                None
+            } else {
+                owner
+                    .borrow()
+                    .intrinsic("Object")
+                    .and_then(|constructor| constructor.get_prop("prototype"))
+                    .map(Rc::new)
+            };
         }
         Some(std::rc::Rc::new(prototype))
     }
@@ -229,11 +276,7 @@ impl Interpreter {
     /// Apply ECMAScript ToString for Node-API. This deliberately differs from
     /// the `String(Symbol())` function special case: abstract ToString throws
     /// for Symbols, as does `napi_coerce_to_string`.
-    #[cfg(all(
-        feature = "node-api-host",
-        any(target_os = "linux", target_os = "macos", target_os = "windows")
-    ))]
-    pub(crate) fn napi_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
+    pub(crate) fn ecmascript_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
         let primitive = self.coerce_object_to_primitive(value, "string")?;
         match primitive {
             Value::Symbol(_) => Err(VmErr::Msg(
@@ -244,6 +287,14 @@ impl Interpreter {
                 "TypeError: Cannot convert object to primitive value".into(),
             )),
         }
+    }
+
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
+    pub(crate) fn napi_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
+        self.ecmascript_to_string(value)
     }
 
     /// Perform ToPrimitive with the requested hint, including the guest's
@@ -419,10 +470,24 @@ impl Interpreter {
 
     /// Resolve a property value, invoking it if it is a getter.
     pub(crate) fn get_prop_value(&mut self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        self.get_prop_value_with_receiver(o, p, o)
+    }
+
+    pub(crate) fn get_prop_value_with_receiver(
+        &mut self,
+        o: &Value,
+        p: &Value,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
+        if let Value::RealmGlobal(global) = o {
+            return self.with_global_storage(global.clone(), |vm| {
+                vm.get_prop_value_with_receiver(&Value::GlobalObject, p, receiver)
+            });
+        }
         // String keys take the borrowed-key path below, which never allocates
         // a key `Value`. Only symbols, numbers, and exotic keys stay here.
         if let Value::String(key) = p {
-            return self.get_prop_value_str(o, &key.to_key());
+            return self.get_prop_value_str_with_receiver(o, &key.to_key(), receiver);
         }
         // A proxy's `get` trap replaces the read entirely; without one the
         // read falls through to the target.
@@ -431,9 +496,9 @@ impl Interpreter {
             if let Some(trap) = self.proxy_trap(&proxy, "get") {
                 let key = self.proxy_property_key(p)?;
                 let handler = proxy.handler.clone();
-                return self.call_this(&trap, handler, vec![target, key, o.clone()]);
+                return self.call_this(&trap, handler, vec![target, key, receiver.clone()]);
             }
-            return self.get_prop_value(&target, p);
+            return self.get_prop_value_with_receiver(&target, p, receiver);
         }
         // Reading a property of `null` or `undefined` is a `TypeError`, not
         // `undefined`. Silently answering `undefined` hides the mistake and
@@ -475,7 +540,7 @@ impl Interpreter {
         let is_getter = name_matches("get ")?;
         let is_setter_only = !is_getter && name_matches("set ")?;
         if is_getter {
-            return self.call_this(&v, o.clone(), vec![]);
+            return self.call_this(&v, receiver.clone(), vec![]);
         }
         if is_setter_only {
             return Ok(Value::Undefined);
@@ -488,7 +553,21 @@ impl Interpreter {
     /// `&str` end to end: no key `String` and no key `Value` is allocated.
     /// Proxy targets still allocate the trap key, exactly as before.
     pub(crate) fn get_prop_value_str(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
-        let value = self.get_prop_value_str_inner(o, key)?;
+        self.get_prop_value_str_with_receiver(o, key, o)
+    }
+
+    fn get_prop_value_str_with_receiver(
+        &mut self,
+        o: &Value,
+        key: &str,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
+        if let Value::RealmGlobal(global) = o {
+            return self.with_global_storage(global.clone(), |vm| {
+                vm.get_prop_value_str_with_receiver(&Value::GlobalObject, key, receiver)
+            });
+        }
+        let value = self.get_prop_value_str_inner(o, key, receiver)?;
         if matches!(value, Value::Uninitialized) {
             return Err(VmErr::Msg(format!(
                 "ReferenceError: Cannot access '{key}' before initialization"
@@ -496,16 +575,21 @@ impl Interpreter {
         }
         Ok(value)
     }
-    fn get_prop_value_str_inner(&mut self, o: &Value, key: &str) -> Result<Value, VmErr> {
+    fn get_prop_value_str_inner(
+        &mut self,
+        o: &Value,
+        key: &str,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
         if let Some(proxy) = o.as_proxy() {
             let target = proxy.target.clone();
             if let Some(trap) = self.proxy_trap(&proxy, "get") {
                 let trap_key = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&trap_key)?;
                 let handler = proxy.handler.clone();
-                return self.call_this(&trap, handler, vec![target, trap_key, o.clone()]);
+                return self.call_this(&trap, handler, vec![target, trap_key, receiver.clone()]);
             }
-            return self.get_prop_value_str(&target, key);
+            return self.get_prop_value_str_with_receiver(&target, key, receiver);
         }
         if matches!(o, Value::Null | Value::Undefined) {
             return Err(VmErr::Msg(format!(
@@ -534,7 +618,7 @@ impl Interpreter {
                 .and_then(|name| name.strip_prefix("set "))
                 .is_some_and(|name| name == key);
         if is_getter {
-            return self.call_this(&v, o.clone(), vec![]);
+            return self.call_this(&v, receiver.clone(), vec![]);
         }
         if is_setter_only {
             return Ok(Value::Undefined);
@@ -742,10 +826,15 @@ impl Interpreter {
     /// `prop_raw` forwards every `Value::String` key here, and borrowed-key
     /// callers arrive via [`prop_str`](Self::prop_str) without allocating.
     fn prop_str_raw(&self, o: &Value, k: &str) -> Result<Value, VmErr> {
+        if let Some(properties) = o.exotic_properties()
+            && let Some(value) = properties.own_value(k)
+        {
+            return Ok(value);
+        }
         match o {
             // `window.x` / `globalThis.x` / `self.x` read a real global.
             Value::GlobalObject => {
-                if let Some(value) = self.persistent_global.borrow().get(k) {
+                if let Some((value, _)) = self.global_property(k) {
                     return Ok(value);
                 }
                 if self.global_keys().iter().any(|key| key == k) {

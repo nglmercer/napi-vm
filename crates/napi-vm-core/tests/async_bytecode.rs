@@ -57,3 +57,16 @@ fn emitted_await_instruction_is_verified() {
     let mut vm = Interpreter::with_builtins();
     assert!(matches!(vm.execute(&code), Ok(Value::Number(42.))));
 }
+
+#[test]
+fn async_resume_preserves_receiver_and_strict_context() {
+    both(
+        "async function f(){'use strict';await 0;return this;}var result=await f.call(7);result===7;",
+    );
+    both(
+        "async function f(){await 0;return this;}var result=await f.call(null);result===globalThis;",
+    );
+    both(
+        "async function f(){'use strict';await 0;try{asyncMissing=1;}catch(e){return e instanceof ReferenceError;}}var result=await f();result && typeof asyncMissing==='undefined';",
+    );
+}

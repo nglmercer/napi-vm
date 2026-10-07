@@ -489,6 +489,7 @@ impl Checker<'_> {
                 obj,
                 key,
                 cache,
+                ..
             } => {
                 if *cache as usize >= self.function.caches.len() {
                     return Err(VerifyError::BadCache {
@@ -516,7 +517,13 @@ impl Checker<'_> {
                 self.check_reg(address, *key)?;
                 self.check_reg(address, *val)?;
             }
-            Instr::Call {
+            Instr::DirectEval {
+                dst,
+                callee,
+                args,
+                argc,
+            }
+            | Instr::Call {
                 dst,
                 callee,
                 args,
@@ -608,7 +615,8 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_slot(address, *slot)?;
             }
-            Instr::CallSpread { dst, callee, tmpl } => {
+            Instr::DirectEvalSpread { dst, callee, tmpl }
+            | Instr::CallSpread { dst, callee, tmpl } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
                 self.check_spread_template(address, *tmpl)?;
@@ -714,7 +722,7 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
-            Instr::ImportMeta { dst } => {
+            Instr::NewTarget { dst } | Instr::ImportMeta { dst } => {
                 self.check_reg(address, *dst)?;
             }
             // Scope balance is a compiler invariant, like handler balance:

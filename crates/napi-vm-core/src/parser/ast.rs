@@ -102,6 +102,8 @@ pub enum Expr {
     /// A `BigInt` literal, carrying its digits.
     BigIntLiteral(String),
     String(crate::JsString),
+    /// Decoded string with escaped spelling, retained for directive semantics.
+    EscapedString(crate::JsString),
     /// `/pattern/flags`.
     Regex(crate::JsString, String),
     Bool(bool),
@@ -184,6 +186,7 @@ pub enum Expr {
     This,
     Super,
     ImportMeta,
+    NewTarget,
     /// `import(specifier)`: resolves to the module's namespace object.
     DynamicImport(Box<Expr>),
     Template {
@@ -297,6 +300,18 @@ pub enum Statement {
     /// environment, so the names land in the enclosing scope. It exists
     /// because one statement can only return one `Statement`.
     Declarations(Vec<Statement>),
+    /// Internal constructor entry, before parameter and body initialization.
+    ClassInitialization {
+        derived: bool,
+        fields: Vec<Statement>,
+    },
+    /// Non-simple formal parameters run before body declaration instantiation.
+    ParameterInitialization {
+        params: Vec<String>,
+        initializers: Vec<Statement>,
+        /// Base-class fields run before constructor parameter initialization.
+        fields: Vec<Statement>,
+    },
     Labeled {
         label: String,
         body: Box<Statement>,
@@ -415,6 +430,8 @@ pub enum PatternKey {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
+    /// An array-pattern elision consumes a position without binding a name.
+    Elision,
     Ident(String),
     Array(Vec<Pattern>),
     Object(Vec<(PatternKey, Option<Pattern>)>),
@@ -425,6 +442,7 @@ pub enum Pattern {
     Member {
         object: Box<Expr>,
         property: Box<Expr>,
+        private: bool,
     },
 }
 
@@ -447,6 +465,7 @@ pub fn pattern_names(pattern: &Pattern) -> Vec<String> {
 
 fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
     match pattern {
+        Pattern::Elision => {}
         Pattern::Ident(name) => out.push(name.clone()),
         // A property target binds no name.
         Pattern::Member { .. } => {}
@@ -483,12 +502,21 @@ fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
 /// declarations are collected too: they are `var`-scoped, and the interpreter
 /// defines them eagerly during hoisting.
 pub fn collect_var_names(stmts: &[Statement], out: &mut Vec<String>) {
+    collect_scoped_var_names(stmts, out, true);
+}
+
+/// Var declaration names without Annex B block-function hoisting.
+pub(crate) fn collect_var_declaration_names(stmts: &[Statement], out: &mut Vec<String>) {
+    collect_scoped_var_names(stmts, out, false);
+}
+
+fn collect_scoped_var_names(stmts: &[Statement], out: &mut Vec<String>, functions: bool) {
     for stmt in stmts {
-        collect_stmt_var_names(stmt, out);
+        collect_stmt_var_names(stmt, out, functions);
     }
 }
 
-fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
+fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bool) {
     match stmt {
         Statement::VarDecl {
             kind: VarKind::Var,
@@ -502,18 +530,24 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
         // Other declaration kinds are lexical: block-scoped, handled elsewhere.
         Statement::VarDecl { .. } | Statement::ClassDecl { .. } => {}
         // A function declaration's *name* is var-scoped; its body is not.
-        Statement::FnDecl { name, .. } => out.push(name.clone()),
-        Statement::Block(body) | Statement::Declarations(body) => collect_var_names(body, out),
+        Statement::FnDecl { name, .. } => {
+            if functions {
+                out.push(name.clone());
+            }
+        }
+        Statement::Block(body) | Statement::Declarations(body) => {
+            collect_scoped_var_names(body, out, functions)
+        }
         Statement::If { then, else_, .. } => {
-            collect_var_names(then, out);
+            collect_scoped_var_names(then, out, functions);
             if let Some(else_) = else_ {
-                collect_var_names(else_, out);
+                collect_scoped_var_names(else_, out, functions);
             }
         }
         Statement::While { body, .. }
         | Statement::DoWhile { body, .. }
         | Statement::ForIn { body, .. }
-        | Statement::ForOf { body, .. } => collect_var_names(body, out),
+        | Statement::ForOf { body, .. } => collect_scoped_var_names(body, out, functions),
         Statement::For { init, body, .. } => {
             if let Some(init) = init {
                 match &**init {
@@ -535,28 +569,30 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>) {
                     _ => {}
                 }
             }
-            collect_var_names(body, out);
+            collect_scoped_var_names(body, out, functions);
         }
-        Statement::Labeled { body, .. } => collect_stmt_var_names(body, out),
+        Statement::Labeled { body, .. } => collect_stmt_var_names(body, out, functions),
         Statement::Try {
             body,
             catch,
             finally,
         } => {
-            collect_var_names(body, out);
+            collect_scoped_var_names(body, out, functions);
             if let Some((_, catch_body)) = catch {
-                collect_var_names(catch_body, out);
+                collect_scoped_var_names(catch_body, out, functions);
             }
             if let Some(finally) = finally {
-                collect_var_names(finally, out);
+                collect_scoped_var_names(finally, out, functions);
             }
         }
         Statement::Switch { cases, .. } => {
             for case in cases {
-                collect_var_names(&case.body, out);
+                collect_scoped_var_names(&case.body, out, functions);
             }
         }
         Statement::Expr(_)
+        | Statement::ClassInitialization { .. }
+        | Statement::ParameterInitialization { .. }
         | Statement::Return(_)
         | Statement::Break
         | Statement::Continue
@@ -715,6 +751,17 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
                 || statements_capture_identifier(body, name)
         }
+        Statement::ClassInitialization { fields, .. } => {
+            statements_capture_identifier(fields, name)
+        }
+        Statement::ParameterInitialization {
+            initializers,
+            fields,
+            ..
+        } => {
+            statements_capture_identifier(initializers, name)
+                || statements_capture_identifier(fields, name)
+        }
         Statement::Block(stmts) | Statement::Declarations(stmts) => {
             statements_capture_identifier(stmts, name)
         }
@@ -830,6 +877,7 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
         Expr::Number(_)
         | Expr::BigIntLiteral(_)
         | Expr::String(_)
+        | Expr::EscapedString(_)
         | Expr::Regex(_, _)
         | Expr::Bool(_)
         | Expr::Null
@@ -837,7 +885,8 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
         | Expr::Identifier(_)
         | Expr::This
         | Expr::Super
-        | Expr::ImportMeta => false,
+        | Expr::ImportMeta
+        | Expr::NewTarget => false,
     }
 }
 
@@ -881,7 +930,7 @@ fn class_members_capture_identifier(members: &[ClassMember], name: &str) -> bool
 
 fn pattern_captures_identifier(pattern: &Pattern, name: &str) -> bool {
     match pattern {
-        Pattern::Ident(_) => false,
+        Pattern::Elision | Pattern::Ident(_) => false,
         Pattern::Array(items) => items
             .iter()
             .any(|item| pattern_captures_identifier(item, name)),
@@ -895,9 +944,9 @@ fn pattern_captures_identifier(pattern: &Pattern, name: &str) -> bool {
         Pattern::Default(inner, default) => {
             pattern_captures_identifier(inner, name) || expr_captures_identifier(default, name)
         }
-        Pattern::Member { object, property } => {
-            expr_captures_identifier(object, name) || expr_captures_identifier(property, name)
-        }
+        Pattern::Member {
+            object, property, ..
+        } => expr_captures_identifier(object, name) || expr_captures_identifier(property, name),
     }
 }
 
@@ -1000,6 +1049,12 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
         Statement::ForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)
         }
+        Statement::ClassInitialization { fields, .. } => stmts_reference(fields, name),
+        Statement::ParameterInitialization {
+            initializers,
+            fields,
+            ..
+        } => stmts_reference(initializers, name) || stmts_reference(fields, name),
         Statement::Block(b) | Statement::Declarations(b) => stmts_reference(b, name),
         Statement::Labeled { body, .. } => stmt_references(body, name),
         Statement::Throw(e) => expr_references(e, name),
@@ -1124,12 +1179,14 @@ fn expr_references(e: &Expr, name: &str) -> bool {
             .unwrap_or(false),
         Expr::Number(_)
         | Expr::String(_)
+        | Expr::EscapedString(_)
         | Expr::Bool(_)
         | Expr::Null
         | Expr::Undefined
         | Expr::This
         | Expr::Super
-        | Expr::ImportMeta => false,
+        | Expr::ImportMeta
+        | Expr::NewTarget => false,
         Expr::DynamicImport(specifier) => expr_references(specifier, name),
     }
 }
@@ -1141,10 +1198,14 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
     Some(match expr {
         Expr::Identifier(name) => Pattern::Ident(name.clone()),
         Expr::Member {
-            object, property, ..
+            object,
+            property,
+            computed,
         } => Pattern::Member {
             object: object.clone(),
             property: property.clone(),
+            private: !computed
+                && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
         },
         Expr::Array(items) => Pattern::Array(
             items
@@ -1154,7 +1215,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
                         expr_to_pattern(inner).map(|p| Pattern::Rest(Box::new(p)))
                     }
                     // A hole (`[, a] = …`) skips a position.
-                    Expr::Undefined => Some(Pattern::Ident("hole".to_string())),
+                    Expr::Undefined => Some(Pattern::Elision),
                     other => expr_to_pattern(other),
                 })
                 .collect::<Option<Vec<_>>>()?,
@@ -1194,10 +1255,10 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
 
 fn pattern_references(p: &Pattern, name: &str) -> bool {
     match p {
-        Pattern::Ident(_) | Pattern::Rest(_) => false,
-        Pattern::Member { object, property } => {
-            expr_references(object, name) || expr_references(property, name)
-        }
+        Pattern::Elision | Pattern::Ident(_) | Pattern::Rest(_) => false,
+        Pattern::Member {
+            object, property, ..
+        } => expr_references(object, name) || expr_references(property, name),
         Pattern::Array(elems) => elems.iter().any(|e| pattern_references(e, name)),
         Pattern::Object(props) => props.iter().any(|(key, p)| {
             matches!(key, PatternKey::Computed(e) if expr_references(e, name))
@@ -1209,4 +1270,21 @@ fn pattern_references(p: &Pattern, name: &str) -> bool {
             pattern_references(inner, name) || expr_references(default, name)
         }
     }
+}
+
+/// ExpectedArgumentCount stops before the first default or rest parameter.
+pub(crate) fn formal_parameter_length<S: AsRef<str>>(params: &[S], body: &[Statement]) -> usize {
+    let initializers = match body
+        .iter()
+        .find(|stmt| !matches!(stmt, Statement::ClassInitialization { .. }))
+    {
+        Some(Statement::ParameterInitialization { initializers, .. }) => initializers.as_slice(),
+        _ => &[],
+    };
+    params.iter().take_while(|parameter| {
+        let name = parameter.as_ref();
+        !name.starts_with("...") && !initializers.iter().any(|initializer| {
+            matches!(initializer, Statement::If { then, .. } if matches!(then.first(), Some(Statement::Expr(Expr::Assignment { target, .. })) if matches!(target.as_ref(), Expr::Identifier(target) if target == name)))
+        })
+    }).count()
 }

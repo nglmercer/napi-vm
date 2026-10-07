@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use super::{Parser, Statement};
+use super::{ParseGoal, Parser, Statement};
 use crate::error::VmErr;
 use crate::lexer::Lexer;
 
@@ -109,14 +109,30 @@ fn cache() -> &'static Mutex<ParseCache> {
 /// Errors are re-parsed on every call (cold path, never cached).
 #[doc(hidden)]
 pub fn parse_cached(source: &str) -> Result<Arc<Vec<Statement>>, CachedParseError> {
-    if let Ok(mut cache) = cache().lock()
+    parse_cached_with_goal(source, ParseGoal::Auto)
+}
+
+static SCRIPT_PARSE_CACHE: OnceLock<Mutex<ParseCache>> = OnceLock::new();
+static MODULE_PARSE_CACHE: OnceLock<Mutex<ParseCache>> = OnceLock::new();
+
+/// Identical source text under different grammar goals never shares a cached AST.
+pub fn parse_cached_with_goal(
+    source: &str,
+    goal: ParseGoal,
+) -> Result<Arc<Vec<Statement>>, CachedParseError> {
+    let goal_cache = match goal {
+        ParseGoal::Auto => cache(),
+        ParseGoal::Script => SCRIPT_PARSE_CACHE.get_or_init(|| Mutex::new(ParseCache::default())),
+        ParseGoal::Module => MODULE_PARSE_CACHE.get_or_init(|| Mutex::new(ParseCache::default())),
+    };
+    if let Ok(mut cache) = goal_cache.lock()
         && let Some(hit) = cache.get(source)
     {
         return Ok(hit);
     }
     let tokens = Lexer::new(source).tokenize_with_spans();
     let mut parser = Parser::new_with_spans(tokens);
-    let statements = match parser.parse_program() {
+    let statements = match parser.parse_program_with_goal(goal) {
         Ok(statements) => statements,
         Err(error) => {
             return Err(CachedParseError {
@@ -126,7 +142,7 @@ pub fn parse_cached(source: &str) -> Result<Arc<Vec<Statement>>, CachedParseErro
         }
     };
     let shared = Arc::new(statements);
-    if let Ok(mut cache) = cache().lock() {
+    if let Ok(mut cache) = goal_cache.lock() {
         cache.insert(source, Arc::clone(&shared));
     }
     Ok(shared)

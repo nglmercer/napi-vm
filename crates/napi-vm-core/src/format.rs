@@ -202,7 +202,11 @@ fn render_plain_value(
     match v {
         // A live module binding renders as the value it names.
         Value::Binding(cell) => render_plain_value(&cell.borrow(), visited, depth, output),
-        Value::RegExp(re) => output.push_str(&format!("/{}/{}", re.regex.source, re.regex.flags)),
+        Value::RegExp(re) => output.push_str(&format!(
+            "/{}/{}",
+            re.regex.borrow().source,
+            re.regex.borrow().flags
+        )),
         // A BigInt renders with an `n` suffix when inspected, matching the
         // literal syntax; plain string coercion drops it.
         Value::BigInt(value) => output.push_str(&value.to_decimal()),
@@ -286,7 +290,7 @@ fn render_plain_value(
             output.push_str(name)?;
             output.push_str(" [native]]")
         }
-        Value::GlobalObject => output.push_str("[object global]"),
+        Value::GlobalObject | Value::RealmGlobal(_) => output.push_str("[object global]"),
         Value::Class(c) => {
             output.push_str("[class ")?;
             output.push_str(&c.name)?;
@@ -434,7 +438,7 @@ fn render_inspect_value(
         Value::RegExp(re) => painter.write_wrapped(
             context.output,
             "31",
-            &format!("/{}/{}", re.regex.source, re.regex.flags),
+            &format!("/{}/{}", re.regex.borrow().source, re.regex.borrow().flags),
         ),
         Value::BigInt(value) => {
             painter.write_wrapped(context.output, "33", &format!("{}n", value.to_decimal()))
@@ -602,7 +606,9 @@ fn render_inspect_value(
             }
             Ok(())
         }
-        Value::GlobalObject => painter.write_wrapped(context.output, "2;37", "[object global]"),
+        Value::GlobalObject | Value::RealmGlobal(_) => {
+            painter.write_wrapped(context.output, "2;37", "[object global]")
+        }
         Value::Class(c) => {
             if context.colors && pretty {
                 context.output.push_str("\x1b[2;37m")?;

@@ -240,6 +240,8 @@ pub enum Instr {
     // -- properties, calls, allocation -----------------------------------
     /// `dst = obj[key]` through the full lookup chain (proxies included).
     GetProp {
+        /// Private syntax requires an existing receiver member.
+        private: bool,
         cache: u32,
         dst: Reg,
         obj: Reg,
@@ -253,6 +255,17 @@ pub enum Instr {
         val: Reg,
     },
     /// `dst = callee(...args)`: `argc` registers starting at `args`.
+    DirectEval {
+        dst: Reg,
+        callee: Reg,
+        args: Reg,
+        argc: u16,
+    },
+    DirectEvalSpread {
+        dst: Reg,
+        callee: Reg,
+        tmpl: u16,
+    },
     Call {
         dst: Reg,
         callee: Reg,
@@ -509,6 +522,9 @@ pub enum Instr {
         src: Reg,
     },
     /// `dst` = this module's `import.meta` object.
+    NewTarget {
+        dst: Reg,
+    },
     ImportMeta {
         dst: Reg,
     },
@@ -561,6 +577,8 @@ pub enum Opcode {
     Throw,
     GetProp,
     SetProp,
+    DirectEval,
+    DirectEvalSpread,
     Call,
     CallMethod,
     Template,
@@ -601,6 +619,7 @@ pub enum Opcode {
     ExportAll,
     DynamicImport,
     Await,
+    NewTarget,
     ImportMeta,
     PushScope,
     PopScope,
@@ -648,6 +667,8 @@ impl Instr {
             Instr::Throw { .. } => Opcode::Throw,
             Instr::GetProp { .. } => Opcode::GetProp,
             Instr::SetProp { .. } => Opcode::SetProp,
+            Instr::DirectEval { .. } => Opcode::DirectEval,
+            Instr::DirectEvalSpread { .. } => Opcode::DirectEvalSpread,
             Instr::Call { .. } => Opcode::Call,
             Instr::CallMethod { .. } => Opcode::CallMethod,
             Instr::Template { .. } => Opcode::Template,
@@ -688,6 +709,7 @@ impl Instr {
             Instr::ExportAll { .. } => Opcode::ExportAll,
             Instr::DynamicImport { .. } => Opcode::DynamicImport,
             Instr::Await { .. } => Opcode::Await,
+            Instr::NewTarget { .. } => Opcode::NewTarget,
             Instr::ImportMeta { .. } => Opcode::ImportMeta,
             Instr::PushScope => Opcode::PushScope,
             Instr::PopScope => Opcode::PopScope,
@@ -700,7 +722,12 @@ impl Instr {
     #[inline(always)]
     pub fn cost(&self) -> u64 {
         match self.opcode() {
-            Opcode::Call | Opcode::CallMethod | Opcode::CallSpread | Opcode::MethodSpread => 5,
+            Opcode::DirectEval
+            | Opcode::DirectEvalSpread
+            | Opcode::Call
+            | Opcode::CallMethod
+            | Opcode::CallSpread
+            | Opcode::MethodSpread => 5,
             Opcode::Construct => 8,
             Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject | Opcode::BuildArray => 10,
             Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
@@ -814,6 +841,15 @@ impl fmt::Display for Instr {
             Instr::Throw { src } => write!(f, "THROW r{src}"),
             Instr::GetProp { dst, obj, key, .. } => write!(f, "GET_PROP r{dst}, r{obj}, r{key}"),
             Instr::SetProp { obj, key, val, .. } => write!(f, "SET_PROP r{obj}, r{key}, r{val}"),
+            Instr::DirectEval {
+                dst,
+                callee,
+                args,
+                argc,
+            } => write!(f, "DIRECT_EVAL r{dst}, r{callee}, r{args}, {argc}"),
+            Instr::DirectEvalSpread { dst, callee, tmpl } => {
+                write!(f, "DIRECT_EVAL_SPREAD r{dst}, r{callee}, c{tmpl}")
+            }
             Instr::Call {
                 dst,
                 callee,
@@ -920,6 +956,7 @@ impl fmt::Display for Instr {
             Instr::ExportAll { tmpl } => write!(f, "EXPORT_ALL c{tmpl}"),
             Instr::DynamicImport { dst, src } => write!(f, "DYNAMIC_IMPORT r{dst}, r{src}"),
             Instr::Await { dst, src } => write!(f, "AWAIT r{dst}, r{src}"),
+            Instr::NewTarget { dst } => write!(f, "NEW_TARGET r{dst}"),
             Instr::ImportMeta { dst } => write!(f, "IMPORT_META r{dst}"),
             Instr::PushScope => write!(f, "PUSH_SCOPE"),
             Instr::PopScope => write!(f, "POP_SCOPE"),

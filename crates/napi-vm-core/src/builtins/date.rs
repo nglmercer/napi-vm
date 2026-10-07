@@ -129,9 +129,7 @@ fn date_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
             utc.to_number()
         }
     };
-    Ok(Value::Date(std::rc::Rc::new(std::cell::Cell::new(
-        time_clip(ms),
-    ))))
+    Ok(Value::date(time_clip(ms)))
 }
 
 /// Members readable on a `Date` instance.

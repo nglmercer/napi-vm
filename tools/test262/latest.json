@@ -5,60 +5,124 @@
   "selection": [
     "."
   ],
-  "engine_sha256": "15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b",
+  "engine_sha256": "f7b98e9f66fc63eb0d08d576ae9c6abcebb5cac6e5b1f649ea6a00f93eb31842",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
   "timeout_seconds": 5.0,
   "total": 102956,
   "counts": {
-    "pass": 34736,
-    "fail": 67740,
+    "pass": 41407,
+    "fail": 61263,
     "skip": 0,
     "timeout": 2,
-    "crash": 8,
-    "harness_error": 470
+    "crash": 0,
+    "harness_error": 284
   },
-  "pass_percentage": 33.73868448657679,
+  "pass_percentage": 40.21815144333502,
   "limitations": [
-    "$262.createRealm, agents and detachArrayBuffer are not implemented"
+    "Agents are not implemented; GC requests run at quiescent host boundaries"
   ],
   "build_profile": "release",
   "notes": [
-    "Development measurement; full Test262 conformance is not achieved.",
-    "Full outcomes and dashboard are generated artifacts; historical baseline is retained.",
-    "Previous run used a different optimization profile, worker count and timeout; pass-count differences include timing changes and corrected async false passes."
+    "Development measurement: phases 1\u20133 remain incomplete; full Test262 conformance is not achieved.",
+    "Same pinned corpus, release profile, four workers and five-second timeout as the previous continuation baseline.",
+    "The focused selection changed; percentages from previous focused reports are not directly comparable.",
+    "The final focused table is extracted from the complete run. Two variants of a 100 ms busy-loop fixture exhausted the unchanged instruction budget in that run and remain failures."
   ],
+  "baseline": {
+    "engine_sha256": "295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b",
+    "total": 102956,
+    "counts": {
+      "pass": 41401,
+      "fail": 61269,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 284
+    },
+    "pass_percentage": 40.212323711099884,
+    "transitions": {
+      "new_passes": 6,
+      "former_passes_now_nonpassing": 0
+    }
+  },
+  "foundation_baseline": {
+    "engine_sha256": "ed9dc3ee79a84b078508c2b1966aa92f37f65e8a86d6f4cff836a887aaaadffb",
+    "total": 102956,
+    "counts": {
+      "pass": 36874,
+      "fail": 65794,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 2,
+      "harness_error": 284
+    },
+    "pass_percentage": 35.81529973969462,
+    "transitions": {
+      "new_passes": 4533,
+      "former_passes_now_nonpassing": 0
+    }
+  },
+  "merged_baseline": {
+    "engine_sha256": "15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b",
+    "total": 102956,
+    "counts": {
+      "pass": 34736,
+      "fail": 67740,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 8,
+      "harness_error": 470
+    },
+    "pass_percentage": 33.73868448657679,
+    "transitions": {
+      "new_passes": 6671,
+      "former_passes_now_nonpassing": 0
+    }
+  },
   "focused": {
     "domain": "ECMAScript",
     "suite": "Test262",
     "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-    "selection": [
-      "built-ins/Map",
-      "built-ins/Set",
-      "built-ins/WeakMap",
-      "built-ins/WeakSet",
-      "built-ins/Reflect/construct",
-      "built-ins/Date/UTC",
-      "built-ins/Date/prototype/toISOString"
-    ],
-    "engine_sha256": "15db9b7181505007c634cdd45d2af36240e437f07a882b810835bf7e27a24a4b",
+    "engine_sha256": "f7b98e9f66fc63eb0d08d576ae9c6abcebb5cac6e5b1f649ea6a00f93eb31842",
     "skip_features": [],
     "denominator": "all selected variants, including skips and errors",
-    "worker_jobs": 2,
+    "worker_jobs": 4,
     "timeout_seconds": 5.0,
-    "total": 1708,
+    "limitations": [
+      "Agents are not implemented; GC requests run at quiescent host boundaries"
+    ],
+    "selection": [
+      "language/expressions/dynamic-import",
+      "language/module-code",
+      "language/import",
+      "language/exports"
+    ],
+    "total": 2637,
     "counts": {
-      "pass": 1318,
-      "fail": 390,
+      "pass": 1372,
+      "fail": 1265,
       "skip": 0,
       "timeout": 0,
       "crash": 0,
       "harness_error": 0
     },
-    "pass_percentage": 77.16627634660422,
-    "limitations": [
-      "$262.createRealm, agents and detachArrayBuffer are not implemented"
-    ]
+    "pass_percentage": 52.02882062950322,
+    "measurement_source": "Rows extracted from the complete pinned corpus run; same isolated worker binary, resource limits and timeout policy.",
+    "transitions_against_previous_full": {
+      "new_passes": 6,
+      "former_passes_now_nonpassing": 0
+    }
+  },
+  "transitions": {
+    "new_passes": 6,
+    "former_passes_now_nonpassing": 0
+  },
+  "worker_resource_limits": {
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000
   }
 }

@@ -478,7 +478,7 @@ pub(super) fn wire_to_guest_with_context(
                 .and_then(JsonValue::as_str)
                 .ok_or_else(|| VmErr::Msg("invalid Node date".into()))?;
             let milliseconds = parse_wire_number(value)?;
-            Ok(Value::Date(Rc::new(std::cell::Cell::new(milliseconds))))
+            Ok(Value::date(milliseconds))
         }
         "regexp" => {
             let source = v
@@ -621,6 +621,7 @@ pub(super) fn wire_to_guest_with_context(
                 ));
             }
             Ok(Value::TypedArray(Rc::new(TypedArrayData {
+                properties: Value::instance_properties(),
                 kind,
                 buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,
@@ -644,6 +645,7 @@ pub(super) fn wire_to_guest_with_context(
                 ));
             }
             Ok(Value::DataView(Rc::new(TypedArrayData {
+                properties: Value::instance_properties(),
                 kind: TypedKind::Uint8,
                 buffer: Buffer::owned(bytes).into(),
                 byte_offset: 0,

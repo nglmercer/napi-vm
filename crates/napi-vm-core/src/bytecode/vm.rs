@@ -205,14 +205,17 @@ pub(crate) fn run_function(
     parent_env: Env,
     this_value: Value,
     args: &[Value],
+    strict: bool,
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
-    let fe = if code.needs_frame_environment {
-        Rc::new(RefCell::new(Environment::child(parent_env)))
-    } else {
-        parent_env
-    };
+    let fe = Rc::new(RefCell::new(Environment::function_child(parent_env)));
+    fe.borrow_mut().replace_strict(Some(strict));
+    if !code.is_arrow {
+        fe.borrow_mut().set("this", this_value.clone());
+        fe.borrow_mut()
+            .set_new_target(interp.pending_new_target.take().unwrap_or(Value::Undefined));
+    }
     if code.needs_frame_environment {
         if !code.is_arrow {
             fe.borrow_mut().set("this", this_value.clone());
@@ -468,10 +471,8 @@ fn run_loop(
                         // Lookup cannot run guest code or change the active
                         // scope. Borrow its existing root instead of bumping
                         // the environment's Rc count for every global read.
-                        let lookup = {
-                            let scope = frame.scopes.last().unwrap_or(&interp.global);
-                            scope.borrow().lookup(name)
-                        };
+                        let scope = current_scope(interp, frame);
+                        let lookup = interp.lookup_binding_in(&scope, name)?;
                         match lookup {
                             Lookup::Value(v) => {
                                 frame.registers[dst as usize].assign_for_execution(v)
@@ -537,8 +538,7 @@ fn run_loop(
                 }
                 Instr::LoadGlobalThis { dst } => {
                     let scope = current_scope(interp, frame);
-                    frame.registers[dst as usize] =
-                        scope.borrow().get("this").unwrap_or(Value::Undefined);
+                    frame.registers[dst as usize] = interp.resolve_this(&scope)?;
                 }
                 Instr::TypeofGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
@@ -697,11 +697,18 @@ fn run_loop(
                     ));
                 }
                 Instr::GetProp {
+                    private,
                     dst,
                     obj,
                     key,
                     cache,
                 } => {
+                    if private {
+                        let name = interp.property_key(&frame.registers[key as usize])?;
+                        frame.registers[dst as usize] =
+                            interp.get_private_member(&frame.registers[obj as usize], &name)?;
+                        return Ok(());
+                    }
                     let value = get_prop_cached(
                         interp,
                         frame.function,
@@ -726,6 +733,32 @@ fn run_loop(
                         &frame.registers[key as usize],
                         val,
                     )?;
+                }
+                Instr::DirectEval {
+                    dst,
+                    callee,
+                    args,
+                    argc,
+                } => {
+                    let argv = take_range(frame, args, argc)?;
+                    let callee = frame.registers[callee as usize].clone_for_execution();
+                    frame.registers[dst as usize] =
+                        if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
+                            crate::builtins::eval_direct(interp, argv)?
+                        } else {
+                            interp.call_this(&callee, Value::Undefined, argv)?
+                        };
+                }
+                Instr::DirectEvalSpread { dst, callee, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let argv = spread_argv(frame, &template)?;
+                    let callee = frame.registers[callee as usize].clone_for_execution();
+                    frame.registers[dst as usize] =
+                        if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
+                            crate::builtins::eval_direct(interp, argv)?
+                        } else {
+                            interp.call_this(&callee, Value::Undefined, argv)?
+                        };
                 }
                 Instr::Call {
                     dst,
@@ -969,7 +1002,9 @@ fn run_loop(
                         ));
                     };
                     let key = frame.registers[key as usize].clone_for_execution();
-                    frame.registers[dst as usize] = interp.get_prop_value(&proto, &key)?;
+                    let receiver = interp.resolve_this(&scope)?;
+                    frame.registers[dst as usize] =
+                        interp.get_prop_value_with_receiver(&proto, &key, &receiver)?;
                 }
                 Instr::SuperCall { dst, args, argc } => {
                     let argv = take_range(frame, args, argc)?;
@@ -1034,6 +1069,12 @@ fn run_loop(
                 Instr::Await { dst, src } => {
                     let value = frame.registers[src as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.perform_await(value)?;
+                }
+                Instr::NewTarget { dst } => {
+                    frame.registers[dst as usize] =
+                        interp.global.borrow().new_target().ok_or_else(|| {
+                            VmErr::Msg("SyntaxError: new.target outside a function".into())
+                        })?;
                 }
                 Instr::ImportMeta { dst } => {
                     frame.registers[dst as usize] = interp.eval_import_meta()?;
@@ -1158,6 +1199,8 @@ fn class_function(
     closure: Env,
     name_override: Option<Rc<str>>,
 ) -> Result<Value, VmErr> {
+    let closure = Rc::new(RefCell::new(Environment::child(closure)));
+    closure.borrow_mut().replace_strict(Some(true));
     match frame.function.constants.get(index as usize) {
         Some(Constant::Function(code)) => Ok(make_function(interp, code, closure, name_override)),
         Some(Constant::AstFunction(ast)) => {
@@ -1187,7 +1230,12 @@ fn build_class_from_template(
         .superclass
         .map(|reg| frame.registers[reg as usize].clone_for_execution());
     let super_proto = interp.super_proto_for(&super_cls)?;
-    let member_closure = Interpreter::member_closure_env(&def_scope, &super_proto);
+    let member_scope = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+    for name in &template.private_fields {
+        member_scope.borrow_mut().declare_private_field(name);
+    }
+    let member_closure = Interpreter::member_closure_env(&member_scope, &super_proto);
+    member_closure.borrow_mut().replace_strict(Some(true));
 
     let mut proto_props = Vec::new();
     let mut statics = vec![(
@@ -1262,7 +1310,7 @@ fn build_class_from_template(
                     ));
                     static_has_accessors = true;
                 } else {
-                    proto_props.push((key, fn_val));
+                    insert_class_accessor(&mut proto_props, &key, fn_val);
                 }
             }
             ClassMemberKind::Field => {
@@ -1278,9 +1326,9 @@ fn build_class_from_template(
 
     let super_ctor_value = Interpreter::super_ctor_for(&super_cls);
     let ctor_closure = match (&super_ctor_value, template.ctor_computed_keys.is_empty()) {
-        (None, true) => def_scope.clone(),
+        (None, true) => member_closure.clone(),
         _ => {
-            let env = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+            let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
             if let Some(target) = super_ctor_value {
                 env.borrow_mut().set("__super_ctor", target);
             }
@@ -1618,6 +1666,7 @@ fn make_function(
         .map(|slot| slot.name.clone())
         .collect();
     Value::Function(Rc::new(FunctionData {
+        strict: closure.borrow().strict() || code.strict,
         native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| code.name.as_deref().map(Rc::from)),
@@ -1656,6 +1705,7 @@ fn make_ast_function(
     name_override: Option<Rc<str>>,
 ) -> Value {
     Value::Function(Rc::new(FunctionData {
+        strict: closure.borrow().strict() || crate::parser::use_strict(&ast.body),
         native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| ast.name.as_deref().map(Rc::from)),

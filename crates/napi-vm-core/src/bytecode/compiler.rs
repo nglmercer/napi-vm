@@ -82,9 +82,12 @@ impl Decline {
 pub fn compile_program(stmts: &[Statement]) -> Result<BytecodeModule, Unsupported> {
     let mut compiler = Compiler::top_level();
     match compiler.compile_top(stmts, false) {
-        Ok(main) => Ok(BytecodeModule {
-            main: Rc::new(main),
-        }),
+        Ok(mut main) => {
+            main.strict = crate::parser::use_strict(stmts);
+            Ok(BytecodeModule {
+                main: Rc::new(main),
+            })
+        }
         Err(decline) => Err(Unsupported {
             reason: decline.reason(),
         }),
@@ -193,10 +196,12 @@ enum PatternKeyView<'a> {
 }
 #[derive(Clone)]
 enum PatternView<'a> {
+    Elision,
     Ident(&'a str),
     Member {
         object: &'a Expr,
         property: &'a Expr,
+        private: bool,
     },
     Array(Vec<PatternView<'a>>),
     Object(Vec<(PatternKeyView<'a>, Option<PatternView<'a>>)>),
@@ -206,8 +211,17 @@ enum PatternView<'a> {
 impl<'a> PatternView<'a> {
     fn from_pattern(p: &'a Pattern) -> Self {
         match p {
+            Pattern::Elision => Self::Elision,
             Pattern::Ident(n) => Self::Ident(n),
-            Pattern::Member { object, property } => Self::Member { object, property },
+            Pattern::Member {
+                object,
+                property,
+                private,
+            } => Self::Member {
+                object,
+                property,
+                private: *private,
+            },
             Pattern::Array(v) => Self::Array(v.iter().map(Self::from_pattern).collect()),
             Pattern::Object(v) => Self::Object(
                 v.iter()
@@ -230,13 +244,20 @@ impl<'a> PatternView<'a> {
         Some(match e {
             Expr::Identifier(n) => Self::Ident(n),
             Expr::Member {
-                object, property, ..
-            } => Self::Member { object, property },
+                object,
+                property,
+                computed,
+            } => Self::Member {
+                object,
+                property,
+                private: !computed
+                    && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
+            },
             Expr::Array(v) => Self::Array(
                 v.iter()
                     .map(|e| match e {
                         Expr::Spread(v) => Some(Self::Rest(Box::new(Self::from_expr(v)?))),
-                        Expr::Undefined => Some(Self::Ident("hole")),
+                        Expr::Undefined => Some(Self::Elision),
                         e => Self::from_expr(e),
                     })
                     .collect::<Option<_>>()?,
@@ -1103,6 +1124,7 @@ impl<'a> Compiler<'a> {
                 )
             });
         Ok(BytecodeFunction {
+            strict: false,
             name,
             code,
             constants: std::mem::take(&mut self.constants),
@@ -1265,7 +1287,10 @@ impl<'a> Compiler<'a> {
             }
         }
         self.finish_functions()?;
-        self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)
+        let mut code =
+            self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)?;
+        code.strict = matches!(body, FuncBody::Stmts(stmts) if crate::parser::use_strict(stmts));
+        Ok(code)
     }
 
     // -- blocks and statements ---------------------------------------------
@@ -1355,6 +1380,12 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 self.load_undefined()
+            }
+            Statement::ParameterInitialization { .. } => {
+                Err(Decline::Func("separate parameter environment"))
+            }
+            Statement::ClassInitialization { .. } => {
+                Err(Decline::Func("constructor initialization environment"))
             }
             Statement::Declarations(inner) => {
                 for stmt in inner {
@@ -1645,7 +1676,14 @@ impl<'a> Compiler<'a> {
     ) -> Result<(), Decline> {
         match pat {
             PatternView::Ident(name) => self.compile_pattern_ident(name, val, mode),
-            PatternView::Member { object, property } => {
+            PatternView::Member {
+                object,
+                property,
+                private,
+            } => {
+                if private {
+                    return Err(Decline::Func("private destructuring writes"));
+                }
                 if matches!(object, Expr::Super) {
                     // The reference fails before the property evaluates.
                     return self.raise_bare_super().map(|_| ());
@@ -1679,6 +1717,7 @@ impl<'a> Compiler<'a> {
                     let key = self.load_const(position)?;
                     let found = self.alloc_reg()?;
                     self.emit(Instr::GetProp {
+                        private: false,
                         cache: 0,
                         dst: found,
                         obj: arr,
@@ -1733,6 +1772,7 @@ impl<'a> Compiler<'a> {
                     taken.push(key_reg);
                     let found = self.alloc_reg()?;
                     self.emit(Instr::GetProp {
+                        private: false,
                         cache: 0,
                         dst: found,
                         obj: val,
@@ -1754,7 +1794,7 @@ impl<'a> Compiler<'a> {
             }
             // A rest element only binds at the top of an array pattern; a
             // bare one anywhere else falls through, like the evaluator.
-            PatternView::Rest(_) => Ok(()),
+            PatternView::Elision | PatternView::Rest(_) => Ok(()),
             PatternView::Default(inner, default) => {
                 let value = self.alloc_reg()?;
                 self.emit(Instr::Mov {
@@ -1813,6 +1853,7 @@ impl<'a> Compiler<'a> {
         // Instance field keys in field order: a static name, or the index
         // into `ctor_computed_keys` holding the evaluated key.
         let mut instance_fields: Vec<(FieldKey, Option<&'a Expr>)> = Vec::new();
+        let mut private_fields = Vec::new();
         let mut ctor: Option<OwnedCtor<'a>> = None;
 
         for member in body {
@@ -1886,6 +1927,11 @@ impl<'a> Compiler<'a> {
                             value: Some(value),
                         });
                     } else {
+                        if let ClassNameTemplate::Static(name) = &template
+                            && name.starts_with('#')
+                        {
+                            private_fields.push(name.clone());
+                        }
                         let key = match template {
                             ClassNameTemplate::Static(key) => FieldKey::Static(key),
                             ClassNameTemplate::Computed(reg) => {
@@ -1988,10 +2034,7 @@ impl<'a> Compiler<'a> {
 
         let (ctor_params, ctor_body) =
             Self::class_ctor_body(superclass.is_some(), ctor, &instance_fields);
-        let ctor_length = ctor_params
-            .iter()
-            .take_while(|param| !param.starts_with("..."))
-            .count();
+        let ctor_length = crate::parser::formal_parameter_length(&ctor_params, &ctor_body);
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
             FuncDef {
@@ -2007,6 +2050,7 @@ impl<'a> Compiler<'a> {
         ));
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
+            private_fields,
             name: name.to_string(),
             expr_name,
             superclass,
@@ -2072,9 +2116,6 @@ impl<'a> Compiler<'a> {
             ),
             None => (SharedSlice::Borrowed(&[]), SharedSlice::Borrowed(&[])),
         };
-        if instance_fields.is_empty() {
-            return (params, body);
-        }
         let mut full = Vec::with_capacity(instance_fields.len() + body.len());
         for (key, init) in instance_fields {
             let (property, computed) = match key {
@@ -2092,6 +2133,14 @@ impl<'a> Compiler<'a> {
                 op: AssignOp::Assign,
                 value: Box::new(init.cloned().unwrap_or(Expr::Undefined)),
             }));
+        }
+        let fields = full;
+        let mut full = Vec::new();
+        if is_derived || !fields.is_empty() {
+            full.push(Statement::ClassInitialization {
+                derived: is_derived,
+                fields,
+            });
         }
         full.extend(body.iter().cloned());
         (params, SharedSlice::Owned(Rc::from(full)))
@@ -2468,6 +2517,7 @@ impl<'a> Compiler<'a> {
         let length_key = self.load_const(length_key)?;
         let len = self.alloc_reg()?;
         self.emit(Instr::GetProp {
+            private: false,
             cache: 0,
             dst: len,
             obj: keys,
@@ -2500,6 +2550,7 @@ impl<'a> Compiler<'a> {
         });
         let key = self.alloc_reg()?;
         self.emit(Instr::GetProp {
+            private: false,
             cache: 0,
             dst: key,
             obj: keys,
@@ -3029,12 +3080,28 @@ impl<'a> Compiler<'a> {
     // -- expressions -------------------------------------------------------
 
     fn compile_expr(&mut self, expr: &'a Expr) -> Result<Reg, Decline> {
+        let target = match expr {
+            Expr::Assignment { target, .. } | Expr::LogicalAssignment { target, .. } => {
+                Some(target.as_ref())
+            }
+            Expr::Unary {
+                op: UnOp::Inc | UnOp::Dec,
+                operand,
+                ..
+            } => Some(operand.as_ref()),
+            _ => None,
+        };
+        if matches!(target, Some(Expr::Member { property, computed: false, .. })
+            if matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')))
+        {
+            return Err(Decline::Func("private field writes"));
+        }
         match expr {
             Expr::Number(value) => {
                 let index = self.intern_number(*value)?;
                 self.load_const(index)
             }
-            Expr::String(value) => {
+            Expr::String(value) | Expr::EscapedString(value) => {
                 let index = self.push_const(Constant::String(value.clone()))?;
                 self.load_const(index)
             }
@@ -3061,7 +3128,9 @@ impl<'a> Compiler<'a> {
             } => self.compile_unary(*op, operand, *prefix),
             Expr::Call { callee, args } => self.compile_call(callee, args),
             Expr::Member {
-                object, property, ..
+                object,
+                property,
+                computed,
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     let key = self.compile_expr(property)?;
@@ -3073,6 +3142,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: !computed && matches!(property.as_ref(), Expr::String(key) if key.to_key().starts_with('#')),
                     cache: 0,
                     dst,
                     obj,
@@ -3195,6 +3265,11 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::DynamicImport { dst, src });
                 Ok(dst)
             }
+            Expr::NewTarget => {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::NewTarget { dst });
+                Ok(dst)
+            }
             Expr::ImportMeta => {
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::ImportMeta { dst });
@@ -3295,7 +3370,7 @@ impl<'a> Compiler<'a> {
                 ObjectProp::Computed(key_expression, value_expression) => {
                     match key_expression {
                         // Statically known keys skip the normalization check.
-                        Expr::String(key) => {
+                        Expr::String(key) | Expr::EscapedString(key) => {
                             let val = self.compile_expr(value_expression)?;
                             let key = self.intern_string(&key.to_key())?;
                             template.push(PropEntry {
@@ -3674,6 +3749,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: false,
                     cache: 0,
                     dst: callee,
                     obj,
@@ -3779,6 +3855,18 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
+        let direct_eval = matches!(callee, Expr::Identifier(name) if name == "eval");
+        if direct_eval && (!self.top_level || self.scopes.len() != 1) {
+            // Dynamic access must see every lexical binding, including locals
+            // normally held only in registers. Keep the AST path until frames
+            // can materialize the complete environment for direct eval.
+            return Err(Decline::Func("direct eval requires a lexical environment"));
+        }
+        let evaluated_eval = if direct_eval {
+            Some(self.compile_expr(callee)?)
+        } else {
+            None
+        };
         // The callee shape is syntactic, so classify before emitting: method
         // calls keep their receiver, chains join on nullish, `super`
         // declines.
@@ -3846,7 +3934,9 @@ impl<'a> Compiler<'a> {
         match kind {
             Callee::Method => {
                 let Expr::Member {
-                    object, property, ..
+                    object,
+                    property,
+                    computed,
                 } = callee
                 else {
                     return Err(Decline::Func("callee shape changed"));
@@ -3855,6 +3945,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let callee = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: !computed && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
                     cache: 0,
                     dst: callee,
                     obj,
@@ -3881,18 +3972,34 @@ impl<'a> Compiler<'a> {
                 }
             }
             Callee::Plain => {
-                let callee = self.compile_expr(callee)?;
+                let callee = match evaluated_eval {
+                    Some(reg) => reg,
+                    None => self.compile_expr(callee)?,
+                };
                 match call_args {
                     CallArgs::Range { start, argc } => {
-                        self.emit(Instr::Call {
-                            dst,
-                            callee,
-                            args: start,
-                            argc,
+                        self.emit(if direct_eval {
+                            Instr::DirectEval {
+                                dst,
+                                callee,
+                                args: start,
+                                argc,
+                            }
+                        } else {
+                            Instr::Call {
+                                dst,
+                                callee,
+                                args: start,
+                                argc,
+                            }
                         });
                     }
                     CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::CallSpread { dst, callee, tmpl });
+                        self.emit(if direct_eval {
+                            Instr::DirectEvalSpread { dst, callee, tmpl }
+                        } else {
+                            Instr::CallSpread { dst, callee, tmpl }
+                        });
                     }
                 }
             }
@@ -3945,6 +4052,7 @@ impl<'a> Compiler<'a> {
                     let key = self.compile_expr(property)?;
                     let callee = self.alloc_reg()?;
                     self.emit(Instr::GetProp {
+                        private: false,
                         cache: 0,
                         dst: callee,
                         obj,
@@ -3992,6 +4100,7 @@ impl<'a> Compiler<'a> {
         let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
         let key = self.compile_expr(property)?;
         self.emit(Instr::GetProp {
+            private: false,
             cache: 0,
             dst: join,
             obj,
@@ -4128,6 +4237,7 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let current = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
+                    private: false,
                     cache: 0,
                     dst: current,
                     obj,

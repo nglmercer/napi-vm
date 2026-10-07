@@ -415,6 +415,7 @@ pub(super) enum NapiExternalBufferFinalizer {
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(super) enum NapiObjectIdentity {
     Global,
+    RealmGlobal(usize),
     Object(usize),
     Array(usize),
     Function(usize),

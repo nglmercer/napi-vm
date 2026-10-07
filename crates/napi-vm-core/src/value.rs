@@ -172,8 +172,10 @@ pub(crate) enum CollectionKind {
 /// makes `Object.setPrototypeOf`, `Object.freeze` and `defineProperty`
 /// observable through every reference to the object rather than through the
 /// one binding they were applied to.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ObjectMeta {
+    /// The realm that owns native methods and implicit intrinsic prototypes.
+    pub(crate) realm_global: Option<Env>,
     pub(crate) collection_kind: Option<CollectionKind>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
@@ -206,9 +208,27 @@ pub struct ObjectMeta {
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
+    /// Lexical private field identities never enter ordinary property storage.
+    pub(crate) private_fields: std::collections::HashMap<u64, Value>,
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
     /// property cell so that value remains compact.
     pub(crate) host_function_id: Option<usize>,
+}
+
+// Prototype and realm edges form cycles. Debug output must not traverse them.
+impl std::fmt::Debug for ObjectMeta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObjectMeta")
+            .field("has_prototype", &self.proto.is_some())
+            .field("uses_default_prototype", &self.uses_default_prototype)
+            .field("attrs", &self.attrs)
+            .field("symbol_keys", &self.symbol_keys)
+            .field("non_extensible", &self.non_extensible)
+            .field("module_namespace", &self.module_namespace)
+            .field("has_accessors", &self.has_accessors)
+            .field("boxed_primitive", &self.boxed_primitive)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ObjectMeta {
@@ -282,6 +302,8 @@ pub struct ArrayCell {
 fn array_meta() -> ObjectMeta {
     let mut meta = ObjectMeta {
         uses_default_prototype: true,
+        proto: crate::interpreter::realm::allocation_prototype("Array"),
+        realm_global: crate::interpreter::realm::allocation_global(),
         ..ObjectMeta::default()
     };
     meta.set_attrs(
@@ -597,7 +619,9 @@ impl ArrayCell {
             out.extend(named.iter().map(|(_, v)| v.clone()));
         }
         if let Ok(meta) = self.meta.try_borrow() {
+            out.extend(meta.private_fields.values().cloned());
             out.extend(meta.proto.as_deref().cloned());
+            out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             out.extend(
                 meta.symbol_keys
                     .iter()
@@ -623,7 +647,9 @@ impl ArrayCell {
         };
         elements.clear();
         named.clear();
+        meta.private_fields.clear();
         meta.proto = None;
+        meta.realm_global = None;
         true
     }
 }
@@ -667,6 +693,7 @@ impl ObjectCell {
             slots: RefCell::new(props),
             meta: RefCell::new(ObjectMeta {
                 proto,
+                realm_global: crate::interpreter::realm::allocation_global(),
                 ..ObjectMeta::default()
             }),
             shape: RefCell::new(None),
@@ -680,6 +707,8 @@ impl ObjectCell {
             slots: RefCell::new(props),
             meta: RefCell::new(ObjectMeta {
                 uses_default_prototype: true,
+                proto: crate::interpreter::realm::allocation_prototype("Object"),
+                realm_global: crate::interpreter::realm::allocation_global(),
                 ..ObjectMeta::default()
             }),
             shape: RefCell::new(None),
@@ -711,7 +740,9 @@ impl ObjectCell {
             out.extend(slots.iter().map(|(_, v)| v.clone()));
         }
         if let Ok(meta) = self.meta.try_borrow() {
+            out.extend(meta.private_fields.values().cloned());
             out.extend(meta.proto.as_deref().cloned());
+            out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             if let Some(BoxedPrimitive::Symbol(symbol)) = &meta.boxed_primitive {
                 out.push(Value::Symbol(symbol.clone()));
             }
@@ -741,7 +772,9 @@ impl ObjectCell {
             *weak = weak::WeakStorage::None;
         }
         meta.symbol_keys.clear();
+        meta.private_fields.clear();
         meta.proto = None;
+        meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access
         // rebuilds instead of answering from a stale layout.
         if let Ok(mut shape) = self.shape.try_borrow_mut() {
@@ -935,6 +968,8 @@ pub struct BoundFunctionData {
 /// Payload of `Value::Function`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct FunctionData {
+    /// Strictness captured at function creation, independent of its caller.
+    pub strict: bool,
     /// Native implementation with ordinary function identity and properties.
     pub native: Option<crate::builtins::NativeFn>,
     /// Shared identity for this function object. Cloning a VM `Value` keeps the
@@ -987,7 +1022,7 @@ impl FunctionData {
     pub fn default_function_prototype(global: &Env) -> Option<Value> {
         global
             .borrow()
-            .get("Function")
+            .intrinsic("Function")
             .and_then(|constructor| constructor.get_prop("prototype"))
     }
 
@@ -1001,6 +1036,34 @@ impl FunctionData {
         properties
     }
 
+    pub(crate) fn needs_arguments_object(&self) -> bool {
+        if self.is_arrow
+            || self
+                .params
+                .iter()
+                .any(|name| name.trim_start_matches("...") == "arguments")
+        {
+            return false;
+        }
+        let non_simple = if let Some(Statement::ParameterInitialization { initializers, .. }) = self
+            .body
+            .iter()
+            .find(|stmt| !matches!(stmt, Statement::ClassInitialization { .. }))
+        {
+            if initializers.iter().any(|initializer| {
+                matches!(initializer,
+                Statement::VarDecl { destructuring: Some(pattern), .. }
+                if crate::parser::pattern_names(pattern).iter().any(|name| name == "arguments"))
+            }) {
+                return false;
+            }
+            true
+        } else {
+            false
+        };
+        self.uses_arguments || non_simple
+    }
+
     pub fn ensure_name_length_properties(&self) {
         if self.standard_properties_initialized.replace(true) {
             return;
@@ -1010,10 +1073,7 @@ impl FunctionData {
             properties.push((
                 "length".to_string(),
                 Value::Number(
-                    self.params
-                        .iter()
-                        .take_while(|parameter| !parameter.starts_with("..."))
-                        .count() as f64,
+                    crate::parser::formal_parameter_length(&self.params, &self.body) as f64,
                 ),
             ));
             self.properties.meta.borrow_mut().set_attrs(
@@ -1122,10 +1182,27 @@ pub struct ClassData {
     pub statics: Rc<ObjectCell>,
 }
 
+/// Date state and ordinary own-property/prototype storage.
+#[derive(Debug)]
+pub struct DateData {
+    pub properties: Rc<ObjectCell>,
+    milliseconds: std::cell::Cell<f64>,
+}
+
+impl std::ops::Deref for DateData {
+    type Target = std::cell::Cell<f64>;
+    fn deref(&self) -> &Self::Target {
+        &self.milliseconds
+    }
+}
+
 /// Payload of `Value::RegExp`.
 #[derive(Debug)]
 pub struct RegExpData {
-    pub regex: crate::regex::Regex,
+    pub properties: Rc<ObjectCell>,
+    pub regex: RefCell<crate::regex::Regex>,
+    /// Legacy RegExp methods are disabled when constructed with a distinct newTarget.
+    pub legacy_enabled: std::cell::Cell<bool>,
     /// Where the next `g`/`y` search starts. Guest-writable.
     pub last_index: std::cell::Cell<usize>,
 }
@@ -1164,11 +1241,27 @@ impl BufferStorage {
 /// at memory owned by a trusted native addon; that addon must keep it valid
 /// until its Node-API finalizer runs and synchronize any concurrent access.
 #[derive(Debug, Clone)]
-pub struct Buffer(Rc<RefCell<BufferStorage>>);
+pub struct Buffer(Rc<BufferData>);
+
+#[derive(Debug)]
+struct BufferData {
+    storage: RefCell<BufferStorage>,
+    properties: Rc<ObjectCell>,
+}
+
+impl std::ops::Deref for BufferData {
+    type Target = RefCell<BufferStorage>;
+    fn deref(&self) -> &Self::Target {
+        &self.storage
+    }
+}
 
 impl Buffer {
     pub fn owned(bytes: Vec<u8>) -> Self {
-        Self(Rc::new(RefCell::new(BufferStorage::Owned(bytes))))
+        Self(Rc::new(BufferData {
+            storage: RefCell::new(BufferStorage::Owned(bytes)),
+            properties: Value::instance_properties(),
+        }))
     }
 
     pub fn zeroed(length: usize) -> Self {
@@ -1186,10 +1279,10 @@ impl Buffer {
             None if length == 0 => NonNull::dangling(),
             None => return None,
         };
-        Some(Self(Rc::new(RefCell::new(BufferStorage::External {
-            data,
-            length,
-        }))))
+        Some(Self(Rc::new(BufferData {
+            storage: RefCell::new(BufferStorage::External { data, length }),
+            properties: Value::instance_properties(),
+        })))
     }
 
     pub fn borrow(&self) -> Ref<'_, [u8]> {
@@ -1345,6 +1438,7 @@ impl Drop for SharedByteStorage {
 /// identity. Its byte store is separate from ordinary `ArrayBuffer` storage.
 #[derive(Debug)]
 struct SharedArrayBufferData {
+    properties: Rc<ObjectCell>,
     bytes: Rc<SharedByteStorage>,
 }
 
@@ -1372,6 +1466,7 @@ impl SharedBuffer {
         // SharedByteStorage::drop.
         let data = NonNull::new(unsafe { alloc_zeroed(layout) })?;
         Some(Self(Rc::new(SharedArrayBufferData {
+            properties: Value::instance_properties(),
             bytes: Rc::new(SharedByteStorage::Owned {
                 data,
                 length,
@@ -1394,6 +1489,7 @@ impl SharedBuffer {
             None => return None,
         };
         Some(Self(Rc::new(SharedArrayBufferData {
+            properties: Value::instance_properties(),
             bytes: Rc::new(SharedByteStorage::External { data, length }),
         })))
     }
@@ -1592,6 +1688,7 @@ impl SharedBuffer {
     /// data block, as required by the structured clone algorithm.
     pub fn shared_clone(&self) -> Self {
         Self(Rc::new(SharedArrayBufferData {
+            properties: Value::instance_properties(),
             bytes: self.0.bytes.clone(),
         }))
     }
@@ -1747,6 +1844,7 @@ impl TypedKind {
 /// differ only in how they interpret it.
 #[derive(Debug)]
 pub struct TypedArrayData {
+    pub properties: Rc<ObjectCell>,
     pub kind: TypedKind,
     pub buffer: BufferBacking,
     pub byte_offset: usize,
@@ -1864,6 +1962,8 @@ pub enum Value {
     /// `window`; member access on it reads and writes real globals (handled in
     /// `Interpreter::prop` / `assign_member`, which have scope access).
     GlobalObject,
+    /// A global object with realm identity and realm-owned environment storage.
+    RealmGlobal(Env),
     Class(Box<ClassData>),
     Promise(Rc<RefCell<PromiseInner>>),
     Generator {
@@ -1881,7 +1981,7 @@ pub enum Value {
     Symbol(Rc<SymbolData>),
     /// A `Date`: epoch milliseconds in a shared, mutable cell, so `setTime`
     /// is observed through every reference.
-    Date(Rc<std::cell::Cell<f64>>),
+    Date(Rc<DateData>),
     /// A `Proxy`: a target and the handler whose traps intercept operations
     /// on it. An operation the handler does not trap falls through.
     Proxy(Rc<ProxyData>),
@@ -1951,6 +2051,7 @@ pub struct Reaction {
 /// `Rc<RefCell<…>>` rather than inline in the `Value`.
 #[derive(Debug)]
 pub struct PromiseInner {
+    pub properties: Rc<ObjectCell>,
     pub state: PromiseState,
     /// The promise's resolve or reject function has already been called.
     /// Resolution can remain pending while it adopts a thenable or promise.
@@ -1974,6 +2075,7 @@ impl Default for PromiseInner {
     fn default() -> Self {
         Self {
             state: PromiseState::Pending,
+            properties: Value::instance_properties(),
             resolution_locked: false,
             external_pending: false,
             value: Value::Undefined,
@@ -2039,6 +2141,11 @@ pub enum GenOutcome {
 /// fallback, because `Drop` implementations must never panic.
 #[cfg(stackful_coroutines)]
 pub(crate) fn force_abandon(coroutine: GenCoroutine) {
+    // A suspended stack can hold an allocation guard from an earlier resume.
+    // Its teardown must not restore that stale realm into the host thread.
+    let _allocation_boundary = crate::interpreter::realm::AllocationRealm::enter(
+        crate::interpreter::realm::allocation_global(),
+    );
     struct LeakOnPanic<'a>(&'a mut Option<GenCoroutine>);
     impl Drop for LeakOnPanic<'_> {
         fn drop(&mut self) {
@@ -2143,6 +2250,8 @@ impl GenYielder {
 /// closed. A coroutine keeps everything on one thread, so the question does not
 /// arise: there is no `Send` bound and no `unsafe` in this path.
 pub struct GeneratorInner {
+    /// Formal parameter initialization already ran at generator creation.
+    pub parameters_initialized: bool,
     pub body: Rc<Vec<Statement>>,
     pub closure: Option<Env>,
     pub params: Rc<Vec<Rc<str>>>,
@@ -2212,6 +2321,11 @@ impl GeneratorInner {
         if coroutine.done() {
             return;
         }
+        let owner = self
+            .closure
+            .as_ref()
+            .and_then(crate::interpreter::Environment::find_global);
+        let _allocation_boundary = crate::interpreter::realm::AllocationRealm::enter(owner);
         match coroutine.resume(GenResume::Return) {
             corosensei::CoroutineResult::Return(_) => {}
             corosensei::CoroutineResult::Yield(_) => {
@@ -2251,6 +2365,96 @@ impl GeneratorInner {
 }
 
 impl Value {
+    pub fn instance_properties() -> Rc<ObjectCell> {
+        let properties = ObjectCell::new_with_default_proto(vec![]);
+        // Exotic default prototypes depend on their builtin kind, not Object.
+        properties.meta.borrow_mut().proto = None;
+        crate::heap::tracked(Rc::new(properties))
+    }
+
+    pub fn date(milliseconds: f64) -> Self {
+        Self::Date(Rc::new(DateData {
+            properties: Self::instance_properties(),
+            milliseconds: std::cell::Cell::new(milliseconds),
+        }))
+    }
+
+    pub(crate) fn exotic_properties(&self) -> Option<Rc<ObjectCell>> {
+        Some(match self {
+            Self::Date(data) => data.properties.clone(),
+            Self::RegExp(data) => data.properties.clone(),
+            Self::TypedArray(data) | Self::DataView(data) => data.properties.clone(),
+            Self::ArrayBuffer(buffer) => buffer.0.properties.clone(),
+            Self::SharedArrayBuffer(buffer) => buffer.0.properties.clone(),
+            Self::Promise(inner) => inner.try_borrow().ok()?.properties.clone(),
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn property_cell(&self) -> Option<Rc<ObjectCell>> {
+        match self {
+            Self::Object { props } => Some(props.clone()),
+            Self::Class(class) => Some(class.statics.clone()),
+            Self::Function(function) => Some(function.properties.clone()),
+            Self::HostFunction { properties, .. } => Some(properties.clone()),
+            _ => self.exotic_properties(),
+        }
+    }
+
+    pub(crate) fn private_field(&self, id: u64) -> Result<Value, VmErr> {
+        let value = if let Self::Array(array) = self {
+            array.meta.borrow().private_fields.get(&id).cloned()
+        } else {
+            self.property_cell()
+                .and_then(|properties| properties.meta.borrow().private_fields.get(&id).cloned())
+        };
+        value.ok_or_else(|| {
+            VmErr::Msg("TypeError: receiver does not contain the private field".into())
+        })
+    }
+
+    pub(crate) fn initialize_private_field(&self, id: u64, value: Value) -> Result<(), VmErr> {
+        let insert = |meta: &mut ObjectMeta| {
+            if meta.private_fields.contains_key(&id) {
+                return Err(VmErr::Msg(
+                    "TypeError: private field is already initialized".into(),
+                ));
+            }
+            meta.private_fields.insert(id, value);
+            Ok(())
+        };
+        if let Self::Array(array) = self {
+            insert(&mut array.meta.borrow_mut())
+        } else if let Some(properties) = self.property_cell() {
+            insert(&mut properties.meta.borrow_mut())
+        } else {
+            Err(VmErr::Msg(
+                "TypeError: invalid private field receiver".into(),
+            ))
+        }
+    }
+
+    pub(crate) fn set_private_field(&self, id: u64, value: Value) -> Result<(), VmErr> {
+        let update = |meta: &mut ObjectMeta| {
+            let Some(field) = meta.private_fields.get_mut(&id) else {
+                return Err(VmErr::Msg(
+                    "TypeError: receiver does not contain the private field".into(),
+                ));
+            };
+            *field = value;
+            Ok(())
+        };
+        if let Self::Array(array) = self {
+            update(&mut array.meta.borrow_mut())
+        } else if let Some(properties) = self.property_cell() {
+            update(&mut properties.meta.borrow_mut())
+        } else {
+            Err(VmErr::Msg(
+                "TypeError: invalid private field receiver".into(),
+            ))
+        }
+    }
+
     /// Construct a host-backed callable with JavaScript function own
     /// properties. `name` and `length` are non-enumerable, non-writable,
     /// configurable data properties, as for a native JavaScript function.
@@ -2376,7 +2580,17 @@ impl Value {
         };
         let object = Self::object(Vec::new());
         if let Value::Object { props } = &object {
-            props.meta.borrow_mut().boxed_primitive = Some(boxed);
+            let builtin = match &boxed {
+                BoxedPrimitive::Bool(_) => "Boolean",
+                BoxedPrimitive::Number(_) => "Number",
+                BoxedPrimitive::String(_) => "String",
+                BoxedPrimitive::Symbol(_) => "Symbol",
+                BoxedPrimitive::BigInt(_) => "BigInt",
+            };
+            let prototype = crate::interpreter::realm::allocation_prototype(builtin);
+            let mut meta = props.meta.borrow_mut();
+            meta.proto = prototype;
+            meta.boxed_primitive = Some(boxed);
         }
         Some(object)
     }
@@ -2384,6 +2598,9 @@ impl Value {
     /// The object's prototype link, or `None` for a null prototype / a
     /// non-object receiver.
     pub fn proto_of(&self) -> Option<Rc<Value>> {
+        if let Some(properties) = self.exotic_properties() {
+            return properties.proto();
+        }
         match self {
             Value::Object { props } => props.proto(),
             Value::Array(array) => array.proto(),
@@ -2398,6 +2615,7 @@ impl Value {
     /// `Promise.reject` and a completed async function hand back.
     pub fn settled_promise(state: PromiseState, value: Value) -> Self {
         Value::Promise(crate::heap::tracked(Rc::new(RefCell::new(PromiseInner {
+            properties: Value::instance_properties(),
             state,
             resolution_locked: true,
             external_pending: false,
@@ -2522,6 +2740,14 @@ impl Value {
     }
 
     pub fn get_prop(&self, key: &str) -> Option<Value> {
+        if let Some(properties) = self.exotic_properties() {
+            if let Some(value) = properties.own_value(key) {
+                return Some(value.deref_binding());
+            }
+            if let Some(prototype) = properties.proto() {
+                return prototype.get_prop(key);
+            }
+        }
         if let Value::Function(function) = self {
             if key == "prototype" {
                 return Some(function.prototype_value(self));
@@ -2599,6 +2825,9 @@ impl Value {
 
     /// Insert or replace an own property while enforcing the object cap.
     pub fn set_prop(&self, key: String, val: Value) -> Result<(), VmErr> {
+        if let Some(properties) = self.exotic_properties() {
+            return set_cell_prop(&properties, key, val);
+        }
         match self {
             Value::Array(cell) => {
                 cell.set_named(key, val);
@@ -2616,6 +2845,12 @@ impl Value {
     }
 
     pub fn has_prop(&self, key: &str) -> bool {
+        if let Some(properties) = self.exotic_properties() {
+            return properties.own_value(key).is_some()
+                || properties
+                    .proto()
+                    .is_some_and(|prototype| prototype.has_prop(key));
+        }
         // A proxy without a `has` trap answers for its target. The trap
         // itself is applied by `bin_op`, which can call guest code.
         if let Value::Proxy(proxy) = self {
@@ -2756,6 +2991,25 @@ impl Value {
     /// using `Rc::get_mut`. A borrow conflict — or a shared cell — skips the
     /// drain and falls back to the ordinary recursive drop.
     fn take_children(&mut self, work: &mut Vec<Value>) {
+        let owns_exotic = match self {
+            Value::Date(data) => Rc::strong_count(data) == 1,
+            Value::RegExp(data) => Rc::strong_count(data) == 1,
+            Value::TypedArray(data) | Value::DataView(data) => Rc::strong_count(data) == 1,
+            Value::ArrayBuffer(buffer) => Rc::strong_count(&buffer.0) == 1,
+            Value::SharedArrayBuffer(buffer) => Rc::strong_count(&buffer.0) == 1,
+            Value::Promise(inner) => Rc::strong_count(inner) == 1,
+            _ => false,
+        };
+        if owns_exotic {
+            if let Some(properties) = self.exotic_properties()
+                && Rc::strong_count(&properties) == 2
+            {
+                drain_object_cell(&properties, work);
+            }
+            if let Value::TypedArray(view) | Value::DataView(view) = self {
+                work.push(view.buffer.to_value());
+            }
+        }
         match self {
             Value::Array(items) => {
                 // Only drain when we own the buffer outright; a shared Rc
@@ -2893,10 +3147,10 @@ fn drain_object_cell(cell: &Rc<ObjectCell>, work: &mut Vec<Value>) {
 /// Move a uniquely-owned prototype link onto the work stack. A shared
 /// prototype stays alive elsewhere; its extra reference here is released.
 fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
-    let taken = meta
-        .try_borrow_mut()
-        .ok()
-        .and_then(|mut meta| meta.proto.take());
+    let taken = meta.try_borrow_mut().ok().and_then(|mut meta| {
+        work.extend(meta.private_fields.drain().map(|(_, value)| value));
+        meta.proto.take()
+    });
     if let Some(link) = taken
         && let Ok(inner) = Rc::try_unwrap(link)
     {

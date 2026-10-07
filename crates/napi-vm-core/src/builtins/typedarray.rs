@@ -87,6 +87,48 @@ pub(super) fn install(e: &mut Environment) {
     }
 
     let typed_array_prototype = typed_array_prototype(object_prototype.clone());
+    let abstract_constructor =
+        Value::object(vec![("prototype".into(), typed_array_prototype.clone())]);
+    super::make_callable(
+        &abstract_constructor,
+        abstract_typed_array_constructor,
+        None,
+    );
+    super::set_builtin_constructor_prototype(
+        e,
+        &abstract_constructor,
+        typed_array_prototype.clone(),
+    );
+    abstract_constructor
+        .set_prop("name".into(), Value::String("TypedArray".into()))
+        .expect("typed-array name");
+    abstract_constructor
+        .set_prop("length".into(), Value::Number(0.0))
+        .expect("typed-array length");
+    if let Value::Object { props } = &abstract_constructor {
+        for name in ["name", "length"] {
+            props.meta.borrow_mut().set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+    }
+    typed_array_prototype
+        .set_prop("constructor".into(), abstract_constructor.clone())
+        .expect("typed-array prototype constructor");
+    if let Value::Object { props } = &typed_array_prototype {
+        props.meta.borrow_mut().set_attrs(
+            "constructor",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
+    }
     for (name, kind) in KINDS {
         // The constructors are not in the pre-seeded global list, so declare
         // them here with their element size as a static.
@@ -147,6 +189,9 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
+        if let Value::Object { props } = &namespace {
+            props.set_proto(Some(Rc::new(abstract_constructor.clone())));
+        }
         e.set(name, namespace);
     }
 }
@@ -227,6 +272,28 @@ fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
                 .meta
                 .borrow_mut()
                 .set_symbol_key(&slot, symbol.clone());
+        }
+    }
+    for (name, getter) in [
+        ("buffer", typed_buffer_getter as super::NativeFn),
+        ("byteLength", typed_byte_length_getter),
+        ("byteOffset", typed_byte_offset_getter),
+        ("length", typed_length_getter),
+    ] {
+        prototype
+            .set_prop(name.into(), super::nf(&format!("get {name}"), getter))
+            .expect("typed-array getter");
+        if let Value::Object { props } = &prototype {
+            let mut metadata = props.meta.borrow_mut();
+            metadata.has_accessors = true;
+            metadata.set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
         }
     }
     if let Value::Object { props } = &prototype {
@@ -331,20 +398,30 @@ fn new_buffer(byte_length: usize) -> Result<Buffer, VmErr> {
     Ok(Buffer::zeroed(byte_length))
 }
 
-fn new_array_buffer(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let length = a.first().map(|v| v.to_number()).unwrap_or(0.0);
-    if !length.is_finite() || length < 0.0 {
-        return Err(range_err("Invalid array buffer length"));
+fn constructor_index(interp: &mut Interpreter, value: Option<&Value>) -> Result<usize, VmErr> {
+    let number = interp.ecmascript_to_number(value.unwrap_or(&Value::Undefined))?;
+    let integer = if number.is_nan() { 0.0 } else { number.trunc() };
+    if !integer.is_finite()
+        || integer < 0.0
+        || integer > 9_007_199_254_740_991.0
+        || integer > usize::MAX as f64
+    {
+        return Err(range_err("Invalid buffer index"));
     }
-    Ok(Value::ArrayBuffer(new_buffer(length as usize)?))
+    Ok(integer as usize)
 }
 
-fn new_shared_array_buffer(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let length = a.first().map(|v| v.to_number()).unwrap_or(0.0);
-    if !length.is_finite() || length < 0.0 {
-        return Err(range_err("Invalid shared array buffer length"));
-    }
-    let length = length as usize;
+fn new_array_buffer(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let length = constructor_index(interp, a.first())?;
+    Ok(Value::ArrayBuffer(new_buffer(length)?))
+}
+
+fn new_shared_array_buffer(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let length = constructor_index(interp, a.first())?;
     if length > crate::value::MAX_ARRAY_LEN * 8 {
         return Err(range_err("Invalid shared array buffer length"));
     }
@@ -875,6 +952,9 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
         // A typed array or any iterable copies element-wise.
         Some(source) => {
             let items = match source {
+                Value::Symbol(_) | Value::BigInt(_) => {
+                    return Err(VmErr::Msg("TypeError: Invalid typed array length".into()));
+                }
                 Value::TypedArray(view) => read_all(view),
                 other => interp.iterate(other)?,
             };
@@ -907,6 +987,7 @@ pub(crate) fn typed_with_buffer(
     is_buffer: bool,
 ) -> Value {
     Value::TypedArray(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
         kind,
         buffer: buffer.into(),
         byte_offset,
@@ -1313,12 +1394,13 @@ fn shared_array_buffer_slice(
 
 // --- DataView ---------------------------------------------------------------
 
-fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let Some(value @ (Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_))) = a.first() else {
         return Err(VmErr::Msg(
             "TypeError: First argument to DataView constructor must be an ArrayBuffer".to_string(),
         ));
     };
+    let byte_offset = constructor_index(interp, a.get(1))?;
     if matches!(value, Value::ArrayBuffer(buffer) if buffer.is_detached()) {
         return Err(VmErr::Msg(
             "TypeError: Cannot construct a DataView from a detached ArrayBuffer".to_string(),
@@ -1330,13 +1412,12 @@ fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
         _ => unreachable!(),
     };
     let available = backing.len();
-    let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0).max(0.0) as usize;
     if byte_offset > available {
         return Err(range_err("Start offset is outside the buffer"));
     }
     let byte_length = match a.get(2) {
         Some(Value::Undefined) | None => available - byte_offset,
-        Some(v) => v.to_number().max(0.0) as usize,
+        Some(v) => constructor_index(interp, Some(v))?,
     };
     if byte_offset
         .checked_add(byte_length)
@@ -1345,6 +1426,7 @@ fn new_data_view(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
         return Err(range_err("Invalid DataView length"));
     }
     Ok(Value::DataView(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
         kind: TypedKind::Uint8,
         buffer: backing,
         byte_offset,
@@ -1385,6 +1467,7 @@ fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<Typed
         return Err(range_err("Offset is outside the DataView"));
     }
     Ok(Rc::new(TypedArrayData {
+        properties: Value::instance_properties(),
         kind,
         buffer: view.buffer.clone(),
         byte_offset: view.effective_byte_offset() + offset,
@@ -1510,6 +1593,40 @@ data_view_accessors!(
         "setBigUint64"
     ),
 );
+
+fn typed_buffer_getter(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(require(&this)?.buffer.to_value())
+}
+fn typed_byte_length_getter(
+    _: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let view = require(&this)?;
+    Ok(Value::Number(
+        (view.effective_length() * view.kind.size()) as f64,
+    ))
+}
+fn typed_byte_offset_getter(
+    _: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    Ok(Value::Number(require(&this)?.effective_byte_offset() as f64))
+}
+fn typed_length_getter(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(require(&this)?.effective_length() as f64))
+}
+
+fn abstract_typed_array_constructor(
+    _: &mut Interpreter,
+    _: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    Err(VmErr::Msg(
+        "TypeError: Abstract TypedArray constructor cannot be invoked".into(),
+    ))
+}
 
 #[cfg(test)]
 mod tests {

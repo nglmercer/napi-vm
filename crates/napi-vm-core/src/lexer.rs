@@ -19,6 +19,8 @@ pub enum Token {
     /// parse as `x = foo` and run.
     Unknown(char),
     String(crate::JsString),
+    /// A string literal containing escapes; it cannot be a Use Strict Directive.
+    EscapedString(crate::JsString),
     Identifier(String),
     Plus,
     Minus,
@@ -768,6 +770,7 @@ impl Lexer {
                 Token::Identifier(_)
                     | Token::Number(_)
                     | Token::String(_)
+                    | Token::EscapedString(_)
                     | Token::Regex(_, _)
                     | Token::RParen
                     | Token::RBracket
@@ -937,16 +940,22 @@ impl Lexer {
         self.pos += 1;
         self.col += 1;
         let mut text = crate::JsString::default();
+        let mut escaped = false;
         while let Some(&c) = self.src.get(self.pos) {
             self.pos += 1;
             self.col += 1;
             if c == q {
-                return Token::String(text);
+                return if escaped {
+                    Token::EscapedString(text)
+                } else {
+                    Token::String(text)
+                };
             }
             if c == '\n' || c == '\r' {
                 return Token::Unknown(c);
             }
             if c == '\\' {
+                escaped = true;
                 match self.read_escape() {
                     Ok(s) => text.push_str(s),
                     Err(()) => return Token::Unknown('\\'),
@@ -1281,7 +1290,7 @@ mod tests {
     fn test_string_escapes() {
         let mut lex = Lexer::new(r#""hello\nworld""#);
         let toks = lex.tokenize();
-        assert_eq!(toks[0], Token::String("hello\nworld".into()));
+        assert_eq!(toks[0], Token::EscapedString("hello\nworld".into()));
     }
 
     #[test]

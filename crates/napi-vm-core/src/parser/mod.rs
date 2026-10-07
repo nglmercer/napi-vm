@@ -5,9 +5,19 @@ mod expr;
 mod index;
 mod primary;
 mod stmt;
+mod validate;
+pub(crate) use validate::use_strict;
 
 pub use ast::*;
-pub use cache::parse_cached;
+pub use cache::{parse_cached, parse_cached_with_goal};
+
+/// Grammar goal; Auto preserves the existing embedding API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParseGoal {
+    Auto,
+    Script,
+    Module,
+}
 pub use index::{DeclKind, Entry, Occurrence, ScopeNode, SymbolIndex};
 
 use crate::lexer::Token;
@@ -41,7 +51,7 @@ fn describe(token: &Token) -> String {
     match token {
         Token::EOF => "end of input".to_string(),
         Token::Number(n) => format!("number `{n}`"),
-        Token::String(s) => format!("string `{s}`"),
+        Token::String(s) | Token::EscapedString(s) => format!("string `{s}`"),
         Token::Identifier(name) => format!("`{name}`"),
         Token::Unknown(c) => format!("`{c}`"),
         other => format!("`{other:?}`"),
@@ -145,6 +155,39 @@ impl Parser {
     /// This is what execution should use: running the salvaged half of a
     /// malformed program is worse than reporting where it broke.
     pub fn parse_program(&mut self) -> Result<Vec<Statement>, ParseError> {
+        self.parse_program_in_context(false)
+    }
+
+    /// Eval inherits the caller's lexical new.target context.
+    #[doc(hidden)]
+    pub fn parse_program_in_context(
+        &mut self,
+        new_target: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_with_goal_context(ParseGoal::Auto, new_target, false)
+    }
+
+    pub fn parse_program_with_goal(
+        &mut self,
+        goal: ParseGoal,
+    ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_with_goal_context(goal, false, false)
+    }
+
+    pub(crate) fn parse_eval_context(
+        &mut self,
+        new_target: bool,
+        strict: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
+        self.parse_with_goal_context(ParseGoal::Script, new_target, strict)
+    }
+
+    fn parse_with_goal_context(
+        &mut self,
+        goal: ParseGoal,
+        new_target: bool,
+        strict: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
         #[cfg(any(test, feature = "test-hooks"))]
         PARSE_PROGRAM_COUNT.with(|count| count.set(count.get() + 1));
         let stmts = self.parse();
@@ -156,7 +199,52 @@ impl Parser {
         }
         match self.error.take() {
             Some(error) => Err(error),
-            None => Ok(stmts),
+            None => {
+                validate::validate(&stmts, new_target, strict, goal).map_err(|message| {
+                    ParseError {
+                        message,
+                        span: Span::unknown(),
+                    }
+                })?;
+                Ok(stmts)
+            }
+        }
+    }
+
+    pub(crate) fn check_parameters(
+        &mut self,
+        params: &[String],
+        defaults: &[Statement],
+        body: &[Statement],
+        unique: bool,
+    ) {
+        let non_simple = !defaults.is_empty() || params.iter().any(|p| p.starts_with("..."));
+        let strict = validate::use_strict(body);
+        if non_simple && strict {
+            self.record_error("use strict directive with non-simple parameters".into());
+        }
+        let mut seen = std::collections::HashSet::new();
+        let mut names: Vec<String> = params
+            .iter()
+            .filter(|p| !p.starts_with("*pattern"))
+            .map(|p| p.trim_start_matches("...").to_owned())
+            .collect();
+        for stmt in defaults {
+            if let Statement::VarDecl {
+                destructuring: Some(pattern),
+                ..
+            } = stmt
+            {
+                names.extend(pattern_names(pattern));
+            }
+        }
+        for name in names {
+            if !seen.insert(name.clone()) && (unique || strict || non_simple) {
+                self.record_error(format!("duplicate parameter: {name}"));
+            }
+            if strict && matches!(name.as_str(), "eval" | "arguments") {
+                self.record_error(format!("invalid strict-mode parameter: {name}"));
+            }
         }
     }
 
@@ -304,6 +392,7 @@ impl Parser {
                 self.peek(),
                 Token::Identifier(_)
                     | Token::String(_)
+                    | Token::EscapedString(_)
                     | Token::Number(_)
                     | Token::LBracket
                     | Token::KwGet
