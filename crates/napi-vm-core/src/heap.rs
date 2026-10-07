@@ -471,6 +471,17 @@ impl Marker {
                         self.borrowed = true;
                         continue;
                     };
+                    if let Some(modules) = &borrowed.module_realm {
+                        match modules.roots() {
+                            Ok(roots) => {
+                                self.mark_modules(&roots.modules);
+                                for value in roots.values {
+                                    self.mark_value(&value);
+                                }
+                            }
+                            Err(()) => self.borrowed = true,
+                        }
+                    }
                     for child in borrowed.trace_values() {
                         self.mark_value(&child);
                     }

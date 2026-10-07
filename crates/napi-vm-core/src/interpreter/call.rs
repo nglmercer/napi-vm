@@ -1298,6 +1298,13 @@ impl Interpreter {
             }
             let owner =
                 super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+            let saved_modules = self.enter_module_realm(&owner);
+            let saved_module = std::mem::replace(
+                &mut self.cur_mod,
+                fd.closure
+                    .as_ref()
+                    .and_then(|env| env.borrow().module_context()),
+            );
             let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
             let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
             let parent_env = fd.closure.clone().unwrap_or_else(|| self.global.clone());
@@ -1320,6 +1327,8 @@ impl Interpreter {
                 })
             }));
             self.persistent_global = saved_persistent;
+            self.cur_mod = saved_module;
+            saved_modules.install(self);
             if let Err(panic) = outcome {
                 self.pop_frame();
                 std::panic::resume_unwind(panic);
@@ -1347,6 +1356,7 @@ impl Interpreter {
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
         let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+        let saved_modules = self.enter_module_realm(&owner);
         let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
         let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
         let module = match f {
@@ -1363,6 +1373,7 @@ impl Interpreter {
             self.cur_mod = saved;
         }
         self.persistent_global = saved_persistent;
+        saved_modules.install(self);
         result
     }
     fn call_this_in_context(

@@ -218,6 +218,7 @@ pub struct Environment {
     /// function/catch frames and the trusted builtins frame leave this unset.
     global_limit: Option<usize>,
     module_context: Option<String>,
+    pub(crate) module_realm: Option<super::ModuleRealm>,
     new_target: Option<Value>,
     /// None outside a constructor; Some(None) is an uninitialized derived this.
     constructor_this: Option<Option<Value>>,
@@ -429,6 +430,7 @@ impl Environment {
             parent: None,
             global_limit: None,
             module_context: None,
+            module_realm: None,
             new_target: None,
             constructor_this: None,
             constructor_fields: None,
@@ -449,6 +451,7 @@ impl Environment {
             parent: Some(p),
             global_limit: None,
             module_context: None,
+            module_realm: None,
             new_target: None,
             constructor_this: None,
             constructor_fields: None,
@@ -472,6 +475,7 @@ impl Environment {
             parent,
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
+            module_realm: None,
             new_target: None,
             constructor_this: None,
             constructor_fields: None,
@@ -507,6 +511,7 @@ impl Environment {
             parent: Some(p),
             global_limit: None,
             module_context: None,
+            module_realm: None,
             new_target: None,
             constructor_this: None,
             constructor_fields: None,
@@ -941,6 +946,7 @@ impl Environment {
         self.constructor_this = None;
         self.constructor_fields = None;
         self.parent = None;
+        self.module_realm = None;
     }
 
     pub(crate) fn drain_chain(env: Env, work: &mut Vec<Value>) {

@@ -12,9 +12,7 @@ struct LinkedModule {
     program: PreparedProgram,
     requests: Vec<(String, String)>,
     state: ModuleState,
-    failure_pin: Option<crate::heap::RootPin>,
     evaluation: Option<Rc<RefCell<crate::value::PromiseInner>>>,
-    evaluation_pin: Option<crate::heap::RootPin>,
 }
 #[derive(Clone)]
 enum ModuleState {
@@ -24,6 +22,16 @@ enum ModuleState {
     Failed(Value),
 }
 impl ModuleGraph {
+    pub(super) fn trace_values(&self) -> Vec<Value> {
+        let mut values = Vec::new();
+        for record in self.records.values() {
+            if let ModuleState::Failed(value) = &record.state {
+                values.push(value.clone());
+            }
+            values.extend(record.evaluation.iter().cloned().map(Value::Promise));
+        }
+        values
+    }
     pub(super) fn remove(&mut self, name: &str) {
         self.records.remove(name);
     }
@@ -220,9 +228,7 @@ impl Interpreter {
                 program: program.clone(),
                 requests: Vec::new(),
                 state: ModuleState::Linked,
-                failure_pin: None,
                 evaluation: None,
-                evaluation_pin: None,
             },
         );
         let outer = self.cur_mod.replace(name.into());
@@ -632,7 +638,6 @@ impl Interpreter {
             Ok(()) => record.state = ModuleState::Evaluated,
             Err(error) => {
                 let value = error_value(error);
-                record.failure_pin = Some(crate::heap::RootPin::new(value.clone()));
                 record.state = ModuleState::Failed(value);
             }
         }

@@ -23,10 +23,12 @@ pub const MAX_JOBS_PER_DRAIN: usize = 1_000_000;
 /// A unit of deferred work.
 pub enum Job {
     ModuleEvaluation {
+        realm: super::Env,
         id: String,
         target: Rc<RefCell<PromiseInner>>,
     },
     DynamicImport {
+        realm: super::Env,
         target: Rc<RefCell<PromiseInner>>,
         specifier: String,
         referrer: Option<String>,
@@ -83,8 +85,11 @@ impl Job {
     /// Values this queued job keeps alive, for the cycle collector.
     pub(crate) fn trace_values(&self, out: &mut Vec<Value>) {
         match self {
-            Job::ModuleEvaluation { target, .. } => out.push(Value::Promise(target.clone())),
-            Job::DynamicImport { target, .. } => out.push(Value::Promise(target.clone())),
+            Job::ModuleEvaluation { realm, target, .. }
+            | Job::DynamicImport { realm, target, .. } => {
+                out.push(Value::Promise(target.clone()));
+                out.push(Value::RealmGlobal(realm.clone()));
+            }
             Job::Reaction {
                 value, reaction, ..
             } => out.extend([

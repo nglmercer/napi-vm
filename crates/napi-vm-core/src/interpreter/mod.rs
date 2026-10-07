@@ -6,6 +6,8 @@ mod env;
 mod eval;
 pub mod jobs;
 mod module_link;
+mod module_realm;
+use module_realm::ModuleRealm;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_addon;
 #[cfg(not(target_arch = "wasm32"))]
@@ -124,6 +126,7 @@ impl Realm {
         interp.module_loader = self.module_loader;
         interp.commonjs_cache = self.commonjs_cache;
         interp.commonjs_entry = self.commonjs_entry;
+        interp.publish_module_realm();
         interp.republish_roots();
     }
 }
@@ -458,6 +461,7 @@ impl Interpreter {
             activation_pool: Vec::new(),
             jit_backend: None,
         };
+        interp.publish_module_realm();
         interp.gc_id =
             crate::heap::register_interp(interp.gc_roots(), interp.guest_execution_depth.clone());
         interp
@@ -475,6 +479,7 @@ impl Interpreter {
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
+        interp.publish_module_realm();
         realm::own_intrinsics(&interp.persistent_global);
         interp.republish_roots();
         #[cfg(all(test, feature = "node-api-host"))]
@@ -490,6 +495,7 @@ impl Interpreter {
     /// Install a host-selected loader; no ambient file or network loader exists.
     pub fn set_module_loader(&mut self, loader: Rc<dyn crate::ModuleLoader>) {
         self.module_loader = Some(loader);
+        self.publish_module_realm();
     }
 
     pub fn load_module(&mut self, specifier: &str) -> Result<String, VmErr> {
@@ -573,6 +579,7 @@ impl Interpreter {
         let require = commonjs::make_require(self, None)?;
         self.set_global_checked("require", require)?;
         self.commonjs_loader = Some(loader);
+        self.publish_module_realm();
         self.commonjs_cache.borrow_mut().clear();
         self.define_module(
             "node:module",
@@ -718,6 +725,7 @@ export default { createRequire, isBuiltin, builtinModules };
     /// Module-local `require()` calls retain their own filename automatically.
     pub fn set_commonjs_entry(&mut self, filename: impl Into<String>) {
         self.commonjs_entry = Some(filename.into());
+        self.publish_module_realm();
     }
 
     /// Remove all cached CommonJS modules. A subsequent `require()` reloads

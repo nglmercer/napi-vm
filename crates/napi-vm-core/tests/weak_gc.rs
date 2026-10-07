@@ -228,3 +228,42 @@ fn live_module_maps_are_roots_across_interpreters_without_snapshot_updates() {
     drop(value);
     assert!(collector.collect_cycles().collected > 0);
 }
+
+#[test]
+fn cached_module_rejections_are_traced_without_permanent_pins() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "bad",
+        "var reason={answer:42};reason.self=reason;throw reason;".into(),
+    );
+    vm.define_module(
+        "bridge",
+        "export function load(){return import('bad');}".into(),
+    );
+    let mut child = vm.create_realm();
+    child.load_module("bridge").unwrap();
+    vm.set_global_checked(
+        "loadChild",
+        child.module("bridge").unwrap().exports["load"].deref_binding(),
+    )
+    .unwrap();
+    drop(child);
+    run(
+        &mut vm,
+        "var failure;loadChild().catch(reason=>{failure=reason;});",
+    );
+    run(
+        &mut vm,
+        "var reference=new WeakRef(failure);failure=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "reference.deref().answer===42;");
+    run(
+        &mut vm,
+        "var again;loadChild().catch(reason=>{again=reason;});",
+    );
+    yes(&mut vm, "again===reference.deref();");
+    run(&mut vm, "loadChild=undefined;again=undefined;");
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "reference.deref()===undefined;");
+}

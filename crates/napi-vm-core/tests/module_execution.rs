@@ -363,3 +363,25 @@ fn namespace_reexports_include_indirect_exports_and_share_identity() {
         Value::Bool(true)
     ));
 }
+
+#[test]
+fn dynamic_import_uses_abstract_to_string_and_rejects_coercion_errors() {
+    let mut vm = Interpreter::with_builtins();
+    source(&mut vm, "target", "export const value=42;");
+    vm.eval_source("var hint,answer;var request={[Symbol.toPrimitive](value){hint=value;return 'target';},toString(){throw 1;}};import(request).then(ns=>{answer=ns.value;});").unwrap();
+    assert!(matches!(
+        vm.eval_source("hint==='string'&&answer===42"),
+        Ok(Value::Bool(true))
+    ));
+    vm.eval_source("var symbolError;import(Symbol()).catch(error=>{symbolError=error;});")
+        .unwrap();
+    assert!(matches!(
+        vm.eval_source("symbolError instanceof TypeError"),
+        Ok(Value::Bool(true))
+    ));
+    vm.eval_source("var reason={};var rejected;import({[Symbol.toPrimitive](){throw reason;}}).catch(error=>{rejected=error;});").unwrap();
+    assert!(matches!(
+        vm.eval_source("rejected===reason"),
+        Ok(Value::Bool(true))
+    ));
+}

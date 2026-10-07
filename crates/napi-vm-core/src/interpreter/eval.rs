@@ -906,12 +906,13 @@ impl Interpreter {
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
         let target = Value::pending_promise();
-        let converted = self.display_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
+        let converted = self.ecmascript_to_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
         match converted {
             Ok(specifier) => {
                 self.jobs
                     .borrow_mut()
                     .push_microtask(super::jobs::Job::DynamicImport {
+                        realm: self.persistent_global.clone(),
                         target: target.clone(),
                         specifier,
                         referrer: self.cur_mod.clone(),

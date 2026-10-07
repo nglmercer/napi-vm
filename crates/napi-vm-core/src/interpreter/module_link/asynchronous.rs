@@ -68,8 +68,6 @@ impl Interpreter {
             let mut graph = self.module_graph.borrow_mut();
             let record = graph.records.get_mut(id).unwrap();
             record.evaluation = Some(promise.clone());
-            record.evaluation_pin =
-                Some(crate::heap::RootPin::new(Value::Promise(promise.clone())));
             record.state = ModuleState::Evaluating;
         }
         ancestors.insert(id.into());
@@ -96,6 +94,7 @@ impl Interpreter {
             self.jobs
                 .borrow_mut()
                 .push_microtask(Job::ModuleEvaluation {
+                    realm: self.persistent_global.clone(),
                     id: id.into(),
                     target: promise.clone(),
                 });
@@ -108,8 +107,8 @@ impl Interpreter {
                 }
                 self.register(
                     &dependency,
-                    handler(&guard, dependency_fulfilled),
-                    handler(&guard, dependency_rejected),
+                    handler(&guard, dependency_fulfilled, &self.persistent_global),
+                    handler(&guard, dependency_rejected, &self.persistent_global),
                     None,
                 )?;
             }
@@ -170,8 +169,8 @@ impl Interpreter {
                 ]);
                 self.register(
                     &completion,
-                    handler(&guard, body_fulfilled),
-                    handler(&guard, dependency_rejected),
+                    handler(&guard, body_fulfilled, &self.persistent_global),
+                    handler(&guard, dependency_rejected, &self.persistent_global),
                     None,
                 )?;
             }
@@ -220,7 +219,6 @@ impl Interpreter {
             Err(value) => {
                 let mut graph = self.module_graph.borrow_mut();
                 let record = graph.records.get_mut(id).unwrap();
-                record.failure_pin = Some(crate::heap::RootPin::new(value.clone()));
                 record.state = ModuleState::Failed(value.clone());
                 drop(graph);
                 self.reject_promise(target, value);
@@ -232,8 +230,9 @@ impl Interpreter {
 fn handler(
     guard: &Value,
     callable: fn(&mut Interpreter, Value, Vec<Value>) -> Result<Value, VmErr>,
+    realm: &Env,
 ) -> Value {
-    Value::object(vec![
+    let value = Value::object(vec![
         (DRIVER.into(), guard.clone()),
         (
             super::super::call::CALL_SLOT.into(),
@@ -242,7 +241,11 @@ fn handler(
                 callable,
             },
         ),
-    ])
+    ]);
+    if let Value::Object { props } = &value {
+        props.meta.borrow_mut().realm_global = Some(realm.clone());
+    }
+    value
 }
 fn driver(this: &Value) -> Result<(Value, String, Rc<RefCell<PromiseInner>>), VmErr> {
     let guard = this
@@ -274,7 +277,11 @@ fn dependency_fulfilled(
             interp
                 .jobs
                 .borrow_mut()
-                .push_microtask(Job::ModuleEvaluation { id, target });
+                .push_microtask(Job::ModuleEvaluation {
+                    realm: interp.persistent_global.clone(),
+                    id,
+                    target,
+                });
         }
     }
     Ok(Value::Undefined)

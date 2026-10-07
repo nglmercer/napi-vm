@@ -11,7 +11,7 @@ Implemented:
 
 Continuation implemented fresh child globals/intrinsics, retained realm ownership, `$262.createRealm`, detached realm host functions and cross-realm calls. Escaped object/array/function values keep their realm after the child interpreter is dropped, and realm edges participate in GC tracing. GC requests use host state rather than a guest-visible sentinel.
 
-Remaining: agents/shared-memory coordination, broader cross-realm exotic-object coverage, separate module caches per realm, primary interpreter global identity across independent embeddings, and more complete GC/finalization observation. The existing `Realm` type remains an agent execution-state handle; `Interpreter::create_realm` constructs fresh child globals/intrinsics on that agent.
+Remaining: agents/shared-memory coordination, broader cross-realm exotic-object coverage, primary interpreter global identity across independent embeddings, and more complete GC/finalization observation. The existing `Realm` type remains an agent execution-state handle; `Interpreter::create_realm` constructs fresh child globals/intrinsics on that agent.
 
 ## Phase 2: parser and early errors
 
@@ -80,7 +80,7 @@ The focused comparison contains 45 formerly passing variants that now fail. Corr
 ## Next implementation order
 
 1. Complete global object storage and declaration instantiation: global lexical/property coexistence, accessor/symbol descriptors, strict writes/deletes/updates for all receiver kinds, and eval variable/lexical environment separation.
-2. Complete realm coverage: realm-owned exotic instances and Reflect construction, per-realm module caches, primary global identity. The UTF-16 host evalScript path is implemented in the parameter continuation below.
+2. Complete realm coverage: realm-owned exotic instances and Reflect construction, primary global identity (per-realm module caches are implemented below). The UTF-16 host evalScript path is implemented in the parameter continuation below.
 3. Implement real Test262 agents with shared-memory transport and scheduler ownership; external threads must never enter an interpreter.
 4. Expand contextual grammar/early errors for async, generators, super and private names, then use complete-corpus failure clusters to drive the next fixes.
 
@@ -320,7 +320,7 @@ Phases 1–3 remain incomplete. Further requirements include private methods,
 accessors and static fields, complete contextual early errors, bytecode constructor
 and private-write coverage, full global object storage and declaration
 instantiation, proxy revocation/invariants, complete exotic descriptors, real
-agents/shared-memory coordination, and independent realm module caches. Runtime
+agents/shared-memory coordination, and primary global identity. Runtime
 features remain disabled by default.
 
 The follow-up verification also guards integer-indexed typed-array property
@@ -337,3 +337,49 @@ Validation of the final derived-constructor batch:
 - Scoped Bun: 1,356 passes and the same 80 baseline failures, with identical failing-test names and multiplicities.
 
 Corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; release worker SHA-256 `295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b`. Four isolated workers, five-second per-variant timeouts, no feature skips. Compact evidence is in `tools/test262/latest.json`; generated full/focused/transition/triage reports are in `artifacts/test262/phases-1-3-derived-*`.
+
+## Realm-owned module state and queued execution
+
+Each ECMAScript realm now owns its ESM linked records, namespace objects,
+evaluation promises, cached failures and CommonJS instances. Creating a child
+copies the parent's source catalog, aliases and file URLs; later changes to one
+catalog do not affect the other. Host-selected loaders remain shared resolution
+providers, while their evaluated modules are isolated. The agent scheduler and
+execution limits remain shared. Replacing a defined source still requires explicit
+`remove_module` before loading it again.
+
+Calls select the defining realm's module registry. Bytecode calls also restore
+the defining module referrer, matching AST calls; both tiers preserve the caller's
+registry and referrer when returning. Escaped functions and CommonJS require
+functions retain that behavior after the child interpreter is dropped.
+Dynamic-import and module-evaluation jobs retain the owning global environment;
+module completion handlers select the same realm. Polling the parent scheduler
+can evaluate multiple realms' imports and resume a child module's top-level await.
+
+Dynamic import uses abstract ToString with the string hint, including
+`Symbol.toPrimitive`. Symbols and coercion exceptions reject the import promise;
+thrown guest values preserve their identity. The UTF-8 loader contract still
+rejects unpaired-surrogate specifiers explicitly.
+
+The collector traces registry exports, module scopes, namespaces, CommonJS values,
+evaluation promises and cached rejection values through realm environments.
+Module graphs no longer use permanent result pins, avoiding an uncollectable
+realm/graph/rejection cycle. An escaped realm function retains its cached rejection;
+releasing that function permits collection. Borrowed registry state makes collection
+skip conservatively.
+
+Rust API migration: directly constructed `Job::DynamicImport` and
+`Job::ModuleEvaluation` values must supply `realm: Env`. No runtime capability is
+enabled by this change. Primary global identity across independent embeddings,
+real agents, full private-name grammar/branding, declarations and exotic/proxy
+invariants remain unfinished; phases 1–3 are not complete.
+
+Validation of the realm-module batch:
+
+- Complete pinned Test262 corpus: **41,407 / 102,956 (40.2182%)**; 6 new passes and zero lost passes against the previous PR head. Against merged main: 6,671 new passes and zero lost passes.
+- Remaining full outcomes: 61,263 failures, 284 harness errors, 2 timeouts, zero crashes and zero skips.
+- Focused module/import table, extracted from that complete run: 1,372 / 2,637; 6 new passes and zero lost passes. A separate initial focused run passed two additional busy-loop variants; both exhaust instruction fuel in the final full run and remain failures in this table.
+- 713 workspace Rust tests pass; four ignored. 73 native Node tests, 14 WebAssembly tests, eight minimal-worker tests and four Python tests pass. Formatting and Clippy with warnings denied pass. The timing-sensitive external-event-loop test passed in the workspace rerun after release compilation finished.
+- Scoped Bun retains 1,356 passes and the same 80 baseline failures, with identical failure names and multiplicities.
+
+Corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; release worker SHA-256 `f7b98e9f66fc63eb0d08d576ae9c6abcebb5cac6e5b1f649ea6a00f93eb31842`. Four isolated workers and five-second timeouts. Worker limits are unchanged: 1,000,000 fuel, 100,000 loop iterations, 128 call depth and 10,000 jobs. Full/focused/transition/triage reports are under `artifacts/test262/phases-1-3-module-realm-*`; compact evidence is in `tools/test262/latest.json`.

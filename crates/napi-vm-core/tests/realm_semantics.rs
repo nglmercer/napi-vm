@@ -203,3 +203,154 @@ fn realm_script_sources_preserve_unpaired_utf16_surrogates() {
     assert!(vm.eval_in_realm_utf16(&global, &source).is_err());
     truth(&mut vm, "this===globalThis;");
 }
+
+#[test]
+fn module_sources_are_copied_but_evaluation_and_namespace_identity_are_isolated() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module("shared", "globalThis.runs=(globalThis.runs||0)+1;export const count=globalThis.runs;export const array=[];".into());
+    vm.load_module("shared").unwrap();
+    let mut child = vm.create_realm();
+    assert!(child.module("shared").is_none());
+    child.load_module("shared").unwrap();
+    truth(&mut vm, "runs===1;");
+    truth(&mut child, "runs===1;");
+    let parent_exports = vm.module("shared").unwrap();
+    let child_exports = child.module("shared").unwrap();
+    assert!(!std::rc::Rc::ptr_eq(
+        &parent_exports.namespace,
+        &child_exports.namespace
+    ));
+    vm.set_global_checked("childArray", child_exports.exports["array"].deref_binding())
+        .unwrap();
+    vm.set_global_checked("childGlobal", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(childArray)===childGlobal.Array.prototype;",
+    );
+    assert!(child.remove_module("shared"));
+    child.define_module("shared", "export const count=99;".into());
+    assert!(vm.module("shared").is_some());
+    child.load_module("shared").unwrap();
+    truth(&mut vm, "import {count} from 'shared';count===1;");
+    truth(&mut child, "import {count} from 'shared';count===99;");
+}
+
+#[test]
+fn escaped_bytecode_functions_import_from_their_own_realm_and_referrer() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "pkg/main",
+        "export function load(){return import('./dep');}export function fallback(p=1){return import('./dep');}".into(),
+    );
+    vm.define_module("dep", "export const value=10;".into());
+    vm.define_module_alias("pkg/main", "./dep", "dep");
+    let mut child = vm.create_realm();
+    child.define_module("dep", "export const value=20;".into());
+    child.load_module("pkg/main").unwrap();
+    let load = child.module("pkg/main").unwrap().exports["load"].deref_binding();
+    vm.set_global_checked("loadChild", load).unwrap();
+    let fallback = child.module("pkg/main").unwrap().exports["fallback"].deref_binding();
+    assert!(matches!(&fallback, Value::Function(function) if function.bytecode.is_none()));
+    vm.set_global_checked("loadFallbackChild", fallback)
+        .unwrap();
+    drop(child);
+    assert!(vm.collect_cycles().skipped.is_none());
+    vm.eval_source("var answer=0;loadChild().then(ns=>{answer=ns.value;});")
+        .unwrap();
+    truth(&mut vm, "answer===20;");
+    vm.eval_source("loadFallbackChild().then(ns=>{answer=ns.value+1;});")
+        .unwrap();
+    truth(&mut vm, "answer===21;");
+    assert!(vm.module("dep").is_none());
+    vm.load_module("dep").unwrap();
+    truth(&mut vm, "import {value} from 'dep';value===10;");
+}
+
+#[test]
+fn shared_scheduler_evaluates_each_pending_import_in_its_own_realm() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "same",
+        "export const value=globalThis.tag;export const array=[];".into(),
+    );
+    vm.eval_source("var tag=10;").unwrap();
+    let mut child = vm.create_realm();
+    child.eval_source("var tag=20;").unwrap();
+    let parent_import = vm.import_module("same").unwrap();
+    let child_import = child.import_module("same").unwrap();
+    vm.set_global_checked("parentImport", parent_import)
+        .unwrap();
+    vm.set_global_checked("childImport", child_import).unwrap();
+    vm.set_global_checked("childGlobal", child.realm_global_object())
+        .unwrap();
+    drop(child);
+    assert!(vm.collect_cycles().skipped.is_none());
+    vm.eval_source("var a,b;parentImport.then(ns=>{a=ns.value;});childImport.then(ns=>{b=ns.value;globalThis.childArray=ns.array;});").unwrap();
+    truth(
+        &mut vm,
+        "a===10&&b===20&&Object.getPrototypeOf(childArray)===childGlobal.Array.prototype;",
+    );
+}
+
+#[test]
+fn suspended_child_module_resumes_on_the_parent_scheduler_after_child_drop() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module("pending", "export const ready=await new Promise(resolve=>{globalThis.release=resolve;});export const value=globalThis.tag;".into());
+    vm.eval_source("var tag=10;").unwrap();
+    let mut child = vm.create_realm();
+    child.eval_source("var tag=20;").unwrap();
+    let completion = child.import_module("pending").unwrap();
+    vm.set_global_checked("completion", completion).unwrap();
+    vm.set_global_checked("childGlobal", child.realm_global_object())
+        .unwrap();
+    vm.eval_source("var ready,value;completion.then(ns=>{ready=ns.ready;value=ns.value;});")
+        .unwrap();
+    let release = child.global.borrow().get("release").unwrap();
+    vm.set_global_checked("releaseChild", release).unwrap();
+    drop(child);
+    vm.eval_source("releaseChild(7);").unwrap();
+    truth(
+        &mut vm,
+        "ready===7&&value===20&&typeof release==='undefined';",
+    );
+    assert!(vm.module("pending").is_none());
+}
+
+#[test]
+fn commonjs_instances_and_escaped_require_use_the_defining_realm() {
+    struct Loader;
+    impl napi_vm_core::CommonJsModuleLoader for Loader {
+        fn resolve(
+            &self,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<napi_vm_core::ResolvedCommonJsModule, napi_vm_core::VmErr> {
+            Ok(napi_vm_core::ResolvedCommonJsModule {
+                id: "pkg".into(),filename:"/virtual/pkg.js".into(),
+                format:napi_vm_core::CommonJsModuleFormat::JavaScript,
+                source:Some("globalThis.cjsRuns=(globalThis.cjsRuns||0)+1;module.exports={tag:globalThis.tag};".into()),
+            })
+        }
+    }
+    let loader = std::rc::Rc::new(Loader);
+    let mut vm = Interpreter::with_builtins();
+    vm.set_commonjs_loader(loader.clone()).unwrap();
+    vm.eval_source("var tag=10;var parentPackage=require('pkg');")
+        .unwrap();
+    let mut child = vm.create_realm();
+    child.set_commonjs_loader(loader).unwrap();
+    child
+        .eval_source("var tag=20;var childPackage=require('pkg');")
+        .unwrap();
+    vm.set_global_checked(
+        "childRequire",
+        child.global.borrow().get("require").unwrap(),
+    )
+    .unwrap();
+    drop(child);
+    truth(
+        &mut vm,
+        "parentPackage.tag===10&&childRequire('pkg').tag===20&&childRequire('pkg')!==parentPackage&&cjsRuns===1;",
+    );
+}

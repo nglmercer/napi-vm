@@ -5,21 +5,21 @@
   "selection": [
     "."
   ],
-  "engine_sha256": "295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b",
+  "engine_sha256": "f7b98e9f66fc63eb0d08d576ae9c6abcebb5cac6e5b1f649ea6a00f93eb31842",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
   "timeout_seconds": 5.0,
   "total": 102956,
   "counts": {
-    "pass": 41401,
-    "fail": 61269,
+    "pass": 41407,
+    "fail": 61263,
     "skip": 0,
     "timeout": 2,
     "crash": 0,
     "harness_error": 284
   },
-  "pass_percentage": 40.212323711099884,
+  "pass_percentage": 40.21815144333502,
   "limitations": [
     "Agents are not implemented; GC requests run at quiescent host boundaries"
   ],
@@ -27,22 +27,23 @@
   "notes": [
     "Development measurement: phases 1\u20133 remain incomplete; full Test262 conformance is not achieved.",
     "Same pinned corpus, release profile, four workers and five-second timeout as the previous continuation baseline.",
-    "The focused selection expanded; percentages from previous focused reports are not directly comparable."
+    "The focused selection changed; percentages from previous focused reports are not directly comparable.",
+    "The final focused table is extracted from the complete run. Two variants of a 100 ms busy-loop fixture exhausted the unchanged instruction budget in that run and remain failures."
   ],
   "baseline": {
-    "engine_sha256": "892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617",
+    "engine_sha256": "295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b",
     "total": 102956,
     "counts": {
-      "pass": 40145,
-      "fail": 62523,
+      "pass": 41401,
+      "fail": 61269,
       "skip": 0,
       "timeout": 2,
-      "crash": 2,
+      "crash": 0,
       "harness_error": 284
     },
-    "pass_percentage": 38.992385096546094,
+    "pass_percentage": 40.212323711099884,
     "transitions": {
-      "new_passes": 1256,
+      "new_passes": 6,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -59,7 +60,7 @@
     },
     "pass_percentage": 35.81529973969462,
     "transitions": {
-      "new_passes": 4527,
+      "new_passes": 4533,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -76,7 +77,7 @@
     },
     "pass_percentage": 33.73868448657679,
     "transitions": {
-      "new_passes": 6665,
+      "new_passes": 6671,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -84,7 +85,7 @@
     "domain": "ECMAScript",
     "suite": "Test262",
     "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-    "engine_sha256": "295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b",
+    "engine_sha256": "f7b98e9f66fc63eb0d08d576ae9c6abcebb5cac6e5b1f649ea6a00f93eb31842",
     "skip_features": [],
     "denominator": "all selected variants, including skips and errors",
     "worker_jobs": 4,
@@ -93,35 +94,35 @@
       "Agents are not implemented; GC requests run at quiescent host boundaries"
     ],
     "selection": [
-      "language/statements/class",
-      "language/expressions/class",
-      "built-ins/Reflect/construct",
-      "built-ins/Function",
-      "staging/sm/fields",
-      "staging/sm/PrivateName",
-      "built-ins/ArrayBuffer",
-      "built-ins/SharedArrayBuffer",
-      "built-ins/DataView",
-      "built-ins/Promise"
+      "language/expressions/dynamic-import",
+      "language/module-code",
+      "language/import",
+      "language/exports"
     ],
-    "total": 20877,
+    "total": 2637,
     "counts": {
-      "pass": 7496,
-      "fail": 13381,
+      "pass": 1372,
+      "fail": 1265,
       "skip": 0,
       "timeout": 0,
       "crash": 0,
       "harness_error": 0
     },
-    "pass_percentage": 35.90554198400153,
-    "measurement_source": "Rows extracted from the complete pinned corpus run; same worker binary, isolation, timeout and feature policy.",
+    "pass_percentage": 52.02882062950322,
+    "measurement_source": "Rows extracted from the complete pinned corpus run; same isolated worker binary, resource limits and timeout policy.",
     "transitions_against_previous_full": {
-      "new_passes": 312,
+      "new_passes": 6,
       "former_passes_now_nonpassing": 0
     }
   },
   "transitions": {
-    "new_passes": 1256,
+    "new_passes": 6,
     "former_passes_now_nonpassing": 0
+  },
+  "worker_resource_limits": {
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000
   }
 }

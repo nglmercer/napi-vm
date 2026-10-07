@@ -276,11 +276,7 @@ impl Interpreter {
     /// Apply ECMAScript ToString for Node-API. This deliberately differs from
     /// the `String(Symbol())` function special case: abstract ToString throws
     /// for Symbols, as does `napi_coerce_to_string`.
-    #[cfg(all(
-        feature = "node-api-host",
-        any(target_os = "linux", target_os = "macos", target_os = "windows")
-    ))]
-    pub(crate) fn napi_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
+    pub(crate) fn ecmascript_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
         let primitive = self.coerce_object_to_primitive(value, "string")?;
         match primitive {
             Value::Symbol(_) => Err(VmErr::Msg(
@@ -291,6 +287,14 @@ impl Interpreter {
                 "TypeError: Cannot convert object to primitive value".into(),
             )),
         }
+    }
+
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
+    pub(crate) fn napi_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
+        self.ecmascript_to_string(value)
     }
 
     /// Perform ToPrimitive with the requested hint, including the guest's

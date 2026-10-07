@@ -89,7 +89,10 @@ impl Interpreter {
     /// globals are not installed into the new realm.
     pub fn create_realm(&self) -> Self {
         let mut child = Self::with_builtins();
+        let modules = super::ModuleRealm::of(&child);
         super::Realm::of(self).install(&mut child);
+        modules.install(&mut child);
+        super::ModuleRealm::fork_sources(self, &mut child);
         child.persistent_global.borrow_mut().set_isolated_realm();
         let value = child.realm_global_object();
         if let Some(builtins) = child.persistent_global.borrow().parent_env() {
@@ -104,9 +107,11 @@ impl Interpreter {
         global: Env,
         operation: impl FnOnce(&mut Self) -> R,
     ) -> R {
+        let saved_modules = self.enter_module_realm(&global);
         let saved = std::mem::replace(&mut self.persistent_global, global);
         let result = operation(self);
         self.persistent_global = saved;
+        saved_modules.install(self);
         result
     }
 
@@ -185,6 +190,7 @@ impl Interpreter {
         let target = self
             .global_scope_of(global)
             .ok_or_else(|| VmErr::Msg("TypeError: expected a realm global".into()))?;
+        let saved_modules = self.enter_module_realm(&target);
         let saved_strict = target.borrow_mut().replace_strict(Some(false));
         let target_context = target.clone();
         let saved_persistent = std::mem::replace(&mut self.persistent_global, target.clone());
@@ -204,6 +210,7 @@ impl Interpreter {
         self.cur_mod = saved_module;
         self.global = saved_scope;
         self.persistent_global = saved_persistent;
+        saved_modules.install(self);
         self.republish_roots();
         result
     }
