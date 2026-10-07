@@ -2,7 +2,7 @@
 //! take a pattern (`match`, `matchAll`, `replace`, `replaceAll`, `search`,
 //! `split`).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::error::VmErr;
@@ -21,6 +21,7 @@ pub(super) fn install(e: &mut Environment) {
             vec![
                 ("constructor".into(), namespace.clone()),
                 ("exec".into(), super::nf("exec", regexp_exec)),
+                ("compile".into(), super::nf("compile", regexp_compile)),
                 ("test".into(), super::nf("test", regexp_test)),
                 ("toString".into(), super::nf("toString", regexp_to_string)),
             ],
@@ -28,7 +29,7 @@ pub(super) fn install(e: &mut Environment) {
         );
         if let Value::Object { props } = &prototype {
             let mut metadata = props.meta.borrow_mut();
-            for name in ["constructor", "exec", "test", "toString"] {
+            for name in ["constructor", "exec", "compile", "test", "toString"] {
                 metadata.set_attrs(
                     name,
                     crate::value::PropAttrs {
@@ -49,7 +50,9 @@ fn type_err(message: String) -> VmErr {
 pub(crate) fn compile(source: impl Into<crate::JsString>, flags: &str) -> Result<Value, VmErr> {
     let regex = Regex::new(source, flags).map_err(type_err)?;
     Ok(Value::RegExp(Rc::new(RegExpData {
-        regex,
+        properties: Value::instance_properties(),
+        regex: RefCell::new(regex),
+        legacy_enabled: Cell::new(true),
         last_index: Cell::new(0),
     })))
 }
@@ -58,7 +61,10 @@ pub(crate) fn compile(source: impl Into<crate::JsString>, flags: &str) -> Result
 /// own flags unless new ones are given.
 fn regexp_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let (source, own_flags) = match a.first() {
-        Some(Value::RegExp(data)) => (data.regex.source.clone(), data.regex.flags.clone()),
+        Some(Value::RegExp(data)) => (
+            data.regex.borrow().source.clone(),
+            data.regex.borrow().flags.clone(),
+        ),
         Some(Value::Undefined) | None => (crate::JsString::default(), String::new()),
         Some(other) => (interp.to_js_string(other)?, String::new()),
     };
@@ -77,7 +83,7 @@ fn regexp_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result
 
 /// Properties and methods readable on a regular expression.
 pub fn regexp_member(data: &Rc<RegExpData>, key: &str) -> Option<Value> {
-    let regex = &data.regex;
+    let regex = data.regex.borrow();
     Some(match key {
         "source" => Value::String(regex.source.clone()),
         "flags" => Value::String((regex.flags.clone()).into()),
@@ -98,9 +104,9 @@ fn regexp_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<V
     };
     Ok(Value::String(
         crate::JsString::from("/")
-            .concat(&data.regex.source)
+            .concat(&data.regex.borrow().source)
             .concat(&crate::JsString::from("/"))
-            .concat(&crate::JsString::from(&data.regex.flags)),
+            .concat(&crate::JsString::from(&data.regex.borrow().flags)),
     ))
 }
 
@@ -122,11 +128,12 @@ fn match_result(
     let start = caps[0].map(|(s, _)| s).unwrap_or(0);
     result.set_prop("index".to_string(), Value::Number(start as f64))?;
     result.set_prop("input".to_string(), Value::String(input.clone()))?;
-    let groups = if data.regex.names.is_empty() {
+    let groups = if data.regex.borrow().names.is_empty() {
         Value::Undefined
     } else {
         let mut named: Vec<(String, Value)> = data
             .regex
+            .borrow()
             .names
             .iter()
             .map(|(name, index)| (name.clone(), slice(caps.get(*index).copied().flatten())))
@@ -140,7 +147,7 @@ fn match_result(
 
 /// Run one search, honouring and updating `lastIndex` for a `g`/`y` pattern.
 fn exec(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Option<Captures>, VmErr> {
-    let stateful = data.regex.global || data.regex.sticky;
+    let stateful = data.regex.borrow().global || data.regex.borrow().sticky;
     let start = if stateful { data.last_index.get() } else { 0 };
     if start > input.len() {
         data.last_index.set(0);
@@ -148,6 +155,7 @@ fn exec(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Option<Capture
     }
     let found = data
         .regex
+        .borrow()
         .find_at(input.units(), start)
         .map_err(|e| VmErr::Msg(e.to_string()))?;
     match &found {
@@ -156,7 +164,7 @@ fn exec(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Option<Capture
                 let end = caps[0].map(|(_, e)| e).unwrap_or(start);
                 // An empty match must still advance, or a `g` loop never ends.
                 data.last_index.set(if end == start {
-                    advance(input, end, data.regex.unicode)
+                    advance(input, end, data.regex.borrow().unicode)
                 } else {
                     end
                 });
@@ -215,17 +223,18 @@ fn all_matches(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Vec<Cap
     loop {
         let found = data
             .regex
+            .borrow()
             .find_at(input.units(), at)
             .map_err(|e| VmErr::Msg(e.to_string()))?;
         let Some(caps) = found else { break };
         let (start, end) = caps[0].unwrap_or((at, at));
         out.push(caps);
-        if !data.regex.global {
+        if !data.regex.borrow().global {
             break;
         }
         // An empty match advances by one so the scan terminates.
         at = if end == start {
-            advance(input, end, data.regex.unicode)
+            advance(input, end, data.regex.borrow().unicode)
         } else {
             end
         };
@@ -251,7 +260,7 @@ pub fn string_match(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
         let compiled = compile(source, "")?;
         return string_match(interp, this, vec![compiled]);
     };
-    if data.regex.global {
+    if data.regex.borrow().global {
         data.last_index.set(0);
         let matches = all_matches(&data, &input)?;
         if matches.is_empty() {
@@ -289,7 +298,7 @@ pub fn string_match_all(
             "TypeError: matchAll requires a global RegExp".to_string(),
         ));
     };
-    if !data.regex.global {
+    if !data.regex.borrow().global {
         return Err(VmErr::Msg(
             "TypeError: matchAll must be called with a global RegExp".to_string(),
         ));
@@ -319,6 +328,7 @@ pub fn string_search(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Re
     };
     let found = data
         .regex
+        .borrow()
         .find_at(input.units(), 0)
         .map_err(|e| VmErr::Msg(e.to_string()))?;
     Ok(Value::Number(match found {
@@ -379,7 +389,7 @@ fn expand(
                     index += 1;
                     continue;
                 }
-                if let Some(group) = data.regex.names.get(&name) {
+                if let Some(group) = data.regex.borrow().names.get(&name) {
                     out.push_str(slice(caps.get(*group).copied().flatten()));
                 }
                 index = cursor + 1;
@@ -393,12 +403,12 @@ fn expand(
                         char::from_u32(chars[index + 2] as u32).and_then(|c| c.to_digit(10))
                 {
                     let two = group * 10 + second as usize;
-                    if two <= data.regex.group_count && two > 0 {
+                    if two <= data.regex.borrow().group_count && two > 0 {
                         group = two;
                         width = 3;
                     }
                 }
-                if group > 0 && group <= data.regex.group_count {
+                if group > 0 && group <= data.regex.borrow().group_count {
                     out.push_str(slice(caps.get(group).copied().flatten()));
                     index += width;
                 } else {
@@ -426,10 +436,11 @@ pub fn replace_with_pattern(
     replacement: &Value,
     all: bool,
 ) -> Result<Value, VmErr> {
-    let matches = if all || data.regex.global {
+    let matches = if all || data.regex.borrow().global {
         all_matches(data, input)?
     } else {
         data.regex
+            .borrow()
             .find_at(input.units(), 0)
             .map_err(|e| VmErr::Msg(e.to_string()))?
             .into_iter()
@@ -493,13 +504,14 @@ pub fn split_with_pattern(
     while at <= input.len() && out.len() < limit {
         let found = data
             .regex
+            .borrow()
             .find_at(input.units(), at)
             .map_err(|e| VmErr::Msg(e.to_string()))?;
         let Some(caps) = found else { break };
         let (start, end) = caps[0].unwrap_or((at, at));
         // An empty match at the cursor would split into empty strings forever.
         if end == start && start == cursor {
-            at = advance(input, start, data.regex.unicode);
+            at = advance(input, start, data.regex.borrow().unicode);
             continue;
         }
         out.push(Value::String(crate::JsString::from_units(
@@ -518,7 +530,7 @@ pub fn split_with_pattern(
         }
         cursor = end;
         at = if end == start {
-            advance(input, end, data.regex.unicode)
+            advance(input, end, data.regex.borrow().unicode)
         } else {
             end
         };
@@ -537,4 +549,34 @@ fn advance(input: &crate::JsString, pos: usize, unicode: bool) -> usize {
     } else {
         1
     }
+}
+
+fn regexp_compile(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let Value::RegExp(data) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: RegExp.compile requires a RegExp receiver".into(),
+        ));
+    };
+    if !data.legacy_enabled.get() {
+        return Err(VmErr::Msg(
+            "TypeError: Legacy RegExp methods are disabled for subclasses".into(),
+        ));
+    }
+    if matches!(args.first(), Some(Value::RegExp(_)))
+        && args
+            .get(1)
+            .is_some_and(|value| !matches!(value, Value::Undefined))
+    {
+        return Err(VmErr::Msg(
+            "TypeError: Flags must be undefined for a RegExp pattern".into(),
+        ));
+    }
+    let Value::RegExp(ref replacement) = regexp_construct(interp, Value::Undefined, args)? else {
+        unreachable!()
+    };
+    let replacement = replacement.regex.borrow();
+    let compiled = Regex::new(replacement.source.clone(), &replacement.flags).map_err(type_err)?;
+    *data.regex.borrow_mut() = compiled;
+    data.last_index.set(0);
+    Ok(this)
 }

@@ -219,6 +219,10 @@ pub struct Environment {
     global_limit: Option<usize>,
     module_context: Option<String>,
     new_target: Option<Value>,
+    /// None outside a constructor; Some(None) is an uninitialized derived this.
+    constructor_this: Option<Option<Value>>,
+    constructor_fields: Option<Rc<Vec<crate::parser::Statement>>>,
+    private_names: HashMap<String, u64>,
     strict: Option<bool>,
     isolated_realm: bool,
     variable_scope: bool,
@@ -241,6 +245,63 @@ impl Default for Environment {
 }
 
 impl Environment {
+    pub(crate) fn declare_private_field(&mut self, name: &str) {
+        if !self.private_names.contains_key(name) {
+            let Value::Symbol(ref symbol) = crate::builtins::new_symbol(None) else {
+                unreachable!()
+            };
+            self.private_names.insert(name.into(), symbol.id);
+        }
+    }
+
+    pub(crate) fn private_name(&self, name: &str) -> Option<u64> {
+        self.private_names.get(name).copied().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.borrow().private_name(name))
+        })
+    }
+    pub(crate) fn enter_constructor(&mut self, derived: bool, fields: &[crate::parser::Statement]) {
+        self.constructor_this = Some(if derived { None } else { self.get("this") });
+        self.constructor_fields = Some(Rc::new(fields.to_vec()));
+    }
+
+    /// Arrows and lexical/eval scopes inherit constructor state. An ordinary
+    /// function's own this binding stops the search.
+    pub(crate) fn constructor_environment(scope: &Env) -> Option<Env> {
+        let mut current = scope.clone();
+        loop {
+            let parent = {
+                let env = current.borrow();
+                if env.constructor_this.is_some() {
+                    return Some(current.clone());
+                }
+                if env.own_binding("this").is_some() {
+                    return None;
+                }
+                env.parent.clone()
+            };
+            current = parent?;
+        }
+    }
+
+    pub(crate) fn bind_constructor_this(
+        &mut self,
+        value: Value,
+    ) -> Result<(), crate::error::VmErr> {
+        if !matches!(self.constructor_this, Some(None)) {
+            return Err(crate::error::VmErr::Msg(
+                "ReferenceError: super() has already initialized this".into(),
+            ));
+        }
+        self.constructor_this = Some(Some(value));
+        Ok(())
+    }
+
+    pub(crate) fn constructor_fields(&self) -> Rc<Vec<crate::parser::Statement>> {
+        self.constructor_fields.clone().unwrap_or_default()
+    }
+
     pub(crate) fn snapshot_intrinsics(&mut self) {
         self.intrinsics = self
             .own_keys()
@@ -259,6 +320,19 @@ impl Environment {
                     .and_then(|parent| parent.borrow().intrinsic(name))
             })
             .or_else(|| self.get(name))
+    }
+
+    pub(crate) fn intrinsic_name(&self, value: &Value) -> Option<String> {
+        self.intrinsics
+            .iter()
+            .find_map(|(name, constructor)| {
+                super::strict_equals(constructor, value).then(|| name.clone())
+            })
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|parent| parent.borrow().intrinsic_name(value))
+            })
     }
 
     pub(crate) fn set_property_attributes(&mut self, name: &str, attrs: crate::value::PropAttrs) {
@@ -356,6 +430,9 @@ impl Environment {
             global_limit: None,
             module_context: None,
             new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: false,
@@ -373,6 +450,9 @@ impl Environment {
             global_limit: None,
             module_context: None,
             new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: false,
@@ -393,6 +473,9 @@ impl Environment {
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
             new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: false,
@@ -425,6 +508,9 @@ impl Environment {
             global_limit: None,
             module_context: None,
             new_target: None,
+            constructor_this: None,
+            constructor_fields: None,
+            private_names: HashMap::new(),
             strict: None,
             isolated_realm: false,
             variable_scope: true,
@@ -495,6 +581,14 @@ impl Environment {
     /// Resolve a name through the scope chain, distinguishing an undeclared
     /// name from one in its temporal dead zone.
     pub fn lookup(&self, n: &str) -> Lookup {
+        if n == "this"
+            && let Some(value) = &self.constructor_this
+        {
+            return match value {
+                Some(value) => Lookup::Value(value.clone()),
+                None => Lookup::Uninitialized,
+            };
+        }
         if let Some(binding) = self.vars.get(n) {
             return if binding.initialized {
                 // A module import is an indirection to the exporting binding,
@@ -826,6 +920,7 @@ impl Environment {
     pub(crate) fn trace_values(&self) -> Vec<Value> {
         let mut values = self.vars.values_cloned();
         values.extend(self.new_target.iter().cloned());
+        values.extend(self.constructor_this.iter().flatten().cloned());
         values.extend(self.intrinsics.values().cloned());
         values
     }
@@ -843,6 +938,8 @@ impl Environment {
         self.property_attributes.clear();
         self.intrinsics.clear();
         self.new_target = None;
+        self.constructor_this = None;
+        self.constructor_fields = None;
         self.parent = None;
     }
 
@@ -854,6 +951,7 @@ impl Environment {
                     let mut env = cell.into_inner();
                     env.vars.drain_into(work);
                     work.extend(env.new_target.take());
+                    work.extend(env.constructor_this.take().flatten());
                     work.extend(env.intrinsics.drain().map(|(_, value)| value));
                     cur = env.parent.take();
                 }

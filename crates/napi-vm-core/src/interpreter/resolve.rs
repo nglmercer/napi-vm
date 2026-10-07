@@ -38,6 +38,11 @@ impl Interpreter {
     /// default Object.prototype and Function.prototype links that are stored
     /// as defaults rather than copied into every property cell.
     pub(crate) fn prototype_of(&self, object: &Value) -> Option<std::rc::Rc<Value>> {
+        if let Some(properties) = object.exotic_properties()
+            && !properties.meta.borrow().uses_default_prototype
+        {
+            return properties.proto();
+        }
         if let Value::RealmGlobal(global) = object {
             return global
                 .borrow()
@@ -817,6 +822,11 @@ impl Interpreter {
     /// `prop_raw` forwards every `Value::String` key here, and borrowed-key
     /// callers arrive via [`prop_str`](Self::prop_str) without allocating.
     fn prop_str_raw(&self, o: &Value, k: &str) -> Result<Value, VmErr> {
+        if let Some(properties) = o.exotic_properties()
+            && let Some(value) = properties.own_value(k)
+        {
+            return Ok(value);
+        }
         match o {
             // `window.x` / `globalThis.x` / `self.x` read a real global.
             Value::GlobalObject => {

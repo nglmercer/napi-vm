@@ -300,6 +300,11 @@ pub enum Statement {
     /// environment, so the names land in the enclosing scope. It exists
     /// because one statement can only return one `Statement`.
     Declarations(Vec<Statement>),
+    /// Internal constructor entry, before parameter and body initialization.
+    ClassInitialization {
+        derived: bool,
+        fields: Vec<Statement>,
+    },
     /// Non-simple formal parameters run before body declaration instantiation.
     ParameterInitialization {
         params: Vec<String>,
@@ -437,6 +442,7 @@ pub enum Pattern {
     Member {
         object: Box<Expr>,
         property: Box<Expr>,
+        private: bool,
     },
 }
 
@@ -585,6 +591,7 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
             }
         }
         Statement::Expr(_)
+        | Statement::ClassInitialization { .. }
         | Statement::ParameterInitialization { .. }
         | Statement::Return(_)
         | Statement::Break
@@ -743,6 +750,9 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .as_deref()
                     .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
                 || statements_capture_identifier(body, name)
+        }
+        Statement::ClassInitialization { fields, .. } => {
+            statements_capture_identifier(fields, name)
         }
         Statement::ParameterInitialization {
             initializers,
@@ -934,9 +944,9 @@ fn pattern_captures_identifier(pattern: &Pattern, name: &str) -> bool {
         Pattern::Default(inner, default) => {
             pattern_captures_identifier(inner, name) || expr_captures_identifier(default, name)
         }
-        Pattern::Member { object, property } => {
-            expr_captures_identifier(object, name) || expr_captures_identifier(property, name)
-        }
+        Pattern::Member {
+            object, property, ..
+        } => expr_captures_identifier(object, name) || expr_captures_identifier(property, name),
     }
 }
 
@@ -1039,6 +1049,7 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
         Statement::ForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)
         }
+        Statement::ClassInitialization { fields, .. } => stmts_reference(fields, name),
         Statement::ParameterInitialization {
             initializers,
             fields,
@@ -1187,10 +1198,14 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
     Some(match expr {
         Expr::Identifier(name) => Pattern::Ident(name.clone()),
         Expr::Member {
-            object, property, ..
+            object,
+            property,
+            computed,
         } => Pattern::Member {
             object: object.clone(),
             property: property.clone(),
+            private: !computed
+                && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
         },
         Expr::Array(items) => Pattern::Array(
             items
@@ -1241,9 +1256,9 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
 fn pattern_references(p: &Pattern, name: &str) -> bool {
     match p {
         Pattern::Elision | Pattern::Ident(_) | Pattern::Rest(_) => false,
-        Pattern::Member { object, property } => {
-            expr_references(object, name) || expr_references(property, name)
-        }
+        Pattern::Member {
+            object, property, ..
+        } => expr_references(object, name) || expr_references(property, name),
         Pattern::Array(elems) => elems.iter().any(|e| pattern_references(e, name)),
         Pattern::Object(props) => props.iter().any(|(key, p)| {
             matches!(key, PatternKey::Computed(e) if expr_references(e, name))
@@ -1259,7 +1274,10 @@ fn pattern_references(p: &Pattern, name: &str) -> bool {
 
 /// ExpectedArgumentCount stops before the first default or rest parameter.
 pub(crate) fn formal_parameter_length<S: AsRef<str>>(params: &[S], body: &[Statement]) -> usize {
-    let initializers = match body.first() {
+    let initializers = match body
+        .iter()
+        .find(|stmt| !matches!(stmt, Statement::ClassInitialization { .. }))
+    {
         Some(Statement::ParameterInitialization { initializers, .. }) => initializers.as_slice(),
         _ => &[],
     };

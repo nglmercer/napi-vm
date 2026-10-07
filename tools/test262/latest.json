@@ -5,21 +5,21 @@
   "selection": [
     "."
   ],
-  "engine_sha256": "892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617",
+  "engine_sha256": "295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
   "timeout_seconds": 5.0,
   "total": 102956,
   "counts": {
-    "pass": 40145,
-    "fail": 62523,
+    "pass": 41401,
+    "fail": 61269,
     "skip": 0,
     "timeout": 2,
-    "crash": 2,
+    "crash": 0,
     "harness_error": 284
   },
-  "pass_percentage": 38.992385096546094,
+  "pass_percentage": 40.212323711099884,
   "limitations": [
     "Agents are not implemented; GC requests run at quiescent host boundaries"
   ],
@@ -30,19 +30,19 @@
     "The focused selection expanded; percentages from previous focused reports are not directly comparable."
   ],
   "baseline": {
-    "engine_sha256": "3b5b5515385e22da7da424e7404b61d4e47c0ccba432e27ac1e65444b06cc58f",
+    "engine_sha256": "892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617",
     "total": 102956,
     "counts": {
-      "pass": 40107,
-      "fail": 62561,
+      "pass": 40145,
+      "fail": 62523,
       "skip": 0,
       "timeout": 2,
       "crash": 2,
       "harness_error": 284
     },
-    "pass_percentage": 38.95547612572361,
+    "pass_percentage": 38.992385096546094,
     "transitions": {
-      "new_passes": 38,
+      "new_passes": 1256,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -59,7 +59,7 @@
     },
     "pass_percentage": 35.81529973969462,
     "transitions": {
-      "new_passes": 3271,
+      "new_passes": 4527,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -76,7 +76,7 @@
     },
     "pass_percentage": 33.73868448657679,
     "transitions": {
-      "new_passes": 5409,
+      "new_passes": 6665,
       "former_passes_now_nonpassing": 0
     }
   },
@@ -84,37 +84,44 @@
     "domain": "ECMAScript",
     "suite": "Test262",
     "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-    "selection": [
-      "built-ins/Proxy/construct",
-      "built-ins/Proxy/getOwnPropertyDescriptor",
-      "built-ins/Reflect/construct",
-      "language/statements/class"
-    ],
-    "engine_sha256": "892b7a95b6fc0c9086745d1e2a6096febf813d176fa46deacf7886bd0fae4617",
+    "engine_sha256": "295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b",
     "skip_features": [],
     "denominator": "all selected variants, including skips and errors",
     "worker_jobs": 4,
     "timeout_seconds": 5.0,
-    "total": 8782,
-    "counts": {
-      "pass": 2937,
-      "fail": 5843,
-      "skip": 0,
-      "timeout": 0,
-      "crash": 2,
-      "harness_error": 0
-    },
-    "pass_percentage": 33.44340696879982,
     "limitations": [
       "Agents are not implemented; GC requests run at quiescent host boundaries"
     ],
+    "selection": [
+      "language/statements/class",
+      "language/expressions/class",
+      "built-ins/Reflect/construct",
+      "built-ins/Function",
+      "staging/sm/fields",
+      "staging/sm/PrivateName",
+      "built-ins/ArrayBuffer",
+      "built-ins/SharedArrayBuffer",
+      "built-ins/DataView",
+      "built-ins/Promise"
+    ],
+    "total": 20877,
+    "counts": {
+      "pass": 7496,
+      "fail": 13381,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "pass_percentage": 35.90554198400153,
+    "measurement_source": "Rows extracted from the complete pinned corpus run; same worker binary, isolation, timeout and feature policy.",
     "transitions_against_previous_full": {
-      "new_passes": 32,
+      "new_passes": 312,
       "former_passes_now_nonpassing": 0
     }
   },
   "transitions": {
-    "new_passes": 38,
+    "new_passes": 1256,
     "former_passes_now_nonpassing": 0
   }
 }

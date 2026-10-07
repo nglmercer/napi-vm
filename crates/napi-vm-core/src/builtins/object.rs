@@ -121,18 +121,12 @@ pub(super) fn install(e: &mut Environment) {
 
 // --- Shared helpers ---------------------------------------------------------
 
-fn cell(v: &Value) -> Option<&Rc<ObjectCell>> {
-    match v {
-        Value::Object { props } => Some(props),
-        Value::Class(class) => Some(&class.statics),
-        Value::Function(function) => {
-            function.ensure_name_length_properties();
-            function.prototype_value(v);
-            Some(&function.properties)
-        }
-        Value::HostFunction { properties, .. } => Some(properties),
-        _ => None,
+fn cell(v: &Value) -> Option<Rc<ObjectCell>> {
+    if let Value::Function(function) = v {
+        function.ensure_name_length_properties();
+        function.prototype_value(v);
     }
+    v.property_cell()
 }
 
 fn type_err(msg: &str) -> VmErr {
@@ -173,7 +167,9 @@ fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
             );
             names
         }
-        _ => Vec::new(),
+        _ => cell(v).map_or_else(Vec::new, |properties| {
+            own_object_names(&properties, enumerable_only)
+        }),
     }
 }
 
@@ -985,6 +981,36 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     };
     if cell(descriptor).is_none() {
         return Err(type_err("Property description must be an object"));
+    }
+
+    if let Value::TypedArray(view) = target {
+        // Integer-indexed elements never become ordinary property slots.
+        let numeric = key.parse::<f64>().ok();
+        let canonical = key == "-0"
+            || key == "NaN"
+            || key == "Infinity"
+            || key == "-Infinity"
+            || numeric.is_some_and(|index| index.to_string() == key);
+        if canonical {
+            let index = numeric.unwrap_or(f64::NAN);
+            if key == "-0"
+                || !index.is_finite()
+                || index < 0.0
+                || index.fract() != 0.0
+                || index >= view.effective_length() as f64
+                || own_slot(descriptor, "get").is_some()
+                || own_slot(descriptor, "set").is_some()
+                || ["configurable", "enumerable", "writable"]
+                    .iter()
+                    .any(|name| own_slot(descriptor, name).is_some_and(|value| !value.is_truthy()))
+            {
+                return Err(type_err("Cannot redefine a typed array element"));
+            }
+            if let Some(value) = own_slot(descriptor, "value") {
+                crate::builtins::write_element(view, index as usize, &value)?;
+            }
+            return Ok(());
+        }
     }
 
     let old_value = own_slot(target, key);

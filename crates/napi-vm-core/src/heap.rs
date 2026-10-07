@@ -306,6 +306,11 @@ impl Marker {
     }
 
     fn mark_value(&mut self, value: &Value) {
+        if let Some(properties) = value.exotic_properties()
+            && self.marked.insert(id_of(&properties))
+        {
+            self.work.push(MarkItem::Object(properties));
+        }
         match value {
             Value::RealmGlobal(global) => self.mark_env(global),
             Value::HostPending { id } => {
@@ -343,7 +348,7 @@ impl Marker {
             }
             Value::TypedArray(view) | Value::DataView(view) => {
                 self.marked.insert(id_of(view));
-                self.marked.insert(view.buffer.identity());
+                self.mark_value(&view.buffer.to_value());
             }
             _ => {
                 if let Some(id) = value.weak_identity() {

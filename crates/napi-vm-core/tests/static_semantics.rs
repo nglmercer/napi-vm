@@ -22,6 +22,129 @@ fn check_both(source: &str) {
 }
 
 #[test]
+fn builtins_keep_their_state_and_derived_prototype() {
+    check_both(
+        "var log='';function Other(){}var target=new Proxy(Other,{get(object,key){if(key==='prototype'){log+='P';}return object[key];}});var input={valueOf(){log+='V';return 4;}};Reflect.construct(ArrayBuffer,[input],target);log==='VP';",
+    );
+    check_both(
+        "var reads=0;function Other(){}var target=new Proxy(Other,{get(object,key){if(key==='prototype'){reads++;}return object[key];}});var caught=false;try{Reflect.construct(Promise,[1],target);}catch(e){caught=e instanceof TypeError;}caught&&reads===0;",
+    );
+    check_both(
+        "var target;class Child extends Promise{}var value=new Child(function(resolve){target=new.target;resolve(1);});value instanceof Child&&target===undefined;",
+    );
+    check_both(
+        "var reads=0;function Other(){}var target=new Proxy(Other,{get(object,key){if(key==='prototype'){reads++;}return object[key];}});Reflect.construct(Map,[],target);reads===1;",
+    );
+    check_both(
+        "class Child extends Array{x=42;}var value=new Child(1,2);value instanceof Child&&value instanceof Array&&Array.isArray(value)&&value.length===2&&value[0]===1&&value.x===42;",
+    );
+    check_both(
+        "class Child extends Date{x=42;}var value=new Child(0);value instanceof Child&&value instanceof Date&&value.getTime()===0&&value.x===42;",
+    );
+    check_both(
+        "class Child extends Uint8Array{x=42;}var value=new Child(2);value[0]=7;value instanceof Child&&value instanceof Uint8Array&&value.length===2&&value[0]===7&&value.x===42;",
+    );
+    check_both(
+        "class Child extends ArrayBuffer{x=42;}var value=new Child(2);value instanceof Child&&value instanceof ArrayBuffer&&value.byteLength===2&&value.x===42;",
+    );
+    check_both(
+        "class Child extends Number{x=42;}var value=new Child(7);value instanceof Child&&value instanceof Number&&value.valueOf()===7&&value.x===42;",
+    );
+    check_both(
+        "class Child extends Object{valueOf(){return 42;}}var original={};var value=new Child(original);value!==original&&value instanceof Child&&value.valueOf()===42;",
+    );
+}
+
+#[test]
+fn instance_private_fields_have_lexical_identity_and_own_storage() {
+    check_both(
+        "class Base{constructor(value){return value;}}class Child extends Base{#x;m(){var init=()=>new Child(this);var source={get a(){init();return 42;}};({a:this.#x}=source);return this.#x;}}Child.prototype.m.call({})===42;",
+    );
+    check_both(
+        "class Base{#x=1;read(){return this.#x;}}class Child extends Base{#x=2;other(){return this.#x;}}var value=new Child();value.read()===1&&value.other()===2&&Reflect.ownKeys(value).length===0;",
+    );
+    check_both(
+        "class Base{#x=1;read(value){return value.#x;}}var instance=new Base();var fake={'#x':1};var caught=false;try{instance.read(fake);}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+    check_both(
+        "class Base{#x=1;update(){this.#x++;this.#x+=2;this.#x&&=7;return this.#x;}}new Base().update()===7;",
+    );
+    check_both("class Base{#x=()=>42;read(){return this.#x();}}new Base().read()===42;");
+    check_both(
+        "var shared={};class Base{constructor(){return shared;}}class Child extends Base{#x=1;}new Child();var caught=false;try{new Child();}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+}
+
+#[test]
+fn derived_constructors_bind_this_only_after_super() {
+    check_both(
+        "var iterator={next(){return {done:false};},return(){this.initialize();return {done:true};},[Symbol.iterator](){return this;}};class Base{}class Child extends Base{constructor(){iterator.initialize=()=>super();for(var value of iterator){return;}}}new Child() instanceof Child;",
+    );
+    check_both(
+        "class Base{constructor(){this.target=new.target;}}class Child extends Base{x=42;constructor(){return ()=>super();}}var construct=new Child();var value=construct();value.x===42&&value.target===Child;",
+    );
+    check_both(
+        "var reads=0;class Base{get x(){reads++;return 1;}}class Child extends Base{constructor(){var caught=false;try{super.x;}catch(e){caught=e instanceof ReferenceError;}super();this.ok=caught&&reads===0;}}new Child().ok;",
+    );
+    check_both(
+        "class Base{}class Child extends Base{constructor(){var caught=false;try{this;}catch(e){caught=e instanceof ReferenceError;}super();this.ok=caught;}}new Child().ok;",
+    );
+    check_both(
+        "class Base{}class Child extends Base{constructor(){}}var caught=false;try{new Child();}catch(e){caught=e instanceof ReferenceError;}caught;",
+    );
+    check_both(
+        "class Base{}class Child extends Base{constructor(){return 1;}}var caught=false;try{new Child();}catch(e){caught=e instanceof TypeError;}caught;",
+    );
+    check_both(
+        "var object={ok:true};class Base{}class Child extends Base{constructor(){return object;}}new Child()===object;",
+    );
+    check_both(
+        "var calls=0;class Base{constructor(){calls++;}}class Child extends Base{constructor(){super();try{super();}catch(e){this.ok=e instanceof ReferenceError;}}}new Child().ok&&calls===2;",
+    );
+    check_both(
+        "class Base{}class Child extends Base{constructor(read=()=>this){var caught=false;try{read();}catch(e){caught=e instanceof ReferenceError;}super();this.ok=caught&&read()===this;}}new Child().ok;",
+    );
+    check_both(
+        "class Base{}class Child extends Base{constructor(){var run=()=>super();run();this.ok=true;}}new Child().ok;",
+    );
+    check_both(
+        "class Base{}class Child extends Base{constructor(){var caught=false;try{eval('this');}catch(e){caught=e instanceof ReferenceError;}super();this.ok=caught&&eval('this')===this;}}new Child().ok;",
+    );
+}
+
+#[test]
+fn fields_follow_construction_and_use_own_property_definitions() {
+    check_both(
+        "var fields=0;class Base{}class Child extends Base{x=(()=>{fields++;throw new Error('field');})();constructor(){var first=false,second=false;try{super();}catch(e){first=e.message==='field';}try{super();}catch(e){second=e instanceof ReferenceError;}this.ok=first&&second;}}new Child().ok&&fields===1;",
+    );
+    check_both(
+        "var object={};function Base(){return object;}class Child extends Base{x=42;}new Child()===object&&object.x===42;",
+    );
+    check_both(
+        "var log='';class Base{x=(log+='B');}class Middle extends Base{x=(log+='M');}class Child extends Middle{x=(log+='C');}new Child();log==='BMC';",
+    );
+    check_both(
+        "var log='';class Base{constructor(){log+='B';}}class Child extends Base{x=(log+='F');constructor(){log+='C';super();log+='A';}}new Child();log==='CBFA';",
+    );
+    check_both(
+        "var object={};class Base{constructor(){return object;}}class Child extends Base{x=42;constructor(){var value=super();this.ok=value===object;}}var value=new Child();value===object&&value.x===42&&value.ok;",
+    );
+    check_both(
+        "var object={};class Base{constructor(){return object;}}class Child extends Base{x=42;}new Child()===object&&object.x===42;",
+    );
+    check_both(
+        "var writes=0;class Base{set x(value){writes++;}}class Child extends Base{x=42;}var value=new Child();var descriptor=Object.getOwnPropertyDescriptor(value,'x');writes===0&&descriptor.value===42&&descriptor.writable&&descriptor.enumerable&&descriptor.configurable;",
+    );
+    check_both("var value=7;class Base{x=value;constructor(value){}}new Base(99).x===7;");
+    check_both(
+        "var log='';class Base{x=(log+='F');constructor(value=(log+='P')){log+='B';}}new Base();log==='FPB';",
+    );
+    check_both(
+        "var fields=0;class Base{}class Child extends Base{x=fields++;constructor(){return {};}}new Child();fields===0;",
+    );
+}
+
+#[test]
 fn class_construction_uses_new_target_prototype() {
     check_both(
         "class Base {constructor(){this.target=new.target;}} function Other(){} var value=Reflect.construct(Base,[],Other);Object.getPrototypeOf(value)===Other.prototype&&value.target===Other;",
@@ -545,5 +668,45 @@ fn base_fields_initialize_before_parameter_defaults_in_their_defining_scope() {
     );
     check_both(
         "var x='outer';class A{field=x;constructor(x='parameter'){this.argument=x;}}var a=new A();a.field==='outer'&&a.argument==='parameter';",
+    );
+}
+
+#[test]
+fn typed_array_elements_reject_invalid_descriptors_and_indices() {
+    check_both(
+        "var a=new Uint8Array(1);!Reflect.defineProperty(a,'-0',{value:1})&&!Reflect.defineProperty(a,'1',{value:1})&&!Reflect.defineProperty(a,'0',{writable:false})&&Reflect.defineProperty(a,'0',{value:42})&&a[0]===42;",
+    );
+    check_both(
+        "var accessed=false;var F=function(){}.bind(null);Object.defineProperty(F,'prototype',{get(){accessed=true;throw 1;}});var caught=false;try{Reflect.construct(Uint8Array,[Symbol()],F);}catch(e){caught=e instanceof TypeError;}caught&&!accessed;",
+    );
+}
+
+#[test]
+fn regexp_compile_replaces_pattern_and_resets_last_index() {
+    check_both(
+        "var re=/a/g;re.lastIndex=4;re.compile('b','i')===re&&re.source==='b'&&re.flags==='i'&&re.lastIndex===0&&re.test('B')&&!re.test('a');",
+    );
+    check_both(
+        "var re=/a/;var copy=Reflect.construct(RegExp,[re],Object.defineProperty(function(){}.bind(null),'prototype',{get(){re.compile('b');return RegExp.prototype;}}));copy.source==='a'&&re.source==='b';",
+    );
+}
+
+#[test]
+fn typed_array_constructor_inheritance_retains_shared_instance_methods() {
+    check_both(
+        "var base=Object.getPrototypeOf(Float32Array);class Derived extends base{constructor(){return Reflect.construct(Float32Array,[1],new.target);}}var a=new Derived();typeof a.slice==='function'&&typeof Derived.prototype.slice==='function'&&a.slice(0).length===1;",
+    );
+}
+
+#[test]
+fn typed_array_metadata_and_accessors_validate_the_receiver() {
+    check_both(
+        "var T=Object.getPrototypeOf(Uint8Array);var d=Object.getOwnPropertyDescriptor(T,'length');T.name==='TypedArray'&&d.value===0&&!d.writable&&!d.enumerable&&d.configurable;",
+    );
+    check_both(
+        "var p=Object.getPrototypeOf(Uint8Array).prototype;var caught=0;for(var k of ['buffer','length','byteLength','byteOffset']){try{p[k];}catch(e){if(e instanceof TypeError)caught++;}}caught===4;",
+    );
+    check_both(
+        "class Re extends RegExp{}var re=new Re('a');var caught=false;try{re.compile('b');}catch(e){caught=e instanceof TypeError;}caught&&re.source==='a';",
     );
 }

@@ -234,10 +234,19 @@ impl Interpreter {
                 self.assign_or_set_binding(name, val.clone())?;
                 Ok(val.clone())
             }
-            Pattern::Member { object, property } => {
+            Pattern::Member {
+                object,
+                property,
+                private,
+            } => {
                 let receiver = self.eval_expr(object)?;
                 let key = self.eval_expr(property)?;
-                self.assign_member(&receiver, &key, val.clone())?;
+                if *private {
+                    let name = self.property_key(&key)?;
+                    self.set_private_member(&receiver, &name, val.clone())?;
+                } else {
+                    self.assign_member(&receiver, &key, val.clone())?;
+                }
                 Ok(val.clone())
             }
             Pattern::Array(elements) => {
@@ -522,7 +531,12 @@ impl Interpreter {
                 }
                 Ok(Value::Bool(true))
             }
-            _ => Ok(Value::Bool(true)),
+            _ => {
+                if let Some(properties) = obj.exotic_properties() {
+                    return self.delete_member(&Value::Object { props: properties }, key);
+                }
+                Ok(Value::Bool(true))
+            }
         }
     }
 
@@ -945,6 +959,18 @@ impl Interpreter {
             // Writing an element of a typed array converts and wraps it to
             // the element type; an out-of-range index is ignored, not grown.
             (Value::TypedArray(view), key) => {
+                let slot = self.property_key(key)?;
+                if slot.parse::<f64>().is_err() {
+                    let properties = view.properties.clone();
+                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    if let Value::Symbol(symbol) = key {
+                        properties
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&slot, symbol.clone());
+                    }
+                    return Ok(());
+                }
                 let index = self.tn(key);
                 if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
                     crate::builtins::write_element(view, index as usize, &val)?;
@@ -1055,7 +1081,21 @@ impl Interpreter {
                 }
                 Ok(())
             }
-            _ => Err(VmErr::Msg("Invalid assignment target".to_string())),
+            _ => {
+                if let Some(properties) = obj.exotic_properties() {
+                    let slot = self.property_key(prop)?;
+                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    if let Value::Symbol(symbol) = prop {
+                        properties
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&slot, symbol.clone());
+                    }
+                    Ok(())
+                } else {
+                    Err(VmErr::Msg("Invalid assignment target".to_string()))
+                }
+            }
         }
     }
 
@@ -1532,6 +1572,7 @@ impl Interpreter {
                     );
                 }
 
+                let constructor_scope = fe.clone();
                 let s = std::mem::replace(&mut self.global, fe);
                 // `name` is an `Rc<str>`: cloning it for the stack frame is a
                 // refcount bump, so the hot path allocates nothing here.
@@ -1572,6 +1613,21 @@ impl Interpreter {
                         stack: self.get_stack().to_vec(),
                     }))),
                     other => other,
+                };
+                let result = if matches!(
+                    fd.body.first(),
+                    Some(Statement::ClassInitialization { derived: true, .. })
+                ) {
+                    match result {
+                        Ok(value) if is_js_object(&value) => Ok(value),
+                        Ok(Value::Undefined) => self.resolve_this(&constructor_scope),
+                        Ok(_) => vm_err(
+                            "TypeError: derived constructor must return an object or undefined",
+                        ),
+                        error => error,
+                    }
+                } else {
+                    result
                 };
                 self.pop_frame();
                 self.global = s;
@@ -1703,21 +1759,23 @@ impl Interpreter {
         }
     }
 
-    /// Run a constructor (class or function) against an already-created `this`,
-    /// as done by `super(...)`. Returns `this`.
+    /// Construct the superclass, bind the owning derived constructor's this,
+    /// then initialize that class's fields. Arrows share the owning activation.
     pub(crate) fn invoke_ctor(
         &mut self,
         f: &Value,
-        this_val: Value,
+        _this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
-        let new_target = self
-            .new_target_stack
-            .last()
-            .cloned()
-            .unwrap_or_else(|| f.clone());
-        self.invoke_constructor_with_new_target(f, this_val.clone(), args, new_target)?;
-        Ok(this_val)
+        let scope = Environment::constructor_environment(&self.global)
+            .ok_or_else(|| VmErr::Msg("ReferenceError: super() outside a constructor".into()))?;
+        let target = scope.borrow().new_target().unwrap_or_else(|| f.clone());
+        // Construct first: a repeated super call still runs the superclass's
+        // side effects before BindThisValue rejects the second initialization.
+        let receiver = self.reflect_constructor(f, args, target)?;
+        scope.borrow_mut().bind_constructor_this(receiver.clone())?;
+        self.initialize_instance_fields(&scope)?;
+        Ok(receiver)
     }
 
     fn invoke_constructor_with_new_target(
@@ -1861,10 +1919,75 @@ impl Interpreter {
             && let Some(target) =
                 callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
         {
-            // The namespace object is the receiver, so a shared implementation
-            // can tell which built-in it was reached through — `Int8Array` and
-            // `Float64Array` differ only by what their namespace carries.
-            return self.call_this(&target, f.clone(), args);
+            let owner =
+                super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+            let builtin = owner
+                .borrow()
+                .intrinsic_name(f)
+                .unwrap_or_else(|| "Object".into());
+            if matches!(builtin.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet") {
+                // Collections already perform OrdinaryCreateFromConstructor
+                // using the active newTarget. Do not read prototype twice.
+                return self.call_this(&target, f.clone(), args);
+            }
+            let is_object = builtin == "Object";
+            if is_object && crate::interpreter::strict_equals(f, &new_target) {
+                // Object(value) retains an existing object's identity and
+                // prototype when constructed with its own newTarget.
+                return self.call_this(&target, f.clone(), args);
+            }
+            let prototype_after_arguments = (builtin.ends_with("Array")
+                && args.first().is_some_and(|value| !is_js_object(value)))
+                || matches!(
+                    builtin.as_str(),
+                    "RegExp"
+                        | "Number"
+                        | "Boolean"
+                        | "String"
+                        | "Date"
+                        | "ArrayBuffer"
+                        | "SharedArrayBuffer"
+                        | "DataView"
+                        | "Function"
+                        | "WeakRef"
+                        | "FinalizationRegistry"
+                );
+            if builtin == "Promise" && !args.first().is_some_and(is_callable_value) {
+                return vm_err("TypeError: Promise executor must be callable");
+            }
+            let prototype = if prototype_after_arguments {
+                None
+            } else {
+                Some(self.constructor_prototype(&new_target, &builtin)?)
+            };
+            // Object's subclass construction ignores its value argument.
+            let args = if is_object { Vec::new() } else { args };
+            // Native constructors use the construction stack for newTarget;
+            // do not let pending function-entry state leak into callbacks.
+            let result = self.call_this(&target, f.clone(), args)?;
+            let prototype = match prototype {
+                Some(prototype) => prototype,
+                None => self.constructor_prototype(&new_target, &builtin)?,
+            };
+            if let Value::RegExp(data) = &result {
+                data.legacy_enabled
+                    .set(crate::interpreter::strict_equals(f, &new_target));
+            }
+            if let Value::DataView(view) = &result
+                && view.buffer.is_detached()
+            {
+                return vm_err(
+                    "TypeError: Cannot construct a DataView from a detached ArrayBuffer",
+                );
+            }
+            if let Value::Array(array) = &result {
+                array.set_proto(prototype);
+            } else if let Some(properties) = result.property_cell() {
+                properties.set_proto(prototype);
+            } else if !is_js_object(&result) {
+                return vm_err("TypeError: builtin constructor must return an object");
+            }
+            return Ok(result);
         }
         if let Some(proxy) = f.as_proxy() {
             let target = proxy.target.clone();
@@ -1923,8 +2046,14 @@ impl Interpreter {
                 // Reflect.construct may supply a different newTarget. Resolve
                 // its prototype before entering the constructor body, including
                 // getters and the newTarget realm's fallback intrinsic.
-                let prototype = self.constructor_prototype(&new_target, "Object")?;
-                let inst = Value::object_with_proto(vec![], prototype);
+                let derived = matches!(c.constructor.as_ref(), Value::Function(fd)
+                    if matches!(fd.body.first(), Some(Statement::ClassInitialization { derived: true, .. })));
+                let inst = if derived {
+                    Value::Undefined
+                } else {
+                    let prototype = self.constructor_prototype(&new_target, "Object")?;
+                    Value::object_with_proto(vec![], prototype)
+                };
                 let r = self.invoke_constructor_with_new_target(
                     c.constructor.as_ref(),
                     inst.clone(),

@@ -711,9 +711,11 @@ impl Interpreter {
     ) -> Result<(), VmErr> {
         match v {
             Value::Binding(cell) => self.vs_rec(&cell.borrow(), visited, depth, output),
-            Value::RegExp(re) => {
-                output.push_str(&format!("/{}/{}", re.regex.source, re.regex.flags))
-            }
+            Value::RegExp(re) => output.push_str(&format!(
+                "/{}/{}",
+                re.regex.borrow().source,
+                re.regex.borrow().flags
+            )),
             Value::BigInt(value) => output.push_str(&value.to_decimal()),
             // A typed array stringifies as its elements, like an array.
             Value::TypedArray(view) => {

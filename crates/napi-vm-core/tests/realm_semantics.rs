@@ -9,6 +9,42 @@ fn truth(vm: &mut Interpreter, source: &str) {
 }
 
 #[test]
+fn exotic_instances_retain_their_defining_realm_after_collection() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    vm.set_global_checked("otherGlobal", child.realm_global_object())
+        .unwrap();
+    for (name, source) in [
+        ("Date", "new Date(0)"),
+        ("RegExp", "new RegExp('x')"),
+        ("Promise", "Promise.resolve(42)"),
+        ("ArrayBuffer", "new ArrayBuffer(4)"),
+        ("SharedArrayBuffer", "new SharedArrayBuffer(4)"),
+        ("Uint8Array", "new Uint8Array(4)"),
+        ("DataView", "new DataView(new ArrayBuffer(4))"),
+    ] {
+        let value = child.eval_source(source).unwrap();
+        vm.set_global_checked(name, value).unwrap();
+    }
+    drop(child);
+    assert!(vm.collect_cycles().skipped.is_none());
+    for name in [
+        "Date",
+        "RegExp",
+        "Promise",
+        "ArrayBuffer",
+        "SharedArrayBuffer",
+        "Uint8Array",
+        "DataView",
+    ] {
+        truth(
+            &mut vm,
+            &format!("Object.getPrototypeOf({name})===otherGlobal.{name}.prototype;"),
+        );
+    }
+}
+
+#[test]
 fn fresh_realms_isolate_globals_intrinsics_and_function_receivers() {
     let mut vm = Interpreter::with_builtins();
     let mut child = vm.create_realm();

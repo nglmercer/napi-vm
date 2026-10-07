@@ -265,3 +265,75 @@ claim to implement those rules.
 
 The scoped Bun suite retains 1,356 passes and the same 80 baseline failures,
 with unchanged failing test names and multiplicities.
+
+
+## Derived constructors, instance fields and exotic storage
+
+Derived constructor entry now leaves `this` uninitialized. Successful `super()`
+constructs the superclass with the actual `new.target`, binds the returned
+object, and initializes derived fields on that object. Repeated `super()` calls
+run superclass side effects before rejecting a second binding. Returning an
+object without `super()` is allowed; returning a primitive other than undefined
+throws TypeError, and returning undefined without a bound receiver throws
+ReferenceError. Arrows and direct eval share the constructor's environment;
+escaped arrows retain `this` and `new.target` after constructor execution ends.
+Super property reads also reject an uninitialized receiver.
+
+Base fields run before parameter defaults and derived fields run after `super()`.
+Fields use their defining lexical scope and create own data properties instead
+of invoking inherited setters. Private instance fields have distinct lexical
+identities and separate storage, including read/write/update/destructuring paths,
+duplicate initialization checks, reflection exclusion and GC tracing. Private
+methods/accessors and static private fields still use legacy slots; full private
+name grammar and branding are not complete.
+
+Date, RegExp, Promise, ArrayBuffer, SharedArrayBuffer, typed arrays and DataView
+now retain ordinary property/prototype storage and defining realm ownership.
+Built-in subclass construction preserves both native state and the derived
+prototype. Object subclass construction ignores its value argument as required.
+Collection construction reads `newTarget.prototype` once, and native constructor
+callbacks do not inherit pending function-entry `new.target` state. Buffer and
+DataView index arguments use JavaScript numeric coercion; DataView checks for
+detachment after prototype access. Custom iterator return handlers run before
+constructor completion, allowing an iterator close to initialize derived `this`.
+
+The collector traces constructor receivers, private fields, exotic properties,
+realm ownership and buffer properties reachable only through a view. Iterative
+teardown drains private-field and exotic-property edges, including a tested
+10,000-node private-field chain. Constructor and private-write paths use AST
+fallback where bytecode cannot yet represent their state. Simple base
+constructors without fields retain bytecode execution.
+
+Rust API changes: exhaustive Statement matches must handle
+`ClassInitialization`; Pattern::Member has a `private` flag; ClassTemplate has
+`private_fields`. Direct PromiseInner, RegExpData and TypedArrayData initializers
+must supply `properties` (use `Value::instance_properties()`). Value::Date holds
+DateData rather than Cell<f64>; construct dates with `Value::date(milliseconds)`.
+DateData preserves get/set access via its Cell dereference. RegExpData.regex is
+now a RefCell so legacy `compile()` can replace the pattern; borrow it to inspect
+the compiled expression. RegExpData also carries a `legacy_enabled` Cell
+(default true for ordinary RegExp creation; false for distinct newTarget
+construction) to guard legacy methods on subclasses. Buffer and SharedBuffer
+public construction helpers initialize their own metadata automatically.
+
+Phases 1–3 remain incomplete. Further requirements include private methods,
+accessors and static fields, complete contextual early errors, bytecode constructor
+and private-write coverage, full global object storage and declaration
+instantiation, proxy revocation/invariants, complete exotic descriptors, real
+agents/shared-memory coordination, and independent realm module caches. Runtime
+features remain disabled by default.
+
+The follow-up verification also guards integer-indexed typed-array property
+definitions, argument errors before prototype access, cross-realm constructor
+prototype lookup, the abstract TypedArray constructor/prototype hierarchy and
+RegExp `compile()` pattern replacement with lastIndex reset.
+
+Validation of the final derived-constructor batch:
+
+- Complete pinned Test262 corpus: **41,401 / 102,956 (40.2123%)**. Remaining: 61,269 failures, 284 harness errors, 0 crashes, 2 timeouts and 0 skips.
+- Against previous PR head: **1,256 new passes, 0 lost passes**. Against merged main: **6,665 new passes, 0 lost passes**.
+- Focused constructor/field/buffer/Promise selection: 7,496 / 20,877; 312 new passes and 0 lost passes against previous PR head. These rows are extracted from the complete final run. All regressions found during intermediate verification are resolved.
+- 706 workspace Rust tests pass; four ignored. 73 native Node tests, 14 WebAssembly tests, eight minimal-worker tests and four Python tests pass. Formatting and Clippy with warnings denied pass.
+- Scoped Bun: 1,356 passes and the same 80 baseline failures, with identical failing-test names and multiplicities.
+
+Corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; release worker SHA-256 `295cb2fe664b6985c1ff6898c6732391c416d5005ac9b27e4c311facd08e3b9b`. Four isolated workers, five-second per-variant timeouts, no feature skips. Compact evidence is in `tools/test262/latest.json`; generated full/focused/transition/triage reports are in `artifacts/test262/phases-1-3-derived-*`.

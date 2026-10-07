@@ -355,6 +355,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             )
         }
         Statement::Block(body) => nested_statements(body, ctx),
+        Statement::ClassInitialization { fields, .. } => nested_statements(fields, ctx),
         Statement::ParameterInitialization {
             initializers: body, ..
         }
@@ -485,7 +486,9 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
             }
             Ok(())
         }
-        Pattern::Member { object, property } => {
+        Pattern::Member {
+            object, property, ..
+        } => {
             expression(object, ctx)?;
             expression(property, ctx)
         }

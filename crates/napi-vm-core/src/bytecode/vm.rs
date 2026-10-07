@@ -538,14 +538,7 @@ fn run_loop(
                 }
                 Instr::LoadGlobalThis { dst } => {
                     let scope = current_scope(interp, frame);
-                    frame.registers[dst as usize] =
-                        scope.borrow().get("this").unwrap_or_else(|| {
-                            if interp.cur_mod.is_some() {
-                                Value::Undefined
-                            } else {
-                                interp.realm_global_object()
-                            }
-                        });
+                    frame.registers[dst as usize] = interp.resolve_this(&scope)?;
                 }
                 Instr::TypeofGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
@@ -710,15 +703,11 @@ fn run_loop(
                     key,
                     cache,
                 } => {
-                    if private
-                        && !interp.has_property(
-                            &frame.registers[obj as usize],
-                            &frame.registers[key as usize],
-                        )?
-                    {
-                        return Err(VmErr::Msg(
-                            "TypeError: receiver does not contain the private member".into(),
-                        ));
+                    if private {
+                        let name = interp.property_key(&frame.registers[key as usize])?;
+                        frame.registers[dst as usize] =
+                            interp.get_private_member(&frame.registers[obj as usize], &name)?;
+                        return Ok(());
                     }
                     let value = get_prop_cached(
                         interp,
@@ -1013,8 +1002,9 @@ fn run_loop(
                         ));
                     };
                     let key = frame.registers[key as usize].clone_for_execution();
+                    let receiver = interp.resolve_this(&scope)?;
                     frame.registers[dst as usize] =
-                        interp.get_prop_value_with_receiver(&proto, &key, &frame.this_value)?;
+                        interp.get_prop_value_with_receiver(&proto, &key, &receiver)?;
                 }
                 Instr::SuperCall { dst, args, argc } => {
                     let argv = take_range(frame, args, argc)?;
@@ -1241,6 +1231,9 @@ fn build_class_from_template(
         .map(|reg| frame.registers[reg as usize].clone_for_execution());
     let super_proto = interp.super_proto_for(&super_cls)?;
     let member_scope = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
+    for name in &template.private_fields {
+        member_scope.borrow_mut().declare_private_field(name);
+    }
     let member_closure = Interpreter::member_closure_env(&member_scope, &super_proto);
     member_closure.borrow_mut().replace_strict(Some(true));
 
@@ -1333,7 +1326,7 @@ fn build_class_from_template(
 
     let super_ctor_value = Interpreter::super_ctor_for(&super_cls);
     let ctor_closure = match (&super_ctor_value, template.ctor_computed_keys.is_empty()) {
-        (None, true) => def_scope.clone(),
+        (None, true) => member_closure.clone(),
         _ => {
             let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
             if let Some(target) = super_ctor_value {

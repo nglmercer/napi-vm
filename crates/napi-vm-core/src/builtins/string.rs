@@ -397,7 +397,7 @@ fn replace(i: &mut Interpreter, t: Value, a: Vec<Value>, all: bool) -> Result<Va
     let s = str_this(i, &t)?;
     let replacement = a.get(1).cloned().unwrap_or(Value::Undefined);
     if let Some(re) = a.first().and_then(Value::as_regexp) {
-        if all && !re.regex.global {
+        if all && !re.regex.borrow().global {
             return Err(VmErr::Msg(
                 "TypeError: replaceAll requires a global RegExp".into(),
             ));

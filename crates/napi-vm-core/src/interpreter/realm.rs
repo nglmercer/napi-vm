@@ -46,7 +46,9 @@ pub(crate) fn value_realm(value: &Value) -> Option<Env> {
         Value::Array(array) => array.meta.borrow().realm_global.clone(),
         Value::Class(class) => value_realm(&class.constructor),
         Value::Proxy(proxy) => value_realm(&proxy.target),
-        _ => None,
+        _ => value
+            .exotic_properties()
+            .and_then(|properties| properties.meta.borrow().realm_global.clone()),
     }
 }
 

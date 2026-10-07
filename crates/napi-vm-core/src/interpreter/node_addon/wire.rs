@@ -281,8 +281,8 @@ pub(super) fn guest_to_wire(
         }
         Value::RegExp(data) => json!({
             "t":"regexp",
-            "source":data.regex.source,
-            "flags":data.regex.flags,
+            "source":data.regex.borrow().source,
+            "flags":data.regex.borrow().flags,
             "lastIndex":data.last_index.get().to_string(),
         }),
         Value::Symbol(symbol) => {

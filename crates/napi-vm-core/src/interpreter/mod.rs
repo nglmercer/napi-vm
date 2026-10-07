@@ -140,7 +140,7 @@ use std::rc::Rc;
 
 use crate::error::{StackFrame, VmErr};
 use crate::host::HostBridge;
-use crate::parser::{Statement, VarKind, collect_var_names, pattern_names};
+use crate::parser::{Expr, Statement, VarKind, collect_var_names, pattern_names};
 use crate::span::Span;
 use crate::value::Value;
 
@@ -356,6 +356,7 @@ pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
         Statement::ParameterInitialization { .. }
+        | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
         Statement::Declarations(inner) => block_needs_lexical_scope(inner),
@@ -386,6 +387,7 @@ fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
     stmts.iter().any(|stmt| match stmt {
         Statement::VarDecl { kind, .. } => matches!(kind, VarKind::Let | VarKind::Const),
         Statement::ParameterInitialization { .. }
+        | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
         Statement::Declarations(inner) => body_needs_lexical_hoist(inner),
@@ -1692,6 +1694,107 @@ impl Interpreter {
         result
     }
 
+    pub(crate) fn resolve_this(&self, scope: &Env) -> Result<Value, VmErr> {
+        match scope.borrow().lookup("this") {
+            env::Lookup::Value(value) => Ok(value),
+            env::Lookup::Uninitialized => Err(VmErr::Msg(
+                "ReferenceError: this is uninitialized before super()".into(),
+            )),
+            env::Lookup::Missing => Ok(if self.cur_mod.is_some() {
+                Value::Undefined
+            } else {
+                self.realm_global_object()
+            }),
+        }
+    }
+
+    pub(crate) fn get_private_member(
+        &mut self,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        let id = self.global.borrow().private_name(name);
+        if let Some(id) = id {
+            return receiver.private_field(id);
+        }
+        // Private methods/accessors still use their legacy class slots.
+        if !self.has_property(receiver, &Value::String(name.into()))? {
+            return Err(VmErr::Msg(
+                "TypeError: receiver does not contain the private member".into(),
+            ));
+        }
+        self.get_prop_value_str(receiver, name)
+    }
+
+    pub(crate) fn set_private_member(
+        &mut self,
+        receiver: &Value,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        if let Some(id) = self.global.borrow().private_name(name) {
+            return receiver.set_private_field(id, value);
+        }
+        self.assign_member_str(receiver, name, value)
+    }
+
+    /// Initialize fields in their defining lexical scope. DefineField creates
+    /// own data properties and must not invoke an inherited setter.
+    pub(crate) fn initialize_instance_fields(
+        &mut self,
+        constructor_scope: &Env,
+    ) -> Result<(), VmErr> {
+        let (fields, defining) = {
+            let scope = constructor_scope.borrow();
+            (
+                scope.constructor_fields(),
+                scope
+                    .parent_env()
+                    .unwrap_or_else(|| self.persistent_global.clone()),
+            )
+        };
+        if fields.is_empty() {
+            return Ok(());
+        }
+        let receiver = self.resolve_this(constructor_scope)?;
+        let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
+        field_scope.borrow_mut().set("this", receiver.clone());
+        field_scope.borrow_mut().replace_strict(Some(true));
+        field_scope.borrow_mut().set_new_target(Value::Undefined);
+        let saved = std::mem::replace(&mut self.global, field_scope);
+        let result = (|| {
+            for field in fields.iter() {
+                self.execution.check()?;
+                let Statement::Expr(Expr::Assignment { target, value, .. }) = field else {
+                    return Err(VmErr::Msg("Invalid instance field initializer".into()));
+                };
+                let Expr::Member {
+                    property, computed, ..
+                } = target.as_ref()
+                else {
+                    return Err(VmErr::Msg("Invalid instance field target".into()));
+                };
+                let name = self.eval_expr(property)?;
+                let key = self.property_key(&name)?;
+                let value = self.eval_expr(value)?;
+                if !computed && let Some(id) = self.global.borrow().private_name(&key) {
+                    receiver.initialize_private_field(id, value)?;
+                    continue;
+                }
+                let descriptor = Value::object(vec![
+                    ("value".into(), value),
+                    ("writable".into(), Value::Bool(true)),
+                    ("enumerable".into(), Value::Bool(true)),
+                    ("configurable".into(), Value::Bool(true)),
+                ]);
+                crate::builtins::object::define_property(&receiver, &key, &descriptor)?;
+            }
+            Ok(())
+        })();
+        self.global = saved;
+        result
+    }
+
     /// Execute a statement list as a block *in the current scope*, hoisting
     /// its lexical declarations but not creating a new frame.
     ///
@@ -1708,6 +1811,17 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
+        if let Some(Statement::ClassInitialization { derived, fields }) = stmts.first() {
+            let depth = self.guest_execution_depth.clone();
+            depth.set(depth.get().saturating_add(1));
+            let _execution_guard = GuestExecutionGuard(depth);
+            let scope = self.global.clone();
+            scope.borrow_mut().enter_constructor(*derived, fields);
+            if !derived {
+                self.initialize_instance_fields(&scope)?;
+            }
+            return self.run_program_body(&stmts[1..]);
+        }
         if let Some(Statement::ParameterInitialization {
             params,
             initializers,
