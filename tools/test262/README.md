@@ -91,3 +91,21 @@ Verification:
 python3 -m unittest discover -s tools/test262 -p 'test_*.py'
 cargo test --no-default-features --test test262_worker --test engine_boundary
 ```
+
+## Compile-only source audit
+
+`audit_syntax.py` checks source acceptance with the public compile-with-goal API.
+It uses the runner's pinned-corpus selection and strict/Script/Module variants,
+without evaluating a harness or guest code. These results are not execution
+passes. Invalid sources accepted and valid sources rejected remain explicit
+outcomes, including unsupported proposals and execution-limit errors.
+
+```sh
+python3 tools/test262/audit_syntax.py /workspace/test262 \
+  --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
+  --output artifacts/test262/syntax-audit.json
+```
+
+The command builds a compile-only Rust companion and records source/engine
+identities. An existing immutable companion can be supplied with `--engine`.
+Full execution and AST/bytecode differential validation remain separate gates.

@@ -1,6 +1,59 @@
 # Phase 2 validation evidence
 
-Phase 2 remains incomplete. The frozen 165dddf source passes 46,342/102,956:
+The current frozen source is **313146b**. Foundation grammar and early-error
+coverage is implemented; the broader Phase 1 audit and Phases 3–4 remain open.
+The PR stays draft.
+
+| Outcome | Count |
+| --- | ---: |
+| Pass | 50,926 / 102,956 |
+| New passes versus PR #23 | 9,519 |
+| Lost passes versus PR #23 / 165dddf / 885a8c7 | 0 / 0 / 0 |
+| Fail | 51,982 |
+| Harness errors | 46 |
+| Timeouts | 2 |
+| Crashes / skips | 0 / 0 |
+| Parse-negative phase/error checks | 8,659 / 8,659 |
+
+Required checks pass: 793 workspace tests (four existing ignored), 158 minimal,
+73 Node, 14 WASM, nine tooling, fmt and strict Clippy. Repository forced-tier
+fixtures observe zero mismatches; full-corpus AST/bytecode differential is not
+measured. No AST fallback was removed.
+
+`313146b-summary.json` records configuration, identities, digests and every
+compressed report. `313146b-full.json.gz` retains all outcomes; comparisons against
+PR #23 and both earlier Phase 2 milestones retain every transition. The focused
+projection covers 38,822 variants, with 23,054 passes, 15,768 failures and zero
+harness errors/timeouts/crashes/skips. It is extracted from the full run by exact
+variant identity. The independent repaired-regression selection passes 2/2.
+
+The compile-only source audit rejects all 8,659 parse negatives and accepts
+94,143/94,297 sources requiring acceptance. Its 154 remaining rejections cover
+88 deferred imports, 22 resource-management variants, 42 decorators/auto-accessors
+and two preserved parse-depth limits. Acceptance is not an execution pass.
+
+Reproduce the comparison:
+
+```sh
+python3 tools/test262/compare.py \
+  tools/test262/evidence/foundations-phase1/baseline-final-full.json.gz \
+  tools/test262/evidence/foundations-phase2/313146b-full.json.gz \
+  --output artifacts/test262/phase2-comparison.json
+```
+
+See [implementation and reproduction](../../../../docs/test262-phase2-contexts.md)
+for build, full execution and source-audit commands. All execution uses revision
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, four workers, 5s timeout, fuel
+1,000,000, loop budget 100,000, call depth 128 and job budget 10,000.
+
+The 885a8c7 reports retain the two intermediate losses restored by 313146b.
+They are historical evidence, not the final implementation's regression count.
+
+---
+
+# Earlier Phase 2 validation evidence
+
+At the 165dddf milestone, Phase 2 remained incomplete. That frozen source passes 46,342/102,956:
 4,935 new passes and zero lost passes versus PR #23, with zero crashes.
 The exploratory reports retain all outcomes, including regressions. Subsequent
 parser changes require their own validation.

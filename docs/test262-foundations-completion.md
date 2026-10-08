@@ -193,19 +193,30 @@ variants and 4,058 Intl Temporal variants. Broader RegExp, Array, String, and
 Iterator failures also remain; these clusters mix algorithm and foundation
 failures and require individual classification. They remain in the denominator.
 
-## Phase 2 measured continuation
+## Phase 2 foundation validation
 
-Frozen source 165dddf passes 46,342/102,956 at the required pinned revision and
-limits: 4,935 new passes and zero lost passes versus PR #23, with 56,566
-failures, 46 harness errors, two timeouts and zero crashes/skips. All required
-checks pass (761 workspace Rust tests, four existing ignored; 158 minimal;
-73 Node; 14 WASM; nine tooling; fmt/Clippy). Repository differential fixtures
-have zero observed mismatches; full-corpus differential is not measured.
+Frozen source `313146b` passes 50,926/102,956 at the pinned revision and required
+limits: 9,519 new passes and zero losses versus PR #23, and 4,584 gains with zero
+losses versus the earlier `165dddf` Phase 2 milestone. Remaining outcomes are
+51,982 failures, 46 harness errors, two timeouts, zero crashes and zero skips.
+All 8,659 parse-negative variants pass the runner's phase/error-type checks.
 
-This continuation adds catch-pattern initialization, iteration binding metadata
-and early errors, assignment loop heads, contextual let/static expressions and
-statement-recovery errors. Shared binding metadata preserves simple-catch Annex
-B eval rules and hoisted var iteration patterns. AST fallback remains enabled.
-The complete reports and source identities are linked from the
-[Phase 2 status](test262-phase2-contexts.md). Known Phase 2 grammar/literal/eval
-context gaps and the broader Phase 1/3/4 gates remain; this PR stays draft.
+Phase 2 implements contextual grammar/static semantics, declaration conflicts,
+class/private early errors, Unicode and literal grammar, binding defaults, module
+export names, import options, eval contexts and lexical goals. Explicit metadata
+preserves private versus quoted public hash properties, grammar parentheses,
+legacy literals, catch/loop bindings and optional/assignment target boundaries.
+The static audit accepts 94,143/94,297 sources requiring acceptance. Its remaining
+154 rejected variants cover deferred imports, resources, decorators/auto-accessors
+and two preserved parse-depth limits; every outcome remains in the denominator.
+
+All required checks pass: 793 workspace tests (four existing ignored), 158 minimal,
+73 Node, 14 WASM, nine tooling, fmt and strict Clippy. Repository differential
+fixtures have zero observed mismatches; full-corpus differential is not measured.
+The focused group projection passes 23,054/38,822 with zero harness errors,
+timeouts, crashes and skips; the live regression selection passes 2/2.
+
+The [Phase 2 status](test262-phase2-contexts.md) links full outcomes, source/worker
+identities, checksums and reproducible commands. The broader Phase 1 realm/GC
+audit, Phase 3 global/class/private/descriptor/Proxy/exotic runtime work and Phase 4
+bytecode parity remain open. No fallback has been removed, and this PR stays draft.
