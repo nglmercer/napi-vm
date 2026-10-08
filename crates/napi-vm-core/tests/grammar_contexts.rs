@@ -389,6 +389,8 @@ fn resource_and_import_call_grammar_rejects_invalid_statement_positions() {
     for source in [
         "async function f(){await using[x];}",
         "let async=11;",
+        "new (import('x'));",
+        "new (import.source('x')).value;",
         "let\nx=1;",
         "for(x=()=>{return 'x' in {};};;)break;",
     ] {
@@ -500,5 +502,39 @@ fn computed_object_methods_keep_method_context_and_accessor_metadata() {
             matches!(result, Ok(napi_vm_core::Value::Bool(true))),
             "{source}: {result:?}"
         );
+    }
+}
+
+#[test]
+fn assignment_rest_comma_and_lexical_loop_bindings_are_early_errors() {
+    for source in [
+        "for([...x,] in []){}",
+        "for([...x=1] in []){}",
+        "for({...x,} in []){}",
+        "([...x,]=[]);",
+        "({...x,}={});",
+        "([...x=1]=[]);",
+        "for(let let in {}){}",
+        "for(const let in {}){}",
+        "for(let let of []){}",
+        "for(const let of []){}",
+        "for(let [let] of []){}",
+        "for(const {let} in {}){}",
+        "for(x in {})label:other:function f(){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "[...x,];",
+        "({...x,});",
+        "[...x=1];",
+        "for([...x] in []){}",
+        "for({...x} in []){}",
+        "let x;for([x,] in []){}",
+        "let x;for({x,} in []){}",
+        "for(var let in {}){}",
+        "label:other:function f(){}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }

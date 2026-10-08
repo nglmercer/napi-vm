@@ -500,6 +500,16 @@ impl Parser {
 
     /// Parses either a `{ ... }` block or a single statement, returning the
     /// body as a statement list. Enables braceless `if`/`for`/`while` bodies.
+    fn is_labelled_function(statement: &Statement) -> bool {
+        match statement {
+            Statement::Labeled { body, .. } => {
+                matches!(body.as_ref(), Statement::FnDecl { .. })
+                    || Self::is_labelled_function(body)
+            }
+            _ => false,
+        }
+    }
+
     fn block_or_stmt(&mut self) -> Vec<Statement> {
         if self.eat(&Token::LBrace) {
             let b = self.block_body();
@@ -509,6 +519,11 @@ impl Parser {
             let saved = self.single_statement;
             self.single_statement = true;
             let statement = self.stmt();
+            if statement.as_ref().is_some_and(Self::is_labelled_function) {
+                self.record_error(
+                    "labelled function is not permitted in this statement position".into(),
+                );
+            }
             self.single_statement = saved;
             statement.into_iter().collect()
         }
@@ -575,6 +590,13 @@ impl Parser {
             self.adv();
             if matches!(self.cur(), Token::LBracket | Token::LBrace) {
                 let pattern = self.pattern()?;
+                if kind != VarKind::Var
+                    && super::pattern_names(&pattern)
+                        .iter()
+                        .any(|name| name == "let")
+                {
+                    self.record_error("let is not a lexical binding name".into());
+                }
                 // `for (… in …)` / `for (… of …)` heads carry no initializer;
                 // a `=` here means a C-style head with optional trailing
                 // `, name = init` declarators.
@@ -605,6 +627,9 @@ impl Parser {
                 let mut decls = Vec::new();
                 loop {
                     let n = self.ident()?;
+                    if kind != VarKind::Var && n == "let" {
+                        self.record_error("let is not a lexical binding name".into());
+                    }
                     let i = if self.eat(&Token::Equal) {
                         Some(self.assign()?)
                     } else {

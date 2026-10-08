@@ -117,8 +117,14 @@ pub enum Expr {
     Null,
     Undefined,
     Identifier(String),
-    Array(Vec<Expr>),
-    Object(Vec<ObjectProp>),
+    Array {
+        items: Vec<Expr>,
+        trailing_comma: bool,
+    },
+    Object {
+        props: Vec<ObjectProp>,
+        trailing_comma: bool,
+    },
     Binary {
         op: BinOp,
         left: Box<Expr>,
@@ -893,10 +899,10 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
                 .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || class_members_capture_identifier(body, name)
         }
-        Expr::Array(items) => items
+        Expr::Array { items, .. } => items
             .iter()
             .any(|expr| expr_captures_identifier(expr, name)),
-        Expr::Object(props) => props.iter().any(|prop| match prop {
+        Expr::Object { props, .. } => props.iter().any(|prop| match prop {
             ObjectProp::Shorthand(_) => false,
             ObjectProp::KeyValue(_, value) | ObjectProp::Spread(value) => {
                 expr_captures_identifier(value, name)
@@ -1191,8 +1197,8 @@ fn expr_references(e: &Expr, name: &str) -> bool {
     match e {
         Expr::Regex(_, _) | Expr::BigIntLiteral(_) => false,
         Expr::Identifier(n) => n == name,
-        Expr::Array(items) => items.iter().any(|x| expr_references(x, name)),
-        Expr::Object(props) => props.iter().any(|p| match p {
+        Expr::Array { items, .. } => items.iter().any(|x| expr_references(x, name)),
+        Expr::Object { props, .. } => props.iter().any(|p| match p {
             ObjectProp::Shorthand(n) => n == name,
             ObjectProp::KeyValue(_, v) => expr_references(v, name),
             ObjectProp::Computed(k, v) => expr_references(k, name) || expr_references(v, name),
@@ -1302,7 +1308,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
             private: !computed
                 && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
         },
-        Expr::Array(items) => Pattern::Array(
+        Expr::Array { items, .. } => Pattern::Array(
             items
                 .iter()
                 .map(|item| match item {
@@ -1315,7 +1321,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
                 })
                 .collect::<Option<Vec<_>>>()?,
         ),
-        Expr::Object(props) => Pattern::Object(
+        Expr::Object { props, .. } => Pattern::Object(
             props
                 .iter()
                 .map(|prop| match prop {

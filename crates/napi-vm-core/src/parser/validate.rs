@@ -578,7 +578,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
         } => {
             if let Some(target) = target {
                 match target.as_ref() {
-                    Expr::Array(_) | Expr::Object(_) => assignment_target(target, ctx)?,
+                    Expr::Array { .. } | Expr::Object { .. } => assignment_target(target, ctx)?,
                     _ => simple_assignment_target(target, ctx)?,
                 }
             } else {
@@ -778,11 +778,17 @@ fn simple_assignment_target(target: &Expr, ctx: &Context) -> Check {
 
 fn assignment_target(target: &Expr, ctx: &Context) -> Check {
     match target {
-        Expr::Array(items) => {
+        Expr::Array {
+            items,
+            trailing_comma,
+        } => {
             for (index, item) in items.iter().enumerate() {
                 match item {
                     Expr::Undefined => {}
-                    Expr::Spread(inner) if index + 1 == items.len() => {
+                    Expr::Spread(inner) if index + 1 == items.len() && !trailing_comma => {
+                        if matches!(inner.as_ref(), Expr::Assignment { .. }) {
+                            return Err("rest element cannot have an initializer".into());
+                        }
                         assignment_target(inner, ctx)?
                     }
                     Expr::Spread(_) => return Err("rest element must be last".into()),
@@ -791,7 +797,10 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
             }
             Ok(())
         }
-        Expr::Object(props) => {
+        Expr::Object {
+            props,
+            trailing_comma,
+        } => {
             for (index, prop) in props.iter().enumerate() {
                 match prop {
                     ObjectProp::Shorthand(name) => binding(name, ctx)?,
@@ -800,7 +809,7 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
                         expression(key, ctx)?;
                         assignment_target(target, ctx)?;
                     }
-                    ObjectProp::Spread(target) if index + 1 == props.len() => {
+                    ObjectProp::Spread(target) if index + 1 == props.len() && !trailing_comma => {
                         simple_assignment_target(target, ctx)?
                     }
                     _ => return Err("invalid object assignment pattern".into()),
@@ -855,13 +864,13 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         Expr::Super => Err("bare super expression".into()),
         Expr::ImportMeta if !ctx.import_meta => Err("import.meta outside a module".into()),
         Expr::NewTarget if !ctx.new_target => Err("new.target outside a function".into()),
-        Expr::Array(items) | Expr::Template { exprs: items, .. } => {
+        Expr::Array { items, .. } | Expr::Template { exprs: items, .. } => {
             for item in items {
                 expression(item, ctx)?;
             }
             Ok(())
         }
-        Expr::Object(props) => {
+        Expr::Object { props, .. } => {
             for prop in props {
                 match prop {
                     ObjectProp::Shorthand(name) => {

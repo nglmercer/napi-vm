@@ -254,7 +254,7 @@ impl<'a> PatternView<'a> {
                 private: !computed
                     && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
             },
-            Expr::Array(v) => Self::Array(
+            Expr::Array { items: v, .. } => Self::Array(
                 v.iter()
                     .map(|e| match e {
                         Expr::Spread(v) => Some(Self::Rest(Box::new(Self::from_expr(v)?))),
@@ -263,7 +263,7 @@ impl<'a> PatternView<'a> {
                     })
                     .collect::<Option<_>>()?,
             ),
-            Expr::Object(v) => Self::Object(
+            Expr::Object { props: v, .. } => Self::Object(
                 v.iter()
                     .map(|p| {
                         Some(match p {
@@ -3164,7 +3164,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Undefined => self.load_undefined(),
             Expr::Identifier(name) => self.compile_identifier(name),
-            Expr::Array(items) => self.compile_array(items),
+            Expr::Array { items, .. } => self.compile_array(items),
             Expr::Binary { op, left, right } => self.compile_binary(*op, left, right),
             Expr::Unary {
                 op,
@@ -3287,7 +3287,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Template { quasis, exprs } => self.compile_template(quasis, exprs),
             Expr::This => self.compile_this(),
-            Expr::Object(props) => self.compile_object(props),
+            Expr::Object { props, .. } => self.compile_object(props),
             Expr::ClassExpr {
                 name,
                 superclass,
@@ -4234,7 +4234,7 @@ impl<'a> Compiler<'a> {
                     Ok(dst)
                 }
             }
-            Expr::Array(_) | Expr::Object(_) => {
+            Expr::Array { .. } | Expr::Object { .. } => {
                 // Only plain `=` destructures; anything else (or an
                 // unconvertible target) fails at runtime on the AST tier.
                 if op != AssignOp::Assign {

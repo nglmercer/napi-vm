@@ -943,7 +943,7 @@ impl Builder<'_> {
                 })
                 .or_else(|| catalog::builtin_global_type(name).map(Type::from_builtin))
                 .unwrap_or(Type::Unknown),
-            Expr::Object(props) => {
+            Expr::Object { props, .. } => {
                 let mut fields = BTreeMap::new();
                 for prop in props {
                     match prop {
@@ -991,7 +991,7 @@ impl Builder<'_> {
                 }
                 Type::Object(fields)
             }
-            Expr::Array(items) => Type::Array(Box::new(
+            Expr::Array { items, .. } => Type::Array(Box::new(
                 items
                     .first()
                     .map(|item| self.expr(item, env))

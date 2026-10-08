@@ -87,8 +87,15 @@ impl Parser {
                         self.eat(&Token::Comma);
                     }
                 }
+                let trailing_comma = self
+                    .toks
+                    .get(self.pos.saturating_sub(1))
+                    .is_some_and(|(token, _)| matches!(token, Token::Comma));
                 self.expect(&Token::RBracket);
-                Some(Expr::Array(i))
+                Some(Expr::Array {
+                    items: i,
+                    trailing_comma,
+                })
             }
             Token::LBrace => {
                 self.adv();
@@ -256,8 +263,15 @@ impl Parser {
                         self.eat(&Token::Comma);
                     }
                 }
+                let trailing_comma = self
+                    .toks
+                    .get(self.pos.saturating_sub(1))
+                    .is_some_and(|(token, _)| matches!(token, Token::Comma));
                 self.expect(&Token::RBrace);
-                Some(Expr::Object(p))
+                Some(Expr::Object {
+                    props: p,
+                    trailing_comma,
+                })
             }
             Token::KwFunction => {
                 self.adv();
@@ -392,8 +406,9 @@ impl Parser {
     /// by member access (dot / computed), but stopping before call arguments so
     /// that `new Foo(1, 2)` treats `(1, 2)` as the constructor's arguments.
     fn new_callee(&mut self) -> Option<Expr> {
+        let direct_import = matches!(self.cur(), Token::KwImport);
         let mut e = self.primary()?;
-        if matches!(e, Expr::DynamicImport { .. }) {
+        if direct_import && matches!(e, Expr::DynamicImport { .. }) {
             self.record_error("import call cannot be a new expression callee".into());
         }
         loop {

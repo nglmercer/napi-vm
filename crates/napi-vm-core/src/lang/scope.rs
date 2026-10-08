@@ -226,8 +226,8 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
 /// Infer a literal shape from an initializer expression, if it is one.
 fn init_shape(e: Option<&Expr>) -> Option<InitShape> {
     match e? {
-        Expr::Array(_) => Some(InitShape::Array),
-        Expr::Object(props) => Some(InitShape::Object(object_keys(props))),
+        Expr::Array { .. } => Some(InitShape::Array),
+        Expr::Object { props, .. } => Some(InitShape::Object(object_keys(props))),
         _ => None,
     }
 }

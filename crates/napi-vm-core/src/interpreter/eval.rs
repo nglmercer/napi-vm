@@ -1958,7 +1958,7 @@ impl Interpreter {
                     Lookup::Missing => vm_err(format!("ReferenceError: {} is not defined", n)),
                 }
             }
-            Expr::Array(i) => {
+            Expr::Array { items: i, .. } => {
                 let mut v = Vec::new();
                 for x in i {
                     match x {
@@ -2013,7 +2013,7 @@ impl Interpreter {
                 }
                 Value::checked_array(v)
             }
-            Expr::Object(props) => self.eval_object_literal(props),
+            Expr::Object { props, .. } => self.eval_object_literal(props),
             Expr::Binary { op, left, right } => {
                 let l = self.eval_expr(left)?;
                 match op {
@@ -2446,7 +2446,7 @@ impl Interpreter {
                     // A destructuring *assignment*: `[a, b] = [b, a]`,
                     // `({ x } = o)`. Unlike a declaration it binds nothing
                     // new, so each name is assigned through the scope chain.
-                    Expr::Array(_) | Expr::Object(_) if matches!(op, AssignOp::Assign) => {
+                    Expr::Array { .. } | Expr::Object { .. } if matches!(op, AssignOp::Assign) => {
                         let pattern = crate::parser::expr_to_pattern(target)
                             .ok_or_else(|| VmErr::Msg("Invalid assignment target".to_string()))?;
                         self.destructure(&pattern, &v)?;
