@@ -124,7 +124,7 @@ repairs is still in progress.
 
 The AST currently loses distinctions needed for complete early errors, including
 parenthesized
-cover grammar/optional-chain assignment boundaries, catch patterns, and complete
+cover grammar/optional-chain assignment boundaries, and complete
 for-in/of declaration/target metadata. These require representation work and
 focused validation. Additional Annex B statement positions, escaped/contextual
 keywords, full binding/assignment pattern grammar, and eval class-initializer
@@ -201,3 +201,9 @@ when getters/defaults throw. Existing catch-identifier bytecode uses lexical
 bindings through the shared declaration operation; pattern catches retain AST
 fallback. Twenty-three grammar tests and one pinned-tier differential test pass.
 Required checks and the catch-focused corpus are in progress.
+
+All required checks pass at 09498f5: 756 workspace Rust tests (four existing
+ignored), 158 minimal Rust tests, 73 Node, 14 WASM and nine tooling tests; fmt
+and Clippy are clean. Its catch/eval selection passes 1,563/2,071: 95 gains and
+zero losses versus an independently rerun d8afb76 baseline, with zero crashes,
+timeouts or harness errors. Complete outcomes and transitions are retained.

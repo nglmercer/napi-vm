@@ -1,0 +1,27 @@
+{
+  "source": "09498f5",
+  "baseline": "d8afb76 identical focused selection",
+  "groups": [
+    "catch-bindings",
+    "eval-globals"
+  ],
+  "total": 2071,
+  "pass": 1563,
+  "fail": 508,
+  "new_passes": 95,
+  "lost_passes": 0,
+  "harness_errors": 0,
+  "timeouts": 0,
+  "crashes": 0,
+  "required_checks": {
+    "workspace_passed": 756,
+    "workspace_ignored": 4,
+    "minimal_passed": 158,
+    "node_passed": 73,
+    "wasm_passed": 14,
+    "tooling_passed": 9,
+    "fmt": "passed",
+    "clippy": "passed"
+  },
+  "full_corpus": "not measured for this revision"
+}
