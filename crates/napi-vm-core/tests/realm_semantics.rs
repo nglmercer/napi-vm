@@ -547,3 +547,43 @@ fn error_prototype_chains_and_generic_to_string_preserve_realm_semantics() {
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn weak_intrinsics_and_iterator_aliases_have_owned_standard_metadata() {
+    let mut vm = Interpreter::with_builtins();
+    let other = vm.create_realm();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "other.Array.prototype.values===other.Array.prototype[Symbol.iterator];",
+        "Object.getPrototypeOf(other.WeakRef)===other.Function.prototype&&other.WeakRef.length===1&&other.WeakRef.name==='WeakRef';",
+        "Object.getPrototypeOf(other.FinalizationRegistry)===other.Function.prototype&&other.FinalizationRegistry.length===1;",
+        "Object.getPrototypeOf(other.WeakRef.prototype)===other.Object.prototype&&other.WeakRef.prototype[Symbol.toStringTag]==='WeakRef';",
+        "other.FinalizationRegistry.prototype.register.length===2&&other.FinalizationRegistry.prototype.unregister.length===1;",
+        "Object.getPrototypeOf(other.WeakRef.prototype.deref)===other.Function.prototype;",
+        "var descriptor=Object.getOwnPropertyDescriptor(other.WeakRef,'prototype');!descriptor.writable&&!descriptor.enumerable&&!descriptor.configurable;",
+        "!Object.getOwnPropertyDescriptor(other.FinalizationRegistry.prototype,'constructor').enumerable;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn primitive_property_references_use_the_current_execution_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("Number.prototype.realm='child';String.prototype.realm='child';Boolean.prototype.realm='child';Symbol.prototype.realm='child';BigInt.prototype.realm='child';var read=value=>value.realm;var iterator=value=>value[Symbol.iterator];").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "other.read(1)==='child'&&other.read('')==='child'&&other.read(true)==='child'&&other.read(Symbol())==='child'&&other.read(1n)==='child';",
+        "(1).realm===undefined&&''.realm===undefined;",
+        "other.iterator('')===other.String.prototype[Symbol.iterator];",
+        "Symbol('description').description==='description'&&Object(Symbol('boxed')).description==='boxed';",
+        "other.eval(\"String.prototype['01']='inherited';'abc'['01']==='inherited'&&'abc'[1]==='b'\");",
+        "other.eval(\"Object.defineProperty(Number.prototype,'receiver',{get(){'use strict';return this;}});(42).receiver===42\");",
+        "other.eval(\"Number=function(){};(1).realm==='child'\");",
+    ] {
+        truth(&mut vm, source);
+    }
+}

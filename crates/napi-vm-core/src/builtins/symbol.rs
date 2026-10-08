@@ -82,6 +82,25 @@ pub(super) fn install(e: &mut Environment) {
         unreachable!("new_symbol returns a symbol")
     };
     super::install_primitive_prototype(e, &constructor, Value::Symbol(primitive.clone()), methods);
+    let prototype = constructor.get_prop("prototype").expect("Symbol.prototype");
+    let function_prototype = e
+        .get("Function")
+        .and_then(|value| value.get_prop("prototype"));
+    prototype
+        .set_prop(
+            "description".into(),
+            super::native_method("get description", 0, symbol_description, function_prototype),
+        )
+        .expect("Symbol.prototype.description");
+    if let Value::Object { props } = &prototype {
+        props.meta.borrow_mut().set_attrs(
+            "description",
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
+    }
 }
 
 fn symbol_construct(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
@@ -183,6 +202,13 @@ pub fn symbol_method(key: &str) -> Option<Value> {
 
 fn symbol_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::String(symbol_receiver(&this)?.to_display()))
+}
+
+fn symbol_description(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(symbol_receiver(&this)?
+        .description
+        .clone()
+        .map_or(Value::Undefined, Value::String))
 }
 
 fn symbol_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

@@ -9,6 +9,22 @@ use crate::value::{BoxedPrimitive, FunctionData, Value};
 use std::rc::Rc;
 
 impl Interpreter {
+    /// Primitive references are boxed with the current execution realm's
+    /// intrinsic prototype, regardless of where the primitive was obtained.
+    fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
+        let name = match value {
+            Value::Bool(_) => "Boolean",
+            Value::Number(_) => "Number",
+            Value::String(_) => "String",
+            Value::BigInt(_) => "BigInt",
+            Value::Symbol(_) => "Symbol",
+            _ => return None,
+        };
+        self.persistent_global
+            .borrow()
+            .intrinsic(name)
+            .and_then(|constructor| constructor.get_prop("prototype"))
+    }
     pub(crate) fn inherited_global_has(&self, name: &str) -> bool {
         self.prototype_of(&self.realm_global_object())
             .is_some_and(|prototype| prototype.has_prop(name))
@@ -720,6 +736,11 @@ impl Interpreter {
         if let Value::String(k) = p {
             return self.prop_str_raw(o, &k.to_key());
         }
+        if matches!(p, Value::Symbol(_))
+            && let Some(prototype) = self.primitive_reference_prototype(o)
+        {
+            return self.prop(&prototype, p);
+        }
         match (o, p) {
             (Value::GlobalObject, Value::Symbol(_)) => {
                 if let Some(prototype) = self.prototype_of(o) {
@@ -895,6 +916,19 @@ impl Interpreter {
             && let Some(value) = properties.own_value(k)
         {
             return Ok(value);
+        }
+        if let Some(prototype) = self.primitive_reference_prototype(o) {
+            if let Value::String(string) = o {
+                if k == "length" {
+                    return Ok(Value::Number(crate::value::str_char_len(string)));
+                }
+                if let Some(index) = crate::value::array_index(k)
+                    && let Some(character) = crate::value::str_char_at(string, index)
+                {
+                    return Ok(character);
+                }
+            }
+            return self.prop_str(&prototype, k);
         }
         match o {
             // `window.x` / `globalThis.x` / `self.x` read a real global.

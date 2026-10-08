@@ -103,7 +103,9 @@ pub(super) fn install(e: &mut Environment) {
             prototype
                 .set_prop(
                     slot.clone(),
-                    array_method("values").expect("Array.prototype.values"),
+                    prototype
+                        .get_prop("values")
+                        .expect("Array.prototype.values"),
                 )
                 .expect("Array.prototype[Symbol.iterator]");
             if let Value::Array(array_prototype) = &prototype {
