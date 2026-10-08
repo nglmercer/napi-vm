@@ -107,6 +107,8 @@ pub enum ImportPhase {
 pub enum Expr {
     /// A legacy literal spelling permitted only in non-strict code.
     LegacyLiteral(Box<Expr>),
+    /// Parentheses preserve references but restrict cover-pattern syntax.
+    Parenthesized(Box<Expr>),
     Number(f64),
     /// A `BigInt` literal, carrying its digits.
     BigIntLiteral(String),
@@ -150,7 +152,7 @@ pub enum Expr {
     /// (carrying a `raw` companion array) followed by the interpolated values.
     TaggedTemplate {
         tag: Box<Expr>,
-        cooked: Vec<crate::JsString>,
+        cooked: Vec<Option<crate::JsString>>,
         raw: Vec<crate::JsString>,
         exprs: Vec<Expr>,
     },
@@ -225,6 +227,10 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectProp {
+    CoverInitializedName {
+        name: String,
+        initializer: Expr,
+    },
     Shorthand(String),
     KeyValue(String, Expr),
     Computed(Expr, Expr),
@@ -263,6 +269,13 @@ pub enum ExprOrBlock {
 }
 
 impl Expr {
+    pub(crate) fn unparenthesized(&self) -> &Self {
+        match self {
+            Self::Parenthesized(inner) => inner.unparenthesized(),
+            _ => self,
+        }
+    }
+
     pub(crate) fn is_string_literal(&self) -> bool {
         match self {
             Self::String(_) | Self::EscapedString(_) => true,
@@ -731,6 +744,11 @@ fn member_name_references(member: &ClassMember, name: &str) -> bool {
     matches!(key, MemberName::Computed(e) if expr_references(e, name))
 }
 
+pub(crate) fn stmts_need_arguments(stmts: &[Statement]) -> bool {
+    // Direct eval may inspect the arguments binding even without a static reference.
+    stmts_reference(stmts, "arguments") || stmts_reference(stmts, "eval")
+}
+
 pub fn stmts_reference(stmts: &[Statement], name: &str) -> bool {
     stmts.iter().any(|s| stmt_references(s, name))
 }
@@ -953,7 +971,9 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
 
 pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
     match expr {
-        Expr::LegacyLiteral(inner) => expr_captures_identifier(inner, name),
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => {
+            expr_captures_identifier(inner, name)
+        }
         Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
         Expr::FnExpr { body, .. } => stmts_reference(body, name),
         Expr::ClassExpr {
@@ -969,9 +989,11 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
             .any(|expr| expr_captures_identifier(expr, name)),
         Expr::Object { props, .. } => props.iter().any(|prop| match prop {
             ObjectProp::Shorthand(_) => false,
-            ObjectProp::KeyValue(_, value) | ObjectProp::Spread(value) => {
-                expr_captures_identifier(value, name)
+            ObjectProp::CoverInitializedName {
+                initializer: value, ..
             }
+            | ObjectProp::KeyValue(_, value)
+            | ObjectProp::Spread(value) => expr_captures_identifier(value, name),
             ObjectProp::Computed(key, value) => {
                 expr_captures_identifier(key, name) || expr_captures_identifier(value, name)
             }
@@ -1271,12 +1293,15 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
 
 fn expr_references(e: &Expr, name: &str) -> bool {
     match e {
-        Expr::LegacyLiteral(inner) => expr_references(inner, name),
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => expr_references(inner, name),
         Expr::Regex(_, _) | Expr::BigIntLiteral(_) => false,
         Expr::Identifier(n) => n == name,
         Expr::Array { items, .. } => items.iter().any(|x| expr_references(x, name)),
         Expr::Object { props, .. } => props.iter().any(|p| match p {
             ObjectProp::Shorthand(n) => n == name,
+            ObjectProp::CoverInitializedName { initializer, .. } => {
+                expr_references(initializer, name)
+            }
             ObjectProp::KeyValue(_, v) => expr_references(v, name),
             ObjectProp::Computed(k, v) => expr_references(k, name) || expr_references(v, name),
             ObjectProp::ComputedMethod { key, body, .. } => {
@@ -1374,7 +1399,7 @@ fn expr_references(e: &Expr, name: &str) -> bool {
 /// not a valid pattern and the assignment fails at runtime.
 pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
     Some(match expr {
-        Expr::LegacyLiteral(inner) => return expr_to_pattern(inner),
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => return expr_to_pattern(inner),
         Expr::Identifier(name) => Pattern::Ident(name.clone()),
         Expr::Member {
             object,
@@ -1403,6 +1428,13 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
             props
                 .iter()
                 .map(|prop| match prop {
+                    ObjectProp::CoverInitializedName { name, initializer } => Some((
+                        PatternKey::Name(name.clone()),
+                        Some(Pattern::Default(
+                            Box::new(Pattern::Ident(name.clone())),
+                            Box::new(initializer.clone()),
+                        )),
+                    )),
                     ObjectProp::Shorthand(name) => Some((PatternKey::Name(name.clone()), None)),
                     ObjectProp::KeyValue(key, value) => {
                         Some((PatternKey::Name(key.clone()), Some(expr_to_pattern(value)?)))

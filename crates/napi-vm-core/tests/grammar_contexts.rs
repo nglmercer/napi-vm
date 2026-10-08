@@ -919,3 +919,164 @@ fn regexp_literals_validate_grammar_before_execution() {
     let source = format!("/{0}x{1}/;", "(".repeat(1024), ")".repeat(1024));
     assert!(!parses(&source, ParseGoal::Script));
 }
+
+#[test]
+fn parenthesized_references_and_optional_chain_boundaries() {
+    for source in [
+        "([a])=[];",
+        "({a})={};",
+        "a?.b.c=1;",
+        "a?.b.c++;",
+        "a?.b`x`;",
+        "a?.b.c`x`;",
+        "new a?.b();",
+        "'use strict';delete (a);",
+        "class C extends B {constructor(){(super)();}}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "(a)=1;",
+        "((a))++;",
+        "(a?.b).c=1;",
+        "(a?.b)`x`;",
+        "new (a?.b)();",
+        "new a()?.b;",
+        "('use strict');with({}){}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "var o={x:3,f:function(){return this.x;}};(o.f)()===3;",
+        "var x=1;(x)++;(x)=4;x===4;",
+        "typeof (missing)==='undefined';",
+        "var o={x:1};delete (o.x);!('x' in o);",
+        "function f(){(eval)('var x=3');return x;}f()===3;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn object_cover_defaults_and_duplicate_prototype_setters() {
+    for source in [
+        "({x=1});",
+        "f({x=1});",
+        "var o={x=1};",
+        "({__proto__:null,'__proto__':null});",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "({x=1}=o);",
+        "({x=1,y:{z=2}}=o);",
+        "({__proto__:a,__proto__:b}=o);",
+        "({__proto__:null,['__proto__']:null});",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "var x;({x=3}={});x===3;",
+        "var x;({x=3}={x:7});x===7;",
+        "var x,y;({x=3,y=4}={});x+y===7;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn exponentiation_and_coalescing_respect_parentheses() {
+    for source in [
+        "-1**2;",
+        "!x**2;",
+        "typeof x**2;",
+        "void x**2;",
+        "a??b||c;",
+        "a||b??c;",
+        "a&&b??c;",
+        "a??b&&c;",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "(-1)**2;",
+        "x++**2;",
+        "++x**2;",
+        "a??(b||c);",
+        "(a&&b)??c;",
+        "a||(b??c);",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn invalid_template_escapes_are_allowed_only_for_tags() {
+    for escape in [r"\1", r"\8", r"\09", r"\xZ", r"\uZ", r"\u{}", r"\u{110000}"] {
+        assert!(!parses(&format!("`{escape}`;"), ParseGoal::Script));
+        let source = format!(
+            "function tag(s){{return s[0]===undefined && s.raw[0].length>0;}}tag`{escape}`;"
+        );
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(&source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+    for source in ["`unterminated", "tag`unterminated", "`a${1}"] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+}
+
+#[test]
+fn classic_for_heads_share_lexical_declaration_conflicts() {
+    for source in [
+        "for(let x,x;;){}",
+        "for(let [x,x]=[];;){}",
+        "for(let [x]=[],x;;){}",
+        "for(let x;;){var x;}",
+        "for(const x=1;;){if(false){var x;}}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "for(var x,x;;){}",
+        "for(let x;;){let x;}",
+        "for(let x;;){function x(){}}",
+        "for(let x of []){function x(){}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn class_initializer_direct_eval_retains_arguments_restrictions() {
+    for source in [
+        "var ok=false;try{class C{x=eval('arguments')};new C;}catch(e){ok=e instanceof SyntaxError;}ok;",
+        "var ok=false;try{class C{static{eval('arguments')}}}catch(e){ok=e instanceof SyntaxError;}ok;",
+        "var ok=false;try{class C{static x=eval('arguments')}}catch(e){ok=e instanceof SyntaxError;}ok;",
+        "class C{x=function(){return eval('arguments.length');}}new C().x(1,2)===2;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn token_internal_line_continuations_do_not_trigger_asi() {
+    assert!(!parses("'a\\\nb' 'c';", ParseGoal::Script));
+    assert!(parses("'a\\\nb'\n'c';", ParseGoal::Script));
+    assert!(!parses("'a\\\nb'++x;", ParseGoal::Script));
+    assert!(parses("'a\\\nb'\n++x;", ParseGoal::Script));
+}

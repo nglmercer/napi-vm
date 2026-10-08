@@ -62,6 +62,7 @@ type Check = Result<(), String>;
 
 #[derive(Default)]
 pub(crate) struct EvalContext {
+    pub forbid_arguments: bool,
     pub new_target: bool,
     pub strict: bool,
     pub super_call: bool,
@@ -111,6 +112,7 @@ pub(super) fn validate(
             new_target,
             await_allowed: goal != ParseGoal::Script,
             lexical_functions: module,
+            forbid_arguments: eval.is_some_and(|context| context.forbid_arguments),
             super_call: eval.is_some_and(|context| context.super_call),
             super_property: eval.is_some_and(|context| context.super_property),
             private_names: eval
@@ -602,6 +604,15 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 match init.as_ref() {
                     ForInit::Expr(expr) => expression(expr, ctx)?,
                     ForInit::Var { kind, decls } => {
+                        if *kind != VarKind::Var {
+                            lexical_loop_head(
+                                &decls
+                                    .iter()
+                                    .map(|(name, _)| name.clone())
+                                    .collect::<Vec<_>>(),
+                                body,
+                            )?;
+                        }
                         for (name, expr) in decls {
                             if *kind == VarKind::Const && expr.is_none() {
                                 return Err("const declaration requires an initializer".into());
@@ -616,6 +627,11 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                         trailing,
                         kind,
                     } => {
+                        if *kind != VarKind::Var {
+                            let mut names = pattern_names(pattern);
+                            names.extend(trailing.iter().map(|(name, _)| name.clone()));
+                            lexical_loop_head(&names, body)?;
+                        }
                         pattern_check(pattern, ctx)?;
                         expression(init, ctx)?;
                         for (name, expr) in trailing {
@@ -840,6 +856,19 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
     }
 }
 
+fn lexical_loop_head(names: &[String], body: &[Statement]) -> Check {
+    let mut seen = HashSet::new();
+    if names.iter().any(|name| name == "let" || !seen.insert(name)) {
+        return Err("invalid lexical loop binding".into());
+    }
+    let mut vars = Vec::new();
+    collect_var_declaration_names(body, &mut vars);
+    if names.iter().any(|name| vars.contains(name)) {
+        return Err("loop binding conflicts with var declaration".into());
+    }
+    Ok(())
+}
+
 fn iteration_binding(
     binding: &ForBinding,
     body: &[Statement],
@@ -868,25 +897,27 @@ fn iteration_binding(
             optional(initializer.as_deref(), ctx)?;
             if *kind != VarKind::Var {
                 let names = pattern_names(pattern);
-                let mut seen = HashSet::new();
-                if names.iter().any(|name| name == "let" || !seen.insert(name)) {
-                    return Err("invalid lexical iteration binding".into());
-                }
-                let mut vars = Vec::new();
-                collect_var_declaration_names(body, &mut vars);
-                if names.iter().any(|name| vars.contains(name)) {
-                    return Err("iteration binding conflicts with var declaration".into());
-                }
+                lexical_loop_head(&names, body)?;
             }
             Ok(())
         }
     }
 }
 
+fn contains_optional_chain(expr: &Expr) -> bool {
+    match expr {
+        Expr::OptionalChain { .. } => true,
+        Expr::Member { object, .. } => contains_optional_chain(object),
+        Expr::Call { callee, .. } => contains_optional_chain(callee),
+        _ => false,
+    }
+}
+
 fn simple_assignment_target(target: &Expr, ctx: &Context) -> Check {
     match target {
+        Expr::Parenthesized(inner) => simple_assignment_target(inner, ctx),
         Expr::Identifier(name) if !name.starts_with('#') => binding(name, ctx),
-        Expr::Member { .. } => expression(target, ctx),
+        Expr::Member { .. } if !contains_optional_chain(target) => expression(target, ctx),
         _ => Err("invalid assignment target".into()),
     }
 }
@@ -924,6 +955,10 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
         } => {
             for (index, prop) in props.iter().enumerate() {
                 match prop {
+                    ObjectProp::CoverInitializedName { name, initializer } => {
+                        binding(name, ctx)?;
+                        expression(initializer, ctx)?;
+                    }
                     ObjectProp::Shorthand(name) => binding(name, ctx)?,
                     ObjectProp::KeyValue(_, target) => assignment_target(target, ctx)?,
                     ObjectProp::Computed(key, target) => {
@@ -952,6 +987,7 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
 
 fn expression(expr: &Expr, ctx: &Context) -> Check {
     match expr {
+        Expr::Parenthesized(inner) => expression(inner, ctx),
         Expr::Regex(pattern, flags) => crate::regex::validate_syntax(pattern, flags).map(|_| ()),
         Expr::LegacyLiteral(inner) => {
             if ctx.strict {
@@ -1002,8 +1038,19 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             Ok(())
         }
         Expr::Object { props, .. } => {
+            if props
+                .iter()
+                .filter(|prop| matches!(prop, ObjectProp::KeyValue(name, _) if name == "__proto__"))
+                .count()
+                > 1
+            {
+                return Err("duplicate prototype setter".into());
+            }
             for prop in props {
                 match prop {
+                    ObjectProp::CoverInitializedName { .. } => {
+                        return Err("cover initialized name outside an assignment pattern".into());
+                    }
                     ObjectProp::Shorthand(name) => {
                         expression(&Expr::Identifier(name.clone()), ctx)?;
                     }
@@ -1071,7 +1118,25 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
             expression(right, ctx)
         }
-        Expr::Binary { left, right, .. } => {
+        Expr::Binary { op, left, right } => {
+            if *op == BinOp::Pow
+                && matches!(left.as_ref(), Expr::Unary { op, .. } if !matches!(op, UnOp::Inc | UnOp::Dec))
+            {
+                return Err("unparenthesized unary expression before exponentiation".into());
+            }
+            if *op == BinOp::Nullish
+                && [left.as_ref(), right.as_ref()].iter().any(|expr| {
+                    matches!(
+                        expr,
+                        Expr::Binary {
+                            op: BinOp::And | BinOp::Or,
+                            ..
+                        }
+                    )
+                })
+            {
+                return Err("nullish coalescing mixed with logical operators".into());
+            }
             expression(left, ctx)?;
             expression(right, ctx)
         }
@@ -1104,10 +1169,12 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             Ok(())
         }
         Expr::Unary { op, operand, .. } => {
-            if *op == UnOp::Delete && private_member(operand).is_some() {
+            if *op == UnOp::Delete && private_member(operand.unparenthesized()).is_some() {
                 return Err("delete of a private element".into());
             }
-            if ctx.strict && *op == UnOp::Delete && matches!(operand.as_ref(), Expr::Identifier(_))
+            if ctx.strict
+                && *op == UnOp::Delete
+                && matches!(operand.unparenthesized(), Expr::Identifier(_))
             {
                 return Err("delete of an unqualified identifier in strict mode".into());
             }
@@ -1152,6 +1219,9 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             Ok(())
         }
         Expr::TaggedTemplate { tag, exprs, .. } => {
+            if contains_optional_chain(tag) {
+                return Err("optional chain cannot be a template tag".into());
+            }
             expression(tag, ctx)?;
             for expr in exprs {
                 expression(expr, ctx)?;

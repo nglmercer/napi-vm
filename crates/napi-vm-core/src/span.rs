@@ -5,15 +5,25 @@ use std::fmt;
 pub struct Span {
     pub line: usize,
     pub col: usize,
+    /// End line distinguishes token-internal newlines from intervening trivia.
+    pub end_line: usize,
 }
 
 impl Span {
     pub fn new(line: usize, col: usize) -> Self {
-        Self { line, col }
+        Self {
+            line,
+            col,
+            end_line: line,
+        }
     }
 
     pub fn unknown() -> Self {
-        Self { line: 0, col: 0 }
+        Self {
+            line: 0,
+            col: 0,
+            end_line: 0,
+        }
     }
 
     pub fn is_unknown(&self) -> bool {

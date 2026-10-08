@@ -1699,6 +1699,7 @@ impl Interpreter {
                     .get("this")
                     .unwrap_or(Value::Undefined),
             );
+            field_scope.borrow_mut().class_initializer = true;
             field_scope.borrow_mut().replace_strict(Some(true));
             field_scope.borrow_mut().set_new_target(Value::Undefined);
             self.global = field_scope;
@@ -1779,6 +1780,7 @@ impl Interpreter {
         let receiver = self.resolve_this(constructor_scope)?;
         let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
         field_scope.borrow_mut().set("this", receiver.clone());
+        field_scope.borrow_mut().class_initializer = true;
         field_scope.borrow_mut().replace_strict(Some(true));
         field_scope.borrow_mut().set_new_target(Value::Undefined);
         let saved = std::mem::replace(&mut self.global, field_scope);

@@ -64,6 +64,10 @@ impl Parser {
             Token::Backtick => {
                 self.adv();
                 let (quasis, exprs) = self.template_body()?;
+                if quasis.iter().any(|quasi| quasi.invalid_escape) {
+                    self.record_error("invalid escape in an untagged template".into());
+                    return None;
+                }
                 Some(Expr::Template {
                     quasis: quasis.into_iter().map(|q| q.cooked).collect(),
                     exprs,
@@ -78,7 +82,7 @@ impl Parser {
                 self.adv();
                 let e = self.with_in(true, Self::expr)?;
                 self.expect(&Token::RParen);
-                Some(e)
+                Some(Expr::Parenthesized(Box::new(e)))
             }
             Token::LBracket => {
                 self.adv();
@@ -269,6 +273,12 @@ impl Parser {
                     } else if self.eat(&Token::Colon) {
                         let v = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::KeyValue(key, v));
+                    } else if self.eat(&Token::Equal) {
+                        let initializer = self.with_in(true, Self::assign)?;
+                        p.push(ObjectProp::CoverInitializedName {
+                            name: key,
+                            initializer,
+                        });
                     } else {
                         p.push(ObjectProp::Shorthand(key));
                     }
@@ -335,6 +345,10 @@ impl Parser {
                     return Some(Expr::NewTarget);
                 }
                 let c = self.new_callee()?;
+                if matches!(self.cur(), Token::QuestionDot) {
+                    self.record_error("optional chain cannot be a constructor callee".into());
+                    return None;
+                }
                 let a = if self.eat(&Token::LParen) {
                     let mut ag = Vec::new();
                     while self.until(&Token::RParen) {
@@ -491,7 +505,7 @@ impl Parser {
             self.expect(&Token::RBrace);
             quasis.push(self.take_quasi());
         }
-        self.eat(&Token::Backtick);
+        self.expect(&Token::Backtick);
         Some((quasis, exprs))
     }
 
@@ -684,9 +698,17 @@ impl Parser {
                 return self.fn_expr_tail(is_generator, true);
             }
             // `async x => …`
-            Token::Identifier(name) | Token::EscapedIdentifier(name) => {
-                let name = name.clone();
-                self.adv();
+            Token::Identifier(_)
+            | Token::EscapedIdentifier(_)
+            | Token::KwAs
+            | Token::KwLet
+            | Token::KwStatic
+            | Token::KwConstructor
+            | Token::KwFrom
+            | Token::KwGet
+            | Token::KwOf
+            | Token::KwSet => {
+                let name = self.ident()?;
                 if self.eat(&Token::Arrow) {
                     return Some(self.arrow_body_async(vec![name], Vec::new(), true));
                 }

@@ -3,6 +3,7 @@
 /// templates expose both; an ordinary template literal uses only `cooked`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TemplateChunk {
+    pub invalid_escape: bool,
     pub cooked: crate::JsString,
     pub raw: crate::JsString,
 }
@@ -356,12 +357,7 @@ impl Lexer {
                 self.col += 1;
                 match self.read_escape(false) {
                     Ok(text) => quasi.cooked.push_str(text),
-                    Err(()) => {
-                        toks.push((
-                            Token::Unknown('\\'),
-                            crate::span::Span::new(self.line, self.col),
-                        ));
-                    }
+                    Err(()) => quasi.invalid_escape = true,
                 }
                 quasi
                     .raw
@@ -382,7 +378,7 @@ impl Lexer {
         // Unterminated template: flush what we have.
         let span = crate::span::Span::new(self.line, self.col);
         toks.push((Token::TemplateQuasi(quasi), span));
-        toks.push((Token::Backtick, span));
+        toks.push((Token::Unknown('`'), span));
         toks
     }
 
@@ -429,8 +425,12 @@ impl Lexer {
     }
 
     fn next_with_span(&mut self) -> Option<crate::span::SpannedToken> {
-        let span = crate::span::Span::new(self.line, self.col);
+        let mut span = crate::span::Span::new(self.line, self.col);
         let t = self.next()?;
+        // Templates emit individual spans for their delimiters/interpolations.
+        if !matches!(t, Token::Backtick) {
+            span.end_line = self.line;
+        }
         Some((t, span))
     }
 

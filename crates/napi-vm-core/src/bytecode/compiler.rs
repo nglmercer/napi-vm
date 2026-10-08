@@ -2065,7 +2065,7 @@ impl<'a> Compiler<'a> {
                     // hands their bodies to assembly, like the evaluator.
                     // They read this scope's `arguments`, so a mention seeds
                     // it (over-approximating, like hoisting).
-                    if stmts_reference(block_body, "arguments") {
+                    if crate::parser::stmts_need_arguments(block_body) {
                         self.captures_arguments = true;
                     }
                     let ast = build_ast_function(&FuncDef {
@@ -3164,7 +3164,7 @@ impl<'a> Compiler<'a> {
             return Err(Decline::Func("private field writes"));
         }
         match expr {
-            Expr::LegacyLiteral(inner) => self.compile_expr(inner),
+            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => self.compile_expr(inner),
             Expr::Number(value) => {
                 let index = self.intern_number(*value)?;
                 self.load_const(index)
@@ -3410,6 +3410,9 @@ impl<'a> Compiler<'a> {
         for prop in props {
             match prop {
                 // Shorthand reads tolerate missing and dead bindings.
+                ObjectProp::CoverInitializedName { .. } => {
+                    return Err(Decline::Func("object assignment default"));
+                }
                 ObjectProp::Shorthand(name) => {
                     let val = self.alloc_reg()?;
                     match self.resolve(name)? {
@@ -3643,6 +3646,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_unary(&mut self, op: UnOp, operand: &'a Expr, prefix: bool) -> Result<Reg, Decline> {
+        let operand = operand.unparenthesized();
         match op {
             UnOp::Inc | UnOp::Dec => self.compile_inc_dec(op, operand, prefix),
             UnOp::Delete => self.compile_delete(operand),
@@ -3808,10 +3812,11 @@ impl<'a> Compiler<'a> {
     fn compile_tagged(
         &mut self,
         tag: &'a Expr,
-        cooked: &'a [crate::JsString],
+        cooked: &'a [Option<crate::JsString>],
         raw: &'a [crate::JsString],
         exprs: &'a [Expr],
     ) -> Result<Reg, Decline> {
+        let tag = tag.unparenthesized();
         let (callee, receiver) = match tag {
             Expr::Member {
                 object, property, ..
@@ -3840,7 +3845,11 @@ impl<'a> Compiler<'a> {
         };
         let mut template = Vec::with_capacity(cooked.len());
         for part in cooked {
-            let index = self.push_const(Constant::String(part.clone()))?;
+            let constant = part
+                .as_ref()
+                .map(|part| Constant::String(part.clone()))
+                .unwrap_or(Constant::Undefined);
+            let index = self.push_const(constant)?;
             let reg = self.load_const(index)?;
             template.push(SpreadEntry { spread: false, reg });
         }
@@ -3934,6 +3943,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
+        let callee = callee.unparenthesized();
         let direct_eval = matches!(callee, Expr::Identifier(name) if name == "eval");
         if direct_eval && (!self.top_level || self.scopes.len() != 1) {
             // Dynamic access must see every lexical binding, including locals
@@ -4196,6 +4206,7 @@ impl<'a> Compiler<'a> {
         op: AssignOp,
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
+        let target = target.unparenthesized();
         let rhs = self.compile_expr(value)?;
         match target {
             Expr::Identifier(name) => {
@@ -4279,6 +4290,7 @@ impl<'a> Compiler<'a> {
         op: LogicalAssignOp,
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
+        let target = target.unparenthesized();
         // Read the current value, skip the write when it already decides.
         let join = self.alloc_reg()?;
         let end_jump = match target {
@@ -4476,7 +4488,7 @@ fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
     let uses_arguments = if def.is_arrow {
         arrow_body_references(&ExprOrBlock::Block(body.clone()), "arguments")
     } else {
-        stmts_reference(&body, "arguments")
+        crate::parser::stmts_need_arguments(&body)
     };
     Rc::new(AstFunction {
         named_expression: def.named_expression,

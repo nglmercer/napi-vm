@@ -245,7 +245,8 @@ pub fn object_keys(props: &[ObjectProp]) -> Vec<String> {
     let mut keys = Vec::new();
     for p in props {
         match p {
-            ObjectProp::Shorthand(n)
+            ObjectProp::CoverInitializedName { name: n, .. }
+            | ObjectProp::Shorthand(n)
             | ObjectProp::KeyValue(n, _)
             | ObjectProp::Method { name: n, .. }
             | ObjectProp::Getter { name: n, .. }

@@ -1,18 +1,153 @@
 {
-  "agents": {"paths": ["built-ins/Atomics", "built-ins/SharedArrayBuffer"]},
-  "shared-memory": {"paths": ["built-ins/SharedArrayBuffer", "built-ins/Atomics", "built-ins/TypedArrayConstructors"]},
-  "realms": {"paths": ["."], "pattern": "(?:realm|proto-from-ctor)"},
-  "gc-weak": {"paths": ["built-ins/WeakRef", "built-ins/FinalizationRegistry", "built-ins/WeakMap", "built-ins/WeakSet"]},
-  "async-generator-grammar": {"paths": ["language/expressions/async-function", "language/expressions/async-generator", "language/expressions/generators", "language/statements/async-function", "language/statements/async-generator", "language/statements/generators", "language/expressions/await"]},
-  "super": {"paths": ["language/expressions/super", "language/expressions/new.target"]},
-  "private-names": {"paths": ["language/expressions/class", "language/statements/class"], "pattern": "(?:private|name|early)"},
-  "eval-globals": {"paths": ["language/eval-code", "language/global-code", "language/block-scope", "language/statements/variable", "language/statements/let", "language/statements/const"]},
-  "classes-private": {"paths": ["language/expressions/class", "language/statements/class"]},
-  "object-reflect-proxy": {"paths": ["built-ins/Object", "built-ins/Reflect", "built-ins/Proxy"]},
-  "typedarray-exotics": {"paths": ["built-ins/TypedArray", "built-ins/TypedArrayConstructors", "built-ins/DataView", "built-ins/ArrayBuffer", "built-ins/SharedArrayBuffer"]},
-  "statement-positions": {"paths": ["language/statements/if", "language/statements/while", "language/statements/do-while", "language/statements/for", "language/statements/for-in", "language/statements/for-of", "language/statements/with", "annexB/language/statements/if"]},
-  "parameter-patterns": {"paths": ["language/expressions/function", "language/expressions/arrow-function", "language/expressions/object", "language/statements/function", "language/expressions/class", "language/statements/class"]},
-  "catch-bindings": {"paths": ["language/statements/try"]},
-  "iteration-bindings": {"paths": ["language/statements/for", "language/statements/for-in", "language/statements/for-of", "language/statements/for-await-of"]},
-  "contextual-identifiers": {"paths": ["language/future-reserved-words", "language/identifiers"]}
+  "agents": {
+    "paths": [
+      "built-ins/Atomics",
+      "built-ins/SharedArrayBuffer"
+    ]
+  },
+  "shared-memory": {
+    "paths": [
+      "built-ins/SharedArrayBuffer",
+      "built-ins/Atomics",
+      "built-ins/TypedArrayConstructors"
+    ]
+  },
+  "realms": {
+    "paths": [
+      "."
+    ],
+    "pattern": "(?:realm|proto-from-ctor)"
+  },
+  "gc-weak": {
+    "paths": [
+      "built-ins/WeakRef",
+      "built-ins/FinalizationRegistry",
+      "built-ins/WeakMap",
+      "built-ins/WeakSet"
+    ]
+  },
+  "async-generator-grammar": {
+    "paths": [
+      "language/expressions/async-function",
+      "language/expressions/async-generator",
+      "language/expressions/generators",
+      "language/statements/async-function",
+      "language/statements/async-generator",
+      "language/statements/generators",
+      "language/expressions/await"
+    ]
+  },
+  "super": {
+    "paths": [
+      "language/expressions/super",
+      "language/expressions/new.target"
+    ]
+  },
+  "private-names": {
+    "paths": [
+      "language/expressions/class",
+      "language/statements/class"
+    ],
+    "pattern": "(?:private|name|early)"
+  },
+  "eval-globals": {
+    "paths": [
+      "language/eval-code",
+      "language/global-code",
+      "language/block-scope",
+      "language/statements/variable",
+      "language/statements/let",
+      "language/statements/const"
+    ]
+  },
+  "classes-private": {
+    "paths": [
+      "language/expressions/class",
+      "language/statements/class"
+    ]
+  },
+  "object-reflect-proxy": {
+    "paths": [
+      "built-ins/Object",
+      "built-ins/Reflect",
+      "built-ins/Proxy"
+    ]
+  },
+  "typedarray-exotics": {
+    "paths": [
+      "built-ins/TypedArray",
+      "built-ins/TypedArrayConstructors",
+      "built-ins/DataView",
+      "built-ins/ArrayBuffer",
+      "built-ins/SharedArrayBuffer"
+    ]
+  },
+  "statement-positions": {
+    "paths": [
+      "language/statements/if",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/with",
+      "annexB/language/statements/if"
+    ]
+  },
+  "parameter-patterns": {
+    "paths": [
+      "language/expressions/function",
+      "language/expressions/arrow-function",
+      "language/expressions/object",
+      "language/statements/function",
+      "language/expressions/class",
+      "language/statements/class"
+    ]
+  },
+  "catch-bindings": {
+    "paths": [
+      "language/statements/try"
+    ]
+  },
+  "iteration-bindings": {
+    "paths": [
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/for-await-of"
+    ]
+  },
+  "contextual-identifiers": {
+    "paths": [
+      "language/future-reserved-words",
+      "language/identifiers"
+    ]
+  },
+  "literal-grammar": {
+    "paths": [
+      "language/literals/numeric",
+      "language/literals/bigint",
+      "language/literals/string",
+      "language/expressions/template-literal",
+      "language/identifiers",
+      "language/future-reserved-words"
+    ]
+  },
+  "regexp-grammar": {
+    "paths": [
+      "language/literals/regexp",
+      "built-ins/RegExp"
+    ]
+  },
+  "cover-grammar": {
+    "paths": [
+      "language/expressions/assignment",
+      "language/expressions/assignmenttargettype",
+      "language/expressions/optional-chaining",
+      "language/expressions/object",
+      "language/expressions/exponentiation",
+      "language/expressions/coalesce",
+      "language/expressions/arrow-function"
+    ]
+  }
 }

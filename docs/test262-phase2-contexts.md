@@ -277,3 +277,26 @@ retained in `tools/test262/evidence/foundations-phase2/165dddf-summary.json`.
 This source is a zero-regression milestone; Phase 2 remains incomplete for the
 known gates above. Repository differential tests observe zero mismatches;
 full-corpus AST/bytecode differential remains unmeasured, and fallback stays.
+
+## Literal and cover grammar follow-up
+
+The follow-up preserves Unicode identifier escapes and legacy literal spellings
+through static semantics. RegExp syntax validation now shares the ECMAScript
+grammar validator with runtime construction while retaining the existing matcher.
+Parentheses retain reference identity for AST and bytecode calls, updates, delete,
+typeof and direct eval, while rejecting parenthesized destructuring targets.
+Object assignment defaults use explicit cover metadata; ordinary object literals
+reject cover names and duplicate prototype setters. Optional-chain assignment,
+constructor and template-tag boundaries, exponentiation and coalescing restrictions
+are checked before execution. Tagged invalid template escapes produce undefined
+cooked entries; untagged invalid escapes and unterminated templates fail parsing.
+Classic and iteration loop heads share lexical conflict validation. Class
+initializer eval carries the arguments restriction across lexical environments;
+ordinary functions reset it. Token end lines distinguish internal continuations
+from ASI boundaries.
+
+The expanded grammar suite passes 37 tests. Full required checks and a new pinned
+corpus comparison are pending for this follow-up. Remaining Phase 2 completion
+gates include parser-controlled RegExp lexical goals, the remaining binding and
+assignment-pattern audit, declaration/contextual grammar audit, and classification
+of all parse-negative corpus failures. Phase 2 is not yet declared complete.

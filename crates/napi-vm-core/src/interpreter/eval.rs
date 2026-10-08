@@ -409,6 +409,7 @@ impl Interpreter {
             let scope = Rc::new(RefCell::new(Environment::function_child(
                 self.global.clone(),
             )));
+            scope.borrow_mut().class_initializer = true;
             scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
             scope.borrow_mut().set(&name, class_val.clone());
@@ -507,7 +508,7 @@ impl Interpreter {
                         is_constructor: false,
                         is_async: *is_async,
                         is_generator: *is_generator,
-                        uses_arguments: stmts_reference(mb, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(mb),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(mb),
                         bound: None,
@@ -543,7 +544,14 @@ impl Interpreter {
                     let fname = self.member_name(name)?;
                     if *st {
                         let init_val = match init {
-                            Some(e) => self.eval_expr(e)?,
+                            Some(e) => {
+                                let scope = self.global.clone();
+                                let saved = scope.borrow().class_initializer;
+                                scope.borrow_mut().class_initializer = true;
+                                let result = self.eval_expr(e);
+                                scope.borrow_mut().class_initializer = saved;
+                                result?
+                            }
                             None => Value::Undefined,
                         };
                         statics.push((fname.clone(), init_val));
@@ -578,7 +586,7 @@ impl Interpreter {
                         is_constructor: false,
                         is_async: false,
                         is_generator: false,
-                        uses_arguments: stmts_reference(gb, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(gb),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(gb),
                         bound: None,
@@ -621,7 +629,7 @@ impl Interpreter {
                         is_constructor: false,
                         is_async: false,
                         is_generator: false,
-                        uses_arguments: stmts_reference(sb, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(sb),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(sb),
                         bound: None,
@@ -709,7 +717,7 @@ impl Interpreter {
                     .map(|p| Rc::from(p.as_str()))
                     .collect(),
             ),
-            uses_arguments: stmts_reference(&full_ctor_body, "arguments"),
+            uses_arguments: crate::parser::stmts_need_arguments(&full_ctor_body),
             needs_hoisting: body_needs_hoisting(&full_ctor_body),
             body: Rc::new(full_ctor_body),
             closure: Some(crate::heap::capture_env(&ctor_closure)),
@@ -1038,7 +1046,7 @@ impl Interpreter {
                         is_constructor: !*is_async && !*is_generator,
                         is_async: *is_async,
                         is_generator: *is_generator,
-                        uses_arguments: stmts_reference(body, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(body),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(body),
                         bound: None,
@@ -1650,7 +1658,7 @@ impl Interpreter {
             is_constructor: false,
             is_async,
             is_generator,
-            uses_arguments: stmts_reference(body, "arguments"),
+            uses_arguments: crate::parser::stmts_need_arguments(body),
             bytecode: None,
             needs_hoisting: body_needs_hoisting(body),
             bound: None,
@@ -1693,6 +1701,9 @@ impl Interpreter {
         let mut symbol_keys = Vec::new();
         for prop in props {
             match prop {
+                ObjectProp::CoverInitializedName { .. } => {
+                    return vm_err("invalid object literal cover grammar");
+                }
                 ObjectProp::Shorthand(name) => {
                     let value = self.global.borrow().get(name).unwrap_or(Value::Undefined);
                     insert_object_property(
@@ -1925,7 +1936,7 @@ impl Interpreter {
     pub(crate) fn eval_expr(&mut self, e: &Expr) -> Result<Value, VmErr> {
         self.consume_fuel(1)?;
         match e {
-            Expr::LegacyLiteral(inner) => self.eval_expr(inner),
+            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => self.eval_expr(inner),
             Expr::Number(n) => Ok(Value::Number(*n)),
             Expr::String(s) | Expr::EscapedString(s) => {
                 if s.len() > crate::value::MAX_STRING_LEN {
@@ -2044,7 +2055,7 @@ impl Interpreter {
                 // slot from the receiver rather than computing anything from
                 // the property it names.
                 if matches!(op, UnOp::Delete) {
-                    match operand.as_ref() {
+                    match operand.unparenthesized() {
                         Expr::Member {
                             object, property, ..
                         } => {
@@ -2084,9 +2095,12 @@ impl Interpreter {
                     }
                 }
                 if matches!(op, UnOp::Inc | UnOp::Dec)
-                    && matches!(operand.as_ref(), Expr::Identifier(_) | Expr::Member { .. })
+                    && matches!(
+                        operand.unparenthesized(),
+                        Expr::Identifier(_) | Expr::Member { .. }
+                    )
                 {
-                    match operand.as_ref() {
+                    match operand.unparenthesized() {
                         Expr::Identifier(n) => {
                             self.inc_global_binding(n, *op == UnOp::Inc, *prefix)
                         }
@@ -2126,7 +2140,7 @@ impl Interpreter {
                     }
                 } else if *op == UnOp::Typeof {
                     // `typeof` never throws, even on undeclared identifiers.
-                    let v = if let Expr::Identifier(n) = operand.as_ref() {
+                    let v = if let Expr::Identifier(n) = operand.unparenthesized() {
                         if n == "undefined" {
                             Value::Undefined
                         } else {
@@ -2156,7 +2170,7 @@ impl Interpreter {
                 // Direct eval is determined by syntax and the original intrinsic,
                 // not by a function's display name. Resolve before arguments.
                 let direct_eval =
-                    matches!(callee.as_ref(), Expr::Identifier(name) if name == "eval");
+                    matches!(callee.unparenthesized(), Expr::Identifier(name) if name == "eval");
                 let evaluated_eval = if direct_eval {
                     Some(self.eval_expr(callee)?)
                 } else {
@@ -2185,7 +2199,7 @@ impl Interpreter {
                         _ => push_call_arg(&mut a, self.eval_expr(x)?)?,
                     }
                 }
-                match callee.as_ref() {
+                match callee.unparenthesized() {
                     // `super(...)` invokes the superclass constructor on the
                     // current `this`.
                     Expr::Super => {
@@ -2263,7 +2277,8 @@ impl Interpreter {
                             crate::builtins::eval_direct(self, a)
                         } else {
                             let scope = self.global.clone();
-                            let receiver = if let Expr::Identifier(name) = callee.as_ref() {
+                            let receiver = if let Expr::Identifier(name) = callee.unparenthesized()
+                            {
                                 self.with_binding_object(&scope, name)?
                                     .unwrap_or(Value::Undefined)
                             } else {
@@ -2332,7 +2347,7 @@ impl Interpreter {
                     object,
                     property,
                     computed,
-                } = target.as_ref()
+                } = target.unparenthesized()
                     && let Expr::String(key) = property.as_ref()
                 {
                     checked_static_key(key)?;
@@ -2361,7 +2376,7 @@ impl Interpreter {
                     }
                     return Ok(assigned);
                 }
-                let (receiver, key, current) = match target.as_ref() {
+                let (receiver, key, current) = match target.unparenthesized() {
                     Expr::Identifier(name) => {
                         let current = self.eval_expr(target)?;
                         let _ = name;
@@ -2393,7 +2408,7 @@ impl Interpreter {
                         self.assign_member(&receiver, &key, assigned.clone())?;
                     }
                     _ => {
-                        let Expr::Identifier(name) = target.as_ref() else {
+                        let Expr::Identifier(name) = target.unparenthesized() else {
                             unreachable!("checked above");
                         };
                         self.assign_or_set_binding(name, assigned.clone())?;
@@ -2403,7 +2418,7 @@ impl Interpreter {
             }
             Expr::Assignment { target, op, value } => {
                 let v = self.eval_expr(value)?;
-                match target.as_ref() {
+                match target.unparenthesized() {
                     Expr::Identifier(n) => {
                         if op.bin_op().is_some() {
                             self.compound_assign_global(n, *op, v)
@@ -2548,7 +2563,7 @@ impl Interpreter {
                     is_constructor: !*is_async && !*is_generator,
                     is_async: *is_async,
                     is_generator: *is_generator,
-                    uses_arguments: stmts_reference(body, "arguments"),
+                    uses_arguments: crate::parser::stmts_need_arguments(body),
                     bytecode: None,
                     needs_hoisting: body_needs_hoisting(body),
                     bound: None,
@@ -2590,7 +2605,7 @@ impl Interpreter {
                 raw,
                 exprs,
             } => {
-                let (this_val, tag_fn) = match tag.as_ref() {
+                let (this_val, tag_fn) = match tag.unparenthesized() {
                     // Preserve the receiver so `` obj.tag`…` `` sees `this`.
                     Expr::Member {
                         object, property, ..
@@ -2602,7 +2617,13 @@ impl Interpreter {
                     }
                     other => (Value::Undefined, self.eval_expr(other)?),
                 };
-                let strings = Value::array(cooked.iter().cloned().map(Value::String).collect());
+                let strings = Value::array(
+                    cooked
+                        .iter()
+                        .cloned()
+                        .map(|part| part.map(Value::String).unwrap_or(Value::Undefined))
+                        .collect(),
+                );
                 strings.set_prop(
                     "raw".to_string(),
                     Value::array(raw.iter().cloned().map(Value::String).collect()),

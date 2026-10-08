@@ -279,13 +279,13 @@ impl Parser {
     pub(crate) fn line_break_after_current(&self) -> bool {
         self.toks
             .get(self.pos + 1)
-            .is_some_and(|(_, span)| !span.is_unknown() && span.line > self.cur_span().line)
+            .is_some_and(|(_, span)| !span.is_unknown() && span.line > self.cur_span().end_line)
     }
 
     pub(crate) fn line_break_before_current(&self) -> bool {
         self.pos > 0
             && !self.cur_span().is_unknown()
-            && self.cur_span().line > self.toks[self.pos - 1].1.line
+            && self.cur_span().line > self.toks[self.pos - 1].1.end_line
     }
 
     pub(crate) fn with_grammar<R>(
@@ -336,7 +336,17 @@ impl Parser {
     pub(crate) fn arrow_head_here(&self) -> bool {
         if matches!(
             self.cur(),
-            Token::Identifier(_) | Token::EscapedIdentifier(_)
+            Token::Identifier(_)
+                | Token::EscapedIdentifier(_)
+                | Token::KwAs
+                | Token::KwLet
+                | Token::KwStatic
+                | Token::KwConstructor
+                | Token::KwFrom
+                | Token::KwGet
+                | Token::KwOf
+                | Token::KwSet
+                | Token::KwAsync
         ) && matches!(self.peek(), Token::Arrow)
         {
             return true;

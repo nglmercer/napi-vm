@@ -466,7 +466,7 @@ fn new_function_kind(
     let (params, body) =
         parse_dynamic_function(&parameter_source, &body_source, asynchronous, generator)?;
 
-    let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
+    let uses_arguments = crate::parser::stmts_need_arguments(&body);
     let needs_hoisting = body_needs_hoisting(&body);
     Ok(Value::Function(Rc::new(FunctionData {
         strict: crate::parser::use_strict(&body),

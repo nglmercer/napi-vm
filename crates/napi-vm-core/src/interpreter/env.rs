@@ -218,6 +218,7 @@ impl Vars {
 
 #[derive(Clone)]
 pub struct Environment {
+    pub(crate) class_initializer: bool,
     pub(crate) with_object: Option<Value>,
     vars: Vars,
     parent: Option<Env>,
@@ -264,6 +265,9 @@ impl Environment {
         let mut found_this = false;
         while let Some(frame) = current {
             let environment = frame.borrow();
+            if !found_this {
+                context.forbid_arguments |= environment.class_initializer;
+            }
             context
                 .private_names
                 .extend(environment.private_names.keys().cloned());
@@ -486,6 +490,7 @@ impl Environment {
             module_context: None,
             module_realm: None,
             new_target: None,
+            class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
@@ -509,6 +514,7 @@ impl Environment {
             module_context: None,
             module_realm: None,
             new_target: None,
+            class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
@@ -535,6 +541,7 @@ impl Environment {
             module_context: None,
             module_realm: None,
             new_target: None,
+            class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),
@@ -573,6 +580,7 @@ impl Environment {
             module_context: None,
             module_realm: None,
             new_target: None,
+            class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
             private_names: HashMap::new(),

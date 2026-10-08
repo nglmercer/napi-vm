@@ -1289,3 +1289,15 @@ fn literal_metadata_keeps_primitive_and_object_tier_parity() {
         check(source, true);
     }
 }
+
+#[test]
+fn parenthesized_references_keep_existing_tier_parity() {
+    for source in [
+        "var x=1;(x)++;(x)=4;x;",
+        "typeof (missing);",
+        "var o={x:1};delete (o.x);'x' in o;",
+        "var o={x:3,f:function(){return this.x;}};(o.f)();",
+    ] {
+        check(source, true);
+    }
+}

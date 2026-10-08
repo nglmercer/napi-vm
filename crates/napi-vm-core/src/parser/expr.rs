@@ -733,7 +733,10 @@ impl Parser {
                     let (quasis, exprs) = self.template_body()?;
                     e = Expr::TaggedTemplate {
                         tag: Box::new(e),
-                        cooked: quasis.iter().map(|q| q.cooked.clone()).collect(),
+                        cooked: quasis
+                            .iter()
+                            .map(|q| (!q.invalid_escape).then(|| q.cooked.clone()))
+                            .collect(),
                         raw: quasis.into_iter().map(|q| q.raw).collect(),
                         exprs,
                     };
