@@ -73,11 +73,17 @@ impl Parser {
                             | Token::KwGet
                             | Token::KwOf
                             | Token::KwSet
+                            | Token::KwStatic
                     ) =>
             {
-                self.adv();
+                // ExpressionStatement excludes a leading `let [` even when
+                // the surrounding position cannot contain a declaration.
+                if matches!(self.peek(), Token::LBracket) {
+                    self.record_error("let [ cannot begin an expression statement".into());
+                }
+                let expression = self.expr()?;
                 self.semi();
-                Some(Statement::Expr(Expr::Identifier("let".into())))
+                Some(Statement::Expr(expression))
             }
             Token::KwLet => self.var_decl(VarKind::Let),
             Token::KwConst => {
@@ -533,6 +539,9 @@ impl Parser {
             self.single_statement = true;
             self.allow_annex_b_function = allow_annex_b_function;
             let statement = self.stmt();
+            if statement.is_none() {
+                self.record_error("expected a statement body".into());
+            }
             if statement.as_ref().is_some_and(Self::is_labelled_function) {
                 self.record_error(
                     "labelled function is not permitted in this statement position".into(),
@@ -972,6 +981,7 @@ impl Parser {
             // positions may still use them as identifiers.
             Token::KwAs => self.consume_contextual_identifier("as"),
             Token::KwLet => self.consume_contextual_identifier("let"),
+            Token::KwStatic => self.consume_contextual_identifier("static"),
             Token::KwUndefined => self.consume_contextual_identifier("undefined"),
             Token::KwAwait if !self.await_expression => self.consume_contextual_identifier("await"),
             Token::KwYield if !self.yield_expression => self.consume_contextual_identifier("yield"),

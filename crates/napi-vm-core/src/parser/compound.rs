@@ -586,6 +586,7 @@ impl Parser {
             if let Some(st) = self.stmt() {
                 s.push(st);
             } else {
+                self.record_error("invalid statement in block".into());
                 break;
             }
         }

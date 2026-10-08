@@ -381,6 +381,8 @@ impl Parser {
             }
             Token::Identifier(_)
             | Token::KwAs
+            | Token::KwLet
+            | Token::KwStatic
             | Token::KwConstructor
             | Token::KwFrom
             | Token::KwGet

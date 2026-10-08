@@ -702,3 +702,40 @@ fn iteration_assignment_targets_update_bindings_and_close_on_failure() {
         );
     }
 }
+
+#[test]
+fn contextual_let_and_static_are_complete_expressions_in_sloppy_code() {
+    for source in [
+        "var static=1;static++;",
+        "let static=1;const other=static;",
+        "var let=2;let+1;",
+        "var let={x:2};let.x++;",
+        "function f(static){return static;}f(1);",
+        "var let=()=>3;if(true)let();",
+        "var static=1;({static});",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "'use strict';var static=1;",
+        "'use strict';static;",
+        "'use strict';let+1;",
+        "if(true)let[x]=[];",
+        "function f(){for(;;) }",
+        "function f(){for(x of )}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "var let=2;let+1===3;",
+        "var let={x:2};let.x++;let.x===3;",
+        "var static=2;static++;static===3;",
+        "var let=()=>3;var result=0;if(true)result=let();result===3;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
