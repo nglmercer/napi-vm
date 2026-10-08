@@ -124,16 +124,18 @@ repairs is still in progress.
 
 The AST currently loses distinctions needed for complete early errors, including
 parenthesized cover grammar/optional-chain assignment boundaries. These require
-representation work and focused validation. Additional Annex B statement positions, escaped/contextual
-keywords, full binding/assignment pattern grammar, and eval class-initializer
-context propagation remain to be audited. Global declarations across separate
+representation work and focused validation. Additional Annex B statement
+positions, Unicode identifiers and escaped/contextual keywords, full
+binding/assignment pattern grammar, and eval class-initializer context
+propagation remain to be audited. RegExp literal syntax and strict-mode numeric
+and string literal metadata remain incomplete. Global declarations across separate
 scripts/eval invocations require Phase 3 declaration instantiation. Function-kind
 intrinsic descriptor/prototype completeness and cross-realm construction remain
 part of the broader Phase 1/3 audits. Import attributes are retained for future
 module-request/cache semantics; JSON modules and source/defer import execution
 are not implemented. Resource disposal and its async continuation semantics are
-not implemented. Ordinary for-in/of still needs lexical iteration environments; binding metadata
-is now retained as described below.
+not implemented. Ordinary for-in/of still needs lexical iteration environments;
+binding metadata is now retained as described below.
 
 Runtime private methods/accessors/static initialization and global declaration
 instantiation remain Phase 3 work. Their execution failures are retained rather
@@ -255,3 +257,23 @@ fixtures have zero observed mismatches; direct eval and new loop binding forms
 retain AST fallback. Full-corpus AST/bytecode differential is not measured.
 The frozen worker is measuring the combined iteration/catch/contextual/eval
 selection and the full corpus before any zero-regression claim for this source.
+
+The repaired 165dddf focused union passes 4,131/7,528, gaining 11 variants and
+losing zero against the identical 63f16b6 selection. It has no harness errors,
+timeouts, crashes or skips. The four variants covering the three exploratory
+full regressions pass 4/4 in a separate selection. The repaired full-corpus run
+remains in progress; focused results do not establish full-source completion.
+
+The frozen 165dddf full corpus passes **46,342/102,956**, with **4,935 new passes
+and zero lost passes versus PR #23**; it gains 883 variants and loses zero
+against the 754ed80 milestone. Remaining outcomes: 56,566 failures, 46 harness
+errors, two timeouts, zero crashes and zero skips. Configuration is the pinned
+5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 revision, four workers, 5s timeout,
+fuel 1,000,000, loop budget 100,000, call depth 128 and max jobs 10,000. The
+worker SHA256 is
+`7b0d2d7ed6f2eb192ec72bf316405048b38758acb44ecfc0633f2a3e81169d6a`.
+The complete compressed reports, exact transitions, checks and checksums are
+retained in `tools/test262/evidence/foundations-phase2/165dddf-summary.json`.
+This source is a zero-regression milestone; Phase 2 remains incomplete for the
+known gates above. Repository differential tests observe zero mismatches;
+full-corpus AST/bytecode differential remains unmeasured, and fallback stays.

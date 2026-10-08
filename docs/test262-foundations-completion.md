@@ -192,3 +192,20 @@ remain unsupported: the final triage records 9,210 non-passing built-in Temporal
 variants and 4,058 Intl Temporal variants. Broader RegExp, Array, String, and
 Iterator failures also remain; these clusters mix algorithm and foundation
 failures and require individual classification. They remain in the denominator.
+
+## Phase 2 measured continuation
+
+Frozen source 165dddf passes 46,342/102,956 at the required pinned revision and
+limits: 4,935 new passes and zero lost passes versus PR #23, with 56,566
+failures, 46 harness errors, two timeouts and zero crashes/skips. All required
+checks pass (761 workspace Rust tests, four existing ignored; 158 minimal;
+73 Node; 14 WASM; nine tooling; fmt/Clippy). Repository differential fixtures
+have zero observed mismatches; full-corpus differential is not measured.
+
+This continuation adds catch-pattern initialization, iteration binding metadata
+and early errors, assignment loop heads, contextual let/static expressions and
+statement-recovery errors. Shared binding metadata preserves simple-catch Annex
+B eval rules and hoisted var iteration patterns. AST fallback remains enabled.
+The complete reports and source identities are linked from the
+[Phase 2 status](test262-phase2-contexts.md). Known Phase 2 grammar/literal/eval
+context gaps and the broader Phase 1/3/4 gates remain; this PR stays draft.

@@ -1,5 +1,5 @@
 {
-  "source_commit": "165dddf",
+  "source_commit": "165dddfdda0839ba40087eddfe3a0a43a7d72736",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "phase2_complete": false,
   "required_checks": {
@@ -17,6 +17,63 @@
     "full_corpus_differential": "not measured",
     "fallback": "retained"
   },
-  "focused": "in progress",
-  "full": "in progress"
+  "focused": {
+    "groups": [
+      "iteration-bindings",
+      "catch-bindings",
+      "contextual-identifiers",
+      "eval-globals"
+    ],
+    "baseline": "63f16b6 identical selection",
+    "total": 7528,
+    "pass": 4131,
+    "fail": 3397,
+    "new_passes": 11,
+    "lost_passes": 0,
+    "harness_error": 0,
+    "timeout": 0,
+    "crash": 0,
+    "skip": 0
+  },
+  "full": {
+    "pass": 46342,
+    "fail": 56566,
+    "harness_error": 46,
+    "timeout": 2,
+    "crash": 0,
+    "skip": 0,
+    "total": 102956,
+    "new_passes_vs_pr23": 4935,
+    "lost_passes_vs_pr23": 0,
+    "new_passes_vs_754ed80": 883,
+    "lost_passes_vs_754ed80": 0
+  },
+  "engine_sha256": "7b0d2d7ed6f2eb192ec72bf316405048b38758acb44ecfc0633f2a3e81169d6a",
+  "regression_selection": {
+    "total": 4,
+    "pass": 4,
+    "fail": 0,
+    "harness_error": 0,
+    "timeout": 0,
+    "crash": 0,
+    "skip": 0
+  },
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "runtime_capabilities": "disabled"
+  },
+  "sha256": {
+    "165dddf-baseline-focused.json.gz": "9e3e74edd83b73726d1a0a427dcd9ab3c586345a3e23b0d331ae1cfd5b6d3fc3",
+    "165dddf-focused-transitions.json.gz": "a8cee904b3955e1e1506b5985f375491eb2bc24468c1256af2a8f19c49eeabc8",
+    "165dddf-regressions.json.gz": "9e54e4b402b7225679e6a9c5810a635305564dddb409afec7a55af54cdadc814",
+    "165dddf-combined-transitions.json.gz": "3136111dfa393095f5d2e1f6da77346d82310f3a465176cce5b6b70c6ee36b3f",
+    "165dddf-focused.json.gz": "48222f4c657859a1ef87cbc265c9e633dff3e8bcc578a27822f21b346ecf03ba",
+    "165dddf-full-transitions.json.gz": "fea98999fa1866a219bcf51eee0e1d1445a7c6d405ac1f0a3c19da36489fb5b6",
+    "165dddf-full.json.gz": "c3bdf626723323f2a7b0594ce231b7bad1816a30a8c567d683a8840d40f8e9b8"
+  }
 }

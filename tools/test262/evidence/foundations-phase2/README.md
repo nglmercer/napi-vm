@@ -1,7 +1,7 @@
-# Phase 2 exploratory evidence
+# Phase 2 validation evidence
 
-Phase 2 remains incomplete. The frozen 754ed80 source passes 45,459/102,956:
-4,052 new passes and zero lost passes versus PR #23, with zero crashes.
+Phase 2 remains incomplete. The frozen 165dddf source passes 46,342/102,956:
+4,935 new passes and zero lost passes versus PR #23, with zero crashes.
 The exploratory reports retain all outcomes, including regressions. Subsequent
 parser changes require their own validation.
 
@@ -62,3 +62,32 @@ three losses versus PR #23, 46 harness errors, two timeouts, zero crashes and
 zero skips. The catch/eval and var-pattern binding regressions are repaired in
 39c9c02 and 165dddf; measurements for the repaired source are pending.
 `63f16b6-summary.json` records all retained report checksums and worker identity.
+
+At repaired source 165dddf, all required checks pass (761 workspace Rust tests,
+four existing ignored; 158 minimal; 73 Node; 14 WASM; nine tooling; fmt/Clippy).
+Its 7,528-variant iteration/catch/contextual/eval selection passes 4,131: 11 gains
+and zero losses against 63f16b6, with zero harness errors/timeouts/crashes/skips.
+The separate regression selection passes 4/4. The full run remains in progress.
+
+The final measured source for this increment, 165dddf, passes 46,342/102,956:
+4,935 gains and zero losses versus PR #23; 883 gains and zero losses versus
+754ed80. Remaining outcomes are 56,566 failures, 46 harness errors, two
+timeouts, zero crashes and zero skips. This is not Phase 2 completion.
+`165dddf-summary.json` records source/worker identity, configuration, required
+checks and all compressed-report checksums. Full-corpus differential remains
+unmeasured; repository forced-tier fixtures have zero observed mismatches.
+
+Reproduce the comparison:
+
+```sh
+python3 tools/test262/compare.py \
+  tools/test262/evidence/foundations-phase1/baseline-final-full.json.gz \
+  tools/test262/evidence/foundations-phase2/165dddf-full.json.gz \
+  --output artifacts/test262/phase2-165dddf-comparison.json
+```
+
+To reproduce execution, build source 165dddf with Rust 1.98.1 using
+`cargo build --release --bin napi-vm-test262`, freeze the executable, then run
+`tools/test262/run.py /workspace/test262 --engine <frozen-worker> --revision
+5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 --jobs 4 --timeout 5 --output <report>`.
+The worker fixes fuel/loop/call-depth/job limits to the configuration above.
