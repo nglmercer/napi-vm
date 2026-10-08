@@ -122,13 +122,11 @@ repairs is still in progress.
 
 ## Remaining Phase 2 gates
 
-The AST currently loses distinctions needed for complete early errors, including
-parenthesized cover grammar/optional-chain assignment boundaries. These require
-representation work and focused validation. Additional Annex B statement
-positions, Unicode identifiers and escaped/contextual keywords, full
-binding/assignment pattern grammar, and eval class-initializer context
-propagation remain to be audited. RegExp literal syntax and strict-mode numeric
-and string literal metadata remain incomplete. Global declarations across separate
+The follow-up below implements parentheses and cover metadata, Unicode and escaped
+identifiers, RegExp grammar validation, legacy literal metadata and class-initializer
+eval context. Parser-controlled lexical goals, remaining Annex B and contextual
+positions, and the full binding/assignment-pattern audit remain completion gates.
+Global declarations across separate
 scripts/eval invocations require Phase 3 declaration instantiation. Function-kind
 intrinsic descriptor/prototype completeness and cross-realm construction remain
 part of the broader Phase 1/3 audits. Import attributes are retained for future
@@ -295,7 +293,8 @@ initializer eval carries the arguments restriction across lexical environments;
 ordinary functions reset it. Token end lines distinguish internal continuations
 from ASI boundaries.
 
-The expanded grammar suite passes 37 tests. Full required checks and a new pinned
+The expanded grammar suite passes 38 tests, with comment termination and newline
+handling added to the final check run. Full required checks and a new pinned
 corpus comparison are pending for this follow-up. Remaining Phase 2 completion
 gates include parser-controlled RegExp lexical goals, the remaining binding and
 assignment-pattern audit, declaration/contextual grammar audit, and classification

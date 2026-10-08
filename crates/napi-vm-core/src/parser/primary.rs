@@ -98,7 +98,7 @@ impl Parser {
                         i.push(self.with_in(true, Self::assign)?);
                     }
                     if !matches!(self.cur(), Token::RBracket) {
-                        self.eat(&Token::Comma);
+                        self.expect(&Token::Comma);
                     }
                 }
                 let trailing_comma = self
@@ -120,7 +120,7 @@ impl Parser {
                         let s = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::Spread(s));
                         if !matches!(self.cur(), Token::RBrace) {
-                            self.eat(&Token::Comma);
+                            self.expect(&Token::Comma);
                         }
                         continue;
                     }
@@ -131,7 +131,11 @@ impl Parser {
                         && !self.line_break_after_current()
                         && !matches!(
                             self.peek(),
-                            Token::Colon | Token::LParen | Token::Comma | Token::RBrace
+                            Token::Colon
+                                | Token::LParen
+                                | Token::Comma
+                                | Token::RBrace
+                                | Token::Equal
                         )
                         && self.eat(&Token::KwAsync);
                     let is_generator = self.eat(&Token::Star);
@@ -145,6 +149,20 @@ impl Parser {
                     }
                     legacy_key |=
                         matches!(self.cur(), Token::LegacyNumber(_) | Token::LegacyString(_));
+                    let identifier_key = matches!(
+                        self.cur(),
+                        Token::Identifier(_)
+                            | Token::EscapedIdentifier(_)
+                            | Token::KwAs
+                            | Token::KwAsync
+                            | Token::KwLet
+                            | Token::KwStatic
+                            | Token::KwConstructor
+                            | Token::KwFrom
+                            | Token::KwGet
+                            | Token::KwOf
+                            | Token::KwSet
+                    );
                     let key = match self.cur() {
                         Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
                             let v = s.to_key();
@@ -166,7 +184,7 @@ impl Parser {
                                     let v = self.with_in(true, Self::assign)?;
                                     p.push(ObjectProp::Computed(e, v));
                                     if !matches!(self.cur(), Token::RBrace) {
-                                        self.eat(&Token::Comma);
+                                        self.expect(&Token::Comma);
                                     }
                                     continue;
                                 }
@@ -229,7 +247,7 @@ impl Parser {
                                         });
                                     }
                                     if !matches!(self.cur(), Token::RBrace) {
-                                        self.eat(&Token::Comma);
+                                        self.expect(&Token::Comma);
                                     }
                                     continue;
                                 }
@@ -274,16 +292,22 @@ impl Parser {
                         let v = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::KeyValue(key, v));
                     } else if self.eat(&Token::Equal) {
+                        if !identifier_key || is_async || is_generator || is_method || is_setter {
+                            self.record_error("invalid cover initialized name".into());
+                        }
                         let initializer = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::CoverInitializedName {
                             name: key,
                             initializer,
                         });
                     } else {
+                        if !identifier_key || is_async || is_generator || is_method || is_setter {
+                            self.record_error("invalid shorthand property".into());
+                        }
                         p.push(ObjectProp::Shorthand(key));
                     }
                     if !matches!(self.cur(), Token::RBrace) {
-                        self.eat(&Token::Comma);
+                        self.expect(&Token::Comma);
                     }
                 }
                 let trailing_comma = self
@@ -513,9 +537,19 @@ impl Parser {
     /// position and return `None` so the caller can parse a parenthesized expr.
     fn try_arrow(&mut self, is_async: bool) -> Option<Expr> {
         let saved = self.await_expression;
+        let saved_error = self.error.clone();
+        let saved_entries = self.index.entries.len();
+        let saved_scopes = self.index.scopes.len();
+        let saved_scope = self.current_scope;
         self.await_expression |= is_async;
         let result = self.try_arrow_parameters(is_async);
         self.await_expression = saved;
+        if result.is_none() {
+            self.error = saved_error;
+            self.index.entries.truncate(saved_entries);
+            self.index.scopes.truncate(saved_scopes);
+            self.current_scope = saved_scope;
+        }
         result
     }
 

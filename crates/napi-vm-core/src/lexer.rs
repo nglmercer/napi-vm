@@ -156,6 +156,7 @@ pub struct Lexer {
     /// Tokens produced ahead of time (e.g. by template scanning), drained in
     /// FIFO order before lexing more source.
     pending: Vec<Token>,
+    lexical_errors: Vec<crate::span::SpannedToken>,
     /// Spans corresponding to tokens in `pending`.
     pending_spans: Vec<crate::span::Span>,
     /// The last token emitted, which decides whether a `/` starts a regular
@@ -177,6 +178,7 @@ impl Lexer {
             line: 1,
             col: 1,
             pending: Vec::new(),
+            lexical_errors: Vec::new(),
             pending_spans: Vec::new(),
             previous: None,
             encoded_source: false,
@@ -247,6 +249,7 @@ impl Lexer {
                 toks.push((t, span));
             }
         }
+        toks.append(&mut self.lexical_errors);
         let eof_span = crate::span::Span::new(self.line, self.col);
         toks.push((Token::EOF, eof_span));
         toks
@@ -297,22 +300,32 @@ impl Lexer {
                         self.col += 1;
                     }
                 } else if n == '*' {
+                    let start = crate::span::Span::new(self.line, self.col);
                     self.pos += 2;
                     self.col += 2;
-                    while self.pos + 1 < self.src.len() {
-                        if self.src[self.pos] == '*' && self.src[self.pos + 1] == '/' {
+                    let mut closed = false;
+                    while self.pos < self.src.len() {
+                        if self.src[self.pos] == '*' && self.src.get(self.pos + 1) == Some(&'/') {
                             self.pos += 2;
                             self.col += 2;
+                            closed = true;
                             break;
                         }
-                        if matches!(self.src[self.pos], '\n' | '\u{2028}' | '\u{2029}') {
+                        let c = self.src[self.pos];
+                        self.pos += 1;
+                        if matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                            if c == '\r' && self.src.get(self.pos) == Some(&'\n') {
+                                self.pos += 1;
+                            }
                             self.line += 1;
                             self.col = 1;
                             self.line_has_token = false;
                         } else {
                             self.col += 1;
                         }
-                        self.pos += 1;
+                    }
+                    if !closed {
+                        self.lexical_errors.push((Token::Unknown('/'), start));
                     }
                 } else {
                     break;

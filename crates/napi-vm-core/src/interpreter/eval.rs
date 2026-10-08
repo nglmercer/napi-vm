@@ -11,7 +11,7 @@ use super::{
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
     AssignOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp, MemberName,
-    ObjectProp, Statement, UnOp, VarKind, arrow_body_references, stmts_reference,
+    ObjectProp, Statement, UnOp, VarKind, arrow_body_references,
 };
 use crate::value::{ClassData, FunctionData, ObjectCell, PropAttrs, Value};
 

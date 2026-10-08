@@ -341,7 +341,7 @@ impl Parser {
                         elements.push(self.pattern()?);
                     }
                     if !matches!(self.cur(), Token::RBracket) {
-                        self.eat(&Token::Comma);
+                        self.expect(&Token::Comma);
                     }
                 }
                 self.expect(&Token::RBracket);
@@ -359,7 +359,7 @@ impl Parser {
                             Some(Pattern::Rest(Box::new(rest))),
                         ));
                         if !matches!(self.cur(), Token::RBrace) {
-                            self.eat(&Token::Comma);
+                            self.expect(&Token::Comma);
                         }
                         continue;
                     }
@@ -384,11 +384,13 @@ impl Parser {
                                 PatternKey::Computed(expr)
                             }
                             Token::String(s) | Token::EscapedString(s) => {
+                                keyword_only = true;
                                 let key = PatternKey::Name(s.to_key());
                                 self.adv();
                                 key
                             }
                             Token::Number(n) => {
+                                keyword_only = true;
                                 let key = PatternKey::Name(crate::format::number_string(*n));
                                 self.adv();
                                 key
@@ -429,7 +431,7 @@ impl Parser {
                     }
                     props.push((key, pat));
                     if !matches!(self.cur(), Token::RBrace) {
-                        self.eat(&Token::Comma);
+                        self.expect(&Token::Comma);
                     }
                 }
                 self.expect(&Token::RBrace);

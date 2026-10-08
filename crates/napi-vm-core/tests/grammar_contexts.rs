@@ -1080,3 +1080,42 @@ fn token_internal_line_continuations_do_not_trigger_asi() {
     assert!(!parses("'a\\\nb'++x;", ParseGoal::Script));
     assert!(parses("'a\\\nb'\n++x;", ParseGoal::Script));
 }
+
+#[test]
+fn property_names_and_list_separators_cannot_be_recovered_as_bindings() {
+    for source in [
+        "[a b];",
+        "({a b});",
+        "({a:1 b:2});",
+        "({'a'});",
+        "({1});",
+        "({'a'=1}=o);",
+        "({*a});",
+        "var [a b]=[];",
+        "var {a b}={};",
+        "var {'a'}={};",
+        "var {1}={};",
+        "var {...{a}}={};",
+        "var {...a,b}={};",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "var {'a':x,1:y}={};",
+        "var {...x}={};",
+        "({async=1}=o);",
+        "({async});",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn comment_termination_and_line_breaks_are_lexical_semantics() {
+    for source in ["/*", "/*x", "/*x*", "var x=1;/*", "`a${1/*`;"] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in ["/**/", "var x=1/*\r*/var y=2;", "var x=1/*\r\n*/var y=2;"] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}

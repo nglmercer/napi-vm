@@ -38,7 +38,7 @@ use crate::parser::{
     AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp,
     MemberName, ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind,
     arrow_body_references, collect_var_names, expr_captures_identifier, pattern_names,
-    statements_capture_identifier, stmts_reference,
+    statements_capture_identifier,
 };
 
 use super::constants::{
