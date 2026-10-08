@@ -54,6 +54,21 @@
       "language/statements/generators"
     ]
   },
+  "async-iteration": {
+    "paths": [
+      "built-ins/AsyncFromSyncIteratorPrototype",
+      "language/statements/for-await-of"
+    ]
+  },
+  "iterator-protocol": {
+    "paths": [
+      "language/statements/for-of",
+      "language/expressions/array",
+      "language/expressions/call",
+      "language/expressions/new"
+    ],
+    "pattern": "(?:for-of|spread|iterator)"
+  },
   "super": {
     "paths": [
       "language/expressions/super",
