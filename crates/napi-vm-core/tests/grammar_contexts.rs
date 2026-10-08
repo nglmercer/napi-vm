@@ -592,3 +592,52 @@ fn annex_b_function_statement_positions_preserve_strict_and_block_boundaries() {
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
+
+#[test]
+fn catch_patterns_validate_bound_names_and_declaration_conflicts() {
+    for source in [
+        "try{}catch({x,x}){}",
+        "try{}catch([x,x]){}",
+        "try{}catch({x,y:x}){}",
+        "try{}catch({x}){let x;}",
+        "try{}catch([x]){const x=1;}",
+        "try{}catch({x}){class x{}}",
+        "try{}catch({x}){function x(){}}",
+        "try{}catch({x}){var x;}",
+        "try{}catch([x]){if(true){var x;}}",
+        "try{}catch(x=1){}",
+        "try{}catch([...x=1]){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "try{}catch({x,y}){}",
+        "try{}catch([x=1,...rest]){}",
+        "try{}catch({x,...rest}){}",
+        "try{}catch({x}){var y;}",
+        "try{}catch({x}){{let x;}}",
+        "try{}catch(x){var x;}",
+        "'use strict';try{}catch(x){var x;}",
+        "try{}catch{}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn catch_pattern_initialization_observes_tdz_and_restores_scope_on_abrupt_completion() {
+    for source in [
+        "let f;try{throw{x:3,y:4};}catch({x,y}){x=8;f=()=>x+y;}f()===12&&typeof x==='undefined';",
+        "let result=0;try{throw[undefined,2,3];}catch([x=1,...rest]){result=x+rest[0]+rest[1];}result===6;",
+        "let result=0;try{throw{x:1,y:2};}catch({x,...rest}){result=x+rest.y;}result===3;",
+        "let x='outer',ok=false;try{try{throw{};}catch({x=x}){}}catch(e){ok=e instanceof ReferenceError;}ok&&x==='outer';",
+        "let x='outer',seen=0;try{try{throw{get x(){throw 9;}};}catch({x}){seen=1;}finally{seen=2;}}catch(e){seen+=e;}x==='outer'&&seen===11;",
+    ] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

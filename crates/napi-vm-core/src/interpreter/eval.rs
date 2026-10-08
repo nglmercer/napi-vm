@@ -994,15 +994,7 @@ impl Interpreter {
                                 // writes land on bindings that already carry
                                 // the right kind -- otherwise a destructured
                                 // `const` would be reassignable.
-                                for bound in crate::parser::pattern_names(pat) {
-                                    self.declare_binding(
-                                        &bound,
-                                        Value::Undefined,
-                                        bind_kind,
-                                        false,
-                                    )?;
-                                }
-                                self.destructure(pat, &v)?;
+                                self.initialize_pattern_binding(pat, &v, bind_kind)?;
                             }
                             None => {
                                 self.declare_binding(name, v.clone(), bind_kind, true)?;

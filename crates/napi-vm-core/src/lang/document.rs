@@ -804,13 +804,17 @@ impl Builder<'_> {
             } => {
                 self.statements(body, env);
                 if let Some((name, body)) = catch {
-                    self.bindings.insert(
-                        name.clone(),
-                        Binding {
-                            kind: "parameter".into(),
-                            ty: Type::Any,
-                        },
-                    );
+                    if let Some(pattern) = name {
+                        for name in crate::parser::pattern_names(pattern) {
+                            self.bindings.insert(
+                                name,
+                                Binding {
+                                    kind: "parameter".into(),
+                                    ty: Type::Any,
+                                },
+                            );
+                        }
+                    }
                     self.statements(body, env);
                 }
                 if let Some(body) = finally {

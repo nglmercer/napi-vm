@@ -682,10 +682,25 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             finally,
         } => {
             nested_statements(body, ctx)?;
-            if let Some((name, body)) = catch {
-                binding(name, ctx)?;
-                if lexical_names(body, true, false)?.contains(name) {
-                    return Err("catch parameter conflicts with a lexical declaration".into());
+            if let Some((pattern, body)) = catch {
+                if let Some(pattern) = pattern {
+                    pattern_check(pattern, ctx)?;
+                    let names = pattern_names(pattern);
+                    let mut seen = HashSet::new();
+                    if names.iter().any(|name| !seen.insert(name)) {
+                        return Err("duplicate catch parameter binding".into());
+                    }
+                    let lexical = lexical_names(body, true, false)?;
+                    if names.iter().any(|name| lexical.contains(name)) {
+                        return Err("catch parameter conflicts with a lexical declaration".into());
+                    }
+                    if !matches!(pattern, Pattern::Ident(_)) {
+                        let mut vars = Vec::new();
+                        collect_var_declaration_names(body, &mut vars);
+                        if names.iter().any(|name| vars.contains(name)) {
+                            return Err("catch pattern conflicts with a var declaration".into());
+                        }
+                    }
                 }
                 nested_statements(body, ctx)?;
             }

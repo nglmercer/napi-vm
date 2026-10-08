@@ -368,7 +368,7 @@ pub enum Statement {
     Throw(Box<Expr>),
     Try {
         body: Vec<Statement>,
-        catch: Option<(String, Vec<Statement>)>,
+        catch: Option<(Option<Pattern>, Vec<Statement>)>,
         finally: Option<Vec<Statement>>,
     },
     Switch {
@@ -863,9 +863,12 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
             finally,
         } => {
             statements_capture_identifier(body, name)
-                || catch
-                    .as_ref()
-                    .is_some_and(|(_, stmts)| statements_capture_identifier(stmts, name))
+                || catch.as_ref().is_some_and(|(pattern, stmts)| {
+                    pattern
+                        .as_ref()
+                        .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
+                        || statements_capture_identifier(stmts, name)
+                })
                 || finally
                     .as_ref()
                     .is_some_and(|stmts| statements_capture_identifier(stmts, name))
@@ -1167,7 +1170,12 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
             stmts_reference(body, name)
                 || catch
                     .as_ref()
-                    .map(|(_, b)| stmts_reference(b, name))
+                    .map(|(pattern, b)| {
+                        pattern
+                            .as_ref()
+                            .is_some_and(|pattern| pattern_references(pattern, name))
+                            || stmts_reference(b, name)
+                    })
                     .unwrap_or(false)
                 || finally
                     .as_ref()

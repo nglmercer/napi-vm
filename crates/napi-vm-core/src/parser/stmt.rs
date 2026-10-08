@@ -754,11 +754,15 @@ impl Parser {
         self.expect(&Token::RBrace);
         let c = if self.eat(&Token::KwCatch) {
             let p = if self.eat(&Token::LParen) {
-                let x = self.ident()?;
+                let binding = if matches!(self.cur(), Token::LBracket | Token::LBrace) {
+                    self.pattern()?
+                } else {
+                    Pattern::Ident(self.ident()?)
+                };
                 self.expect(&Token::RParen);
-                x
+                Some(binding)
             } else {
-                String::new()
+                None
             };
             self.eat(&Token::LBrace);
             let cb = self.block_body();

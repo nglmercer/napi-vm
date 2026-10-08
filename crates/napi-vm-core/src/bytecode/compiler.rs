@@ -2361,9 +2361,12 @@ impl<'a> Compiler<'a> {
     fn compile_try(
         &mut self,
         body: &'a [Statement],
-        catch: &'a Option<(String, Vec<Statement>)>,
+        catch: &'a Option<(Option<Pattern>, Vec<Statement>)>,
         finally: &'a Option<Vec<Statement>>,
     ) -> Result<Reg, Decline> {
+        if matches!(catch, Some((Some(pattern), _)) if !matches!(pattern, Pattern::Ident(_))) {
+            return Err(Decline::Func("catch binding pattern"));
+        }
         let value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
         self.emit(Instr::Mov {
@@ -2410,19 +2413,30 @@ impl<'a> Compiler<'a> {
         let catch_pad = self.here();
         if let Some((param, catch_body)) = catch {
             let mut boxed = boxed_block_names(catch_body);
-            if statements_capture_identifier(catch_body, param) {
-                boxed.insert(param.clone());
+            let param = match param {
+                Some(Pattern::Ident(name)) => Some(name.as_str()),
+                None => None,
+                _ => unreachable!("catch pattern declined before emission"),
+            };
+            if let Some(param) = param
+                && statements_capture_identifier(catch_body, param)
+            {
+                boxed.insert(param.to_owned());
             }
             self.push_scope(boxed);
-            if self.is_boxed_here(param) {
-                let index = self.intern_string(param)?;
-                self.emit(Instr::InitGlobal {
-                    name: index,
-                    src: err,
-                });
-            } else {
-                let slot = self.declare_slot(param, SlotKind::Var)?;
-                self.emit(Instr::InitLocal { slot, src: err });
+            if let Some(param) = param {
+                if self.is_boxed_here(param) {
+                    let index = self.intern_string(param)?;
+                    self.emit(Instr::DefineGlobal {
+                        name: index,
+                        src: err,
+                        kind: SlotKind::Let,
+                        initialized: true,
+                    });
+                } else {
+                    let slot = self.declare_slot(param, SlotKind::Let)?;
+                    self.emit(Instr::InitLocal { slot, src: err });
+                }
             }
             self.hoist_block(catch_body)?;
             let catch_value = self.compile_block(catch_body)?;

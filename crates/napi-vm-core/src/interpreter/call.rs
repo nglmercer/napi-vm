@@ -367,20 +367,36 @@ impl Interpreter {
         }
     }
 
+    pub(crate) fn initialize_pattern_binding(
+        &mut self,
+        pattern: &Pattern,
+        value: &Value,
+        kind: super::BindKind,
+    ) -> Result<Value, VmErr> {
+        for bound in crate::parser::pattern_names(pattern) {
+            self.declare_binding(&bound, Value::Undefined, kind, false)?;
+        }
+        self.destructure(pattern, value)
+    }
+
     pub(super) fn run_catch(
         &mut self,
-        catch: &Option<(String, Vec<Statement>)>,
+        catch: &Option<(Option<Pattern>, Vec<Statement>)>,
         err_val: Value,
     ) -> Result<Value, VmErr> {
         if let Some((p, cb)) = catch {
             let ce = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-            ce.borrow_mut().set(p, err_val);
             // The catch parameter lives in its own scope, and the catch block
             // is a block: its lexical declarations belong to that scope too.
             let s = std::mem::replace(&mut self.global, ce);
             // Only lexical hoisting here: a `var` inside `catch` belongs to
             // the enclosing function scope, where it was already hoisted.
-            let r = self.run_hoisted_here(cb);
+            let r = (|| {
+                if let Some(pattern) = p {
+                    self.initialize_pattern_binding(pattern, &err_val, super::BindKind::Let)?;
+                }
+                self.run_hoisted_here(cb)
+            })();
             self.global = s;
             r
         } else {

@@ -186,7 +186,11 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
         } => {
             walk_stmts(body, scope, runtime_handlers);
             if let Some((param, block)) = catch {
-                push(scope, param, CompletionKind::Variable, None);
+                if let Some(pattern) = param {
+                    for name in crate::parser::pattern_names(pattern) {
+                        push(scope, &name, CompletionKind::Variable, None);
+                    }
+                }
                 walk_stmts(block, scope, runtime_handlers);
             }
             if let Some(f) = finally {

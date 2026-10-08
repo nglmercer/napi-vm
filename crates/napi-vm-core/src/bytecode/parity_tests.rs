@@ -1246,3 +1246,16 @@ fn named_expression_bindings_are_lexical_and_immutable_in_both_tiers() {
         check(source, true);
     }
 }
+
+#[test]
+fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
+    for source in [
+        "var e=7;try{throw 1;}catch(e){var e=3;}e;",
+        "let f;try{throw 1;}catch(e){f=()=>++e;}f()+f();",
+        "let e=7;try{throw 1;}catch{e=9;}e;",
+        "function f(){let e=7;try{throw 1;}catch(e){e=3;}return e;}f();",
+    ] {
+        check(source, true);
+    }
+    check("try{throw {x:7};}catch({x}){x;}", false);
+}
