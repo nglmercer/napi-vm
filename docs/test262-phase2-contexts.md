@@ -101,7 +101,7 @@ exhausting the unchanged job budget. General runtime capabilities remain disable
 
 ## Validation
 
-Seventeen parser/context integration tests cover valid and invalid forms, including
+Nineteen parser/context integration tests cover valid and invalid forms, including
 direct eval and Annex B controls. The isolated worker also checks that contextual
 errors precede harness execution and are classified as parse/SyntaxError.
 
@@ -123,7 +123,7 @@ repairs is still in progress.
 ## Remaining Phase 2 gates
 
 The AST currently loses distinctions needed for complete early errors, including
-computed object methods versus ordinary computed function values, parenthesized
+parenthesized
 cover grammar/optional-chain assignment boundaries, catch patterns, and complete
 for-in/of declaration/target metadata. These require representation work and
 focused validation. Additional Annex B statement positions, escaped/contextual
@@ -148,3 +148,23 @@ are clean. Its full run remains in progress. Two further losses in the
 for-in bare-initializer negative fixture motivated a subsequent parser fix.
 That correction and lexical declaration statement-position coverage pass the
 17-test grammar suite; their full-source checks remain pending.
+
+Computed object methods/accessors now have distinct AST metadata. Their shared
+static validation uses method context, while ordinary computed function-valued
+properties retain ordinary function context. Named/computed methods and accessors
+share one AST callable allocation helper. Computed methods retain bytecode
+fallback. Eighteen grammar tests cover their early errors, computed accessor
+execution, Symbol keys and inferred names. Method home-object semantics remain
+a Phase 3 gate. The a48a3df full run also identified two covered import-call
+constructor cases; direct import calls are rejected as new callees while
+parenthesized import expressions remain valid. Validation is in progress.
+
+The third exploratory full run at a48a3df passed 45,313/102,956: 3,588 new
+passes and 17 lost passes versus Phase 1, with 57,595 failures, 46 harness
+errors, two timeouts and zero crashes/skips. All outcomes and transitions are
+retained. Its 17 losses motivated general rest-pattern comma metadata, lexical
+loop-binding restrictions, labelled-function statement-position checks and the
+covered-import distinction. The subsequent 754ed80 source passes 19 grammar
+tests; required checks and exact regression selections are rerunning before
+its full-corpus measurement. Array/object trailing commas are syntax metadata
+and do not change ordinary literal evaluation or bytecode behavior.

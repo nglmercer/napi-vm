@@ -12,6 +12,7 @@ No variants are skipped. Each report records the worker SHA256.
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | First full | d434ffe | 44,228 | 58,680 | 46 | 2 | 0 | 119 |
 | Second full | 0faed45 | 44,833 | 58,075 | 46 | 2 | 0 | 43 |
+| Third full | a48a3df | 45,313 | 57,595 | 46 | 2 | 0 | 17 |
 | First regression paths | a48a3df | 120 | 0 | 0 | 0 | 0 | 0 |
 | Second regression paths | a48a3df | 44 | 0 | 0 | 0 | 0 | 0 |
 

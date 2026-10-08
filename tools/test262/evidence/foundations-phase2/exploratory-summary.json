@@ -76,12 +76,28 @@
       "worker_jobs": 4,
       "timeout_seconds": 5.0,
       "sha256": "ea9338f60f7a64f219e2c3105174fc1e54367052996fb81971e4f3f222df089d"
+    },
+    "exploratory-third-full": {
+      "total": 102956,
+      "counts": {
+        "pass": 45313,
+        "fail": 57595,
+        "skip": 0,
+        "timeout": 2,
+        "crash": 0,
+        "harness_error": 46
+      },
+      "engine_sha256": "76e6e54b3a667fa542233faf21dcbb1c7f9f6de39eb7e914574fede99c857654",
+      "worker_jobs": 4,
+      "timeout_seconds": 5.0,
+      "sha256": "8e74eb4cb667e230bcbc0ce8bab522bea068ffcd26b8e4580c862ddc98512462"
     }
   },
   "source_commits": {
     "exploratory-first-full": "d434ffe06be3b2fd1070f996f382337d32798aac",
     "exploratory-second-full": "0faed45879ce39a73fb8def008e15d854e63c8ef",
-    "regression-selections": "a48a3df269df2e06f3e66af5ce6998c6c36e6f08"
+    "regression-selections": "a48a3df269df2e06f3e66af5ce6998c6c36e6f08",
+    "exploratory-third-full": "a48a3df269df2e06f3e66af5ce6998c6c36e6f08"
   },
   "regression_selections": {
     "first": {
@@ -117,5 +133,9 @@
       "passed": 9,
       "failed": 0
     }
+  },
+  "third_full_comparison": {
+    "new_passes_vs_phase1": 3588,
+    "lost_passes_vs_phase1": 17
   }
 }
