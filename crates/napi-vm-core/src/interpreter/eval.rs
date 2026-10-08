@@ -1651,6 +1651,39 @@ impl Interpreter {
         scope
     }
 
+    fn object_literal_callable(
+        &self,
+        name: &str,
+        params: &[String],
+        body: &[Statement],
+        is_async: bool,
+        is_generator: bool,
+    ) -> Value {
+        Value::Function(Rc::new(FunctionData {
+            strict: self.global.borrow().strict() || crate::parser::use_strict(body),
+            native: None,
+            identity: Rc::new(0),
+            name: Some(name.into()),
+            properties: FunctionData::properties_with_function_kind(
+                &self.persistent_global,
+                is_async,
+                is_generator,
+            ),
+            standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
+            params: intern_params(params),
+            body: Rc::new(body.to_vec()),
+            closure: Some(crate::heap::capture_env(&self.global)),
+            is_arrow: false,
+            is_constructor: false,
+            is_async,
+            is_generator,
+            uses_arguments: stmts_reference(body, "arguments"),
+            bytecode: None,
+            needs_hoisting: body_needs_hoisting(body),
+            bound: None,
+        }))
+    }
+
     fn eval_object_literal(&mut self, props: &[ObjectProp]) -> Result<Value, VmErr> {
         let mut object = Vec::new();
         let mut positions = HashMap::new();
@@ -1678,6 +1711,51 @@ impl Interpreter {
                         self.eval_expr(expression)?,
                         None,
                     );
+                }
+                ObjectProp::ComputedMethod {
+                    key,
+                    params,
+                    body,
+                    is_async,
+                    is_generator,
+                    is_getter,
+                    is_setter,
+                } => {
+                    let key_value = self.eval_expr(key)?;
+                    let property_key = self.proxy_property_key(&key_value)?;
+                    let key = self.property_key(&property_key)?;
+                    let accessor = if *is_getter {
+                        Some(ObjectAccessorKind::Getter)
+                    } else if *is_setter {
+                        Some(ObjectAccessorKind::Setter)
+                    } else {
+                        None
+                    };
+                    let function_name = if *is_getter {
+                        format!("get {key}")
+                    } else if *is_setter {
+                        format!("set {key}")
+                    } else {
+                        key.clone()
+                    };
+                    let function = self.object_literal_callable(
+                        &function_name,
+                        params,
+                        body,
+                        *is_async,
+                        *is_generator,
+                    );
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        key.clone(),
+                        function,
+                        accessor,
+                    );
+                    if let Value::Symbol(symbol) = &property_key {
+                        symbol_keys.push((key, symbol.clone()));
+                    }
                 }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     let key_value = self.eval_expr(key_expression)?;
@@ -1710,29 +1788,8 @@ impl Interpreter {
                     is_async,
                     is_generator,
                 } => {
-                    let function = Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(name.as_str().into()),
-                        properties: FunctionData::properties_with_function_kind(
-                            &self.persistent_global,
-                            *is_async,
-                            *is_generator,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: intern_params(params),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        is_arrow: false,
-                        is_constructor: false,
-                        is_async: *is_async,
-                        is_generator: *is_generator,
-                        uses_arguments: stmts_reference(body, "arguments"),
-                        bytecode: None,
-                        needs_hoisting: body_needs_hoisting(body),
-                        bound: None,
-                    }));
+                    let function =
+                        self.object_literal_callable(name, params, body, *is_async, *is_generator);
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -1743,27 +1800,13 @@ impl Interpreter {
                     );
                 }
                 ObjectProp::Getter { name, body } => {
-                    let function = Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(format!("get {name}").into()),
-                        properties: FunctionData::properties_with_default_prototype(
-                            &self.persistent_global,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: Rc::new(vec![]),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        needs_hoisting: body_needs_hoisting(body),
-                        is_arrow: false,
-                        is_constructor: false,
-                        is_async: false,
-                        is_generator: false,
-                        uses_arguments: stmts_reference(body, "arguments"),
-                        bytecode: None,
-                        bound: None,
-                    }));
+                    let function = self.object_literal_callable(
+                        &format!("get {name}"),
+                        &[],
+                        body,
+                        false,
+                        false,
+                    );
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -1774,27 +1817,13 @@ impl Interpreter {
                     );
                 }
                 ObjectProp::Setter { name, param, body } => {
-                    let function = Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(format!("set {name}").into()),
-                        properties: FunctionData::properties_with_default_prototype(
-                            &self.persistent_global,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: Rc::new(vec![Rc::from(param.as_str())]),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        needs_hoisting: body_needs_hoisting(body),
-                        is_arrow: false,
-                        is_constructor: false,
-                        is_async: false,
-                        is_generator: false,
-                        uses_arguments: stmts_reference(body, "arguments"),
-                        bytecode: None,
-                        bound: None,
-                    }));
+                    let function = self.object_literal_callable(
+                        &format!("set {name}"),
+                        std::slice::from_ref(param),
+                        body,
+                        false,
+                        false,
+                    );
                     insert_object_property(
                         &mut object,
                         &mut positions,

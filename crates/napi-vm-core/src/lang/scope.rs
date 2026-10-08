@@ -242,7 +242,9 @@ pub fn object_keys(props: &[ObjectProp]) -> Vec<String> {
             | ObjectProp::Method { name: n, .. }
             | ObjectProp::Getter { name: n, .. }
             | ObjectProp::Setter { name: n, .. } => keys.push(n.clone()),
-            ObjectProp::Computed(_, _) | ObjectProp::Spread(_) => {}
+            ObjectProp::Computed(_, _)
+            | ObjectProp::ComputedMethod { .. }
+            | ObjectProp::Spread(_) => {}
         }
     }
     keys

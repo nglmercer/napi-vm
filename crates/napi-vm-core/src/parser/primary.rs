@@ -157,8 +157,7 @@ impl Parser {
                                     let body = Self::function_body(&params, defaults, b);
                                     // If the computed key is a simple literal,
                                     // use the named Method/Getter/Setter forms.
-                                    // Otherwise, emit a Computed property whose
-                                    // value is a function expression.
+                                    // Otherwise, retain computed method/accessor metadata.
                                     // Only a *literal* computed key has a
                                     // name known at parse time. An identifier
                                     // is a variable to evaluate — `{ [k]() {} }`
@@ -195,14 +194,15 @@ impl Parser {
                                     } else {
                                         // Computed method with a non-literal key
                                         // (e.g. [Symbol.iterator]() { ... }).
-                                        let fn_expr = Expr::FnExpr {
-                                            name: None,
+                                        p.push(ObjectProp::ComputedMethod {
+                                            key: e,
                                             params,
                                             body,
                                             is_async,
                                             is_generator,
-                                        };
-                                        p.push(ObjectProp::Computed(e, fn_expr));
+                                            is_getter: is_method,
+                                            is_setter,
+                                        });
                                     }
                                     if !matches!(self.cur(), Token::RBrace) {
                                         self.eat(&Token::Comma);

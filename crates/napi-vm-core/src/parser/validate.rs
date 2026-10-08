@@ -874,6 +874,24 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                         expression(key, ctx)?;
                         expression(value, ctx)?;
                     }
+                    ObjectProp::ComputedMethod {
+                        key,
+                        params,
+                        body,
+                        is_async,
+                        is_generator,
+                        ..
+                    } => {
+                        expression(key, ctx)?;
+                        function(
+                            params,
+                            body,
+                            ctx,
+                            FunctionKind::of(false, *is_async, *is_generator),
+                            true,
+                            true,
+                        )?;
+                    }
                     ObjectProp::Method {
                         params,
                         body,

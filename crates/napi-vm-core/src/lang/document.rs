@@ -984,7 +984,9 @@ impl Builder<'_> {
                                 },
                             );
                         }
-                        ObjectProp::Computed(_, _) | ObjectProp::Spread(_) => {}
+                        ObjectProp::Computed(_, _)
+                        | ObjectProp::ComputedMethod { .. }
+                        | ObjectProp::Spread(_) => {}
                     }
                 }
                 Type::Object(fields)

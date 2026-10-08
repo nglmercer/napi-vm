@@ -3417,6 +3417,9 @@ impl<'a> Compiler<'a> {
                         kind: PropKind::Data,
                     });
                 }
+                ObjectProp::ComputedMethod { .. } => {
+                    return Err(Decline::Func("computed object method"));
+                }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     match key_expression {
                         // Statically known keys skip the normalization check.

@@ -469,3 +469,36 @@ fn lexical_declarations_require_statement_list_positions() {
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
+
+#[test]
+fn computed_object_methods_keep_method_context_and_accessor_metadata() {
+    for source in [
+        "({[key](){return super.x;}});",
+        "({get [key](){return super.x;},set [key](x){super.x=x;}});",
+        "({async [key](){await 1;return super.x;},*[key](){yield super.x;}});",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "({[key]:function(){return super.x;}});",
+        "({[key](){super();}});",
+        "({get [key](x){}});",
+        "({set [key](){}});",
+        "({set [key](...x){}});",
+        "({async [key](){yield 1;}});",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "let key='x';let v=0;let o={get [key](){return v;},set [key](x){v=x;}};o.x=7;o.x===7;",
+        "let key=Symbol('x');let o={[key](){return 7;}};o[key]()===7;",
+        "let key='x';let o={[key](){return 7;}};o.x.name==='x';",
+    ] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

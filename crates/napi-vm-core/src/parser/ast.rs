@@ -220,6 +220,15 @@ pub enum ObjectProp {
     Shorthand(String),
     KeyValue(String, Expr),
     Computed(Expr, Expr),
+    ComputedMethod {
+        key: Expr,
+        params: Vec<String>,
+        body: Vec<Statement>,
+        is_async: bool,
+        is_generator: bool,
+        is_getter: bool,
+        is_setter: bool,
+    },
     Method {
         name: String,
         params: Vec<String>,
@@ -895,6 +904,9 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
             ObjectProp::Computed(key, value) => {
                 expr_captures_identifier(key, name) || expr_captures_identifier(value, name)
             }
+            ObjectProp::ComputedMethod { key, body, .. } => {
+                expr_captures_identifier(key, name) || stmts_reference(body, name)
+            }
             ObjectProp::Method { body, .. }
             | ObjectProp::Getter { body, .. }
             | ObjectProp::Setter { body, .. } => stmts_reference(body, name),
@@ -1184,6 +1196,9 @@ fn expr_references(e: &Expr, name: &str) -> bool {
             ObjectProp::Shorthand(n) => n == name,
             ObjectProp::KeyValue(_, v) => expr_references(v, name),
             ObjectProp::Computed(k, v) => expr_references(k, name) || expr_references(v, name),
+            ObjectProp::ComputedMethod { key, body, .. } => {
+                expr_references(key, name) || stmts_reference(body, name)
+            }
             ObjectProp::Method { body, .. } => stmts_reference(body, name),
             ObjectProp::Getter { body, .. } => stmts_reference(body, name),
             ObjectProp::Setter { body, .. } => stmts_reference(body, name),
