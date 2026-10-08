@@ -1992,6 +1992,9 @@ impl Interpreter {
                         | "SharedArrayBuffer"
                         | "DataView"
                         | "Function"
+                        | "%AsyncFunction%"
+                        | "%GeneratorFunction%"
+                        | "%AsyncGeneratorFunction%"
                         | "WeakRef"
                         | "FinalizationRegistry"
                 );

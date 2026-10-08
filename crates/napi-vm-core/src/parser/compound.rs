@@ -100,7 +100,7 @@ impl Parser {
             // `[expr]` evaluates when the class is defined; string and
             // numeric spellings name the same property as their bare form.
             let mn = if self.eat(&Token::LBracket) {
-                let expr = self.assign()?;
+                let expr = self.with_in(true, Self::assign)?;
                 self.expect(&Token::RBracket);
                 MemberName::Computed(expr)
             } else {
@@ -572,7 +572,10 @@ impl Parser {
     /// which is what makes rename safe.
     pub(crate) fn block_body(&mut self) -> Vec<Statement> {
         let outer = self.push_scope(false);
+        let single_statement = self.single_statement;
+        self.single_statement = false;
         let body = self.block_body_inner();
+        self.single_statement = single_statement;
         self.pop_scope(outer);
         body
     }

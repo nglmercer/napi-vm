@@ -1176,7 +1176,12 @@ impl Interpreter {
                 self.pop_scope(outer);
                 result
             }
-            Statement::ForIn { name, obj, body } => {
+            Statement::ForIn {
+                name,
+                target,
+                obj,
+                body,
+            } => {
                 let o = self.eval_expr(obj)?;
                 let ks = self.keys_with_proxy_trap(&o)?;
                 let body_needs_scope = block_needs_lexical_scope(body);
@@ -1184,7 +1189,15 @@ impl Interpreter {
                 let label = self.active_label.take();
                 for k in ks {
                     self.consume_loop()?;
-                    self.set_binding(name, Value::String((k).into()))?;
+                    if let Some(target) = target {
+                        self.eval_expr(&Expr::Assignment {
+                            target: target.clone(),
+                            op: AssignOp::Assign,
+                            value: Box::new(Expr::String(k.into())),
+                        })?;
+                    } else {
+                        self.set_binding(name, Value::String(k.into()))?;
+                    }
                     match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
                         Err(VmErr::Break(l)) if label_matches(&label, &l) => break,

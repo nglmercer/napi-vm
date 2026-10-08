@@ -344,3 +344,103 @@ fn newer_syntax_retains_metadata_and_reports_runtime_gaps_explicitly() {
             .contains("resource disposal execution is not implemented")
     }));
 }
+
+#[test]
+fn no_in_loop_heads_restore_in_for_nested_grammar_productions() {
+    for source in [
+        "for(C=class{get ['x' in {}](){return 1;}};;)break;",
+        "for(C=class{static set ['x' in {}](x){}};;)break;",
+        "for(x={['x' in {}]:1};;)break;",
+        "for(x={key:'x' in {}};;)break;",
+        "for(x=['x' in {}];;)break;",
+        "for(x=f('x' in {});;)break;",
+        "for(x=new F('x' in {});;)break;",
+        "for(x=a['x' in {}];;)break;",
+        "for(x=a?.['x' in {}];;)break;",
+        "for(x=a?.('x' in {});;)break;",
+        "for(x=true?'x' in {}:false;;)break;",
+        "for(x=function(){return 'x' in {}; };;)break;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    assert!(!parses(
+        "class C{#x;m(){for(#x in {};;)break;}}",
+        ParseGoal::Script
+    ));
+}
+
+#[test]
+fn resource_and_import_call_grammar_rejects_invalid_statement_positions() {
+    for source in [
+        "do using x=1; while(false);",
+        "async function f(){do await using x=1;while(false);}",
+        "for(using x of []){var x;}",
+        "async function f(){for(await using x of []){var x;}}",
+        "let\nlet;",
+        ".0000000001n;",
+        ".0_e1;",
+        "async()=>await new import.defer('x');",
+        "async()=>await new import.source('x').value;",
+        "async()=>await import.defer(...['x']);",
+        "async()=>await import.source(...['x']);",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "async function f(){await using[x];}",
+        "let async=11;",
+        "let\nx=1;",
+        "for(x=()=>{return 'x' in {};};;)break;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn dynamic_function_parse_errors_precede_new_target_prototype_access() {
+    let mut vm = napi_vm_core::Interpreter::with_builtins();
+    let result = vm.eval_source(
+        r#"
+        let reads=0;
+        let target=Object.defineProperty(function(){}.bind(), 'prototype', {
+            get(){reads++;return null;}
+        });
+        let constructors=[Function,(async function(){}).constructor,
+            (function*(){}).constructor,(async function*(){}).constructor];
+        let errors=0;
+        for(let ctor of constructors){
+            try{Reflect.construct(ctor,['@error'],target);}catch(e){
+                if(e instanceof SyntaxError)errors++;
+            }
+        }
+        reads===0 && errors===4;
+    "#,
+    );
+    assert!(
+        matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn for_in_assignment_heads_are_retained_and_validated() {
+    for source in [
+        "class C{#x;m(){for(#x in []){}}}",
+        "function* f(){for({yield} in []){}}",
+        "for(1 in {}){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "let x;for(x in {a:1}){};x==='a';",
+        "let o={};for(o.x in {a:1}){};o.x==='a';",
+        "let x;for([x] in {abc:1}){};x==='a';",
+    ] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

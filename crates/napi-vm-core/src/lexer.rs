@@ -1068,6 +1068,21 @@ impl Lexer {
                 }
             }
         }
+        if self.src[s..self.pos]
+            .iter()
+            .enumerate()
+            .any(|(index, character)| {
+                *character == '_'
+                    && (index == 0
+                        || !self.src[s + index - 1].is_ascii_digit()
+                        || !self
+                            .src
+                            .get(s + index + 1)
+                            .is_some_and(char::is_ascii_digit))
+            })
+        {
+            return Token::Unknown('_');
+        }
         // A trailing `n` makes the literal a BigInt.
         if self.pos < self.src.len() && self.src[self.pos] == 'n' {
             let digits: String = self.src[s..self.pos]
@@ -1076,6 +1091,9 @@ impl Lexer {
                 .collect();
             self.pos += 1;
             self.col += 1;
+            if digits.contains(['.', 'e', 'E']) {
+                return Token::Unknown('n');
+            }
             return Token::BigInt(digits);
         }
         let n: String = self.src[s..self.pos]

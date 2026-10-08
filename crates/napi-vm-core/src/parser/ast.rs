@@ -303,6 +303,8 @@ pub enum Statement {
     },
     ForIn {
         name: String,
+        /// Assignment head, distinct from a variable declaration.
+        target: Option<Box<Expr>>,
         obj: Box<Expr>,
         body: Vec<Statement>,
     },
@@ -790,8 +792,14 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || statements_capture_identifier(body, name)
         }
-        Statement::ForIn { obj, body, .. } => {
-            expr_captures_identifier(obj, name) || statements_capture_identifier(body, name)
+        Statement::ForIn {
+            obj, target, body, ..
+        } => {
+            target
+                .as_deref()
+                .is_some_and(|target| expr_captures_identifier(target, name))
+                || expr_captures_identifier(obj, name)
+                || statements_capture_identifier(body, name)
         }
         Statement::ResourceForOf { iter, body, .. } => {
             expr_captures_identifier(iter, name) || statements_capture_identifier(body, name)
@@ -1105,8 +1113,14 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                     .unwrap_or(false)
                 || stmts_reference(body, name)
         }
-        Statement::ForIn { obj, body, .. } => {
-            expr_references(obj, name) || stmts_reference(body, name)
+        Statement::ForIn {
+            obj, target, body, ..
+        } => {
+            target
+                .as_deref()
+                .is_some_and(|target| expr_references(target, name))
+                || expr_references(obj, name)
+                || stmts_reference(body, name)
         }
         Statement::ForOf { iter, body, .. } | Statement::ResourceForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)

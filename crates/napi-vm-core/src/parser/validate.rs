@@ -452,6 +452,11 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 return Err("async resource loop outside async context".into());
             }
             binding(name, ctx)?;
+            let mut vars = Vec::new();
+            collect_var_declaration_names(body, &mut vars);
+            if vars.iter().any(|var| var == name) {
+                return Err("resource loop binding conflicts with var declaration".into());
+            }
             expression(iter, ctx)?;
             statements(
                 body,
@@ -565,8 +570,17 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 },
             )
         }
-        Statement::ForIn { name, obj, body } => {
-            binding(name, ctx)?;
+        Statement::ForIn {
+            name,
+            target,
+            obj,
+            body,
+        } => {
+            if let Some(target) = target {
+                assignment_target(target, ctx)?;
+            } else {
+                binding(name, ctx)?;
+            }
             expression(obj, ctx)?;
             nested_statements(
                 body,
@@ -753,7 +767,7 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
 
 fn simple_assignment_target(target: &Expr, ctx: &Context) -> Check {
     match target {
-        Expr::Identifier(name) => binding(name, ctx),
+        Expr::Identifier(name) if !name.starts_with('#') => binding(name, ctx),
         Expr::Member { .. } => expression(target, ctx),
         _ => Err("invalid assignment target".into()),
     }

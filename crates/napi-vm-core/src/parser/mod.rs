@@ -83,6 +83,7 @@ pub struct Parser {
     await_expression: bool,
     yield_expression: bool,
     in_expression: bool,
+    single_statement: bool,
 }
 
 /// A syntax error, with the source position of the token that caused it.
@@ -120,6 +121,7 @@ impl Parser {
             await_expression: true,
             yield_expression: false,
             in_expression: true,
+            single_statement: false,
         }
     }
 
@@ -136,6 +138,7 @@ impl Parser {
             await_expression: true,
             yield_expression: false,
             in_expression: true,
+            single_statement: false,
         }
     }
 

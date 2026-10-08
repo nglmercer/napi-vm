@@ -869,7 +869,9 @@ fn boxed_for_head_names(
 fn block_loop_heads(stmts: &[Statement], out: &mut Vec<String>) {
     for stmt in stmts {
         match stmt {
-            Statement::ForIn { name, .. } => out.push(name.clone()),
+            Statement::ForIn {
+                name, target: None, ..
+            } => out.push(name.clone()),
             Statement::ForOf { name, pattern, .. } => match pattern {
                 Some(pattern) => out.extend(pattern_names(pattern)),
                 None => out.push(name.clone()),
@@ -1495,7 +1497,15 @@ impl<'a> Compiler<'a> {
                 }
                 self.load_undefined()
             }
-            Statement::ForIn { name, obj, body } => self.compile_for_in(name, obj, body),
+            Statement::ForIn {
+                name,
+                target: None,
+                obj,
+                body,
+            } => self.compile_for_in(name, obj, body),
+            Statement::ForIn {
+                target: Some(_), ..
+            } => Err(Decline::Func("for-in assignment head")),
             Statement::ForOf {
                 name,
                 pattern,

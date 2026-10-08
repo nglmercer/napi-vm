@@ -79,9 +79,9 @@ impl Parser {
                         continue;
                     }
                     if self.eat(&Token::DotDotDot) {
-                        i.push(Expr::Spread(Box::new(self.assign()?)));
+                        i.push(Expr::Spread(Box::new(self.with_in(true, Self::assign)?)));
                     } else {
-                        i.push(self.assign()?);
+                        i.push(self.with_in(true, Self::assign)?);
                     }
                     if !matches!(self.cur(), Token::RBracket) {
                         self.eat(&Token::Comma);
@@ -95,7 +95,7 @@ impl Parser {
                 let mut p = Vec::new();
                 while self.until(&Token::RBrace) {
                     if self.eat(&Token::DotDotDot) {
-                        let s = self.assign()?;
+                        let s = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::Spread(s));
                         if !matches!(self.cur(), Token::RBrace) {
                             self.eat(&Token::Comma);
@@ -134,12 +134,12 @@ impl Parser {
                         }
                         Token::LBracket => {
                             self.adv();
-                            let e = self.assign()?;
+                            let e = self.with_in(true, Self::assign)?;
                             self.expect(&Token::RBracket);
                             match self.cur() {
                                 Token::Colon => {
                                     self.adv();
-                                    let v = self.assign()?;
+                                    let v = self.with_in(true, Self::assign)?;
                                     p.push(ObjectProp::Computed(e, v));
                                     if !matches!(self.cur(), Token::RBrace) {
                                         self.eat(&Token::Comma);
@@ -247,7 +247,7 @@ impl Parser {
                             });
                         }
                     } else if self.eat(&Token::Colon) {
-                        let v = self.assign()?;
+                        let v = self.with_in(true, Self::assign)?;
                         p.push(ObjectProp::KeyValue(key, v));
                     } else {
                         p.push(ObjectProp::Shorthand(key));
@@ -305,7 +305,7 @@ impl Parser {
                 let a = if self.eat(&Token::LParen) {
                     let mut ag = Vec::new();
                     while self.until(&Token::RParen) {
-                        if let Some(arg) = self.assign() {
+                        if let Some(arg) = self.with_in(true, Self::assign) {
                             ag.push(arg);
                         } else {
                             self.record_error("expected call argument".into());
@@ -342,7 +342,10 @@ impl Parser {
                     super::ImportPhase::Evaluation
                 };
                 self.expect(&Token::LParen);
-                let specifier = self.assign()?;
+                if matches!(self.cur(), Token::DotDotDot) {
+                    self.record_error("spread argument in import call".into());
+                }
+                let specifier = self.with_in(true, Self::assign)?;
                 self.expect(&Token::RParen);
                 Some(Expr::DynamicImport {
                     specifier: Box::new(specifier),
@@ -378,7 +381,7 @@ impl Parser {
             }
             Token::DotDotDot => {
                 self.adv();
-                let i = self.assign()?;
+                let i = self.with_in(true, Self::assign)?;
                 Some(Expr::Spread(Box::new(i)))
             }
             _ => None,
@@ -390,6 +393,9 @@ impl Parser {
     /// that `new Foo(1, 2)` treats `(1, 2)` as the constructor's arguments.
     fn new_callee(&mut self) -> Option<Expr> {
         let mut e = self.primary()?;
+        if matches!(e, Expr::DynamicImport { .. }) {
+            self.record_error("import call cannot be a new expression callee".into());
+        }
         loop {
             match self.cur() {
                 Token::Dot => {
@@ -403,7 +409,7 @@ impl Parser {
                 }
                 Token::LBracket => {
                     self.adv();
-                    let p = self.expr()?;
+                    let p = self.with_in(true, Self::expr)?;
                     self.expect(&Token::RBracket);
                     e = Expr::Member {
                         object: Box::new(e),
@@ -568,8 +574,11 @@ impl Parser {
         // The parameters were consumed before the scope existed, so they are
         // recorded here, in the body's scope, where they belong.
         let arrow_scope = self.push_scope(true);
+        let in_expression = self.in_expression;
         let expr = self.with_grammar(is_async, false, |parser| {
-            parser.arrow_body_in_scope(params, defaults, is_async)
+            parser.with_in(in_expression, |parser| {
+                parser.arrow_body_in_scope(params, defaults, is_async)
+            })
         });
         self.pop_scope(arrow_scope);
         expr
@@ -582,7 +591,7 @@ impl Parser {
         is_async: bool,
     ) -> Expr {
         if self.eat(&Token::LBrace) {
-            let b = self.block_body();
+            let b = self.with_in(true, Self::block_body);
             self.expect(&Token::RBrace);
             self.check_parameters(&params, &defaults, &b, true);
             let body = Self::function_body(&params, defaults, b);

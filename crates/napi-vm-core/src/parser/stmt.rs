@@ -22,12 +22,22 @@ impl Parser {
                     && !self.line_break_after_current()
                     && matches!(self.peek(), Token::Identifier(_)) =>
             {
+                if self.single_statement {
+                    self.record_error("resource declaration requires a statement list".into());
+                }
                 self.resource_declaration(false)
             }
             Token::KwAwait
                 if matches!(self.peek(), Token::Identifier(name) if name == "using")
-                    && !self.line_break_after_current() =>
+                    && !self.line_break_after_current()
+                    && self
+                        .toks
+                        .get(self.pos + 2)
+                        .is_some_and(|(token, _)| matches!(token, Token::Identifier(_))) =>
             {
+                if self.single_statement {
+                    self.record_error("resource declaration requires a statement list".into());
+                }
                 self.adv();
                 self.resource_declaration(true)
             }
@@ -44,14 +54,24 @@ impl Parser {
             }
             Token::KwVar => self.var_decl(VarKind::Var),
             Token::KwLet
-                if !matches!(
-                    self.peek(),
-                    Token::Identifier(_)
-                        | Token::LBracket
-                        | Token::LBrace
-                        | Token::KwAwait
-                        | Token::KwYield
-                ) || self.line_break_after_current() && matches!(self.peek(), Token::LBrace) =>
+                if self.single_statement
+                    || !matches!(
+                        self.peek(),
+                        Token::Identifier(_)
+                            | Token::LBracket
+                            | Token::LBrace
+                            | Token::KwAwait
+                            | Token::KwYield
+                            | Token::KwLet
+                            | Token::KwAsync
+                            | Token::KwAs
+                            | Token::KwUndefined
+                            | Token::KwConstructor
+                            | Token::KwFrom
+                            | Token::KwGet
+                            | Token::KwOf
+                            | Token::KwSet
+                    ) =>
             {
                 self.adv();
                 self.semi();
@@ -472,10 +492,11 @@ impl Parser {
             self.expect(&Token::RBrace);
             b
         } else {
-            match self.stmt() {
-                Some(s) => vec![s],
-                None => vec![],
-            }
+            let saved = self.single_statement;
+            self.single_statement = true;
+            let statement = self.stmt();
+            self.single_statement = saved;
+            statement.into_iter().collect()
         }
     }
 
@@ -602,12 +623,17 @@ impl Parser {
                 let o = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
                 let b = self.block_or_stmt();
-                let n = match init.as_ref() {
-                    ForInit::Var { decls, .. } => decls.first()?.0.clone(),
-                    _ => return None,
+                let (n, target) = match init.as_ref() {
+                    ForInit::Var { decls, .. } => (decls.first()?.0.clone(), None),
+                    ForInit::Expr(target) => (String::new(), Some(Box::new(target.clone()))),
+                    _ => {
+                        self.record_error("invalid for-in declaration head".into());
+                        return None;
+                    }
                 };
                 return Some(Statement::ForIn {
                     name: n,
+                    target,
                     obj: o,
                     body: b,
                 });
@@ -849,6 +875,7 @@ impl Parser {
             // (async functions, accessors and module syntax), while binding
             // positions may still use them as identifiers.
             Token::KwAs => self.consume_contextual_identifier("as"),
+            Token::KwLet => self.consume_contextual_identifier("let"),
             Token::KwUndefined => self.consume_contextual_identifier("undefined"),
             Token::KwAwait if !self.await_expression => self.consume_contextual_identifier("await"),
             Token::KwYield if !self.yield_expression => self.consume_contextual_identifier("yield"),

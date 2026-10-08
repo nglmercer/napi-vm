@@ -201,8 +201,8 @@ impl Parser {
     fn cond(&mut self) -> Option<Expr> {
         let t = self.nullish()?;
         if self.eat(&Token::Question) {
-            let c = self.assign()?;
-            self.eat(&Token::Colon);
+            let c = self.with_in(true, Self::assign)?;
+            self.expect(&Token::Colon);
             let a = self.assign()?;
             Some(Expr::Conditional {
                 test: Box::new(t),
@@ -607,7 +607,7 @@ impl Parser {
                     self.adv();
                     let mut a = Vec::new();
                     while self.until(&Token::RParen) {
-                        if let Some(arg) = self.assign() {
+                        if let Some(arg) = self.with_in(true, Self::assign) {
                             a.push(arg);
                         } else {
                             self.record_error("expected call argument".into());
@@ -656,7 +656,7 @@ impl Parser {
                 }
                 Token::LBracket => {
                     self.adv();
-                    let p = self.expr()?;
+                    let p = self.with_in(true, Self::expr)?;
                     self.expect(&Token::RBracket);
                     e = Expr::Member {
                         object: Box::new(e),
@@ -686,7 +686,7 @@ impl Parser {
                         // Optional call: obj?.(args)
                         let mut a = Vec::new();
                         while self.until(&Token::RParen) {
-                            if let Some(arg) = self.assign() {
+                            if let Some(arg) = self.with_in(true, Self::assign) {
                                 a.push(arg);
                             } else {
                                 self.adv();
@@ -706,7 +706,7 @@ impl Parser {
                         };
                     } else if self.eat(&Token::LBracket) {
                         // Optional computed member: obj?.[expr]
-                        let p = self.assign()?;
+                        let p = self.with_in(true, Self::assign)?;
                         self.expect(&Token::RBracket);
                         e = Expr::OptionalChain {
                             object: Box::new(e),
