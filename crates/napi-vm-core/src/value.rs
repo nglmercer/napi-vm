@@ -211,6 +211,8 @@ pub struct ObjectMeta {
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
     /// Lexical private field identities never enter ordinary property storage.
     pub(crate) private_fields: std::collections::HashMap<u64, Value>,
+    /// Intrinsic iterator/continuation state, invisible to property operations.
+    pub(crate) async_from_sync: Option<crate::interpreter::async_from_sync::Slots>,
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
     /// property cell so that value remains compact.
     pub(crate) host_function_id: Option<usize>,
@@ -621,6 +623,9 @@ impl ArrayCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.private_fields.values().cloned());
+            if let Some(slots) = &meta.async_from_sync {
+                out.extend(slots.values());
+            }
             out.extend(meta.proto.as_deref().cloned());
             out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             out.extend(
@@ -649,6 +654,7 @@ impl ArrayCell {
         elements.clear();
         named.clear();
         meta.private_fields.clear();
+        meta.async_from_sync = None;
         meta.proto = None;
         meta.realm_global = None;
         true
@@ -742,6 +748,9 @@ impl ObjectCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.private_fields.values().cloned());
+            if let Some(slots) = &meta.async_from_sync {
+                out.extend(slots.values());
+            }
             out.extend(meta.proto.as_deref().cloned());
             out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             if let Some(BoxedPrimitive::Symbol(symbol)) = &meta.boxed_primitive {
@@ -774,6 +783,7 @@ impl ObjectCell {
         }
         meta.symbol_keys.clear();
         meta.private_fields.clear();
+        meta.async_from_sync = None;
         meta.proto = None;
         meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access
@@ -3417,6 +3427,9 @@ fn drain_object_cell(cell: &Rc<ObjectCell>, work: &mut Vec<Value>) {
 fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
     let taken = meta.try_borrow_mut().ok().and_then(|mut meta| {
         work.extend(meta.private_fields.drain().map(|(_, value)| value));
+        if let Some(slots) = meta.async_from_sync.take() {
+            work.extend(slots.values());
+        }
         meta.proto.take()
     });
     if let Some(link) = taken

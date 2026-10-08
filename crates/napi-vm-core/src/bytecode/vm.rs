@@ -754,7 +754,7 @@ fn run_loop(
                 }
                 Instr::DirectEvalSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     frame.registers[dst as usize] =
                         if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
@@ -802,7 +802,7 @@ fn run_loop(
                 }
                 Instr::CallSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     frame.registers[dst as usize] =
                         interp.call_this(&callee, Value::Undefined, argv)?;
@@ -814,7 +814,7 @@ fn run_loop(
                     tmpl,
                 } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     let this = frame.registers[this as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
@@ -1012,7 +1012,7 @@ fn run_loop(
                 }
                 Instr::SuperCallSpread { dst, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     frame.registers[dst as usize] = super_call(interp, frame, argv)?;
                 }
                 Instr::Raise { msg } => {
@@ -1495,34 +1495,25 @@ fn spread_template(frame: &CallFrame, tmpl: u16) -> Result<Vec<SpreadEntry>, VmE
     }
 }
 
-/// Build a call argument list with call-spread rules: arrays splice,
-/// anything else passes as one argument. Mirrors the evaluator's
-/// argument loop, including the count limit.
-fn spread_argv(frame: &CallFrame, template: &[SpreadEntry]) -> Result<Vec<Value>, VmErr> {
+/// Build a call argument list using the shared iterator protocol.
+fn spread_argv(
+    interp: &mut Interpreter,
+    frame: &CallFrame,
+    template: &[SpreadEntry],
+) -> Result<Vec<Value>, VmErr> {
     let mut argv = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if !entry.spread {
+        if entry.spread {
+            interp.append_iterable(&mut argv, &value, "Maximum argument count exceeded")?;
+        } else {
             push_call_arg(&mut argv, value)?;
-            continue;
-        }
-        match &value {
-            Value::Array(arr) => {
-                let items = arr.borrow();
-                if argv.len().saturating_add(items.len()) > crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum argument count exceeded"));
-                }
-                argv.extend(items.iter().cloned());
-            }
-            _ => push_call_arg(&mut argv, value)?,
         }
     }
     Ok(argv)
 }
 
-/// Build an array literal with element-spread rules: arrays splice, strings
-/// spread per character, anything else drains the iterator protocol.
-/// Mirrors the evaluator's element loop, including every limit check.
+/// Build an array literal using the same spread helper as the AST evaluator.
 fn spread_array(
     interp: &mut Interpreter,
     frame: &CallFrame,
@@ -1531,33 +1522,10 @@ fn spread_array(
     let mut items = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if !entry.spread {
-            items.push(value);
+        if entry.spread {
+            interp.append_iterable(&mut items, &value, "Maximum array length exceeded")?;
         } else {
-            match &value {
-                Value::Array(arr) => {
-                    let elements = arr.borrow();
-                    if items.len().saturating_add(elements.len()) > crate::value::MAX_ARRAY_LEN {
-                        return Err(crate::value::limit_err("Maximum array length exceeded"));
-                    }
-                    items.extend(elements.iter().cloned());
-                }
-                Value::String(s) => {
-                    if items.len().saturating_add(s.code_points().count())
-                        > crate::value::MAX_ARRAY_LEN
-                    {
-                        return Err(crate::value::limit_err("Maximum array length exceeded"));
-                    }
-                    items.extend(s.code_points().map(Value::String));
-                }
-                other => {
-                    let drained = interp.drain_iterable(other)?;
-                    if items.len().saturating_add(drained.len()) > crate::value::MAX_ARRAY_LEN {
-                        return Err(crate::value::limit_err("Maximum array length exceeded"));
-                    }
-                    items.extend(drained);
-                }
-            }
+            items.push(value);
         }
         if items.len() > crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum array length exceeded"));

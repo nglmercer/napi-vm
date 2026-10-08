@@ -39,6 +39,7 @@
   },
   "async-generators": {
     "paths": [
+      "built-ins/AsyncFromSyncIteratorPrototype",
       "built-ins/AsyncGeneratorFunction",
       "built-ins/AsyncGeneratorPrototype",
       "language/expressions/async-generator",

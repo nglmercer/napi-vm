@@ -1,4 +1,5 @@
 pub(crate) mod async_fn;
+pub(crate) mod async_from_sync;
 pub(crate) mod async_generator;
 pub(crate) mod call;
 pub use call::is_callable_value;

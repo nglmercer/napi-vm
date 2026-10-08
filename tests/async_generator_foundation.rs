@@ -84,6 +84,199 @@ fn ordinary_nested_function_return_is_not_awaited() {
 }
 
 #[test]
+fn return_rejects_abrupt_promise_constructor_access_without_starting_body() {
+    assert_eq!(
+        run(
+            r#"
+        let started = false, reason = {}, result;
+        let value = Promise.resolve(42);
+        Object.defineProperty(value, 'constructor', {get() {throw reason;}});
+        async function* f() {started = true;}
+        f().return(value).then(() => result = 'fulfilled', error => result = error === reason);
+    "#,
+            "started + ':' + result"
+        ),
+        "false:true"
+    );
+}
+
+#[test]
+fn return_promise_constructor_error_is_caught_at_the_yield() {
+    assert_eq!(
+        run(
+            r#"
+        let reason = {}, caught, result;
+        let value = Promise.resolve(42);
+        Object.defineProperty(value, 'constructor', {get() {throw reason;}});
+        async function* f() {try {yield 1;} catch(error) {caught = error; return 9;}}
+        let g = f();
+        g.next().then(() => g.return(value)).then(r => result = r.value + ':' + r.done);
+    "#,
+            "(caught === reason) + ':' + result"
+        ),
+        "true:9:true"
+    );
+}
+
+#[test]
+fn real_async_iterator_preserves_a_promise_valued_step() {
+    assert_eq!(
+        run(
+            r#"
+        let promise = Promise.resolve(42), result, calls = 0;
+        let source = {[Symbol.asyncIterator]() {return {
+            next() {return Promise.resolve(++calls === 1 ? {done: false, value: promise} : {done: true});}
+        };}};
+        async function consume() {for await (let value of source) result = value === promise;}
+        consume();
+    "#,
+            "result"
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn sync_adapter_reads_results_before_await_and_omits_next_arguments() {
+    assert_eq!(
+        run(
+            r#"
+        let log = [], calls = 0;
+        let source = {[Symbol.iterator]() {return {
+            next() {
+                let count = ++calls;
+                log.push('next:' + arguments.length);
+                return {
+                    get done() {log.push('done:' + count); return count === 2;},
+                    get value() {log.push('value:' + count); return Promise.resolve(42);}
+                };
+            }
+        };}};
+        async function consume() {for await (let value of source) log.push('body:' + value);}
+        consume();
+        log.push('caller');
+    "#,
+            "log.join(',')"
+        ),
+        "next:0,done:1,value:1,caller,body:42,next:0,done:2,value:2"
+    );
+}
+
+#[test]
+fn sync_adapter_closes_on_rejected_values_and_preserves_the_reason() {
+    assert_eq!(
+        run(
+            r#"
+        let reason = {}, caught, closed = 0;
+        function* source() {try {yield Promise.reject(reason);} finally {closed++;}}
+        async function consume() {try {for await (let value of source()) {}} catch(error) {caught = error;}}
+        consume();
+    "#,
+            "(caught === reason) + ':' + closed"
+        ),
+        "true:1"
+    );
+}
+
+#[test]
+fn sync_adapter_closes_when_promise_constructor_access_throws() {
+    assert_eq!(
+        run(
+            r#"
+        let reason = {}, caught, closed = 0;
+        let value = Promise.resolve(42);
+        Object.defineProperty(value, 'constructor', {get() {throw reason;}});
+        function* source() {try {yield value;} finally {closed++;}}
+        async function consume() {try {for await (let value of source()) {}} catch(error) {caught = error;}}
+        consume();
+    "#,
+            "(caught === reason) + ':' + closed"
+        ),
+        "true:1"
+    );
+}
+
+#[test]
+fn sync_adapter_awaits_completed_iterator_values() {
+    assert_eq!(
+        run(
+            r#"
+        let reason = {}, caught, body = 0;
+        let source = {[Symbol.iterator]() {return {
+            next() {return {done: true, value: Promise.reject(reason)};}
+        };}};
+        async function consume() {try {for await (let value of source) body++;} catch(error) {caught = error;}}
+        consume();
+    "#,
+            "(caught === reason) + ':' + body"
+        ),
+        "true:0"
+    );
+}
+
+#[test]
+fn await_reads_promise_constructor_once() {
+    assert_eq!(
+        run(
+            r#"
+        let reads = 0, result;
+        let promise = Promise.resolve(42);
+        Object.defineProperty(promise, 'constructor', {get() {reads++; return Promise;}});
+        async function* f() {yield promise;}
+        f().next().then(r => result = r.value);
+    "#,
+            "reads + ':' + result"
+        ),
+        "1:42"
+    );
+}
+
+#[test]
+fn sync_adapter_return_uses_promise_resolution_for_its_result() {
+    assert_eq!(
+        run(
+            r#"
+        let reason = {}, caught;
+        let source = {[Symbol.iterator]() {return {next() {return {value: 1, done: false};}};}};
+        async function consume() {
+            try {
+                for await (let value of source) {
+                    Object.defineProperty(Object.prototype, 'then', {get() {throw reason;}, configurable: true});
+                    break;
+                }
+            } catch(error) {caught = error;}
+            finally {delete Object.prototype.then;}
+        }
+        consume();
+    "#,
+            "caught === reason"
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn pending_sync_adapter_continuations_survive_collection() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source(
+        r#"
+        let release, values = [];
+        let gate = new Promise(resolve => release = resolve);
+        function* source() {try {yield gate;} finally {values.push('closed');}}
+        async function consume() {for await (let value of source()) values.push(value);}
+        consume();
+    "#,
+    )
+    .expect("suspended consumer");
+    vm.collect_garbage();
+    vm.eval_source("release(42);").expect("resume");
+    vm.poll_event_loop(TurnBudget::jobs(10_000))
+        .expect("continuations");
+    let value = vm.eval_source("values.join(',');").expect("result");
+    assert_eq!(vm.vs(&value).unwrap(), "42,closed");
+}
+
+#[test]
 fn asynchronous_delegation_forwards_return_completion() {
     assert_eq!(
         run(

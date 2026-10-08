@@ -405,7 +405,7 @@ fn optional_chaining() {
 
 #[test]
 fn spreads() {
-    // Call spread: arrays splice, anything else is one argument.
+    // Call spread follows the iterator protocol, including strings and errors.
     check(
         "function f(a, b, c){ return a + b + c; } f(...[1, 2], 3)",
         true,
@@ -415,7 +415,19 @@ fn spreads() {
     check("function f(a){ return a; } f(...'ab')", true);
     check("function f(a){ return typeof a; } f(...5)", true);
     check("let o = {m(a, b){ return a * b; }}; o.m(...[6, 7])", true);
-    // Array spread: arrays splice, strings per character, else iterables.
+    check(
+        "let a=[1,2]; a[Symbol.iterator]=function*(){yield 42;}; function f(x){return x;} f(...a)",
+        true,
+    );
+    check(
+        "let a=[1,2]; a[Symbol.iterator]=function*(){yield 42;}; [...a].join(',')",
+        true,
+    );
+    check(
+        "let n=0;let o={};o[Symbol.iterator]=function(){return {next(){return ++n===2?{done:true}:{value:42};}}};function f(x){return x;}f(...o)",
+        true,
+    );
+    // Array spread follows the same iterator protocol.
     check("let a = [...[1, 2], 3]; a.join(',')", true);
     check("let a = [...'ab']; a.join(',')", true);
     check("let a = [0, ...[1, 2], ...[3]]; a.join(',')", true);

@@ -1475,6 +1475,35 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
         );
     }
     environment.install_intrinsic("%AsyncIteratorPrototype%", async_iterator.clone());
+    let async_from_sync = Value::object_with_proto(vec![], Some(Rc::new(async_iterator.clone())));
+    for (name, callable) in [
+        (
+            "next",
+            super::async_from_sync::next as crate::builtins::NativeFn,
+        ),
+        ("return", super::async_from_sync::return_),
+        ("throw", super::async_from_sync::throw),
+    ] {
+        async_from_sync
+            .set_prop(
+                name.into(),
+                crate::builtins::native_method(name, 1, callable, function_prototype.clone()),
+            )
+            .expect("async-from-sync method");
+        async_from_sync
+            .property_cell()
+            .expect("intrinsic object")
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+    }
+    environment.install_intrinsic("%AsyncFromSyncIteratorPrototype%", async_from_sync);
     for (kind, tag, methods) in [
         (
             "%ArrayIteratorPrototype%",

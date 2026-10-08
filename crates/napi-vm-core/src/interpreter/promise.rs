@@ -14,11 +14,7 @@ use crate::error::VmErr;
 use crate::value::{PromiseInner, PromiseState, Reaction, Value};
 
 fn is_callable(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-    ) || crate::interpreter::call::callable_slot(value, crate::interpreter::call::CALL_SLOT)
-        .is_some()
+    super::call::is_callable_value(value)
 }
 
 fn promise_error_reason(error: VmErr) -> Value {
@@ -42,6 +38,21 @@ fn claim_resolution(guard: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// PromiseResolve(%Promise%, value), used by Await. Constructor access on
+    /// an existing promise is observable and may throw before suspension.
+    pub(crate) fn promise_resolve_intrinsic(&mut self, value: Value) -> Result<Value, VmErr> {
+        if value.as_promise().is_some() {
+            let constructor = self.get_prop_value_str(&value, "constructor")?;
+            let intrinsic = self.persistent_global.borrow().intrinsic("Promise");
+            if intrinsic.is_some_and(|intrinsic| super::strict_equals(&constructor, &intrinsic)) {
+                return Ok(value);
+            }
+        }
+        let promise = Value::pending_promise();
+        self.resolve_promise(&promise, value)?;
+        Ok(Value::Promise(promise))
+    }
+
     /// Settle `promise` with `value` as its *resolution*, which is not the
     /// same as fulfilling it: resolving with a promise or a thenable adopts
     /// that object's eventual state instead of fulfilling with the object.
@@ -85,16 +96,10 @@ impl Interpreter {
             return Ok(());
         }
 
-        if let Value::Promise(_) = &value {
-            let target = promise.clone();
-            self.adopt(&value, target)?;
-            return Ok(());
-        }
-
         // Thenable assimilation: any object with a callable `then` is treated
         // as a promise, which is how promises from other implementations
         // interoperate.
-        if matches!(value, Value::Object { .. }) {
+        if super::call::is_js_object(&value) {
             let then = match self.member(&value, "then") {
                 Ok(then) => then,
                 Err(error) => {
@@ -136,12 +141,6 @@ impl Interpreter {
             inner.resolution_locked = true;
         }
         settle(&self.jobs, promise, PromiseState::Rejected, reason);
-    }
-
-    /// Make `target` follow `source`'s eventual state.
-    fn adopt(&mut self, source: &Value, target: Rc<RefCell<PromiseInner>>) -> Result<(), VmErr> {
-        self.register(source, Value::Undefined, Value::Undefined, Some(target))?;
-        Ok(())
     }
 
     fn run_thenable_job(

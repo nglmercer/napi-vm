@@ -183,6 +183,25 @@ fn await_value(
     value: Value,
     finish: Option<bool>,
 ) -> Result<(), VmErr> {
+    // Body Await has already performed PromiseResolve before suspension.
+    // A return request on a completed/unstarted generator has no body and
+    // must perform the same operation here, rejecting the request on error.
+    let value = if finish.is_some() {
+        match vm.promise_resolve_intrinsic(value) {
+            Ok(value) => value,
+            Err(error) => {
+                let reason = match error {
+                    VmErr::Throw(value) => value,
+                    VmErr::RuntimeError(error) => error.guest_value(),
+                    error => error_value_from_msg(&error.to_string()),
+                };
+                settle(vm, inner, Err(reason))?;
+                return drive(vm, inner);
+            }
+        }
+    } else {
+        value
+    };
     let make = |callable: crate::builtins::NativeFn| {
         Value::object(vec![
             (

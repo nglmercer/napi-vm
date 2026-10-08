@@ -1280,15 +1280,10 @@ impl Interpreter {
                     if *is_await {
                         result = self.perform_await(result)?;
                     }
-                    let (done, mut value) = self.iterator_result_fields(&result)?;
+                    let (done, value) = self.iterator_result_fields(&result)?;
                     if done {
                         exhausted = true;
                         break;
-                    }
-                    // A sync iterator of promises is also valid input to
-                    // `for await`, so each value is awaited too.
-                    if *is_await {
-                        value = self.perform_await(value)?;
                     }
                     if let Err(error) = self.assign_iteration_binding(binding, &value) {
                         if !error.is_abandon() {
@@ -1431,23 +1426,35 @@ impl Interpreter {
     /// generator raises a catchable `RangeError` instead of hanging.
     pub(crate) fn drain_iterable(&mut self, source: &Value) -> Result<Vec<Value>, VmErr> {
         let iterator = self.iterator_for(source)?;
-        let next_fn = self.prop_str(&iterator, "next")?;
-        if matches!(next_fn, Value::Undefined) {
-            return Ok(Vec::new());
-        }
+        let next_fn = self.member(&iterator, "next")?;
         let mut out = Vec::new();
         loop {
             self.consume_loop()?;
             let step = self.call_this(&next_fn, iterator.clone(), vec![])?;
-            let done = step.get_prop("done").map(|v| v.is_truthy()).unwrap_or(true);
+            let (done, value) = self.iterator_result_fields(&step)?;
             if done {
                 return Ok(out);
             }
-            out.push(step.get_prop("value").unwrap_or(Value::Undefined));
+            out.push(value);
             if out.len() > crate::value::MAX_ARRAY_LEN {
                 return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
         }
+    }
+
+    /// Array and argument spread use the same iterator protocol in both tiers.
+    pub(crate) fn append_iterable(
+        &mut self,
+        output: &mut Vec<Value>,
+        source: &Value,
+        limit_message: &str,
+    ) -> Result<(), VmErr> {
+        let items = self.drain_iterable(source)?;
+        if output.len().saturating_add(items.len()) > crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err(limit_message));
+        }
+        output.extend(items);
+        Ok(())
     }
 
     /// Obtain an iterator for `for await (… of source)`.
@@ -1465,7 +1472,8 @@ impl Interpreter {
             }
             return Ok(iterator);
         }
-        self.iterator_for(source)
+        let iterator = self.iterator_for(source)?;
+        super::async_from_sync::create(self, iterator)
     }
 
     /// Obtain an iterator for `source`, following the `Symbol.iterator`
@@ -2015,46 +2023,11 @@ impl Interpreter {
                     match x {
                         Expr::Spread(inner) => {
                             let inner_val = self.eval_expr(inner)?;
-                            match &inner_val {
-                                Value::Array(arr) => {
-                                    let items = arr.borrow();
-                                    if v.len().saturating_add(items.len())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum array length exceeded",
-                                        ));
-                                    }
-                                    v.extend(items.iter().cloned());
-                                }
-                                Value::String(s) => {
-                                    if v.len().saturating_add(s.code_points().count())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum array length exceeded",
-                                        ));
-                                    }
-                                    v.extend(s.code_points().map(Value::String))
-                                }
-                                // Anything else goes through the iterator
-                                // protocol — a generator, a typed array, an
-                                // object with `Symbol.iterator`. Silently
-                                // producing nothing here made `[...gen()]`
-                                // return an empty array, so a value that is
-                                // not iterable now says so.
-                                other => {
-                                    let items = self.drain_iterable(other)?;
-                                    if v.len().saturating_add(items.len())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum array length exceeded",
-                                        ));
-                                    }
-                                    v.extend(items);
-                                }
-                            }
+                            self.append_iterable(
+                                &mut v,
+                                &inner_val,
+                                "Maximum array length exceeded",
+                            )?;
                         }
                         _ => v.push(self.eval_expr(x)?),
                     }
@@ -2221,20 +2194,11 @@ impl Interpreter {
                     match x {
                         Expr::Spread(inner) => {
                             let inner_val = self.eval_expr(inner)?;
-                            match &inner_val {
-                                Value::Array(arr) => {
-                                    let items = arr.borrow();
-                                    if a.len().saturating_add(items.len())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum argument count exceeded",
-                                        ));
-                                    }
-                                    a.extend(items.iter().cloned());
-                                }
-                                _ => push_call_arg(&mut a, inner_val)?,
-                            }
+                            self.append_iterable(
+                                &mut a,
+                                &inner_val,
+                                "Maximum argument count exceeded",
+                            )?;
                         }
                         _ => push_call_arg(&mut a, self.eval_expr(x)?)?,
                     }
@@ -2777,7 +2741,7 @@ impl Interpreter {
                 } else {
                     self.iterator_for(&source)?
                 };
-                let next_fn = self.prop_str(&iterator, "next")?;
+                let next_fn = self.member(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
                     return vm_err("TypeError: yield* requires an iterable");
                 }
@@ -2793,22 +2757,14 @@ impl Interpreter {
                         crate::value::GenResume::Return(value) => {
                             let method = self.iterator_method(&iterator, "return")?;
                             let Some(method) = method else {
-                                return vm_ret(value);
+                                return vm_ret(self.prepare_return_value(value)?);
                             };
                             (method, vec![value])
                         }
                         crate::value::GenResume::Throw(value) => {
                             let method = self.iterator_method(&iterator, "throw")?;
                             let Some(method) = method else {
-                                if let Some(close) = self.iterator_method(&iterator, "return")? {
-                                    let result =
-                                        self.call_this(&close, iterator.clone(), vec![])?;
-                                    if !super::call::is_js_object(&result) {
-                                        return vm_err(
-                                            "TypeError: Iterator return must return an object",
-                                        );
-                                    }
-                                }
+                                self.close_guest_iterator(&iterator, asynchronous)?;
                                 return vm_err("TypeError: Delegated iterator has no throw method");
                             };
                             (method, vec![value])
@@ -2826,14 +2782,18 @@ impl Interpreter {
                     }
                     let done = self.member(&step, "done")?.is_truthy();
                     let value = self.member(&step, "value")?;
+                    if done {
+                        return if returning {
+                            vm_ret(self.prepare_return_value(value)?)
+                        } else {
+                            Ok(value)
+                        };
+                    }
                     let value = if asynchronous {
                         self.perform_await(value)?
                     } else {
                         value
                     };
-                    if done {
-                        return if returning { vm_ret(value) } else { Ok(value) };
-                    }
 
                     // `yield*` re-yields into the same buffer.
                     #[cfg(not(stackful_coroutines))]

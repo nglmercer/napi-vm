@@ -87,6 +87,8 @@ impl Interpreter {
             return bridge.await_host(id);
         }
 
+        let value = self.promise_resolve_intrinsic(value)?;
+
         #[cfg(stackful_coroutines)]
         if let Some(yielder) = self.await_yielder.as_ref() {
             // Suspend, handing the awaited value to the driver. It resumes us
@@ -101,13 +103,6 @@ impl Interpreter {
             };
         }
 
-        let value = if value.as_promise().is_some() {
-            value
-        } else {
-            let wrapper = Value::pending_promise();
-            self.resolve_promise(&wrapper, value)?;
-            Value::Promise(wrapper)
-        };
         self.await_synchronously(value)
     }
 
