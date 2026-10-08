@@ -552,8 +552,8 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let value = get_report(&mut vm, Value::Undefined, vec![]).unwrap();
-            if let Value::String(message) = value {
-                assert_eq!(message, napi_vm::JsString::from("worker"));
+            if let Value::String(message) = &value {
+                assert_eq!(message, &napi_vm::JsString::from("worker"));
                 break;
             }
             assert!(Instant::now() < deadline, "worker did not report");
