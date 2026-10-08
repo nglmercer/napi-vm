@@ -18,8 +18,8 @@ ahash = { version = "0.8.12", default-features = false, features = ["std"] }
 stacker = "0.1.25"
 regex-syntax = "0.8"
 unicode-id-start = "1.5"
-oxc_allocator = "0.95.0"
-oxc_regular_expression = "0.95.0"
+oxc_allocator = "0.120.0"
+oxc_regular_expression = "0.120.0"
 url = "2"
 base64 = "0.22"
 libloading = { version = "0.9", optional = true }

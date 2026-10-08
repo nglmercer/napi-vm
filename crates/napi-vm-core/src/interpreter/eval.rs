@@ -917,8 +917,48 @@ impl Interpreter {
 
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
+        self.eval_dynamic_import_with_options(specifier, None)
+    }
+
+    fn eval_dynamic_import_with_options(
+        &mut self,
+        specifier: Value,
+        options: Option<Value>,
+    ) -> Result<Value, VmErr> {
         let target = Value::pending_promise();
-        let converted = self.ecmascript_to_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
+        let converted = (|| {
+            let name = self.ecmascript_to_string(&specifier)?.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into()))?;
+            if let Some(options) = options.filter(|value| !matches!(value, Value::Undefined)) {
+                if !super::call::is_js_object(&options) {
+                    return Err(VmErr::Msg(
+                        "TypeError: import options must be an object".into(),
+                    ));
+                }
+                let attributes = self.get_prop_value_str(&options, "with")?;
+                if !matches!(attributes, Value::Undefined) {
+                    if !super::call::is_js_object(&attributes) {
+                        return Err(VmErr::Msg(
+                            "TypeError: import attributes must be an object".into(),
+                        ));
+                    }
+                    let keys = crate::builtins::object::own_names_for(self, &attributes, true)?;
+                    for key in &keys {
+                        if !matches!(self.get_prop_value_str(&attributes, key)?, Value::String(_)) {
+                            return Err(VmErr::Msg(
+                                "TypeError: import attribute values must be strings".into(),
+                            ));
+                        }
+                    }
+                    if !keys.is_empty() {
+                        return Err(VmErr::Msg(
+                            "TypeError: import attributes are not supported by this module loader"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+            Ok(name)
+        })();
         match converted {
             Ok(specifier) => {
                 self.jobs
@@ -1664,6 +1704,19 @@ impl Interpreter {
         }))
     }
 
+    fn reject_call_assignment_target(&mut self, target: &Expr) -> Result<(), VmErr> {
+        if matches!(
+            target.unparenthesized(),
+            Expr::Call { .. } | Expr::TaggedTemplate { .. }
+        ) {
+            self.eval_expr(target)?;
+            return Err(VmErr::Msg(
+                "ReferenceError: invalid assignment target".into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn assign_iteration_binding(
         &mut self,
         binding: &ForBinding,
@@ -1671,6 +1724,7 @@ impl Interpreter {
     ) -> Result<Value, VmErr> {
         match binding {
             ForBinding::Assignment(target) => {
+                self.reject_call_assignment_target(target)?;
                 let pattern = crate::parser::expr_to_pattern(target)
                     .ok_or_else(|| VmErr::Msg("Invalid iteration assignment target".into()))?;
                 self.destructure_assignment(&pattern, value)
@@ -1955,9 +2009,6 @@ impl Interpreter {
             },
             Expr::Undefined => Ok(Value::Undefined),
             Expr::Identifier(n) => {
-                if n == "undefined" {
-                    return Ok(Value::Undefined);
-                }
                 let scope = self.global.clone();
                 match self.lookup_binding_in(&scope, n)? {
                     Lookup::Value(v) => Ok(v),
@@ -1968,6 +2019,7 @@ impl Interpreter {
                         "ReferenceError: Cannot access '{}' before initialization",
                         n
                     )),
+                    Lookup::Missing if n == "undefined" => Ok(Value::Undefined),
                     Lookup::Missing => vm_err(format!("ReferenceError: {} is not defined", n)),
                 }
             }
@@ -2092,6 +2144,9 @@ impl Interpreter {
                             return Ok(Value::Bool(true));
                         }
                     }
+                }
+                if matches!(op, UnOp::Inc | UnOp::Dec) {
+                    self.reject_call_assignment_target(operand)?;
                 }
                 if matches!(op, UnOp::Inc | UnOp::Dec)
                     && matches!(
@@ -2340,6 +2395,7 @@ impl Interpreter {
             // `obj.x ||= expensive()` leaves a truthy `x` untouched and never
             // evaluates `expensive`.
             Expr::LogicalAssignment { target, op, value } => {
+                self.reject_call_assignment_target(target)?;
                 // Static member target: skip the key allocation on both the
                 // read and the conditional write.
                 if let Expr::Member {
@@ -2416,6 +2472,7 @@ impl Interpreter {
                 Ok(assigned)
             }
             Expr::Assignment { target, op, value } => {
+                self.reject_call_assignment_target(target)?;
                 let v = self.eval_expr(value)?;
                 match target.unparenthesized() {
                     Expr::Identifier(n) => {
@@ -2583,12 +2640,20 @@ impl Interpreter {
             // `import(specifier)`. Module registration is synchronous in this
             // VM, so the promise is already settled when it is handed back;
             // `await import(…)` and `.then(…)` both work.
-            Expr::DynamicImport { specifier, phase } => {
+            Expr::DynamicImport {
+                specifier,
+                options,
+                phase,
+            } => {
                 if *phase != crate::parser::ImportPhase::Evaluation {
                     return vm_err("TypeError: non-evaluation import phases are not implemented");
                 }
                 let specifier = self.eval_expr(specifier)?;
-                self.eval_dynamic_import(specifier)
+                let options = options
+                    .as_deref()
+                    .map(|expr| self.eval_expr(expr))
+                    .transpose()?;
+                self.eval_dynamic_import_with_options(specifier, options)
             }
             Expr::ImportMeta => self.eval_import_meta(),
             Expr::NewTarget => self

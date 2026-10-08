@@ -33,6 +33,7 @@ impl Parser {
     /// when it is not itself the member name (`get() {}`, `static = 1`).
     fn eat_modifier(&mut self, tok: &Token) -> bool {
         if matches!(self.cur(), t if t == tok)
+            && !(matches!(tok, Token::KwGet | Token::KwSet) && matches!(self.peek(), Token::Star))
             && !matches!(
                 self.peek(),
                 Token::LParen | Token::Equal | Token::Semicolon | Token::RBrace
@@ -54,9 +55,8 @@ impl Parser {
         self.adv();
         let name_span = self.cur_span();
         let n = match (self.cur(), fallback) {
-            (Token::Identifier(_) | Token::EscapedIdentifier(_), _) => self.ident()?,
-            (_, Some(name)) => name.to_string(),
-            _ => return None,
+            (Token::LBrace | Token::KwExtends, Some(name)) => name.to_string(),
+            _ => self.ident()?,
         };
         self.record(
             &n,
@@ -118,6 +118,11 @@ impl Parser {
                         let v = s.to_key();
                         self.adv();
                         v
+                    }
+                    Token::BigInt(digits) => {
+                        let name = crate::bigint::BigInt::parse(digits).ok()?.to_string();
+                        self.adv();
+                        name
                     }
                     Token::Number(n) | Token::LegacyNumber(n) => {
                         let v = crate::format::number_string(*n);
@@ -244,7 +249,10 @@ impl Parser {
             let decl = match self.cur() {
                 Token::KwClass => self.class_decl_named(Some(DEFAULT_BINDING)),
                 Token::KwFunction => self.fn_decl_named(false, Some(DEFAULT_BINDING)),
-                Token::KwAsync if matches!(self.peek(), Token::KwFunction) => {
+                Token::KwAsync
+                    if matches!(self.peek(), Token::KwFunction)
+                        && !self.line_break_after_current() =>
+                {
                     self.adv();
                     self.fn_decl_named(true, Some(DEFAULT_BINDING))
                 }
@@ -266,7 +274,7 @@ impl Parser {
         } else if self.eat(&Token::Star) {
             // `export * from 'm'` / `export * as ns from 'm'`.
             let alias = if self.eat(&Token::KwAs) {
-                Some(self.ident_or_keyword()?)
+                Some(self.import_specifier_name()?)
             } else {
                 None
             };
@@ -290,20 +298,14 @@ impl Parser {
             })
         } else if self.eat(&Token::LBrace) {
             let mut sp = Vec::new();
+            let mut string_local = false;
             while self.until(&Token::RBrace) {
+                string_local |= matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
                 // `export { default as x }` names the default export, so the
                 // keyword is a valid specifier here.
-                let l = if self.eat(&Token::KwDefault) {
-                    "default".to_string()
-                } else {
-                    self.ident()?
-                };
+                let l = self.import_specifier_name()?;
                 let e = if self.eat(&Token::KwAs) {
-                    if self.eat(&Token::KwDefault) {
-                        "default".to_string()
-                    } else {
-                        self.ident_or_keyword()?
-                    }
+                    self.import_specifier_name()?
                 } else {
                     l.clone()
                 };
@@ -325,6 +327,9 @@ impl Parser {
             } else {
                 None
             };
+            if s.is_none() && string_local {
+                self.record_error("string export names require a source module".into());
+            }
             let attributes = if s.is_some() {
                 self.import_attributes()?
             } else {
@@ -367,7 +372,9 @@ impl Parser {
                 let n = decl_name(&d);
                 (d, n)
             }
-            Token::KwAsync if matches!(self.peek(), Token::KwFunction) => {
+            Token::KwAsync
+                if matches!(self.peek(), Token::KwFunction) && !self.line_break_after_current() =>
+            {
                 self.adv();
                 let d = self.fn_decl(true)?;
                 let n = decl_name(&d);
@@ -402,8 +409,10 @@ impl Parser {
     /// A name inside an `import { … }` list. `default` is a keyword but a
     /// legal specifier: `import { default as x } from 'm'`.
     fn import_specifier_name(&mut self) -> Option<String> {
-        if self.eat(&Token::KwDefault) {
-            return Some("default".to_string());
+        if let Token::String(value) | Token::EscapedString(value) = self.cur() {
+            let value = value.clone();
+            self.adv();
+            return self.module_specifier(value);
         }
         self.ident_or_keyword()
     }
@@ -437,6 +446,17 @@ impl Parser {
                         named: nd,
                         namespace: None,
                     })
+                } else if self.eat(&Token::Star) {
+                    self.expect(&Token::KwAs);
+                    let ns = self.ident()?;
+                    let m = self.from()?;
+                    Some(Statement::Import {
+                        attributes: Vec::new(),
+                        module: m,
+                        default: Some(nm),
+                        named: vec![],
+                        namespace: Some(ns),
+                    })
                 } else {
                     None
                 }
@@ -466,10 +486,15 @@ impl Parser {
         } else if self.eat(&Token::LBrace) {
             let mut nd = Vec::new();
             while self.until(&Token::RBrace) {
+                let string_import =
+                    matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
                 let imported = self.import_specifier_name()?;
                 let local = if self.eat(&Token::KwAs) {
                     self.ident()?
                 } else {
+                    if string_import {
+                        self.record_error("string import names require a local binding".into());
+                    }
                     imported.clone()
                 };
                 nd.push((imported, local));

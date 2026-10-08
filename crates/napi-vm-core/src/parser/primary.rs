@@ -51,7 +51,7 @@ impl Parser {
             }
             Token::KwUndefined => {
                 self.adv();
-                Some(Expr::Undefined)
+                Some(Expr::Identifier("undefined".into()))
             }
             Token::KwThis => {
                 self.adv();
@@ -172,8 +172,13 @@ impl Parser {
                             self.adv();
                             v
                         }
+                        Token::BigInt(digits) => {
+                            let name = crate::bigint::BigInt::parse(digits).ok()?.to_string();
+                            self.adv();
+                            name
+                        }
                         Token::Number(n) | Token::LegacyNumber(n) => {
-                            let v = n.to_string();
+                            let v = crate::format::number_string(*n);
                             self.adv();
                             v
                         }
@@ -424,9 +429,20 @@ impl Parser {
                     self.record_error("spread argument in import call".into());
                 }
                 let specifier = self.with_in(true, Self::assign)?;
+                let options = if self.eat(&Token::Comma) && !matches!(self.cur(), Token::RParen) {
+                    if matches!(self.cur(), Token::DotDotDot) {
+                        self.record_error("spread argument in import call".into());
+                    }
+                    let options = self.with_in(true, Self::assign)?;
+                    self.eat(&Token::Comma);
+                    Some(Box::new(options))
+                } else {
+                    None
+                };
                 self.expect(&Token::RParen);
                 Some(Expr::DynamicImport {
                     specifier: Box::new(specifier),
+                    options,
                     phase,
                 })
             }

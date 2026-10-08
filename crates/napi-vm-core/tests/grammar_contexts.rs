@@ -1287,3 +1287,154 @@ fn quoted_hash_properties_do_not_declare_private_names() {
     );
     assert!(!parses("o.?.x;", ParseGoal::Script));
 }
+
+#[test]
+fn aggregate_binding_defaults_and_numeric_property_names_share_literal_semantics() {
+    for source in [
+        "var [{x}={x:3}]=[];x===3;",
+        "var [[x]=[3]]=[];x===3;",
+        "function f([{x}={x:3}]){return x;}f([])===3;",
+        "([[x]=[3]])=>x;",
+        "var o={0xffn:3};o['255']===3;",
+        "var {0xffn:x}={255:3};x===3;",
+        "class C{0xffn=3;}new C()['255']===3;",
+        "true?.30:false;",
+        "#!comment\n3===3;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "for(var [x=a in b]=[];;){}",
+        "for(var f=function(x=a in b){};;){}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in ["1nfoo;", "var {1n}={};", "{#!comment\n}"] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+}
+
+#[test]
+fn import_options_and_arbitrary_module_export_names_are_validated() {
+    for source in [
+        "import('m',);",
+        "import('m', {},);",
+        "import('m', {with:{}});",
+        "export {x as '☿'} from 'm';",
+        "export * as 'All' from 'm';",
+        "import {'☿' as x} from 'm';",
+    ] {
+        assert!(parses(source, ParseGoal::Module), "rejected {source}");
+    }
+    for source in [
+        "import('m', ...o);",
+        "import('m', {}, 3);",
+        "import('m', {with:{x:super()}});",
+        "export {x as '\\uD800'} from 'm';",
+    ] {
+        assert!(!parses(source, ParseGoal::Module), "accepted {source}");
+    }
+    let mut vm = napi_vm_core::Interpreter::with_builtins();
+    let result = vm.eval_source("var log='';try{import({toString(){log+='convert';return 'm'}},(()=>{log+='options';throw 3})())}catch(e){}log==='options';");
+    assert!(
+        matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn sloppy_call_assignment_targets_evaluate_before_reference_error() {
+    for source in [
+        "f()=g();",
+        "f()+=g();",
+        "f()++;",
+        "++f();",
+        "for(f() in o){}",
+        "for(f() of o){}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+        assert!(
+            !parses(&format!("'use strict';{source}"), ParseGoal::Script),
+            "accepted strict {source}"
+        );
+    }
+    for expression in ["f()=g()", "f()+=g()", "f()++", "++f()"] {
+        let source = format!(
+            "var log='';function f(){{log+='f';return 1}}function g(){{log+='g'}}try{{{expression}}}catch(e){{if(!(e instanceof ReferenceError))throw e}}log==='f';"
+        );
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(&source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn undefined_is_a_shadowable_identifier() {
+    for source in [
+        "undefined=1;",
+        "undefined++;",
+        "class undefined{}",
+        "function f(undefined){return undefined===3}f(3);",
+        "function f(undefined){return typeof undefined==='number'}f(3);",
+        "var undefined=3;undefined===3;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "function f(undefined){return undefined===3}f(3);",
+        "function f(undefined){return typeof undefined==='number'}f(3);",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn closing_statement_delimiters_allow_regexp_literals() {
+    for source in [
+        "{} /x/.test('x');",
+        "if(true)/x/.test('x');",
+        "while(false)/x/;",
+        "function f(){} /x/.test('x');",
+        "class C{} /x/.test('x');",
+        "const f=function(){} / 2 / 3;",
+        "const C=class{} / 2 / 3;",
+        "const o={} / 2 / 3;",
+        "let x=1n / 2n / 3n;",
+        "function* f(){return (yield)?yield:yield;}",
+        "for(let in {}){}",
+        "let o={};o?.[1,2];",
+        "var yield=12,a=3,b=6,g=2;yield / a; b / g;",
+        "for(let=3;;)break;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for name in ["Beria_Erfe", "Sidetic", "Tai_Yo", "Tolong_Siki"] {
+        assert!(parses(
+            &format!("/\\p{{Script={name}}}/u;"),
+            ParseGoal::Script
+        ));
+    }
+    for source in [
+        "import {'x'} from 'm';",
+        "const x=1;export {'x'};",
+        "export * as '\\uD800' from 'm';",
+    ] {
+        assert!(!parses(source, ParseGoal::Module), "accepted {source}");
+    }
+}
+
+#[test]
+fn annex_b_call_targets_exclude_logical_assignments_and_tagged_templates() {
+    for source in [
+        "f()&&=1;", "f()||=1;", "f()??=1;", "f``=1;", "(f``)++;", "o.x``=1;",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    assert!(parses("import d, * as ns from 'm';", ParseGoal::Module));
+}

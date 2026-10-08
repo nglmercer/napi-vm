@@ -896,7 +896,7 @@ fn iteration_binding(
     match binding {
         ForBinding::Assignment(target) => match target.as_ref() {
             Expr::Array { .. } | Expr::Object { .. } => assignment_target(target, ctx),
-            _ => simple_assignment_target(target, ctx),
+            _ => legacy_assignment_target(target, ctx),
         },
         ForBinding::Declaration {
             kind,
@@ -938,6 +938,16 @@ fn simple_assignment_target(target: &Expr, ctx: &Context) -> Check {
         Expr::Member { .. } if !contains_optional_chain(target) => expression(target, ctx),
         _ => Err("invalid assignment target".into()),
     }
+}
+
+fn legacy_assignment_target(target: &Expr, ctx: &Context) -> Check {
+    if !ctx.strict
+        && matches!(target.unparenthesized(), Expr::Call { .. })
+        && !contains_optional_chain(target)
+    {
+        return expression(target, ctx);
+    }
+    simple_assignment_target(target, ctx)
 }
 
 fn assignment_target(target: &Expr, ctx: &Context) -> Check {
@@ -999,7 +1009,7 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
             assignment_target(target, ctx)?;
             expression(value, ctx)
         }
-        _ => simple_assignment_target(target, ctx),
+        _ => legacy_assignment_target(target, ctx),
     }
 }
 
@@ -1210,7 +1220,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                 return Err("delete of an unqualified identifier in strict mode".into());
             }
             if matches!(op, UnOp::Inc | UnOp::Dec) {
-                simple_assignment_target(operand, ctx)
+                legacy_assignment_target(operand, ctx)
             } else {
                 expression(operand, ctx)
             }
@@ -1219,7 +1229,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             if *op == AssignOp::Assign {
                 assignment_target(target, ctx)?;
             } else {
-                simple_assignment_target(target, ctx)?;
+                legacy_assignment_target(target, ctx)?;
             }
             expression(value, ctx)
         }
@@ -1364,8 +1374,11 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         }
         Expr::Spread(_) => Err("spread outside an array or argument list".into()),
         Expr::DynamicImport {
-            specifier: value, ..
-        } => expression(value, ctx),
+            specifier, options, ..
+        } => {
+            expression(specifier, ctx)?;
+            optional(options.as_deref(), ctx)
+        }
         Expr::Number(_)
         | Expr::BigIntLiteral(_)
         | Expr::String(_)

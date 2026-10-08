@@ -465,28 +465,25 @@ fn run_loop(
                 }
                 Instr::LoadGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
-                    if name == "undefined" {
-                        frame.registers[dst as usize] = Value::Undefined;
-                    } else {
-                        // Lookup cannot run guest code or change the active
-                        // scope. Borrow its existing root instead of bumping
-                        // the environment's Rc count for every global read.
-                        let scope = current_scope(interp, frame);
-                        let lookup = interp.lookup_binding_in(&scope, name)?;
-                        match lookup {
-                            Lookup::Value(v) => {
-                                frame.registers[dst as usize].assign_for_execution(v)
-                            }
-                            Lookup::Uninitialized => {
-                                return Err(VmErr::Msg(format!(
-                                    "ReferenceError: Cannot access '{name}' before initialization"
-                                )));
-                            }
-                            Lookup::Missing => {
-                                return Err(VmErr::Msg(format!(
-                                    "ReferenceError: {name} is not defined"
-                                )));
-                            }
+                    // Lookup cannot run guest code or change the active
+                    // scope. Borrow its existing root instead of bumping
+                    // the environment's Rc count for every global read.
+                    let scope = current_scope(interp, frame);
+                    let lookup = interp.lookup_binding_in(&scope, name)?;
+                    match lookup {
+                        Lookup::Value(v) => frame.registers[dst as usize].assign_for_execution(v),
+                        Lookup::Uninitialized => {
+                            return Err(VmErr::Msg(format!(
+                                "ReferenceError: Cannot access '{name}' before initialization"
+                            )));
+                        }
+                        Lookup::Missing if name == "undefined" => {
+                            frame.registers[dst as usize] = Value::Undefined;
+                        }
+                        Lookup::Missing => {
+                            return Err(VmErr::Msg(format!(
+                                "ReferenceError: {name} is not defined"
+                            )));
                         }
                     }
                 }

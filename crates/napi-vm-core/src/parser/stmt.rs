@@ -43,7 +43,11 @@ impl Parser {
                     && !self.line_break_after_current()
                     && matches!(
                         self.peek(),
-                        Token::Identifier(_) | Token::EscapedIdentifier(_)
+                        Token::Identifier(_)
+                            | Token::EscapedIdentifier(_)
+                            | Token::KwAwait
+                            | Token::KwYield
+                            | Token::KwOf
                     ) =>
             {
                 if self.single_statement {
@@ -176,33 +180,13 @@ impl Parser {
             Token::KwSwitch => self.switch(),
             Token::KwExport => self.export(),
             Token::KwImport => {
-                let saved_pos = self.pos;
-                self.adv();
-                if self.eat(&Token::Dot)
-                    && let Token::Identifier(m) = self.cur()
-                    && m == "meta"
-                {
-                    self.adv();
-                    let mut expr = Expr::ImportMeta;
-                    while self.eat(&Token::Dot) {
-                        let prop = self.ident()?;
-                        expr = Expr::Member {
-                            object: Box::new(expr),
-                            property: Box::new(Expr::String((prop).into())),
-                            computed: false,
-                        };
-                    }
-                    self.semi();
-                    return Some(Statement::Expr(expr));
-                }
-                // `import('m')` at statement position is an expression.
-                if matches!(self.cur(), Token::LParen | Token::Dot) {
-                    self.pos = saved_pos;
+                // Meta-properties and phased imports use the same postfix grammar
+                // as every other expression, including calls and computed members.
+                if matches!(self.peek(), Token::LParen | Token::Dot) {
                     let e = self.expr()?;
                     self.semi();
                     return Some(Statement::Expr(e));
                 }
-                self.pos = saved_pos;
                 self.import()
             }
             Token::LBrace => {
@@ -319,6 +303,16 @@ impl Parser {
         }
     }
 
+    fn pattern_element(&mut self) -> Option<Pattern> {
+        let pattern = self.pattern()?;
+        if matches!(pattern, Pattern::Array(_) | Pattern::Object(_)) && self.eat(&Token::Equal) {
+            let initializer = self.with_in(true, Self::assign)?;
+            Some(Pattern::Default(Box::new(pattern), Box::new(initializer)))
+        } else {
+            Some(pattern)
+        }
+    }
+
     pub(crate) fn pattern(&mut self) -> Option<Pattern> {
         match self.cur() {
             Token::LBracket => {
@@ -338,7 +332,7 @@ impl Parser {
                             );
                         }
                     } else {
-                        elements.push(self.pattern()?);
+                        elements.push(self.pattern_element()?);
                     }
                     if !matches!(self.cur(), Token::RBracket) {
                         self.expect(&Token::Comma);
@@ -370,7 +364,7 @@ impl Parser {
                     // numeric keys behave like their object-literal forms.
                     let mut keyword_only = false;
                     let key = if self.eat(&Token::LBracket) {
-                        let expr = self.assign()?;
+                        let expr = self.with_in(true, Self::assign)?;
                         self.expect(&Token::RBracket);
                         PatternKey::Computed(expr)
                     } else {
@@ -391,6 +385,12 @@ impl Parser {
                                 let key = PatternKey::Name(s.to_key());
                                 self.adv();
                                 key
+                            }
+                            Token::BigInt(digits) => {
+                                keyword_only = true;
+                                let name = crate::bigint::BigInt::parse(digits).ok()?.to_string();
+                                self.adv();
+                                PatternKey::Name(name)
                             }
                             Token::Number(n) => {
                                 keyword_only = true;
@@ -421,7 +421,7 @@ impl Parser {
                     // property that is absent or `undefined`. A computed key
                     // without a colon (`{ [k] }`, `{ [k] = 1 }`) is invalid.
                     if self.eat(&Token::Equal) {
-                        let default = self.assign()?;
+                        let default = self.with_in(true, Self::assign)?;
                         let target = match (pat, &key) {
                             (Some(target), _) => target,
                             (None, PatternKey::Name(name)) => Pattern::Ident(name.clone()),
@@ -445,7 +445,7 @@ impl Parser {
                 if self.eat(&Token::Equal) {
                     Some(Pattern::Default(
                         Box::new(Pattern::Ident(name)),
-                        Box::new(self.assign()?),
+                        Box::new(self.with_in(true, Self::assign)?),
                     ))
                 } else {
                     Some(Pattern::Ident(name))
@@ -646,7 +646,11 @@ impl Parser {
         if matches!(self.cur(), Token::Identifier(name) if name == "using")
             && matches!(
                 self.peek(),
-                Token::Identifier(_) | Token::EscapedIdentifier(_)
+                Token::Identifier(_)
+                    | Token::EscapedIdentifier(_)
+                    | Token::KwAwait
+                    | Token::KwYield
+                    | Token::KwOf
             )
         {
             self.adv();
@@ -668,7 +672,17 @@ impl Parser {
         let mut head_pattern: Option<Box<Pattern>> = None;
         let bare_async_head =
             matches!(self.cur(), Token::KwAsync) && matches!(self.peek(), Token::KwOf);
-        let init = if matches!(self.cur(), Token::KwVar | Token::KwLet | Token::KwConst) {
+        let init = if matches!(self.cur(), Token::KwVar | Token::KwConst)
+            || (matches!(self.cur(), Token::KwLet)
+                && !matches!(
+                    self.peek(),
+                    Token::KwIn
+                        | Token::Semicolon
+                        | Token::RParen
+                        | Token::Equal
+                        | Token::PlusEqual
+                        | Token::MinusEqual
+                )) {
             let kind = match self.cur() {
                 Token::KwVar => VarKind::Var,
                 Token::KwLet => VarKind::Let,
@@ -949,7 +963,7 @@ impl Parser {
                 let slot = format!("*pattern{}*", names.len());
                 let mut init: Expr = Expr::Identifier(slot.clone());
                 if self.eat(&Token::Equal) {
-                    let Some(default) = self.assign() else {
+                    let Some(default) = self.with_in(true, Self::assign) else {
                         self.record_error("expected parameter default expression".into());
                         break;
                     };
@@ -975,7 +989,7 @@ impl Parser {
                         None,
                     );
                     if self.eat(&Token::Equal) {
-                        let Some(d) = self.assign() else {
+                        let Some(d) = self.with_in(true, Self::assign) else {
                             self.record_error("expected parameter default expression".into());
                             break;
                         };

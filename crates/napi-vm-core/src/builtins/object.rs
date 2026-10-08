@@ -184,7 +184,7 @@ fn own_object_names(props: &Rc<ObjectCell>, enumerable_only: bool) -> Vec<String
         .collect()
 }
 
-fn own_names_for(
+pub(crate) fn own_names_for(
     interp: &mut Interpreter,
     value: &Value,
     enumerable_only: bool,

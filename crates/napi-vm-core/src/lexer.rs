@@ -225,6 +225,14 @@ pub struct Lexer {
     /// something that *ends a value* it is division, and otherwise it begins a
     /// literal.
     previous: Option<Token>,
+    // Closing statement delimiters select InputElementRegExp; expression
+    // delimiters select InputElementDiv. Function/class expressions retain
+    // their expression goal even though their bodies contain statements.
+    delimiters: Vec<(Token, bool)>,
+    closed_statement: bool,
+    pending_function: Option<(usize, bool)>,
+    pending_class: Option<(usize, bool)>,
+    function_body: Option<bool>,
     encoded_source: bool,
     module_goal: bool,
     line_has_token: bool,
@@ -241,6 +249,11 @@ impl Lexer {
             lexical_errors: Vec::new(),
             pending_spans: Vec::new(),
             previous: None,
+            delimiters: Vec::new(),
+            closed_statement: false,
+            pending_function: None,
+            pending_class: None,
+            function_body: None,
             encoded_source: false,
             module_goal: false,
             line_has_token: false,
@@ -304,6 +317,7 @@ impl Lexer {
                 break;
             }
             if let Some((t, span)) = self.next_with_span() {
+                self.observe_token(&t);
                 self.previous = Some(t.clone());
                 self.line_has_token = true;
                 toks.push((t, span));
@@ -321,7 +335,14 @@ impl Lexer {
             let html_open = self.src[self.pos..].starts_with(&['<', '!', '-', '-']);
             let html_close =
                 !self.line_has_token && self.src[self.pos..].starts_with(&['-', '-', '>']);
-            if !self.module_goal && (html_open || html_close) {
+            if self.pos == 0 && self.src.starts_with(&['#', '!']) {
+                while self.pos < self.src.len()
+                    && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+                {
+                    self.pos += 1;
+                    self.col += 1;
+                }
+            } else if !self.module_goal && (html_open || html_close) {
                 while self.pos < self.src.len()
                     && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
                 {
@@ -575,7 +596,7 @@ impl Lexer {
                         Token::QuestionQuestion
                     }
                 }
-                Some('.') => {
+                Some('.') if !self.src.get(self.pos + 2).is_some_and(char::is_ascii_digit) => {
                     self.pos += 2;
                     self.col += 2;
                     Token::QuestionDot
@@ -894,7 +915,97 @@ impl Lexer {
     /// It is division only when the previous token ends a value. Everything
     /// else — the start of the program, an operator, a keyword, an opening
     /// bracket — is a position where an expression may begin.
+    fn observe_token(&mut self, token: &Token) {
+        let previous = self.previous.as_ref();
+        let statement_start = previous.is_none()
+            || matches!(
+                previous,
+                Some(
+                    Token::Semicolon
+                        | Token::LBrace
+                        | Token::KwElse
+                        | Token::KwExport
+                        | Token::KwDefault
+                )
+            )
+            || (self.closed_statement && matches!(previous, Some(Token::RBrace | Token::RParen)));
+        match token {
+            Token::KwFunction if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) => {
+                self.pending_function = Some((self.delimiters.len(), !statement_start));
+            }
+            Token::KwClass if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) => {
+                self.pending_class = Some((self.delimiters.len(), !statement_start));
+            }
+            Token::LParen => {
+                let control = matches!(
+                    previous,
+                    Some(
+                        Token::KwIf
+                            | Token::KwWhile
+                            | Token::KwFor
+                            | Token::KwWith
+                            | Token::KwSwitch
+                            | Token::KwCatch
+                    )
+                );
+                self.delimiters.push((Token::LParen, control));
+            }
+            Token::RParen => {
+                if let Some((Token::LParen, control)) = self.delimiters.pop() {
+                    self.closed_statement = control;
+                }
+                if let Some((depth, expression)) = self.pending_function
+                    && depth == self.delimiters.len()
+                {
+                    self.function_body = Some(expression);
+                    self.pending_function = None;
+                }
+                return;
+            }
+            Token::LBracket => self.delimiters.push((Token::LBracket, false)),
+            Token::RBracket => {
+                self.delimiters.pop();
+            }
+            Token::LBrace => {
+                let statement = if let Some(expression) = self.function_body.take() {
+                    !expression
+                } else if let Some((depth, expression)) = self.pending_class
+                    && depth == self.delimiters.len()
+                {
+                    self.pending_class = None;
+                    !expression
+                } else {
+                    statement_start
+                        || matches!(
+                            previous,
+                            Some(Token::RParen | Token::KwTry | Token::KwFinally | Token::KwDo)
+                        )
+                };
+                self.delimiters.push((Token::LBrace, statement));
+            }
+            Token::RBrace => {
+                if let Some((Token::LBrace, statement)) = self.delimiters.pop() {
+                    self.closed_statement = statement;
+                }
+                return;
+            }
+            _ => {}
+        }
+        self.closed_statement = false;
+    }
+
     fn regex_allowed(&self) -> bool {
+        // At Script top level these contextual words are identifier references.
+        // Module await and callable yield continue to admit an operand literal.
+        if !self.module_goal
+            && self.delimiters.is_empty()
+            && matches!(self.previous, Some(Token::KwAwait | Token::KwYield))
+        {
+            return false;
+        }
+        if self.closed_statement && matches!(self.previous, Some(Token::RParen | Token::RBrace)) {
+            return true;
+        }
         match &self.previous {
             None => true,
             Some(token) => !matches!(
@@ -903,6 +1014,7 @@ impl Lexer {
                     | Token::EscapedIdentifier(_)
                     | Token::PrivateIdentifier(_)
                     | Token::Number(_)
+                    | Token::BigInt(_)
                     | Token::LegacyNumber(_)
                     | Token::String(_)
                     | Token::EscapedString(_)

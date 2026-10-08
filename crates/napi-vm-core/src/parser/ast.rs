@@ -207,6 +207,7 @@ pub enum Expr {
     /// `import(specifier)`: resolves to the module's namespace object.
     DynamicImport {
         specifier: Box<Expr>,
+        options: Option<Box<Expr>>,
         phase: ImportPhase,
     },
     Template {
@@ -1039,9 +1040,15 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
                 || expr_captures_identifier(consequent, name)
                 || expr_captures_identifier(alternate, name)
         }
-        Expr::DynamicImport { specifier, .. } | Expr::YieldFrom(specifier) => {
+        Expr::DynamicImport {
+            specifier, options, ..
+        } => {
             expr_captures_identifier(specifier, name)
+                || options
+                    .as_deref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
         }
+        Expr::YieldFrom(specifier) => expr_captures_identifier(specifier, name),
         Expr::Template { exprs, .. } => exprs
             .iter()
             .any(|expr| expr_captures_identifier(expr, name)),
@@ -1391,7 +1398,14 @@ fn expr_references(e: &Expr, name: &str) -> bool {
         | Expr::Super
         | Expr::ImportMeta
         | Expr::NewTarget => false,
-        Expr::DynamicImport { specifier, .. } => expr_references(specifier, name),
+        Expr::DynamicImport {
+            specifier, options, ..
+        } => {
+            expr_references(specifier, name)
+                || options
+                    .as_deref()
+                    .is_some_and(|expr| expr_references(expr, name))
+        }
     }
 }
 

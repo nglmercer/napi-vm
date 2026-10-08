@@ -554,6 +554,7 @@ impl Parser {
                         | Token::LegacyString(_)
                         | Token::Number(_)
                         | Token::LegacyNumber(_)
+                        | Token::BigInt(_)
                         | Token::LBracket
                 ))
     }

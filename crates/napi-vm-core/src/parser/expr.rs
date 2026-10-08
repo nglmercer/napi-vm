@@ -53,6 +53,7 @@ impl Parser {
                         | Token::RBrace
                         | Token::RBracket
                         | Token::Comma
+                        | Token::Colon
                         | Token::EOF
                 ) {
                 None
@@ -684,7 +685,7 @@ impl Parser {
                         };
                     } else if self.eat(&Token::LBracket) {
                         // Optional computed member: obj?.[expr]
-                        let p = self.with_in(true, Self::assign)?;
+                        let p = self.with_in(true, Self::expr)?;
                         self.expect(&Token::RBracket);
                         e = Expr::OptionalChain {
                             object: Box::new(e),

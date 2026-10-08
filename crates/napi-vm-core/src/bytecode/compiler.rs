@@ -3338,7 +3338,14 @@ impl<'a> Compiler<'a> {
             } => self.compile_tagged(tag, cooked, raw, exprs),
             Expr::Super => self.raise_bare_super(),
             Expr::Spread(inner) => self.compile_expr(inner),
-            Expr::DynamicImport { specifier, phase } => {
+            Expr::DynamicImport {
+                specifier,
+                options,
+                phase,
+            } => {
+                if options.is_some() {
+                    return Err(Decline::Func("dynamic import options"));
+                }
                 if *phase != crate::parser::ImportPhase::Evaluation {
                     return Err(Decline::Func("non-evaluation import phases"));
                 }
@@ -3387,15 +3394,12 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Identifier reads. `undefined` is always the value, even when shadowed
-    /// — the evaluator special-cases it before any lookup. `arguments` in a
+    /// Identifier reads resolve lexical bindings, including shadowed `undefined`.
+    /// `arguments` in a
     /// real function needs the arguments object (per-function fallback); in
     /// an arrow it captures the enclosing one through the chain (seeded by
     /// the defining non-arrow function).
     fn compile_identifier(&mut self, name: &str) -> Result<Reg, Decline> {
-        if name == "undefined" {
-            return self.load_undefined();
-        }
         if name == "arguments" && !self.top_level {
             if self.is_arrow() {
                 self.captures_arguments = true;
@@ -3785,16 +3789,6 @@ impl<'a> Compiler<'a> {
     /// still reads as `undefined` rather than throwing, like the evaluator.
     fn compile_typeof(&mut self, operand: &'a Expr) -> Result<Reg, Decline> {
         if let Expr::Identifier(name) = operand {
-            if name == "undefined" {
-                let src = self.load_undefined()?;
-                let dst = self.alloc_reg()?;
-                self.emit(Instr::Unary {
-                    dst,
-                    op: UnOp::Typeof,
-                    src,
-                });
-                return Ok(dst);
-            }
             let dst = self.alloc_reg()?;
             match self.resolve(name)? {
                 Binding::Slot(slot) => self.emit(Instr::TypeofLocal { dst, slot }),
