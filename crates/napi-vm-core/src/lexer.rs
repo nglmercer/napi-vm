@@ -216,6 +216,7 @@ struct LexicalCallable {
     is_async: bool,
     is_generator: bool,
     arrow: bool,
+    field: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -224,6 +225,7 @@ struct LexicalMember {
     head: bool,
     async_names: usize,
     generator: bool,
+    class: bool,
 }
 
 pub struct Lexer {
@@ -247,11 +249,14 @@ pub struct Lexer {
     async_statement_start: bool,
     async_line_break: bool,
     last_token_end_line: usize,
+    current_line_break: bool,
     // Closing statement delimiters select InputElementRegExp; expression
     // delimiters select InputElementDiv. Function/class expressions retain
     // their expression goal even though their bodies contain statements.
     delimiters: Vec<(Token, bool)>,
     closed_statement: bool,
+    conditional_depths: Vec<usize>,
+    statement_colon: bool,
     callables: Vec<LexicalCallable>,
     members: Vec<LexicalMember>,
     async_arrow_depth: Option<usize>,
@@ -277,8 +282,11 @@ impl Lexer {
             async_statement_start: false,
             async_line_break: false,
             last_token_end_line: 1,
+            current_line_break: false,
             delimiters: Vec::new(),
             closed_statement: false,
+            conditional_depths: Vec::new(),
+            statement_colon: false,
             callables: Vec::new(),
             members: Vec::new(),
             async_arrow_depth: None,
@@ -525,6 +533,8 @@ impl Lexer {
         let previous = self.previous.take();
         let before_previous = self.before_previous.take();
         let closed_statement = std::mem::replace(&mut self.closed_statement, false);
+        let conditional_depths = std::mem::take(&mut self.conditional_depths);
+        let statement_colon = std::mem::replace(&mut self.statement_colon, false);
         let callables = self.callables.clone();
         let members = self.members.clone();
         let async_arrow_depth = self.async_arrow_depth;
@@ -533,6 +543,7 @@ impl Lexer {
         let async_statement_start = self.async_statement_start;
         let async_line_break = self.async_line_break;
         let last_token_end_line = self.last_token_end_line;
+        let current_line_break = self.current_line_break;
         let delimiter_depth = self.delimiters.len();
         let mut depth = 1i32;
         while self.pos < self.src.len() && depth > 0 {
@@ -563,6 +574,8 @@ impl Lexer {
         self.previous = previous;
         self.before_previous = before_previous;
         self.closed_statement = closed_statement;
+        self.conditional_depths = conditional_depths;
+        self.statement_colon = statement_colon;
         self.callables = callables;
         self.members = members;
         self.async_arrow_depth = async_arrow_depth;
@@ -571,6 +584,7 @@ impl Lexer {
         self.async_statement_start = async_statement_start;
         self.async_line_break = async_line_break;
         self.last_token_end_line = last_token_end_line;
+        self.current_line_break = current_line_break;
         self.delimiters.truncate(delimiter_depth);
     }
 
@@ -972,6 +986,7 @@ impl Lexer {
     /// else — the start of the program, an operator, a keyword, an opening
     /// bracket — is a position where an expression may begin.
     fn record_token(&mut self, token: &Token, line: usize, end_line: usize) {
+        self.current_line_break = line > self.last_token_end_line;
         self.async_line_break =
             matches!(self.previous, Some(Token::KwAsync)) && line > self.last_token_end_line;
         if self.async_line_break {
@@ -1000,13 +1015,54 @@ impl Lexer {
                 )
             )
             || (self.closed_statement && matches!(previous, Some(Token::RBrace | Token::RParen)));
+        let field_boundary = self.members.last().is_some_and(|member| {
+            member.class && member.depth == self.delimiters.len() && !member.head
+        }) && self.current_line_break
+            && (token.identifier_name().is_some()
+                && !matches!(token, Token::KwIn | Token::KwInstanceof)
+                || matches!(
+                    token,
+                    Token::PrivateIdentifier(_)
+                        | Token::String(_)
+                        | Token::EscapedString(_)
+                        | Token::Number(_)
+                        | Token::BigInt(_)
+                ))
+            && previous.is_some_and(|token| {
+                token.identifier_name().is_some()
+                    || matches!(
+                        token,
+                        Token::Number(_)
+                            | Token::BigInt(_)
+                            | Token::String(_)
+                            | Token::EscapedString(_)
+                            | Token::RParen
+                            | Token::RBracket
+                            | Token::RBrace
+                            | Token::Backtick
+                    )
+            });
+        if field_boundary {
+            while self.callables.last().is_some_and(|callable| {
+                (callable.field || callable.arrow)
+                    && callable.body_depth.is_none()
+                    && callable.depth == self.delimiters.len()
+            }) {
+                self.callables.pop();
+            }
+            if let Some(member) = self.members.last_mut() {
+                member.head = true;
+                member.async_names = 0;
+                member.generator = false;
+            }
+        }
         let member_head = self
             .members
             .last()
             .is_some_and(|member| member.depth == self.delimiters.len() && member.head);
         if matches!(token, Token::Comma | Token::Semicolon) {
             while self.callables.last().is_some_and(|callable| {
-                callable.arrow
+                (callable.arrow || callable.field)
                     && callable.body_depth.is_none()
                     && callable.depth == self.delimiters.len()
             }) {
@@ -1035,6 +1091,31 @@ impl Lexer {
             }
         }
         match token {
+            Token::Equal
+                if member_head && self.members.last().is_some_and(|member| member.class) =>
+            {
+                self.callables.push(LexicalCallable {
+                    depth: self.delimiters.len(),
+                    body_depth: None,
+                    expression: true,
+                    is_async: false,
+                    is_generator: false,
+                    arrow: false,
+                    field: true,
+                });
+            }
+            Token::Question => self.conditional_depths.push(self.delimiters.len()),
+            Token::Colon => {
+                if self.conditional_depths.last() == Some(&self.delimiters.len()) {
+                    self.conditional_depths.pop();
+                    self.statement_colon = false;
+                } else {
+                    self.statement_colon = !self
+                        .members
+                        .last()
+                        .is_some_and(|member| member.depth == self.delimiters.len());
+                }
+            }
             Token::KwAsync => {
                 self.async_statement_start = statement_start;
                 if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) {
@@ -1054,6 +1135,7 @@ impl Lexer {
                     is_async: matches!(previous, Some(Token::KwAsync)) && !self.async_line_break,
                     is_generator: false,
                     arrow: false,
+                    field: false,
                 });
                 self.async_arrow_depth = None;
             }
@@ -1076,6 +1158,7 @@ impl Lexer {
                     is_async,
                     is_generator: false,
                     arrow: true,
+                    field: false,
                 });
             }
             Token::LParen => {
@@ -1103,6 +1186,7 @@ impl Lexer {
                                 || member.async_names > 1),
                         is_generator: member.generator,
                         arrow: false,
+                        field: false,
                     });
                     self.members.last_mut().unwrap().head = false;
                 }
@@ -1127,6 +1211,7 @@ impl Lexer {
                 }
                 if let Some(callable) = self.callables.last_mut()
                     && !callable.arrow
+                    && !callable.field
                     && callable.body_depth.is_none()
                     && callable.depth == self.delimiters.len()
                 {
@@ -1161,6 +1246,8 @@ impl Lexer {
                     !expression
                 } else {
                     statement_start
+                        || matches!(previous, Some(Token::Colon)) && self.statement_colon
+                        || matches!(previous, Some(Token::KwStatic)) && member_head
                         || matches!(
                             previous,
                             Some(Token::RParen | Token::KwTry | Token::KwFinally | Token::KwDo)
@@ -1173,11 +1260,19 @@ impl Lexer {
                         head: true,
                         async_names: 0,
                         generator: false,
+                        class: class_body,
                     });
                 }
             }
             Token::RBrace => {
                 let depth = self.delimiters.len();
+                while self
+                    .callables
+                    .last()
+                    .is_some_and(|callable| callable.field && callable.depth == depth)
+                {
+                    self.callables.pop();
+                }
                 if self
                     .members
                     .last()

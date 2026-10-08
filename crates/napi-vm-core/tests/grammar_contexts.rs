@@ -1516,3 +1516,40 @@ fn keyword_member_names_and_template_line_endings_follow_lexical_grammar() {
         );
     }
 }
+
+#[test]
+fn using_iteration_heads_preserve_contextual_identifier_grammar() {
+    let source = "var using,of=[[9],[8],[7]],result=[];for(using of of[0,1,2]){result.push(using)}result.length===1&&result[0]===7;";
+    for prefix in ["", "'use strict';"] {
+        let result =
+            napi_vm_core::Interpreter::with_builtins().eval_source(&format!("{prefix}{source}"));
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{result:?}"
+        );
+    }
+    assert!(parses(
+        "async function f(){for(await using of of []){}}",
+        ParseGoal::Script
+    ));
+}
+
+#[test]
+fn labelled_and_static_blocks_preserve_statement_lexical_goals() {
+    for source in [
+        "label:{} /x/;",
+        "function f(){label:{} /x/;}",
+        "class C{static{ {} /x/; }}",
+        "class C{static{function f(){} /x/;}}",
+        "const o=x?{}:{} / 2 / 3;",
+        "const o={x:{}} / 2 / 3;",
+        "switch(x){case 1:{} /x/;}",
+        "do{}while(false)/x/;",
+        "async function f(){class C{x=await/a;b=g;}}",
+        "async function f(){class C{x=await/a\ny=g;}}",
+        "async function f(){class C{x=await/a;[await /r/]=1;}}",
+        "async function f(){class C{x=g();[await /r/]=1;}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}

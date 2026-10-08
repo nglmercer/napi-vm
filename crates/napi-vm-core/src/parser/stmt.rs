@@ -652,6 +652,7 @@ impl Parser {
                     | Token::KwYield
                     | Token::KwOf
             )
+            && (await_using || !matches!(self.peek(), Token::KwOf))
         {
             self.adv();
             let name = self.ident()?;
