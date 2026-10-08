@@ -54,7 +54,7 @@ impl Parser {
         self.adv();
         let name_span = self.cur_span();
         let n = match (self.cur(), fallback) {
-            (Token::Identifier(_), _) => self.ident()?,
+            (Token::Identifier(_) | Token::EscapedIdentifier(_), _) => self.ident()?,
             (_, Some(name)) => name.to_string(),
             _ => return None,
         };
@@ -105,7 +105,7 @@ impl Parser {
                 MemberName::Computed(expr)
             } else {
                 let name = match self.cur() {
-                    Token::Identifier(x) => {
+                    Token::Identifier(x) | Token::EscapedIdentifier(x) => {
                         let v = x.clone();
                         self.adv();
                         v
@@ -401,7 +401,7 @@ impl Parser {
 
     pub(super) fn import(&mut self) -> Option<Statement> {
         self.adv();
-        let def = if let Token::Identifier(n) = self.cur() {
+        let def = if let Token::Identifier(n) | Token::EscapedIdentifier(n) = self.cur() {
             let nm = n.clone();
             self.adv();
             if self.eat(&Token::Comma) {

@@ -52,7 +52,7 @@ fn describe(token: &Token) -> String {
         Token::EOF => "end of input".to_string(),
         Token::Number(n) => format!("number `{n}`"),
         Token::String(s) | Token::EscapedString(s) => format!("string `{s}`"),
-        Token::Identifier(name) => format!("`{name}`"),
+        Token::Identifier(name) | Token::EscapedIdentifier(name) => format!("`{name}`"),
         Token::Unknown(c) => format!("`{c}`"),
         other => format!("`{other:?}`"),
     }
@@ -334,7 +334,11 @@ impl Parser {
 
     /// Arrow parameters cannot start an unparenthesized ShiftExpression.
     pub(crate) fn arrow_head_here(&self) -> bool {
-        if matches!(self.cur(), Token::Identifier(_)) && matches!(self.peek(), Token::Arrow) {
+        if matches!(
+            self.cur(),
+            Token::Identifier(_) | Token::EscapedIdentifier(_)
+        ) && matches!(self.peek(), Token::Arrow)
+        {
             return true;
         }
         if !matches!(self.cur(), Token::LParen) {
@@ -535,6 +539,7 @@ impl Parser {
             && matches!(
                 self.peek(),
                 Token::Identifier(_)
+                    | Token::EscapedIdentifier(_)
                     | Token::String(_)
                     | Token::EscapedString(_)
                     | Token::Number(_)

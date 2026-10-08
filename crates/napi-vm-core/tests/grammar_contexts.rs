@@ -757,3 +757,70 @@ fn sloppy_eval_var_conflicts_distinguish_identifier_and_pattern_catch_bindings()
         );
     }
 }
+
+#[test]
+fn unicode_identifier_names_preserve_escape_and_keyword_boundaries() {
+    for source in [
+        r"var α=1;α;",
+        r"var 𝒜=1;𝒜;",
+        r"var \u0061=1;a;",
+        r"var a\u200Cb=1;a\u200Cb;",
+        r"var \u{1D49C}=1;𝒜;",
+        r"var \u0073tatic=1;static;",
+        r"var obj={\u0069f:1};obj.\u0069f;",
+        r"function f(\u0061){return a;}",
+        r"async \u0061=>a;",
+        r"\u0061:while(false){break \u0061;}",
+        r"class C{#\u0061;m(){return this.#a;}}",
+        r"debugger;",
+        r"let:while(false){break let;}",
+        r"static:while(false){continue static;}",
+        r"async:while(false){break async;}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        r"var \u0030=1;",
+        r"var \u200C=1;",
+        r"var a\u0020b=1;",
+        r"var \uD800=1;",
+        r"var \u{110000}=1;",
+        r"var \u{}=1;",
+        r"var \u12=1;",
+        r"var \u0069f=1;",
+        r"\u0069f(true){}",
+        r"\u0066unction f(){}",
+        r"\u0064ebugger;",
+        r"var enum=1;",
+        r"'use strict';static:while(false){}",
+        r"async function f(){await:while(false){}}",
+        r"function* f(){yield:while(false){}}",
+        r"({\u0069f});",
+        r"'use strict';var \u0073tatic=1;",
+        r"async function f(\u0061wait){}",
+        r"function* f(\u0079ield){}",
+        r"function f(){new.\u0074arget;}",
+        r"\u0069f:while(false){}",
+        r"class C{#a;#\u0061;}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    assert!(!parses(r"import.\u006deta;", ParseGoal::Module));
+    assert!(parses(
+        r"import {x as \u0061} from 'm';export {a};",
+        ParseGoal::Module
+    ));
+    for source in [
+        r"var \u{1D49C}=3;𝒜===3;",
+        r"var α=6;α/2===3;",
+        r"var \u0061=6;a/2===3;",
+        r"var static=6;static/2===3;",
+        r"var o={\u0069f:3};o.\u0069f===3;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

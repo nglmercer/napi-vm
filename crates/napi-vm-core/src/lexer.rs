@@ -22,6 +22,8 @@ pub enum Token {
     /// A string literal containing escapes; it cannot be a Use Strict Directive.
     EscapedString(crate::JsString),
     Identifier(String),
+    /// IdentifierName containing a Unicode escape. It cannot act as a keyword.
+    EscapedIdentifier(String),
     Plus,
     Minus,
     Star,
@@ -102,6 +104,8 @@ pub enum Token {
     KwUndefined,
     KwDelete,
     KwVoid,
+    KwDebugger,
+    KwEnum,
     KwStatic,
     KwGet,
     KwSet,
@@ -781,7 +785,7 @@ impl Lexer {
             }
             '"' | '\'' => self.read_str(c),
             c if c.is_ascii_digit() => self.read_num(),
-            c if c.is_ascii_alphabetic() || c == '_' || c == '$' => self.read_ident(),
+            c if is_identifier_start(c) || c == '\\' => self.read_ident(),
             _ => {
                 self.pos += 1;
                 self.col += 1;
@@ -801,6 +805,7 @@ impl Lexer {
             Some(token) => !matches!(
                 token,
                 Token::Identifier(_)
+                    | Token::EscapedIdentifier(_)
                     | Token::Number(_)
                     | Token::String(_)
                     | Token::EscapedString(_)
@@ -810,6 +815,16 @@ impl Lexer {
                     | Token::RBrace
                     | Token::PlusPlus
                     | Token::MinusMinus
+                    | Token::KwAs
+                    | Token::KwAsync
+                    | Token::KwConstructor
+                    | Token::KwFrom
+                    | Token::KwGet
+                    | Token::KwLet
+                    | Token::KwOf
+                    | Token::KwSet
+                    | Token::KwStatic
+                    | Token::KwUndefined
                     | Token::KwThis
                     | Token::KwSuper
                     | Token::KwNull
@@ -1103,17 +1118,81 @@ impl Lexer {
         Token::Number(n.parse().unwrap_or(0.0))
     }
 
-    fn read_ident(&mut self) -> Token {
-        let s = self.pos;
-        while self.pos < self.src.len() {
-            let c = self.src[self.pos];
-            if !c.is_ascii_alphanumeric() && c != '_' && c != '$' {
+    fn identifier_escape(&mut self) -> Result<char, ()> {
+        self.pos += 1;
+        self.col += 1;
+        if self.src.get(self.pos) != Some(&'u') {
+            return Err(());
+        }
+        self.pos += 1;
+        self.col += 1;
+        let braced = self.src.get(self.pos) == Some(&'{');
+        if braced {
+            self.pos += 1;
+            self.col += 1;
+        }
+        let mut value = 0u32;
+        let mut digits = 0;
+        while let Some(&c) = self.src.get(self.pos) {
+            if braced && c == '}' || !braced && digits == 4 {
                 break;
+            }
+            let digit = c.to_digit(16).ok_or(())?;
+            value = value
+                .checked_mul(16)
+                .and_then(|v| v.checked_add(digit))
+                .ok_or(())?;
+            self.pos += 1;
+            self.col += 1;
+            digits += 1;
+        }
+        if digits == 0 || !braced && digits != 4 {
+            return Err(());
+        }
+        if braced {
+            if self.src.get(self.pos) != Some(&'}') {
+                return Err(());
             }
             self.pos += 1;
             self.col += 1;
         }
-        let i: String = self.src[s..self.pos].iter().collect();
+        char::from_u32(value).ok_or(())
+    }
+
+    fn read_ident(&mut self) -> Token {
+        let mut i = String::new();
+        let mut escaped = false;
+        while let Some(&c) = self.src.get(self.pos) {
+            let character = if c == '\\' {
+                escaped = true;
+                match self.identifier_escape() {
+                    Ok(character) => character,
+                    Err(()) => return Token::Unknown('\\'),
+                }
+            } else {
+                if !(if i.is_empty() {
+                    is_identifier_start(c)
+                } else {
+                    is_identifier_continue(c)
+                }) {
+                    break;
+                }
+                self.pos += 1;
+                self.col += 1;
+                c
+            };
+            if !(if i.is_empty() {
+                is_identifier_start(character)
+            } else {
+                is_identifier_continue(character)
+            }) {
+                return Token::Unknown('\\');
+            }
+            i.push(character);
+        }
+        if escaped {
+            return Token::EscapedIdentifier(i);
+        }
         match i.as_str() {
             "var" => Token::KwVar,
             "let" => Token::KwLet,
@@ -1157,6 +1236,8 @@ impl Lexer {
             "undefined" => Token::KwUndefined,
             "delete" => Token::KwDelete,
             "void" => Token::KwVoid,
+            "debugger" => Token::KwDebugger,
+            "enum" => Token::KwEnum,
             "static" => Token::KwStatic,
             "get" => Token::KwGet,
             "set" => Token::KwSet,
@@ -1164,6 +1245,15 @@ impl Lexer {
             _ => Token::Identifier(i),
         }
     }
+}
+
+pub(crate) fn is_identifier_start(character: char) -> bool {
+    matches!(character, '$' | '_') || unicode_id_start::is_id_start(character)
+}
+
+pub(crate) fn is_identifier_continue(character: char) -> bool {
+    matches!(character, '$' | '_' | '\u{200c}' | '\u{200d}')
+        || unicode_id_start::is_id_continue(character)
 }
 
 /// Whether `name` may be used as a binding identifier in guest source --
@@ -1239,6 +1329,8 @@ mod tests {
         "delete",
         "void",
         "static",
+        "debugger",
+        "enum",
     ];
 
     const CONTEXTUAL_IDENTIFIERS: &[&str] =
@@ -1276,6 +1368,11 @@ mod tests {
     #[test]
     fn ordinary_names_are_binding_identifiers() {
         for name in [
+            "café",
+            "你好",
+            "𝒜",
+            "℘",
+            "a\u{200c}b",
             "read",
             "write",
             "_private",
@@ -1311,8 +1408,6 @@ mod tests {
             "a-b",
             "a.b",
             "a()",
-            "café",
-            "\u{4f60}\u{597d}",
             " a",
             "a ",
             "//x",

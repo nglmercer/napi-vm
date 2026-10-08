@@ -1146,6 +1146,7 @@ dependencies = [
  "smallvec",
  "stacker",
  "static_assertions",
+ "unicode-id-start",
  "url",
 ]
 

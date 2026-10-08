@@ -164,7 +164,52 @@ fn module_exports(body: &[Statement]) -> Check {
     Ok(())
 }
 
+fn reserved_identifier(name: &str) -> bool {
+    matches!(
+        name,
+        "break"
+            | "case"
+            | "catch"
+            | "class"
+            | "const"
+            | "continue"
+            | "debugger"
+            | "default"
+            | "delete"
+            | "do"
+            | "else"
+            | "enum"
+            | "export"
+            | "extends"
+            | "false"
+            | "finally"
+            | "for"
+            | "function"
+            | "if"
+            | "import"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "null"
+            | "return"
+            | "super"
+            | "switch"
+            | "this"
+            | "throw"
+            | "true"
+            | "try"
+            | "typeof"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+    )
+}
+
 fn binding(name: &str, ctx: &Context) -> Check {
+    if reserved_identifier(name) {
+        return Err(format!("reserved binding: {name}"));
+    }
     if name == "await" && (ctx.module || ctx.kind.asynchronous() || ctx.await_reserved)
         || name == "yield" && ctx.kind.generator()
     {
@@ -631,6 +676,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             Ok(())
         }
         Statement::Labeled { label, body } => {
+            expression(&Expr::Identifier(label.clone()), ctx)?;
             if ctx.labels.iter().any(|(name, _)| name == label) {
                 return Err(format!("duplicate label: {label}"));
             }
@@ -922,6 +968,9 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                 ) =>
         {
             Err(format!("reserved strict identifier: {name}"))
+        }
+        Expr::Identifier(name) if reserved_identifier(name) => {
+            Err(format!("reserved identifier: {name}"))
         }
         Expr::Identifier(name) if name.starts_with('#') => {
             Err("private name must be the left operand of in".into())

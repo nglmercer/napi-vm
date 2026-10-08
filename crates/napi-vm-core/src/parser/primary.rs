@@ -309,10 +309,11 @@ impl Parser {
             Token::KwNew => {
                 self.adv();
                 if self.eat(&Token::Dot) {
-                    if self.ident().as_deref() != Some("target") {
+                    if !matches!(self.cur(), Token::Identifier(name) if name == "target") {
                         self.record_error("expected target after new.".into());
                         return None;
                     }
+                    self.adv();
                     return Some(Expr::NewTarget);
                 }
                 let c = self.new_callee()?;
@@ -342,6 +343,10 @@ impl Parser {
             Token::KwImport => {
                 self.adv();
                 let phase = if self.eat(&Token::Dot) {
+                    if matches!(self.cur(), Token::EscapedIdentifier(_)) {
+                        self.record_error("escaped import meta-property name".into());
+                        return None;
+                    }
                     let name = self.ident()?;
                     match name.as_str() {
                         "meta" => return Some(Expr::ImportMeta),
@@ -380,6 +385,7 @@ impl Parser {
                 Some(Expr::Identifier(format!("#{name}")))
             }
             Token::Identifier(_)
+            | Token::EscapedIdentifier(_)
             | Token::KwAs
             | Token::KwLet
             | Token::KwStatic
@@ -660,7 +666,7 @@ impl Parser {
                 return self.fn_expr_tail(is_generator, true);
             }
             // `async x => …`
-            Token::Identifier(name) => {
+            Token::Identifier(name) | Token::EscapedIdentifier(name) => {
                 let name = name.clone();
                 self.adv();
                 if self.eat(&Token::Arrow) {

@@ -18,11 +18,33 @@ impl Parser {
     }
 
     fn stmt_inner(&mut self) -> Option<Statement> {
+        // Labeled statement: `label: statement`
+        if matches!(self.peek(), Token::Colon)
+            && let Some(label) = self.label_name()
+        {
+            self.adv(); // identifier
+            self.adv(); // colon
+            let saved = self.single_statement;
+            let saved_annex_b = self.allow_annex_b_function;
+            self.single_statement = true;
+            self.allow_annex_b_function = true;
+            let body = self.stmt();
+            self.single_statement = saved;
+            self.allow_annex_b_function = saved_annex_b;
+            let body = body?;
+            return Some(Statement::Labeled {
+                label,
+                body: Box::new(body),
+            });
+        }
         match self.cur() {
             Token::Identifier(name)
                 if name == "using"
                     && !self.line_break_after_current()
-                    && matches!(self.peek(), Token::Identifier(_)) =>
+                    && matches!(
+                        self.peek(),
+                        Token::Identifier(_) | Token::EscapedIdentifier(_)
+                    ) =>
             {
                 if self.single_statement {
                     self.record_error("resource declaration requires a statement list".into());
@@ -32,10 +54,9 @@ impl Parser {
             Token::KwAwait
                 if matches!(self.peek(), Token::Identifier(name) if name == "using")
                     && !self.line_break_after_current()
-                    && self
-                        .toks
-                        .get(self.pos + 2)
-                        .is_some_and(|(token, _)| matches!(token, Token::Identifier(_))) =>
+                    && self.toks.get(self.pos + 2).is_some_and(|(token, _)| {
+                        matches!(token, Token::Identifier(_) | Token::EscapedIdentifier(_))
+                    }) =>
             {
                 if self.single_statement {
                     self.record_error("resource declaration requires a statement list".into());
@@ -60,6 +81,7 @@ impl Parser {
                     || !matches!(
                         self.peek(),
                         Token::Identifier(_)
+                            | Token::EscapedIdentifier(_)
                             | Token::LBracket
                             | Token::LBrace
                             | Token::KwAwait
@@ -118,9 +140,8 @@ impl Parser {
             Token::KwBreak => {
                 self.adv();
                 let label = if !self.line_break_before_current()
-                    && let Token::Identifier(n) = self.cur()
+                    && let Some(l) = self.label_name()
                 {
-                    let l = n.clone();
                     self.adv();
                     Some(l)
                 } else {
@@ -136,9 +157,8 @@ impl Parser {
             Token::KwContinue => {
                 self.adv();
                 let label = if !self.line_break_before_current()
-                    && let Token::Identifier(n) = self.cur()
+                    && let Some(l) = self.label_name()
                 {
-                    let l = n.clone();
                     self.adv();
                     Some(l)
                 } else {
@@ -191,31 +211,16 @@ impl Parser {
                 self.expect(&Token::RBrace);
                 Some(Statement::Block(b))
             }
+            Token::KwDebugger => {
+                self.adv();
+                self.semi();
+                Some(Statement::Empty)
+            }
             Token::Semicolon => {
                 self.adv();
                 Some(Statement::Empty)
             }
             _ => {
-                // Labeled statement: `label: statement`
-                if let Token::Identifier(n) = self.cur()
-                    && matches!(self.peek(), Token::Colon)
-                {
-                    let label = n.clone();
-                    self.adv(); // identifier
-                    self.adv(); // colon
-                    let saved = self.single_statement;
-                    let saved_annex_b = self.allow_annex_b_function;
-                    self.single_statement = true;
-                    self.allow_annex_b_function = true;
-                    let body = self.stmt();
-                    self.single_statement = saved;
-                    self.allow_annex_b_function = saved_annex_b;
-                    let body = body?;
-                    return Some(Statement::Labeled {
-                        label,
-                        body: Box::new(body),
-                    });
-                }
                 let literal_start =
                     matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
                 let mut e = self.expr()?;
@@ -621,7 +626,10 @@ impl Parser {
             self.adv();
         }
         if matches!(self.cur(), Token::Identifier(name) if name == "using")
-            && matches!(self.peek(), Token::Identifier(_))
+            && matches!(
+                self.peek(),
+                Token::Identifier(_) | Token::EscapedIdentifier(_)
+            )
         {
             self.adv();
             let name = self.ident()?;
@@ -968,9 +976,28 @@ impl Parser {
         (names, defaults)
     }
 
+    fn label_name(&self) -> Option<String> {
+        Some(match self.cur() {
+            Token::Identifier(name) | Token::EscapedIdentifier(name) => name.clone(),
+            Token::KwAs => "as".into(),
+            Token::KwAsync => "async".into(),
+            Token::KwAwait => "await".into(),
+            Token::KwConstructor => "constructor".into(),
+            Token::KwFrom => "from".into(),
+            Token::KwGet => "get".into(),
+            Token::KwLet => "let".into(),
+            Token::KwOf => "of".into(),
+            Token::KwSet => "set".into(),
+            Token::KwStatic => "static".into(),
+            Token::KwUndefined => "undefined".into(),
+            Token::KwYield => "yield".into(),
+            _ => return None,
+        })
+    }
+
     pub(crate) fn ident(&mut self) -> Option<String> {
         match self.cur() {
-            Token::Identifier(n) => {
+            Token::Identifier(n) | Token::EscapedIdentifier(n) => {
                 let v = n.clone();
                 self.adv();
                 Some(v)
@@ -1004,12 +1031,14 @@ impl Parser {
     /// `.` in member expressions: `obj.for`, `obj.of`, `obj.get`, etc.).
     pub(crate) fn ident_or_keyword(&mut self) -> Option<String> {
         match self.cur() {
-            Token::Identifier(n) => {
+            Token::Identifier(n) | Token::EscapedIdentifier(n) => {
                 let v = n.clone();
                 self.adv();
                 Some(v)
             }
             // Keywords that can appear as property names after `.`.
+            Token::KwDebugger => self.consume_contextual_identifier("debugger"),
+            Token::KwEnum => self.consume_contextual_identifier("enum"),
             Token::KwFor => {
                 self.adv();
                 Some("for".to_string())
