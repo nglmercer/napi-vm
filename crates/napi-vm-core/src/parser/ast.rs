@@ -472,6 +472,7 @@ pub struct SwitchCase {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemberName {
     Static(String),
+    Private(String),
     Computed(Expr),
 }
 
@@ -519,7 +520,7 @@ pub(crate) fn class_private_declarations(body: &[ClassMember]) -> Vec<String> {
                 ClassMember::StaticBlock { .. } => return None,
             };
             match name {
-                MemberName::Static(name) if name.starts_with('#') => Some(name.clone()),
+                MemberName::Private(name) => Some(name.clone()),
                 _ => None,
             }
         })

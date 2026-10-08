@@ -1205,3 +1205,85 @@ fn const_initializers_numeric_boundaries_and_spread_positions_are_early_errors()
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
+
+#[test]
+fn private_identifiers_are_contiguous_tokens_and_heritage_is_not_assignment_grammar() {
+    for source in [
+        "class C{# x;}",
+        "class C{#/*x*/y;}",
+        "class C{get # x(){}}",
+        "class C{#x;m(){this.# x;}}",
+        "class C{static constructor;}",
+        "class C{static 'constructor';}",
+        "class C extends ()=>{} {}",
+        "class C extends async()=>{} {}",
+        "class C extends a,b {}",
+        "class C extends a=b {}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "class C{#x;m(){return this.#x/2/3;}}",
+        "class C{#x;m(){return new this.#x();}}",
+        "class C{#x;m(){return this?.#x;}}",
+        "class C extends (()=>{}){}",
+        "class C extends f(){}",
+        "class C{static ['constructor'];}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn module_declarations_and_resources_require_their_grammar_positions() {
+    for source in [
+        "label:import x from 'x';",
+        "label:export var x;",
+        "export default null,null;",
+    ] {
+        assert!(!parses(source, ParseGoal::Module), "accepted {source}");
+    }
+    for source in [
+        "using x=null;",
+        "switch(0){case 0:using x=null;}",
+        "switch(0){default:using x=null;}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "switch(0){case 0:await using x=null;}",
+        "switch(0){default:await using x=null;}",
+    ] {
+        assert!(!parses(source, ParseGoal::Module), "accepted {source}");
+    }
+    for source in [
+        "{using x=null;}",
+        "function f(){using x=null;}",
+        "switch(0){case 0:{using x=null;}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "using x=null;",
+        "export default (null,null);",
+        "switch(0){case 0:{await using x=null;}}",
+    ] {
+        assert!(parses(source, ParseGoal::Module), "rejected {source}");
+    }
+}
+
+#[test]
+fn quoted_hash_properties_do_not_declare_private_names() {
+    assert!(!parses(
+        "class C{'#x';m(){return this.#x;}}",
+        ParseGoal::Script
+    ));
+    assert!(parses("class C{'#constructor';}", ParseGoal::Script));
+    let source = "class C{#x=1;'#x'=2;m(){return this.#x+this['#x'];}}new C().m()===3;";
+    let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+    assert!(
+        matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+        "{source}: {result:?}"
+    );
+    assert!(!parses("o.?.x;", ParseGoal::Script));
+}

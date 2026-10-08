@@ -102,6 +102,7 @@ impl Parser {
             }
             // `[expr]` evaluates when the class is defined; string and
             // numeric spellings name the same property as their bare form.
+            let private = matches!(self.cur(), Token::PrivateIdentifier(_));
             let mn = if self.eat(&Token::LBracket) {
                 let expr = self.with_in(true, Self::assign)?;
                 self.expect(&Token::RBracket);
@@ -147,15 +148,20 @@ impl Parser {
                     // name, which is what keeps it out of reach of ordinary
                     // property access — there is no way to write the name from
                     // outside the class body.
-                    Token::Hash => {
+                    Token::PrivateIdentifier(name) => {
+                        let name = format!("#{name}");
                         self.adv();
-                        format!("#{}", self.ident_or_keyword()?)
+                        name
                     }
                     _ => self.ident_or_keyword()?,
                 };
-                MemberName::Static(name)
+                if private {
+                    MemberName::Private(name)
+                } else {
+                    MemberName::Static(name)
+                }
             };
-            if let MemberName::Static(name) = &mn {
+            if let MemberName::Static(name) | MemberName::Private(name) = &mn {
                 self.record(
                     name,
                     member_span,
@@ -254,7 +260,7 @@ impl Parser {
                     Statement::ExportDefault(Box::new(Expr::Identifier(name))),
                 ]));
             }
-            let e = self.expr()?;
+            let e = self.assign()?;
             self.semi();
             Some(Statement::ExportDefault(Box::new(e)))
         } else if self.eat(&Token::Star) {

@@ -1301,3 +1301,11 @@ fn parenthesized_references_keep_existing_tier_parity() {
         check(source, true);
     }
 }
+
+#[test]
+fn public_hash_properties_preserve_private_field_tier_parity() {
+    check(
+        "class C{#x=1;'#x'=2;m(){return this.#x+this['#x'];}}new C().m();",
+        true,
+    );
+}

@@ -1146,7 +1146,7 @@ impl Builder<'_> {
         for member in members {
             match member {
                 ClassMember::Method {
-                    name: MemberName::Static(member_name),
+                    name: MemberName::Static(member_name) | MemberName::Private(member_name),
                     is_static,
                     params,
                     body,
@@ -1161,7 +1161,7 @@ impl Builder<'_> {
                 }
                 // Computed names contribute no static type entry.
                 ClassMember::Method {
-                    name: MemberName::Static(member_name),
+                    name: MemberName::Static(member_name) | MemberName::Private(member_name),
                     is_static,
                     params,
                     body,
@@ -1179,7 +1179,7 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Field {
-                    name: MemberName::Static(field_name),
+                    name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     init,
                 } if !is_static => {
@@ -1191,14 +1191,14 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Getter {
-                    name: MemberName::Static(field_name),
+                    name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     body,
                 } if !is_static => {
                     fields.insert(field_name.clone(), self.function_result(&[], body, outer));
                 }
                 ClassMember::Setter {
-                    name: MemberName::Static(field_name),
+                    name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     param,
                     body,

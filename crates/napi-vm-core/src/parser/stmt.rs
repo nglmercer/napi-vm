@@ -1047,6 +1047,16 @@ impl Parser {
 
     /// Like `ident()`, but also accepts keywords as property names (valid after
     /// `.` in member expressions: `obj.for`, `obj.of`, `obj.get`, etc.).
+    pub(crate) fn member_property_name(&mut self) -> Option<String> {
+        if let Token::PrivateIdentifier(name) = self.cur() {
+            let name = format!("#{name}");
+            self.adv();
+            Some(name)
+        } else {
+            self.ident_or_keyword()
+        }
+    }
+
     pub(crate) fn ident_or_keyword(&mut self) -> Option<String> {
         let name = self.cur().identifier_name()?.to_owned();
         self.adv();

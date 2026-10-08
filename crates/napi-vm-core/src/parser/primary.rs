@@ -438,10 +438,10 @@ impl Parser {
                 self.adv();
                 Some(Expr::Identifier("yield".into()))
             }
-            Token::Hash => {
+            Token::PrivateIdentifier(name) => {
+                let name = format!("#{name}");
                 self.adv();
-                let name = self.ident_or_keyword()?;
-                Some(Expr::Identifier(format!("#{name}")))
+                Some(Expr::Identifier(name))
             }
             Token::Identifier(_)
             | Token::EscapedIdentifier(_)
@@ -482,7 +482,7 @@ impl Parser {
             match self.cur() {
                 Token::Dot => {
                     self.adv();
-                    let p = self.ident_or_keyword()?;
+                    let p = self.member_property_name()?;
                     e = Expr::Member {
                         object: Box::new(e),
                         property: Box::new(Expr::String((p).into())),

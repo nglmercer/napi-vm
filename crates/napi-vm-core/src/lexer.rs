@@ -119,6 +119,8 @@ pub enum Token {
     Tilde,
     /// `#`, which begins a private class member name.
     Hash,
+    /// A contiguous #IdentifierName; whitespace cannot split this token.
+    PrivateIdentifier(String),
     Shl,
     Shr,
     UShr,
@@ -862,7 +864,19 @@ impl Lexer {
             '#' => {
                 self.pos += 1;
                 self.col += 1;
-                Token::Hash
+                if self
+                    .src
+                    .get(self.pos)
+                    .is_some_and(|c| is_identifier_start(*c) || *c == '\\')
+                {
+                    let token = self.read_ident();
+                    match token.identifier_name() {
+                        Some(name) => Token::PrivateIdentifier(name.to_owned()),
+                        None => token,
+                    }
+                } else {
+                    Token::Unknown('#')
+                }
             }
             '"' | '\'' => self.read_str(c),
             c if c.is_ascii_digit() => self.read_num(),
@@ -887,6 +901,7 @@ impl Lexer {
                 token,
                 Token::Identifier(_)
                     | Token::EscapedIdentifier(_)
+                    | Token::PrivateIdentifier(_)
                     | Token::Number(_)
                     | Token::LegacyNumber(_)
                     | Token::String(_)

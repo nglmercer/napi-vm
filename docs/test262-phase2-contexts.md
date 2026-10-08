@@ -319,3 +319,23 @@ share function/arrow parameter grammar with balanced-head lookahead. Arrows
 now accept rest binding patterns, and object binding rest rejects trailing
 commas. The expanded grammar suite passes 42 tests. Required checks and focused
 corpus validation must be rerun on these repairs before the full corpus.
+
+### Full parser classification audit
+
+A compile-only replay uses the public compile-with-goal API and the same Script,
+strict Script and Module variants as the runner. All 102,956 corpus variants have
+valid metadata: 8,659 expect a parse error and 94,297 require source acceptance.
+At db44aac, 113 parse-negative variants remain accepted. Subsequent repairs
+lex private identifiers as contiguous tokens, distinguish private member names
+from quoted public hash properties, constrain class heritage, reject constructor
+fields, enforce module declaration positions, restrict export-default expression
+grammar and validate resource declaration scopes. The complete negative replay
+now rejects all 8,659 variants. Forty-five grammar tests and the public/private
+hash-property AST/bytecode differential test pass.
+
+This audit does not count parser acceptance as an ECMAScript execution pass.
+The positive-source replay still rejects 2,775 variants, predominantly nested
+aggregate binding defaults and import option grammar, plus lexical-goal and
+Unicode 17 RegExp property-name gaps. These remain Phase 2 work; decorators are
+a separately classified feature outside the requested foundation list. Final
+required checks and full-corpus execution remain pending for these repairs.

@@ -56,6 +56,7 @@ struct Context {
     new_target: bool,
     loops: usize,
     switches: usize,
+    case_clause: bool,
     labels: Vec<(String, bool)>,
 }
 
@@ -434,6 +435,7 @@ fn nested_statements(body: &[Statement], ctx: &Context) -> Check {
         &Context {
             top_level: false,
             lexical_functions: true,
+            case_clause: false,
             ..ctx.clone()
         },
     )
@@ -538,6 +540,11 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             declarations,
             is_await,
         } => {
+            if ctx.case_clause || ctx.top_level && !ctx.module {
+                return Err(
+                    "resource declaration requires a block, function or module scope".into(),
+                );
+            }
             if *is_await && !ctx.await_allowed {
                 return Err("await using outside async context".into());
             }
@@ -565,7 +572,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                     ..ctx.clone()
                 },
             )?;
-            optional(
+            heritage(
                 superclass.as_deref(),
                 &Context {
                     strict: true,
@@ -705,6 +712,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 return Err(format!("duplicate label: {label}"));
             }
             let mut next = ctx.clone();
+            next.top_level = false;
             let mut target = body.as_ref();
             while let Statement::Labeled { body, .. } = target {
                 target = body;
@@ -772,6 +780,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             expression(disc, ctx)?;
             let next = Context {
                 switches: ctx.switches + 1,
+                case_clause: true,
                 ..ctx.clone()
             };
             if cases.iter().filter(|case| case.test.is_none()).count() > 1 {
@@ -1326,7 +1335,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                     },
                 )?;
             }
-            optional(
+            heritage(
                 superclass.as_deref(),
                 &Context {
                     strict: true,
@@ -1402,6 +1411,28 @@ fn private_member(expr: &Expr) -> Option<String> {
     }
 }
 
+fn heritage(superclass: Option<&Expr>, ctx: &Context) -> Check {
+    if let Some(expr) = superclass {
+        if matches!(
+            expr,
+            Expr::ArrowFn { .. }
+                | Expr::Assignment { .. }
+                | Expr::LogicalAssignment { .. }
+                | Expr::Binary { .. }
+                | Expr::Conditional { .. }
+                | Expr::Unary { .. }
+                | Expr::Await(_)
+                | Expr::Yield(_)
+                | Expr::YieldFrom(_)
+                | Expr::Spread(_)
+        ) {
+            return Err("class heritage requires a left-hand-side expression".into());
+        }
+        expression(expr, ctx)?;
+    }
+    Ok(())
+}
+
 fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
     let mut ctx = Context {
         strict: true,
@@ -1425,23 +1456,26 @@ fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
             } => (name, *is_static, 2),
             ClassMember::StaticBlock { .. } => continue,
         };
+        if let MemberName::Private(name) = name {
+            if name == "#constructor" {
+                return Err("private constructor name is forbidden".into());
+            }
+            if let Some((previous_static, previous_accessor)) = private.get(name) {
+                if *previous_static != is_static
+                    || accessor == 0
+                    || *previous_accessor == 0
+                    || *previous_accessor & accessor != 0
+                {
+                    return Err(format!("duplicate private name: {name}"));
+                }
+                private.insert(name.clone(), (is_static, *previous_accessor | accessor));
+            } else {
+                private.insert(name.clone(), (is_static, accessor));
+            }
+        }
         if let MemberName::Static(name) = name {
-            if name.starts_with('#') {
-                if name == "#constructor" {
-                    return Err("private constructor name is forbidden".into());
-                }
-                if let Some((previous_static, previous_accessor)) = private.get(name) {
-                    if *previous_static != is_static
-                        || accessor == 0
-                        || *previous_accessor == 0
-                        || *previous_accessor & accessor != 0
-                    {
-                        return Err(format!("duplicate private name: {name}"));
-                    }
-                    private.insert(name.clone(), (is_static, *previous_accessor | accessor));
-                } else {
-                    private.insert(name.clone(), (is_static, accessor));
-                }
+            if name == "constructor" && matches!(member, ClassMember::Field { .. }) {
+                return Err("constructor field name is forbidden".into());
             }
             if is_static && name == "prototype" {
                 return Err("static prototype element is forbidden".into());

@@ -262,7 +262,7 @@ impl Interpreter {
     /// evaluated once, in definition order, when the class is defined.
     fn member_name(&mut self, name: &MemberName) -> Result<String, VmErr> {
         match name {
-            MemberName::Static(name) => Ok(name.clone()),
+            MemberName::Static(name) | MemberName::Private(name) => Ok(name.clone()),
             MemberName::Computed(expr) => {
                 let value = self.eval_expr(expr)?;
                 self.property_key(&value)
@@ -445,11 +445,10 @@ impl Interpreter {
             .declare_private_declarations(crate::parser::class_private_declarations(body));
         for member in body {
             if let ClassMember::Field {
-                name: MemberName::Static(name),
+                name: MemberName::Private(name),
                 is_static: false,
                 ..
             } = member
-                && name.starts_with('#')
             {
                 member_scope.borrow_mut().declare_private_field(name);
             }
@@ -560,7 +559,7 @@ impl Interpreter {
                         instance_fields.push((
                             fname.clone(),
                             init.clone(),
-                            matches!(name, MemberName::Computed(_)),
+                            !matches!(name, MemberName::Private(_)),
                         ));
                     }
                 }

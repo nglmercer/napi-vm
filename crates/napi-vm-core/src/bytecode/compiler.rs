@@ -304,6 +304,7 @@ struct OwnedCtor<'a> {
 /// the template's `ctor_computed_keys` holding the definition-time key.
 enum FieldKey {
     Static(String),
+    Private(String),
     Computed(usize),
 }
 
@@ -1976,11 +1977,16 @@ impl<'a> Compiler<'a> {
                         });
                     } else {
                         if let ClassNameTemplate::Static(name) = &template
-                            && name.starts_with('#')
+                            && matches!(field_name, MemberName::Private(_))
                         {
                             private_fields.push(name.clone());
                         }
                         let key = match template {
+                            ClassNameTemplate::Static(key)
+                                if matches!(field_name, MemberName::Private(_)) =>
+                            {
+                                FieldKey::Private(key)
+                            }
                             ClassNameTemplate::Static(key) => FieldKey::Static(key),
                             ClassNameTemplate::Computed(reg) => {
                                 let index = ctor_computed_keys.len();
@@ -2135,7 +2141,9 @@ impl<'a> Compiler<'a> {
     /// definition time rather than at first use.
     fn compile_member_name(&mut self, name: &'a MemberName) -> Result<ClassNameTemplate, Decline> {
         match name {
-            MemberName::Static(key) => Ok(ClassNameTemplate::Static(key.clone())),
+            MemberName::Static(key) | MemberName::Private(key) => {
+                Ok(ClassNameTemplate::Static(key.clone()))
+            }
             MemberName::Computed(expr) => {
                 let src = self.compile_expr(expr)?;
                 let dst = self.alloc_reg()?;
@@ -2172,7 +2180,8 @@ impl<'a> Compiler<'a> {
         let mut full = Vec::with_capacity(instance_fields.len() + body.len());
         for (key, init) in instance_fields {
             let (property, computed) = match key {
-                FieldKey::Static(field) => (Expr::String(crate::JsString::from_key(field)), false),
+                FieldKey::Static(field) => (Expr::String(crate::JsString::from_key(field)), true),
+                FieldKey::Private(field) => (Expr::String(crate::JsString::from_key(field)), false),
                 // Evaluated at class definition time; the builder binds the
                 // value into the constructor's scope under this key.
                 FieldKey::Computed(index) => (Expr::Identifier(class_key_name(*index)), true),

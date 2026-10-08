@@ -625,34 +625,12 @@ impl Parser {
                 }
                 Token::Dot => {
                     self.adv();
-                    // `obj.#name`: a private member. The `#` is part of the
-                    // property name, so nothing outside the class body can
-                    // name it — that is the whole of the privacy.
-                    if self.eat(&Token::Hash) {
-                        let p = self.ident_or_keyword()?;
-                        e = Expr::Member {
-                            object: Box::new(e),
-                            property: Box::new(Expr::String((format!("#{}", p)).into())),
-                            computed: false,
-                        };
-                        continue;
-                    }
-                    if self.eat(&Token::QuestionDot) {
-                        // optional chaining: obj?.prop
-                        let p = self.ident_or_keyword()?;
-                        e = Expr::OptionalChain {
-                            object: Box::new(e),
-                            property: Box::new(Expr::String((p).into())),
-                            computed: false,
-                        };
-                    } else {
-                        let p = self.ident_or_keyword()?;
-                        e = Expr::Member {
-                            object: Box::new(e),
-                            property: Box::new(Expr::String((p).into())),
-                            computed: false,
-                        };
-                    }
+                    let p = self.member_property_name()?;
+                    e = Expr::Member {
+                        object: Box::new(e),
+                        property: Box::new(Expr::String(p.into())),
+                        computed: false,
+                    };
                 }
                 Token::LBracket => {
                     self.adv();
@@ -715,9 +693,7 @@ impl Parser {
                         };
                     } else {
                         // Optional member: obj?.prop
-                        let private = self.eat(&Token::Hash);
-                        let p = self.ident_or_keyword()?;
-                        let p = if private { format!("#{p}") } else { p };
+                        let p = self.member_property_name()?;
                         e = Expr::OptionalChain {
                             object: Box::new(e),
                             property: Box::new(Expr::String((p).into())),
