@@ -2528,7 +2528,7 @@ impl Interpreter {
             return Ok(self.keys(value));
         };
         let target = proxy.target.clone();
-        let Some(trap) = self.proxy_trap(&proxy, "ownKeys") else {
+        let Some(trap) = self.proxy_trap(&proxy, "ownKeys")? else {
             return Ok(self.keys(&target));
         };
         let handler = proxy.handler.clone();

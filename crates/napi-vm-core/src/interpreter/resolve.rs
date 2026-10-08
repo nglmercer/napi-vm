@@ -417,6 +417,12 @@ impl Interpreter {
         } else {
             ["valueOf", "toString"]
         };
+        let materialized_object_prototype = self
+            .persistent_global
+            .borrow()
+            .intrinsic("Object")
+            .and_then(|constructor| constructor.get_prop("prototype"))
+            .is_some();
         for name in order {
             let method = self.member(&value, name)?;
             if is_callable(&method) {
@@ -427,19 +433,21 @@ impl Interpreter {
                 continue;
             }
 
-            // Object.prototype.valueOf returns its receiver. The VM does not
-            // materialize Object.prototype, so preserve that behavior when
-            // the ordinary default prototype supplies the missing method.
+            // Bare interpreters can omit the intrinsic bootstrap. Preserve
+            // default valueOf behavior only in that configuration; a guest
+            // shadowing a materialized method with undefined must be honored.
             if matches!(method, Value::Undefined)
+                && !materialized_object_prototype
                 && name == "valueOf"
                 && has_default_object_prototype(&value)
             {
                 continue;
             }
 
-            // Object.prototype.toString is likewise supplied by the runtime
-            // for ordinary objects whose prototype chain uses that default.
+            // Supply the bare interpreter's default toString on the same
+            // terms, without replacing explicitly shadowed guest methods.
             if matches!(method, Value::Undefined)
+                && !materialized_object_prototype
                 && name == "toString"
                 && has_default_object_prototype(&value)
             {
@@ -526,7 +534,7 @@ impl Interpreter {
         let property = self.property_key(key)?;
         if let Some(proxy) = object.as_proxy() {
             let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "has") {
+            if let Some(trap) = self.proxy_trap(&proxy, "has")? {
                 let handler = proxy.handler.clone();
                 let trap_key = self.proxy_property_key(key)?;
                 let result = self.call_this(&trap, handler, vec![target, trap_key])?;
@@ -574,7 +582,7 @@ impl Interpreter {
         // read falls through to the target.
         if let Some(proxy) = o.as_proxy() {
             let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "get") {
+            if let Some(trap) = self.proxy_trap(&proxy, "get")? {
                 let key = self.proxy_property_key(p)?;
                 let handler = proxy.handler.clone();
                 return self.call_this(&trap, handler, vec![target, key, receiver.clone()]);
@@ -664,7 +672,7 @@ impl Interpreter {
     ) -> Result<Value, VmErr> {
         if let Some(proxy) = o.as_proxy() {
             let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "get") {
+            if let Some(trap) = self.proxy_trap(&proxy, "get")? {
                 let trap_key = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&trap_key)?;
                 let handler = proxy.handler.clone();
@@ -1588,8 +1596,13 @@ fn array_iter_next(
             "TypeError: Cannot iterate a detached typed array".into(),
         ));
     }
-    let length = interp.get_prop_value_str(&source, "length")?;
-    let length = interp.ecmascript_to_number(&length)?;
+    let length = match &source {
+        Value::TypedArray(view) => view.effective_length() as f64,
+        _ => {
+            let length = interp.get_prop_value_str(&source, "length")?;
+            interp.ecmascript_to_number(&length)?
+        }
+    };
     let cursor = match this.get_prop("__cursor__") {
         Some(super::Value::Number(n)) => n as usize,
         _ => 0,

@@ -9,6 +9,44 @@ fn truth(vm: &mut Interpreter, source: &str) {
 }
 
 #[test]
+fn buffer_construction_observes_new_target_before_backing_allocation_limits() {
+    let mut vm = Interpreter::with_builtins();
+    for constructor in ["ArrayBuffer", "SharedArrayBuffer"] {
+        for arguments in ["[8388608]", "[0,{maxByteLength:8388608}]"] {
+            truth(
+                &mut vm,
+                &format!(
+                    "var marker={{}};var reads=0;var target=function(){{}}.bind(null);Object.defineProperty(target,'prototype',{{get(){{reads++;throw marker;}}}});var caught;try{{Reflect.construct({constructor},{arguments},target);}}catch(e){{caught=e;}}caught===marker&&reads===1;"
+                ),
+            );
+        }
+        truth(
+            &mut vm,
+            &format!(
+                "var order='';var prototype={{}};var target=function(){{}}.bind(null);Object.defineProperty(target,'prototype',{{get(){{order+='p';return prototype;}}}});var buffer=Reflect.construct({constructor},[{{valueOf(){{order+='l';return 4;}}}},{{get maxByteLength(){{order+='m';return {{valueOf(){{order+='n';return 8;}}}};}}}}],target);order==='lmnp'&&Object.getPrototypeOf(buffer)===prototype&&Object.getOwnPropertyDescriptor({constructor}.prototype,'byteLength').get.call(buffer)===4;"
+            ),
+        );
+        truth(
+            &mut vm,
+            &format!(
+                "reads=0;target=function(){{}}.bind(null);Object.defineProperty(target,'prototype',{{get(){{reads++;return {{}};}}}});try{{Reflect.construct({constructor},[-1],target);}}catch(e){{caught=e;}}caught instanceof RangeError&&reads===0;"
+            ),
+        );
+    }
+}
+
+#[test]
+fn typed_iterators_use_internal_lengths_even_when_length_is_shadowed() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var array=new Uint8Array([1,2]);Object.defineProperty(array,'length',{value:0});var iterator=array.values();iterator.next().value===1&&iterator.next().value===2&&iterator.next().done;",
+        "var empty=new Uint8Array();Object.defineProperty(empty,'length',{get(){throw 'read';}});empty.values().next().done;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
 fn growth_updates_tracking_views_preserves_fixed_views_and_zeroes_new_bytes() {
     let mut vm = Interpreter::with_builtins();
     truth(

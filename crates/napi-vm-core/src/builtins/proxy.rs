@@ -14,30 +14,19 @@ use crate::value::{ProxyData, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("Proxy") {
-        super::make_callable(&namespace, new_proxy, None);
+        super::make_callable(&namespace, super::require_new, Some(new_proxy));
     }
 }
 
 fn new_proxy(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
     let handler = a.get(1).cloned().unwrap_or(Value::Undefined);
-    if !matches!(
-        target,
-        Value::Object { .. }
-            | Value::Array(_)
-            | Value::Function(_)
-            | Value::Class(_)
-            | Value::Proxy(_)
-            // The global scope is an ordinary object to every member and
-            // prototype path; only this allowlist excluded it.
-            | Value::GlobalObject
-            | Value::RealmGlobal(_)
-    ) {
+    if !crate::interpreter::call::is_js_object(&target) {
         return Err(VmErr::Msg(
             "TypeError: Cannot create proxy with a non-object as target".to_string(),
         ));
     }
-    if !matches!(handler, Value::Object { .. }) {
+    if !crate::interpreter::call::is_js_object(&handler) {
         return Err(VmErr::Msg(
             "TypeError: Cannot create proxy with a non-object as handler".to_string(),
         ));
@@ -47,13 +36,21 @@ fn new_proxy(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmEr
 
 impl Interpreter {
     /// The handler's trap named `name`, if it defines one.
-    pub(crate) fn proxy_trap(&mut self, proxy: &Rc<ProxyData>, name: &str) -> Option<Value> {
-        let trap = self.member(&proxy.handler, name).ok()?;
-        matches!(
-            trap,
-            Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-        )
-        .then_some(trap)
+    pub(crate) fn proxy_trap(
+        &mut self,
+        proxy: &Rc<ProxyData>,
+        name: &str,
+    ) -> Result<Option<Value>, VmErr> {
+        let trap = self.member(&proxy.handler, name)?;
+        if matches!(trap, Value::Undefined | Value::Null) {
+            return Ok(None);
+        }
+        if !crate::interpreter::call::is_callable_value(&trap) {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Proxy {name} trap must be callable"
+            )));
+        }
+        Ok(Some(trap))
     }
 
     /// Convert a property operand to its internal PropertyKey while retaining
@@ -79,7 +76,7 @@ impl Interpreter {
         };
         let target = proxy.target.clone();
         let handler = proxy.handler.clone();
-        let Some(trap) = self.proxy_trap(proxy, "getPrototypeOf") else {
+        let Some(trap) = self.proxy_trap(proxy, "getPrototypeOf")? else {
             return self.get_prototype_of(&target);
         };
         let trap_result = self.call_this(&trap, handler, vec![target.clone()])?;

@@ -1158,7 +1158,16 @@ impl FunctionData {
             Value::object_with_proto(
                 vec![],
                 owner
-                    .and_then(|global| global.borrow().intrinsic(kind))
+                    .and_then(|global| {
+                        let global = global.borrow();
+                        global.intrinsic(kind).or_else(|| {
+                            // Retain the existing generator execution path
+                            // until async generators have their own driver.
+                            self.is_async
+                                .then(|| global.intrinsic("%GeneratorPrototype%"))
+                                .flatten()
+                        })
+                    })
                     .map(Rc::new),
             )
         } else {

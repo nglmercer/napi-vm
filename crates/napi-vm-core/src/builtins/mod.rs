@@ -33,6 +33,7 @@ pub use collections::{collection_entries_of, collection_tag, describe_collection
 pub use date::{date_member, iso_string};
 pub use error::error_to_string;
 pub use number::number_method;
+pub(crate) use object::install_intrinsic_accessor;
 pub(crate) use regexp::compile as compile_regex;
 pub use regexp::regexp_member;
 pub use string::string_method;

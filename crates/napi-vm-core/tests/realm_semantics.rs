@@ -587,3 +587,95 @@ fn primitive_property_references_use_the_current_execution_realm() {
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn proxy_internal_errors_use_the_caller_realm_and_preserve_trap_abrupt_completions() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var target=function(){};var callable=new Proxy(target,{apply:1});var constructible=new Proxy(target,{construct:1});var Class=class{};var throwing=new Proxy(target,{get apply(){throw new TypeError('foreign getter');}});").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{other.callable();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "try{new other.constructible();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "try{other.Class();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "try{other.throwing();}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var apply=new Proxy(function(target,receiver,args){return args[0];},{});new Proxy(function(){},{apply})(42)===42;",
+        "new Proxy({x:42},new Proxy({},{})).x===42;",
+        "var handler=[];handler.get=function(){return 42;};new Proxy({},handler).x===42;",
+        "try{other.Proxy({},{});}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var reads=0;var newTarget=function(){}.bind(null);Object.defineProperty(newTarget,'prototype',{get(){reads++;throw 'read';}});Reflect.construct(Proxy,[{},{}],newTarget);reads===0;",
+    ] {
+        truth(&mut vm, source);
+    }
+    for (name, operation) in [
+        ("get", "proxy.x"),
+        ("set", "proxy.x=1"),
+        ("has", "'x' in proxy"),
+        ("deleteProperty", "delete proxy.x"),
+        ("ownKeys", "Object.keys(proxy)"),
+        ("getPrototypeOf", "Object.getPrototypeOf(proxy)"),
+    ] {
+        for trap in ["get(){throw marker;}", "value:1"] {
+            truth(
+                &mut vm,
+                &format!(
+                    "var marker={{}};var handler={{}};Object.defineProperty(handler,'{name}',{{{trap}}});var proxy=new Proxy({{}},handler);var caught;try{{{operation};}}catch(e){{caught=e;}}{};",
+                    if trap.starts_with("get") {
+                        "caught===marker"
+                    } else {
+                        "caught instanceof TypeError"
+                    }
+                ),
+            );
+        }
+    }
+}
+
+#[test]
+fn restricted_accessors_share_one_thrower_per_realm_and_keep_argument_identity() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var strictArgs=function(){'use strict';return arguments;};var defaults=function(a=0){return arguments;};var rest=function(...a){return arguments;};var ordinary=function(){return arguments;};").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var foreign=Object.getOwnPropertyDescriptor(other.strictArgs(),'callee');var caller=Object.getOwnPropertyDescriptor(other.Function.prototype,'caller');foreign.get===foreign.set&&foreign.get===caller.get&&foreign.get===caller.set;",
+        "Object.getOwnPropertyDescriptor(other.defaults(),'callee').get===foreign.get&&Object.getOwnPropertyDescriptor(other.rest(),'callee').set===foreign.get;",
+        "var local=Object.getOwnPropertyDescriptor(Function.prototype,'caller').get;foreign.get!==local&&Object.getPrototypeOf(foreign.get)===other.Function.prototype;",
+        "foreign.get.name===''&&foreign.get.length===0&&!Object.isExtensible(foreign.get)&&!Object.getOwnPropertyDescriptor(foreign.get,'name').configurable;",
+        "var caught;try{other.strictArgs().callee;}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "try{other.Function.prototype.caller=1;}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var arguments=other.ordinary(42);arguments.callee===other.ordinary&&arguments[0]===42&&arguments[Symbol.iterator]===other.Array.prototype.values;",
+        "!Object.getOwnPropertyDescriptor(other.strictArgs(),'callee').configurable&&!Object.getOwnPropertyDescriptor(arguments,'length').enumerable;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn async_generator_prototype_ownership_preserves_existing_iteration() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other
+        .eval_source("var generate=async function*(){yield 42;};")
+        .unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "var generator=other.generate();Object.getPrototypeOf(generator)===other.generate.prototype&&Object.getPrototypeOf(generator.next)===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "var sum=0;for await(var value of generator){sum+=value;}sum===42;",
+    );
+    truth(
+        &mut vm,
+        "var caught;try{Error({toString:undefined,valueOf:undefined});}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    truth(
+        &mut vm,
+        "Number.prototype.split=String.prototype.split;try{(42).split({toString(){return /x/;}});}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+}

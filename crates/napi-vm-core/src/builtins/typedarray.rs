@@ -540,12 +540,34 @@ fn new_array_buffer(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result
     if maximum.is_some_and(|maximum| maximum < length) {
         return Err(range_err("Invalid ArrayBuffer maximum length"));
     }
+    let prototype = buffer_constructor_prototype(interp, "ArrayBuffer")?;
+    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_ARRAY_LEN * 8) {
+        return Err(range_err("Invalid buffer maximum length"));
+    }
     let buffer = match maximum {
         Some(maximum) => Buffer::resizable(length, maximum)
             .ok_or_else(|| range_err("Invalid ArrayBuffer length"))?,
         None => new_buffer(length)?,
     };
-    Ok(Value::ArrayBuffer(buffer))
+    let value = Value::ArrayBuffer(buffer);
+    value
+        .property_cell()
+        .expect("ArrayBuffer properties")
+        .set_proto(prototype);
+    Ok(value)
+}
+
+fn buffer_constructor_prototype(
+    interp: &mut Interpreter,
+    name: &str,
+) -> Result<Option<Rc<Value>>, VmErr> {
+    let constructor = interp
+        .new_target_stack
+        .last()
+        .cloned()
+        .or_else(|| interp.persistent_global.borrow().intrinsic(name))
+        .ok_or_else(|| VmErr::Msg("TypeError: buffer constructor is unavailable".into()))?;
+    interp.constructor_prototype(&constructor, name)
 }
 
 fn buffer_maximum_option(
@@ -561,9 +583,6 @@ fn buffer_maximum_option(
         return Ok(None);
     }
     let maximum = constructor_index(interp, Some(&maximum))?;
-    if maximum > crate::value::MAX_ARRAY_LEN * 8 {
-        return Err(range_err("Invalid buffer maximum length"));
-    }
     Ok(Some(maximum))
 }
 
@@ -611,17 +630,25 @@ fn new_shared_array_buffer(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let length = constructor_index(interp, a.first())?;
+    let maximum = buffer_maximum_option(interp, a.get(1))?;
+    if maximum.is_some_and(|maximum| maximum < length) {
+        return Err(range_err("Invalid shared array buffer maximum length"));
+    }
+    let prototype = buffer_constructor_prototype(interp, "SharedArrayBuffer")?;
     if length > crate::value::MAX_ARRAY_LEN * 8 {
         return Err(range_err("Invalid shared array buffer length"));
     }
-    let maximum = buffer_maximum_option(interp, a.get(1))?;
-    if maximum.is_some_and(|maximum| maximum < length || maximum > crate::value::MAX_ARRAY_LEN * 8)
-    {
+    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_ARRAY_LEN * 8) {
         return Err(range_err("Invalid shared array buffer maximum length"));
     }
     let buffer = SharedBuffer::zeroed_with_maximum(length, maximum)
         .ok_or_else(|| range_err("Invalid shared array buffer length"))?;
-    Ok(Value::SharedArrayBuffer(buffer))
+    let value = Value::SharedArrayBuffer(buffer);
+    value
+        .property_cell()
+        .expect("SharedArrayBuffer properties")
+        .set_proto(prototype);
+    Ok(value)
 }
 
 fn require_shared(this: &Value) -> Result<&SharedBuffer, VmErr> {

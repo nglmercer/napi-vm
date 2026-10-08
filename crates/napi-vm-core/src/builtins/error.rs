@@ -37,6 +37,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("constructor".into(), constructor.clone()),
                 ("name".into(), Value::String(name.into())),
                 ("message".into(), Value::String(crate::JsString::default())),
+                ("stack".into(), Value::String(crate::JsString::default())),
             ],
             parent.map(Rc::new),
         );

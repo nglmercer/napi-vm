@@ -122,6 +122,69 @@ pub(crate) fn is_js_object(value: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// Build arguments through one shared path for AST and bytecode calls.
+    pub(crate) fn function_arguments(
+        &self,
+        function: &Value,
+        args: &[Value],
+    ) -> Result<Value, VmErr> {
+        let Value::Function(data) = function else {
+            return Value::arguments_object(args);
+        };
+        let object = Value::arguments_object(args)?;
+        let unmapped = data.strict
+            || data.params.iter().any(|name| name.starts_with("..."))
+            || data
+                .body
+                .iter()
+                .find(|statement| !matches!(statement, Statement::ClassInitialization { .. }))
+                .is_some_and(|statement| {
+                    matches!(statement, Statement::ParameterInitialization { .. })
+                });
+        if unmapped {
+            if let Some(thrower) = self
+                .persistent_global
+                .borrow()
+                .intrinsic("%ThrowTypeError%")
+            {
+                crate::builtins::install_intrinsic_accessor(
+                    &object, "callee", &thrower, &thrower, false,
+                );
+            }
+        } else {
+            object.set_prop("callee".into(), function.clone())?;
+        }
+        if let Some(method) = self
+            .persistent_global
+            .borrow()
+            .intrinsic("Array")
+            .and_then(|constructor| constructor.get_prop("prototype"))
+            .and_then(|prototype| prototype.get_prop("values"))
+        {
+            object.set_prop(super::SYMBOL_ITERATOR_SLOT.into(), method)?;
+            if let Some(Value::Symbol(ref symbol)) = crate::builtins::well_known("iterator") {
+                object
+                    .property_cell()
+                    .expect("arguments properties")
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(super::SYMBOL_ITERATOR_SLOT, symbol.clone());
+            }
+        }
+        let properties = object.property_cell().expect("arguments properties");
+        for key in ["length", "callee", super::SYMBOL_ITERATOR_SLOT] {
+            if key != "callee" || !unmapped {
+                properties.meta.borrow_mut().set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        Ok(object)
+    }
     /// ECMAScript `instanceof`, including a guest-defined
     /// `Symbol.hasInstance` method. This lives on the mutable interpreter
     /// path because reading the method and invoking it can execute guest code.
@@ -421,7 +484,7 @@ impl Interpreter {
     pub(crate) fn delete_member(&mut self, obj: &Value, key: &Value) -> Result<Value, VmErr> {
         if let Some(proxy) = obj.as_proxy() {
             let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "deleteProperty") {
+            if let Some(trap) = self.proxy_trap(&proxy, "deleteProperty")? {
                 let name = self.proxy_property_key(key)?;
                 let handler = proxy.handler.clone();
                 let result = self.call_this(&trap, handler, vec![target, name])?;
@@ -798,7 +861,7 @@ impl Interpreter {
         }
         if let Some(proxy) = obj.as_proxy() {
             let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "set") {
+            if let Some(trap) = self.proxy_trap(&proxy, "set")? {
                 let prop = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&prop)?;
                 let handler = proxy.handler.clone();
@@ -895,7 +958,7 @@ impl Interpreter {
         // through to the target.
         if let Some(proxy) = obj.as_proxy() {
             let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "set") {
+            if let Some(trap) = self.proxy_trap(&proxy, "set")? {
                 let key = self.proxy_property_key(prop)?;
                 let handler = proxy.handler.clone();
                 let accepted =
@@ -1379,6 +1442,7 @@ impl Interpreter {
                         self.function_this(fd, this_val),
                         args,
                         fd.strict,
+                        f,
                     )
                 })
             }));
@@ -1412,6 +1476,13 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
+        if matches!(f, Value::Proxy(_) | Value::Class(_)) {
+            // Proxy internal methods and rejecting a class call execute in
+            // the caller's context. A trap or target call enters its realm.
+            return self
+                .call_this_in_context(f, this_val, args)
+                .map_err(|error| error.with_context(None, self.get_stack()));
+        }
         let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
         let saved_modules = self.enter_module_realm(&owner);
         let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
@@ -1472,7 +1543,7 @@ impl Interpreter {
                     if fd.needs_arguments_object() {
                         context
                             .borrow_mut()
-                            .set("arguments", Value::arguments_object(&args)?);
+                            .set("arguments", self.function_arguments(f, &args)?);
                     }
                     let (body, closure, parameters_initialized) =
                         if let Some(Statement::ParameterInitialization {
@@ -1590,7 +1661,7 @@ impl Interpreter {
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
                         if fd.needs_arguments_object() {
-                            let args_obj = Value::arguments_object(args.as_slice())?;
+                            let args_obj = self.function_arguments(f, args.as_slice())?;
                             vars.push((Key::from("arguments"), args_obj));
                         }
                         Rc::new(RefCell::new(Environment::with_bindings(parent_env, vars)))
@@ -1628,7 +1699,7 @@ impl Interpreter {
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
                         if fd.needs_arguments_object() {
-                            let args_obj = Value::arguments_object(args.as_slice())?;
+                            let args_obj = self.function_arguments(f, args.as_slice())?;
                             fe.borrow_mut().set("arguments", args_obj);
                         }
                         fe
@@ -1774,7 +1845,7 @@ impl Interpreter {
             // A proxy over a function: `apply` intercepts the call.
             Value::Proxy(proxy) => {
                 let target = proxy.target.clone();
-                match self.proxy_trap(&proxy.clone(), "apply") {
+                match self.proxy_trap(&proxy.clone(), "apply")? {
                     Some(trap) => {
                         let handler = proxy.handler.clone();
                         let arg_list = Value::checked_array(args)?;
@@ -1975,7 +2046,11 @@ impl Interpreter {
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
         let caller = self.persistent_global.clone();
-        let owner = super::realm::value_realm(f).unwrap_or_else(|| caller.clone());
+        let owner = if matches!(f, Value::Proxy(_)) {
+            caller.clone()
+        } else {
+            super::realm::value_realm(f).unwrap_or_else(|| caller.clone())
+        };
         self.constructor_error_realms.push(caller);
         let result = self.with_global_storage(owner.clone(), |vm| {
             let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
@@ -2027,8 +2102,17 @@ impl Interpreter {
                 .borrow()
                 .intrinsic_name(f)
                 .unwrap_or_else(|| "Object".into());
-            if matches!(builtin.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet") {
-                // Collections already perform OrdinaryCreateFromConstructor
+            if matches!(
+                builtin.as_str(),
+                "Map"
+                    | "Set"
+                    | "WeakMap"
+                    | "WeakSet"
+                    | "ArrayBuffer"
+                    | "SharedArrayBuffer"
+                    | "Proxy"
+            ) {
+                // These constructors perform OrdinaryCreateFromConstructor
                 // using the active newTarget. Do not read prototype twice.
                 return self.call_this(&target, f.clone(), args);
             }
@@ -2101,15 +2185,9 @@ impl Interpreter {
             if !crate::builtins::is_constructor(&target) {
                 return vm_err("TypeError: Proxy target is not a constructor");
             }
-            let trap = self.get_prop_value_str(&proxy.handler, "construct")?;
-            return match trap {
-                Value::Undefined | Value::Null => {
-                    self.ctor_with_new_target(&target, args, new_target)
-                }
-                trap => {
-                    if !is_callable_value(&trap) {
-                        return vm_err("TypeError: Proxy construct trap must be callable");
-                    }
+            return match self.proxy_trap(&proxy, "construct")? {
+                None => self.ctor_with_new_target(&target, args, new_target),
+                Some(trap) => {
                     let handler = proxy.handler.clone();
                     let arg_list = Value::checked_array(args)?;
                     let result =

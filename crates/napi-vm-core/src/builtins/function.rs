@@ -44,6 +44,26 @@ pub(super) fn install(e: &mut Environment) {
         bound: None,
     }));
 
+    let thrower = super::native_method("", 0, throw_type_error, Some(prototype.clone()));
+    if let Value::Function(function) = &thrower {
+        let mut metadata = function.properties.meta.borrow_mut();
+        metadata.non_extensible = true;
+        for key in ["name", "length"] {
+            metadata.set_attrs(
+                key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+    }
+    for key in ["caller", "arguments"] {
+        super::object::install_intrinsic_accessor(&prototype, key, &thrower, &thrower, true);
+    }
+    e.install_intrinsic("%ThrowTypeError%", thrower);
+
     prototype
         .set_prop("constructor".to_string(), namespace.clone())
         .expect("Function.prototype constructor");
@@ -191,6 +211,12 @@ pub(super) fn install(e: &mut Environment) {
         }
         e.install_intrinsic(&format!("%{name}%"), constructor);
     }
+}
+
+fn throw_type_error(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Err(VmErr::Msg(
+        "TypeError: restricted function or arguments property".into(),
+    ))
 }
 
 /// Methods shared by guest and native callable values.

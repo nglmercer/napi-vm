@@ -10,7 +10,7 @@ fn bounded_string(value: impl Into<JsString>) -> Result<Value, VmErr> {
     Value::checked_string(value)
 }
 fn arg_string(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<JsString, VmErr> {
-    interp.display_string(args.get(index).unwrap_or(&Value::Undefined))
+    interp.ecmascript_to_string(args.get(index).unwrap_or(&Value::Undefined))
 }
 fn position(
     interp: &mut Interpreter,

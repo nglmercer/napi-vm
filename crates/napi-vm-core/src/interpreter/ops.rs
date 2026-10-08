@@ -124,7 +124,7 @@ impl Interpreter {
             && let Some(proxy) = r.as_proxy()
         {
             let target = proxy.target.clone();
-            return match self.proxy_trap(&proxy, "has") {
+            return match self.proxy_trap(&proxy, "has")? {
                 Some(trap) => {
                     let key = self.proxy_property_key(l)?;
                     let handler = proxy.handler.clone();

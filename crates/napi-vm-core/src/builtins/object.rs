@@ -281,6 +281,40 @@ fn name_callable(value: &Value, name: &str) -> Option<Value> {
     })
 }
 
+/// Install a trusted intrinsic accessor using the same callable identity
+/// representation as ordinary descriptor definitions.
+pub(crate) fn install_intrinsic_accessor(
+    target: &Value,
+    key: &str,
+    getter: &Value,
+    setter: &Value,
+    configurable: bool,
+) {
+    let properties = target
+        .property_cell()
+        .expect("intrinsic accessor property cell");
+    let getter =
+        name_callable(getter, &format!("get {key}")).expect("intrinsic getter is callable");
+    let setter =
+        name_callable(setter, &format!("set {key}")).expect("intrinsic setter is callable");
+    target
+        .set_prop(key.into(), getter)
+        .expect("intrinsic getter slot");
+    target
+        .set_prop(format!("__setter:{key}__"), setter)
+        .expect("intrinsic setter slot");
+    let mut metadata = properties.meta.borrow_mut();
+    metadata.has_accessors = true;
+    metadata.set_attrs(
+        key,
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable,
+        },
+    );
+}
+
 // --- Enumeration ------------------------------------------------------------
 
 fn object_keys(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

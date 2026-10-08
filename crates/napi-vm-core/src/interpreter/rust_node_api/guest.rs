@@ -681,7 +681,7 @@ pub(super) fn napi_guest_own_property_keys(
     };
 
     let target = proxy.target.clone();
-    let Some(trap) = interpreter.proxy_trap(proxy, "ownKeys") else {
+    let Some(trap) = interpreter.proxy_trap(proxy, "ownKeys")? else {
         return napi_guest_own_property_keys(interpreter, &target, depth + 1);
     };
     let result = interpreter.call_this(&trap, proxy.handler.clone(), vec![target.clone()])?;

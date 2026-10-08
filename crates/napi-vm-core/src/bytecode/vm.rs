@@ -206,6 +206,7 @@ pub(crate) fn run_function(
     this_value: Value,
     args: &[Value],
     strict: bool,
+    function: &Value,
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
@@ -220,7 +221,7 @@ pub(crate) fn run_function(
         if !code.is_arrow {
             fe.borrow_mut().set("this", this_value.clone());
         }
-        seed_captured(&fe, code, args)?;
+        seed_captured(interp, &fe, code, args, function)?;
     }
     let module_context = fe.borrow().module_context();
     let saved_module = std::mem::replace(&mut interp.cur_mod, module_context);
@@ -240,12 +241,18 @@ pub(crate) fn run_function(
 /// unless a lexical declaration merged the slot dead, plain `var`s start
 /// defined, lexicals dead. Hoisted-function cells are overwritten by the
 /// eager instantiation when the body starts.
-fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) -> Result<(), VmErr> {
+fn seed_captured(
+    interp: &Interpreter,
+    fe: &Env,
+    code: &BytecodeFunction,
+    args: &[Value],
+    function: &Value,
+) -> Result<(), VmErr> {
     // A nested arrow reads `arguments` through the chain: seed the object
     // first, like the evaluator, so a shadowing parameter or lexical still
     // wins. Arrows never carry the flag themselves.
     if code.captures_arguments && !code.is_arrow {
-        let args_obj = Value::arguments_object(args)?;
+        let args_obj = interp.function_arguments(function, args)?;
         fe.borrow_mut()
             .declare("arguments", args_obj, BindKind::Var, true);
     }

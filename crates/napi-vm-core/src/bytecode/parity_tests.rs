@@ -1319,3 +1319,14 @@ fn native_buffer_growth_uses_the_same_semantics_in_both_tiers() {
         check(source, true);
     }
 }
+
+#[test]
+fn realm_intrinsic_arguments_and_proxy_abrupt_completions_share_tier_semantics() {
+    for source in [
+        "function f(){'use strict';return()=>arguments;}var args=f()();var getter=Object.getOwnPropertyDescriptor(args,'callee').get;getter===Object.getOwnPropertyDescriptor(Function.prototype,'caller').get;",
+        "function f(){return arguments;}var args=f(42);args.callee===f&&args[0]===42&&args[Symbol.iterator]===Array.prototype.values;",
+        "var proxy=new Proxy({},{get:1});var caught=false;try{proxy.x;}catch(e){caught=e instanceof TypeError;}caught;",
+    ] {
+        check(source, true);
+    }
+}
