@@ -14,7 +14,8 @@
     "7c0a9ce-wasm-tests.log.gz": "c5f359d1a4a72b934c130fc321ca0c2065748e82bd93af0ddf993769adfe220d",
     "7c0a9ce-full.json.gz": "f0f5cc6c323609a402f3a9736060254cc00339d4897d302d9ef46effdde0bb44",
     "7c0a9ce-vs-phase2.json.gz": "2f5e80cbef40845731254c57b2d84215bb5bbcfa2167e67df0cf582ddb1e607f",
-    "7c0a9ce-vs-pr23.json.gz": "c39033aa921d458b2b66730d5c95dedb086349d022160749e39c6a236a1cf7ca"
+    "7c0a9ce-vs-pr23.json.gz": "c39033aa921d458b2b66730d5c95dedb086349d022160749e39c6a236a1cf7ca",
+    "7c0a9ce-triage.json": "da401df65834ad8e2abf8fec7d64b15df8da768692fb122907424da972f73786"
   },
   "full_corpus_ast_bytecode_mismatches": "not measured",
   "regression_selection_counts": {
@@ -114,5 +115,11 @@
   "vs_pr23": {
     "new_passes": 11639,
     "lost_passes": 0
+  },
+  "non_passing_engine_phases": {
+    "runtime": 49725,
+    "parse": 154,
+    "resolution": 29,
+    "timeout": 2
   }
 }

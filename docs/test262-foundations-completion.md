@@ -268,5 +268,12 @@ These examples do not classify every remaining failure as outside Phase 1–3.
 
 The subsequent GC/host follow-up explicitly traces completed async tasks'
 result promises and applies guest ToString before source/report transfer or
-queue locking. Its collection and host tests require separate validation; the
-`7c0a9ce` full results do not measure that follow-up.
+queue locking. All four new collection/coercion/worker tests pass, as do all
+required checks: 819 workspace tests (four existing ignored), 161 minimal tests,
+73 Node tests, 14 WASM tests, formatting and strict Clippy. The frozen `bbca33c`
+worker passes 1,712/2,030 agent/realm/GC variants with no special outcomes and no
+lost passes against the matching `7c0a9ce` full-run projection. The `7c0a9ce` full
+results do not measure this follow-up; a later full run remains required before
+merge. Runner validation now rejects non-executable workers before creating
+corpus outcomes, and all ten tooling tests pass. The initial worker-permission
+driver failure is retained and explicitly excluded from conformance comparisons.

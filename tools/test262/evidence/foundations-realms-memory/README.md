@@ -59,5 +59,22 @@ python3 tools/test262/compare.py \
   --output artifacts/test262/reproduced-realm-full-transitions.json
 ```
 
-Later GC/host-coercion changes require their own checks and corpus evidence;
-this full result must not be attributed to those later commits.
+The later `bbca33c` GC/host-coercion snapshot explicitly traces completed async
+tasks' result promises and performs guest ToString on the owner thread before
+queue locking or source/report transfer. All required checks pass: 819 workspace
+tests (four existing ignored), 161 minimal tests, 73 Node tests, 14 WASM tests,
+formatting and strict Clippy. Its focused union passes 1,712/2,030 variants, with
+318 failures and no special outcomes: zero losses versus the matching `7c0a9ce`
+full-run projection, and 211 new passes with zero losses versus Phase 2.
+This is focused evidence; the `7c0a9ce` full result must not be attributed to it.
+
+The initial `bbca33c` worker copy lacked executable permissions. The archived
+driver-error report is not valid variant evidence and cannot be compared against
+the focused denominator. After correcting permissions, the focused run above
+completed normally. `c94ede0` adds preflight validation so future invalid worker
+setups fail before corpus outcomes are created; all ten tooling tests pass.
+The source/check/archive details are in `bbca33c-summary.json`.
+
+`7c0a9ce-triage.json` retains every outcome by path and engine phase. Non-passing
+phases are runtime (49,725), parse (154), resolution (29), and timeout (2).
+These buckets do not claim all remaining failures are outside Phase 1–3.
