@@ -112,3 +112,87 @@ fn call_spread_observes_an_overridden_array_iterator() {
         "42"
     );
 }
+
+#[test]
+fn body_throw_preserves_its_reason_when_getting_return_throws() {
+    assert_eq!(
+        evaluate(
+            r#"
+        let original = {}, secondary = {}, caught, closes = 0;
+        let source = {};
+        source[Symbol.iterator] = function() {return {
+            next() {return {done: false, value: 1};},
+            get return() {closes++; throw secondary;}
+        };};
+        try {for (let value of source) throw original;} catch(error) {caught = error;}
+        (caught === original) + ':' + closes;
+    "#
+        ),
+        "true:1"
+    );
+}
+
+#[test]
+fn body_throw_preserves_its_reason_when_return_is_non_callable() {
+    assert_eq!(
+        evaluate(
+            r#"
+        let original = {}, caught;
+        let source = {};
+        source[Symbol.iterator] = function() {return {
+            next() {return {done: false, value: 1};}, return: 42
+        };};
+        try {for (let value of source) throw original;} catch(error) {caught = error;}
+        caught === original;
+    "#
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn iterator_step_errors_do_not_close_the_iterator() {
+    assert_eq!(
+        evaluate(
+            r#"
+        let reason = {}, closes = 0, failures = 0;
+        for (let kind of [0, 1, 2]) {
+            let source = {};
+            source[Symbol.iterator] = function() {return {
+                next() {
+                    if (kind === 0) throw reason;
+                    return {
+                        get done() {if (kind === 1) throw reason; return false;},
+                        get value() {throw reason;}
+                    };
+                },
+                return() {closes++; return {};}
+            };};
+            try {for (let value of source) {}} catch(error) {if (error === reason) failures++;}
+        }
+        failures + ':' + closes;
+    "#
+        ),
+        "3:0"
+    );
+}
+
+#[test]
+fn close_error_replaces_a_return_completion() {
+    assert_eq!(
+        evaluate(
+            r#"
+        let reason = {}, caught;
+        let source = {};
+        source[Symbol.iterator] = function() {return {
+            next() {return {done: false, value: 1};},
+            get return() {throw reason;}
+        };};
+        function consume() {for (let value of source) return 42;}
+        try {consume();} catch(error) {caught = error;}
+        caught === reason;
+    "#
+        ),
+        "true"
+    );
+}

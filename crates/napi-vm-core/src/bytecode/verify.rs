@@ -675,7 +675,7 @@ impl Checker<'_> {
                 self.check_reg(address, *iter)?;
                 self.check_reg(address, *next)?;
             }
-            Instr::CloseIterator { src } => {
+            Instr::CloseIterator { src, .. } => {
                 self.check_reg(address, *src)?;
             }
             Instr::PushCatch { target, dst } | Instr::PushFinally { target, dst } => {

@@ -1185,6 +1185,22 @@ fn for_of_loops() {
         "function* g(){ try { yield null; } finally { log += 'c'; } } let log = ''; try { for (let {a} of g()) {} } catch (e) { log += 'e'; } log",
         true,
     );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){throw e;},return(){throw 42;}};};try{for(let x of o){}}catch(x){caught=x;}caught===e",
+        true,
+    );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){return {done:false};},get return(){throw 42;}};};try{for(let x of o){throw e;}}catch(x){caught=x;}caught===e",
+        true,
+    );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){return {done:false};},return:42};};try{for(let x of o){throw e;}}catch(x){caught=x;}caught===e",
+        true,
+    );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){return {get done(){throw e;}};},return(){throw 42;}};};try{for(let x of o){}}catch(x){caught=x;}caught===e",
+        true,
+    );
     // Non-iterables and method-less iterators fail like the evaluator.
     check("for (let v of {}) {}", true);
     check(

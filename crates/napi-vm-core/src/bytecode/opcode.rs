@@ -356,8 +356,7 @@ pub enum Instr {
         slot: Slot,
     },
     /// `dst = callee(...spread_args)`: like [`Instr::Call`], but the
-    /// argument list in `constants[tmpl]` splices array-valued spread
-    /// elements and passes anything else as one argument.
+    /// argument list in `constants[tmpl]` consumes each spread iterable.
     CallSpread {
         dst: Reg,
         callee: Reg,
@@ -371,8 +370,7 @@ pub enum Instr {
         tmpl: u16,
     },
     /// `dst` = one array literal from `constants[tmpl]`: plain elements
-    /// plus spreads (arrays splice, strings spread per character, anything
-    /// else drains the iterator protocol).
+    /// plus spreads using the shared iterator protocol.
     BuildArray {
         dst: Reg,
         tmpl: u16,
@@ -422,17 +420,18 @@ pub enum Instr {
         src: Reg,
     },
     /// One `for-of` step: call `next` on `iter`; `done` reports truthy
-    /// `done` (missing counts as done), `value` the yielded value.
+    /// `done` (missing means false), `value` the yielded value.
     IterNext {
         done: Reg,
         value: Reg,
         iter: Reg,
         next: Reg,
     },
-    /// Close `src` as a `for-of` iterator (runs a suspended generator's
-    /// `finally` blocks); anything else ignores it.
+    /// Get and call an iterator's return method, validating its result.
     CloseIterator {
         src: Reg,
+        /// Use the pending abrupt completion in an exceptional unwind pad.
+        unwind: bool,
     },
     /// Push a catch handler: a catchable error (`Throw`, `Msg`,
     /// `RuntimeError`) abandons the protected region, stores the catch
@@ -937,7 +936,9 @@ impl fmt::Display for Instr {
             } => {
                 write!(f, "ITER_NEXT r{done}, r{value}, r{iter}, r{next}")
             }
-            Instr::CloseIterator { src } => write!(f, "CLOSE_ITERATOR r{src}"),
+            Instr::CloseIterator { src, unwind } => {
+                write!(f, "CLOSE_ITERATOR r{src} unwind={unwind}")
+            }
             Instr::PushCatch { target, dst } => write!(f, "PUSH_CATCH @{target}, r{dst}"),
             Instr::PushFinally { target, dst } => write!(f, "PUSH_FINALLY @{target}, r{dst}"),
             Instr::PopHandler => write!(f, "POP_HANDLER"),

@@ -2344,7 +2344,10 @@ impl<'a> Compiler<'a> {
                 } => (*finally, *close_iter),
             };
             if let Some(iter) = close_iter {
-                self.emit(Instr::CloseIterator { src: iter });
+                self.emit(Instr::CloseIterator {
+                    src: iter,
+                    unwind: false,
+                });
             }
             if let Some(body) = finally {
                 // The inline copy runs outside its own region: compile it
@@ -2705,10 +2708,6 @@ impl<'a> Compiler<'a> {
             src: undef,
         });
         let scratch = self.alloc_reg()?;
-        let unwind_pad = self.emit_jump(|target| Instr::PushFinally {
-            target,
-            dst: scratch,
-        });
         self.unwind.push(UnwindCtx::Handler {
             finally: None,
             close_iter: Some(iterator),
@@ -2729,6 +2728,12 @@ impl<'a> Compiler<'a> {
             next,
         });
         let exhausted = self.emit_jump(|target| Instr::JumpIfTrue { src: done, target });
+        // IteratorStep/IteratorValue failures do not close the iterator.
+        // Protect only binding initialization and the body of each iteration.
+        let unwind_pad = self.emit_jump(|target| Instr::PushFinally {
+            target,
+            dst: scratch,
+        });
         match (&head, pattern) {
             (Some(head), None) => self.bind_for_head(head, yielded),
             (None, Some(pattern)) => {
@@ -2745,6 +2750,8 @@ impl<'a> Compiler<'a> {
             dst: loop_value,
             src: body_value,
         });
+        let continue_pad = self.here();
+        self.emit(Instr::PopHandler);
         self.emit(Instr::Jump {
             target: addr_target(top)?,
         });
@@ -2756,21 +2763,26 @@ impl<'a> Compiler<'a> {
             .pop()
             .ok_or(Decline::Func("unwind stack underflow"))?;
         let drained = self.here();
-        self.emit(Instr::PopHandler);
         let end_jump = self.emit_jump(|target| Instr::Jump { target });
         let close_pad = self.here();
-        self.emit(Instr::CloseIterator { src: iterator });
+        self.emit(Instr::CloseIterator {
+            src: iterator,
+            unwind: false,
+        });
         self.emit(Instr::PopHandler);
         let over_pad = self.emit_jump(|target| Instr::Jump { target });
         self.patch_jump(unwind_pad, self.here())?;
-        self.emit(Instr::CloseIterator { src: iterator });
+        self.emit(Instr::CloseIterator {
+            src: iterator,
+            unwind: true,
+        });
         self.emit(Instr::Rethrow);
         let end = self.here();
         self.patch_jump(exhausted, drained)?;
         self.patch_jump(end_jump, end)?;
         self.patch_jump(over_pad, end)?;
         for addr in ctx.continues {
-            self.patch_jump(addr, top)?;
+            self.patch_jump(addr, continue_pad)?;
         }
         for addr in ctx.breaks {
             self.patch_jump(addr, close_pad)?;

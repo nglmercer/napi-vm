@@ -931,9 +931,11 @@ fn run_loop(
                 Instr::ForOfInit { iter, next, src } => {
                     let source = frame.registers[src as usize].clone_for_execution();
                     let iterator = interp.iterator_for(&source)?;
-                    let next_fn = interp.prop_str(&iterator, "next")?;
+                    let next_fn = interp.member(&iterator, "next")?;
                     if matches!(next_fn, Value::Undefined) {
-                        return Err(VmErr::Msg("iterator has no next() method".to_string()));
+                        return Err(VmErr::Msg(
+                            "TypeError: iterator has no next() method".to_string(),
+                        ));
                     }
                     frame.registers[iter as usize] = iterator;
                     frame.registers[next as usize] = next_fn;
@@ -951,9 +953,16 @@ fn run_loop(
                     frame.registers[done as usize] = Value::Bool(finished);
                     frame.registers[value as usize] = produced;
                 }
-                Instr::CloseIterator { src } => {
+                Instr::CloseIterator { src, unwind } => {
                     let iterator = frame.registers[src as usize].clone_for_execution();
-                    interp.close_guest_iterator(&iterator, false)?;
+                    if unwind {
+                        let completion = frame.pending.as_ref().ok_or_else(|| {
+                            internal("iterator unwind without a pending completion")
+                        })?;
+                        interp.close_guest_iterator_for_abrupt(&iterator, false, completion)?;
+                    } else {
+                        interp.close_guest_iterator(&iterator, false)?;
+                    }
                 }
                 Instr::PushCatch { target, dst } => {
                     let scope_depth = frame.scopes.len();

@@ -199,6 +199,25 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 pub(crate) const SUPER_PROTO: &str = "__super_proto__";
 
 impl Interpreter {
+    /// IteratorClose preserves an original throw, including errors raised by
+    /// retrieving return. Other abrupt completions may be replaced by close.
+    pub(crate) fn close_guest_iterator_for_abrupt(
+        &mut self,
+        iterator: &Value,
+        asynchronous: bool,
+        completion: &VmErr,
+    ) -> Result<(), VmErr> {
+        let result = self.close_guest_iterator(iterator, asynchronous);
+        if matches!(
+            completion,
+            VmErr::Throw(_) | VmErr::Msg(_) | VmErr::RuntimeError(_)
+        ) {
+            Ok(())
+        } else {
+            result
+        }
+    }
+
     pub(crate) fn close_guest_iterator(
         &mut self,
         iterator: &Value,
@@ -1260,7 +1279,7 @@ impl Interpreter {
                 };
                 let next_fn = self.member(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
-                    return vm_err("iterator has no next() method");
+                    return vm_err("TypeError: iterator has no next() method");
                 }
                 let mut r = Value::Undefined;
                 let label = self.active_label.take();
@@ -1302,13 +1321,7 @@ impl Interpreter {
                         // handlers, so it must not close either.
                         Err(error) => {
                             if !error.is_abandon() {
-                                let closed = self.close_guest_iterator(&iterator, *is_await);
-                                if matches!(
-                                    error,
-                                    VmErr::Ret(_) | VmErr::Break(_) | VmErr::Continue(_)
-                                ) {
-                                    closed?;
-                                }
+                                self.close_guest_iterator_for_abrupt(&iterator, *is_await, &error)?;
                             }
                             return Err(error);
                         }
