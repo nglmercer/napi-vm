@@ -78,7 +78,12 @@ impl Parser {
                 Some(Statement::Expr(Expr::Identifier("let".into())))
             }
             Token::KwLet => self.var_decl(VarKind::Let),
-            Token::KwConst => self.var_decl(VarKind::Const),
+            Token::KwConst => {
+                if self.single_statement {
+                    self.record_error("const declaration requires a statement list".into());
+                }
+                self.var_decl(VarKind::Const)
+            }
             Token::KwFunction => self.fn_decl(false),
             Token::KwAsync => {
                 // `async function name(...) { ... }`
@@ -91,7 +96,12 @@ impl Parser {
                     Some(Statement::Expr(e))
                 }
             }
-            Token::KwClass => self.class_decl(),
+            Token::KwClass => {
+                if self.single_statement {
+                    self.record_error("class declaration requires a statement list".into());
+                }
+                self.class_decl()
+            }
             Token::KwReturn => self.ret(),
             Token::KwIf => self.if_(),
             Token::KwWhile => self.while_(),
@@ -185,7 +195,11 @@ impl Parser {
                     let label = n.clone();
                     self.adv(); // identifier
                     self.adv(); // colon
-                    let body = self.stmt()?;
+                    let saved = self.single_statement;
+                    self.single_statement = true;
+                    let body = self.stmt();
+                    self.single_statement = saved;
+                    let body = body?;
                     return Some(Statement::Labeled {
                         label,
                         body: Box::new(body),

@@ -577,7 +577,10 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             body,
         } => {
             if let Some(target) = target {
-                assignment_target(target, ctx)?;
+                match target.as_ref() {
+                    Expr::Array(_) | Expr::Object(_) => assignment_target(target, ctx)?,
+                    _ => simple_assignment_target(target, ctx)?,
+                }
             } else {
                 binding(name, ctx)?;
             }

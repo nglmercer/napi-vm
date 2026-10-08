@@ -428,6 +428,7 @@ fn for_in_assignment_heads_are_retained_and_validated() {
         "class C{#x;m(){for(#x in []){}}}",
         "function* f(){for({yield} in []){}}",
         "for(1 in {}){}",
+        "for(x=0 in {}){}",
     ] {
         assert!(!parses(source, ParseGoal::Script), "accepted {source}");
     }
@@ -442,5 +443,29 @@ fn for_in_assignment_heads_are_retained_and_validated() {
             matches!(result, Ok(napi_vm_core::Value::Bool(true))),
             "{source}: {result:?}"
         );
+    }
+}
+
+#[test]
+fn lexical_declarations_require_statement_list_positions() {
+    for source in [
+        "if(true)const x=1;",
+        "while(false)class C{}",
+        "label:class C{}",
+        "label:const x=1;",
+        "label:using x=null;",
+        "async function f(){label:await using x=null;}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "if(true){const x=1;}",
+        "while(false){class C{}}",
+        "label:{const x=1;}",
+        "label:{using x=null;}",
+        "async function f(){label:{await using x=null;}}",
+        "label:function f(){}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
