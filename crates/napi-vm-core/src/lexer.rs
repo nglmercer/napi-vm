@@ -10,6 +10,7 @@ pub struct TemplateChunk {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Number(f64),
+    LegacyNumber(f64),
     /// A `BigInt` literal, carrying its digits (`123n` → `"123"`).
     BigInt(String),
     /// A character that begins no valid token, e.g. `@` or `#`.
@@ -21,6 +22,7 @@ pub enum Token {
     String(crate::JsString),
     /// A string literal containing escapes; it cannot be a Use Strict Directive.
     EscapedString(crate::JsString),
+    LegacyString(crate::JsString),
     Identifier(String),
     /// IdentifierName containing a Unicode escape. It cannot act as a keyword.
     EscapedIdentifier(String),
@@ -352,7 +354,7 @@ impl Lexer {
                 let start = self.pos;
                 self.pos += 1;
                 self.col += 1;
-                match self.read_escape() {
+                match self.read_escape(false) {
                     Ok(text) => quasi.cooked.push_str(text),
                     Err(()) => {
                         toks.push((
@@ -807,8 +809,10 @@ impl Lexer {
                 Token::Identifier(_)
                     | Token::EscapedIdentifier(_)
                     | Token::Number(_)
+                    | Token::LegacyNumber(_)
                     | Token::String(_)
                     | Token::EscapedString(_)
+                    | Token::LegacyString(_)
                     | Token::Regex(_, _)
                     | Token::RParen
                     | Token::RBracket
@@ -873,6 +877,10 @@ impl Lexer {
                 '\\' => {
                     pattern.push(c);
                     if let Some(&escaped) = self.src.get(self.pos) {
+                        if matches!(escaped, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                            self.pos = start;
+                            return None;
+                        }
                         pattern.push(escaped);
                         self.pos += 1;
                         self.col += 1;
@@ -889,7 +897,7 @@ impl Lexer {
                 '/' if !in_class => break,
                 // A line terminator ends a regular-expression literal's
                 // reach; what looked like one is a division operator.
-                '\n' => {
+                '\n' | '\r' | '\u{2028}' | '\u{2029}' => {
                     self.pos = start;
                     return None;
                 }
@@ -915,7 +923,7 @@ impl Lexer {
         ))
     }
 
-    fn read_escape(&mut self) -> Result<crate::JsString, ()> {
+    fn read_escape(&mut self, legacy_allowed: bool) -> Result<crate::JsString, ()> {
         let e = *self.src.get(self.pos).ok_or(())?;
         self.pos += 1;
         self.col += 1;
@@ -926,8 +934,35 @@ impl Lexer {
             'b' => "\u{0008}",
             'f' => "\u{000C}",
             'v' => "\u{000B}",
-            '0' => "\0",
+            '0' if !self.src.get(self.pos).is_some_and(char::is_ascii_digit) => "\0",
+            '0'..='7' => {
+                if !legacy_allowed {
+                    return Err(());
+                }
+                let mut value = e.to_digit(8).ok_or(())?;
+                let limit = if e <= '3' { 3 } else { 2 };
+                for _ in 1..limit {
+                    let Some(digit) = self.src.get(self.pos).and_then(|c| c.to_digit(8)) else {
+                        break;
+                    };
+                    value = value * 8 + digit;
+                    self.pos += 1;
+                    self.col += 1;
+                }
+                return Ok(crate::JsString::from_units(vec![value as u16]));
+            }
+            '8' | '9' => {
+                if !legacy_allowed {
+                    return Err(());
+                }
+                return Ok(self.source_unit_string(e));
+            }
             '\n' => {
+                self.line += 1;
+                self.col = 1;
+                return Ok(crate::JsString::default());
+            }
+            '\u{2028}' | '\u{2029}' => {
                 self.line += 1;
                 self.col = 1;
                 return Ok(crate::JsString::default());
@@ -989,11 +1024,14 @@ impl Lexer {
         self.col += 1;
         let mut text = crate::JsString::default();
         let mut escaped = false;
+        let mut legacy = false;
         while let Some(&c) = self.src.get(self.pos) {
             self.pos += 1;
             self.col += 1;
             if c == q {
-                return if escaped {
+                return if legacy {
+                    Token::LegacyString(text)
+                } else if escaped {
                     Token::EscapedString(text)
                 } else {
                     Token::String(text)
@@ -1004,7 +1042,13 @@ impl Lexer {
             }
             if c == '\\' {
                 escaped = true;
-                match self.read_escape() {
+                legacy |= self
+                    .src
+                    .get(self.pos)
+                    .is_some_and(|c| matches!(c, '1'..='9'))
+                    || self.src.get(self.pos) == Some(&'0')
+                        && self.src.get(self.pos + 1).is_some_and(char::is_ascii_digit);
+                match self.read_escape(true) {
                     Ok(s) => text.push_str(s),
                     Err(()) => return Token::Unknown('\\'),
                 }
@@ -1039,6 +1083,17 @@ impl Lexer {
                 self.pos += 1;
                 self.col += 1;
             }
+            let raw = &self.src[digits_start..self.pos];
+            if raw.is_empty()
+                || raw.iter().enumerate().any(|(index, c)| {
+                    *c == '_'
+                        && (index == 0
+                            || !raw[index - 1].is_digit(radix)
+                            || !raw.get(index + 1).is_some_and(|c| c.is_digit(radix)))
+                })
+            {
+                return Token::Unknown('_');
+            }
             let digits: String = self.src[digits_start..self.pos]
                 .iter()
                 .filter(|c| **c != '_')
@@ -1049,7 +1104,9 @@ impl Lexer {
                 let literal: String = self.src[s..self.pos - 1].iter().collect();
                 return Token::BigInt(literal);
             }
-            return Token::Number(u128::from_str_radix(&digits, radix).unwrap_or(0) as f64);
+            return Token::Number(digits.chars().fold(0.0, |value, digit| {
+                value * f64::from(radix) + f64::from(digit.to_digit(radix).unwrap_or(0))
+            }));
         }
         while self.pos < self.src.len()
             && (self.src[self.pos].is_ascii_digit() || self.src[self.pos] == '_')
@@ -1083,6 +1140,21 @@ impl Lexer {
                 }
             }
         }
+        let legacy = self.src[s] == '0' && self.src.get(s + 1).is_some_and(char::is_ascii_digit);
+        let legacy_octal = legacy
+            && self.src[s..self.pos]
+                .iter()
+                .filter(|c| c.is_ascii_digit())
+                .all(|c| *c <= '7');
+        if self.src[s] == '0' && self.src.get(s + 1) == Some(&'_')
+            || legacy && self.src[s..self.pos].contains(&'_')
+            || legacy_octal
+                && self.src[s..self.pos]
+                    .iter()
+                    .any(|c| matches!(c, '.' | 'e' | 'E'))
+        {
+            return Token::Unknown('0');
+        }
         if self.src[s..self.pos]
             .iter()
             .enumerate()
@@ -1106,7 +1178,7 @@ impl Lexer {
                 .collect();
             self.pos += 1;
             self.col += 1;
-            if digits.contains(['.', 'e', 'E']) {
+            if digits.contains(['.', 'e', 'E']) || legacy {
                 return Token::Unknown('n');
             }
             return Token::BigInt(digits);
@@ -1115,7 +1187,18 @@ impl Lexer {
             .iter()
             .filter(|c| **c != '_')
             .collect();
-        Token::Number(n.parse().unwrap_or(0.0))
+        let value = if legacy_octal {
+            n.chars().fold(0.0, |value, digit| {
+                value * 8.0 + f64::from(digit.to_digit(8).unwrap_or(0))
+            })
+        } else {
+            n.parse().unwrap_or(0.0)
+        };
+        if legacy {
+            Token::LegacyNumber(value)
+        } else {
+            Token::Number(value)
+        }
     }
 
     fn identifier_escape(&mut self) -> Result<char, ()> {

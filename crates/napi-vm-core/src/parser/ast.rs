@@ -105,6 +105,8 @@ pub enum ImportPhase {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    /// A legacy literal spelling permitted only in non-strict code.
+    LegacyLiteral(Box<Expr>),
     Number(f64),
     /// A `BigInt` literal, carrying its digits.
     BigIntLiteral(String),
@@ -258,6 +260,16 @@ pub enum ObjectProp {
 pub enum ExprOrBlock {
     Expr(Box<Expr>),
     Block(Vec<Statement>),
+}
+
+impl Expr {
+    pub(crate) fn is_string_literal(&self) -> bool {
+        match self {
+            Self::String(_) | Self::EscapedString(_) => true,
+            Self::LegacyLiteral(inner) => inner.is_string_literal(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -941,6 +953,7 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
 
 pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
     match expr {
+        Expr::LegacyLiteral(inner) => expr_captures_identifier(inner, name),
         Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
         Expr::FnExpr { body, .. } => stmts_reference(body, name),
         Expr::ClassExpr {
@@ -1258,6 +1271,7 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
 
 fn expr_references(e: &Expr, name: &str) -> bool {
     match e {
+        Expr::LegacyLiteral(inner) => expr_references(inner, name),
         Expr::Regex(_, _) | Expr::BigIntLiteral(_) => false,
         Expr::Identifier(n) => n == name,
         Expr::Array { items, .. } => items.iter().any(|x| expr_references(x, name)),
@@ -1360,6 +1374,7 @@ fn expr_references(e: &Expr, name: &str) -> bool {
 /// not a valid pattern and the assignment fails at runtime.
 pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
     Some(match expr {
+        Expr::LegacyLiteral(inner) => return expr_to_pattern(inner),
         Expr::Identifier(name) => Pattern::Ident(name.clone()),
         Expr::Member {
             object,

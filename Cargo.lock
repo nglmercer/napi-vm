@@ -1139,6 +1139,8 @@ dependencies = [
  "corosensei",
  "js-sys",
  "libloading",
+ "oxc_allocator",
+ "oxc_regular_expression",
  "regex-syntax",
  "serde",
  "serde_json",

@@ -97,6 +97,9 @@ impl Parser {
             let is_getter = self.eat_modifier(&Token::KwGet);
             let is_setter = self.eat_modifier(&Token::KwSet);
             let member_span = self.cur_span();
+            if matches!(self.cur(), Token::LegacyNumber(_) | Token::LegacyString(_)) {
+                self.record_error("legacy literal class member name".into());
+            }
             // `[expr]` evaluates when the class is defined; string and
             // numeric spellings name the same property as their bare form.
             let mn = if self.eat(&Token::LBracket) {
@@ -110,12 +113,12 @@ impl Parser {
                         self.adv();
                         v
                     }
-                    Token::String(s) | Token::EscapedString(s) => {
+                    Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
                         let v = s.to_key();
                         self.adv();
                         v
                     }
-                    Token::Number(n) => {
+                    Token::Number(n) | Token::LegacyNumber(n) => {
                         let v = crate::format::number_string(*n);
                         self.adv();
                         v
@@ -557,7 +560,7 @@ impl Parser {
     fn from(&mut self) -> Option<String> {
         self.eat(&Token::KwFrom);
         match self.cur() {
-            Token::String(s) | Token::EscapedString(s) => {
+            Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
                 let v = self.module_specifier(s.clone())?;
                 self.adv();
                 Some(v)

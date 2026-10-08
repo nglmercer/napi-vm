@@ -3164,6 +3164,7 @@ impl<'a> Compiler<'a> {
             return Err(Decline::Func("private field writes"));
         }
         match expr {
+            Expr::LegacyLiteral(inner) => self.compile_expr(inner),
             Expr::Number(value) => {
                 let index = self.intern_number(*value)?;
                 self.load_const(index)

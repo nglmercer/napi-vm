@@ -12,6 +12,16 @@ const ANONYMOUS_CLASS: &str = "*anonymous class*";
 impl Parser {
     pub(super) fn primary(&mut self) -> Option<Expr> {
         match self.cur() {
+            Token::LegacyNumber(n) => {
+                let value = *n;
+                self.adv();
+                Some(Expr::LegacyLiteral(Box::new(Expr::Number(value))))
+            }
+            Token::LegacyString(text) => {
+                let value = text.clone();
+                self.adv();
+                Some(Expr::LegacyLiteral(Box::new(Expr::EscapedString(value))))
+            }
             Token::Number(n) => {
                 let v = *n;
                 self.adv();
@@ -99,6 +109,7 @@ impl Parser {
             }
             Token::LBrace => {
                 self.adv();
+                let mut legacy_key = false;
                 let mut p = Vec::new();
                 while self.until(&Token::RBrace) {
                     if self.eat(&Token::DotDotDot) {
@@ -128,13 +139,15 @@ impl Parser {
                     if (is_method || is_setter) && (is_async || is_generator) {
                         self.record_error("accessor cannot be async or a generator".into());
                     }
+                    legacy_key |=
+                        matches!(self.cur(), Token::LegacyNumber(_) | Token::LegacyString(_));
                     let key = match self.cur() {
-                        Token::String(s) | Token::EscapedString(s) => {
+                        Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
                             let v = s.to_key();
                             self.adv();
                             v
                         }
-                        Token::Number(n) => {
+                        Token::Number(n) | Token::LegacyNumber(n) => {
                             let v = n.to_string();
                             self.adv();
                             v
@@ -268,9 +281,14 @@ impl Parser {
                     .get(self.pos.saturating_sub(1))
                     .is_some_and(|(token, _)| matches!(token, Token::Comma));
                 self.expect(&Token::RBrace);
-                Some(Expr::Object {
+                let object = Expr::Object {
                     props: p,
                     trailing_comma,
+                };
+                Some(if legacy_key {
+                    Expr::LegacyLiteral(Box::new(object))
+                } else {
+                    object
                 })
             }
             Token::KwFunction => {

@@ -69,9 +69,13 @@ pub(crate) struct EvalContext {
     pub private_names: HashSet<String>,
 }
 
+fn directive_literal(statement: &Statement) -> bool {
+    matches!(statement, Statement::Expr(expr) if expr.is_string_literal())
+}
+
 pub(crate) fn use_strict(body: &[Statement]) -> bool {
     body.iter()
-        .take_while(|s| matches!(s, Statement::Expr(Expr::String(_) | Expr::EscapedString(_))))
+        .take_while(|s| directive_literal(s))
         .any(|s| matches!(s, Statement::Expr(Expr::String(text)) if text == "use strict"))
 }
 
@@ -889,6 +893,12 @@ fn simple_assignment_target(target: &Expr, ctx: &Context) -> Check {
 
 fn assignment_target(target: &Expr, ctx: &Context) -> Check {
     match target {
+        Expr::LegacyLiteral(inner) => {
+            if ctx.strict {
+                return Err("legacy literal in strict code".into());
+            }
+            assignment_target(inner, ctx)
+        }
         Expr::Array {
             items,
             trailing_comma,
@@ -942,6 +952,13 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
 
 fn expression(expr: &Expr, ctx: &Context) -> Check {
     match expr {
+        Expr::Regex(pattern, flags) => crate::regex::validate_syntax(pattern, flags).map(|_| ()),
+        Expr::LegacyLiteral(inner) => {
+            if ctx.strict {
+                return Err("legacy literal in strict code".into());
+            }
+            expression(inner, ctx)
+        }
         Expr::Identifier(name) if name == "arguments" && ctx.forbid_arguments => {
             Err("arguments in class initialization".into())
         }
@@ -1252,7 +1269,6 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         | Expr::BigIntLiteral(_)
         | Expr::String(_)
         | Expr::EscapedString(_)
-        | Expr::Regex(_, _)
         | Expr::Bool(_)
         | Expr::Null
         | Expr::Undefined

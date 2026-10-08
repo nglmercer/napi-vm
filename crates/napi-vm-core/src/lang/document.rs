@@ -918,6 +918,7 @@ impl Builder<'_> {
 
     fn expr(&mut self, expr: &Expr, env: &mut HashMap<String, Type>) -> Type {
         match expr {
+            Expr::LegacyLiteral(inner) => self.expr(inner, env),
             Expr::Number(_) => Type::Number,
             Expr::String(_) | Expr::EscapedString(_) | Expr::Template { .. } => Type::String,
             // A tag can return anything, so its call site is unconstrained.

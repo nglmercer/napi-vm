@@ -221,10 +221,12 @@ impl Parser {
                 Some(Statement::Empty)
             }
             _ => {
-                let literal_start =
-                    matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
+                let literal_start = matches!(
+                    self.cur(),
+                    Token::String(_) | Token::EscapedString(_) | Token::LegacyString(_)
+                );
                 let mut e = self.expr()?;
-                if !literal_start && matches!(e, Expr::String(_) | Expr::EscapedString(_)) {
+                if !literal_start && e.is_string_literal() {
                     // Parentheses are erased elsewhere in the AST. Preserve
                     // their non-directive status without changing completion.
                     e = Expr::Binary {
@@ -370,6 +372,17 @@ impl Parser {
                         PatternKey::Computed(expr)
                     } else {
                         match self.cur() {
+                            Token::LegacyString(s) => {
+                                let expr =
+                                    Expr::LegacyLiteral(Box::new(Expr::EscapedString(s.clone())));
+                                self.adv();
+                                PatternKey::Computed(expr)
+                            }
+                            Token::LegacyNumber(n) => {
+                                let expr = Expr::LegacyLiteral(Box::new(Expr::Number(*n)));
+                                self.adv();
+                                PatternKey::Computed(expr)
+                            }
                             Token::String(s) | Token::EscapedString(s) => {
                                 let key = PatternKey::Name(s.to_key());
                                 self.adv();

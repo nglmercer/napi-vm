@@ -824,3 +824,98 @@ fn unicode_identifier_names_preserve_escape_and_keyword_boundaries() {
         );
     }
 }
+
+#[test]
+fn legacy_literal_metadata_obeys_strict_scopes_and_property_names() {
+    for source in [
+        "'use strict';010;",
+        "'use strict';08;",
+        r"'use strict';'\1';",
+        r"'\1';'use strict';",
+        r"function f(){'\1';'use strict';}",
+        r"'use strict';({'\1':1});",
+        "'use strict';({010:1});",
+        r"'use strict';var {'\1':x}={};",
+        "class C{010(){}}",
+        r"class C{'\1'(){}}",
+        "class C{x=010;}",
+        "010.1;",
+        "00e1;",
+        "00n;",
+        "01n;",
+        "0_1;",
+        "0x_1;",
+        "0x1_;",
+        "0b1__0;",
+        "0o_1n;",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        r"('\1');'use strict';010;",
+        "var x=010;",
+        "var x=08.1;",
+        r"({'\1':1});",
+        r"var {'\1':x}={};",
+        "'use strict';0;",
+        r"'use strict';'\0';",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    assert!(!parses("010;", ParseGoal::Module));
+    for source in [
+        "010===8&&08===8&&09===9;",
+        r"'\012'==='\n'&&'\1'.charCodeAt(0)===1;",
+        r"'\400'===' 0'&&'\777'==='?7';",
+        r"'\8'==='8'&&'\9'==='9';",
+        r"var o={'\137_proto__':{x:1}};o['__proto__'].x===1;",
+        r"var {'\1':x}={'\1':3};x===3;",
+        r"var x;({'\1':x}={'\1':3});x===3;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn regexp_literals_validate_grammar_before_execution() {
+    for source in [
+        r"/(/;",
+        r"/a{2,1}/;",
+        r"/a/gg;",
+        r"/a/z;",
+        r"/a/uv;",
+        r"/\xZ1/u;",
+        r"/\u{110000}/u;",
+        r"/\p{NoSuchProperty}/u;",
+        r"/\p{Script=noSuchScript}/u;",
+        r"/[z-a]/;",
+        r"/(?<x>a)(?<x>b)/;",
+        r"/[a&&&b]/v;",
+        r"/[\q{a}]/u;",
+        r"/\k<missing>/u;",
+        "/a\u{2028}b/;",
+        "/a\\\u{2029}b/;",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        r"/a/;",
+        r"/a/uy;",
+        r"/\uD800/u;",
+        r"/\p{Script=Greek}/u;",
+        r"/[a&&b]/v;",
+        r"/[\q{abc|def}]/v;",
+        r"/\p{RGI_Emoji}/v;",
+        r"/(?<x>a)|(?<x>b)/;",
+        r"/\8/;",
+        r"/\xZ1/;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    let source = format!("/{0}x{1}/;", "(".repeat(1024), ")".repeat(1024));
+    assert!(!parses(&source, ParseGoal::Script));
+}

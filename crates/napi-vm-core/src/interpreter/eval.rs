@@ -1925,6 +1925,7 @@ impl Interpreter {
     pub(crate) fn eval_expr(&mut self, e: &Expr) -> Result<Value, VmErr> {
         self.consume_fuel(1)?;
         match e {
+            Expr::LegacyLiteral(inner) => self.eval_expr(inner),
             Expr::Number(n) => Ok(Value::Number(*n)),
             Expr::String(s) | Expr::EscapedString(s) => {
                 if s.len() > crate::value::MAX_STRING_LEN {
@@ -2448,7 +2449,9 @@ impl Interpreter {
                     // A destructuring *assignment*: `[a, b] = [b, a]`,
                     // `({ x } = o)`. Unlike a declaration it binds nothing
                     // new, so each name is assigned through the scope chain.
-                    Expr::Array { .. } | Expr::Object { .. } if matches!(op, AssignOp::Assign) => {
+                    Expr::Array { .. } | Expr::Object { .. } | Expr::LegacyLiteral(_)
+                        if matches!(op, AssignOp::Assign) =>
+                    {
                         let pattern = crate::parser::expr_to_pattern(target)
                             .ok_or_else(|| VmErr::Msg("Invalid assignment target".to_string()))?;
                         self.destructure_assignment(&pattern, &v)?;

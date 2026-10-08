@@ -1276,3 +1276,16 @@ fn iteration_assignment_forms_retain_fallback_and_declaration_tier_parity() {
     check("function f(){for(var x of []){}return x;}f();", true);
     check("function f(){for(var x in {}){}return x;}f();", true);
 }
+
+#[test]
+fn literal_metadata_keeps_primitive_and_object_tier_parity() {
+    for source in [
+        "010+1;",
+        r"'\012'.charCodeAt(0);",
+        r"({'\1':3})['\1'];",
+        r"var \u0061=6;a/2;",
+        "var α=3;α+1;",
+    ] {
+        check(source, true);
+    }
+}
