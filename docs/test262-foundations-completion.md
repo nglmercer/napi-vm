@@ -277,3 +277,28 @@ results do not measure this follow-up; a later full run remains required before
 merge. Runner validation now rejects non-executable workers before creating
 corpus outcomes, and all ten tooling tests pass. The initial worker-permission
 driver failure is retained and explicitly excluded from conformance comparisons.
+
+## Async-generator continuation (`e193e23`)
+
+Async generators now serialize real next/return/throw requests on the VM owner
+thread using the existing generator coroutine and promise scheduler. Await
+rejections resume the body at its suspension point; return completions survive
+yielding finally blocks. Captured realms and pending request promises are traced
+by GC. Generator delegation forwards abrupt completions, and loop closing uses
+the shared guest iterator protocol rather than abandoning the coroutine.
+
+The focused agents/realms/GC/generators/async-generators union passes
+**4,192/5,186** variants: **1,084 new passes and zero lost passes** against the
+matching selection projected from the `7c0a9ce` full report. There are zero
+harness errors, timeouts, crashes, or skips. All 122 `GeneratorPrototype` variants
+pass; 90/96 `AsyncGeneratorPrototype` variants pass. The six remaining builtin
+failures concern abrupt promise-constructor access during return-value awaiting.
+
+All required checks passed for this source: formatting, strict Clippy, 840
+workspace tests (four existing ignored), 182 minimal tests, 73 Node tests, 14 WASM
+tests, and ten tooling tests. Exact reports, the explicitly labeled baseline
+projection, transitions, logs, and digests are archived with the
+[realm continuation evidence](../tools/test262/evidence/foundations-realms-memory/README.md).
+This focused result does not replace the last full-corpus measurement. Async
+iterator adaptation, suspended GC auditing, the broader Phase 3 operations, and
+full-corpus bytecode differential measurement remain completion gates.

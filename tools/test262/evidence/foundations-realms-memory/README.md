@@ -4,6 +4,14 @@ Phases 1–3 remain incomplete and PR #24 remains draft. Each report is tied to
 its exact source commit and frozen worker digest; focused and exploratory
 results are not completion evidence.
 
+The `e193e23` async-generator continuation passes 4,192/5,186 variants in the
+agents/realms/gc-weak/generators/async-generators union. It gains 1,084 passes and
+loses zero against the matching selection projected from the `7c0a9ce` full
+report, with zero harness errors, timeouts, crashes, and skips. The projection is
+not an independent baseline rerun. `e193e23-summary.json` ties the worker digest,
+reports, transitions, and all required passing check logs to the exact source.
+No full-corpus result or phase-completion claim is made for this continuation.
+
 The 2,030 variants have 1,640 passes and 390 failures, with no harness errors,
 timeouts, crashes, or skips. Against the identical `313146b` selection, the
 comparison has 139 new passes and zero lost passes. Source configuration, worker
