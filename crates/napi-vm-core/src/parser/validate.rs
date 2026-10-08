@@ -836,10 +836,10 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
         }
         Pattern::Object(props) => {
             for (index, (key, value)) in props.iter().enumerate() {
-                if let Some(Pattern::Rest(inner)) = value {
-                    if index + 1 != props.len() || !matches!(inner.as_ref(), Pattern::Ident(_)) {
-                        return Err("object binding rest must be a final identifier".into());
-                    }
+                if let Some(Pattern::Rest(inner)) = value
+                    && (index + 1 != props.len() || !matches!(inner.as_ref(), Pattern::Ident(_)))
+                {
+                    return Err("object binding rest must be a final identifier".into());
                 }
                 if let PatternKey::Computed(expr) = key {
                     expression(expr, ctx)?;
