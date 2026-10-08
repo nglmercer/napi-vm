@@ -83,6 +83,14 @@ def run_variant(engine, root, test, source, data, mode, strict, timeout):
     return {"status": outcome(report, data), "engine": report}
 
 
+def validate_engine(engine):
+    """Reject driver setup errors before creating corpus outcomes."""
+    if not engine.is_file():
+        raise ValueError(f"engine is not a file: {engine}")
+    if not os.access(engine, os.X_OK):
+        raise ValueError(f"engine is not executable: {engine}")
+
+
 def selected_files(root, paths, groups, catalog):
     """Union explicit focused selections; errors never become silent omissions."""
     tests = set()
@@ -154,6 +162,10 @@ def main():
         parser.error("timeout must be positive")
     if args.resume and not args.checkpoint:
         parser.error("--resume requires --checkpoint")
+    try:
+        validate_engine(args.engine)
+    except ValueError as error:
+        parser.error(str(error))
     root = args.corpus.resolve()
     revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if revision != args.revision:
