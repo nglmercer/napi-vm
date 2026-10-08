@@ -37,6 +37,22 @@
       "language/expressions/await"
     ]
   },
+  "async-generators": {
+    "paths": [
+      "built-ins/AsyncGeneratorFunction",
+      "built-ins/AsyncGeneratorPrototype",
+      "language/expressions/async-generator",
+      "language/statements/async-generator"
+    ]
+  },
+  "generators": {
+    "paths": [
+      "built-ins/GeneratorFunction",
+      "built-ins/GeneratorPrototype",
+      "language/expressions/generators",
+      "language/statements/generators"
+    ]
+  },
   "super": {
     "paths": [
       "language/expressions/super",
