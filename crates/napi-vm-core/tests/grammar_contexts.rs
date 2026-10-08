@@ -538,3 +538,57 @@ fn assignment_rest_comma_and_lexical_loop_bindings_are_early_errors() {
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
+
+#[test]
+fn parameter_defaults_and_pattern_bound_names_cannot_disappear_during_recovery() {
+    for source in [
+        "class C{async f(x=await){}}",
+        "function f(x=){}",
+        "function f({x}=){}",
+        "function f(a,a=1){}",
+        "function f(a,{x:a}){}",
+        "function f({x},{x}){}",
+        "class C{f({x},{x}){}}",
+        "const f=({x},{x})=>x;",
+        "const [...x=1]=[];",
+        "function f([...x=1]){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "function f(a,a){}",
+        "function f(a=1,b=2){}",
+        "function f({x},{y}){}",
+        "function f([...x]){}",
+        "const [...x]=[];",
+        "class C{async f(x=async()=>await 1){}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn annex_b_function_statement_positions_preserve_strict_and_block_boundaries() {
+    for source in [
+        "while(false)function f(){}",
+        "for(;;)function f(){}",
+        "with({})function f(){}",
+        "if(true)async function f(){}",
+        "if(true)function* f(){}",
+        "label:async function f(){}",
+        "'use strict';if(true)function f(){}",
+        "'use strict';label:function f(){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "if(true)function f(){}",
+        "if(true){}else function f(){}",
+        "label:function f(){}",
+        "while(false){function f(){}}",
+        "if(true)switch(1){case 1:const x=1;}",
+        "if(true)function f(){'use strict';function g(){}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}

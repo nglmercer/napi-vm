@@ -286,6 +286,9 @@ pub enum Statement {
         body: Vec<Statement>,
         is_async: bool,
         is_generator: bool,
+
+        /// Legacy declaration in an if clause or labelled statement.
+        annex_b_statement: bool,
     },
     ClassDecl {
         name: String,

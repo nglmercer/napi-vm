@@ -84,6 +84,7 @@ pub struct Parser {
     yield_expression: bool,
     in_expression: bool,
     single_statement: bool,
+    allow_annex_b_function: bool,
 }
 
 /// A syntax error, with the source position of the token that caused it.
@@ -122,6 +123,7 @@ impl Parser {
             yield_expression: false,
             in_expression: true,
             single_statement: false,
+            allow_annex_b_function: false,
         }
     }
 
@@ -139,6 +141,7 @@ impl Parser {
             yield_expression: false,
             in_expression: true,
             single_statement: false,
+            allow_annex_b_function: false,
         }
     }
 
@@ -305,6 +308,15 @@ impl Parser {
             self.yield_expression,
             self.in_expression,
         ) = saved;
+        result
+    }
+
+    pub(crate) fn with_statement_list<R>(&mut self, operation: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = (self.single_statement, self.allow_annex_b_function);
+        self.single_statement = false;
+        self.allow_annex_b_function = false;
+        let result = operation(self);
+        (self.single_statement, self.allow_annex_b_function) = saved;
         result
     }
 

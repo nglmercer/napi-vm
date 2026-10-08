@@ -226,11 +226,10 @@ fn function(
         forbid_arguments: kind.arrow() && outer.forbid_arguments,
         ..Context::default()
     };
-    parameters(
-        params,
-        &ctx,
-        unique || kind.arrow() || params.iter().any(|p| p.starts_with("...")),
-    )?;
+    let non_simple = params.iter().any(|p| p.starts_with("..."))
+        || matches!(body.first(), Some(Statement::ParameterInitialization { initializers, .. }) if !initializers.is_empty());
+    let unique_bindings = unique || kind.arrow() || ctx.strict || non_simple;
+    parameters(params, &ctx, unique_bindings)?;
     // Parameters cannot collide with direct lexical declarations in the body.
     let lexical = lexical_names(body, ctx.lexical_functions, !ctx.strict && !ctx.module)?;
     let mut parameter_names: Vec<_> = params
@@ -241,11 +240,21 @@ fn function(
         for initializer in initializers {
             if let Statement::VarDecl {
                 destructuring: Some(pattern),
+                init,
                 ..
             } = initializer
             {
+                if let Some(Expr::Identifier(slot)) = init.as_deref() {
+                    parameter_names.retain(|name| name != slot);
+                }
                 parameter_names.extend(pattern_names(pattern));
             }
+        }
+    }
+    if unique_bindings {
+        let mut seen = HashSet::new();
+        if parameter_names.iter().any(|name| !seen.insert(name)) {
+            return Err("duplicate parameter binding".into());
         }
     }
     if parameter_names.iter().any(|p| lexical.contains(p)) {
@@ -428,7 +437,11 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             body,
             is_async,
             is_generator,
+            annex_b_statement,
         } => {
+            if *annex_b_statement && ctx.strict {
+                return Err("legacy function declaration in strict code".into());
+            }
             let mut own = ctx.clone();
             own.strict |= use_strict(body);
             binding(name, &own)?;
@@ -735,7 +748,12 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
     match pattern {
         Pattern::Elision => Ok(()),
         Pattern::Ident(name) => binding(name, ctx),
-        Pattern::Rest(inner) => pattern_check(inner, ctx),
+        Pattern::Rest(inner) => {
+            if matches!(inner.as_ref(), Pattern::Default(..)) {
+                return Err("rest binding cannot have an initializer".into());
+            }
+            pattern_check(inner, ctx)
+        }
         Pattern::Default(inner, value) => {
             pattern_check(inner, ctx)?;
             expression(value, ctx)

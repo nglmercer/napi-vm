@@ -905,6 +905,7 @@ fn block_fn_decls<'a>(stmts: &'a [Statement], out: &mut Vec<FnDeclRef<'a>>) {
                 body,
                 is_async,
                 is_generator,
+                ..
             } => {
                 out.push(FnDeclRef {
                     name,
@@ -1367,6 +1368,7 @@ impl<'a> Compiler<'a> {
                 body,
                 is_async,
                 is_generator,
+                ..
             } => {
                 let value = self.defer_function(FuncDef {
                     named_expression: false,

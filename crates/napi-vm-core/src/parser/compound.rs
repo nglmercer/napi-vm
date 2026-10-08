@@ -572,10 +572,7 @@ impl Parser {
     /// which is what makes rename safe.
     pub(crate) fn block_body(&mut self) -> Vec<Statement> {
         let outer = self.push_scope(false);
-        let single_statement = self.single_statement;
-        self.single_statement = false;
-        let body = self.block_body_inner();
-        self.single_statement = single_statement;
+        let body = self.with_statement_list(Self::block_body_inner);
         self.pop_scope(outer);
         body
     }

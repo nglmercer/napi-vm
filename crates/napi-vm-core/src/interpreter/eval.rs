@@ -1018,6 +1018,7 @@ impl Interpreter {
                 body,
                 is_async,
                 is_generator,
+                ..
             } => {
                 let scope = if self.global.borrow().is_eval_scope() {
                     Environment::variable_environment(&self.global)

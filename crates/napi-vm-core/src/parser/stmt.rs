@@ -46,7 +46,7 @@ impl Parser {
                 self.expect(&Token::LParen);
                 let object = self.expr()?;
                 self.expect(&Token::RParen);
-                let body = self.block_or_stmt();
+                let body = self.block_or_stmt(false);
                 Some(Statement::With {
                     object: Box::new(object),
                     body,
@@ -196,9 +196,12 @@ impl Parser {
                     self.adv(); // identifier
                     self.adv(); // colon
                     let saved = self.single_statement;
+                    let saved_annex_b = self.allow_annex_b_function;
                     self.single_statement = true;
+                    self.allow_annex_b_function = true;
                     let body = self.stmt();
                     self.single_statement = saved;
+                    self.allow_annex_b_function = saved_annex_b;
                     let body = body?;
                     return Some(Statement::Labeled {
                         label,
@@ -434,6 +437,12 @@ impl Parser {
         self.adv(); // consume `function`
         // Generator declaration: `function*`.
         let is_generator = self.eat(&Token::Star);
+        let annex_b_statement = self.single_statement;
+        if annex_b_statement && (!self.allow_annex_b_function || is_async || is_generator) {
+            self.record_error(
+                "function declaration is not permitted in this statement position".into(),
+            );
+        }
         let name_span = self.cur_span();
         let n = if let Some(name) = self.ident() {
             name
@@ -455,6 +464,7 @@ impl Parser {
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
         let body = Self::function_body(&p, defaults, b);
         Some(Statement::FnDecl {
+            annex_b_statement,
             name: n,
             params: p,
             body,
@@ -481,12 +491,12 @@ impl Parser {
         self.eat(&Token::LParen);
         let t = Box::new(self.expr()?);
         self.expect(&Token::RParen);
-        let c = self.block_or_stmt();
+        let c = self.block_or_stmt(true);
         let a = if self.eat(&Token::KwElse) {
             if matches!(self.cur(), Token::KwIf) {
                 Some(vec![self.if_()?])
             } else {
-                Some(self.block_or_stmt())
+                Some(self.block_or_stmt(true))
             }
         } else {
             None
@@ -510,14 +520,16 @@ impl Parser {
         }
     }
 
-    fn block_or_stmt(&mut self) -> Vec<Statement> {
+    fn block_or_stmt(&mut self, allow_annex_b_function: bool) -> Vec<Statement> {
         if self.eat(&Token::LBrace) {
             let b = self.block_body();
             self.expect(&Token::RBrace);
             b
         } else {
             let saved = self.single_statement;
+            let saved_annex_b = self.allow_annex_b_function;
             self.single_statement = true;
+            self.allow_annex_b_function = allow_annex_b_function;
             let statement = self.stmt();
             if statement.as_ref().is_some_and(Self::is_labelled_function) {
                 self.record_error(
@@ -525,6 +537,7 @@ impl Parser {
                 );
             }
             self.single_statement = saved;
+            self.allow_annex_b_function = saved_annex_b;
             statement.into_iter().collect()
         }
     }
@@ -534,13 +547,13 @@ impl Parser {
         self.eat(&Token::LParen);
         let t = Box::new(self.expr()?);
         self.expect(&Token::RParen);
-        let b = self.block_or_stmt();
+        let b = self.block_or_stmt(false);
         Some(Statement::While { test: t, body: b })
     }
 
     fn do_(&mut self) -> Option<Statement> {
         self.adv();
-        let b = self.block_or_stmt();
+        let b = self.block_or_stmt(false);
         if !self.eat(&Token::KwWhile) {
             return None;
         }
@@ -569,7 +582,7 @@ impl Parser {
             self.expect(&Token::KwOf);
             let iter = Box::new(self.expr()?);
             self.expect(&Token::RParen);
-            let body = self.block_or_stmt();
+            let body = self.block_or_stmt(false);
             return Some(Statement::ResourceForOf {
                 name,
                 iter,
@@ -661,7 +674,7 @@ impl Parser {
                 }
                 let o = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
-                let b = self.block_or_stmt();
+                let b = self.block_or_stmt(false);
                 let (n, target) = match init.as_ref() {
                     ForInit::Var { decls, .. } => (decls.first()?.0.clone(), None),
                     ForInit::Expr(target) => (String::new(), Some(Box::new(target.clone()))),
@@ -685,7 +698,7 @@ impl Parser {
                 }
                 let i = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
-                let b = self.block_or_stmt();
+                let b = self.block_or_stmt(false);
                 let n = match init.as_ref() {
                     ForInit::Var { decls, .. } => decls.first()?.0.clone(),
                     _ => return None,
@@ -715,7 +728,7 @@ impl Parser {
             None
         };
         self.expect(&Token::RParen);
-        let b = self.block_or_stmt();
+        let b = self.block_or_stmt(false);
         Some(Statement::For {
             init,
             test: t,
@@ -775,33 +788,36 @@ impl Parser {
         let d = Box::new(self.expr()?);
         self.expect(&Token::RParen);
         self.eat(&Token::LBrace);
-        let mut cs = Vec::new();
-        while self.until(&Token::RBrace) {
-            if self.eof() {
-                break;
-            }
-            let t = if self.eat(&Token::KwCase) {
-                let e = self.expr()?;
-                self.eat(&Token::Colon);
-                Some(e)
-            } else if self.eat(&Token::KwDefault) {
-                self.eat(&Token::Colon);
-                None
-            } else {
-                break;
-            };
-            let mut b = Vec::new();
-            while !matches!(self.cur(), Token::KwCase)
-                && !matches!(self.cur(), Token::KwDefault)
-                && !matches!(self.cur(), Token::RBrace)
-            {
-                if self.eof() {
+        let cs = self.with_statement_list(|parser| {
+            let mut cs = Vec::new();
+            while parser.until(&Token::RBrace) {
+                if parser.eof() {
                     break;
                 }
-                b.push(self.stmt()?);
+                let t = if parser.eat(&Token::KwCase) {
+                    let e = parser.expr()?;
+                    parser.eat(&Token::Colon);
+                    Some(e)
+                } else if parser.eat(&Token::KwDefault) {
+                    parser.eat(&Token::Colon);
+                    None
+                } else {
+                    break;
+                };
+                let mut b = Vec::new();
+                while !matches!(parser.cur(), Token::KwCase)
+                    && !matches!(parser.cur(), Token::KwDefault)
+                    && !matches!(parser.cur(), Token::RBrace)
+                {
+                    if parser.eof() {
+                        break;
+                    }
+                    b.push(parser.stmt()?);
+                }
+                cs.push(SwitchCase { test: t, body: b });
             }
-            cs.push(SwitchCase { test: t, body: b });
-        }
+            Some(cs)
+        })?;
         self.expect(&Token::RBrace);
         Some(Statement::Switch { disc: d, cases: cs })
     }
@@ -860,9 +876,11 @@ impl Parser {
                 };
                 let slot = format!("*pattern{}*", names.len());
                 let mut init: Expr = Expr::Identifier(slot.clone());
-                if self.eat(&Token::Equal)
-                    && let Some(default) = self.assign()
-                {
+                if self.eat(&Token::Equal) {
+                    let Some(default) = self.assign() else {
+                        self.record_error("expected parameter default expression".into());
+                        break;
+                    };
                     // `function f({ a } = {})`: the default applies to the
                     // whole parameter before it is unpacked.
                     defaults.push(Self::default_guard(&slot, default));
@@ -884,9 +902,11 @@ impl Parser {
                         crate::parser::Occurrence::Declaration(crate::parser::DeclKind::Parameter),
                         None,
                     );
-                    if self.eat(&Token::Equal)
-                        && let Some(d) = self.assign()
-                    {
+                    if self.eat(&Token::Equal) {
+                        let Some(d) = self.assign() else {
+                            self.record_error("expected parameter default expression".into());
+                            break;
+                        };
                         defaults.push(Self::default_guard(&name, d));
                     }
                     names.push(name);
