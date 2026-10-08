@@ -192,3 +192,12 @@ and Clippy are clean. The expanded statement-position/parameter-pattern selectio
 contains 28,799 variants and passes 14,110: 248 new passes and zero lost passes
 versus its exact subset of the 754ed80 full report. It has no harness errors,
 timeouts or crashes. This revision has no independent full-corpus measurement.
+
+The subsequent catch-pattern source (09498f5) represents a catch binding as an
+optional Pattern rather than a string-only parameter. Bound names participate
+in duplicate, lexical and var conflict validation. Catch bindings and let/const
+patterns share one initialization helper, preserving TDZ and restoring scope
+when getters/defaults throw. Existing catch-identifier bytecode uses lexical
+bindings through the shared declaration operation; pattern catches retain AST
+fallback. Twenty-three grammar tests and one pinned-tier differential test pass.
+Required checks and the catch-focused corpus are in progress.
