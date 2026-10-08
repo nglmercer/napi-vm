@@ -163,12 +163,12 @@ execution-server disconnects. The successful final run completed without resume.
 
 ## Remaining implementation gates
 
-Phase 1 still needs a complete realm/intrinsic/error/prototype audit, unification
-of primary and child global identity across independent embeddings, iterator and
-generator ownership coverage, and complete GC/finalization host observation.
-Growable/resizable buffers and remaining shared-memory exotic semantics need
-focused validation and implementation. Agents being implemented does not close
-these gates.
+Phase 1 still needs completion of the realm/intrinsic/prototype audit, real async
+generator scheduling, and complete GC/finalization host observation. Primary and
+child globals now share one realm-global model. Growable shared buffers,
+resizable ordinary buffers and tracking views are implemented and have focused
+validation; remaining shared-memory exotic semantics belong to the Phase 3
+internal-operation audit. Agents being implemented does not close these gates.
 
 Phase 2 now validates async/generator/arrow boundaries, parameter restrictions,
 super/new.target contexts, lexical private-name scope, class-element early errors,
@@ -239,3 +239,34 @@ and their fixes are preserved in [realm/buffer evidence](../tools/test262/eviden
 Phase 1 still needs the remaining intrinsic/async-generator and GC suspension
 semantics audit. Phase 3 global records, private methods/accessors/static elements,
 initialization order and centralized Proxy/exotic operations remain open.
+
+## Realm regression validation (`7c0a9ce`)
+
+The full pinned corpus now passes **53,046/102,956** variants, with **11,639 new
+passes and zero lost passes** against PR #23's exact 41,407-pass baseline. The
+remaining outcomes are **49,908 failures, zero harness errors, two timeouts and
+zero crashes**; no variants were skipped. The timeouts are the two deep-WeakMap
+staging variants. Against the Phase 2 `313146b` snapshot, there are 2,120 new
+passes and zero losses.
+
+The run uses four workers, a five-second timeout, fuel 1,000,000, loop budget
+100,000, call depth 128, job budget 10,000, disabled runtime capabilities, and
+revision `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`. All required checks pass for
+`7c0a9ce`. Exact outcome reports, worker/archive digests, check logs and
+transitions are in the [realm continuation evidence](../tools/test262/evidence/foundations-realms-memory/README.md).
+The preceding full runs with 310 and 25 losses remain archived as exploratory
+results; all 335 regressed variants pass on this snapshot.
+
+The shared arguments/Proxy helpers have three new verified AST/bytecode
+differential fixtures with no observed differences, in addition to the two
+buffer-growth fixtures. Full-corpus tier mismatches are **not measured**.
+The remaining Phase 1–3 gates above and Phase 4 coverage still block completion.
+Broader standard-library algorithms, Intl/Temporal, RegExp execution,
+deferred/JSON imports, resource management, decorators/auto-accessors and the
+Error stack accessor proposal also remain outside this foundation's coverage.
+These examples do not classify every remaining failure as outside Phase 1–3.
+
+The subsequent GC/host follow-up explicitly traces completed async tasks'
+result promises and applies guest ToString before source/report transfer or
+queue locking. Its collection and host tests require separate validation; the
+`7c0a9ce` full results do not measure that follow-up.
