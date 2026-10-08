@@ -174,11 +174,6 @@ impl Interpreter {
         {
             return Ok(Value::Bool(true));
         }
-        if let (Value::Error(error), Value::Class(class)) = (object, constructor) {
-            return Ok(Value::Bool(
-                class.name == "Error" || class.name == error.name,
-            ));
-        }
 
         let prototype = self.get_prop_value_str(constructor, "prototype")?;
         if !is_js_object(&prototype) {
@@ -1404,6 +1399,7 @@ impl Interpreter {
             let result = match outcome.expect("panic resumed above") {
                 Err(VmErr::Ret(v)) | Ok(v) => Ok(v),
                 Err(VmErr::Msg(message)) => Err(VmErr::RuntimeError(Box::new(RuntimeErrorData {
+                    realm: super::realm::allocation_global(),
                     message,
                     span: None,
                     stack: self.get_stack().to_vec(),
@@ -1436,7 +1432,9 @@ impl Interpreter {
             _ => None,
         };
         let saved = module.map(|module| std::mem::replace(&mut self.cur_mod, module));
-        let result = self.call_this_in_context(f, this_val, args);
+        let result = self
+            .call_this_in_context(f, this_val, args)
+            .map_err(|error| error.with_context(None, self.get_stack()));
         if let Some(saved) = saved {
             self.cur_mod = saved;
         }
@@ -1520,7 +1518,21 @@ impl Interpreter {
                         } else {
                             (fd.body.clone(), context, false)
                         };
+                    let properties = Value::instance_properties();
+                    let prototype = fd.prototype_value(f);
+                    let prototype = if is_js_object(&prototype) {
+                        Some(prototype)
+                    } else {
+                        let kind = if fd.is_async {
+                            "%AsyncGeneratorPrototype%"
+                        } else {
+                            "%GeneratorPrototype%"
+                        };
+                        self.persistent_global.borrow().intrinsic(kind)
+                    };
+                    properties.set_proto(prototype.map(Rc::new));
                     let inner = GeneratorInner {
+                        properties,
                         parameters_initialized,
                         body,
                         closure: Some(crate::heap::capture_env(&closure)),
@@ -1687,6 +1699,7 @@ impl Interpreter {
                     // the inner EntityDecoder).
                     Ok(_) => Ok(Value::Undefined),
                     Err(VmErr::Msg(msg)) => Err(VmErr::RuntimeError(Box::new(RuntimeErrorData {
+                        realm: super::realm::allocation_global(),
                         message: msg,
                         span: None,
                         stack: self.get_stack().to_vec(),
@@ -2281,8 +2294,8 @@ fn make_generator_coroutine(
                 // Abandoned while suspended: the initiating `Drop` consumes
                 // this; it is never reported to the driver.
                 Err(VmErr::Abandon) => GenOutcome::Abandon,
-                Err(VmErr::Msg(m)) => GenOutcome::Failed(m),
-                Err(VmErr::RuntimeError(e)) => GenOutcome::Failed(e.message.clone()),
+                Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
+                Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
                 // A break/continue escaping the generator body is a runtime error.
                 Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => {
                     GenOutcome::Failed(format!("{}", e))

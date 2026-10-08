@@ -159,6 +159,7 @@ pub fn setup_builtins(env: &Env) {
                 .expect("Number numeric parser alias");
         }
     }
+    crate::interpreter::resolve::install_iterator_intrinsics(&mut e);
     e.snapshot_intrinsics();
 }
 
@@ -277,7 +278,12 @@ fn nf(name: &str, callable: NativeFn) -> Value {
 }
 
 /// A native method with ordinary, mutable function property descriptors.
-fn native_method(name: &str, length: usize, callable: NativeFn, prototype: Option<Value>) -> Value {
+pub(crate) fn native_method(
+    name: &str,
+    length: usize,
+    callable: NativeFn,
+    prototype: Option<Value>,
+) -> Value {
     let properties = crate::heap::tracked(std::rc::Rc::new(crate::value::ObjectCell::new(
         vec![
             ("name".into(), Value::String(name.into())),

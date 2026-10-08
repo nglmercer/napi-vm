@@ -1144,11 +1144,26 @@ impl FunctionData {
         if self.bound.is_some() {
             return Value::Undefined;
         }
-        if !self.is_constructor {
+        if !self.is_constructor && !self.is_generator {
             return Value::Undefined;
         }
-
-        let prototype = Value::object(vec![("constructor".to_string(), function.clone())]);
+        let owner = crate::interpreter::realm::value_realm(function);
+        let _allocation_realm = crate::interpreter::realm::AllocationRealm::enter(owner.clone());
+        let prototype = if self.is_generator {
+            let kind = if self.is_async {
+                "%AsyncGeneratorPrototype%"
+            } else {
+                "%GeneratorPrototype%"
+            };
+            Value::object_with_proto(
+                vec![],
+                owner
+                    .and_then(|global| global.borrow().intrinsic(kind))
+                    .map(Rc::new),
+            )
+        } else {
+            Value::object(vec![("constructor".to_string(), function.clone())])
+        };
         if let Value::Object { props } = &prototype {
             props.meta.borrow_mut().set_attrs(
                 "constructor",
@@ -1187,6 +1202,7 @@ impl FunctionData {
 /// UTF-8 byte offset, so `next()` creates only the one scalar value requested.
 #[derive(Debug, Clone)]
 pub struct StringIteratorData {
+    pub properties: Rc<ObjectCell>,
     pub source: crate::JsString,
     pub cursor: usize,
 }
@@ -1986,6 +2002,7 @@ pub struct ProxyData {
 /// Payload of `Value::Error`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct ErrorData {
+    pub properties: Rc<ObjectCell>,
     /// Clones of a guest error value must retain object identity, while two
     /// separately-created errors with the same fields remain distinct.
     pub identity: Rc<()>,
@@ -2003,6 +2020,7 @@ impl ErrorData {
     /// combinator-produced error takes, where there was no guest frame.
     pub fn new(name: &str, message: impl Into<crate::JsString>) -> Box<Self> {
         Box::new(Self {
+            properties: Value::instance_properties(),
             identity: Rc::new(()),
             name: name.into(),
             message: message.into(),
@@ -2018,6 +2036,7 @@ impl ErrorData {
         code: impl Into<crate::JsString>,
     ) -> Box<Self> {
         Box::new(Self {
+            properties: Value::instance_properties(),
             identity: Rc::new(()),
             message: message.into(),
             name: name.into(),
@@ -2353,6 +2372,7 @@ impl GenYielder {
 /// closed. A coroutine keeps everything on one thread, so the question does not
 /// arise: there is no `Send` bound and no `unsafe` in this path.
 pub struct GeneratorInner {
+    pub properties: Rc<ObjectCell>,
     /// Formal parameter initialization already ran at generator creation.
     pub parameters_initialized: bool,
     pub body: Rc<Vec<Statement>>,
@@ -2484,6 +2504,9 @@ impl Value {
 
     pub(crate) fn exotic_properties(&self) -> Option<Rc<ObjectCell>> {
         Some(match self {
+            Self::Generator { inner } => inner.try_borrow().ok()?.properties.clone(),
+            Self::StringIterator { inner } => inner.try_borrow().ok()?.properties.clone(),
+            Self::Error(data) => data.properties.clone(),
             Self::Date(data) => data.properties.clone(),
             Self::RegExp(data) => data.properties.clone(),
             Self::TypedArray(data) | Self::DataView(data) => data.properties.clone(),

@@ -19,7 +19,7 @@ pub(super) unsafe extern "C" fn api_get_global(env: NapiEnv, result: *mut NapiVa
         let handle = environment
             .handles
             .borrow_mut()
-            .create(Value::GlobalObject)?;
+            .create(Value::RealmGlobal(napi_global_scope(&environment)?))?;
         unsafe { result.write(handle) };
         Ok(())
     })

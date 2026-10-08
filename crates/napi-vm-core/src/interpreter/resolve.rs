@@ -147,6 +147,7 @@ impl Interpreter {
             Value::TypedArray(view) if view.is_buffer => ("Buffer", true),
             Value::TypedArray(view) => (view.kind.name(), true),
             Value::DataView(_) => ("DataView", true),
+            Value::Error(error) => (error.name.as_str(), true),
             Value::GlobalObject => ("Object", true),
             Value::NativeFunction { .. } | Value::HostFunction { .. } => ("Function", true),
             _ => return None,
@@ -990,6 +991,9 @@ impl Interpreter {
                 })
             }
             Value::Generator { .. } => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
                 if k == "next" {
                     Ok(Value::NativeFunction {
                         name: "next".into(),
@@ -1017,6 +1021,9 @@ impl Interpreter {
                 }
             }
             Value::StringIterator { .. } => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    return self.prop_str(&prototype, k);
+                }
                 if k == "next" {
                     Ok(Value::NativeFunction {
                         name: "next".into(),
@@ -1136,13 +1143,10 @@ impl Interpreter {
                 "name" => Ok(Value::String(e.name.clone())),
                 "stack" => Ok(Value::String(e.stack.clone())),
                 "code" => Ok(e.code.clone().map_or(Value::Undefined, Value::String)),
-                "toString" => Ok(crate::builtins::error_to_string()),
-                "constructor" => Ok(self
-                    .persistent_global
-                    .borrow()
-                    .get(&e.name)
-                    .unwrap_or(Value::Undefined)),
-                _ => Ok(Value::Undefined),
+                _ => match self.prototype_of(o) {
+                    Some(prototype) => self.prop_str(&prototype, k),
+                    None => Ok(Value::Undefined),
+                },
             },
             // Booleans, null, undefined, proxies (handled by the caller), and
             // live bindings carry no string-keyed properties.
@@ -1341,6 +1345,124 @@ fn completion_kind(value: &Value) -> CompletionKind {
     }
 }
 
+pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) {
+    let object_prototype = environment
+        .get("Object")
+        .and_then(|constructor| constructor.get_prop("prototype"));
+    let function_prototype = environment
+        .get("Function")
+        .and_then(|constructor| constructor.get_prop("prototype"));
+    let iterator = Value::object_with_proto(vec![], object_prototype.map(Rc::new));
+    let method = crate::builtins::native_method(
+        "[Symbol.iterator]",
+        0,
+        generator_iter_self,
+        function_prototype.clone(),
+    );
+    iterator
+        .set_prop(super::SYMBOL_ITERATOR_SLOT.into(), method)
+        .expect("iterator method");
+    if let Value::Object { props } = &iterator {
+        if let Some(Value::Symbol(ref symbol)) = crate::builtins::well_known("iterator") {
+            props
+                .meta
+                .borrow_mut()
+                .set_symbol_key(super::SYMBOL_ITERATOR_SLOT, symbol.clone());
+        }
+        props.meta.borrow_mut().set_attrs(
+            super::SYMBOL_ITERATOR_SLOT,
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
+    }
+    environment.install_intrinsic("%IteratorPrototype%", iterator.clone());
+    for (kind, tag, methods) in [
+        (
+            "%ArrayIteratorPrototype%",
+            "Array Iterator",
+            vec![("next", 0, array_iter_next as crate::builtins::NativeFn)],
+        ),
+        (
+            "%StringIteratorPrototype%",
+            "String Iterator",
+            vec![("next", 0, string_iter_next)],
+        ),
+        (
+            "%GeneratorPrototype%",
+            "Generator",
+            vec![
+                ("next", 1, super::call::generator_next),
+                ("return", 1, super::call::generator_return),
+                ("throw", 1, super::call::generator_throw),
+            ],
+        ),
+    ] {
+        let prototype = Value::object_with_proto(vec![], Some(Rc::new(iterator.clone())));
+        for (name, length, callable) in methods {
+            prototype
+                .set_prop(
+                    name.into(),
+                    crate::builtins::native_method(
+                        name,
+                        length,
+                        callable,
+                        function_prototype.clone(),
+                    ),
+                )
+                .expect("iterator method");
+            if let Value::Object { props } = &prototype {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        let Value::Symbol(ref symbol) =
+            crate::builtins::well_known("toStringTag").expect("toStringTag")
+        else {
+            unreachable!()
+        };
+        let key = super::symbol_slot_key(symbol);
+        prototype
+            .set_prop(key.clone(), Value::String(tag.into()))
+            .expect("iterator tag");
+        if let Value::Object { props } = &prototype {
+            let mut meta = props.meta.borrow_mut();
+            meta.set_symbol_key(&key, symbol.clone());
+            meta.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        environment.install_intrinsic(kind, prototype);
+    }
+    if let Some(string_prototype) = environment
+        .get("String")
+        .and_then(|constructor| constructor.get_prop("prototype"))
+    {
+        string_prototype
+            .set_prop(
+                super::SYMBOL_ITERATOR_SLOT.into(),
+                crate::builtins::native_method(
+                    "[Symbol.iterator]",
+                    0,
+                    string_iter,
+                    function_prototype,
+                ),
+            )
+            .expect("string iterator method");
+    }
+}
+
 // --- Iterator protocol native functions -------------------------------------
 
 /// `[Symbol.iterator]()` on a generator returns the generator itself (generators
@@ -1387,6 +1509,14 @@ pub(crate) fn array_iter_with_kind(
         ),
     ]);
     if let super::Value::Object { props } = &iterator {
+        if let Some(prototype) = super::realm::allocation_global()
+            .and_then(|global| global.borrow().intrinsic("%ArrayIteratorPrototype%"))
+        {
+            props.set_proto(Some(Rc::new(prototype)));
+            props
+                .borrow_mut()
+                .retain(|(key, _)| key != "next" && key != super::SYMBOL_ITERATOR_SLOT);
+        }
         for key in [
             "__items__",
             "__cursor__",
@@ -1469,6 +1599,13 @@ fn string_iter(
 
     Ok(super::Value::StringIterator {
         inner: Rc::new(RefCell::new(crate::value::StringIteratorData {
+            properties: {
+                let properties = Value::instance_properties();
+                let prototype = super::realm::allocation_global()
+                    .and_then(|global| global.borrow().intrinsic("%StringIteratorPrototype%"));
+                properties.set_proto(prototype.map(Rc::new));
+                properties
+            },
             source,
             cursor: 0,
         })),

@@ -256,8 +256,8 @@ fn spawn_body(
             Err(VmErr::Throw(v)) => GenOutcome::Threw(v),
             // Abandoned while suspended: the initiating `Drop` consumes this.
             Err(VmErr::Abandon) => GenOutcome::Abandon,
-            Err(VmErr::Msg(m)) => GenOutcome::Failed(m),
-            Err(VmErr::RuntimeError(e)) => GenOutcome::Failed(e.message.clone()),
+            Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
+            Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
             Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => GenOutcome::Failed(format!("{}", e)),
         }
     });

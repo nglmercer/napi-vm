@@ -24,7 +24,7 @@ fn is_callable(value: &Value) -> bool {
 fn promise_error_reason(error: VmErr) -> Value {
     match error {
         VmErr::Throw(reason) => reason,
-        VmErr::RuntimeError(data) => crate::error::error_value_from_msg(&data.message),
+        VmErr::RuntimeError(data) => data.guest_value(),
         other => crate::error::error_value_from_msg(&other.to_string()),
     }
 }
@@ -322,7 +322,7 @@ impl Interpreter {
                 self.reject_promise(&reaction.derived, reason);
             }
             Err(VmErr::RuntimeError(data)) => {
-                let reason = crate::error::error_value_from_msg(&data.message);
+                let reason = data.guest_value();
                 self.reject_promise(&reaction.derived, reason);
             }
             Err(other) => return Err(other),

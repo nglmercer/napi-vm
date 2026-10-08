@@ -1117,9 +1117,7 @@ fn land_handler(
     let value = match &error {
         VmErr::Throw(value) => value.clone(),
         VmErr::Msg(message) => crate::error::error_value_with_stack(message, interp.get_stack()),
-        VmErr::RuntimeError(data) => {
-            crate::error::error_value_with_stack(&data.message, &data.stack)
-        }
+        VmErr::RuntimeError(data) => data.guest_value(),
         VmErr::Ret(_) => Value::Undefined,
         _ => unreachable!("filtered above"),
     };

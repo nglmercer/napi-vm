@@ -2,7 +2,7 @@
 use super::{Env, Interpreter};
 use crate::{Value, error::VmErr};
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 thread_local! {
@@ -44,7 +44,13 @@ pub(crate) fn value_realm(value: &Value) -> Option<Env> {
             .or_else(|| function.properties.meta.borrow().realm_global.clone()),
         Value::Object { props } => props.meta.borrow().realm_global.clone(),
         Value::Array(array) => array.meta.borrow().realm_global.clone(),
-        Value::Class(class) => value_realm(&class.constructor),
+        Value::Class(class) => class
+            .statics
+            .meta
+            .borrow()
+            .realm_global
+            .clone()
+            .or_else(|| value_realm(&class.constructor)),
         Value::Proxy(proxy) => value_realm(&proxy.target),
         _ => value
             .exotic_properties()
@@ -60,6 +66,8 @@ pub(crate) fn own_intrinsics(global: &Env) {
         work.extend(parent.borrow().trace_values());
     }
     let mut seen = HashSet::new();
+    let mut native_methods = HashMap::new();
+    let function_prototype = crate::value::FunctionData::default_function_prototype(global);
     while let Some(value) = work.pop() {
         if let Value::Array(array) = &value {
             if seen.insert(Rc::as_ptr(array) as usize) {
@@ -77,6 +85,26 @@ pub(crate) fn own_intrinsics(global: &Env) {
         if !seen.insert(Rc::as_ptr(&cell) as usize) {
             continue;
         }
+        // Bootstrap native slots become ordinary realm-owned function objects.
+        // Preserve aliases through the native value's shared identity token.
+        for (_, slot) in cell.borrow_mut().iter_mut() {
+            if let Value::NativeFunction { name, callable } = slot {
+                let id = Rc::as_ptr(name) as *const () as usize;
+                let method = native_methods.entry(id).or_insert_with(|| {
+                    let method = crate::builtins::native_method(
+                        name,
+                        0,
+                        *callable,
+                        function_prototype.clone(),
+                    );
+                    if let Value::Function(function) = &method {
+                        function.properties.meta.borrow_mut().realm_global = Some(global.clone());
+                    }
+                    method
+                });
+                *slot = method.clone();
+            }
+        }
         // Read children before introducing the realm back-edge.
         work.extend(cell.trace_children());
         cell.meta.borrow_mut().realm_global = Some(global.clone());
@@ -93,11 +121,6 @@ impl Interpreter {
         super::Realm::of(self).install(&mut child);
         modules.install(&mut child);
         super::ModuleRealm::fork_sources(self, &mut child);
-        child.persistent_global.borrow_mut().set_isolated_realm();
-        let value = child.realm_global_object();
-        if let Some(builtins) = child.persistent_global.borrow().parent_env() {
-            builtins.borrow_mut().set("globalThis", value);
-        }
         child.republish_roots();
         child
     }
@@ -161,11 +184,7 @@ impl Interpreter {
     }
 
     pub fn realm_global_object(&self) -> Value {
-        if self.persistent_global.borrow().is_isolated_realm() {
-            Value::RealmGlobal(self.persistent_global.clone())
-        } else {
-            Value::GlobalObject
-        }
+        Value::RealmGlobal(self.persistent_global.clone())
     }
 
     pub(crate) fn global_scope_of(&self, value: &Value) -> Option<Env> {

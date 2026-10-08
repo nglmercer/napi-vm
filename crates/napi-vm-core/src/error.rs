@@ -29,9 +29,17 @@ impl fmt::Display for StackFrame {
 /// actually occurred, so the extra allocation is cold-path.
 #[derive(Debug)]
 pub struct RuntimeErrorData {
+    pub realm: Option<crate::interpreter::Env>,
     pub message: String,
     pub span: Option<Span>,
     pub stack: Vec<StackFrame>,
+}
+
+impl RuntimeErrorData {
+    pub(crate) fn guest_value(&self) -> Value {
+        let _realm = crate::interpreter::realm::AllocationRealm::enter(self.realm.clone());
+        error_value_with_stack(&self.message, &self.stack)
+    }
 }
 
 #[derive(Debug)]
@@ -79,6 +87,7 @@ impl VmErr {
     pub fn with_context(self, span: Option<Span>, stack: &[StackFrame]) -> Self {
         match self {
             VmErr::Msg(message) => VmErr::RuntimeError(Box::new(RuntimeErrorData {
+                realm: crate::interpreter::realm::allocation_global(),
                 message,
                 span,
                 stack: stack.to_vec(),
@@ -97,6 +106,7 @@ impl fmt::Display for VmErr {
                     message,
                     span,
                     stack,
+                    ..
                 } = inner.as_ref();
                 write!(f, "{}", message)?;
                 if let Some(span) = span
@@ -203,6 +213,8 @@ pub fn error_value_with_stack(message: &str, frames: &[StackFrame]) -> Value {
         "RangeError",
         "SyntaxError",
         "ReferenceError",
+        "EvalError",
+        "URIError",
         "Error",
     ];
     let (name, text) = NAMES

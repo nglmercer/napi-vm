@@ -15,6 +15,8 @@ const ERROR_TYPES: &[&str] = &[
     "RangeError",
     "SyntaxError",
     "ReferenceError",
+    "EvalError",
+    "URIError",
 ];
 
 pub(super) fn install(e: &mut Environment) {

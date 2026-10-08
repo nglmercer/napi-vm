@@ -86,6 +86,7 @@ fn syntax(message: impl Into<String>) -> VmErr {
 fn error_value(error: &VmErr) -> Value {
     match error {
         VmErr::Throw(value) => value.clone(),
+        VmErr::RuntimeError(data) => data.guest_value(),
         _ => crate::error::error_value_from_msg(&error.to_string()),
     }
 }

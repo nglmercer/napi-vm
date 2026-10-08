@@ -234,7 +234,6 @@ pub struct Environment {
     private_names: HashMap<String, u64>,
     private_declarations: HashSet<String>,
     strict: Option<bool>,
-    isolated_realm: bool,
     variable_scope: bool,
     eval_scope: bool,
     parameter_scope: bool,
@@ -445,13 +444,6 @@ impl Environment {
             .collect()
     }
 
-    pub(crate) fn set_isolated_realm(&mut self) {
-        self.isolated_realm = true;
-    }
-    pub(crate) fn is_isolated_realm(&self) -> bool {
-        self.isolated_realm
-    }
-
     pub(crate) fn strict(&self) -> bool {
         self.strict
             .unwrap_or_else(|| self.parent.as_ref().is_some_and(|p| p.borrow().strict()))
@@ -496,7 +488,6 @@ impl Environment {
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
-            isolated_realm: false,
             variable_scope: false,
             eval_scope: false,
             parameter_scope: false,
@@ -520,7 +511,6 @@ impl Environment {
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
-            isolated_realm: false,
             variable_scope: false,
             eval_scope: false,
             parameter_scope: false,
@@ -547,7 +537,6 @@ impl Environment {
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
-            isolated_realm: false,
             variable_scope: false,
             eval_scope: false,
             parameter_scope: false,
@@ -586,7 +575,6 @@ impl Environment {
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
-            isolated_realm: false,
             variable_scope: true,
             eval_scope: false,
             parameter_scope: false,

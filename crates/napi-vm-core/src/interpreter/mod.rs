@@ -22,7 +22,7 @@ pub use scheduler::{
     TurnOutcome, VirtualClock, YieldReason,
 };
 pub(crate) mod realm;
-mod resolve;
+pub(crate) mod resolve;
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -488,6 +488,11 @@ impl Interpreter {
         interp.global = global.clone();
         interp.persistent_global = global;
         interp.publish_module_realm();
+        if let Some(builtins) = interp.persistent_global.borrow().parent_env() {
+            builtins
+                .borrow_mut()
+                .set("globalThis", interp.realm_global_object());
+        }
         realm::own_intrinsics(&interp.persistent_global);
         interp.republish_roots();
         #[cfg(all(test, feature = "node-api-host"))]

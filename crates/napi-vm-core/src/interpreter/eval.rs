@@ -1386,7 +1386,7 @@ impl Interpreter {
                     // A located runtime error already carries the stack from
                     // where it was raised, which is deeper than here.
                     Err(VmErr::RuntimeError(re)) => {
-                        let value = crate::error::error_value_with_stack(&re.message, &re.stack);
+                        let value = re.guest_value();
                         self.run_catch(catch, value)
                     }
                     other => other,

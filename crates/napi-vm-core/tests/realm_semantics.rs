@@ -354,3 +354,121 @@ fn commonjs_instances_and_escaped_require_use_the_defining_realm() {
         "parentPackage.tag===10&&childRequire('pkg').tag===20&&childRequire('pkg')!==parentPackage&&cjsRuns===1;",
     );
 }
+
+#[test]
+fn independent_primary_globals_keep_their_identity_and_storage() {
+    let mut first = Interpreter::with_builtins();
+    let mut second = Interpreter::with_builtins();
+    first
+        .eval_source("var tag=11;function receiver(){return this;}var array=[];")
+        .unwrap();
+    second.eval_source("var tag=22;").unwrap();
+    second
+        .set_global_checked("firstGlobal", first.realm_global_object())
+        .unwrap();
+    truth(
+        &mut second,
+        "firstGlobal!==globalThis&&firstGlobal.globalThis===firstGlobal&&firstGlobal.tag===11&&tag===22;",
+    );
+    truth(
+        &mut second,
+        "var f=firstGlobal.receiver;f()===firstGlobal&&Object.getPrototypeOf(firstGlobal.array)===firstGlobal.Array.prototype;",
+    );
+    truth(
+        &mut second,
+        "firstGlobal.tag=33;firstGlobal.tag===33&&tag===22;",
+    );
+    truth(&mut first, "tag===33&&this===globalThis;");
+    drop(first);
+    assert!(second.collect_cycles().skipped.is_none());
+    truth(
+        &mut second,
+        "firstGlobal.tag===33&&firstGlobal.receiver()===firstGlobal&&Object.getPrototypeOf(firstGlobal)===firstGlobal.Object.prototype;",
+    );
+}
+
+#[test]
+fn weak_collections_keep_live_primary_globals_and_release_dead_realms() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source(
+        "var map=new WeakMap();map.set(globalThis,{answer:42});var ref=new WeakRef(globalThis);",
+    )
+    .unwrap();
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "ref.deref()===globalThis&&map.get(globalThis).answer===42;",
+    );
+    let foreign = Interpreter::with_builtins();
+    vm.set_global_checked("foreign", foreign.realm_global_object())
+        .unwrap();
+    vm.eval_source("var foreignRef=new WeakRef(foreign);map.set(foreign,{owner:foreign});")
+        .unwrap();
+    drop(foreign);
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "foreignRef.deref()===foreign&&map.get(foreign).owner===foreign;",
+    );
+    vm.eval_source("foreign=undefined;").unwrap();
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "foreignRef.deref()===undefined&&ref.deref()===globalThis;",
+    );
+}
+
+#[test]
+fn foreign_native_and_guest_errors_keep_their_originating_intrinsics() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = Interpreter::with_builtins();
+    other.eval_source("function bad(){null.x;}function* generator(){null.x;}async function asynchronous(){await 0;null.x;}function F(){}").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    drop(other);
+    for source in [
+        "var caught;try{other.bad();}catch(e){caught=e;}caught.constructor===other.TypeError&&Object.getPrototypeOf(caught)===other.TypeError.prototype&&!(caught instanceof TypeError);",
+        "try{other.Object.getPrototypeOf(undefined);}catch(e){caught=e;}caught.constructor===other.TypeError&&Object.getPrototypeOf(caught)===other.TypeError.prototype;",
+        "try{other.generator().next();}catch(e){caught=e;}caught.constructor===other.TypeError;",
+        "try{await other.asynchronous();}catch(e){caught=e;}caught.constructor===other.TypeError;",
+        "Object.getPrototypeOf(other.F.prototype)===other.Object.prototype;",
+        "try{other.Function('return )');}catch(e){caught=e;}caught.constructor===other.SyntaxError;",
+    ] {
+        truth(&mut vm, source);
+    }
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(&mut vm, "caught.constructor===other.SyntaxError;");
+}
+
+#[test]
+fn iterators_have_shared_realm_owned_prototypes_and_methods() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = Interpreter::with_builtins();
+    other.eval_source("function* generator(){yield 1;}var g=generator();var arrayIterator=[1].values();var stringIterator='x'[Symbol.iterator]();").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    drop(other);
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.g)===other.generator.prototype&&other.g.next===Object.getPrototypeOf(other.generator.prototype).next;",
+    );
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.arrayIterator)!==Object.getPrototypeOf([].values())&&Object.getPrototypeOf(other.arrayIterator.next)===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.stringIterator)!==Object.getPrototypeOf(''[Symbol.iterator]())&&Object.getPrototypeOf(other.stringIterator.next)===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "other.arrayIterator.next().value===1&&other.stringIterator.next().value==='x'&&other.g.next().value===1;",
+    );
+    // Finish the generator before the conservative opaque-stack collection boundary.
+    truth(&mut vm, "other.g.next().done;");
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.arrayIterator.next)===other.Function.prototype;",
+    );
+}
