@@ -422,29 +422,17 @@ fn function_apply(
     target: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    if !crate::interpreter::is_callable_value(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Function.prototype.apply receiver must be callable".into(),
+        ));
+    }
     let receiver = args.first().cloned().unwrap_or(Value::Undefined);
     let array_like = args.get(1).cloned().unwrap_or(Value::Undefined);
-    let call_args = match &array_like {
-        Value::Undefined | Value::Null => Vec::new(),
-        Value::Array(items) => items.borrow().clone(),
-        other => {
-            let length_value = interp.get_prop_value_str(other, "length")?;
-            let length = interp.ecmascript_to_number(&length_value)?;
-            let length = if length.is_nan() || length <= 0.0 {
-                0
-            } else if !length.is_finite() || length.floor() > crate::value::MAX_ARRAY_LEN as f64 {
-                return Err(crate::value::limit_err("Maximum argument count exceeded"));
-            } else {
-                length.floor() as usize
-            };
-            let mut values = Vec::with_capacity(length.min(1024));
-            for index in 0..length {
-                values.push(
-                    interp.get_prop_value(other, &Value::String((index.to_string()).into()))?,
-                );
-            }
-            values
-        }
+    let call_args = if matches!(array_like, Value::Undefined | Value::Null) {
+        Vec::new()
+    } else {
+        interp.argument_list_from_array_like(&array_like)?
     };
     interp.call_this(&target, receiver, call_args)
 }

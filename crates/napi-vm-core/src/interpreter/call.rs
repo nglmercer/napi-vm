@@ -122,6 +122,34 @@ pub(crate) fn is_js_object(value: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// CreateListFromArrayLike for call/construct argument lists. Property
+    /// reads stay observable; these operations do not use iterator methods.
+    pub(crate) fn argument_list_from_array_like(
+        &mut self,
+        value: &Value,
+    ) -> Result<Vec<Value>, VmErr> {
+        if !is_js_object(value) {
+            return Err(VmErr::Msg(
+                "TypeError: Arguments list must be an object".into(),
+            ));
+        }
+        let length = self.get_prop_value_str(value, "length")?;
+        let number = self.ecmascript_to_number(&length)?;
+        let length = if number.is_nan() || number <= 0.0 {
+            0.0
+        } else {
+            number.floor()
+        };
+        if !length.is_finite() || length > crate::value::MAX_ARRAY_LEN as f64 {
+            return Err(crate::value::limit_err("Maximum argument count exceeded"));
+        }
+        let mut arguments = Vec::with_capacity((length as usize).min(1024));
+        for index in 0..length as usize {
+            self.execution.check()?;
+            arguments.push(self.get_prop_value_str(value, &index.to_string())?);
+        }
+        Ok(arguments)
+    }
     /// Build arguments through one shared path for AST and bytecode calls.
     pub(crate) fn function_arguments(
         &self,
@@ -1476,14 +1504,18 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
-        if matches!(f, Value::Proxy(_) | Value::Class(_)) {
-            // Proxy internal methods and rejecting a class call execute in
-            // the caller's context. A trap or target call enters its realm.
+        if matches!(f, Value::Proxy(_)) {
+            // Proxy internal methods execute in the caller's context.
+            // A trap or target call enters its own realm.
             return self
                 .call_this_in_context(f, this_val, args)
                 .map_err(|error| error.with_context(None, self.get_stack()));
         }
-        let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+        let owner = if is_callable_value(f) {
+            super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone())
+        } else {
+            self.persistent_global.clone()
+        };
         let saved_modules = self.enter_module_realm(&owner);
         let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
         let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));

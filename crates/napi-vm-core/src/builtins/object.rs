@@ -615,6 +615,7 @@ fn object_to_string_tag(value: &Value) -> String {
         Value::Symbol(_) => "Symbol".into(),
         Value::BigInt(_) => "BigInt".into(),
         Value::Object { .. } if crate::interpreter::is_callable_value(value) => "Function".into(),
+        Value::Object { .. } if value.is_error_object() => "Error".into(),
         Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
             Some(BoxedPrimitive::Bool(_)) => "Boolean".into(),
             Some(BoxedPrimitive::Number(_)) => "Number".into(),

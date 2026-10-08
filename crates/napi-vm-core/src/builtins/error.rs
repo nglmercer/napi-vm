@@ -25,10 +25,17 @@ pub(super) fn install(e: &mut Environment) {
         ),
         ("EvalError", eval_error_constructor as super::NativeFn),
         ("URIError", uri_error_constructor as super::NativeFn),
+        (
+            "AggregateError",
+            aggregate_error_constructor as super::NativeFn,
+        ),
     ] {
         let constructor = Value::object(vec![
             ("name".into(), Value::String(name.into())),
-            ("length".into(), Value::Number(1.0)),
+            (
+                "length".into(),
+                Value::Number(if name == "AggregateError" { 2.0 } else { 1.0 }),
+            ),
         ]);
         super::make_callable(&constructor, callable, None);
         let parent = base_prototype.clone().or_else(|| object_prototype.clone());
@@ -42,6 +49,24 @@ pub(super) fn install(e: &mut Environment) {
             parent.map(Rc::new),
         );
         if name == "Error" {
+            constructor
+                .set_prop(
+                    "isError".into(),
+                    super::native_method("isError", 1, error_is_error, function_prototype.clone()),
+                )
+                .expect("Error.isError");
+            constructor
+                .property_cell()
+                .expect("Error constructor")
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    "isError",
+                    PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
             prototype
                 .set_prop(
                     "toString".into(),
@@ -145,6 +170,12 @@ fn construct_error(interp: &mut Interpreter, name: &str, args: Vec<Value>) -> Re
         .intrinsic(name)
         .and_then(|constructor| constructor.get_prop("prototype"));
     let error = Value::object_with_proto(vec![], prototype.map(Rc::new));
+    error
+        .property_cell()
+        .expect("Error instance")
+        .meta
+        .borrow_mut()
+        .error_object = true;
     let message = match args.first() {
         None | Some(Value::Undefined) => crate::JsString::default(),
         Some(value) => {
@@ -182,5 +213,40 @@ fn construct_error(interp: &mut Interpreter, name: &str, args: Vec<Value>) -> Re
             }
         }
     }
+    Ok(error)
+}
+
+fn error_is_error(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let error = args.first().is_some_and(Value::is_error_object);
+    Ok(Value::Bool(error))
+}
+
+fn aggregate_error_constructor(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    // Message and cause precede iteration, using the same Error construction
+    // semantics and the active realm's AggregateError prototype.
+    let error = construct_error(
+        interp,
+        "AggregateError",
+        args.iter().skip(1).cloned().collect(),
+    )?;
+    let errors = args.first().cloned().unwrap_or(Value::Undefined);
+    let list = interp.drain_iterable(&errors)?;
+    error.set_prop("errors".into(), Value::checked_array(list)?)?;
+    error
+        .property_cell()
+        .expect("AggregateError instance")
+        .meta
+        .borrow_mut()
+        .set_attrs(
+            "errors",
+            PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
     Ok(error)
 }

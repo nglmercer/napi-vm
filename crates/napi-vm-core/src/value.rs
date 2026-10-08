@@ -209,6 +209,8 @@ pub struct ObjectMeta {
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
+    /// Presence of [[ErrorData]], independent of prototypes and realms.
+    pub(crate) error_object: bool,
     /// Lexical private field identities never enter ordinary property storage.
     pub(crate) private_fields: std::collections::HashMap<u64, Value>,
     /// Intrinsic iterator/continuation state, invisible to property operations.
@@ -2677,6 +2679,13 @@ impl Value {
             Self::HostFunction { properties, .. } => Some(properties.clone()),
             _ => self.exotic_properties(),
         }
+    }
+
+    pub(crate) fn is_error_object(&self) -> bool {
+        matches!(self, Self::Error(_))
+            || self
+                .property_cell()
+                .is_some_and(|properties| properties.meta.borrow().error_object)
     }
 
     pub(crate) fn private_field(&self, id: u64) -> Result<Value, VmErr> {

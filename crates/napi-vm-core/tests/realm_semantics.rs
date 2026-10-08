@@ -569,6 +569,73 @@ fn weak_intrinsics_and_iterator_aliases_have_owned_standard_metadata() {
 }
 
 #[test]
+fn class_call_and_non_callable_apply_use_the_required_error_realms() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child
+        .eval_source("var C = class {}; var object = {};")
+        .unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{other.C();}catch(error){caught=error;}caught instanceof other.TypeError;",
+        "try{other.Function.prototype.apply.call({}, null, []);}catch(error){caught=error;}caught instanceof other.TypeError;",
+        "try{Function.prototype.call.call(other.object);}catch(error){caught=error;}caught instanceof TypeError;",
+        "try{other.Function.prototype.apply.call(function(){}, null, 42);}catch(error){caught=error;}caught instanceof other.TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn aggregate_errors_and_error_branding_preserve_realm_and_identity() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var error=other.AggregateError([1,2],'message',{cause:42});error instanceof other.AggregateError&&error instanceof other.Error&&error.message==='message'&&error.cause===42&&error.errors.join(',')==='1,2';",
+        "Object.getPrototypeOf(error.errors)===other.Array.prototype&&Object.prototype.toString.call(error)==='[object Error]';",
+        "Error.isError(error)&&other.Error.isError(new Error())&&!Error.isError(Object.create(Error.prototype))&&!Error.isError(new Proxy(error,{}));",
+        "var descriptor=Object.getOwnPropertyDescriptor(error,'errors');descriptor.writable&&!descriptor.enumerable&&descriptor.configurable;",
+        "var Target=new other.Function();Target.prototype=null;Object.getPrototypeOf(Reflect.construct(AggregateError,[[]],Target))===other.AggregateError.prototype;",
+        "var order='';var errors={};errors[Symbol.iterator]=function(){order+='i';return [1][Symbol.iterator]();};var message={toString(){order+='m';return 'message';}};var options={get cause(){order+='c';return 42;}};AggregateError(errors,message,options);order==='mci';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn apply_and_construct_share_array_like_property_access_order() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var order='';var list={get length(){order+='l';return 2;},get 0(){order+='a';return 1;},get 1(){order+='b';return 2;}};function add(a,b){return a+b;}add.apply(null,list)===3&&order==='lab';",
+        "order='';Reflect.apply(add,null,list)===3&&order==='lab';",
+        "order='';function C(a,b){this.value=a+b;}Reflect.construct(C,list).value===3&&order==='lab';",
+        "var caught;try{Reflect.apply(add,null,undefined);}catch(error){caught=error;}caught instanceof TypeError;",
+        "order='';try{Function.prototype.apply.call({},null,list);}catch(error){caught=error;}caught instanceof TypeError&&order==='';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn regexp_compile_checks_the_defining_realm_of_its_receiver() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("var regex=/child/;").unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{RegExp.prototype.compile.call(other.regex,'main');}catch(error){caught=error;}caught instanceof TypeError&&other.regex.source==='child';",
+        "try{other.RegExp.prototype.compile.call(/main/,'child');}catch(error){caught=error;}caught instanceof other.TypeError;",
+        "other.regex.compile('changed')===other.regex&&other.regex.source==='changed';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
 fn primitive_property_references_use_the_current_execution_realm() {
     let mut vm = Interpreter::with_builtins();
     let mut other = vm.create_realm();
@@ -598,7 +665,7 @@ fn proxy_internal_errors_use_the_caller_realm_and_preserve_trap_abrupt_completio
     for source in [
         "var caught;try{other.callable();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
         "try{new other.constructible();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
-        "try{other.Class();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "try{other.Class();}catch(e){caught=e;}caught instanceof other.TypeError&&!(caught instanceof TypeError);",
         "try{other.throwing();}catch(e){caught=e;}caught instanceof other.TypeError;",
         "var apply=new Proxy(function(target,receiver,args){return args[0];},{});new Proxy(function(){},{apply})(42)===42;",
         "new Proxy({x:42},new Proxy({},{})).x===42;",

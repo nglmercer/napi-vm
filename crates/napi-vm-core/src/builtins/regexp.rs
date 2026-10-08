@@ -557,9 +557,16 @@ fn regexp_compile(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Re
             "TypeError: RegExp.compile requires a RegExp receiver".into(),
         ));
     };
-    if !data.legacy_enabled.get() {
+    let foreign_realm = data
+        .properties
+        .meta
+        .borrow()
+        .realm_global
+        .as_ref()
+        .is_some_and(|realm| !Rc::ptr_eq(realm, &interp.persistent_global));
+    if !data.legacy_enabled.get() || foreign_realm {
         return Err(VmErr::Msg(
-            "TypeError: Legacy RegExp methods are disabled for subclasses".into(),
+            "TypeError: Legacy RegExp methods require an enabled same-realm receiver".into(),
         ));
     }
     if matches!(args.first(), Some(Value::RegExp(_)))

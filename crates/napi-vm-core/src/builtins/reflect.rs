@@ -161,12 +161,14 @@ fn reflect_prevent_extensions(
 }
 
 fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let args = match &arg(&a, 2) {
-        Value::Array(items) => items.borrow().clone(),
-        Value::Undefined | Value::Null => Vec::new(),
-        other => interp.iterate(other)?,
-    };
-    interp.call_this(&arg(&a, 0), arg(&a, 1), args)
+    let target = arg(&a, 0);
+    if !crate::interpreter::is_callable_value(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect.apply target must be callable".into(),
+        ));
+    }
+    let args = interp.argument_list_from_array_like(&arg(&a, 2))?;
+    interp.call_this(&target, arg(&a, 1), args)
 }
 
 fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -177,25 +179,6 @@ fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Resul
             "TypeError: Target and newTarget must be constructors".into(),
         ));
     }
-    let list = arg(&a, 1);
-    if !crate::interpreter::call::is_js_object(&list) {
-        return Err(VmErr::Msg(
-            "TypeError: Arguments list must be an object".into(),
-        ));
-    }
-    let length = interp.member(&list, "length")?;
-    let number = interp.ecmascript_to_number(&length)?;
-    let length = if number.is_nan() || number <= 0. {
-        0.
-    } else {
-        number.floor()
-    };
-    if length > crate::value::MAX_ARRAY_LEN as f64 {
-        return Err(crate::value::limit_err("Maximum argument count exceeded"));
-    }
-    let mut args = Vec::with_capacity(length as usize);
-    for index in 0..length as usize {
-        args.push(interp.member(&list, &index.to_string())?);
-    }
+    let args = interp.argument_list_from_array_like(&arg(&a, 1))?;
     interp.reflect_constructor(&target, args, new_target)
 }
