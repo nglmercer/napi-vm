@@ -56,3 +56,9 @@ repairs them. Reports retain every outcome and phase classification; no tests
 are skipped. The repaired 63f16b6 selection passes 2,240/4,837: 450 gains and
 zero losses, with zero crashes/timeouts/harness errors. Its full corpus and the
 required checks for subsequent source are still in progress.
+
+The exploratory full run at 63f16b6 passes 46,320/102,956 with 4,916 gains and
+three losses versus PR #23, 46 harness errors, two timeouts, zero crashes and
+zero skips. The catch/eval and var-pattern binding regressions are repaired in
+39c9c02 and 165dddf; measurements for the repaired source are pending.
+`63f16b6-summary.json` records all retained report checksums and worker identity.

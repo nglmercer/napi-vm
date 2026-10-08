@@ -238,3 +238,20 @@ catch binding under Annex B; patterns and intervening lexical bindings still
 reject the conflict. All 27 grammar tests pass; required checks are in progress.
 The exploratory full run at 63f16b6 exposed the catch/eval regression and is
 retained independently of these repairs.
+
+The exploratory 63f16b6 full corpus finishes at 46,320/102,956: 4,916 gains and
+three losses versus PR #23, with 56,588 failures, 46 harness errors, two
+timeouts, zero crashes and zero skips. Two losses expose the simple-catch
+Annex B eval rule; the third exposes var iteration patterns initialized as
+lexical bindings. The subsequent 39c9c02 and 165dddf repairs distinguish catch
+bindings and assign hoisted var-pattern names without creating lexical bindings.
+The full run is retained with all exact transitions. Required checks and a
+repaired full run remain pending.
+
+At 165dddf, all required checks pass: fmt, Clippy with warnings denied, 761
+workspace Rust tests (four existing ignored), 158 minimal Rust tests, 73 Node
+tests, 14 WASM tests and nine Test262 tooling tests. The repository differential
+fixtures have zero observed mismatches; direct eval and new loop binding forms
+retain AST fallback. Full-corpus AST/bytecode differential is not measured.
+The frozen worker is measuring the combined iteration/catch/contextual/eval
+selection and the full corpus before any zero-regression claim for this source.

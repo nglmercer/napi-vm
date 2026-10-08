@@ -1,0 +1,22 @@
+{
+  "source_commit": "165dddf",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "phase2_complete": false,
+  "required_checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace_passed": 761,
+    "workspace_ignored": 4,
+    "minimal_passed": 158,
+    "node_passed": 73,
+    "wasm_passed": 14,
+    "tooling_passed": 9
+  },
+  "ast_bytecode": {
+    "repository_differential_mismatches": 0,
+    "full_corpus_differential": "not measured",
+    "fallback": "retained"
+  },
+  "focused": "in progress",
+  "full": "in progress"
+}
