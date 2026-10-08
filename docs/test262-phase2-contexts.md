@@ -299,3 +299,23 @@ corpus comparison are pending for this follow-up. Remaining Phase 2 completion
 gates include parser-controlled RegExp lexical goals, the remaining binding and
 assignment-pattern audit, declaration/contextual grammar audit, and classification
 of all parse-negative corpus failures. Phase 2 is not yet declared complete.
+
+### Focused corpus audit and repairs
+
+The fe65c74 exploratory focused run selects 16,619 variants across literals,
+RegExp, cover grammar, iteration bindings and eval/globals. It records 10,238
+passes, 6,360 failures, 21 timeouts, zero crashes and zero harness errors:
+1,769 gains and 14 losses against the exact selection projected from 165dddf.
+All losses involve keyword accessor names or contextual await/yield shorthand.
+The subsequent repair centralizes IdentifierName classification, retaining
+context-sensitive binding restrictions. Immutable private-name sets are shared
+across static contexts instead of being copied for every class element; this
+addresses quadratic validation of newly accepted large Unicode classes.
+
+The parse-negative audit of that selection finds 16 remaining failures. Repairs
+require const initializers, reject numeric literals immediately followed by
+identifier starts, restrict spread expressions to arrays/argument lists, and
+share function/arrow parameter grammar with balanced-head lookahead. Arrows
+now accept rest binding patterns, and object binding rest rejects trailing
+commas. The expanded grammar suite passes 42 tests. Required checks and focused
+corpus validation must be rerun on these repairs before the full corpus.

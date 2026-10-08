@@ -1,6 +1,7 @@
 //! Static semantics shared by cached parsing, eval and compilation.
 use super::*;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 #[derive(Clone, Copy, Default)]
 enum FunctionKind {
@@ -49,7 +50,7 @@ struct Context {
     parameters: bool,
     super_call: bool,
     super_property: bool,
-    private_names: Vec<HashSet<String>>,
+    private_names: Vec<Rc<HashSet<String>>>,
     forbid_arguments: bool,
     lexical_functions: bool,
     new_target: bool,
@@ -116,7 +117,7 @@ pub(super) fn validate(
             super_call: eval.is_some_and(|context| context.super_call),
             super_property: eval.is_some_and(|context| context.super_property),
             private_names: eval
-                .map(|context| vec![context.private_names.clone()])
+                .map(|context| vec![Rc::new(context.private_names.clone())])
                 .unwrap_or_default(),
             ..Context::default()
         },
@@ -465,6 +466,9 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             destructuring,
             kind,
         } => {
+            if *kind == VarKind::Const && init.is_none() {
+                return Err("const declaration requires an initializer".into());
+            }
             if matches!(kind, VarKind::Let | VarKind::Const)
                 && destructuring
                     .as_deref()
@@ -990,6 +994,13 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
     }
 }
 
+fn argument(expr: &Expr, ctx: &Context) -> Check {
+    match expr {
+        Expr::Spread(inner) => expression(inner, ctx),
+        _ => expression(expr, ctx),
+    }
+}
+
 fn expression(expr: &Expr, ctx: &Context) -> Check {
     match expr {
         Expr::Parenthesized(inner) => expression(inner, ctx),
@@ -1036,9 +1047,15 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         Expr::Super => Err("bare super expression".into()),
         Expr::ImportMeta if !ctx.import_meta => Err("import.meta outside a module".into()),
         Expr::NewTarget if !ctx.new_target => Err("new.target outside a function".into()),
-        Expr::Array { items, .. } | Expr::Template { exprs: items, .. } => {
+        Expr::Array { items, .. } => {
             for item in items {
-                expression(item, ctx)?;
+                argument(item, ctx)?;
+            }
+            Ok(())
+        }
+        Expr::Template { exprs, .. } => {
+            for expr in exprs {
+                expression(expr, ctx)?;
             }
             Ok(())
         }
@@ -1219,7 +1236,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
                 expression(callee, ctx)?;
             }
             for arg in args {
-                expression(arg, ctx)?;
+                argument(arg, ctx)?;
             }
             Ok(())
         }
@@ -1336,8 +1353,8 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
             optional(value.as_deref(), ctx)
         }
-        Expr::Spread(value)
-        | Expr::DynamicImport {
+        Expr::Spread(_) => Err("spread outside an array or argument list".into()),
+        Expr::DynamicImport {
             specifier: value, ..
         } => expression(value, ctx),
         Expr::Number(_)
@@ -1446,7 +1463,8 @@ fn class(body: &[ClassMember], outer: &Context, derived: bool) -> Check {
             }
         }
     }
-    ctx.private_names.push(private.into_keys().collect());
+    ctx.private_names
+        .push(Rc::new(private.into_keys().collect()));
     for member in body {
         let name = match member {
             ClassMember::Method { name, .. }

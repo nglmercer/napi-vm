@@ -546,17 +546,16 @@ impl Parser {
     /// `{ get() {} }`, `{ get }` and `{ get, x }` all name a property `get`.
     pub(crate) fn starts_accessor(&self, keyword: &Token) -> bool {
         self.cur() == keyword
-            && matches!(
-                self.peek(),
-                Token::Identifier(_)
-                    | Token::EscapedIdentifier(_)
-                    | Token::String(_)
-                    | Token::EscapedString(_)
-                    | Token::Number(_)
-                    | Token::LBracket
-                    | Token::KwGet
-                    | Token::KwSet
-            )
+            && (self.peek().identifier_name().is_some()
+                || matches!(
+                    self.peek(),
+                    Token::String(_)
+                        | Token::EscapedString(_)
+                        | Token::LegacyString(_)
+                        | Token::Number(_)
+                        | Token::LegacyNumber(_)
+                        | Token::LBracket
+                ))
     }
 
     pub(crate) fn eat(&mut self, t: &Token) -> bool {

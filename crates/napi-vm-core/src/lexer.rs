@@ -148,6 +148,64 @@ pub enum Token {
     EOF,
 }
 
+impl Token {
+    /// IdentifierName includes keywords; binding contexts impose their own restrictions.
+    pub(crate) fn identifier_name(&self) -> Option<&str> {
+        Some(match self {
+            Self::Identifier(name) | Self::EscapedIdentifier(name) => name,
+            Self::KwVar => "var",
+            Self::KwLet => "let",
+            Self::KwConst => "const",
+            Self::KwFunction => "function",
+            Self::KwReturn => "return",
+            Self::KwIf => "if",
+            Self::KwElse => "else",
+            Self::KwFor => "for",
+            Self::KwWhile => "while",
+            Self::KwWith => "with",
+            Self::KwDo => "do",
+            Self::KwSwitch => "switch",
+            Self::KwCase => "case",
+            Self::KwDefault => "default",
+            Self::KwBreak => "break",
+            Self::KwContinue => "continue",
+            Self::KwClass => "class",
+            Self::KwExtends => "extends",
+            Self::KwNew => "new",
+            Self::KwThis => "this",
+            Self::KwSuper => "super",
+            Self::KwImport => "import",
+            Self::KwExport => "export",
+            Self::KwFrom => "from",
+            Self::KwAs => "as",
+            Self::KwAsync => "async",
+            Self::KwAwait => "await",
+            Self::KwYield => "yield",
+            Self::KwTry => "try",
+            Self::KwCatch => "catch",
+            Self::KwFinally => "finally",
+            Self::KwThrow => "throw",
+            Self::KwTypeof => "typeof",
+            Self::KwInstanceof => "instanceof",
+            Self::KwIn => "in",
+            Self::KwOf => "of",
+            Self::KwTrue => "true",
+            Self::KwFalse => "false",
+            Self::KwNull => "null",
+            Self::KwUndefined => "undefined",
+            Self::KwDelete => "delete",
+            Self::KwVoid => "void",
+            Self::KwDebugger => "debugger",
+            Self::KwEnum => "enum",
+            Self::KwStatic => "static",
+            Self::KwGet => "get",
+            Self::KwSet => "set",
+            Self::KwConstructor => "constructor",
+            _ => return None,
+        })
+    }
+}
+
 pub struct Lexer {
     src: Vec<char>,
     pos: usize,
@@ -439,7 +497,15 @@ impl Lexer {
 
     fn next_with_span(&mut self) -> Option<crate::span::SpannedToken> {
         let mut span = crate::span::Span::new(self.line, self.col);
-        let t = self.next()?;
+        let mut t = self.next()?;
+        if matches!(
+            t,
+            Token::Number(_) | Token::LegacyNumber(_) | Token::BigInt(_)
+        ) && let Some(&following) = self.src.get(self.pos)
+            && (is_identifier_start(following) || following.is_ascii_digit() || following == '\\')
+        {
+            t = Token::Unknown(following);
+        }
         // Templates emit individual spans for their delimiters/interpolations.
         if !matches!(t, Token::Backtick) {
             span.end_line = self.line;

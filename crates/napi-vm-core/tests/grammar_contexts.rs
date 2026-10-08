@@ -1119,3 +1119,89 @@ fn comment_termination_and_line_breaks_are_lexical_semantics() {
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
+
+#[test]
+fn keyword_property_names_and_contextual_shorthand_use_distinct_grammar() {
+    for source in [
+        "var yield=1;({yield});",
+        "var await=1;({await});",
+        "({get yield(){return 1},set return(x){}});",
+        "function* f(){return {get yield(){return 1}};}",
+        "({get default(){},set if(x){}});",
+        "class C{get yield(){}set return(x){}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "'use strict';({yield});",
+        "async function f(){return {await};}",
+        "({return});",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    let fields = (0..4000).map(|n| format!("#field{n};")).collect::<String>();
+    assert!(parses(&format!("class C{{{fields}}}"), ParseGoal::Script));
+}
+
+#[test]
+fn arrows_share_function_rest_pattern_grammar() {
+    for source in [
+        "(...[x])=>x;",
+        "(...{length})=>length;",
+        "async (...[x])=>x;",
+        "(a=1,...[x])=>x;",
+        "(a,b)=>a;",
+        "(a,b);",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "(...[x],)=>x;",
+        "(...{length},x)=>x;",
+        "(...[x]=[])=>x;",
+        "var {...x,}={};",
+        "function f({...x,}){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "((...[x])=>x)(3)===3;",
+        "((...{length})=>length)(1,2)===2;",
+        "((a=1,...[x])=>a+x)(undefined,3)===4;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn const_initializers_numeric_boundaries_and_spread_positions_are_early_errors() {
+    for source in [
+        "const x;",
+        "const x=1,y;",
+        "switch(x){case 1:const y;}",
+        "3in [];",
+        "0x1in [];",
+        "3nfoo;",
+        "...x=>x;",
+        "var x=...[];",
+        "()\n=>{};",
+        "async ()\n=>{};",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "const x=1;",
+        "for(const x of []){}",
+        "for(const x in {}){}",
+        "3 in [];",
+        "[...x];",
+        "f(...x);",
+        "new F(...x);",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}

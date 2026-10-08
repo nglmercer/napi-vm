@@ -155,6 +155,9 @@ impl Parser {
                             | Token::EscapedIdentifier(_)
                             | Token::KwAs
                             | Token::KwAsync
+                            | Token::KwAwait
+                            | Token::KwYield
+                            | Token::KwUndefined
                             | Token::KwLet
                             | Token::KwStatic
                             | Token::KwConstructor
@@ -536,6 +539,9 @@ impl Parser {
     /// Speculatively parse `( params ) =>`. On any failure, restore the parser
     /// position and return `None` so the caller can parse a parenthesized expr.
     fn try_arrow(&mut self, is_async: bool) -> Option<Expr> {
+        if !self.arrow_head_here() {
+            return None;
+        }
         let saved = self.await_expression;
         let saved_error = self.error.clone();
         let saved_entries = self.index.entries.len();
@@ -558,67 +564,8 @@ impl Parser {
         if !self.eat(&Token::LParen) {
             return None;
         }
-        let mut params = Vec::new();
-        let mut defaults = Vec::new();
-        if self.eat(&Token::RParen) {
-            if self.eat(&Token::Arrow) {
-                return Some(self.arrow_body_async(params, defaults, is_async));
-            }
-            self.pos = save;
-            return None;
-        }
-        loop {
-            match self.cur() {
-                Token::DotDotDot => {
-                    self.adv();
-                    if let Some(name) = self.ident() {
-                        params.push(format!("...{}", name));
-                    } else {
-                        self.pos = save;
-                        return None;
-                    }
-                }
-                // A destructured arrow parameter: `({ a }) => a`.
-                Token::LBracket | Token::LBrace => {
-                    let Some(pattern) = self.pattern() else {
-                        self.pos = save;
-                        return None;
-                    };
-                    let slot = format!("*pattern{}*", params.len());
-                    if self.eat(&Token::Equal)
-                        && let Some(default) = self.assign()
-                    {
-                        defaults.push(Parser::default_guard(&slot, default));
-                    }
-                    defaults.push(Statement::VarDecl {
-                        kind: crate::parser::VarKind::Let,
-                        name: String::new(),
-                        init: Some(Box::new(Expr::Identifier(slot.clone()))),
-                        destructuring: Some(Box::new(pattern)),
-                    });
-                    params.push(slot);
-                }
-                _ => {
-                    let Some(name) = self.ident() else {
-                        self.pos = save;
-                        return None;
-                    };
-                    if self.eat(&Token::Equal) {
-                        match self.assign() {
-                            Some(d) => defaults.push(Parser::default_guard(&name, d)),
-                            None => {
-                                self.pos = save;
-                                return None;
-                            }
-                        }
-                    }
-                    params.push(name);
-                }
-            }
-            if !self.eat(&Token::Comma) {
-                break;
-            }
-        }
+        // Functions and arrows use the same binding/default/rest grammar.
+        let (params, defaults) = self.params();
         if !self.eat(&Token::RParen) {
             self.pos = save;
             return None;
