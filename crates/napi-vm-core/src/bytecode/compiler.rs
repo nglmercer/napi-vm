@@ -2436,11 +2436,11 @@ impl<'a> Compiler<'a> {
                     self.emit(Instr::DefineGlobal {
                         name: index,
                         src: err,
-                        kind: SlotKind::Let,
+                        kind: SlotKind::Catch,
                         initialized: true,
                     });
                 } else {
-                    let slot = self.declare_slot(param, SlotKind::Let)?;
+                    let slot = self.declare_slot(param, SlotKind::Catch)?;
                     self.emit(Instr::InitLocal { slot, src: err });
                 }
             }

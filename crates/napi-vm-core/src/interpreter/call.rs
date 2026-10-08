@@ -408,7 +408,12 @@ impl Interpreter {
             // the enclosing function scope, where it was already hoisted.
             let r = (|| {
                 if let Some(pattern) = p {
-                    self.initialize_pattern_binding(pattern, &err_val, super::BindKind::Let)?;
+                    let kind = if matches!(pattern, Pattern::Ident(_)) {
+                        super::BindKind::Catch
+                    } else {
+                        super::BindKind::Let
+                    };
+                    self.initialize_pattern_binding(pattern, &err_val, kind)?;
                 }
                 self.run_hoisted_here(cb)
             })();

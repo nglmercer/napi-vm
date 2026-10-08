@@ -1136,6 +1136,7 @@ fn land_handler(
 fn bind_kind(kind: SlotKind) -> BindKind {
     match kind {
         SlotKind::Var => BindKind::Var,
+        SlotKind::Catch => BindKind::Catch,
         SlotKind::Let => BindKind::Let,
         SlotKind::Const => BindKind::Const,
     }

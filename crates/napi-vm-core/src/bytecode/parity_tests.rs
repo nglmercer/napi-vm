@@ -1251,6 +1251,8 @@ fn named_expression_bindings_are_lexical_and_immutable_in_both_tiers() {
 fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
     for source in [
         "var e=7;try{throw 1;}catch(e){var e=3;}e;",
+        "var e=7;try{throw 1;}catch(e){eval('var e=3');}e;",
+        "try{throw 1;}catch(e){eval('function e(){}');e;}",
         "let f;try{throw 1;}catch(e){f=()=>++e;}f()+f();",
         "let e=7;try{throw 1;}catch{e=9;}e;",
         "function f(){let e=7;try{throw 1;}catch(e){e=3;}return e;}f();",

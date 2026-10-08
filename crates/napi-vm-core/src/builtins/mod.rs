@@ -413,7 +413,7 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                 loop {
                     if names
                         .iter()
-                        .any(|name| scope.borrow().has_lexical_binding(name))
+                        .any(|name| scope.borrow().has_eval_var_conflict(name))
                     {
                         return Err(VmErr::Msg(
                             "SyntaxError: Eval variable conflicts with a lexical binding".into(),

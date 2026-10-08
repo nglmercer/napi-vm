@@ -739,3 +739,19 @@ fn contextual_let_and_static_are_complete_expressions_in_sloppy_code() {
         );
     }
 }
+
+#[test]
+fn sloppy_eval_var_conflicts_distinguish_identifier_and_pattern_catch_bindings() {
+    for source in [
+        "let ok=true;try{throw null;}catch(err){eval('function err(){}');eval('var err;');eval('for(var err of []){}');}ok;",
+        "let ok=false;try{throw{x:1};}catch({x}){try{eval('var x;');}catch(e){ok=e instanceof SyntaxError;}}ok;",
+        "let ok=false;try{throw 1;}catch(x){{let x=2;try{eval('var x;');}catch(e){ok=e instanceof SyntaxError;}}}ok;",
+        "let ok=false;try{throw 1;}catch(x){eval('var x=3;');ok=x===3;}ok;",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

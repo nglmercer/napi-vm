@@ -44,10 +44,13 @@ pub(super) fn randomized_hasher() -> ahash::RandomState {
 /// rules, and whether the binding has a temporal dead zone.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BindKind {
-    /// `var`, function declarations, parameters, catch parameters, and
+    /// `var`, function declarations, parameters, and
     /// bindings created by assigning to an undeclared name. Function-scoped,
     /// reassignable, hoisted already-initialized (as `undefined`).
     Var,
+    /// An identifier catch parameter: mutable and local to the catch scope.
+    /// Annex B permits sloppy direct-eval var declarations across this binding.
+    Catch,
     /// `let`. Block-scoped, reassignable, dead until its declaration runs.
     Let,
     /// `const`. Block-scoped, not reassignable, dead until its declaration runs.
@@ -601,10 +604,10 @@ impl Environment {
         self.eval_scope
     }
 
-    pub(crate) fn has_lexical_binding(&self, name: &str) -> bool {
-        self.vars
-            .get(name)
-            .is_some_and(|binding| self.parameter_scope || binding.kind != BindKind::Var)
+    pub(crate) fn has_eval_var_conflict(&self, name: &str) -> bool {
+        self.vars.get(name).is_some_and(|binding| {
+            self.parameter_scope || !matches!(binding.kind, BindKind::Var | BindKind::Catch)
+        })
     }
 
     /// Named function expressions own a lexical scope, distinct from declarations

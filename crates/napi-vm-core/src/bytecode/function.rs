@@ -12,6 +12,7 @@ use crate::bytecode::constants::Constant;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SlotKind {
     Var,
+    Catch,
     Let,
     Const,
 }
