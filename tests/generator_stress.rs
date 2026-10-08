@@ -173,6 +173,20 @@ fn generator_methods_reject_incompatible_receivers() {
     );
 }
 
+#[test]
+fn loop_close_does_not_abandon_a_generator_that_yields_in_finally() {
+    assert_eq!(
+        run(r#"
+        function* f() { try { yield 1; } finally { yield 2; yield 3; } }
+        let g = f();
+        for (let value of g) { break; }
+        let a = g.next(), b = g.next();
+        [a.value, a.done, b.value, b.done].join(',');
+    "#),
+        "3,false,,true"
+    );
+}
+
 /// Evaluate `source` in a fresh interpreter and return the result as a string.
 fn run(source: &str) -> String {
     let mut interp = Interpreter::with_builtins();

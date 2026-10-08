@@ -61,6 +61,17 @@ impl AsyncTask {
 }
 
 impl Interpreter {
+    /// Async-generator Return evaluates Await inside the body, so rejection
+    /// remains catchable by its try/catch/finally. Ordinary nested functions
+    /// have their own return context and must not inherit this behavior.
+    pub(crate) fn prepare_return_value(&mut self, value: Value) -> Result<Value, VmErr> {
+        let asynchronous = self.global.borrow().awaits_return_value();
+        if asynchronous {
+            self.perform_await(value)
+        } else {
+            Ok(value)
+        }
+    }
     /// Evaluate `await value`.
     ///
     /// Inside an async body this suspends; at the top level (where there is no

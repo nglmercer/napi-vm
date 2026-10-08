@@ -463,12 +463,7 @@ fn construct(
             if let Err(error) = inserted {
                 // IteratorClose with a throw completion preserves the original
                 // exception even when getting/calling return also throws.
-                if let Ok(close) = interp.member(&iterator, "return")
-                    && !matches!(close, Value::Undefined | Value::Null)
-                {
-                    let _ = interp.call_this(&close, iterator.clone(), vec![]);
-                }
-                crate::interpreter::close_iterator(&iterator);
+                let _ = interp.close_guest_iterator(&iterator, false);
                 return Err(error);
             }
         }

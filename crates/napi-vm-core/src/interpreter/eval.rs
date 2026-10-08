@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{
-    BindKind, Env, Environment, Interpreter, Lookup, SYMBOL_ITERATOR_SLOT,
-    block_needs_lexical_scope, body_needs_hoisting,
+    BindKind, Env, Environment, Interpreter, Lookup, block_needs_lexical_scope, body_needs_hoisting,
 };
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
@@ -182,21 +181,6 @@ pub(crate) fn push_call_arg(args: &mut Vec<Value>, value: Value) -> Result<(), V
 /// the callers directly; this only decides labeled ones.
 /// Close an iterator that a `for...of` is abandoning before exhaustion.
 ///
-/// Only generators need this today: their bodies may be suspended inside a
-/// `try`, and JavaScript runs those `finally` blocks when the loop exits
-/// early. Any other iterable is a plain object with no teardown to perform.
-#[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
-pub(crate) fn close_iterator(iterator: &Value) {
-    #[cfg(stackful_coroutines)]
-    if let Value::Generator { inner } = iterator {
-        // A generator cannot be mid-`next()` here: this runs on the same
-        // thread that just returned from it, so the cell is free.
-        if let Ok(mut inner) = inner.try_borrow_mut() {
-            inner.close();
-        }
-    }
-}
-
 fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
     match (label, signal) {
         (Some(a), Some(b)) => a == b,
@@ -215,20 +199,14 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 pub(crate) const SUPER_PROTO: &str = "__super_proto__";
 
 impl Interpreter {
-    fn close_guest_iterator(&mut self, iterator: &Value, asynchronous: bool) -> Result<(), VmErr> {
-        if matches!(iterator, Value::Generator { .. }) {
-            close_iterator(iterator);
+    pub(crate) fn close_guest_iterator(
+        &mut self,
+        iterator: &Value,
+        asynchronous: bool,
+    ) -> Result<(), VmErr> {
+        let Some(method) = self.get_method(iterator, &Value::String("return".into()))? else {
             return Ok(());
-        }
-        let method = self.get_prop_value_str(iterator, "return")?;
-        if matches!(method, Value::Undefined | Value::Null) {
-            return Ok(());
-        }
-        if !super::call::is_callable_value(&method) {
-            return Err(VmErr::Msg(
-                "TypeError: iterator return must be callable".into(),
-            ));
-        }
+        };
         let mut result = self.call_this(&method, iterator.clone(), vec![])?;
         if asynchronous {
             result = self.perform_await(result)?;
@@ -239,6 +217,26 @@ impl Interpreter {
             ));
         }
         Ok(())
+    }
+
+    /// IteratorComplete/GetValue with observable property access. Completed
+    /// iterators do not read value; a missing done property means false.
+    pub(crate) fn iterator_result_fields(
+        &mut self,
+        result: &Value,
+    ) -> Result<(bool, Value), VmErr> {
+        if !super::call::is_js_object(result) {
+            return Err(VmErr::Msg(
+                "TypeError: Iterator result must be an object".into(),
+            ));
+        }
+        let done = self.member(result, "done")?.is_truthy();
+        let value = if done {
+            Value::Undefined
+        } else {
+            self.member(result, "value")?
+        };
+        Ok((done, value))
     }
 
     /// Resolve `super.<key>` — a lookup on the superclass prototype.
@@ -1104,7 +1102,10 @@ impl Interpreter {
             }
             Statement::Return(e) => {
                 let v = match e {
-                    Some(ex) => self.eval_expr(ex)?,
+                    Some(ex) => {
+                        let value = self.eval_expr(ex)?;
+                        self.prepare_return_value(value)?
+                    }
                     None => Value::Undefined,
                 };
                 vm_ret(v)
@@ -1257,7 +1258,7 @@ impl Interpreter {
                 } else {
                     self.iterator_for(&source)?
                 };
-                let next_fn = self.prop_str(&iterator, "next")?;
+                let next_fn = self.member(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
                     return vm_err("iterator has no next() method");
                 }
@@ -1279,15 +1280,11 @@ impl Interpreter {
                     if *is_await {
                         result = self.perform_await(result)?;
                     }
-                    let done = result
-                        .get_prop("done")
-                        .map(|v| v.is_truthy())
-                        .unwrap_or(true);
+                    let (done, mut value) = self.iterator_result_fields(&result)?;
                     if done {
                         exhausted = true;
                         break;
                     }
-                    let mut value = result.get_prop("value").unwrap_or(Value::Undefined);
                     // A sync iterator of promises is also valid input to
                     // `for await`, so each value is awaited too.
                     if *is_await {
@@ -1461,9 +1458,12 @@ impl Interpreter {
     fn async_iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
         let key = crate::builtins::well_known("asyncIterator")
             .unwrap_or(Value::String(("Symbol.asyncIterator".to_string()).into()));
-        let async_iter_fn = self.prop(source, &key)?;
-        if !matches!(async_iter_fn, Value::Undefined) {
-            return self.call_this(&async_iter_fn, source.clone(), vec![]);
+        if let Some(async_iter_fn) = self.get_method(source, &key)? {
+            let iterator = self.call_this(&async_iter_fn, source.clone(), vec![])?;
+            if !super::call::is_js_object(&iterator) {
+                return vm_err("TypeError: Async iterator method must return an object");
+            }
+            return Ok(iterator);
         }
         self.iterator_for(source)
     }
@@ -1471,29 +1471,15 @@ impl Interpreter {
     /// Obtain an iterator for `source`, following the `Symbol.iterator`
     /// protocol. Shared by `for...of` and `yield*`.
     pub(crate) fn iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
-        if matches!(source, Value::String(_)) {
-            let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
-            return self.call_this(&iter_fn, source.clone(), vec![]);
+        let key = crate::builtins::well_known("iterator").expect("Symbol.iterator");
+        let Some(method) = self.get_method(source, &key)? else {
+            return vm_err("TypeError: Value has no callable Symbol.iterator");
+        };
+        let iterator = self.call_this(&method, source.clone(), vec![])?;
+        if !super::call::is_js_object(&iterator) {
+            return vm_err("TypeError: Iterator method must return an object");
         }
-        match source {
-            // A generator is its own iterator.
-            Value::Generator { .. } => Ok(source.clone()),
-            Value::Array(_) => {
-                let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
-                self.call_this(&iter_fn, source.clone(), vec![])
-            }
-            Value::Object { .. } | Value::TypedArray(_) => {
-                let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
-                if matches!(iter_fn, Value::Undefined) {
-                    return vm_err("object is not iterable (no Symbol.iterator)");
-                }
-                self.call_this(&iter_fn, source.clone(), vec![])
-            }
-            other => {
-                let rendered = self.vs(other).unwrap_or_else(|_| "value".to_string());
-                vm_err(format!("TypeError: {} is not iterable", rendered))
-            }
-        }
+        Ok(iterator)
     }
 
     /// The body of a C-style `for`, running inside the loop scope the caller
@@ -2736,6 +2722,12 @@ impl Interpreter {
                     Some(e) => self.eval_expr(e)?,
                     None => Value::Undefined,
                 };
+                #[cfg(stackful_coroutines)]
+                let v = if self.await_yielder.is_some() {
+                    self.perform_await(v)?
+                } else {
+                    v
+                };
                 // Where suspension is unavailable, the value goes to the
                 // buffer the driver drains, and the `yield` expression itself
                 // evaluates to `undefined`.
@@ -2759,7 +2751,10 @@ impl Interpreter {
                         // Closed (`gen.return()` / leaving `for...of` early):
                         // return from the body so the surrounding
                         // `try`/`finally` still runs on the way out.
-                        crate::value::GenResume::Return(value) => vm_ret(value),
+                        crate::value::GenResume::Return(value) => {
+                            let value = self.prepare_return_value(value)?;
+                            vm_ret(value)
+                        }
                         // Abandoned while suspended: unwind with no guest
                         // handlers at all (see `VmErr::Abandon`).
                         crate::value::GenResume::Abandon => Err(VmErr::Abandon),
@@ -2773,7 +2768,15 @@ impl Interpreter {
                 // evaluates to `it`'s own return value. Values sent in with
                 // `next(v)` are forwarded to the delegate.
                 let source = self.eval_expr(inner)?;
-                let iterator = self.iterator_for(&source)?;
+                #[cfg(stackful_coroutines)]
+                let asynchronous = self.await_yielder.is_some();
+                #[cfg(not(stackful_coroutines))]
+                let asynchronous = false;
+                let iterator = if asynchronous {
+                    self.async_iterator_for(&source)?
+                } else {
+                    self.iterator_for(&source)?
+                };
                 let next_fn = self.prop_str(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
                     return vm_err("TypeError: yield* requires an iterable");
@@ -2813,11 +2816,21 @@ impl Interpreter {
                         crate::value::GenResume::Abandon => return Err(VmErr::Abandon),
                     };
                     let step = self.call_this(&method, iterator.clone(), args)?;
+                    let step = if asynchronous {
+                        self.perform_await(step)?
+                    } else {
+                        step
+                    };
                     if !super::call::is_js_object(&step) {
                         return vm_err("TypeError: Iterator result must be an object");
                     }
                     let done = self.member(&step, "done")?.is_truthy();
                     let value = self.member(&step, "value")?;
+                    let value = if asynchronous {
+                        self.perform_await(value)?
+                    } else {
+                        value
+                    };
                     if done {
                         return if returning { vm_ret(value) } else { Ok(value) };
                     }
@@ -2850,15 +2863,6 @@ impl Interpreter {
     /// GetMethod for iterator completion forwarding. Only nullish methods are
     /// absent; getters and non-callable values must produce observable errors.
     fn iterator_method(&mut self, iterator: &Value, name: &str) -> Result<Option<Value>, VmErr> {
-        let method = self.member(iterator, name)?;
-        if matches!(method, Value::Undefined | Value::Null) {
-            return Ok(None);
-        }
-        if !super::call::is_callable_value(&method) {
-            return Err(VmErr::Msg(
-                "TypeError: Iterator method must be callable".into(),
-            ));
-        }
-        Ok(Some(method))
+        self.get_method(iterator, &Value::String(name.into()))
     }
 }

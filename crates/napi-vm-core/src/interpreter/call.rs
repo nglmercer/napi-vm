@@ -1594,6 +1594,10 @@ impl Interpreter {
                     };
                     properties.set_proto(prototype.map(Rc::new));
                     let inner = GeneratorInner {
+                        realm: super::Realm::of(self),
+                        async_state: fd
+                            .is_async
+                            .then(super::async_generator::AsyncGeneratorState::new),
                         properties,
                         parameters_initialized,
                         body,
@@ -2314,12 +2318,17 @@ fn make_generator_coroutine(
     args: Vec<Value>,
     builtins_env: Option<super::Env>,
     gen_depth: u32,
-    realm: super::Realm,
+    continuation: (
+        super::Realm,
+        Option<Rc<std::cell::Cell<crate::value::GenSuspension>>>,
+    ),
 ) -> Option<crate::value::GenCoroutine> {
     use corosensei::Coroutine;
     use corosensei::stack::DefaultStack;
 
     let (params, parameters_initialized) = parameters;
+    let (realm, suspension) = continuation;
+    let asynchronous = suspension.is_some();
     let stack = DefaultStack::new(GENERATOR_STACK_SIZE).ok()?;
 
     // The first `next()` only starts the body; JS discards its argument, since
@@ -2354,6 +2363,23 @@ fn make_generator_coroutine(
             // outlive its referent, and `GenYielder` is `!Send`, so it cannot
             // leave this thread. See `crate::value::GenYielder`.
             interp.gen_yielder = Some(unsafe { crate::value::GenYielder::new(yielder) });
+            if let Some(state) = suspension {
+                // SAFETY: both handles live only on this coroutine's owner stack.
+                interp.gen_yielder = Some(unsafe {
+                    crate::value::GenYielder::with_suspension(
+                        yielder,
+                        state.clone(),
+                        crate::value::GenSuspension::Yield,
+                    )
+                });
+                interp.await_yielder = Some(unsafe {
+                    crate::value::GenYielder::with_suspension(
+                        yielder,
+                        state,
+                        crate::value::GenSuspension::Await,
+                    )
+                });
+            }
 
             // Bind parameters in a child of the defining scope.
             let parent_env = closure.unwrap_or_else(|| interp.global.clone());
@@ -2363,6 +2389,7 @@ fn make_generator_coroutine(
                 Rc::new(RefCell::new(Environment::function_child(parent_env)))
             };
             fe.borrow_mut().set_new_target(Value::Undefined);
+            fe.borrow_mut().async_generator_body = asynchronous;
             for (i, p) in params
                 .iter()
                 .enumerate()
@@ -2393,8 +2420,28 @@ fn make_generator_coroutine(
 
 /// `Generator.prototype.next`: resumes the generator (starting it on the first
 /// call), and produces a `{ value, done }` result object.
-#[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
 pub(crate) fn generator_next(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    require_sync_generator(&this)?;
+    generator_next_driver(interp, this, args)
+}
+
+fn require_sync_generator(value: &Value) -> Result<(), VmErr> {
+    if let Value::Generator { inner } = value
+        && inner.borrow().async_state.is_none()
+    {
+        return Ok(());
+    }
+    Err(VmErr::Msg(
+        "TypeError: Method requires a synchronous generator receiver".into(),
+    ))
+}
+
+#[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
+pub(crate) fn generator_next_driver(
     interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,
@@ -2494,7 +2541,13 @@ pub(crate) fn generator_next(
                     inner.args.clone(),
                     builtins_env,
                     interp.gen_depth + 1,
-                    super::Realm::of(interp),
+                    (
+                        inner.realm.clone(),
+                        inner
+                            .async_state
+                            .as_ref()
+                            .map(|state| state.suspension.clone()),
+                    ),
                 );
                 if inner.coroutine.is_none() {
                     // Stack allocation failed; report an exhausted generator.
@@ -2601,6 +2654,15 @@ fn run_buffered_generator(
 /// `Generator.prototype.throw`: raise a value at the suspension point, so a
 /// `try`/`catch` around the `yield` inside the body sees it.
 pub(crate) fn generator_throw(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    require_sync_generator(&this)?;
+    generator_throw_driver(interp, this, args)
+}
+
+pub(crate) fn generator_throw_driver(
     _interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,
@@ -2674,6 +2736,15 @@ pub(crate) fn generator_throw(
 /// `Generator.prototype.return`: finish the generator, running any `finally`
 /// blocks around the suspension point, and report the given value.
 pub(crate) fn generator_return(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    require_sync_generator(&this)?;
+    generator_return_driver(interp, this, args)
+}
+
+pub(crate) fn generator_return_driver(
     _interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,

@@ -52,10 +52,17 @@ impl ModuleRealm {
         child.publish_module_realm();
     }
     pub(crate) fn roots(&self) -> Result<crate::heap::GcRoots, ()> {
-        let graph = self.graph.try_borrow().map_err(|_| ())?;
-        let cache = self.commonjs_cache.try_borrow().map_err(|_| ())?;
+        Self::roots_of(&self.modules, &self.graph, &self.commonjs_cache)
+    }
+    pub(super) fn roots_of(
+        modules: &Rc<RefCell<HashMap<String, Module>>>,
+        graph: &Rc<RefCell<module_link::ModuleGraph>>,
+        cache: &Rc<RefCell<HashMap<String, commonjs::CommonJsCacheEntry>>>,
+    ) -> Result<crate::heap::GcRoots, ()> {
+        let graph = graph.try_borrow().map_err(|_| ())?;
+        let cache = cache.try_borrow().map_err(|_| ())?;
         let mut roots = crate::heap::GcRoots {
-            modules: vec![self.modules.clone()],
+            modules: vec![modules.clone()],
             ..Default::default()
         };
         roots.values.extend(graph.trace_values());

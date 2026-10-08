@@ -1224,13 +1224,7 @@ impl FunctionData {
         } else {
             "%GeneratorPrototype%"
         };
-        global.intrinsic(kind).or_else(|| {
-            // Retain the existing generator execution path until async
-            // generators have their own driver and intrinsic prototype.
-            is_async
-                .then(|| global.intrinsic("%GeneratorPrototype%"))
-                .flatten()
-        })
+        global.intrinsic(kind)
     }
 }
 
@@ -2336,10 +2330,8 @@ impl Default for PromiseInner {
 pub enum GenResume {
     /// A normal `next(v)`: `v` becomes the value of the `yield` expression.
     Next(Option<Value>),
-    /// The generator is being abandoned. The `yield` expression returns from
-    /// the body instead of producing a value, so the interpreter unwinds it
-    /// normally and guest `finally` blocks still run -- which is what
-    /// `for...of` + `break` does in JavaScript, via the implicit `return()`.
+    /// A return completion carrying the caller's value. Finally blocks can
+    /// suspend again or replace this completion before the body finishes.
     Return(Value),
     /// `gen.throw(e)`, or an `await` whose promise rejected: the suspension
     /// point raises `e` instead of producing a value, so guest `try`/`catch`
@@ -2454,6 +2446,7 @@ pub type GenCoroutine = corosensei::Coroutine<GenResume, Value, GenOutcome>;
 #[cfg(stackful_coroutines)]
 pub struct GenYielder {
     inner: *const corosensei::Yielder<GenResume, Value>,
+    suspension: Option<(Rc<std::cell::Cell<GenSuspension>>, GenSuspension)>,
     /// Pins this handle to one thread: a raw pointer is already `!Send`, and
     /// `PhantomData<*const ()>` makes that explicit and stable.
     _not_send: std::marker::PhantomData<*const ()>,
@@ -2469,6 +2462,7 @@ impl GenYielder {
     pub unsafe fn new(yielder: &corosensei::Yielder<GenResume, Value>) -> Self {
         Self {
             inner: yielder as *const _,
+            suspension: None,
             _not_send: std::marker::PhantomData,
         }
     }
@@ -2476,10 +2470,32 @@ impl GenYielder {
     /// Suspend the generator, handing `value` to the caller of `next()`, and
     /// report why it was resumed.
     pub fn suspend(&self, value: Value) -> GenResume {
+        if let Some((state, kind)) = &self.suspension {
+            state.set(*kind);
+        }
         // SAFETY: see the type-level proof. The referent outlives this handle
         // by construction, and this is the thread that created it.
         unsafe { (*self.inner).suspend(value) }
     }
+
+    /// # Safety
+    /// The same stack and owner-thread lifetime requirements as `new` apply.
+    pub(crate) unsafe fn with_suspension(
+        yielder: &corosensei::Yielder<GenResume, Value>,
+        state: Rc<std::cell::Cell<GenSuspension>>,
+        kind: GenSuspension,
+    ) -> Self {
+        // SAFETY: the caller guarantees the lifetime contract above.
+        let mut handle = unsafe { Self::new(yielder) };
+        handle.suspension = Some((state, kind));
+        handle
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GenSuspension {
+    Yield,
+    Await,
 }
 
 /// Mutable state shared across a generator's `next()` calls (behind an `Rc` so
@@ -2496,6 +2512,8 @@ impl GenYielder {
 /// closed. A coroutine keeps everything on one thread, so the question does not
 /// arise: there is no `Send` bound and no `unsafe` in this path.
 pub struct GeneratorInner {
+    pub(crate) realm: crate::interpreter::Realm,
+    pub(crate) async_state: Option<crate::interpreter::async_generator::AsyncGeneratorState>,
     pub properties: Rc<ObjectCell>,
     /// Formal parameter initialization already ran at generator creation.
     pub parameters_initialized: bool,

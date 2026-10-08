@@ -1,4 +1,5 @@
 pub(crate) mod async_fn;
+pub(crate) mod async_generator;
 pub(crate) mod call;
 pub use call::is_callable_value;
 pub mod commonjs;
@@ -37,8 +38,8 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 pub(crate) use eval::{
-    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, close_iterator, insert_class_accessor,
-    insert_object_property, intern_params, push_call_arg,
+    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, insert_class_accessor, insert_object_property,
+    intern_params, push_call_arg,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_addon::{
@@ -80,6 +81,12 @@ pub struct Realm {
 }
 
 impl Realm {
+    pub(crate) fn gc_roots(&self) -> Result<crate::heap::GcRoots, ()> {
+        let mut roots =
+            ModuleRealm::roots_of(&self.modules, &self.module_graph, &self.commonjs_cache)?;
+        roots.jobs.push(self.jobs.clone());
+        Ok(roots)
+    }
     pub fn of(interp: &Interpreter) -> Self {
         Self {
             jobs: interp.jobs.clone(),

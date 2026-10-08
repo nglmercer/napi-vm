@@ -41,16 +41,7 @@ impl Interpreter {
         proxy: &Rc<ProxyData>,
         name: &str,
     ) -> Result<Option<Value>, VmErr> {
-        let trap = self.member(&proxy.handler, name)?;
-        if matches!(trap, Value::Undefined | Value::Null) {
-            return Ok(None);
-        }
-        if !crate::interpreter::call::is_callable_value(&trap) {
-            return Err(VmErr::Msg(format!(
-                "TypeError: Proxy {name} trap must be callable"
-            )));
-        }
-        Ok(Some(trap))
+        self.get_method(&proxy.handler, &Value::String(name.into()))
     }
 
     /// Convert a property operand to its internal PropertyKey while retaining

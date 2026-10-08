@@ -208,6 +208,24 @@ pub(super) fn install(e: &mut Environment) {
                     configurable: true,
                 },
             );
+            let Value::Symbol(ref symbol) = super::well_known("toStringTag").expect("toStringTag")
+            else {
+                unreachable!()
+            };
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            kind_prototype
+                .set_prop(key.clone(), Value::String(name.into()))
+                .expect("function kind tag");
+            let mut metadata = props.meta.borrow_mut();
+            metadata.set_symbol_key(&key, symbol.clone());
+            metadata.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
         }
         e.install_intrinsic(&format!("%{name}%"), constructor);
     }

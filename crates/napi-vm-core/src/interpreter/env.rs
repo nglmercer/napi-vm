@@ -235,6 +235,7 @@ pub struct Environment {
     private_declarations: HashSet<String>,
     strict: Option<bool>,
     variable_scope: bool,
+    pub(crate) async_generator_body: bool,
     eval_scope: bool,
     parameter_scope: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
@@ -489,6 +490,7 @@ impl Environment {
             private_declarations: HashSet::new(),
             strict: None,
             variable_scope: false,
+            async_generator_body: false,
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
@@ -512,6 +514,7 @@ impl Environment {
             private_declarations: HashSet::new(),
             strict: None,
             variable_scope: false,
+            async_generator_body: false,
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
@@ -538,6 +541,7 @@ impl Environment {
             private_declarations: HashSet::new(),
             strict: None,
             variable_scope: false,
+            async_generator_body: false,
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
@@ -576,6 +580,7 @@ impl Environment {
             private_declarations: HashSet::new(),
             strict: None,
             variable_scope: true,
+            async_generator_body: false,
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
@@ -585,6 +590,15 @@ impl Environment {
     }
 
     /// Function bodies own a variable environment; lexical blocks do not.
+    pub(crate) fn awaits_return_value(&self) -> bool {
+        if self.variable_scope {
+            return self.async_generator_body;
+        }
+        self.parent
+            .as_ref()
+            .is_some_and(|parent| parent.borrow().awaits_return_value())
+    }
+
     pub(crate) fn function_child(parent: Env) -> Self {
         let mut frame = Self::child(parent);
         frame.variable_scope = true;

@@ -688,9 +688,8 @@ fn run_loop(
                 // `call_this` maps it to a value, `ctor` maps object returns to
                 // the returned object. Only falling off the end yields `Ok`.
                 Instr::Return { src } => {
-                    return Err(VmErr::Ret(
-                        frame.registers[src as usize].clone_for_execution(),
-                    ));
+                    let value = frame.registers[src as usize].clone_for_execution();
+                    return Err(VmErr::Ret(interp.prepare_return_value(value)?));
                 }
                 Instr::ReturnUndefined => {
                     return Err(VmErr::Ret(Value::Undefined));
@@ -948,16 +947,13 @@ fn run_loop(
                     let iterator = frame.registers[iter as usize].clone_for_execution();
                     let next_fn = frame.registers[next as usize].clone_for_execution();
                     let result = interp.call_this(&next_fn, iterator, vec![])?;
-                    let finished = result
-                        .get_prop("done")
-                        .map(|flag| flag.is_truthy())
-                        .unwrap_or(true);
+                    let (finished, produced) = interp.iterator_result_fields(&result)?;
                     frame.registers[done as usize] = Value::Bool(finished);
-                    frame.registers[value as usize] =
-                        result.get_prop("value").unwrap_or(Value::Undefined);
+                    frame.registers[value as usize] = produced;
                 }
                 Instr::CloseIterator { src } => {
-                    crate::interpreter::close_iterator(&frame.registers[src as usize]);
+                    let iterator = frame.registers[src as usize].clone_for_execution();
+                    interp.close_guest_iterator(&iterator, false)?;
                 }
                 Instr::PushCatch { target, dst } => {
                     let scope_depth = frame.scopes.len();

@@ -9,6 +9,25 @@ use crate::value::{BoxedPrimitive, FunctionData, Value};
 use std::rc::Rc;
 
 impl Interpreter {
+    /// ECMAScript GetMethod, shared by iterator protocols and Proxy traps.
+    /// Resolve getters before checking callability and treat only nullish
+    /// values as absent.
+    pub(crate) fn get_method(
+        &mut self,
+        receiver: &Value,
+        key: &Value,
+    ) -> Result<Option<Value>, VmErr> {
+        let method = self.get_prop_value(receiver, key)?;
+        if matches!(method, Value::Undefined | Value::Null) {
+            return Ok(None);
+        }
+        if !super::call::is_callable_value(&method) {
+            return Err(VmErr::Msg(
+                "TypeError: Property method must be callable".into(),
+            ));
+        }
+        Ok(Some(method))
+    }
     /// Primitive references are boxed with the current execution realm's
     /// intrinsic prototype, regardless of where the primitive was obtained.
     fn primitive_reference_prototype(&self, value: &Value) -> Option<Value> {
@@ -876,21 +895,17 @@ impl Interpreter {
                     Ok(Value::Undefined)
                 }
             }
-            (Value::Generator { .. }, Value::Symbol(_))
-                if crate::builtins::is_iterator_symbol(p) =>
-            {
-                Ok(Value::NativeFunction {
-                    name: "[Symbol.iterator]".into(),
-                    callable: generator_iter_self,
-                })
-            }
-            (Value::StringIterator { .. }, Value::Symbol(_))
-                if crate::builtins::is_iterator_symbol(p) =>
-            {
-                Ok(Value::NativeFunction {
-                    name: "[Symbol.iterator]".into(),
-                    callable: string_iter_self,
-                })
+            (Value::Generator { .. } | Value::StringIterator { .. }, Value::Symbol(symbol)) => {
+                if let Some(value) = lookup_chain_found(self, o, &super::symbol_slot_key(symbol))? {
+                    return Ok(value);
+                }
+                if self.prototype_of(o).is_none() && crate::builtins::is_iterator_symbol(p) {
+                    return Ok(Value::NativeFunction {
+                        name: "[Symbol.iterator]".into(),
+                        callable: generator_iter_self,
+                    });
+                }
+                Ok(Value::Undefined)
             }
             // Object symbol-keyed lookup: `obj[Symbol.iterator]` resolves the
             // internal `__symbol_iterator__` property.
@@ -1214,7 +1229,7 @@ fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Opti
     for _ in 0..=crate::value::MAX_PROTOTYPE_DEPTH {
         let node = descended.as_ref().unwrap_or(o);
         let props = match node {
-            Value::Object { props } => props,
+            Value::Object { props } => props.clone(),
             Value::Array(array) => {
                 if let Some(value) = array.named_prop(key) {
                     return Ok(Some(value.deref_binding()));
@@ -1227,10 +1242,13 @@ fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Opti
                 descended = Some(proto.as_ref().clone());
                 continue;
             }
-            Value::Class(class) => &class.statics,
-            Value::Function(function) => &function.properties,
-            Value::HostFunction { properties, .. } => properties,
-            _ => return Ok(None),
+            Value::Class(class) => class.statics.clone(),
+            Value::Function(function) => function.properties.clone(),
+            Value::HostFunction { properties, .. } => properties.clone(),
+            _ => match node.exotic_properties() {
+                Some(properties) => properties,
+                None => return Ok(None),
+            },
         };
         if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {
             return Ok(Some(value.clone()));
@@ -1421,6 +1439,42 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
         );
     }
     environment.install_intrinsic("%IteratorPrototype%", iterator.clone());
+    let async_iterator = Value::object_with_proto(
+        vec![],
+        environment
+            .get("Object")
+            .and_then(|constructor| constructor.get_prop("prototype"))
+            .map(Rc::new),
+    );
+    let Value::Symbol(ref async_symbol) =
+        crate::builtins::well_known("asyncIterator").expect("asyncIterator")
+    else {
+        unreachable!()
+    };
+    let async_key = super::symbol_slot_key(async_symbol);
+    async_iterator
+        .set_prop(
+            async_key.clone(),
+            crate::builtins::native_method(
+                "[Symbol.asyncIterator]",
+                0,
+                generator_iter_self,
+                function_prototype.clone(),
+            ),
+        )
+        .expect("async iterator method");
+    if let Value::Object { props } = &async_iterator {
+        let mut meta = props.meta.borrow_mut();
+        meta.set_symbol_key(&async_key, async_symbol.clone());
+        meta.set_attrs(
+            &async_key,
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
+    }
+    environment.install_intrinsic("%AsyncIteratorPrototype%", async_iterator.clone());
     for (kind, tag, methods) in [
         (
             "%ArrayIteratorPrototype%",
@@ -1441,8 +1495,22 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
                 ("throw", 1, super::call::generator_throw),
             ],
         ),
+        (
+            "%AsyncGeneratorPrototype%",
+            "AsyncGenerator",
+            vec![
+                ("next", 1, super::async_generator::next),
+                ("return", 1, super::async_generator::return_),
+                ("throw", 1, super::async_generator::throw),
+            ],
+        ),
     ] {
-        let prototype = Value::object_with_proto(vec![], Some(Rc::new(iterator.clone())));
+        let parent = if kind == "%AsyncGeneratorPrototype%" {
+            &async_iterator
+        } else {
+            &iterator
+        };
+        let prototype = Value::object_with_proto(vec![], Some(Rc::new(parent.clone())));
         for (name, length, callable) in methods {
             prototype
                 .set_prop(
@@ -1485,6 +1553,35 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
                     configurable: true,
                 },
             );
+        }
+        let constructor_kind = match kind {
+            "%GeneratorPrototype%" => Some("%GeneratorFunction%"),
+            "%AsyncGeneratorPrototype%" => Some("%AsyncGeneratorFunction%"),
+            _ => None,
+        };
+        if let Some(constructor_kind) = constructor_kind
+            && let Some(function_prototype) = environment
+                .intrinsic(constructor_kind)
+                .and_then(|constructor| constructor.get_prop("prototype"))
+        {
+            for (object, key, value) in [
+                (&prototype, "constructor", function_prototype.clone()),
+                (&function_prototype, "prototype", prototype.clone()),
+            ] {
+                object
+                    .set_prop(key.into(), value)
+                    .expect("generator intrinsic link");
+                if let Some(properties) = object.property_cell() {
+                    properties.meta.borrow_mut().set_attrs(
+                        key,
+                        crate::value::PropAttrs {
+                            writable: false,
+                            enumerable: false,
+                            configurable: true,
+                        },
+                    );
+                }
+            }
         }
         environment.install_intrinsic(kind, prototype);
     }

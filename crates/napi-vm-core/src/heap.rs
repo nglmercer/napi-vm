@@ -524,6 +524,32 @@ impl Marker {
                         self.borrowed = true;
                         continue;
                     };
+                    match borrowed.realm.gc_roots() {
+                        Ok(roots) => {
+                            self.mark_modules(&roots.modules);
+                            for value in roots.values {
+                                self.mark_value(&value);
+                            }
+                            for queue in roots.jobs {
+                                match queue.try_borrow() {
+                                    Ok(queue) => {
+                                        let mut values = Vec::new();
+                                        queue.trace_roots(&mut values);
+                                        for value in values {
+                                            self.mark_value(&value);
+                                        }
+                                    }
+                                    Err(_) => self.borrowed = true,
+                                }
+                            }
+                        }
+                        Err(_) => self.borrowed = true,
+                    }
+                    if let Some(state) = &borrowed.async_state {
+                        for value in state.trace_values() {
+                            self.mark_value(&value);
+                        }
+                    }
                     if let Some(closure) = &borrowed.closure {
                         self.mark_env(closure);
                     }
