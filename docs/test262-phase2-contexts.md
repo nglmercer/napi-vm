@@ -101,7 +101,7 @@ exhausting the unchanged job budget. General runtime capabilities remain disable
 
 ## Validation
 
-Nineteen parser/context integration tests cover valid and invalid forms, including
+Twenty-one parser/context integration tests cover valid and invalid forms, including
 direct eval and Annex B controls. The isolated worker also checks that contextual
 errors precede harness execution and are classified as parse/SyntaxError.
 
@@ -168,3 +168,20 @@ covered-import distinction. The subsequent 754ed80 source passes 19 grammar
 tests; required checks and exact regression selections are rerunning before
 its full-corpus measurement. Array/object trailing commas are syntax metadata
 and do not change ordinary literal evaluation or bytecode behavior.
+
+Frozen 754ed80 full evidence: **45,459/102,956 passed, 4,052 new passes,
+zero lost passes versus PR #23**. Versus Phase 1: 3,717 new passes and zero
+losses. Remaining outcomes: 57,449 failures, 46 harness errors, two timeouts,
+zero crashes and zero skips. Its focused run passes 6,353/15,247, with 1,543
+new passes and zero losses. All required checks pass at that revision: 751
+workspace Rust tests (four existing ignored), 158 minimal Rust tests, 73 Node,
+14 WASM and nine tooling tests; fmt and Clippy are clean. Repository
+differential fixtures show zero mismatches; full-corpus differential is not
+measured. This establishes a zero-regression milestone, not Phase 2 completion.
+
+The subsequent d8afb76 parser source records failed parameter-default parses,
+checks actual pattern-bound names for duplicate parameters, rejects rest-binding
+initializers, carries Annex B declaration-position metadata into static semantics,
+and distinguishes braceless function declarations from StatementList declarations.
+Switch cases and nested blocks reset the statement-position context. Twenty-one
+grammar tests pass; required checks and Test262 validation are in progress.

@@ -1,7 +1,9 @@
 # Phase 2 exploratory evidence
 
-Phase 2 remains incomplete. These reports retain all outcomes, including
-regressions; they do not certify final-source completion.
+Phase 2 remains incomplete. The frozen 754ed80 source passes 45,459/102,956:
+4,052 new passes and zero lost passes versus PR #23, with zero crashes.
+The exploratory reports retain all outcomes, including regressions. Subsequent
+parser changes require their own validation.
 
 Corpus revision: `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`.
 All selections use four workers, 5s timeout, instruction fuel 1,000,000,
@@ -13,6 +15,7 @@ No variants are skipped. Each report records the worker SHA256.
 | First full | d434ffe | 44,228 | 58,680 | 46 | 2 | 0 | 119 |
 | Second full | 0faed45 | 44,833 | 58,075 | 46 | 2 | 0 | 43 |
 | Third full | a48a3df | 45,313 | 57,595 | 46 | 2 | 0 | 17 |
+| Frozen milestone | 754ed80 | 45,459 | 57,449 | 46 | 2 | 0 | 0 |
 | First regression paths | a48a3df | 120 | 0 | 0 | 0 | 0 | 0 |
 | Second regression paths | a48a3df | 44 | 0 | 0 | 0 | 0 | 0 |
 
@@ -36,3 +39,11 @@ The retained transitions include every newly passing and formerly passing
 variant. `exploratory-summary.json` records source revisions, worker/report
 checksums, configuration, and required checks at a48a3df. Full AST/bytecode
 differential testing is not measured; AST fallback remains enabled.
+
+The frozen milestone gains 3,717 passes versus Phase 1. Its focused selection
+passes 6,353/15,247: 1,543 gains and zero losses versus Phase 1. Required checks
+pass at this source: fmt, Clippy, 751 workspace Rust tests (four existing ignored),
+158 minimal Rust tests, 73 Node tests, 14 WASM tests and nine tooling tests.
+`754ed80-summary.json` records checksums and exact source/worker identities.
+Use `754ed80-full.json.gz` for the milestone comparison and
+`../foundations-phase1/baseline-final-full.json.gz` as the PR #23 baseline.
