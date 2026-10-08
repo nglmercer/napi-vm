@@ -522,3 +522,28 @@ fn cross_realm_instances_use_prototypes_for_brand_checks() {
         );
     }
 }
+
+#[test]
+fn error_prototype_chains_and_generic_to_string_preserve_realm_semantics() {
+    let mut vm = Interpreter::with_builtins();
+    let other = vm.create_realm();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "Object.getPrototypeOf(other.Error.prototype)===other.Object.prototype;",
+        "Object.getPrototypeOf(other.TypeError)===other.Error&&other.Error.length===1;",
+        "var called=other.TypeError.call(null,'message');called instanceof other.TypeError&&called.message==='message'&&!Object.prototype.hasOwnProperty.call(called,'name');",
+        "var noMessage=other.Error();!Object.prototype.hasOwnProperty.call(noMessage,'message');",
+        "var caused=other.Error('x',{cause:42});caused.cause===42&&!Object.getOwnPropertyDescriptor(caused,'cause').enumerable;",
+        "var Derived=class extends other.Error{};var derived=new Derived('x');derived instanceof Derived&&derived instanceof other.Error&&derived.message==='x';",
+        "var error=new other.TypeError('message');error instanceof other.Object&&error instanceof other.Error&&!(error instanceof Object);",
+        "Error.prototype.toString.call({name:'',message:'message'})==='message';",
+        "Error.prototype.toString.call({name:12,message:34})==='12: 34';",
+        "Error.prototype.toString.call({})==='Error';",
+        "var order='';Error.prototype.toString.call({name:{toString(){order+='n';return 'N';}},get message(){order+='m';return 'M';}})==='N: M'&&order==='nm';",
+        "var caught;try{other.Error.prototype.toString.call(1);}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var marker={};try{Error.prototype.toString.call({name:Symbol(),get message(){throw marker;}});}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
