@@ -1,0 +1,81 @@
+{
+  "source_commit": "f078fcb",
+  "baseline_source_commit": "313146b",
+  "scope": "Focused agents/realms/gc-weak union; not full-corpus or phase-completion evidence",
+  "configuration": {
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "worker_jobs": 4,
+    "timeout_seconds": 5.0,
+    "engine_sha256": "412bd9b84da855763de9f85367a7ae99ccbc447c14ab6ebed260dc74091a8c8e",
+    "groups": [
+      "agents",
+      "realms",
+      "gc-weak"
+    ],
+    "total": 2030
+  },
+  "counts": {
+    "pass": 1640,
+    "fail": 390,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 139,
+  "lost_passes": 0,
+  "checks": {
+    "allfeatures-tests": {
+      "status": "passed",
+      "passed": 805,
+      "ignored": 4
+    },
+    "clippy": {
+      "status": "passed"
+    },
+    "fmt": {
+      "status": "passed"
+    },
+    "minimal-tests": {
+      "status": "passed",
+      "passed": 158,
+      "ignored": 0
+    },
+    "native-build": {
+      "status": "passed"
+    },
+    "node-tests": {
+      "status": "passed"
+    },
+    "release-build": {
+      "status": "passed"
+    },
+    "tooling-tests": {
+      "status": "passed"
+    },
+    "wasm-tests": {
+      "status": "passed"
+    }
+  },
+  "ast_bytecode_mismatches": {
+    "new_growth_fixtures": 2,
+    "observed_mismatches": 0,
+    "full_corpus": "not measured"
+  },
+  "sha256": {
+    "313146b-baseline-focused.json.gz": "c54efaebb56c1d898b9102eae261ac7ec8a2ccccf71ba980cf6db10c382420ac",
+    "f078fcb-focused.json.gz": "f556213a0fe5042d969b37b6dfd71753af8d2ffb25e08a5e7435aa9397330d00",
+    "f078fcb-transitions.json.gz": "fd44274f7f1cb7c480bd7a04d8fd480d4e9c4554c05041ccf1b6b1053bd6610c",
+    "f078fcb-allfeatures-tests.log.gz": "467e4797f66c364110cd9cb4a5d5f0967b6895053a5e9ad44383235ecf2ba5d7",
+    "f078fcb-clippy.log.gz": "368debc0d63aa61f601da54f0b5a9f02c9530a20e6952882c547f061c6d6dd95",
+    "f078fcb-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "f078fcb-minimal-tests.log.gz": "b8e1c2d13be63b8b31d9017c10dccb27e2dc65e9788794a2bce99bfa8284b263",
+    "f078fcb-native-build.log.gz": "0738703a75ae20107cdfc7c5bdbbc5e92ef0abc845724e4e74d7b7ca839eba25",
+    "f078fcb-node-tests.log.gz": "a6040a6a2791ab2e110e8857b73bb5af77a6050a8171308c6693897eaa4a6b06",
+    "f078fcb-release-build.log.gz": "6399378c800f32d6b3b3ff4a21d1955c0a9a94694f199d3986e1748e26d39686",
+    "f078fcb-tooling-tests.log.gz": "730b72104968e238595c0f9aef2d11bdfd90b8ee39720ee924e7801471d2bfbf",
+    "f078fcb-wasm-tests.log.gz": "f4bff8a5f424e2c70c31f4c9d25954cffade9526e0d115d88cb9fb5ac1f2e62a",
+    "df3d691-exploratory-focused.json.gz": "b07f86a271e079faf78b215b582188b54bb644e5d31c90d66b211a60ff7c9618",
+    "df3d691-exploratory-transitions.json.gz": "2ddea44f3481b987c75d850a4def830f12f10953f7fe98d9211ae18153e90bf7"
+  }
+}

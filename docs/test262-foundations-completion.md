@@ -16,8 +16,8 @@ not establish phase completion.
    verifier, VM, differential, and focused Test262 validation before fallback removal.
 5. Full pinned-corpus validation, regression fixes, and final documentation.
 
-Phase 1 remains incomplete. Phase 2 contextual grammar/static semantics is now
-in progress; Phases 3–4 have not started. PR #23's
+Phase 1 remains incomplete. Phase 2 contextual grammar/static semantics has a
+validated milestone; Phases 3–4 remain pending. PR #23's
 realm-owned module caches, async/module ownership, parameter and constructor
 environments, private instance fields, AST fallback, execution limits, and
 capabilities disabled by default are preserved.
@@ -220,3 +220,22 @@ The [Phase 2 status](test262-phase2-contexts.md) links full outcomes, source/wor
 identities, checksums and reproducible commands. The broader Phase 1 realm/GC
 audit, Phase 3 global/class/private/descriptor/Proxy/exotic runtime work and Phase 4
 bytecode parity remain open. No fallback has been removed, and this PR stays draft.
+
+## Realm and buffer continuation (`f078fcb`)
+
+Primary and child global objects now share realm-global identity. Native methods,
+errors, iterators and generator prototypes retain their defining realm, and weak
+collections recognize live realm globals. Constructor post-return errors use the
+constructing caller's realm. Shared native blocks support growable SABs; ordinary
+buffers support resizing. Tracking TypedArray/DataView views and live typed-array
+iterators observe growth, shrinking, detachment and out-of-bounds transitions.
+
+The pinned agents/realms/gc-weak union passes 1,640/2,030 variants: 139 new passes,
+zero lost passes, and zero crashes, timeouts or harness errors versus the matching
+Phase 2 baseline. All required checks pass. These are focused results, not a new
+full-corpus result or phase completion. The earlier exploratory run's four losses
+and their fixes are preserved in [realm/buffer evidence](../tools/test262/evidence/foundations-realms-memory/README.md).
+
+Phase 1 still needs the remaining intrinsic/async-generator and GC suspension
+semantics audit. Phase 3 global records, private methods/accessors/static elements,
+initialization order and centralized Proxy/exotic operations remain open.
