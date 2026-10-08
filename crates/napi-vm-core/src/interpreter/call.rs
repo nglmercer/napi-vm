@@ -2401,7 +2401,7 @@ pub(crate) fn generator_next(
 ) -> Result<Value, VmErr> {
     let inner_rc = match &this {
         Value::Generator { inner } => inner.clone(),
-        _ => return Ok(iter_result(Value::Undefined, true)),
+        _ => return vm_err("TypeError: Generator next requires a generator receiver"),
     };
 
     // Without stack switching a running body cannot be suspended (see
@@ -2459,7 +2459,7 @@ pub(crate) fn generator_next(
             Some(value) => Ok(iter_result(value, false)),
             None => {
                 inner.done = true;
-                let returned = inner.return_value.clone().unwrap_or(Value::Undefined);
+                let returned = inner.return_value.take().unwrap_or(Value::Undefined);
                 Ok(iter_result(returned, true))
             }
         }
@@ -2475,8 +2475,7 @@ pub(crate) fn generator_next(
             let mut inner = inner_rc.borrow_mut();
 
             if inner.done {
-                let rv = inner.return_value.clone().unwrap_or(Value::Undefined);
-                return Ok(iter_result(rv, true));
+                return Ok(iter_result(Value::Undefined, true));
             }
 
             if !inner.started {
@@ -2608,7 +2607,7 @@ pub(crate) fn generator_throw(
 ) -> Result<Value, VmErr> {
     let thrown = args.into_iter().next().unwrap_or(Value::Undefined);
     let Value::Generator { inner } = &this else {
-        return Err(VmErr::Throw(thrown));
+        return vm_err("TypeError: Generator throw requires a generator receiver");
     };
 
     // Nothing is suspended on a target without stack switching, and a
@@ -2680,17 +2679,56 @@ pub(crate) fn generator_return(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let value = args.into_iter().next().unwrap_or(Value::Undefined);
-    if let Value::Generator { inner } = &this {
-        #[cfg(stackful_coroutines)]
-        inner.borrow_mut().close();
-        #[cfg(not(stackful_coroutines))]
-        {
+    let Value::Generator { inner } = &this else {
+        return vm_err("TypeError: Generator return requires a generator receiver");
+    };
+    #[cfg(stackful_coroutines)]
+    {
+        let mut coroutine = {
             let mut state = inner.borrow_mut();
-            state.done = true;
-            state.buffered.clear();
+            if state.done || !state.started {
+                state.done = true;
+                return Ok(iter_result(value, true));
+            }
+            state
+                .coroutine
+                .take()
+                .ok_or_else(|| VmErr::Msg("TypeError: Generator is already running".into()))?
+        };
+        let owner = inner
+            .borrow()
+            .closure
+            .as_ref()
+            .and_then(Environment::find_global);
+        let _allocation_boundary = super::realm::AllocationRealm::enter(owner);
+        let outcome = coroutine.resume(GenResume::Return(value));
+        let mut state = inner.borrow_mut();
+        match outcome {
+            corosensei::CoroutineResult::Yield(value) => {
+                state.coroutine = Some(coroutine);
+                Ok(iter_result(value, false))
+            }
+            corosensei::CoroutineResult::Return(outcome) => {
+                state.done = true;
+                match outcome {
+                    GenOutcome::Returned(value) => {
+                        state.return_value = Some(value.clone());
+                        Ok(iter_result(value, true))
+                    }
+                    GenOutcome::Threw(value) => Err(VmErr::Throw(value)),
+                    GenOutcome::Failed(message) => Err(VmErr::Msg(message)),
+                    GenOutcome::Abandon => vm_err("Error: Generator was abandoned during return"),
+                }
+            }
         }
     }
-    Ok(iter_result(value, true))
+    #[cfg(not(stackful_coroutines))]
+    {
+        let mut state = inner.borrow_mut();
+        state.done = true;
+        state.buffered.clear();
+        Ok(iter_result(value, true))
+    }
 }
 
 /// Build an iterator result object `{ value, done }`.

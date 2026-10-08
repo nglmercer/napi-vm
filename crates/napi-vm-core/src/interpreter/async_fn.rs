@@ -84,7 +84,7 @@ impl Interpreter {
                 GenResume::Next(v) => Ok(v.unwrap_or(Value::Undefined)),
                 GenResume::Throw(reason) => Err(VmErr::Throw(reason)),
                 // The task was abandoned; unwind the body so `finally` runs.
-                GenResume::Return => Err(VmErr::Ret(Value::Undefined)),
+                GenResume::Return(value) => Err(VmErr::Ret(value)),
                 // Dropped while suspended: unwind with no guest handlers.
                 GenResume::Abandon => Err(VmErr::Abandon),
             };

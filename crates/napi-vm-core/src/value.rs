@@ -2340,7 +2340,7 @@ pub enum GenResume {
     /// the body instead of producing a value, so the interpreter unwinds it
     /// normally and guest `finally` blocks still run -- which is what
     /// `for...of` + `break` does in JavaScript, via the implicit `return()`.
-    Return,
+    Return(Value),
     /// `gen.throw(e)`, or an `await` whose promise rejected: the suspension
     /// point raises `e` instead of producing a value, so guest `try`/`catch`
     /// around it runs.
@@ -2573,7 +2573,7 @@ impl GeneratorInner {
             .as_ref()
             .and_then(crate::interpreter::Environment::find_global);
         let _allocation_boundary = crate::interpreter::realm::AllocationRealm::enter(owner);
-        match coroutine.resume(GenResume::Return) {
+        match coroutine.resume(GenResume::Return(Value::Undefined)) {
             corosensei::CoroutineResult::Return(_) => {}
             corosensei::CoroutineResult::Yield(_) => {
                 // A `yield` inside the `finally` block: honouring it would

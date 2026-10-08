@@ -2759,7 +2759,7 @@ impl Interpreter {
                         // Closed (`gen.return()` / leaving `for...of` early):
                         // return from the body so the surrounding
                         // `try`/`finally` still runs on the way out.
-                        crate::value::GenResume::Return => vm_ret(Value::Undefined),
+                        crate::value::GenResume::Return(value) => vm_ret(value),
                         // Abandoned while suspended: unwind with no guest
                         // handlers at all (see `VmErr::Abandon`).
                         crate::value::GenResume::Abandon => Err(VmErr::Abandon),
@@ -2779,15 +2779,47 @@ impl Interpreter {
                     return vm_err("TypeError: yield* requires an iterable");
                 }
 
-                let mut sent = Value::Undefined;
+                let mut received = crate::value::GenResume::Next(Some(Value::Undefined));
                 loop {
                     self.consume_loop()?;
-                    let step = self.call_this(&next_fn, iterator.clone(), vec![sent])?;
-                    let done = step.get_prop("done").map(|v| v.is_truthy()).unwrap_or(true);
-                    let value = step.get_prop("value").unwrap_or(Value::Undefined);
+                    let returning = matches!(&received, crate::value::GenResume::Return(_));
+                    let (method, args) = match received {
+                        crate::value::GenResume::Next(value) => {
+                            (next_fn.clone(), vec![value.unwrap_or(Value::Undefined)])
+                        }
+                        crate::value::GenResume::Return(value) => {
+                            let method = self.iterator_method(&iterator, "return")?;
+                            let Some(method) = method else {
+                                return vm_ret(value);
+                            };
+                            (method, vec![value])
+                        }
+                        crate::value::GenResume::Throw(value) => {
+                            let method = self.iterator_method(&iterator, "throw")?;
+                            let Some(method) = method else {
+                                if let Some(close) = self.iterator_method(&iterator, "return")? {
+                                    let result =
+                                        self.call_this(&close, iterator.clone(), vec![])?;
+                                    if !super::call::is_js_object(&result) {
+                                        return vm_err(
+                                            "TypeError: Iterator return must return an object",
+                                        );
+                                    }
+                                }
+                                return vm_err("TypeError: Delegated iterator has no throw method");
+                            };
+                            (method, vec![value])
+                        }
+                        crate::value::GenResume::Abandon => return Err(VmErr::Abandon),
+                    };
+                    let step = self.call_this(&method, iterator.clone(), args)?;
+                    if !super::call::is_js_object(&step) {
+                        return vm_err("TypeError: Iterator result must be an object");
+                    }
+                    let done = self.member(&step, "done")?.is_truthy();
+                    let value = self.member(&step, "value")?;
                     if done {
-                        // The delegate's return value is this expression's.
-                        return Ok(value);
+                        return if returning { vm_ret(value) } else { Ok(value) };
                     }
 
                     // `yield*` re-yields into the same buffer.
@@ -2801,38 +2833,32 @@ impl Interpreter {
                             }
                             sink.borrow_mut().push(value);
                         }
-                        sent = Value::Undefined;
+                        received = crate::value::GenResume::Next(None);
                     }
                     #[cfg(stackful_coroutines)]
                     match self.gen_yielder.as_ref() {
-                        Some(yielder) => match yielder.suspend(value) {
-                            crate::value::GenResume::Next(v) => {
-                                sent = v.unwrap_or(Value::Undefined);
-                            }
-                            crate::value::GenResume::Throw(reason) => {
-                                close_iterator(&iterator);
-                                return vm_throw(reason);
-                            }
-                            crate::value::GenResume::Return => {
-                                // The outer generator is being closed: close
-                                // the delegate too, then unwind.
-                                close_iterator(&iterator);
-                                return vm_ret(Value::Undefined);
-                            }
-                            crate::value::GenResume::Abandon => {
-                                // Abandoning the outer generator: do *not*
-                                // close the delegate (that would run its
-                                // handlers). It is a local; dropping it on
-                                // the way out abandons it in turn.
-                                return Err(VmErr::Abandon);
-                            }
-                        },
+                        Some(yielder) => received = yielder.suspend(value),
                         // Outside a generator body there is nobody to yield
                         // to; drain the iterator for its side effects.
-                        None => sent = Value::Undefined,
+                        None => received = crate::value::GenResume::Next(None),
                     }
                 }
             }
         }
+    }
+
+    /// GetMethod for iterator completion forwarding. Only nullish methods are
+    /// absent; getters and non-callable values must produce observable errors.
+    fn iterator_method(&mut self, iterator: &Value, name: &str) -> Result<Option<Value>, VmErr> {
+        let method = self.member(iterator, name)?;
+        if matches!(method, Value::Undefined | Value::Null) {
+            return Ok(None);
+        }
+        if !super::call::is_callable_value(&method) {
+            return Err(VmErr::Msg(
+                "TypeError: Iterator method must be callable".into(),
+            ));
+        }
+        Ok(Some(method))
     }
 }
