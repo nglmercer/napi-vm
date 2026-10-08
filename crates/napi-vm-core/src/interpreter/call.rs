@@ -168,13 +168,6 @@ impl Interpreter {
             return self.instance_of(object, &bound.target);
         }
 
-        if matches!(object, Value::Date(_))
-            && matches!(constructor, Value::Object { props }
-                if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
-        {
-            return Ok(Value::Bool(true));
-        }
-
         let prototype = self.get_prop_value_str(constructor, "prototype")?;
         if !is_js_object(&prototype) {
             return Err(VmErr::Msg(
@@ -1710,12 +1703,22 @@ impl Interpreter {
                     fd.body.first(),
                     Some(Statement::ClassInitialization { derived: true, .. })
                 ) {
+                    // [[Construct]] validates the return and retrieves this
+                    // after the function's execution context has been removed.
+                    // These errors therefore belong to the constructing caller.
+                    let _error_realm = super::realm::AllocationRealm::enter(
+                        self.constructor_error_realms.last().cloned(),
+                    );
                     match result {
                         Ok(value) if is_js_object(&value) => Ok(value),
-                        Ok(Value::Undefined) => self.resolve_this(&constructor_scope),
-                        Ok(_) => vm_err(
-                            "TypeError: derived constructor must return an object or undefined",
-                        ),
+                        Ok(Value::Undefined) => self
+                            .resolve_this(&constructor_scope)
+                            .map_err(|error| error.with_context(None, self.get_stack())),
+                        Ok(_) => Err(VmErr::Msg(
+                            "TypeError: derived constructor must return an object or undefined"
+                                .into(),
+                        )
+                        .with_context(None, self.get_stack())),
                         error => error,
                     }
                 } else {
@@ -1971,11 +1974,15 @@ impl Interpreter {
     }
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
-        let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
-        self.with_global_storage(owner.clone(), |vm| {
+        let caller = self.persistent_global.clone();
+        let owner = super::realm::value_realm(f).unwrap_or_else(|| caller.clone());
+        self.constructor_error_realms.push(caller);
+        let result = self.with_global_storage(owner.clone(), |vm| {
             let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
             vm.ctor_in_realm(f, args)
-        })
+        });
+        self.constructor_error_realms.pop();
+        result
     }
 
     fn ctor_in_realm(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
@@ -1993,7 +2000,10 @@ impl Interpreter {
         new_target: Value,
     ) -> Result<Value, VmErr> {
         self.new_target_stack.push(new_target.clone());
+        self.constructor_error_realms
+            .push(self.persistent_global.clone());
         let result = self.ctor_with_new_target(target, args, new_target);
+        self.constructor_error_realms.pop();
         self.new_target_stack.pop();
         result
     }

@@ -322,6 +322,10 @@ pub(crate) fn native_method(
     }))
 }
 
+pub(super) fn require_new(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Err(VmErr::Msg("TypeError: constructor requires new".into()))
+}
+
 /// Make a built-in namespace object callable.
 ///
 /// `String`, `Number`, `Array` and friends are objects so they can carry their

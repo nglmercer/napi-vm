@@ -3,13 +3,16 @@
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::VecDeque;
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 struct Allocation {
     data: NonNull<u8>,
-    length: usize,
+    length: AtomicUsize,
+    maximum_length: usize,
+    growable: bool,
     layout: Layout,
     access: Mutex<()>,
     waiters: Mutex<VecDeque<(usize, Arc<WaitSignal>)>>,
@@ -53,19 +56,35 @@ pub enum SharedWaitResult {
     Ok,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SharedGrowError {
+    NotGrowable,
+    InvalidLength,
+}
+
 /// Thread-safe, owned SAB backing memory, without guest object identity.
 #[derive(Debug, Clone)]
 pub struct SharedMemory(Arc<Allocation>);
 
 impl SharedMemory {
     pub(crate) fn zeroed(length: usize) -> Option<Self> {
-        let allocation_length = length.max(1).checked_add(7)? & !7;
+        Self::zeroed_with_maximum(length, None)
+    }
+
+    pub(crate) fn zeroed_with_maximum(length: usize, maximum: Option<usize>) -> Option<Self> {
+        let maximum_length = maximum.unwrap_or(length);
+        if maximum_length < length {
+            return None;
+        }
+        let allocation_length = maximum_length.max(1).checked_add(7)? & !7;
         let layout = Layout::from_size_align(allocation_length, 8).ok()?;
         // SAFETY: layout is nonzero; Allocation owns its deallocation.
         let data = NonNull::new(unsafe { alloc_zeroed(layout) })?;
         Some(Self(Arc::new(Allocation {
             data,
-            length,
+            length: AtomicUsize::new(length),
+            maximum_length,
+            growable: maximum.is_some(),
             layout,
             access: Mutex::new(()),
             waiters: Mutex::new(VecDeque::new()),
@@ -73,7 +92,30 @@ impl SharedMemory {
     }
 
     pub fn len(&self) -> usize {
-        self.0.length
+        self.0.length.load(Ordering::SeqCst)
+    }
+
+    pub fn maximum_length(&self) -> usize {
+        self.0.maximum_length
+    }
+
+    pub fn is_growable(&self) -> bool {
+        self.0.growable
+    }
+
+    /// Publish growth without relocating memory shared with another owner.
+    /// Reserved bytes are zeroed at allocation; every access uses the same
+    /// lock, and only the length and native data block cross threads.
+    pub fn grow(&self, length: usize) -> Result<(), SharedGrowError> {
+        if !self.is_growable() {
+            return Err(SharedGrowError::NotGrowable);
+        }
+        let _access = self.access();
+        if length < self.len() || length > self.maximum_length() {
+            return Err(SharedGrowError::InvalidLength);
+        }
+        self.0.length.store(length, Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {

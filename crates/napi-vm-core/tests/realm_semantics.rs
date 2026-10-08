@@ -472,3 +472,53 @@ fn iterators_have_shared_realm_owned_prototypes_and_methods() {
         "Object.getPrototypeOf(other.arrayIterator.next)===other.Function.prototype;",
     );
 }
+
+#[test]
+fn constructor_post_return_errors_belong_to_the_constructing_caller() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("var Primitive=class extends Object{constructor(){return null;}};var Missing=class extends Object{constructor(){}};var Thrown=class extends Object{constructor(){null.x;}};").unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{new other.Primitive();}catch(e){caught=e;}caught.constructor===TypeError;",
+        "try{new other.Missing();}catch(e){caught=e;}caught.constructor===ReferenceError;",
+        "try{new other.Thrown();}catch(e){caught=e;}caught.constructor===other.TypeError;",
+        "try{Reflect.construct(other.Primitive,[]);}catch(e){caught=e;}caught.constructor===TypeError;",
+        "try{Reflect.construct(other.Missing,[]);}catch(e){caught=e;}caught.constructor===ReferenceError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn cross_realm_instances_use_prototypes_for_brand_checks() {
+    let mut vm = Interpreter::with_builtins();
+    let other = vm.create_realm();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for (kind, args) in [
+        ("Object", ""),
+        ("Array", ""),
+        ("Date", "0"),
+        ("RegExp", "'x'"),
+        ("Map", ""),
+        ("Set", ""),
+        ("WeakMap", ""),
+        ("WeakSet", ""),
+        ("ArrayBuffer", "4"),
+        ("SharedArrayBuffer", "4"),
+        ("Int32Array", "4"),
+        ("DataView", "new other.ArrayBuffer(4)"),
+        ("WeakRef", "{}"),
+        ("FinalizationRegistry", "()=>{}"),
+        ("Error", "'x'"),
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var instance=new other.{kind}({args});instance instanceof other.{kind}&&!(instance instanceof {kind});"
+            ),
+        );
+    }
+}

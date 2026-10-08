@@ -567,6 +567,7 @@ fn read_typed_array(env: sys::napi_env, raw: sys::napi_value) -> Result<Value, V
         let bytes = std::slice::from_raw_parts(data as *const u8, byte_length).to_vec();
         Ok(Value::TypedArray(std::rc::Rc::new(
             crate::value::TypedArrayData {
+                length_tracking: false,
                 properties: Value::instance_properties(),
                 kind,
                 buffer: Buffer::owned(bytes).into(),

@@ -1,6 +1,6 @@
 mod shared;
 pub(crate) mod weak;
-pub use shared::{SharedMemory, SharedWaitRegistration, SharedWaitResult};
+pub use shared::{SharedGrowError, SharedMemory, SharedWaitRegistration, SharedWaitResult};
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -1284,6 +1284,7 @@ pub struct Buffer(Rc<BufferData>);
 
 #[derive(Debug)]
 struct BufferData {
+    maximum_length: Option<usize>,
     storage: RefCell<BufferStorage>,
     properties: Rc<ObjectCell>,
 }
@@ -1298,6 +1299,7 @@ impl std::ops::Deref for BufferData {
 impl Buffer {
     pub fn owned(bytes: Vec<u8>) -> Self {
         Self(Rc::new(BufferData {
+            maximum_length: None,
             storage: RefCell::new(BufferStorage::Owned(bytes)),
             properties: Value::instance_properties(),
         }))
@@ -1305,6 +1307,50 @@ impl Buffer {
 
     pub fn zeroed(length: usize) -> Self {
         Self::owned(vec![0; length])
+    }
+
+    pub(crate) fn resizable(length: usize, maximum: usize) -> Option<Self> {
+        if length > maximum {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(maximum).ok()?;
+        bytes.resize(length, 0);
+        Some(Self(Rc::new(BufferData {
+            maximum_length: Some(maximum),
+            storage: RefCell::new(BufferStorage::Owned(bytes)),
+            properties: Value::instance_properties(),
+        })))
+    }
+
+    pub fn is_resizable(&self) -> bool {
+        self.0.maximum_length.is_some()
+    }
+    pub fn maximum_length(&self) -> usize {
+        if self.is_detached() {
+            0
+        } else {
+            self.0.maximum_length.unwrap_or_else(|| self.borrow().len())
+        }
+    }
+    pub fn resize(&self, length: usize) -> Result<(), VmErr> {
+        let maximum = self
+            .0
+            .maximum_length
+            .ok_or_else(|| VmErr::Msg("TypeError: ArrayBuffer is not resizable".into()))?;
+        let mut storage = self.0.borrow_mut();
+        let BufferStorage::Owned(bytes) = &mut *storage else {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot resize a detached ArrayBuffer".into(),
+            ));
+        };
+        if length > maximum {
+            return Err(VmErr::Msg(
+                "RangeError: Invalid ArrayBuffer resize length".into(),
+            ));
+        }
+        bytes.resize(length, 0);
+        Ok(())
     }
 
     /// Wrap a native-owned byte range without copying it.
@@ -1319,6 +1365,7 @@ impl Buffer {
             None => return None,
         };
         Some(Self(Rc::new(BufferData {
+            maximum_length: None,
             storage: RefCell::new(BufferStorage::External { data, length }),
             properties: Value::instance_properties(),
         })))
@@ -1496,6 +1543,28 @@ impl SharedBuffer {
     pub fn zeroed(length: usize) -> Option<Self> {
         let memory = SharedMemory::zeroed(length)?;
         Some(Self::from_shared_memory(memory))
+    }
+
+    pub fn zeroed_with_maximum(length: usize, maximum: Option<usize>) -> Option<Self> {
+        Some(Self::from_shared_memory(SharedMemory::zeroed_with_maximum(
+            length, maximum,
+        )?))
+    }
+
+    pub fn is_growable(&self) -> bool {
+        self.shared_memory()
+            .is_some_and(|memory| memory.is_growable())
+    }
+
+    pub fn maximum_length(&self) -> usize {
+        self.shared_memory()
+            .map_or_else(|| self.len(), |memory| memory.maximum_length())
+    }
+
+    pub fn grow(&self, length: usize) -> Result<(), shared::SharedGrowError> {
+        self.shared_memory()
+            .ok_or(shared::SharedGrowError::NotGrowable)?
+            .grow(length)
     }
 
     /// Create a realm-local SAB wrapper from an owned, thread-safe data block.
@@ -1969,6 +2038,8 @@ pub struct TypedArrayData {
     pub byte_offset: usize,
     /// Element count for a typed array; *byte* count for a `DataView`.
     pub length: usize,
+    /// An omitted length over growable backing follows its current extent.
+    pub length_tracking: bool,
     /// Node's `Buffer` subclasses `Uint8Array`, but keeps distinct prototype
     /// and coercion behavior. The shared storage shape represents both.
     pub is_buffer: bool,
@@ -1976,15 +2047,32 @@ pub struct TypedArrayData {
 
 impl TypedArrayData {
     pub fn effective_length(&self) -> usize {
-        if self.buffer.is_detached() {
+        if self.is_out_of_bounds() {
             0
+        } else if self.length_tracking {
+            self.buffer.len().saturating_sub(self.byte_offset) / self.kind.size()
         } else {
             self.length
         }
     }
 
-    pub fn effective_byte_offset(&self) -> usize {
+    pub fn is_out_of_bounds(&self) -> bool {
         if self.buffer.is_detached() {
+            return true;
+        }
+        let length = self.buffer.len();
+        if self.length_tracking {
+            self.byte_offset > length
+        } else {
+            self.length
+                .checked_mul(self.kind.size())
+                .and_then(|size| self.byte_offset.checked_add(size))
+                .is_none_or(|end| end > length)
+        }
+    }
+
+    pub fn effective_byte_offset(&self) -> usize {
+        if self.is_out_of_bounds() {
             0
         } else {
             self.byte_offset

@@ -24,7 +24,7 @@ pub(super) fn install(env: &mut Environment) {
         ),
     ] {
         let namespace = env.get(name).expect("weak builtin namespace");
-        make_callable(&namespace, constructor, None);
+        make_callable(&namespace, super::require_new, Some(constructor));
         let prototype = Value::object(vec![]);
         for (method, callable) in methods {
             prototype
@@ -52,7 +52,7 @@ fn instance(interp: &Interpreter, name: &str, storage: WeakStorage) -> Value {
     let prototype = interp
         .persistent_global
         .borrow()
-        .get(name)
+        .intrinsic(name)
         .and_then(|constructor| constructor.get_prop("prototype"));
     let object = Value::object_with_proto(vec![], prototype.map(Rc::new));
     if let Value::Object { props } = &object {

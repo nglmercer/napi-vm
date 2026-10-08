@@ -206,6 +206,7 @@ pub struct Interpreter {
     /// and catch frames while those bodies execute, but `globalThis` aliases
     /// and top-level binding quotas must always target this frame.
     pub persistent_global: Env,
+    pub(crate) constructor_error_realms: Vec<Env>,
     /// Export records, shared with every generator and async body: those run
     /// on their own `Interpreter`, and an `import` inside one must resolve
     /// against the same registry as the code that started it.
@@ -424,6 +425,7 @@ impl Interpreter {
         let mut interp = Self {
             global: global.clone(),
             persistent_global: global,
+            constructor_error_realms: Vec::new(),
             modules: Rc::new(RefCell::new(HashMap::new())),
             module_sources: Rc::new(RefCell::new(HashMap::new())),
             module_aliases: Rc::new(RefCell::new(HashMap::new())),
@@ -1011,6 +1013,9 @@ export default { createRequire, isBuiltin, builtinModules };
             jobs: vec![self.jobs.clone()],
             modules: vec![self.modules.clone()],
         };
+        roots
+            .envs
+            .extend(self.constructor_error_realms.iter().cloned());
         if let Some(host) = &self.host {
             host.trace_roots(&mut roots.values, &mut roots.envs);
         }

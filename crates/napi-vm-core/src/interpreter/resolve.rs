@@ -1098,7 +1098,7 @@ impl Interpreter {
                 Ok(Value::Undefined)
             }
             Value::DataView(view) => {
-                if view.buffer.is_detached() && matches!(k, "byteLength" | "byteOffset") {
+                if view.is_out_of_bounds() && matches!(k, "byteLength" | "byteOffset") {
                     return Err(VmErr::Msg(
                         "TypeError: Cannot access a DataView backed by a detached ArrayBuffer"
                             .to_string(),
@@ -1548,6 +1548,11 @@ fn array_iter_next(
         .unwrap_or(super::Value::Undefined);
     if matches!(source, super::Value::Undefined) {
         return Ok(super::call::iter_result(super::Value::Undefined, true));
+    }
+    if matches!(&source, Value::TypedArray(view) if view.is_out_of_bounds()) {
+        return Err(crate::error::VmErr::Msg(
+            "TypeError: Cannot iterate a detached typed array".into(),
+        ));
     }
     let length = interp.get_prop_value_str(&source, "length")?;
     let length = interp.ecmascript_to_number(&length)?;

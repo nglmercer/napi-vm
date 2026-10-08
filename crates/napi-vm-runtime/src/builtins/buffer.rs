@@ -126,6 +126,7 @@ fn checked_length(value: &Value) -> Result<usize, VmErr> {
 fn make_buffer(bytes: Vec<u8>) -> Value {
     let length = bytes.len();
     Value::TypedArray(Rc::new(TypedArrayData {
+        length_tracking: false,
         properties: Value::instance_properties(),
         kind: TypedKind::Uint8,
         buffer: Buffer::owned(bytes).into(),
@@ -137,6 +138,7 @@ fn make_buffer(bytes: Vec<u8>) -> Value {
 
 fn make_buffer_view(buffer: BufferBacking, byte_offset: usize, length: usize) -> Value {
     Value::TypedArray(Rc::new(TypedArrayData {
+        length_tracking: false,
         properties: Value::instance_properties(),
         kind: TypedKind::Uint8,
         buffer,

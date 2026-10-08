@@ -1309,3 +1309,13 @@ fn public_hash_properties_preserve_private_field_tier_parity() {
         true,
     );
 }
+
+#[test]
+fn native_buffer_growth_uses_the_same_semantics_in_both_tiers() {
+    for source in [
+        "var b=new SharedArrayBuffer(4,{maxByteLength:16});var a=new Int32Array(b);a[0]=7;b.grow(16);Atomics.store(a,3,42);a.length===4&&a[0]===7&&a[3]===42;",
+        "var b=new ArrayBuffer(8,{maxByteLength:16});var a=new Uint8Array(b,4,4);b.resize(2);var empty=a.length===0;b.resize(16);empty&&a.length===4&&a[0]===0;",
+    ] {
+        check(source, true);
+    }
+}
