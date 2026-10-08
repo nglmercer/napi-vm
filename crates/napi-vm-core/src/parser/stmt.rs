@@ -617,7 +617,7 @@ impl Parser {
             self.adv();
             let name = self.ident()?;
             self.expect(&Token::KwOf);
-            let iter = Box::new(self.expr()?);
+            let iter = Box::new(self.assign()?);
             self.expect(&Token::RParen);
             let body = self.block_or_stmt(false);
             return Some(Statement::ResourceForOf {
@@ -631,6 +631,8 @@ impl Parser {
         // `for (const [k, v] of pairs)` / `for (const { id } of rows)`: the
         // head binds a pattern, which the loop destructures per iteration.
         let mut head_pattern: Option<Box<Pattern>> = None;
+        let bare_async_head =
+            matches!(self.cur(), Token::KwAsync) && matches!(self.peek(), Token::KwOf);
         let init = if matches!(self.cur(), Token::KwVar | Token::KwLet | Token::KwConst) {
             let kind = match self.cur() {
                 Token::KwVar => VarKind::Var,
@@ -720,12 +722,15 @@ impl Parser {
                 });
             }
             if self.eat(&Token::KwOf) {
+                if bare_async_head && !is_await {
+                    self.record_error("bare async is not a for-of assignment head".into());
+                }
                 if let ForInit::Var { decls, .. } = init.as_ref()
                     && (decls.len() != 1 || decls[0].1.is_some())
                 {
                     self.record_error("invalid for-of declaration".into());
                 }
-                let i = Box::new(self.expr()?);
+                let i = Box::new(self.assign()?);
                 self.expect(&Token::RParen);
                 let b = self.block_or_stmt(false);
                 let binding = self.iteration_binding(init, head_pattern)?;

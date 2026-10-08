@@ -645,6 +645,8 @@ fn catch_pattern_initialization_observes_tdz_and_restores_scope_on_abrupt_comple
 #[test]
 fn iteration_heads_keep_declaration_and_assignment_grammar_distinct() {
     for source in [
+        "for(x of [],[]){}",
+        "for(async of []){}",
         "for(const x;;){}",
         "for(const [x]=[],y;;){}",
         "for(var [x];;){}",
@@ -663,6 +665,9 @@ fn iteration_heads_keep_declaration_and_assignment_grammar_distinct() {
         assert!(!parses(source, ParseGoal::Script), "accepted {source}");
     }
     for source in [
+        "for(x of ([],[])){}",
+        "for((async) of []){}",
+        "async function f(){for await(async of []){}}",
         "for(var x=1 in {}){}",
         "for(var [x,x] of []){}",
         "for(let x of []){function f(){var x;}}",
