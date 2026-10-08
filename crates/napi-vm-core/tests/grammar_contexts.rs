@@ -641,3 +641,59 @@ fn catch_pattern_initialization_observes_tdz_and_restores_scope_on_abrupt_comple
         );
     }
 }
+
+#[test]
+fn iteration_heads_keep_declaration_and_assignment_grammar_distinct() {
+    for source in [
+        "for(const x;;){}",
+        "for(const [x]=[],y;;){}",
+        "for(var [x];;){}",
+        "for(let x of []){var x;}",
+        "for(const {x} in {}){if(false){var x;}}",
+        "for(let [x,x] of []){}",
+        "for(const x=1 in {}){}",
+        "'use strict';for(var x=1 in {}){}",
+        "for(var {x}={} in {}){}",
+        "for(var [x]=[] of []){}",
+        "for(x+1 of []){}",
+        "for([x,...y,] of []){}",
+        "for({x,...y,z} of []){}",
+        "for await(x in {}){}",
+    ] {
+        assert!(!parses(source, ParseGoal::Script), "accepted {source}");
+    }
+    for source in [
+        "for(var x=1 in {}){}",
+        "for(var [x,x] of []){}",
+        "for(let x of []){function f(){var x;}}",
+        "for(x of []){}",
+        "for(obj.x of []){}",
+        "for([x,...rest] of []){}",
+        "for({x:y} of []){}",
+        "for([x] in {}){}",
+        "async function f(){for await([x] of []){}}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn iteration_assignment_targets_update_bindings_and_close_on_failure() {
+    for source in [
+        "let x=0,sum=0;for(x of [1,2,3]){sum+=x;}x===3&&sum===6;",
+        "let x=0,rest;for([x,...rest] of [[1,2,3]]){}x===1&&rest.length===2&&rest[1]===3;",
+        "let obj={x:0};for(obj.x of [2,4]){}obj.x===4;",
+        "let y;for({x:y} of [{x:9}]){}y===9;",
+        "let x;for([x] in {ab:1}){}x==='a';",
+        "let calls=0,x;for(var i=(calls++,7) in {a:1}){x=i;}calls===1&&x==='a';",
+        "let closed=false,ok=false;const x=0;function* g(){try{yield 1;}finally{closed=true;}}try{for(x of g()){} }catch(e){ok=e instanceof TypeError;}closed&&ok;",
+        "let ok=false;try{[x]=[1];let x;}catch(e){ok=e instanceof ReferenceError;}ok;",
+    ] {
+        let mut vm = napi_vm_core::Interpreter::with_builtins();
+        let result = vm.eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

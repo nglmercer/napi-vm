@@ -169,9 +169,13 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             }
             walk_stmts(body, scope, runtime_handlers);
         }
-        Statement::ForIn { name, body, .. }
-        | Statement::ForOf { name, body, .. }
-        | Statement::ResourceForOf { name, body, .. } => {
+        Statement::ForIn { binding, body, .. } | Statement::ForOf { binding, body, .. } => {
+            for name in binding.declared_names() {
+                push(scope, &name, CompletionKind::Variable, None);
+            }
+            walk_stmts(body, scope, runtime_handlers);
+        }
+        Statement::ResourceForOf { name, body, .. } => {
             push(scope, name, CompletionKind::Variable, None);
             walk_stmts(body, scope, runtime_handlers);
         }

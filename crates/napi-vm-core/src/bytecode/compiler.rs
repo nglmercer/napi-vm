@@ -35,10 +35,10 @@ use std::rc::Rc;
 
 use crate::interpreter::{block_needs_lexical_scope, produces_completion_value};
 use crate::parser::{
-    AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName,
-    ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind, arrow_body_references,
-    collect_var_names, expr_captures_identifier, pattern_names, statements_capture_identifier,
-    stmts_reference,
+    AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp,
+    MemberName, ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind,
+    arrow_body_references, collect_var_names, expr_captures_identifier, pattern_names,
+    statements_capture_identifier, stmts_reference,
 };
 
 use super::constants::{
@@ -869,13 +869,9 @@ fn boxed_for_head_names(
 fn block_loop_heads(stmts: &[Statement], out: &mut Vec<String>) {
     for stmt in stmts {
         match stmt {
-            Statement::ForIn {
-                name, target: None, ..
-            } => out.push(name.clone()),
-            Statement::ForOf { name, pattern, .. } => match pattern {
-                Some(pattern) => out.extend(pattern_names(pattern)),
-                None => out.push(name.clone()),
-            },
+            Statement::ForIn { binding, .. } | Statement::ForOf { binding, .. } => {
+                out.extend(binding.declared_names())
+            }
             Statement::Declarations(inner) => block_loop_heads(inner, out),
             _ => {}
         }
@@ -1500,21 +1496,31 @@ impl<'a> Compiler<'a> {
                 self.load_undefined()
             }
             Statement::ForIn {
-                name,
-                target: None,
+                binding:
+                    ForBinding::Declaration {
+                        pattern: Pattern::Ident(name),
+                        initializer: None,
+                        ..
+                    },
                 obj,
                 body,
             } => self.compile_for_in(name, obj, body),
-            Statement::ForIn {
-                target: Some(_), ..
-            } => Err(Decline::Func("for-in assignment head")),
+            Statement::ForIn { .. } => Err(Decline::Func("for-in binding form")),
             Statement::ForOf {
-                name,
-                pattern,
+                binding:
+                    ForBinding::Declaration {
+                        pattern,
+                        initializer: None,
+                        ..
+                    },
                 iter,
                 body,
                 is_await,
-            } => self.compile_for_of(name, pattern, iter, body, *is_await),
+            } => match pattern {
+                Pattern::Ident(name) => self.compile_for_of(name, None, iter, body, *is_await),
+                _ => self.compile_for_of("", Some(pattern), iter, body, *is_await),
+            },
+            Statement::ForOf { .. } => Err(Decline::Func("for-of assignment head")),
             Statement::Labeled { label, body } => self.compile_labeled(label, body),
             Statement::LabeledBreak(label) => {
                 let depth = match self
@@ -2655,7 +2661,7 @@ impl<'a> Compiler<'a> {
     fn compile_for_of(
         &mut self,
         name: &'a str,
-        pattern: &'a Option<Box<Pattern>>,
+        pattern: Option<&'a Pattern>,
         iter: &'a Expr,
         body: &'a [Statement],
         is_await: bool,

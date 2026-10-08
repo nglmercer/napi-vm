@@ -320,21 +320,14 @@ pub enum Statement {
         body: Vec<Statement>,
     },
     ForIn {
-        name: String,
-        /// Assignment head, distinct from a variable declaration.
-        target: Option<Box<Expr>>,
+        binding: ForBinding,
         obj: Box<Expr>,
         body: Vec<Statement>,
     },
     ForOf {
-        name: String,
-        /// `for (const [k, v] of pairs)`: the head binds a pattern rather than
-        /// one name. `name` is then unused.
-        pattern: Option<Box<Pattern>>,
+        binding: ForBinding,
         iter: Box<Expr>,
         body: Vec<Statement>,
-        /// `for await (… of …)`: each step's result is awaited, and an async
-        /// iterator (`Symbol.asyncIterator`) is preferred over a sync one.
         is_await: bool,
     },
     Block(Vec<Statement>),
@@ -404,6 +397,25 @@ pub enum VarKind {
     Var,
     Let,
     Const,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForBinding {
+    Declaration {
+        kind: VarKind,
+        pattern: Pattern,
+        initializer: Option<Box<Expr>>,
+    },
+    Assignment(Box<Expr>),
+}
+
+impl ForBinding {
+    pub fn declared_names(&self) -> Vec<String> {
+        match self {
+            Self::Declaration { pattern, .. } => pattern_names(pattern),
+            Self::Assignment(_) => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -617,9 +629,18 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
         }
         Statement::While { body, .. }
         | Statement::DoWhile { body, .. }
-        | Statement::ForIn { body, .. }
-        | Statement::ForOf { body, .. }
         | Statement::ResourceForOf { body, .. } => collect_scoped_var_names(body, out, functions),
+        Statement::ForIn { binding, body, .. } | Statement::ForOf { binding, body, .. } => {
+            if let ForBinding::Declaration {
+                kind: VarKind::Var,
+                pattern,
+                ..
+            } = binding
+            {
+                out.extend(pattern_names(pattern));
+            }
+            collect_scoped_var_names(body, out, functions);
+        }
         Statement::For { init, body, .. } => {
             if let Some(init) = init {
                 match &**init {
@@ -733,6 +754,37 @@ pub fn for_loop_captures_bindings(
     })
 }
 
+fn for_binding_captures(binding: &ForBinding, name: &str) -> bool {
+    match binding {
+        ForBinding::Assignment(target) => expr_captures_identifier(target, name),
+        ForBinding::Declaration {
+            pattern,
+            initializer,
+            ..
+        } => {
+            pattern_captures_identifier(pattern, name)
+                || initializer
+                    .as_deref()
+                    .is_some_and(|value| expr_captures_identifier(value, name))
+        }
+    }
+}
+fn for_binding_references(binding: &ForBinding, name: &str) -> bool {
+    match binding {
+        ForBinding::Assignment(target) => expr_references(target, name),
+        ForBinding::Declaration {
+            pattern,
+            initializer,
+            ..
+        } => {
+            pattern_references(pattern, name)
+                || initializer
+                    .as_deref()
+                    .is_some_and(|value| expr_references(value, name))
+        }
+    }
+}
+
 fn for_init_captures(init: &ForInit, name: &str) -> bool {
     match init {
         ForInit::Var { decls, .. } => decls.iter().any(|(_, expr)| {
@@ -810,29 +862,23 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || statements_capture_identifier(body, name)
         }
-        Statement::ForIn {
-            obj, target, body, ..
-        } => {
-            target
-                .as_deref()
-                .is_some_and(|target| expr_captures_identifier(target, name))
+        Statement::ForIn { binding, obj, body } => {
+            for_binding_captures(binding, name)
                 || expr_captures_identifier(obj, name)
+                || statements_capture_identifier(body, name)
+        }
+        Statement::ForOf {
+            binding,
+            iter,
+            body,
+            ..
+        } => {
+            for_binding_captures(binding, name)
+                || expr_captures_identifier(iter, name)
                 || statements_capture_identifier(body, name)
         }
         Statement::ResourceForOf { iter, body, .. } => {
             expr_captures_identifier(iter, name) || statements_capture_identifier(body, name)
-        }
-        Statement::ForOf {
-            iter,
-            pattern,
-            body,
-            ..
-        } => {
-            expr_captures_identifier(iter, name)
-                || pattern
-                    .as_deref()
-                    .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
-                || statements_capture_identifier(body, name)
         }
         Statement::ClassInitialization { fields, .. } => {
             statements_capture_identifier(fields, name)
@@ -1137,16 +1183,22 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                     .unwrap_or(false)
                 || stmts_reference(body, name)
         }
-        Statement::ForIn {
-            obj, target, body, ..
-        } => {
-            target
-                .as_deref()
-                .is_some_and(|target| expr_references(target, name))
+        Statement::ForIn { binding, obj, body } => {
+            for_binding_references(binding, name)
                 || expr_references(obj, name)
                 || stmts_reference(body, name)
         }
-        Statement::ForOf { iter, body, .. } | Statement::ResourceForOf { iter, body, .. } => {
+        Statement::ForOf {
+            binding,
+            iter,
+            body,
+            ..
+        } => {
+            for_binding_references(binding, name)
+                || expr_references(iter, name)
+                || stmts_reference(body, name)
+        }
+        Statement::ResourceForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)
         }
         Statement::ClassInitialization { fields, .. } => stmts_reference(fields, name),

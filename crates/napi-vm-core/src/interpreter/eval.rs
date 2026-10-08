@@ -10,8 +10,8 @@ use super::{
 };
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
-    AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName, ObjectProp,
-    Statement, UnOp, VarKind, arrow_body_references, stmts_reference,
+    AssignOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp, MemberName,
+    ObjectProp, Statement, UnOp, VarKind, arrow_body_references, stmts_reference,
 };
 use crate::value::{ClassData, FunctionData, ObjectCell, PropAttrs, Value};
 
@@ -1169,12 +1169,16 @@ impl Interpreter {
                 self.pop_scope(outer);
                 result
             }
-            Statement::ForIn {
-                name,
-                target,
-                obj,
-                body,
-            } => {
+            Statement::ForIn { binding, obj, body } => {
+                if let ForBinding::Declaration {
+                    pattern,
+                    initializer: Some(value),
+                    ..
+                } = binding
+                {
+                    let value = self.eval_expr(value)?;
+                    self.destructure(pattern, &value)?;
+                }
                 let o = self.eval_expr(obj)?;
                 let ks = self.keys_with_proxy_trap(&o)?;
                 let body_needs_scope = block_needs_lexical_scope(body);
@@ -1182,15 +1186,7 @@ impl Interpreter {
                 let label = self.active_label.take();
                 for k in ks {
                     self.consume_loop()?;
-                    if let Some(target) = target {
-                        self.eval_expr(&Expr::Assignment {
-                            target: target.clone(),
-                            op: AssignOp::Assign,
-                            value: Box::new(Expr::String(k.into())),
-                        })?;
-                    } else {
-                        self.set_binding(name, Value::String(k.into()))?;
-                    }
+                    self.assign_iteration_binding(binding, &Value::String(k.into()))?;
                     match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
                         Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
@@ -1202,8 +1198,7 @@ impl Interpreter {
                 Ok(r)
             }
             Statement::ForOf {
-                name,
-                pattern,
+                binding,
                 iter,
                 body,
                 is_await,
@@ -1251,26 +1246,11 @@ impl Interpreter {
                     if *is_await {
                         value = self.perform_await(value)?;
                     }
-                    match pattern {
-                        Some(pattern) => {
-                            for bound in crate::parser::pattern_names(pattern) {
-                                self.declare_binding(
-                                    &bound,
-                                    Value::Undefined,
-                                    BindKind::Let,
-                                    false,
-                                )?;
-                            }
-                            if let Err(error) = self.destructure(pattern, &value) {
-                                // An abandon teardown runs no handlers — and
-                                // closing is a handler. Anything else closes.
-                                if !error.is_abandon() {
-                                    let _ = self.close_guest_iterator(&iterator, *is_await);
-                                }
-                                return Err(error);
-                            }
+                    if let Err(error) = self.assign_iteration_binding(binding, &value) {
+                        if !error.is_abandon() {
+                            let _ = self.close_guest_iterator(&iterator, *is_await);
                         }
-                        None => self.set_binding(name, value)?,
+                        return Err(error);
                     }
                     match self.run_block_with_lexical_scope(body, body_needs_scope) {
                         Err(VmErr::Break(None)) => break,
@@ -1675,6 +1655,30 @@ impl Interpreter {
             needs_hoisting: body_needs_hoisting(body),
             bound: None,
         }))
+    }
+
+    fn assign_iteration_binding(
+        &mut self,
+        binding: &ForBinding,
+        value: &Value,
+    ) -> Result<Value, VmErr> {
+        match binding {
+            ForBinding::Assignment(target) => {
+                let pattern = crate::parser::expr_to_pattern(target)
+                    .ok_or_else(|| VmErr::Msg("Invalid iteration assignment target".into()))?;
+                self.destructure_assignment(&pattern, value)
+            }
+            ForBinding::Declaration {
+                pattern: crate::parser::Pattern::Ident(name),
+                ..
+            } => {
+                self.set_binding(name, value.clone())?;
+                Ok(value.clone())
+            }
+            ForBinding::Declaration { pattern, .. } => {
+                self.initialize_pattern_binding(pattern, value, BindKind::Let)
+            }
+        }
     }
 
     fn eval_object_literal(&mut self, props: &[ObjectProp]) -> Result<Value, VmErr> {
@@ -2442,7 +2446,7 @@ impl Interpreter {
                     Expr::Array { .. } | Expr::Object { .. } if matches!(op, AssignOp::Assign) => {
                         let pattern = crate::parser::expr_to_pattern(target)
                             .ok_or_else(|| VmErr::Msg("Invalid assignment target".to_string()))?;
-                        self.destructure(&pattern, &v)?;
+                        self.destructure_assignment(&pattern, &v)?;
                         Ok(v)
                     }
                     _ => vm_err("Invalid assignment target"),

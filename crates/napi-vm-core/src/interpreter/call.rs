@@ -220,6 +220,21 @@ impl Interpreter {
     }
 
     pub(super) fn destructure(&mut self, pat: &Pattern, val: &Value) -> Result<Value, VmErr> {
+        self.destructure_pattern(pat, val, true)
+    }
+    pub(super) fn destructure_assignment(
+        &mut self,
+        pat: &Pattern,
+        val: &Value,
+    ) -> Result<Value, VmErr> {
+        self.destructure_pattern(pat, val, false)
+    }
+    fn destructure_pattern(
+        &mut self,
+        pat: &Pattern,
+        val: &Value,
+        initialize: bool,
+    ) -> Result<Value, VmErr> {
         match pat {
             Pattern::Elision => Ok(Value::Undefined),
             Pattern::Ident(name) => {
@@ -228,7 +243,7 @@ impl Interpreter {
                 // initialization, which `assign` would refuse. Anything else
                 // is a destructuring *assignment*, which must reach the
                 // binding it names wherever that is.
-                if self.global.borrow_mut().initialize(name, val.clone()) {
+                if initialize && self.global.borrow_mut().initialize(name, val.clone()) {
                     return Ok(val.clone());
                 }
                 self.assign_or_set_binding(name, val.clone())?;
@@ -272,9 +287,9 @@ impl Interpreter {
                         break;
                     }
                     if let Some(v) = values.get(i) {
-                        self.destructure(elem, v)?;
+                        self.destructure_pattern(elem, v, initialize)?;
                     } else {
-                        self.destructure(elem, &Value::Undefined)?;
+                        self.destructure_pattern(elem, &Value::Undefined, initialize)?;
                     }
                 }
                 if let Some(rest_idx) = rest_target
@@ -282,7 +297,7 @@ impl Interpreter {
                 {
                     let rest_vals = values.get(rest_idx..).unwrap_or(&[]).to_vec();
                     let rest_val = Value::array(rest_vals);
-                    self.destructure(rest_pat, &rest_val)?;
+                    self.destructure_pattern(rest_pat, &rest_val, initialize)?;
                 }
                 Ok(val.clone())
             }
@@ -333,7 +348,7 @@ impl Interpreter {
                             remaining.push((k.clone(), v));
                         }
                         let rest = Value::checked_object(remaining)?;
-                        self.destructure(target, &rest)?;
+                        self.destructure_pattern(target, &rest, initialize)?;
                         continue;
                     }
                     let key_str = match key {
@@ -348,7 +363,7 @@ impl Interpreter {
                     taken.push(key_str.clone());
                     let found = self.get_prop_value_str(val, &key_str)?;
                     if let Some(p) = pat {
-                        self.destructure(p, &found)?;
+                        self.destructure_pattern(p, &found, initialize)?;
                     } else {
                         self.set_binding(&key_str, found)?;
                     }
@@ -359,9 +374,9 @@ impl Interpreter {
             Pattern::Default(pat, default_expr) => {
                 if matches!(val, Value::Undefined | Value::Null) {
                     let default_val = self.eval_expr(default_expr)?;
-                    self.destructure(pat, &default_val)
+                    self.destructure_pattern(pat, &default_val, initialize)
                 } else {
-                    self.destructure(pat, val)
+                    self.destructure_pattern(pat, val, initialize)
                 }
             }
         }

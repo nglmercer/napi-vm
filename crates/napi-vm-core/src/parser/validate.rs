@@ -552,8 +552,11 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             if let Some(init) = init {
                 match init.as_ref() {
                     ForInit::Expr(expr) => expression(expr, ctx)?,
-                    ForInit::Var { decls, .. } => {
+                    ForInit::Var { kind, decls } => {
                         for (name, expr) in decls {
+                            if *kind == VarKind::Const && expr.is_none() {
+                                return Err("const declaration requires an initializer".into());
+                            }
                             binding(name, ctx)?;
                             optional(expr.as_ref(), ctx)?;
                         }
@@ -562,11 +565,14 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                         pattern,
                         init,
                         trailing,
-                        ..
+                        kind,
                     } => {
                         pattern_check(pattern, ctx)?;
                         expression(init, ctx)?;
                         for (name, expr) in trailing {
+                            if *kind == VarKind::Const && expr.is_none() {
+                                return Err("const declaration requires an initializer".into());
+                            }
                             binding(name, ctx)?;
                             optional(expr.as_ref(), ctx)?;
                         }
@@ -583,20 +589,8 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
                 },
             )
         }
-        Statement::ForIn {
-            name,
-            target,
-            obj,
-            body,
-        } => {
-            if let Some(target) = target {
-                match target.as_ref() {
-                    Expr::Array { .. } | Expr::Object { .. } => assignment_target(target, ctx)?,
-                    _ => simple_assignment_target(target, ctx)?,
-                }
-            } else {
-                binding(name, ctx)?;
-            }
+        Statement::ForIn { binding, obj, body } => {
+            iteration_binding(binding, body, ctx, true)?;
             expression(obj, ctx)?;
             nested_statements(
                 body,
@@ -607,8 +601,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             )
         }
         Statement::ForOf {
-            name,
-            pattern,
+            binding,
             iter,
             body,
             is_await,
@@ -616,11 +609,7 @@ fn statement(stmt: &Statement, ctx: &Context) -> Check {
             if *is_await && (!ctx.await_allowed || ctx.parameters) {
                 return Err("for await outside an async context".into());
             }
-            if let Some(pattern) = pattern {
-                pattern_check(pattern, ctx)?;
-            } else {
-                binding(name, ctx)?;
-            }
+            iteration_binding(binding, body, ctx, false)?;
             expression(iter, ctx)?;
             nested_statements(
                 body,
@@ -797,6 +786,49 @@ fn pattern_check(pattern: &Pattern, ctx: &Context) -> Check {
         } => {
             expression(object, ctx)?;
             expression(property, ctx)
+        }
+    }
+}
+
+fn iteration_binding(
+    binding: &ForBinding,
+    body: &[Statement],
+    ctx: &Context,
+    for_in: bool,
+) -> Check {
+    match binding {
+        ForBinding::Assignment(target) => match target.as_ref() {
+            Expr::Array { .. } | Expr::Object { .. } => assignment_target(target, ctx),
+            _ => simple_assignment_target(target, ctx),
+        },
+        ForBinding::Declaration {
+            kind,
+            pattern,
+            initializer,
+        } => {
+            pattern_check(pattern, ctx)?;
+            if initializer.is_some()
+                && (!for_in
+                    || ctx.strict
+                    || *kind != VarKind::Var
+                    || !matches!(pattern, Pattern::Ident(_)))
+            {
+                return Err("invalid iteration declaration initializer".into());
+            }
+            optional(initializer.as_deref(), ctx)?;
+            if *kind != VarKind::Var {
+                let names = pattern_names(pattern);
+                let mut seen = HashSet::new();
+                if names.iter().any(|name| name == "let" || !seen.insert(name)) {
+                    return Err("invalid lexical iteration binding".into());
+                }
+                let mut vars = Vec::new();
+                collect_var_declaration_names(body, &mut vars);
+                if names.iter().any(|name| vars.contains(name)) {
+                    return Err("iteration binding conflicts with var declaration".into());
+                }
+            }
+            Ok(())
         }
     }
 }

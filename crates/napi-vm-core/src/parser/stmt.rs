@@ -1,7 +1,9 @@
 //! Core statement parsing. Classes and `import` / `export` live in
 //! `compound.rs`.
 
-use super::{Expr, ForInit, Parser, Pattern, PatternKey, Statement, SwitchCase, VarKind};
+use super::{
+    Expr, ForBinding, ForInit, Parser, Pattern, PatternKey, Statement, SwitchCase, VarKind,
+};
 use crate::lexer::Token;
 
 impl Parser {
@@ -564,6 +566,41 @@ impl Parser {
         Some(Statement::DoWhile { test: t, body: b })
     }
 
+    fn iteration_binding(
+        &mut self,
+        init: &ForInit,
+        pattern: Option<Box<Pattern>>,
+    ) -> Option<ForBinding> {
+        Some(match init {
+            ForInit::Var { kind, decls } => {
+                let (name, initializer) = decls.first()?;
+                ForBinding::Declaration {
+                    kind: kind.clone(),
+                    pattern: pattern
+                        .map(|pattern| *pattern)
+                        .unwrap_or_else(|| Pattern::Ident(name.clone())),
+                    initializer: initializer.clone().map(Box::new),
+                }
+            }
+            ForInit::Pattern {
+                kind,
+                pattern,
+                init,
+                trailing,
+            } => {
+                if !trailing.is_empty() {
+                    self.record_error("multiple iteration declarations".into());
+                }
+                ForBinding::Declaration {
+                    kind: kind.clone(),
+                    pattern: pattern.clone(),
+                    initializer: Some(Box::new(init.clone())),
+                }
+            }
+            ForInit::Expr(target) => ForBinding::Assignment(Box::new(target.clone())),
+        })
+    }
+
     fn for_(&mut self) -> Option<Statement> {
         self.adv();
         // `for await (… of …)`.
@@ -614,12 +651,12 @@ impl Parser {
                 // a `=` here means a C-style head with optional trailing
                 // `, name = init` declarators.
                 if self.eat(&Token::Equal) {
-                    let init_expr = self.assign()?;
+                    let init_expr = self.with_in(false, Self::assign)?;
                     let mut trailing = Vec::new();
                     while self.eat(&Token::Comma) {
                         let n = self.ident()?;
                         let i = if self.eat(&Token::Equal) {
-                            Some(self.assign()?)
+                            Some(self.with_in(false, Self::assign)?)
                         } else {
                             None
                         };
@@ -644,7 +681,7 @@ impl Parser {
                         self.record_error("let is not a lexical binding name".into());
                     }
                     let i = if self.eat(&Token::Equal) {
-                        Some(self.assign()?)
+                        Some(self.with_in(false, Self::assign)?)
                     } else {
                         None
                     };
@@ -675,17 +712,9 @@ impl Parser {
                 let o = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
                 let b = self.block_or_stmt(false);
-                let (n, target) = match init.as_ref() {
-                    ForInit::Var { decls, .. } => (decls.first()?.0.clone(), None),
-                    ForInit::Expr(target) => (String::new(), Some(Box::new(target.clone()))),
-                    _ => {
-                        self.record_error("invalid for-in declaration head".into());
-                        return None;
-                    }
-                };
+                let binding = self.iteration_binding(init, head_pattern)?;
                 return Some(Statement::ForIn {
-                    name: n,
-                    target,
+                    binding,
                     obj: o,
                     body: b,
                 });
@@ -699,13 +728,9 @@ impl Parser {
                 let i = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
                 let b = self.block_or_stmt(false);
-                let n = match init.as_ref() {
-                    ForInit::Var { decls, .. } => decls.first()?.0.clone(),
-                    _ => return None,
-                };
+                let binding = self.iteration_binding(init, head_pattern)?;
                 return Some(Statement::ForOf {
-                    name: n,
-                    pattern: head_pattern,
+                    binding,
                     iter: i,
                     body: b,
                     is_await,
@@ -714,6 +739,9 @@ impl Parser {
         }
         if is_await {
             self.record_error("for await requires of".into());
+        }
+        if head_pattern.is_some() {
+            self.record_error("destructuring declaration requires an initializer".into());
         }
         self.expect(&Token::Semicolon);
         let t = if !matches!(self.cur(), Token::Semicolon) {
