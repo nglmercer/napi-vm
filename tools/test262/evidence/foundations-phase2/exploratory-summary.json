@@ -1,0 +1,121 @@
+{
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "status": "Phase 2 incomplete; current-source full validation pending",
+  "reports": {
+    "exploratory-first-full": {
+      "total": 102956,
+      "counts": {
+        "pass": 44228,
+        "fail": 58680,
+        "skip": 0,
+        "timeout": 2,
+        "crash": 0,
+        "harness_error": 46
+      },
+      "engine_sha256": "08f8d7d798853d0e09d8234cb46d2ff7c81bb7846f152a7f1fef9f52c16d2f18",
+      "worker_jobs": 4,
+      "timeout_seconds": 5.0,
+      "sha256": "665b8cdba92616f7c67b1a8285f2869cd3d5aede71f84953ae42513046519325"
+    },
+    "exploratory-second-full": {
+      "total": 102956,
+      "counts": {
+        "pass": 44833,
+        "fail": 58075,
+        "skip": 0,
+        "timeout": 2,
+        "crash": 0,
+        "harness_error": 46
+      },
+      "engine_sha256": "c1db48805bdba0d4cf16b729f2e9be777a50948cd478fd4747c1765bccdd57af",
+      "worker_jobs": 4,
+      "timeout_seconds": 5.0,
+      "sha256": "db00990c121dbb62072ea0296810fedc2ad7c66a402a1c89da0cc335a2ff7378"
+    },
+    "focused-baseline": {
+      "total": 15247,
+      "counts": {
+        "pass": 4810,
+        "fail": 10437,
+        "skip": 0,
+        "timeout": 0,
+        "crash": 0,
+        "harness_error": 0
+      },
+      "engine_sha256": "7c572cffae742ab4d231bcb5acc22fd934a6a03d1a9780f28e5b473ad4ca0cdb",
+      "worker_jobs": 4,
+      "timeout_seconds": 5.0,
+      "sha256": "4470d23adcc8b90627d9e630ebfa5b5da1dbb053d250b472d6f8dac256a5f453"
+    },
+    "focused-initial": {
+      "total": 15247,
+      "counts": {
+        "pass": 6234,
+        "fail": 9013,
+        "skip": 0,
+        "timeout": 0,
+        "crash": 0,
+        "harness_error": 0
+      },
+      "engine_sha256": "5e36f8be7530dae6ea55e45984ca00ed709439a0673ac39c1245c10f0b0c9e68",
+      "worker_jobs": 4,
+      "timeout_seconds": 5.0,
+      "sha256": "80501d428c9923ad8dfd54785911a04d844cccc61465e85b87b38b600cd4de13"
+    },
+    "focused-d434ffe": {
+      "total": 15247,
+      "counts": {
+        "pass": 6258,
+        "fail": 8989,
+        "skip": 0,
+        "timeout": 0,
+        "crash": 0,
+        "harness_error": 0
+      },
+      "engine_sha256": "08f8d7d798853d0e09d8234cb46d2ff7c81bb7846f152a7f1fef9f52c16d2f18",
+      "worker_jobs": 4,
+      "timeout_seconds": 5.0,
+      "sha256": "ea9338f60f7a64f219e2c3105174fc1e54367052996fb81971e4f3f222df089d"
+    }
+  },
+  "source_commits": {
+    "exploratory-first-full": "d434ffe06be3b2fd1070f996f382337d32798aac",
+    "exploratory-second-full": "0faed45879ce39a73fb8def008e15d854e63c8ef",
+    "regression-selections": "a48a3df269df2e06f3e66af5ce6998c6c36e6f08"
+  },
+  "regression_selections": {
+    "first": {
+      "pass": 120,
+      "non_pass": 0
+    },
+    "second": {
+      "pass": 44,
+      "non_pass": 0
+    }
+  },
+  "a48a3df_required_checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 748,
+      "ignored": 4,
+      "failed": 0
+    },
+    "minimal": {
+      "passed": 158,
+      "failed": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 14,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 9,
+      "failed": 0
+    }
+  }
+}

@@ -16,7 +16,8 @@ not establish phase completion.
    verifier, VM, differential, and focused Test262 validation before fallback removal.
 5. Full pinned-corpus validation, regression fixes, and final documentation.
 
-Phase 1 is in progress. Later implementation phases have not started. PR #23's
+Phase 1 remains incomplete. Phase 2 contextual grammar/static semantics is now
+in progress; Phases 3–4 have not started. PR #23's
 realm-owned module caches, async/module ownership, parameter and constructor
 environments, private instance fields, AST fallback, execution limits, and
 capabilities disabled by default are preserved.
@@ -169,8 +170,12 @@ Growable/resizable buffers and remaining shared-memory exotic semantics need
 focused validation and implementation. Agents being implemented does not close
 these gates.
 
-Phase 2 still needs the complete async/generator/super/private-name grammar
-contexts and declaration conflicts specified in the completion request.
+Phase 2 now validates async/generator/arrow boundaries, parameter restrictions,
+super/new.target contexts, lexical private-name scope, class-element early errors,
+and import/export/block/catch declaration conflicts. It also validates semicolon
+insertion boundaries and parameter/call delimiters. This is not complete Phase 2:
+see [context implementation status](test262-phase2-contexts.md) for coverage,
+validation evidence, and the remaining parser representation gaps.
 
 Phase 3 still needs one global environment/declaration-instantiation model,
 complete lexical private identities and branding for methods/accessors/static
