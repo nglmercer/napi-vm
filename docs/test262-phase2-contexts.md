@@ -123,10 +123,8 @@ repairs is still in progress.
 ## Remaining Phase 2 gates
 
 The AST currently loses distinctions needed for complete early errors, including
-parenthesized
-cover grammar/optional-chain assignment boundaries, and complete
-for-in/of declaration/target metadata. These require representation work and
-focused validation. Additional Annex B statement positions, escaped/contextual
+parenthesized cover grammar/optional-chain assignment boundaries. These require
+representation work and focused validation. Additional Annex B statement positions, escaped/contextual
 keywords, full binding/assignment pattern grammar, and eval class-initializer
 context propagation remain to be audited. Global declarations across separate
 scripts/eval invocations require Phase 3 declaration instantiation. Function-kind
@@ -134,8 +132,8 @@ intrinsic descriptor/prototype completeness and cross-realm construction remain
 part of the broader Phase 1/3 audits. Import attributes are retained for future
 module-request/cache semantics; JSON modules and source/defer import execution
 are not implemented. Resource disposal and its async continuation semantics are
-not implemented. Ordinary for-in/of still needs complete declaration/target
-metadata and lexical iteration environments.
+not implemented. Ordinary for-in/of still needs lexical iteration environments; binding metadata
+is now retained as described below.
 
 Runtime private methods/accessors/static initialization and global declaration
 instantiation remain Phase 3 work. Their execution failures are retained rather
@@ -207,3 +205,36 @@ ignored), 158 minimal Rust tests, 73 Node, 14 WASM and nine tooling tests; fmt
 and Clippy are clean. Its catch/eval selection passes 1,563/2,071: 95 gains and
 zero losses versus an independently rerun d8afb76 baseline, with zero crashes,
 timeouts or harness errors. Complete outcomes and transitions are retained.
+
+The subsequent iteration-binding change retains declaration kind, full binding
+pattern, optional Annex B initializer, or an assignment target in a single
+`ForBinding` model. Static semantics reject lexical/body var conflicts,
+duplicate lexical binding names, invalid assignment heads and prohibited
+initializers. Classic const/destructuring heads require initializers. AST
+execution handles identifier/member/destructuring assignment heads and closes
+for-of iterators when assignment throws. Shared var-name collection includes
+var loop declarations. Assignment destructuring preserves TDZ rather than
+initializing an uninitialized binding. Existing compiled declaration heads keep
+their bytecode path; new forms retain AST fallback. Per-iteration lexical
+environments and complete iterator-based destructuring remain Phase 3 gaps.
+At 5eb88fe, required checks pass: 759 workspace Rust tests (four existing
+ignored), 158 minimal Rust tests, 73 Node tests, 14 WASM tests and nine tooling
+tests; fmt and Clippy are clean. Its 4,837-variant exploratory selection gains
+446 passes but loses four parse-negative variants. The retained report records
+all losses. Source 63f16b6 repairs the for-of RHS AssignmentExpression boundary
+and the bare `async of` restriction. Its focused selection passes 2,240/4,837:
+450 new passes and zero lost passes, with no harness errors, timeouts or crashes.
+All 25 grammar tests pass. Full-corpus validation runs against this frozen
+revision; required checks for the subsequent source are in progress.
+
+Source 35c9653 accepts sloppy `static` bindings/references and parses full `let`
+expression statements, while retaining strict-mode rejection and the `let [`
+ExpressionStatement lookahead restriction. Failed statement parsing in a block,
+and a missing control-flow body, now records a parse error instead of silently
+producing an empty statement list. Source 39c9c02 distinguishes an identifier
+catch binding from an ordinary lexical binding in shared AST/bytecode binding
+metadata. Sloppy direct-eval var/function redeclarations may cross an identifier
+catch binding under Annex B; patterns and intervening lexical bindings still
+reject the conflict. All 27 grammar tests pass; required checks are in progress.
+The exploratory full run at 63f16b6 exposed the catch/eval regression and is
+retained independently of these repairs.

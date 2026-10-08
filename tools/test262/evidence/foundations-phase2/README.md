@@ -47,3 +47,12 @@ pass at this source: fmt, Clippy, 751 workspace Rust tests (four existing ignore
 `754ed80-summary.json` records checksums and exact source/worker identities.
 Use `754ed80-full.json.gz` for the milestone comparison and
 `../foundations-phase1/baseline-final-full.json.gz` as the PR #23 baseline.
+
+Iteration bindings at 5eb88fe are exploratory: 2,232/4,837 pass, with 446 gains
+and four losses against the identical 09498f5 selection. All required checks
+pass, with 759 workspace tests and four existing ignored tests. The losses are
+for-of RHS comma-expression and bare `async of` grammar boundaries; 63f16b6
+repairs them. Reports retain every outcome and phase classification; no tests
+are skipped. The repaired 63f16b6 selection passes 2,240/4,837: 450 gains and
+zero losses, with zero crashes/timeouts/harness errors. Its full corpus and the
+required checks for subsequent source are still in progress.

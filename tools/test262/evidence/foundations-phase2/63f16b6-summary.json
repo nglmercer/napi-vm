@@ -1,0 +1,15 @@
+{
+  "source": "63f16b6",
+  "baseline": "09498f5 identical iteration-bindings selection",
+  "total": 4837,
+  "pass": 2240,
+  "fail": 2597,
+  "new_passes": 450,
+  "lost_passes": 0,
+  "harness_errors": 0,
+  "timeouts": 0,
+  "crashes": 0,
+  "grammar_tests_passed": 25,
+  "required_checks": "passed at 5eb88fe; rerun required for subsequent repairs",
+  "full_corpus": "in progress for this revision"
+}

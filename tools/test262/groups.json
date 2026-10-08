@@ -12,5 +12,7 @@
   "typedarray-exotics": {"paths": ["built-ins/TypedArray", "built-ins/TypedArrayConstructors", "built-ins/DataView", "built-ins/ArrayBuffer", "built-ins/SharedArrayBuffer"]},
   "statement-positions": {"paths": ["language/statements/if", "language/statements/while", "language/statements/do-while", "language/statements/for", "language/statements/for-in", "language/statements/for-of", "language/statements/with", "annexB/language/statements/if"]},
   "parameter-patterns": {"paths": ["language/expressions/function", "language/expressions/arrow-function", "language/expressions/object", "language/statements/function", "language/expressions/class", "language/statements/class"]},
-  "catch-bindings": {"paths": ["language/statements/try"]}
+  "catch-bindings": {"paths": ["language/statements/try"]},
+  "iteration-bindings": {"paths": ["language/statements/for", "language/statements/for-in", "language/statements/for-of", "language/statements/for-await-of"]},
+  "contextual-identifiers": {"paths": ["language/future-reserved-words", "language/identifiers"]}
 }
