@@ -9,5 +9,7 @@
   "eval-globals": {"paths": ["language/eval-code", "language/global-code", "language/block-scope", "language/statements/variable", "language/statements/let", "language/statements/const"]},
   "classes-private": {"paths": ["language/expressions/class", "language/statements/class"]},
   "object-reflect-proxy": {"paths": ["built-ins/Object", "built-ins/Reflect", "built-ins/Proxy"]},
-  "typedarray-exotics": {"paths": ["built-ins/TypedArray", "built-ins/TypedArrayConstructors", "built-ins/DataView", "built-ins/ArrayBuffer", "built-ins/SharedArrayBuffer"]}
+  "typedarray-exotics": {"paths": ["built-ins/TypedArray", "built-ins/TypedArrayConstructors", "built-ins/DataView", "built-ins/ArrayBuffer", "built-ins/SharedArrayBuffer"]},
+  "statement-positions": {"paths": ["language/statements/if", "language/statements/while", "language/statements/do-while", "language/statements/for", "language/statements/for-in", "language/statements/for-of", "language/statements/with", "annexB/language/statements/if"]},
+  "parameter-patterns": {"paths": ["language/expressions/function", "language/expressions/arrow-function", "language/expressions/object", "language/statements/function", "language/expressions/class", "language/statements/class"]}
 }

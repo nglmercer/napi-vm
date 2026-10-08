@@ -185,3 +185,10 @@ initializers, carries Annex B declaration-position metadata into static semantic
 and distinguishes braceless function declarations from StatementList declarations.
 Switch cases and nested blocks reset the statement-position context. Twenty-one
 grammar tests pass; required checks and Test262 validation are in progress.
+
+At d8afb76, all required checks pass: 753 workspace Rust tests (four existing
+ignored), 158 minimal Rust tests, 73 Node, 14 WASM and nine tooling tests; fmt
+and Clippy are clean. The expanded statement-position/parameter-pattern selection
+contains 28,799 variants and passes 14,110: 248 new passes and zero lost passes
+versus its exact subset of the 754ed80 full report. It has no harness errors,
+timeouts or crashes. This revision has no independent full-corpus measurement.
