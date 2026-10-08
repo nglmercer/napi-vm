@@ -1179,9 +1179,10 @@ fn for_of_loops() {
         "let o = {}; o['__symbol_iterator__'] = function() { return {}; }; for (let v of o) {}",
         true,
     );
-    // A missing `done` counts as done; a missing value is undefined.
+    // A missing `done` is false; a missing value is undefined. Bound the
+    // consumer because this iterator deliberately never reports completion.
     check(
-        "let o = {}; o['__symbol_iterator__'] = function() { return { next: function() { return {}; } }; }; let n = 0; for (let v of o) { n++; } n",
+        "let o = {}; o['__symbol_iterator__'] = function() { return { next: function() { return {}; } }; }; let n = 0; for (let v of o) { n++; if (n === 2) break; } n",
         true,
     );
     check(
