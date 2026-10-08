@@ -268,7 +268,7 @@ fn pending_sync_adapter_continuations_survive_collection() {
     "#,
     )
     .expect("suspended consumer");
-    vm.collect_garbage();
+    vm.collect_cycles();
     vm.eval_source("release(42);").expect("resume");
     vm.poll_event_loop(TurnBudget::jobs(10_000))
         .expect("continuations");
