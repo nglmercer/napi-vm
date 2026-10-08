@@ -1587,12 +1587,10 @@ impl Interpreter {
                     let prototype = if is_js_object(&prototype) {
                         Some(prototype)
                     } else {
-                        let kind = if fd.is_async {
-                            "%AsyncGeneratorPrototype%"
-                        } else {
-                            "%GeneratorPrototype%"
-                        };
-                        self.persistent_global.borrow().intrinsic(kind)
+                        crate::value::FunctionData::generator_default_prototype(
+                            &self.persistent_global,
+                            fd.is_async,
+                        )
                     };
                     properties.set_proto(prototype.map(Rc::new));
                     let inner = GeneratorInner {

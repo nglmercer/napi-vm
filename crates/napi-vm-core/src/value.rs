@@ -1092,6 +1092,31 @@ impl FunctionData {
             return;
         }
         let mut properties = self.properties.borrow_mut();
+        // Legacy ordinary non-strict functions may expose null caller and
+        // arguments properties. Other function kinds inherit the restricted
+        // accessors from Function.prototype.
+        if !self.strict
+            && self.is_constructor
+            && !self.is_arrow
+            && !self.is_async
+            && !self.is_generator
+            && self.native.is_none()
+            && self.bound.is_none()
+        {
+            for key in ["caller", "arguments"] {
+                if !properties.iter().any(|(name, _)| name == key) {
+                    properties.push((key.into(), Value::Null));
+                    self.properties.meta.borrow_mut().set_attrs(
+                        key,
+                        PropAttrs {
+                            writable: false,
+                            enumerable: false,
+                            configurable: false,
+                        },
+                    );
+                }
+            }
+        }
         if !properties.iter().any(|(key, _)| key == "length") {
             properties.push((
                 "length".to_string(),
@@ -1150,24 +1175,10 @@ impl FunctionData {
         let owner = crate::interpreter::realm::value_realm(function);
         let _allocation_realm = crate::interpreter::realm::AllocationRealm::enter(owner.clone());
         let prototype = if self.is_generator {
-            let kind = if self.is_async {
-                "%AsyncGeneratorPrototype%"
-            } else {
-                "%GeneratorPrototype%"
-            };
             Value::object_with_proto(
                 vec![],
                 owner
-                    .and_then(|global| {
-                        let global = global.borrow();
-                        global.intrinsic(kind).or_else(|| {
-                            // Retain the existing generator execution path
-                            // until async generators have their own driver.
-                            self.is_async
-                                .then(|| global.intrinsic("%GeneratorPrototype%"))
-                                .flatten()
-                        })
-                    })
+                    .and_then(|global| Self::generator_default_prototype(&global, self.is_async))
                     .map(Rc::new),
             )
         } else {
@@ -1204,6 +1215,22 @@ impl FunctionData {
             },
         );
         prototype
+    }
+
+    pub(crate) fn generator_default_prototype(global: &Env, is_async: bool) -> Option<Value> {
+        let global = global.borrow();
+        let kind = if is_async {
+            "%AsyncGeneratorPrototype%"
+        } else {
+            "%GeneratorPrototype%"
+        };
+        global.intrinsic(kind).or_else(|| {
+            // Retain the existing generator execution path until async
+            // generators have their own driver and intrinsic prototype.
+            is_async
+                .then(|| global.intrinsic("%GeneratorPrototype%"))
+                .flatten()
+        })
     }
 }
 

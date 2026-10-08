@@ -672,10 +672,28 @@ fn async_generator_prototype_ownership_preserves_existing_iteration() {
     );
     truth(
         &mut vm,
+        "var fallback=Object.getPrototypeOf(other.generate.prototype);other.generate.prototype=undefined;Object.getPrototypeOf(other.generate())===fallback;",
+    );
+    truth(
+        &mut vm,
         "var caught;try{Error({toString:undefined,valueOf:undefined});}catch(e){caught=e;}caught instanceof TypeError;",
     );
     truth(
         &mut vm,
         "Number.prototype.split=String.prototype.split;try{(42).split({toString(){return /x/;}});}catch(e){caught=e;}caught instanceof TypeError;",
     );
+}
+
+#[test]
+fn non_strict_ordinary_functions_keep_legacy_properties_without_exposing_callers() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "function ordinary(){return ordinary.caller;}function strict(){'use strict';return ordinary();}strict()===null;",
+        "eval(\"'use strict';ordinary();\")===null;",
+        "ordinary.arguments===null&&!Object.getOwnPropertyDescriptor(ordinary,'caller').configurable;",
+        "var caught;try{strict.caller;}catch(e){caught=e;}caught instanceof TypeError;",
+        "try{(()=>{}).caller;}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
 }
