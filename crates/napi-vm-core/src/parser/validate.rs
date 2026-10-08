@@ -1009,7 +1009,7 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
             assignment_target(target, ctx)?;
             expression(value, ctx)
         }
-        _ => legacy_assignment_target(target, ctx),
+        _ => simple_assignment_target(target, ctx),
     }
 }
 
@@ -1226,7 +1226,9 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
         }
         Expr::Assignment { target, value, op } => {
-            if *op == AssignOp::Assign {
+            if *op == AssignOp::Assign
+                && matches!(target.as_ref(), Expr::Array { .. } | Expr::Object { .. })
+            {
                 assignment_target(target, ctx)?;
             } else {
                 legacy_assignment_target(target, ctx)?;
