@@ -354,10 +354,11 @@ impl Interpreter {
         }
     }
 
-    /// Apply ECMAScript ToString for Node-API. This deliberately differs from
+    /// Apply ECMAScript ToString, invoking guest conversion hooks on the VM
+    /// owner thread. This deliberately differs from
     /// the `String(Symbol())` function special case: abstract ToString throws
     /// for Symbols, as does `napi_coerce_to_string`.
-    pub(crate) fn ecmascript_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
+    pub fn ecmascript_to_string(&mut self, value: &Value) -> Result<crate::JsString, VmErr> {
         let primitive = self.coerce_object_to_primitive(value, "string")?;
         match primitive {
             Value::Symbol(_) => Err(VmErr::Msg(

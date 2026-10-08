@@ -45,7 +45,7 @@ impl std::fmt::Debug for AsyncTask {
 #[cfg(stackful_coroutines)]
 impl AsyncTask {
     /// Whether this task's suspended coroutine holds values the tracer
-    /// cannot see. The result promise is traced in its own right.
+    /// cannot see. The tracer separately follows this task's result promise.
     pub(crate) fn suspends_values(&self) -> bool {
         self.coroutine.is_some()
     }
@@ -433,4 +433,35 @@ fn resume_with_throw(
         )?;
     }
     Ok(Value::Undefined)
+}
+
+#[cfg(all(test, stackful_coroutines))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completed_task_retains_its_result_across_collection() {
+        let mut interp = Interpreter::with_builtins();
+        let result = Value::pending_promise();
+        result.borrow_mut().state = PromiseState::Fulfilled;
+        result.borrow_mut().value = Value::object(vec![("alive".into(), Value::Number(42.0))]);
+        let task = crate::heap::tracked(Rc::new(RefCell::new(AsyncTask {
+            execution: interp.execution.clone(),
+            counted: false,
+            owner: None,
+            coroutine: None,
+            result,
+        })));
+        interp
+            .set_global_checked("retainedTask", Value::AsyncTask(task.clone()))
+            .unwrap();
+
+        let stats = interp.collect_cycles();
+        assert_eq!(stats.skipped, None);
+        let result = task.borrow().result_promise();
+        assert_eq!(result.borrow().state, PromiseState::Fulfilled);
+        let value = result.borrow().value.clone();
+        let alive = value.get_prop("alive").unwrap();
+        assert!(matches!(alive, Value::Number(42.0)), "got {alive:?}");
+    }
 }

@@ -188,7 +188,7 @@ pub(super) fn host(vm: &mut Interpreter) -> Value {
 }
 
 fn start(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let source = vm.to_js_string(args.first().unwrap_or(&Value::Undefined))?;
+    let source = vm.ecmascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
     let cluster = cluster()?;
     check_errors(&cluster)?;
     let mut state = cluster.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -414,7 +414,7 @@ fn receive_broadcast(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<
 }
 
 fn report(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let message = vm.to_js_string(args.first().unwrap_or(&Value::Undefined))?;
+    let message = vm.ecmascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
     let cluster = cluster()?;
     let mut state = cluster.state.lock().unwrap_or_else(|e| e.into_inner());
     if state.reports.len() >= MAX_REPORTS {
@@ -494,4 +494,71 @@ fn monotonic_now(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, 
     Ok(Value::Number(
         START.get_or_init(Instant::now).elapsed().as_secs_f64() * 1000.0,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_coercion_runs_before_taking_the_shared_queue_lock() {
+        let session = Session::new();
+        let mut vm = Interpreter::with_builtins();
+        let agent = host(&mut vm);
+        vm.set_global_checked("agent", agent).unwrap();
+        vm.eval_source(
+            r#"
+            agent.report({
+                [Symbol.toPrimitive](hint) {
+                    if (hint !== 'string') throw new Error('wrong hint');
+                    agent.report('nested');
+                    return 'outer';
+                }
+            });
+            if (agent.getReport() !== 'nested' || agent.getReport() !== 'outer')
+                throw new Error('report ordering lost');
+            var threw = false;
+            try { agent.report(Symbol()); } catch (e) { threw = e instanceof TypeError; }
+            if (!threw || agent.getReport() !== null) throw new Error('invalid report queued');
+        "#,
+        )
+        .unwrap();
+        session.finish().unwrap();
+    }
+
+    #[test]
+    fn start_coerces_source_before_transferring_it_to_a_worker() {
+        let session = Session::new();
+        let mut vm = Interpreter::with_builtins();
+        let agent = host(&mut vm);
+        vm.set_global_checked("agent", agent).unwrap();
+        vm.eval_source(
+            r#"
+            var conversions = 0;
+            agent.start({
+                [Symbol.toPrimitive](hint) {
+                    if (hint !== 'string') throw new Error('wrong hint');
+                    conversions++;
+                    return "$262.agent.report('worker'); $262.agent.leaving();";
+                }
+            });
+            if (conversions !== 1) throw new Error('source conversion lost');
+            var threw = false;
+            try { agent.start(Symbol()); } catch (e) { threw = e instanceof TypeError; }
+            if (!threw) throw new Error('Symbol source must reject');
+        "#,
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let value = get_report(&mut vm, Value::Undefined, vec![]).unwrap();
+            if let Value::String(message) = value {
+                assert_eq!(message, napi_vm::JsString::from("worker"));
+                break;
+            }
+            assert!(Instant::now() < deadline, "worker did not report");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        session.finish().unwrap();
+    }
 }

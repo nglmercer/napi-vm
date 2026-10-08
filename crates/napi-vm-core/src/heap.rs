@@ -554,10 +554,12 @@ impl Marker {
                 }
                 #[cfg(stackful_coroutines)]
                 MarkItem::AsyncTask(inner) => {
-                    // The result promise is tracked in its own right; the
-                    // coroutine stack is opaque, hence the suspend barrier.
+                    // Registration is not reachability: a retained task also
+                    // retains its result promise after its coroutine finishes.
+                    // The coroutine stack is opaque, hence the suspend barrier.
                     if let Ok(task) = inner.try_borrow() {
                         self.opaque |= task.suspends_values();
+                        self.mark_value(&Value::Promise(task.result_promise()));
                         if let Some(owner) = task.owner() {
                             self.mark_env(&owner);
                         }

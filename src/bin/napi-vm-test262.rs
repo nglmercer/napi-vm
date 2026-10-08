@@ -149,7 +149,7 @@ fn collect_requested_gc(vm: &mut Interpreter) {
 }
 
 fn eval_realm_script(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let source = vm.to_js_string(args.first().unwrap_or(&Value::Undefined))?;
+    let source = vm.ecmascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
     let global = vm.realm_global_object();
     vm.eval_in_realm_utf16(&global, &source)
 }
@@ -374,4 +374,30 @@ fn main() {
         Err(error) => json!({"status":"error", "phase":"driver", "message":error.to_string()}),
     };
     println!("{report}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn realm_eval_script_performs_guest_string_coercion() {
+        let request = serde_json::from_value(json!({"source": r#"
+            var calls = 0;
+            var result = $262.evalScript({
+                [Symbol.toPrimitive](hint) {
+                    if (hint !== 'string') throw new Error('wrong hint');
+                    calls++;
+                    return '21 * 2';
+                }
+            });
+            if (result !== 42 || calls !== 1) throw new Error('conversion lost');
+            var threw = false;
+            try { $262.evalScript(Symbol()); } catch (e) { threw = e instanceof TypeError; }
+            if (!threw) throw new Error('Symbol must reject');
+        "#}))
+        .unwrap();
+        let result = execute(request);
+        assert_eq!(result["status"], "ok", "{result}");
+    }
 }
