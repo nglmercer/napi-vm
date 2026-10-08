@@ -1108,8 +1108,8 @@ fn for_in_loops() {
         "function f(){ for (let k in {a: 1, b: 2}) {} function g(){ return k; } return g(); } f()",
         true,
     );
-    // A pattern head in `for-in` binds the placeholder name.
-    check("let o = {x: 1}; for (let [a] in o) {} typeof a", true);
+    // Pattern heads now retain their actual binding and use AST fallback.
+    check("let o = {x: 1}; for (let [a] in o) {} typeof a", false);
 }
 
 #[test]
@@ -1258,4 +1258,18 @@ fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
         check(source, true);
     }
     check("try{throw {x:7};}catch({x}){x;}", false);
+}
+
+#[test]
+fn iteration_assignment_forms_retain_fallback_and_declaration_tier_parity() {
+    for source in [
+        "var x;for(x of [1,2]){}x;",
+        "let x;for([x] of [[7]]){}x;",
+        "let o={x:0};for(o.x of [9]){}o.x;",
+        "for(var x=7 in {a:1}){}x;",
+    ] {
+        check(source, false);
+    }
+    check("function f(){for(var x of []){}return x;}f();", true);
+    check("function f(){for(var x in {}){}return x;}f();", true);
 }
