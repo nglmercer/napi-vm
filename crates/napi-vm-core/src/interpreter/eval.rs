@@ -1675,6 +1675,11 @@ impl Interpreter {
                 self.set_binding(name, value.clone())?;
                 Ok(value.clone())
             }
+            ForBinding::Declaration {
+                kind: VarKind::Var,
+                pattern,
+                ..
+            } => self.destructure_assignment(pattern, value),
             ForBinding::Declaration { pattern, .. } => {
                 self.initialize_pattern_binding(pattern, value, BindKind::Let)
             }

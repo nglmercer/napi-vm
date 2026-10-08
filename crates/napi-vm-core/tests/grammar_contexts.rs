@@ -686,6 +686,8 @@ fn iteration_heads_keep_declaration_and_assignment_grammar_distinct() {
 fn iteration_assignment_targets_update_bindings_and_close_on_failure() {
     for source in [
         "let x=0,sum=0;for(x of [1,2,3]){sum+=x;}x===3&&sum===6;",
+        "var x;for(var[x] of [[1]]){}eval('var x=2;');x===2;",
+        "var x;for(var[x] of [[1]]){}var sum=0;eval('for(var[x] of [[2],[3]]){sum+=x;}');sum===5;",
         "let x=0,rest;for([x,...rest] of [[1,2,3]]){}x===1&&rest.length===2&&rest[1]===3;",
         "let obj={x:0};for(obj.x of [2,4]){}obj.x===4;",
         "let y;for({x:y} of [{x:9}]){}y===9;",
