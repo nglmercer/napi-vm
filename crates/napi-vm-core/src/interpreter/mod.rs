@@ -1851,7 +1851,12 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
-        if let Some(Statement::ClassInitialization { derived, fields }) = stmts.first() {
+        if let Some(Statement::ClassInitialization {
+            derived,
+            fields,
+            forward_rest,
+        }) = stmts.first()
+        {
             let depth = self.guest_execution_depth.clone();
             depth.set(depth.get().saturating_add(1));
             let _execution_guard = GuestExecutionGuard(depth);
@@ -1859,6 +1864,20 @@ impl Interpreter {
             scope.borrow_mut().enter_constructor(*derived, fields);
             if !derived {
                 self.initialize_instance_fields(&scope)?;
+            }
+            if let Some(rest) = forward_rest {
+                let arguments = scope
+                    .borrow()
+                    .get(rest)
+                    .and_then(|value| value.as_array())
+                    .expect("implicit constructor rest parameter")
+                    .borrow()
+                    .clone();
+                let superclass = scope
+                    .borrow()
+                    .get("__super_ctor")
+                    .expect("implicit derived constructor superclass");
+                self.invoke_ctor(&superclass, Value::Undefined, arguments)?;
             }
             return self.run_program_body(&stmts[1..]);
         }

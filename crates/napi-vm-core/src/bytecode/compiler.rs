@@ -2155,7 +2155,7 @@ impl<'a> Compiler<'a> {
 
     /// The constructor's parameter list and body: the written one with
     /// instance fields desugared ahead of it, the implicit derived
-    /// `constructor(...args) { super(...args); }`, or the empty default.
+    /// Implicit constructors forward arguments through shared constructor entry.
     /// Owned bodies promote to the compilation lifetime, like converted
     /// destructuring patterns.
     fn class_ctor_body(
@@ -2163,6 +2163,7 @@ impl<'a> Compiler<'a> {
         ctor: Option<OwnedCtor<'a>>,
         instance_fields: &[(FieldKey, Option<&'a Expr>)],
     ) -> (SharedSlice<'a, String>, SharedSlice<'a, Statement>) {
+        let implicit_derived = is_derived && ctor.is_none();
         let (params, body) = match ctor {
             Some(own) => (
                 SharedSlice::Borrowed(own.params),
@@ -2170,10 +2171,7 @@ impl<'a> Compiler<'a> {
             ),
             None if is_derived => (
                 SharedSlice::Owned(Rc::from(vec!["...args".to_string()])),
-                SharedSlice::Owned(Rc::from(vec![Statement::Expr(Expr::Call {
-                    callee: Box::new(Expr::Super),
-                    args: vec![Expr::Spread(Box::new(Expr::Identifier("args".to_string())))],
-                })])),
+                SharedSlice::Borrowed(&[]),
             ),
             None => (SharedSlice::Borrowed(&[]), SharedSlice::Borrowed(&[])),
         };
@@ -2201,6 +2199,7 @@ impl<'a> Compiler<'a> {
         if is_derived || !fields.is_empty() {
             full.push(Statement::ClassInitialization {
                 derived: is_derived,
+                forward_rest: implicit_derived.then(|| "args".into()),
                 fields,
             });
         }

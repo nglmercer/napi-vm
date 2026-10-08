@@ -302,3 +302,20 @@ projection, transitions, logs, and digests are archived with the
 This focused result does not replace the last full-corpus measurement. Async
 iterator adaptation, suspended GC auditing, the broader Phase 3 operations, and
 full-corpus bytecode differential measurement remain completion gates.
+
+### Exploratory full run at 121d115
+
+The pinned corpus completed with four workers and the required execution limits:
+57,941 passes, 45,013 failures, two timeouts, zero crashes, zero harness errors,
+and zero skips across 102,956 variants. Against PR23 this is 16,548 new passes
+and **14 lost passes**, so this snapshot is not ready for merge. The complete
+reports and both baseline comparisons are preserved in
+`tools/test262/evidence/foundations-realms-memory/121d115-exploratory-full-*`.
+Full-corpus AST/bytecode differential results remain unmeasured.
+
+The regressions concern synchronous propagation of Promise combinator iterator
+errors, constructible Promise resolving functions, and iterator observation by
+implicit derived constructors. Follow-up regression tests cover the first two
+issues, implicit constructor forwarding, and concrete typed-array constructor metadata; these changes are newer
+than the frozen full-run worker and must be revalidated against Test262. The
+remaining foundation completion gates stay open; all 33 realm regression tests pass.

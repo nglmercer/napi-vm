@@ -26,6 +26,16 @@ pub(crate) const CALL_SLOT: &str = "__symbol_call__";
 /// built-ins whose `new` form differs from their call form.
 pub(crate) const CONSTRUCT_SLOT: &str = "__symbol_construct__";
 
+pub(crate) fn construct_slot(value: &Value) -> Option<Value> {
+    let Value::Object { props } = value else {
+        return None;
+    };
+    if props.meta.borrow().call_only {
+        return None;
+    }
+    callable_slot(value, CONSTRUCT_SLOT).or_else(|| callable_slot(value, CALL_SLOT))
+}
+
 /// The function stored in one of the internal call slots, if any.
 pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
     let Value::Object { props } = value else {
@@ -45,15 +55,17 @@ pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
 }
 
 #[doc(hidden)]
-pub fn is_callable_value(value: &Value) -> bool {
-    match value {
-        Value::Function(_)
-        | Value::NativeFunction { .. }
-        | Value::HostFunction { .. }
-        | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_callable_value(&proxy.target),
-        Value::Object { .. } => callable_slot(value, CALL_SLOT).is_some(),
-        _ => false,
+pub fn is_callable_value(mut value: &Value) -> bool {
+    loop {
+        match value {
+            Value::Proxy(proxy) => value = &proxy.target,
+            Value::Function(_)
+            | Value::NativeFunction { .. }
+            | Value::HostFunction { .. }
+            | Value::Class(_) => return true,
+            Value::Object { .. } => return callable_slot(value, CALL_SLOT).is_some(),
+            _ => return false,
+        }
     }
 }
 
@@ -2025,9 +2037,7 @@ impl Interpreter {
             // called directly and their fresh result is discarded by the
             // caller, matching the pre-existing `super()` contract.
             Value::Object { .. } => {
-                if let Some(target) =
-                    callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
-                {
+                if let Some(target) = construct_slot(f) {
                     return self.call_this(&target, this_val, args);
                 }
                 vm_err("TypeError: object is not a constructor".to_string())
@@ -2127,8 +2137,7 @@ impl Interpreter {
         // `new Map()` and `Map()` reach the same implementation unless the
         // built-in installs a separate one.
         if let Value::Object { .. } = f
-            && let Some(target) =
-                callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
+            && let Some(target) = construct_slot(f)
         {
             let owner =
                 super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());

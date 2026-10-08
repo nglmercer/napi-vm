@@ -31,30 +31,37 @@ pub(crate) fn allocation_prototype(name: &str) -> Option<Rc<Value>> {
         .map(Rc::new)
 }
 
-pub(crate) fn value_realm(value: &Value) -> Option<Env> {
-    match value {
-        Value::RealmGlobal(global) => Some(global.clone()),
-        Value::Function(function) if function.bound.is_some() => {
-            value_realm(&function.bound.as_ref().expect("bound function").target)
+pub(crate) fn value_realm(mut value: &Value) -> Option<Env> {
+    // Bound targets and Proxy targets can form very deep chains. Realm
+    // lookup must not spend the host stack on an otherwise shallow call.
+    loop {
+        match value {
+            Value::Proxy(proxy) => value = &proxy.target,
+            Value::Function(function) if function.bound.is_some() => {
+                value = &function.bound.as_ref().expect("bound function").target;
+            }
+            Value::Class(class) => {
+                if let Some(realm) = class.statics.meta.borrow().realm_global.clone() {
+                    return Some(realm);
+                }
+                value = &class.constructor;
+            }
+            Value::RealmGlobal(global) => return Some(global.clone()),
+            Value::Function(function) => {
+                return function
+                    .closure
+                    .as_ref()
+                    .and_then(super::Environment::find_global)
+                    .or_else(|| function.properties.meta.borrow().realm_global.clone());
+            }
+            Value::Object { props } => return props.meta.borrow().realm_global.clone(),
+            Value::Array(array) => return array.meta.borrow().realm_global.clone(),
+            _ => {
+                return value
+                    .exotic_properties()
+                    .and_then(|properties| properties.meta.borrow().realm_global.clone());
+            }
         }
-        Value::Function(function) => function
-            .closure
-            .as_ref()
-            .and_then(super::Environment::find_global)
-            .or_else(|| function.properties.meta.borrow().realm_global.clone()),
-        Value::Object { props } => props.meta.borrow().realm_global.clone(),
-        Value::Array(array) => array.meta.borrow().realm_global.clone(),
-        Value::Class(class) => class
-            .statics
-            .meta
-            .borrow()
-            .realm_global
-            .clone()
-            .or_else(|| value_realm(&class.constructor)),
-        Value::Proxy(proxy) => value_realm(&proxy.target),
-        _ => value
-            .exotic_properties()
-            .and_then(|properties| properties.meta.borrow().realm_global.clone()),
     }
 }
 

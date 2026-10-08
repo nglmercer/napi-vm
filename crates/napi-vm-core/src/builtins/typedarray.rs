@@ -252,10 +252,26 @@ pub(super) fn install(e: &mut Environment) {
     for (name, kind) in KINDS {
         // The constructors are not in the pre-seeded global list, so declare
         // them here with their element size as a static.
-        let namespace = Value::object(vec![(
-            "BYTES_PER_ELEMENT".to_string(),
-            Value::Number(kind.size() as f64),
-        )]);
+        let namespace = Value::object(vec![
+            ("name".into(), Value::String((*name).into())),
+            ("length".into(), Value::Number(3.0)),
+            (
+                "BYTES_PER_ELEMENT".into(),
+                Value::Number(kind.size() as f64),
+            ),
+        ]);
+        if let Value::Object { props } = &namespace {
+            for property in ["name", "length"] {
+                props.meta.borrow_mut().set_attrs(
+                    property,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
         namespace
             .set_prop("of".to_string(), super::nf("of", typed_of))
             .expect("built-in typed-array property");

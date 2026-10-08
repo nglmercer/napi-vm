@@ -197,6 +197,11 @@ impl Interpreter {
                 },
             ),
         ]);
+        for resolver in [&resolve, &reject] {
+            if let Value::Object { props } = resolver {
+                props.meta.borrow_mut().call_only = true;
+            }
+        }
         (resolve, reject)
     }
 
@@ -206,7 +211,7 @@ impl Interpreter {
     ) -> (Value, Value) {
         let carrier = Value::Promise(promise);
         let make_resolver = |name: &str, callable| {
-            Value::object(vec![
+            let resolver = Value::object(vec![
                 (TARGET_SLOT.to_owned(), carrier.clone()),
                 (RESOLUTION_GUARD_SLOT.to_owned(), resolution_guard.clone()),
                 (
@@ -216,7 +221,11 @@ impl Interpreter {
                         callable,
                     },
                 ),
-            ])
+            ]);
+            if let Value::Object { props } = &resolver {
+                props.meta.borrow_mut().call_only = true;
+            }
+            resolver
         };
         (
             make_resolver("resolve", thenable_resolve),

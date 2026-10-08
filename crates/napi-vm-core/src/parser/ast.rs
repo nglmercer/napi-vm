@@ -367,6 +367,8 @@ pub enum Statement {
     /// Internal constructor entry, before parameter and body initialization.
     ClassInitialization {
         derived: bool,
+        /// Implicit derived constructors forward the argument list without iteration.
+        forward_rest: Option<String>,
         fields: Vec<Statement>,
     },
     /// Non-simple formal parameters run before body declaration instantiation.

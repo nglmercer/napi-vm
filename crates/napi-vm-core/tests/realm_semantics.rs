@@ -1,5 +1,76 @@
 use napi_vm_core::{Interpreter, Value};
 
+#[test]
+fn implicit_derived_constructors_forward_arguments_without_iteration() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "Array.prototype[Symbol.iterator]=function(){throw 42;};class Base{constructor(a,b){this.sum=a+b;}}class Derived extends Base{field=7;}class Leaf extends Derived{}var instance=new Leaf(2,3);instance.sum===5&&instance.field===7&&instance instanceof Leaf;",
+    );
+}
+
+#[test]
+fn promise_resolving_functions_have_call_but_no_construct() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var resolve,reject;new Promise(function(a,b){resolve=a;reject=b;});var count=0;for(var fn of [resolve,reject]){try{Reflect.construct(function(){},[],fn);}catch(e){if(e instanceof TypeError)count++;}try{new fn();}catch(e){if(e instanceof TypeError)count++;}}count===4;",
+    );
+    truth(
+        &mut vm,
+        "var settled=false;var p=new Promise(function(resolve){resolve(42);});p.then(function(v){settled=v===42;});true;",
+    );
+    truth(&mut vm, "settled;");
+}
+
+#[test]
+fn promise_combinators_reject_iterator_step_errors_without_closing() {
+    let mut vm = Interpreter::with_builtins();
+    for method in ["all", "allSettled", "race", "any"] {
+        truth(
+            &mut vm,
+            &format!(
+                "var error={{}};var closed=0;var rejected=false;var iterable={{[Symbol.iterator](){{return {{next(){{return {{get done(){{throw error;}},get value(){{throw 42;}}}};}},return(){{closed++;return {{}};}}}};}}}};Promise.{method}(iterable).then(undefined,function(e){{rejected=e===error;}});closed===0;"
+            ),
+        );
+        truth(&mut vm, "rejected===true;");
+    }
+}
+
+#[test]
+fn concrete_typed_array_metadata_identifies_each_realms_constructor() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for name in [
+        "Int8Array",
+        "Uint8Array",
+        "Uint8ClampedArray",
+        "Int16Array",
+        "Uint16Array",
+        "Int32Array",
+        "Uint32Array",
+        "Float32Array",
+        "Float64Array",
+        "BigInt64Array",
+        "BigUint64Array",
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var C={name};var d=Object.getOwnPropertyDescriptor(C,'name');C.name==='{name}'&&d.value===C.name&&!d.writable&&!d.enumerable&&d.configurable&&C.length===3&&Object.getPrototypeOf(C)===Object.getPrototypeOf(Uint8Array);"
+            ),
+        );
+        truth(
+            &mut vm,
+            &format!(
+                "var target=other.{name}.bind(null);target.prototype=undefined;Object.getPrototypeOf(Reflect.construct({name},[0],target))===other[C.name].prototype;"
+            ),
+        );
+    }
+}
+
 fn truth(vm: &mut Interpreter, source: &str) {
     let result = vm.eval_source(source);
     assert!(

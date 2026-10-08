@@ -206,12 +206,17 @@ fn each_input(
     Ok(())
 }
 
+fn reject_input_error(error: VmErr) -> Value {
+    let reason = match error {
+        VmErr::Throw(reason) => reason,
+        VmErr::RuntimeError(data) => data.guest_value(),
+        other => crate::error::error_value_from_msg(&other.to_string()),
+    };
+    Value::settled_promise(PromiseState::Rejected, reason)
+}
+
 fn inputs_of(interp: &mut Interpreter, a: &[Value]) -> Result<Vec<Value>, VmErr> {
-    match a.first() {
-        Some(Value::Array(items)) => Ok(items.borrow().clone()),
-        Some(other) => interp.iterate(other),
-        None => Ok(Vec::new()),
-    }
+    interp.drain_iterable(a.first().unwrap_or(&Value::Undefined))
 }
 
 /// Build the `(onFulfilled, onRejected)` pair for one input of a combinator,
@@ -309,7 +314,13 @@ fn combinator_state(inputs: &[Value]) -> Combinator {
 }
 
 fn promise_all(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = inputs_of(interp, &a)?;
+    let inputs = match inputs_of(interp, &a) {
+        Ok(inputs) => inputs,
+        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
+            return Ok(reject_input_error(error));
+        }
+        Err(error) => return Err(error),
+    };
     let state = combinator_state(&inputs);
     let result = state.result.clone();
     if inputs.is_empty() {
@@ -342,7 +353,13 @@ fn all_reject(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result
 }
 
 fn promise_all_settled(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = inputs_of(interp, &a)?;
+    let inputs = match inputs_of(interp, &a) {
+        Ok(inputs) => inputs,
+        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
+            return Ok(reject_input_error(error));
+        }
+        Err(error) => return Err(error),
+    };
     let state = combinator_state(&inputs);
     let result = state.result.clone();
     if inputs.is_empty() {
@@ -396,7 +413,13 @@ fn settled_reject(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Re
 }
 
 fn promise_race(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = inputs_of(interp, &a)?;
+    let inputs = match inputs_of(interp, &a) {
+        Ok(inputs) => inputs,
+        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
+            return Ok(reject_input_error(error));
+        }
+        Err(error) => return Err(error),
+    };
     let state = combinator_state(&inputs);
     let result = state.result.clone();
     each_input(interp, &inputs, |interp, index, input| {
@@ -418,7 +441,13 @@ fn race_fulfil(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Resul
 /// `Promise.any`: the first fulfilment wins; if every input rejects, the
 /// result rejects with an `AggregateError`.
 fn promise_any(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = inputs_of(interp, &a)?;
+    let inputs = match inputs_of(interp, &a) {
+        Ok(inputs) => inputs,
+        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
+            return Ok(reject_input_error(error));
+        }
+        Err(error) => return Err(error),
+    };
     let state = combinator_state(&inputs);
     let result = state.result.clone();
     if inputs.is_empty() {

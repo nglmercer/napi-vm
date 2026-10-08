@@ -209,6 +209,8 @@ pub struct ObjectMeta {
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
+    /// Stateful callable objects may provide [[Call]] without [[Construct]].
+    pub(crate) call_only: bool,
     /// Presence of [[ErrorData]], independent of prototypes and realms.
     pub(crate) error_object: bool,
     /// Lexical private field identities never enter ordinary property storage.

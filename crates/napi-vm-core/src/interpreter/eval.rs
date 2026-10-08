@@ -669,15 +669,12 @@ impl Interpreter {
         }
 
         // A derived class with no constructor of its own gets the implicit
-        // `constructor(...args) { super(...args); }`. Without it, extending a
+        // argument forwarding without guest iterator calls. Without it, extending a
         // class whose constructor does the work — `class E extends Error {}` —
         // produced an instance the superclass never initialized.
         if super_cls.is_some() && !has_own_constructor {
             ctor_params = vec!["...args".to_string()];
-            ctor_body = vec![Statement::Expr(Expr::Call {
-                callee: Box::new(Expr::Super),
-                args: vec![Expr::Spread(Box::new(Expr::Identifier("args".to_string())))],
-            })];
+            ctor_body = Vec::new();
         }
 
         // Store fields separately from the body so constructor entry/super
@@ -700,6 +697,7 @@ impl Interpreter {
         if super_cls.is_some() || !fields.is_empty() {
             full_ctor_body.push(Statement::ClassInitialization {
                 derived: super_cls.is_some(),
+                forward_rest: (super_cls.is_some() && !has_own_constructor).then(|| "args".into()),
                 fields,
             });
         }
