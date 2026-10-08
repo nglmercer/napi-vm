@@ -1226,9 +1226,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
             }
         }
         Expr::Assignment { target, value, op } => {
-            if *op == AssignOp::Assign
-                && matches!(target.as_ref(), Expr::Array { .. } | Expr::Object { .. })
-            {
+            if *op == AssignOp::Assign && !matches!(target.unparenthesized(), Expr::Call { .. }) {
                 assignment_target(target, ctx)?;
             } else {
                 legacy_assignment_target(target, ctx)?;

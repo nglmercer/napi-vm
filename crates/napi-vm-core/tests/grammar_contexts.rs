@@ -1432,7 +1432,15 @@ fn closing_statement_delimiters_allow_regexp_literals() {
 #[test]
 fn annex_b_call_targets_exclude_logical_assignments_and_tagged_templates() {
     for source in [
-        "f()&&=1;", "f()||=1;", "f()??=1;", "f``=1;", "(f``)++;", "o.x``=1;",
+        "f()&&=1;",
+        "f()||=1;",
+        "f()??=1;",
+        "f``=1;",
+        "(f``)++;",
+        "o.x``=1;",
+        "[f()]=[];",
+        "({x:f()}={});",
+        "[...f()]=[];",
     ] {
         assert!(!parses(source, ParseGoal::Script), "accepted {source}");
     }
