@@ -208,6 +208,24 @@ impl Token {
     }
 }
 
+#[derive(Clone, Copy)]
+struct LexicalCallable {
+    depth: usize,
+    body_depth: Option<usize>,
+    expression: bool,
+    is_async: bool,
+    is_generator: bool,
+    arrow: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LexicalMember {
+    depth: usize,
+    head: bool,
+    async_names: usize,
+    generator: bool,
+}
+
 pub struct Lexer {
     src: Vec<char>,
     pos: usize,
@@ -225,12 +243,18 @@ pub struct Lexer {
     /// something that *ends a value* it is division, and otherwise it begins a
     /// literal.
     previous: Option<Token>,
+    before_previous: Option<Token>,
+    async_statement_start: bool,
+    async_line_break: bool,
+    last_token_end_line: usize,
     // Closing statement delimiters select InputElementRegExp; expression
     // delimiters select InputElementDiv. Function/class expressions retain
     // their expression goal even though their bodies contain statements.
     delimiters: Vec<(Token, bool)>,
     closed_statement: bool,
-    pending_function: Option<(usize, bool)>,
+    callables: Vec<LexicalCallable>,
+    members: Vec<LexicalMember>,
+    async_arrow_depth: Option<usize>,
     pending_class: Option<(usize, bool)>,
     function_body: Option<bool>,
     encoded_source: bool,
@@ -249,9 +273,15 @@ impl Lexer {
             lexical_errors: Vec::new(),
             pending_spans: Vec::new(),
             previous: None,
+            before_previous: None,
+            async_statement_start: false,
+            async_line_break: false,
+            last_token_end_line: 1,
             delimiters: Vec::new(),
             closed_statement: false,
-            pending_function: None,
+            callables: Vec::new(),
+            members: Vec::new(),
+            async_arrow_depth: None,
             pending_class: None,
             function_body: None,
             encoded_source: false,
@@ -317,8 +347,7 @@ impl Lexer {
                 break;
             }
             if let Some((t, span)) = self.next_with_span() {
-                self.observe_token(&t);
-                self.previous = Some(t.clone());
+                self.record_token(&t, span.line, span.end_line);
                 self.line_has_token = true;
                 toks.push((t, span));
             }
@@ -418,7 +447,7 @@ impl Lexer {
     }
 
     /// Scan a template literal starting at the opening backtick, preserving the
-    /// raw text of each quasi (including whitespace). Emits:
+    /// raw text of each quasi, with ECMAScript line-ending normalization. Emits:
     /// `Backtick Quasi (DollarLBrace <expr tokens> RBrace Quasi)* Backtick`.
     fn read_template(&mut self) -> Vec<crate::span::SpannedToken> {
         self.pos += 1; // consume opening backtick
@@ -453,15 +482,26 @@ impl Lexer {
                     Ok(text) => quasi.cooked.push_str(text),
                     Err(()) => quasi.invalid_escape = true,
                 }
-                quasi
-                    .raw
-                    .push_str(self.src[start..self.pos].iter().collect::<String>());
+                quasi.raw.push_str(
+                    self.src[start..self.pos]
+                        .iter()
+                        .collect::<String>()
+                        .replace("\r\n", "\n")
+                        .replace('\r', "\n"),
+                );
             } else {
                 self.pos += 1;
-                let text = self.source_unit_string(c);
+                let text = if c == '\r' {
+                    if self.src.get(self.pos) == Some(&'\n') {
+                        self.pos += 1;
+                    }
+                    crate::JsString::from("\n")
+                } else {
+                    self.source_unit_string(c)
+                };
                 quasi.cooked.push_str(&text);
                 quasi.raw.push_str(text);
-                if c == '\n' {
+                if matches!(c, '\r' | '\n' | '\u{2028}' | '\u{2029}') {
                     self.line += 1;
                     self.col = 1;
                 } else {
@@ -480,6 +520,20 @@ impl Lexer {
     /// so nested object literals and templates terminate correctly. Consumes the
     /// matching closing brace and appends `RBrace`.
     fn lex_interp(&mut self, toks: &mut Vec<crate::span::SpannedToken>) {
+        // Each substitution starts in an expression lexical goal. Restore the
+        // enclosing goal after scanning it, including nested template literals.
+        let previous = self.previous.take();
+        let before_previous = self.before_previous.take();
+        let closed_statement = std::mem::replace(&mut self.closed_statement, false);
+        let callables = self.callables.clone();
+        let members = self.members.clone();
+        let async_arrow_depth = self.async_arrow_depth;
+        let pending_class = self.pending_class.take();
+        let function_body = self.function_body.take();
+        let async_statement_start = self.async_statement_start;
+        let async_line_break = self.async_line_break;
+        let last_token_end_line = self.last_token_end_line;
+        let delimiter_depth = self.delimiters.len();
         let mut depth = 1i32;
         while self.pos < self.src.len() && depth > 0 {
             self.skip_ws();
@@ -487,35 +541,37 @@ impl Lexer {
                 break;
             }
             let c = self.src[self.pos];
-            match c {
-                '{' => {
-                    depth += 1;
-                    let span = crate::span::Span::new(self.line, self.col);
-                    toks.push((Token::LBrace, span));
-                    self.pos += 1;
-                    self.col += 1;
+            if c == '`' {
+                let start_line = self.line;
+                let nested = self.read_template();
+                toks.extend(nested);
+                self.record_token(&Token::Backtick, start_line, self.line);
+                continue;
+            }
+            if let Some((token, span)) = self.next_with_span() {
+                match token {
+                    Token::LBrace => depth += 1,
+                    Token::RBrace => depth -= 1,
+                    _ => {}
                 }
-                '}' => {
-                    depth -= 1;
-                    self.pos += 1;
-                    self.col += 1;
-                    let span = crate::span::Span::new(self.line, self.col - 1);
-                    toks.push((Token::RBrace, span));
-                    if depth == 0 {
-                        return;
-                    }
+                if depth > 0 {
+                    self.record_token(&token, span.line, span.end_line);
                 }
-                '`' => {
-                    let nested = self.read_template();
-                    toks.extend(nested);
-                }
-                _ => {
-                    if let Some((t, span)) = self.next_with_span() {
-                        toks.push((t, span));
-                    }
-                }
+                toks.push((token, span));
             }
         }
+        self.previous = previous;
+        self.before_previous = before_previous;
+        self.closed_statement = closed_statement;
+        self.callables = callables;
+        self.members = members;
+        self.async_arrow_depth = async_arrow_depth;
+        self.pending_class = pending_class;
+        self.function_body = function_body;
+        self.async_statement_start = async_statement_start;
+        self.async_line_break = async_line_break;
+        self.last_token_end_line = last_token_end_line;
+        self.delimiters.truncate(delimiter_depth);
     }
 
     fn next_with_span(&mut self) -> Option<crate::span::SpannedToken> {
@@ -915,6 +971,21 @@ impl Lexer {
     /// It is division only when the previous token ends a value. Everything
     /// else — the start of the program, an operator, a keyword, an opening
     /// bracket — is a position where an expression may begin.
+    fn record_token(&mut self, token: &Token, line: usize, end_line: usize) {
+        self.async_line_break =
+            matches!(self.previous, Some(Token::KwAsync)) && line > self.last_token_end_line;
+        if self.async_line_break {
+            self.async_arrow_depth = None;
+            self.async_statement_start = false;
+            if let Some(member) = self.members.last_mut() {
+                member.async_names = member.async_names.saturating_sub(1);
+            }
+        }
+        self.observe_token(token);
+        self.last_token_end_line = end_line;
+        self.before_previous = self.previous.replace(token.clone());
+    }
+
     fn observe_token(&mut self, token: &Token) {
         let previous = self.previous.as_ref();
         let statement_start = previous.is_none()
@@ -929,44 +1000,158 @@ impl Lexer {
                 )
             )
             || (self.closed_statement && matches!(previous, Some(Token::RBrace | Token::RParen)));
-        match token {
-            Token::KwFunction if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) => {
-                self.pending_function = Some((self.delimiters.len(), !statement_start));
+        let member_head = self
+            .members
+            .last()
+            .is_some_and(|member| member.depth == self.delimiters.len() && member.head);
+        if matches!(token, Token::Comma | Token::Semicolon) {
+            while self.callables.last().is_some_and(|callable| {
+                callable.arrow
+                    && callable.body_depth.is_none()
+                    && callable.depth == self.delimiters.len()
+            }) {
+                self.callables.pop();
             }
-            Token::KwClass if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) => {
+            if self
+                .async_arrow_depth
+                .is_some_and(|depth| depth == self.delimiters.len())
+            {
+                self.async_arrow_depth = None;
+            }
+        }
+        if let Some(member) = self.members.last_mut()
+            && member.depth == self.delimiters.len()
+        {
+            match token {
+                Token::Comma | Token::Semicolon => {
+                    member.head = true;
+                    member.async_names = 0;
+                    member.generator = false;
+                }
+                Token::Colon | Token::Equal => member.head = false,
+                Token::KwAsync if member.head => member.async_names += 1,
+                Token::Star if member.head => member.generator = true,
+                _ => {}
+            }
+        }
+        match token {
+            Token::KwAsync => {
+                self.async_statement_start = statement_start;
+                if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) {
+                    self.async_arrow_depth = Some(self.delimiters.len());
+                }
+            }
+            Token::KwFunction
+                if !member_head && !matches!(previous, Some(Token::Dot | Token::QuestionDot)) =>
+            {
+                let statement = statement_start
+                    || self.async_line_break
+                    || matches!(previous, Some(Token::KwAsync)) && self.async_statement_start;
+                self.callables.push(LexicalCallable {
+                    depth: self.delimiters.len(),
+                    body_depth: None,
+                    expression: !statement,
+                    is_async: matches!(previous, Some(Token::KwAsync)) && !self.async_line_break,
+                    is_generator: false,
+                    arrow: false,
+                });
+                self.async_arrow_depth = None;
+            }
+            Token::KwClass
+                if !member_head && !matches!(previous, Some(Token::Dot | Token::QuestionDot)) =>
+            {
                 self.pending_class = Some((self.delimiters.len(), !statement_start));
             }
+            Token::Star if matches!(previous, Some(Token::KwFunction)) => {
+                if let Some(callable) = self.callables.last_mut() {
+                    callable.is_generator = true;
+                }
+            }
+            Token::Arrow => {
+                let is_async = self.async_arrow_depth.take() == Some(self.delimiters.len());
+                self.callables.push(LexicalCallable {
+                    depth: self.delimiters.len(),
+                    body_depth: None,
+                    expression: true,
+                    is_async,
+                    is_generator: false,
+                    arrow: true,
+                });
+            }
             Token::LParen => {
-                let control = matches!(
-                    previous,
-                    Some(
-                        Token::KwIf
-                            | Token::KwWhile
-                            | Token::KwFor
-                            | Token::KwWith
-                            | Token::KwSwitch
-                            | Token::KwCatch
-                    )
-                );
+                if member_head
+                    && previous.is_some_and(|token| {
+                        token.identifier_name().is_some()
+                            || matches!(
+                                token,
+                                Token::String(_)
+                                    | Token::EscapedString(_)
+                                    | Token::Number(_)
+                                    | Token::BigInt(_)
+                                    | Token::PrivateIdentifier(_)
+                                    | Token::RBracket
+                            )
+                    })
+                {
+                    let member = self.members.last().unwrap();
+                    self.callables.push(LexicalCallable {
+                        depth: self.delimiters.len(),
+                        body_depth: None,
+                        expression: true,
+                        is_async: member.async_names > 0
+                            && (!matches!(previous, Some(Token::KwAsync))
+                                || member.async_names > 1),
+                        is_generator: member.generator,
+                        arrow: false,
+                    });
+                    self.members.last_mut().unwrap().head = false;
+                }
+                let control =
+                    !matches!(self.before_previous, Some(Token::Dot | Token::QuestionDot))
+                        && matches!(
+                            previous,
+                            Some(
+                                Token::KwIf
+                                    | Token::KwWhile
+                                    | Token::KwFor
+                                    | Token::KwWith
+                                    | Token::KwSwitch
+                                    | Token::KwCatch
+                            )
+                        );
                 self.delimiters.push((Token::LParen, control));
             }
             Token::RParen => {
                 if let Some((Token::LParen, control)) = self.delimiters.pop() {
                     self.closed_statement = control;
                 }
-                if let Some((depth, expression)) = self.pending_function
-                    && depth == self.delimiters.len()
+                if let Some(callable) = self.callables.last_mut()
+                    && !callable.arrow
+                    && callable.body_depth.is_none()
+                    && callable.depth == self.delimiters.len()
                 {
-                    self.function_body = Some(expression);
-                    self.pending_function = None;
+                    self.function_body = Some(callable.expression);
+                    callable.body_depth = Some(self.delimiters.len() + 1);
                 }
+                self.finish_concise_arrows();
                 return;
             }
             Token::LBracket => self.delimiters.push((Token::LBracket, false)),
             Token::RBracket => {
                 self.delimiters.pop();
+                self.finish_concise_arrows();
             }
             Token::LBrace => {
+                let callable_body =
+                    self.function_body.is_some() || matches!(previous, Some(Token::Arrow));
+                let class_body = self
+                    .pending_class
+                    .is_some_and(|(depth, _)| depth == self.delimiters.len());
+                if matches!(previous, Some(Token::Arrow))
+                    && let Some(callable) = self.callables.last_mut()
+                {
+                    callable.body_depth = Some(self.delimiters.len() + 1);
+                }
                 let statement = if let Some(expression) = self.function_body.take() {
                     !expression
                 } else if let Some((depth, expression)) = self.pending_class
@@ -982,11 +1167,40 @@ impl Lexer {
                         )
                 };
                 self.delimiters.push((Token::LBrace, statement));
+                if class_body || !statement && !callable_body {
+                    self.members.push(LexicalMember {
+                        depth: self.delimiters.len(),
+                        head: true,
+                        async_names: 0,
+                        generator: false,
+                    });
+                }
             }
             Token::RBrace => {
+                let depth = self.delimiters.len();
+                if self
+                    .members
+                    .last()
+                    .is_some_and(|member| member.depth == depth)
+                {
+                    self.members.pop();
+                }
+                if self
+                    .callables
+                    .last()
+                    .is_some_and(|callable| callable.body_depth == Some(depth))
+                {
+                    self.callables.pop();
+                    if let Some(member) = self.members.last_mut() {
+                        member.head = true;
+                        member.async_names = 0;
+                        member.generator = false;
+                    }
+                }
                 if let Some((Token::LBrace, statement)) = self.delimiters.pop() {
                     self.closed_statement = statement;
                 }
+                self.finish_concise_arrows();
                 return;
             }
             _ => {}
@@ -994,14 +1208,40 @@ impl Lexer {
         self.closed_statement = false;
     }
 
+    fn finish_concise_arrows(&mut self) {
+        while self.callables.last().is_some_and(|callable| {
+            callable.arrow
+                && callable.body_depth.is_none()
+                && callable.depth > self.delimiters.len()
+        }) {
+            self.callables.pop();
+        }
+    }
+
     fn regex_allowed(&self) -> bool {
-        // At Script top level these contextual words are identifier references.
-        // Module await and callable yield continue to admit an operand literal.
-        if !self.module_goal
-            && self.delimiters.is_empty()
-            && matches!(self.previous, Some(Token::KwAwait | Token::KwYield))
+        if matches!(self.before_previous, Some(Token::Dot | Token::QuestionDot))
+            && self
+                .previous
+                .as_ref()
+                .is_some_and(|token| token.identifier_name().is_some())
         {
             return false;
+        }
+        if matches!(self.previous, Some(Token::KwAwait | Token::KwYield)) {
+            if matches!(self.before_previous, Some(Token::Dot | Token::QuestionDot)) {
+                return false;
+            }
+            let (await_allowed, yield_allowed) = self
+                .callables
+                .last()
+                .map_or((self.module_goal, false), |callable| {
+                    (callable.is_async, callable.is_generator)
+                });
+            return if matches!(self.previous, Some(Token::KwAwait)) {
+                await_allowed
+            } else {
+                yield_allowed
+            };
         }
         if self.closed_statement && matches!(self.previous, Some(Token::RParen | Token::RBrace)) {
             return true;
@@ -1020,6 +1260,7 @@ impl Lexer {
                     | Token::EscapedString(_)
                     | Token::LegacyString(_)
                     | Token::Regex(_, _)
+                    | Token::Backtick
                     | Token::RParen
                     | Token::RBracket
                     | Token::RBrace

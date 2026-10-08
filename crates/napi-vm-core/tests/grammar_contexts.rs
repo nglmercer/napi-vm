@@ -1446,3 +1446,73 @@ fn annex_b_call_targets_exclude_logical_assignments_and_tagged_templates() {
     }
     assert!(parses("import d, * as ns from 'm';", ParseGoal::Module));
 }
+
+#[test]
+fn templates_and_async_declarations_preserve_lexical_goals() {
+    for source in [
+        "async function f(){} /x/.test('x');",
+        "const f=async function(){} / 2 / 3;",
+        "o.if() / 2 / 3;",
+        "o?.while() / 2 / 3;",
+        "const t=`${1 / 2 / 3}`;",
+        "const t=`${/x/.test('x')}`;",
+        "const t=`${`${/x/.test('x')}`} ${1/2/3}`;",
+        "const x=`x` / 2 / 3;",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+    for source in [
+        "`${1/2/3}`==='0.16666666666666666';",
+        "`${/x/.test('x')}`==='true';",
+        "`${`${/x/.test('x')}`} ${6/2/3}`==='true 1';",
+    ] {
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn callable_lexical_goals_distinguish_contextual_names_from_operands() {
+    for source in [
+        "{var yield=12,a=3,b=6,g=2;yield/a;b/g;}",
+        "function f(){var yield=12,a=3,b=6,g=2;yield/a;b/g;}",
+        "const o={m(){var yield=12,a=3,b=6,g=2;yield/a;b/g;}};",
+        "function* f(){yield /x/;function g(){var yield=12,a=3,b=6,g=2;yield/a;b/g;}yield /y/;}",
+        "const o={*m(){yield /x/;},async m2(){await /x/;},async *m3(){yield /x/;await /y/;}};",
+        "class C{*m(){yield /x/;}async m2(){await /x/;}async *m3(){yield /x/;await /y/;}}",
+        "const f=async()=>await /x/;",
+        "const f=async()=>{await /x/;};",
+        "function f(x=function*(){yield /x/;}){} /y/;",
+        "const o={async(){var await=12,a=3,b=6,g=2;await/a;b/g;}};",
+        "const o={x:f() / 2 / 3};",
+        "function* f(){o.yield / 2 / 3;}async function g(){o.await / 2 / 3;}",
+        "async\nfunction f(){var await=12,a=3,b=6,g=2;await/a;b/g;} /x/;",
+        "class C{async\nm(){var await=12,a=3,b=6,g=2;await/a;b/g;}}",
+        "async\nx=>await/a;b/g;",
+        "function* f(){yield `${/x/.test('x')}`;}",
+    ] {
+        assert!(parses(source, ParseGoal::Script), "rejected {source}");
+    }
+}
+
+#[test]
+fn keyword_member_names_and_template_line_endings_follow_lexical_grammar() {
+    for name in [
+        "return", "class", "function", "enum", "debugger", "yield", "await",
+    ] {
+        assert!(parses(&format!("o.{name} / 2 / 3;"), ParseGoal::Script));
+    }
+    for newline in ["\r", "\r\n", "\n"] {
+        let source = format!(
+            "function tag(s){{return s[0]==='a\\nb'&&s.raw[0]==='a\\nb'}}tag`a{newline}b`;"
+        );
+        let result = napi_vm_core::Interpreter::with_builtins().eval_source(&source);
+        assert!(
+            matches!(result, Ok(napi_vm_core::Value::Bool(true))),
+            "{source}: {result:?}"
+        );
+    }
+}

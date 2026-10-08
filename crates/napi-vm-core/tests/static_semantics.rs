@@ -448,7 +448,7 @@ fn assignment_targets_and_var_lexical_conflicts_are_early_errors() {
         "1=2;",
         "true++;",
         "++null;",
-        "f()=1;",
+        "'use strict';f()=1;",
         "this=1;",
         "(a+b)=1;",
         "obj?.x=1;",
