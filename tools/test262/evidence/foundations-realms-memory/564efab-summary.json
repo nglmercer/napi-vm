@@ -1,0 +1,49 @@
+{
+  "source_commit": "564efabeb8f3f1870c272398fdf23d3d89e5ee14",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "f094978a8fc641e624517d20bd94a546f67049ee2fae954e3708a24cccb569ce",
+  "classification": "Exploratory focused validation; one lost pass blocks full run; not complete Phase 1",
+  "total": 3721,
+  "counts": {
+    "pass": 3289,
+    "fail": 432,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 359,
+  "lost_passes": 1,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 877,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "One Atomics waitAsync fuel failure in wider run; 30 isolated diagnostics pass; queue-publication handoff fix and bound realms in newer source; Array constructors and species dependencies remain",
+  "archive_sha256": {
+    "564efab-release-build.log.gz": "a113ccad7cd3b0d95facd39ff11f6ed7eda221a41eab923f4205ef1f97de0ed7",
+    "564efab-tooling-tests.log.gz": "277dc8a3a1a4bd46163a2c7755c9cac05411614c42f79f11d5873be5f238e7ea",
+    "564efab-wasm-tests.log.gz": "c3ff3a0a07705687e29f6a41104e20cd081e0c50086be617ec1583481e0cb041",
+    "564efab-node-tests.log.gz": "18c9686e076ddf4b36bb350825cdf3c46535bdd9b3dda8821d1a18146ce5cb41",
+    "564efab-native-build.log.gz": "67c530314660268766e5faf143759d3bd88078ea55c03464bb2af46c3329afc4",
+    "564efab-minimal-tests.log.gz": "825206566fd1e394d4f7262e314ef41b4fafecf5790eba0b7285a3b59b834f3a",
+    "564efab-allfeatures-tests.log.gz": "b981f895ad417493a06ce9fa9e7565b359e4ed274ef83a1280ddf93a94b03097",
+    "564efab-clippy.log.gz": "be63ccf1380f1e4c185ecc42af2bb9228c635c615bff5391d648a865741e6422",
+    "564efab-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "564efab-focused.json.gz": "bfcbcaa77cb40355c2f98b75795e4fcaf34812290ad256c00b86cf56c8c83c69",
+    "564efab-focused.jsonl.gz": "1bc1afdd1ce142b4af7566e445dfd8f6e6da21dbe0e761ed58c7d459aae95970",
+    "564efab-focused-transitions.json.gz": "e9123fa152bc55f9d311ce2dac88bbe1022ffb01ad1011f4195f79a83f76a4c5",
+    "564efab-focused-7c0a9ce-projection.json.gz": "7918ca783daee3a2d2b055c645cf3ba497eaa89dc2e1fdcca99ab92a38374f61",
+    "564efab-waitasync-repeated.json.gz": "3baba08ce55fc5877bf19356bfb7a67019600d22054c567fdcd0e99f0549077f"
+  }
+}

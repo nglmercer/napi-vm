@@ -105,3 +105,14 @@ harness errors, or skips occurred. All required checks passed; see
 `8314510-summary.json` and archived logs. This source does not complete Phase 1;
 Proxy revocation and remaining Array allocation dependencies are still open.
 No full corpus or full AST/bytecode differential measurement is claimed.
+
+### Source 564efab: exploratory Proxy lifecycle validation
+
+All required checks passed. The wider 3,721-variant selection passed 3,289, failed
+432, and produced no special outcomes. Against the matching 7c0a9ce projection
+it adds 359 passes and loses one: Atomics/waitAsync/bigint/was-woken-before-timeout,
+script, instruction fuel exhausted. This failed gate is retained in the archives;
+it did not trigger a full run. Thirty isolated repetitions passed and are archived
+as diagnostics, not as replacement conformance evidence. A newer source corrects
+broadcast acknowledgement ordering and yields after queue publication. Validation
+of that source must include another complete focused gate.
