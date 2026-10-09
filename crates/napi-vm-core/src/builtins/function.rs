@@ -268,28 +268,22 @@ fn function_bind(
         ));
     }
 
+    let prototype = interp.get_prototype_of(&target)?;
     let bound_this = args.first().cloned().unwrap_or(Value::Undefined);
     let new_arguments: Vec<Value> = args.into_iter().skip(1).collect();
+    let descriptor = super::object::descriptor_for_in(interp, &target, "length")?;
+    let mut target_length = 0.0;
+    if !matches!(descriptor, Value::Undefined)
+        && let Value::Number(length) = interp.get_prop_value_str(&target, "length")?
+    {
+        target_length = if length.is_nan() { 0.0 } else { length.trunc() };
+    }
+    let bound_length = (target_length - new_arguments.len() as f64).max(0.0);
     let target_name = interp.get_prop_value_str(&target, "name")?;
     let target_name = match &target_name {
         Value::String(name) => name.to_string(),
-        _ => match &target {
-            Value::Class(class) => class.name.clone(),
-            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.to_string()
-            }
-            _ => String::new(),
-        },
+        _ => String::new(),
     };
-    let target_length = interp
-        .get_prop_value_str(&target, "length")
-        .and_then(|length| interp.ecmascript_to_number(&length))?;
-    let target_length = if target_length.is_nan() {
-        0.0
-    } else {
-        target_length.trunc()
-    };
-    let bound_length = (target_length - new_arguments.len() as f64).max(0.0);
 
     let (bound_target, bound_this, mut bound_arguments) = match &target {
         Value::Function(function) => match &function.bound {
@@ -308,6 +302,7 @@ fn function_bind(
     bound_arguments.extend(new_arguments);
 
     let properties = FunctionData::properties_with_default_prototype(&interp.persistent_global);
+    properties.set_proto((!matches!(prototype, Value::Null)).then(|| Rc::new(prototype)));
     properties.borrow_mut().push((
         "name".into(),
         Value::String((format!("bound {target_name}")).into()),

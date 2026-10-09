@@ -1037,3 +1037,21 @@ fn proxy_extensibility_and_prototype_operations_share_invariant_checks() {
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn bound_functions_observe_target_prototypes_before_metadata_and_realm_lookup() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var target=function(a,b,c){};").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "Object.getPrototypeOf(Function.prototype.bind.call(other.target,null))===other.Function.prototype;",
+        "var log='';var proto={};var target=new Proxy(other.target,{getPrototypeOf(){log+='p';return proto;},getOwnPropertyDescriptor(target,key){log+='d';return Reflect.getOwnPropertyDescriptor(target,key);},get(target,key){log+=key==='length'?'l':'n';return target[key];}});var bound=Function.prototype.bind.call(target,null,1);log==='pdln'&&bound.length===2&&Object.getPrototypeOf(bound)===proto;",
+        "var target=function(){};Object.defineProperty(target,'length',{value:{valueOf(){throw new Error('length conversion');}}});target.bind(null).length===0;",
+        "var pair=Proxy.revocable(other.target,{});var bound=Function.prototype.bind.call(pair.proxy,null);pair.revoke();var observed=false;Object.defineProperty(bound,Symbol.species,{get(){observed=true;return Array;}});var input=[1];input.constructor=bound;var caught;try{input.map(x=>x);}catch(e){caught=e;}caught instanceof TypeError&&!observed;",
+        "caught=undefined;try{Function.prototype.bind.call(pair.proxy,null);}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}

@@ -1503,7 +1503,11 @@ fn object_get_own_descriptors(
 
 /// Build the descriptor object for one own property, or `undefined` when the
 /// property does not exist.
-fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Result<Value, VmErr> {
+pub(crate) fn descriptor_for_in(
+    interp: &mut Interpreter,
+    target: &Value,
+    key: &str,
+) -> Result<Value, VmErr> {
     if let Value::Proxy(proxy) = target {
         let (target, handler) = proxy.snapshot()?;
         let trap = interp.get_prop_value_str(&handler, "getOwnPropertyDescriptor")?;

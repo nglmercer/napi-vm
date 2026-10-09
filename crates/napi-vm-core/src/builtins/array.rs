@@ -614,7 +614,7 @@ fn array_species_create(
     }
     let mut constructor = interp.get_prop_value_str(original, "constructor")?;
     if super::is_constructor(&constructor)
-        && let Some(realm) = crate::interpreter::realm::value_realm(&constructor)
+        && let Some(realm) = crate::interpreter::realm::function_realm(&constructor)?
         && let Some(current) = crate::interpreter::realm::allocation_global()
         && !Rc::ptr_eq(&realm, &current)
         && realm

@@ -300,7 +300,6 @@ fn run_worker(
                         VmErr::Msg("Error: Agent has no receiveBroadcast callback".into())
                     })?;
                 let buffer = vm.shared_array_buffer_from_memory(memory);
-                let _ = received.send(());
                 // The interpreter and callback are used only on this worker's
                 // owner thread. notify/report only signal native host state.
                 vm.set_cancellation_token(cancellation.clone());
@@ -310,6 +309,9 @@ fn run_worker(
                         callback,
                         args: vec![buffer, id.value()],
                     });
+                // Acknowledge publication to the owner queue, not receipt of
+                // a command whose callback has not yet been queued.
+                let _ = received.send(());
                 vm.poll_event_loop(napi_vm::TurnBudget::jobs(10_000))?;
                 super::collect_requested_gc(&mut vm);
             }
@@ -389,6 +391,10 @@ fn broadcast(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, 
             }
         }
     }
+    // Yield after publishing all mailboxes so worker owners can make progress
+    // before this owner starts a guest shared-memory polling loop. No worker
+    // is joined here: callbacks may block until this owner notifies them.
+    std::thread::yield_now();
     Ok(Value::Undefined)
 }
 
