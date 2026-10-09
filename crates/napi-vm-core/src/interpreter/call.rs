@@ -546,11 +546,53 @@ impl Interpreter {
     ///
     /// Non-configurable properties survive and yield `false`; a missing
     /// property is already absent, so deleting it succeeds.
+    pub(crate) fn delete_member_or_throw(
+        &mut self,
+        obj: &Value,
+        key: &Value,
+        strict: bool,
+    ) -> Result<Value, VmErr> {
+        let result = self.delete_member(obj, key)?;
+        if strict && matches!(result, Value::Bool(false)) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot delete a non-configurable property".into(),
+            ));
+        }
+        Ok(result)
+    }
+
     pub(crate) fn delete_member(&mut self, obj: &Value, key: &Value) -> Result<Value, VmErr> {
+        let key = self.proxy_property_key(key)?;
+        self.delete_member_key(obj, &key, 0)
+    }
+
+    fn delete_member_key(
+        &mut self,
+        obj: &Value,
+        key: &Value,
+        depth: usize,
+    ) -> Result<Value, VmErr> {
+        self.check_execution_interrupt()?;
+        if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+            return Err(crate::value::limit_err(
+                "Maximum Proxy traversal depth exceeded",
+            ));
+        }
+        stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
+            self.delete_member_inner(obj, key, depth)
+        })
+    }
+
+    fn delete_member_inner(
+        &mut self,
+        obj: &Value,
+        key: &Value,
+        depth: usize,
+    ) -> Result<Value, VmErr> {
         if let Some(proxy) = obj.as_proxy() {
             let (target, handler) = proxy.snapshot()?;
             if let Some(trap) = self.proxy_trap(&handler, "deleteProperty")? {
-                let name = self.proxy_property_key(key)?;
+                let name = key.clone();
 
                 let result = self.call_this(&trap, handler, vec![target.clone(), name.clone()])?;
                 if !result.is_truthy() {
@@ -571,7 +613,15 @@ impl Interpreter {
                 }
                 return Ok(Value::Bool(true));
             }
-            return self.delete_member(&target, key);
+            return self.delete_member_key(&target, key, depth + 1);
+        }
+        let descriptor = crate::builtins::object::descriptor_for_key_in(self, obj, key)?;
+        if !matches!(descriptor, Value::Undefined)
+            && !descriptor
+                .get_prop("configurable")
+                .is_some_and(|value| value.is_truthy())
+        {
+            return Ok(Value::Bool(false));
         }
         match obj {
             Value::RealmGlobal(global) => {
@@ -587,6 +637,21 @@ impl Interpreter {
                         .borrow_mut()
                         .delete_global_property(&key),
                 ))
+            }
+            Value::TypedArray(view) => {
+                let slot = self.property_key(key)?;
+                if let Some(index) = crate::builtins::canonical_numeric_index(&slot) {
+                    return Ok(Value::Bool(!crate::builtins::valid_integer_index(
+                        view, index,
+                    )));
+                }
+                self.delete_member_key(
+                    &Value::Object {
+                        props: view.properties.clone(),
+                    },
+                    key,
+                    depth + 1,
+                )
             }
             Value::Object { props } => {
                 let slot = self.property_key(key)?;
@@ -701,7 +766,11 @@ impl Interpreter {
             }
             _ => {
                 if let Some(properties) = obj.exotic_properties() {
-                    return self.delete_member(&Value::Object { props: properties }, key);
+                    return self.delete_member_key(
+                        &Value::Object { props: properties },
+                        key,
+                        depth + 1,
+                    );
                 }
                 Ok(Value::Bool(true))
             }

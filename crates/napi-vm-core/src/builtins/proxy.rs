@@ -219,6 +219,39 @@ impl Interpreter {
         }
     }
 
+    /// Enforce [[Get]] invariants after the trap, against the target's current
+    /// own descriptor (which the trap may have changed).
+    pub(crate) fn validate_proxy_get(
+        &mut self,
+        target: &Value,
+        key: &Value,
+        result: Value,
+    ) -> Result<Value, VmErr> {
+        let descriptor = super::object::descriptor_for_key_in(self, target, key)?;
+        if !matches!(descriptor, Value::Undefined)
+            && !descriptor
+                .get_prop("configurable")
+                .is_some_and(|value| value.is_truthy())
+        {
+            if let Some(value) = descriptor.get_prop("value") {
+                if !descriptor
+                    .get_prop("writable")
+                    .is_some_and(|value| value.is_truthy())
+                    && !super::object::same_value(&value, &result)
+                {
+                    return Err(VmErr::Msg(
+                        "TypeError: Proxy get cannot change a frozen target value".into(),
+                    ));
+                }
+            } else if matches!(descriptor.get_prop("get"), Some(Value::Undefined))
+                && !matches!(result, Value::Undefined)
+            {
+                return Err(VmErr::Msg("TypeError: Proxy get must return undefined for a protected accessor without a getter".into()));
+            }
+        }
+        Ok(result)
+    }
+
     /// The handler's trap named `name`, if it defines one.
     pub(crate) fn proxy_trap(
         &mut self,

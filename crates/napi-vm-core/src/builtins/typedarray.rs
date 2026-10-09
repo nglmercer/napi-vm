@@ -232,6 +232,7 @@ pub(super) fn install(e: &mut Environment) {
             .and_then(|constructor| constructor.get_prop("prototype"));
         for (name, length, method) in [
             ("isLockFree", 1, atomics_is_lock_free as _),
+            ("pause", 0, atomics_pause as _),
             ("load", 2, atomics_load as _),
             ("store", 3, atomics_store as _),
             ("add", 3, atomics_add as _),
@@ -812,6 +813,24 @@ fn shared_array_buffer_grow(
             range_err("Invalid shared array buffer growth length")
         }
     })?;
+    Ok(Value::Undefined)
+}
+
+/// A scheduling hint, never a wait or a guest-budget refill. Validation does
+/// not coerce the optional iteration number or invoke guest callbacks.
+fn atomics_pause(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(value) = args.first()
+        && !matches!(value, Value::Undefined)
+        && !matches!(value, Value::Number(number) if number.is_finite() && *number >= 0.0 && number.fract() == 0.0)
+    {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics.pause iteration number must be a nonnegative integer Number".into(),
+        ));
+    }
+    interp.check_execution_interrupt()?;
+    std::hint::spin_loop();
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::yield_now();
     Ok(Value::Undefined)
 }
 

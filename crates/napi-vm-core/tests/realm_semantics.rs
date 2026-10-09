@@ -1440,3 +1440,125 @@ fn proxy_key_invariant_errors_use_the_operation_realm() {
     "#,
     );
 }
+
+#[test]
+fn atomic_pause_is_a_noncoercing_realm_owned_scheduling_hint() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var calls=0,bad={valueOf(){calls++;return 1;}},caught;
+        try{other.Atomics.pause(bad);}catch(e){caught=e;}
+        other.Atomics.pause()===undefined&&other.Atomics.pause(0)===undefined&&other.Atomics.pause(-0)===undefined&&other.Atomics.pause(1)===undefined&&calls===0&&caught instanceof other.TypeError&&Object.getPrototypeOf(other.Atomics.pause)===other.Function.prototype&&other.Atomics.pause.length===0&&other.Atomics.pause.name==='pause';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var invalid=[null,-1,0.5,NaN,Infinity,'1',1n],rejected=0;
+        for(var value of invalid){try{Atomics.pause(value);}catch(e){if(e instanceof TypeError)rejected++;}}
+        var construct=false;try{new Atomics.pause();}catch(e){construct=e instanceof TypeError;}
+        rejected===invalid.length&&construct;
+    "#,
+    );
+}
+
+#[test]
+fn shared_atomic_bigint_results_use_observable_primitive_conversion() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var calls=0,value={valueOf(){calls++;return 33n;}};
+        var array=new BigInt64Array(new SharedArrayBuffer(8));
+        Atomics.store(array,0,value)===BigInt(value)&&Atomics.load(array,0)===33n&&calls===2&&BigInt({valueOf(){return 42;}})===42n;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_deletion_coerces_keys_before_dispatch_and_only_once() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var calls=0,events='',key={toString(){calls++;events+='k';return 'x';}};
+        var handler={get deleteProperty(){events+='t';return function(t,k){events+='d';return k==='x';};}};
+        var proxy=new Proxy(new Proxy({},handler),{});
+        Reflect.deleteProperty(proxy,key)&&calls===1&&events==='ktd';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var marker={},key={toString(){throw marker;}},r=Proxy.revocable({},{}),caught;r.revoke();
+        try{Reflect.deleteProperty(r.proxy,key);}catch(e){caught=e;}
+        caught===marker;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_string_exotics_preserve_keys_and_strict_deletion_rules() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol(),string=new String('str');string[symbol]=1;
+        var proxy=new Proxy(new Proxy(string,{}),{}),keys=Reflect.ownKeys(proxy);
+        keys.length===5&&keys[0]==='0'&&keys[1]==='1'&&keys[2]==='2'&&keys[3]==='length'&&keys[4]===symbol&&!Reflect.deleteProperty(proxy,'0');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var fn=function(){},proxy=new Proxy(new Proxy(fn,{}),{}),caught;
+        function strictDelete(){'use strict';delete proxy.prototype;}
+        try{strictDelete();}catch(e){caught=e;}
+        caught instanceof TypeError&&!Reflect.deleteProperty(proxy,'prototype');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var proxy=new Proxy(new Proxy(/x/g,{}),{deleteProperty:null}),caught;
+        function strictDelete(){'use strict';delete proxy.lastIndex;}
+        try{strictDelete();}catch(e){caught=e;}
+        caught instanceof TypeError&&!Reflect.deleteProperty(proxy,'lastIndex');
+    "#,
+    );
+}
+
+#[test]
+fn proxy_get_protects_frozen_values_and_undefined_getters() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('key'),target={};Object.defineProperty(target,symbol,{value:NaN});
+        var proxy=new Proxy(target,{get(){return NaN;}});
+        Number.isNaN(Reflect.get(proxy,symbol));
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={};Object.defineProperty(target,'x',{value:-0});
+        var proxy=new Proxy(target,{get(){return 0;}}),caught;
+        try{proxy.x;}catch(e){caught=e;}
+        caught instanceof TypeError;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={};Object.defineProperty(target,'x',{set(v){}});
+        var bad=new Proxy(target,{get(){return 1;}}),good=new Proxy(target,{get(){return undefined;}}),caught;
+        try{Reflect.get(bad,'x');}catch(e){caught=e;}
+        caught instanceof TypeError&&good.x===undefined;
+    "#,
+    );
+}

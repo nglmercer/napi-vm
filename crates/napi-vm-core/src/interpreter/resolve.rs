@@ -699,7 +699,12 @@ impl Interpreter {
             if let Some(trap) = self.proxy_trap(&handler, "get")? {
                 let key = self.proxy_property_key(p)?;
 
-                return self.call_this(&trap, handler, vec![target, key, receiver.clone()]);
+                let result = self.call_this(
+                    &trap,
+                    handler,
+                    vec![target.clone(), key.clone(), receiver.clone()],
+                )?;
+                return self.validate_proxy_get(&target, &key, result);
             }
             return self.get_prop_value_with_receiver(&target, p, receiver);
         }
@@ -800,7 +805,12 @@ impl Interpreter {
                 let trap_key = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&trap_key)?;
 
-                return self.call_this(&trap, handler, vec![target, trap_key, receiver.clone()]);
+                let result = self.call_this(
+                    &trap,
+                    handler,
+                    vec![target.clone(), trap_key.clone(), receiver.clone()],
+                )?;
+                return self.validate_proxy_get(&target, &trap_key, result);
             }
             return self.get_prop_value_str_with_receiver(&target, key, receiver);
         }

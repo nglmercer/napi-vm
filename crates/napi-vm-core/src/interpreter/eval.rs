@@ -2094,7 +2094,8 @@ impl Interpreter {
                         } => {
                             let obj = self.eval_expr(object)?;
                             let key = self.eval_expr(property)?;
-                            return self.delete_member(&obj, &key);
+                            let strict = self.global.borrow().strict();
+                            return self.delete_member_or_throw(&obj, &key, strict);
                         }
                         Expr::OptionalChain {
                             object, property, ..
@@ -2104,7 +2105,8 @@ impl Interpreter {
                                 return Ok(Value::Bool(true));
                             }
                             let key = self.eval_expr(property)?;
-                            return self.delete_member(&obj, &key);
+                            let strict = self.global.borrow().strict();
+                            return self.delete_member_or_throw(&obj, &key, strict);
                         }
                         // Resolve object and declarative bindings through the
                         // shared environment operation used by both tiers.

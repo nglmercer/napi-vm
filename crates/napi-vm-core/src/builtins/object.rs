@@ -138,7 +138,40 @@ fn type_err(msg: &str) -> VmErr {
 /// symbol slots. `enumerable_only` applies the `enumerable` attribute.
 fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
     match v {
-        Value::Object { props } => own_object_names(props, enumerable_only),
+        Value::Object { props } => {
+            let string = match props.meta.borrow().boxed_primitive.as_ref() {
+                Some(BoxedPrimitive::String(string)) => Some(string.clone()),
+                _ => None,
+            };
+            let mut names = Vec::new();
+            if let Some(string) = string {
+                names.extend((0..string.len()).map(|index| index.to_string()));
+                if !enumerable_only {
+                    names.push("length".into());
+                }
+            }
+            names.extend(own_object_names(props, enumerable_only));
+            names
+        }
+        Value::RegExp(data) => {
+            let mut names = Vec::new();
+            if !enumerable_only {
+                names.push("lastIndex".into());
+            }
+            names.extend(
+                own_object_names(&data.properties, enumerable_only)
+                    .into_iter()
+                    .filter(|name| name != "lastIndex"),
+            );
+            names
+        }
+        Value::TypedArray(view) => {
+            let mut names: Vec<_> = (0..view.effective_length())
+                .map(|index| index.to_string())
+                .collect();
+            names.extend(own_object_names(&view.properties, enumerable_only));
+            names
+        }
         Value::Class(class) => own_object_names(&class.statics, enumerable_only),
         Value::Function(function) => {
             function.ensure_name_length_properties();
@@ -236,12 +269,6 @@ pub(crate) fn ordinary_own_property_keys(
     } else {
         own_names(value, false)
     };
-    if let Value::TypedArray(view) = value {
-        names.splice(
-            0..0,
-            (0..view.effective_length()).map(|index| index.to_string()),
-        );
-    }
     let mut seen = std::collections::HashSet::new();
     names.retain(|name| seen.insert(name.clone()));
     // Integer index keys precede other strings; the sort is stable for the
@@ -299,6 +326,14 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
         if let Some(index) = crate::value::array_index(key) {
             return crate::value::str_char_at(string, index);
         }
+    }
+    if let Value::RegExp(data) = v
+        && key == "lastIndex"
+    {
+        return data
+            .properties
+            .own_value(key)
+            .or_else(|| Some(Value::Number(data.last_index.get() as f64)));
     }
     if let Value::TypedArray(view) = v
         && let Some(index) = crate::value::array_index(key)
@@ -503,17 +538,12 @@ fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
 }
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if matches!(v, Value::Undefined | Value::Null) {
-        return Err(type_err("Cannot convert undefined or null to object"));
-    }
-    let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
-    let found = if let Some(global) = interp.global_scope_of(&v) {
-        global.borrow().global_property(&key).is_some()
-    } else {
-        object_property_attributes(&v, &key).is_some()
-    };
-    Ok(Value::Bool(found))
+    let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.proxy_property_key(a.get(1).unwrap_or(&Value::Undefined))?;
+    Ok(Value::Bool(!matches!(
+        descriptor_for_key_in(interp, &target, &key)?,
+        Value::Undefined
+    )))
 }
 
 fn object_has_own_property(
@@ -521,11 +551,12 @@ fn object_has_own_property(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    object_has_own(
-        interp,
-        Value::Undefined,
-        vec![this, args.first().cloned().unwrap_or(Value::Undefined)],
-    )
+    let key = interp.proxy_property_key(args.first().unwrap_or(&Value::Undefined))?;
+    let target = to_object_receiver(&this)?;
+    Ok(Value::Bool(!matches!(
+        descriptor_for_key_in(interp, &target, &key)?,
+        Value::Undefined
+    )))
 }
 
 fn is_ecmascript_object(value: &Value) -> bool {
@@ -1654,7 +1685,7 @@ pub(crate) fn descriptor_for_key_in(
         if matches!(trap, Value::Undefined | Value::Null) {
             return descriptor_for_key_in(interp, &target, property_key);
         }
-        if !is_callable(&trap) {
+        if !crate::interpreter::is_callable_value(&trap) {
             return Err(type_err(
                 "Proxy getOwnPropertyDescriptor trap must be callable",
             ));

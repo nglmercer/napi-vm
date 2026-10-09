@@ -1359,3 +1359,16 @@ fn realm_intrinsic_arguments_and_proxy_abrupt_completions_share_tier_semantics()
         check(source, true);
     }
 }
+
+#[test]
+fn shared_proxy_deletion_and_atomic_hints_match_both_tiers() {
+    for source in [
+        "'use strict';var o={};Object.defineProperty(o,'x',{value:1});delete o.x;",
+        "var o={};Object.defineProperty(o,'x',{value:1});delete o.x;",
+        "'use strict';var p=new Proxy(new String('x'),{});delete p[0];",
+        "var p=new Proxy(new Uint8Array(1),{});Reflect.deleteProperty(p,'0');",
+        "Atomics.pause(1)===undefined;",
+    ] {
+        check(source, true);
+    }
+}

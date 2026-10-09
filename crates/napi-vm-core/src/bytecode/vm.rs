@@ -643,7 +643,9 @@ fn run_loop(
                 Instr::DelProp { dst, obj, key } => {
                     let obj = frame.registers[obj as usize].clone_for_execution();
                     let key = frame.registers[key as usize].clone_for_execution();
-                    frame.registers[dst as usize] = interp.delete_member(&obj, &key)?;
+                    let strict = current_scope(interp, frame).borrow().strict();
+                    frame.registers[dst as usize] =
+                        interp.delete_member_or_throw(&obj, &key, strict)?;
                 }
                 Instr::DelGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
