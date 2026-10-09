@@ -1042,7 +1042,11 @@ impl Interpreter {
     ) -> Result<bool, VmErr> {
         let key = self.proxy_property_key(property)?;
         let slot = self.property_key(&key)?;
-        let mut current = crate::builtins::object::to_object_receiver(target)?;
+        let mut current = if matches!(target, Value::GlobalObject) {
+            self.realm_global_object()
+        } else {
+            crate::builtins::object::to_object_receiver(target)?
+        };
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
             if let Value::Proxy(proxy) = &current {
                 let (target, handler) = proxy.snapshot()?;
@@ -1098,11 +1102,10 @@ impl Interpreter {
                 }
             }
             if crate::interpreter::strict_equals(&current, receiver)
-                && (matches!(current, Value::GlobalObject | Value::RealmGlobal(_))
-                    || matches!(current, Value::RegExp(_)) && slot == "lastIndex"
+                && (matches!(current, Value::RegExp(_)) && slot == "lastIndex"
                     || matches!(current, Value::Array(_)) && slot == "length")
             {
-                // Keep the existing realm-global and exotic storage helpers.
+                // Keep the existing exotic storage helpers.
                 return self.set_member(&current, &key, value);
             }
             if current

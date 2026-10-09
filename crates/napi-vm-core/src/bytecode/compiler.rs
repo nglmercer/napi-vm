@@ -939,8 +939,12 @@ impl<'a> Compiler<'a> {
     fn hoist_top(&mut self, stmts: &'a [Statement]) -> Result<(), Decline> {
         let mut vars = Vec::new();
         collect_var_names(stmts, &mut vars);
+        let lexical_names = crate::parser::top_lexical_names(stmts);
         let mut seen = HashSet::new();
         for name in vars {
+            if lexical_names.contains(&name) {
+                continue;
+            }
             if seen.insert(name.clone()) {
                 let index = self.intern_string(&name)?;
                 self.emit(Instr::HoistVarGlobal { name: index });
@@ -978,6 +982,7 @@ impl<'a> Compiler<'a> {
             self.emit(Instr::InitGlobal {
                 name: index,
                 src: value,
+                function: true,
             });
         }
         Ok(())
@@ -1032,6 +1037,7 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::InitGlobal {
                     name: index,
                     src: value,
+                    function: true,
                 });
             } else {
                 self.emit(Instr::InitLocal { slot, src: value });
@@ -1086,6 +1092,7 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::InitGlobal {
                     name: index,
                     src: value,
+                    function: true,
                 });
                 continue;
             }
@@ -1384,6 +1391,7 @@ impl<'a> Compiler<'a> {
                         self.emit(Instr::InitGlobal {
                             name: index,
                             src: value,
+                            function: true,
                         });
                     }
                 }
@@ -1491,6 +1499,7 @@ impl<'a> Compiler<'a> {
                         self.emit(Instr::InitGlobal {
                             name: index,
                             src: value,
+                            function: false,
                         });
                     }
                 }
@@ -1501,25 +1510,27 @@ impl<'a> Compiler<'a> {
                     ForBinding::Declaration {
                         pattern: Pattern::Ident(name),
                         initializer: None,
-                        ..
+                        kind,
                     },
                 obj,
                 body,
-            } => self.compile_for_in(name, obj, body),
+            } => self.compile_for_in(name, kind, obj, body),
             Statement::ForIn { .. } => Err(Decline::Func("for-in binding form")),
             Statement::ForOf {
                 binding:
                     ForBinding::Declaration {
                         pattern,
                         initializer: None,
-                        ..
+                        kind,
                     },
                 iter,
                 body,
                 is_await,
             } => match pattern {
-                Pattern::Ident(name) => self.compile_for_of(name, None, iter, body, *is_await),
-                _ => self.compile_for_of("", Some(pattern), iter, body, *is_await),
+                Pattern::Ident(name) => {
+                    self.compile_for_of(name, None, kind, iter, body, *is_await)
+                }
+                _ => self.compile_for_of("", Some(pattern), kind, iter, body, *is_await),
             },
             Statement::ForOf { .. } => Err(Decline::Func("for-of assignment head")),
             Statement::Labeled { label, body } => self.compile_labeled(label, body),
@@ -1695,7 +1706,11 @@ impl<'a> Compiler<'a> {
             }
             (DestructureMode::Decl { .. }, Binding::Global) => {
                 let index = self.intern_string(name)?;
-                self.emit(Instr::InitGlobal { name: index, src });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src,
+                    function: false,
+                });
             }
         }
         Ok(())
@@ -2263,7 +2278,11 @@ impl<'a> Compiler<'a> {
                     None => self.load_undefined()?,
                 };
                 let index = self.intern_string(name)?;
-                self.emit(Instr::InitGlobal { name: index, src });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src,
+                    function: false,
+                });
             }
         }
         self.load_undefined()
@@ -2541,10 +2560,36 @@ impl<'a> Compiler<'a> {
         Ok(value)
     }
 
-    /// Prepare a `for-in`/`for-of` head name. The parser erases the head
-    /// kind, and the evaluator assigns (never re-declares) per iteration:
-    /// top level writes the global binding, function bodies reuse or
-    /// create the function-scope slot, nested blocks shadow it fresh.
+    /// Lexical iteration heads use a boxed TDZ environment, replaced before
+    /// each binding initialization so closures retain their iteration's cell.
+    fn define_iteration_head(&mut self, names: &[String], kind: &VarKind) -> Result<(), Decline> {
+        for name in names {
+            let index = self.intern_string(name)?;
+            let undef = self.load_undefined()?;
+            self.emit(Instr::DefineGlobal {
+                name: index,
+                src: undef,
+                kind: if *kind == VarKind::Const {
+                    SlotKind::Const
+                } else {
+                    SlotKind::Let
+                },
+                initialized: false,
+            });
+        }
+        Ok(())
+    }
+
+    fn reset_iteration_head(&mut self, names: &[String], kind: &VarKind) -> Result<(), Decline> {
+        if *kind != VarKind::Var {
+            self.emit(Instr::PopScope);
+            self.emit(Instr::PushScope);
+            self.define_iteration_head(names, kind)?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a head after its lexical scope has been prepared.
     fn prepare_for_head(&mut self, name: &str) -> Result<ForHead, Decline> {
         if self.top_level {
             return Ok(ForHead::Global(self.intern_string(name)?));
@@ -2569,10 +2614,20 @@ impl<'a> Compiler<'a> {
 
     /// One head write per iteration: an unchecked initialize, matching the
     /// evaluator's kind- and zone-ignoring head assignment.
-    fn bind_for_head(&mut self, head: &ForHead, src: Reg) {
+    fn bind_for_head(&mut self, head: &ForHead, src: Reg, kind: &VarKind) {
         match head {
             ForHead::Slot(slot) => self.emit(Instr::InitLocal { slot: *slot, src }),
-            ForHead::Global(name) => self.emit(Instr::InitGlobal { name: *name, src }),
+            ForHead::Global(name) => {
+                if *kind == VarKind::Var {
+                    self.emit(Instr::StoreGlobal { name: *name, src });
+                } else {
+                    self.emit(Instr::InitGlobal {
+                        name: *name,
+                        src,
+                        function: false,
+                    });
+                }
+            }
         }
     }
 
@@ -2581,9 +2636,15 @@ impl<'a> Compiler<'a> {
     fn compile_for_in(
         &mut self,
         name: &'a str,
+        kind: &VarKind,
         obj: &'a Expr,
         body: &'a [Statement],
     ) -> Result<Reg, Decline> {
+        let names = vec![name.to_string()];
+        if *kind != VarKind::Var {
+            self.push_scope(names.iter().cloned().collect());
+            self.define_iteration_head(&names, kind)?;
+        }
         let head = self.prepare_for_head(name)?;
         let source = self.compile_expr(obj)?;
         let keys = self.alloc_reg()?;
@@ -2634,7 +2695,8 @@ impl<'a> Compiler<'a> {
             obj: keys,
             key: idx,
         });
-        self.bind_for_head(&head, key);
+        self.reset_iteration_head(&names, kind)?;
+        self.bind_for_head(&head, key, kind);
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov {
             dst: loop_value,
@@ -2662,6 +2724,9 @@ impl<'a> Compiler<'a> {
         let end = self.here();
         self.patch_jump(end_jump, end)?;
         self.finish_loop(ctx, increment, end)?;
+        if *kind != VarKind::Var {
+            self.pop_scope()?;
+        }
         Ok(loop_value)
     }
 
@@ -2673,12 +2738,21 @@ impl<'a> Compiler<'a> {
         &mut self,
         name: &'a str,
         pattern: Option<&'a Pattern>,
+        kind: &VarKind,
         iter: &'a Expr,
         body: &'a [Statement],
         is_await: bool,
     ) -> Result<Reg, Decline> {
         if is_await {
             return Err(Decline::Func("async needs Phase G"));
+        }
+        let names = match pattern {
+            Some(pattern) => pattern_names(pattern),
+            None => vec![name.to_string()],
+        };
+        if *kind != VarKind::Var {
+            self.push_scope(names.iter().cloned().collect());
+            self.define_iteration_head(&names, kind)?;
         }
         // Heads prepare before the iterable evaluates, like declarations.
         let head = match pattern {
@@ -2733,13 +2807,16 @@ impl<'a> Compiler<'a> {
             target,
             dst: scratch,
         });
+        self.reset_iteration_head(&names, kind)?;
         match (&head, pattern) {
-            (Some(head), None) => self.bind_for_head(head, yielded),
+            (Some(head), None) => self.bind_for_head(head, yielded, kind),
             (None, Some(pattern)) => {
                 self.compile_destructure(
                     pattern,
                     yielded,
-                    DestructureMode::Decl { is_var: false },
+                    DestructureMode::Decl {
+                        is_var: *kind == VarKind::Var,
+                    },
                 )?;
             }
             _ => return Err(Decline::Func("bad for-of head")),
@@ -2785,6 +2862,9 @@ impl<'a> Compiler<'a> {
         }
         for addr in ctx.breaks {
             self.patch_jump(addr, close_pad)?;
+        }
+        if *kind != VarKind::Var {
+            self.pop_scope()?;
         }
         Ok(loop_value)
     }
@@ -3038,6 +3118,7 @@ impl<'a> Compiler<'a> {
             self.emit(Instr::InitGlobal {
                 name: index,
                 src: tmp,
+                function: false,
             });
         }
         Ok(())
@@ -3089,7 +3170,11 @@ impl<'a> Compiler<'a> {
                             Some(value) => self.compile_expr(value)?,
                             None => self.load_undefined()?,
                         };
-                        self.emit(Instr::InitGlobal { name: index, src });
+                        self.emit(Instr::InitGlobal {
+                            name: index,
+                            src,
+                            function: false,
+                        });
                         continue;
                     }
                     let slot = self.declare_slot(name, slot_kind)?;
@@ -4629,13 +4714,13 @@ mod tests {
             reason("function g() { const f = () => arguments; return f; }"),
             "compiled"
         );
-        // A head inside an unscoped block nested in a pushed one declares
-        // in the outer scope without boxing, so capturing it declines.
+        // A lexical iteration head has its own boxed scope even inside
+        // surrounding blocks that need no runtime environment.
         assert_eq!(
             reason(
                 "function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; }"
             ),
-            "block-scope capture needs Phase G"
+            "compiled"
         );
     }
 

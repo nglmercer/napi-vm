@@ -1008,20 +1008,19 @@ fn object_set_prototype_of(
     Ok(value)
 }
 
-/// Validate and wrap the prototype argument shared by `create` and
-/// `setPrototypeOf`: an object, or `null` for a null prototype.
+/// Object.create accepts every object kind, including Proxy and realm globals.
 fn proto_arg(proto: &Value) -> Result<Option<Rc<Value>>, VmErr> {
-    match proto {
-        Value::Null | Value::Uninitialized | Value::Undefined => Ok(None),
-        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_) => {
-            Ok(Some(Rc::new(proto.clone())))
-        }
-        _ => Err(type_err("Object prototype may only be an Object or null")),
+    if matches!(proto, Value::Null) {
+        Ok(None)
+    } else if crate::interpreter::call::is_js_object(proto) {
+        Ok(Some(Rc::new(proto.clone())))
+    } else {
+        Err(type_err("Object prototype may only be an Object or null"))
     }
 }
 
 fn object_create(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let proto = a.first().cloned().unwrap_or(Value::Null);
+    let proto = a.first().cloned().unwrap_or(Value::Undefined);
     let created = Value::object_with_proto(vec![], proto_arg(&proto)?);
     if let Some(descriptors) = a.get(1)
         && !matches!(descriptors, Value::Undefined | Value::Null)
@@ -1699,10 +1698,7 @@ pub(crate) fn descriptor_for_key_in(
         }
         let previous = descriptor_for_key_in(interp, &target, property_key)?;
         let exists = !matches!(previous, Value::Undefined);
-        let extensible = match &target {
-            Value::GlobalObject | Value::RealmGlobal(_) => true,
-            _ => interp.is_extensible(&target)?,
-        };
+        let extensible = interp.is_extensible(&target)?;
         let configurable = previous
             .get_prop("configurable")
             .is_some_and(|v| v.is_truthy());
@@ -1770,18 +1766,11 @@ pub(crate) fn descriptor_for_key_in(
         return Ok(descriptor);
     }
     if let Some(global) = interp.global_scope_of(target) {
-        return Ok(global
+        let object = global
             .borrow()
-            .global_property(key)
-            .map(|(value, attrs)| {
-                Value::object(vec![
-                    ("value".into(), value),
-                    ("writable".into(), Value::Bool(attrs.writable)),
-                    ("enumerable".into(), Value::Bool(attrs.enumerable)),
-                    ("configurable".into(), Value::Bool(attrs.configurable)),
-                ])
-            })
-            .unwrap_or(Value::Undefined));
+            .global_object()
+            .expect("realm object record");
+        return Ok(descriptor_for(&object, key));
     }
     Ok(descriptor_for(target, key))
 }

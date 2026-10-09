@@ -466,32 +466,8 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                     }
                 }
             }
-            if !strict && std::rc::Rc::ptr_eq(&variable_scope, &interp.persistent_global) {
-                fn validate(
-                    body: &[crate::parser::Statement],
-                    scope: &crate::interpreter::Env,
-                ) -> Result<(), VmErr> {
-                    for statement in body {
-                        match statement {
-                            crate::parser::Statement::FnDecl { name, .. } => {
-                                if let Some((_, attributes)) = scope.borrow().global_property(name)
-                                    && !attributes.configurable
-                                    && !(attributes.writable && attributes.enumerable)
-                                {
-                                    return Err(VmErr::Msg(format!(
-                                        "TypeError: Cannot declare global function {name}"
-                                    )));
-                                }
-                            }
-                            crate::parser::Statement::Declarations(inner) => {
-                                validate(inner, scope)?
-                            }
-                            _ => {}
-                        }
-                    }
-                    Ok(())
-                }
-                validate(&body, &variable_scope)?;
+            if !strict {
+                interp.validate_global_declarations(&body, false)?;
             }
             interp.global = std::rc::Rc::new(std::cell::RefCell::new(
                 crate::interpreter::Environment::child(saved.clone()),

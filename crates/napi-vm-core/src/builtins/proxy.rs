@@ -151,6 +151,9 @@ impl Interpreter {
             }
             return Ok(true);
         }
+        if matches!(object, Value::GlobalObject) {
+            return self.define_own_property(&self.realm_global_object(), key, descriptor);
+        }
         let slot = self.property_key(key)?;
         if let Value::TypedArray(view) = object
             && let Some(index) = super::canonical_numeric_index(&slot)
@@ -199,9 +202,16 @@ impl Interpreter {
         {
             return Ok(false);
         }
+        let global = self.global_scope_of(object);
+        if let Some(global) = &global {
+            global.borrow().check_global_quota(&slot)?;
+        }
         let result = super::object::define_property(object, &slot, descriptor);
         match result {
             Ok(()) => {
+                if let Some(global) = &global {
+                    global.borrow_mut().note_global_property(&slot);
+                }
                 if let Value::Symbol(symbol) = key {
                     if let Value::Array(array) = object {
                         array.set_symbol_key(&slot, symbol.clone());
@@ -273,6 +283,9 @@ impl Interpreter {
     }
 
     pub(crate) fn is_extensible(&mut self, value: &Value) -> Result<bool, VmErr> {
+        if matches!(value, Value::GlobalObject) {
+            return self.is_extensible(&self.realm_global_object());
+        }
         if let Value::Proxy(proxy) = value {
             let (target, handler) = proxy.snapshot()?;
             let Some(trap) = self.proxy_trap(&handler, "isExtensible")? else {
@@ -297,6 +310,9 @@ impl Interpreter {
     }
 
     pub(crate) fn prevent_extensions(&mut self, value: &Value) -> Result<bool, VmErr> {
+        if matches!(value, Value::GlobalObject) {
+            return self.prevent_extensions(&self.realm_global_object());
+        }
         if let Value::Proxy(proxy) = value {
             let (target, handler) = proxy.snapshot()?;
             let Some(trap) = self.proxy_trap(&handler, "preventExtensions")? else {
@@ -328,6 +344,9 @@ impl Interpreter {
         value: &Value,
         requested: &Value,
     ) -> Result<bool, VmErr> {
+        if matches!(value, Value::GlobalObject) {
+            return self.set_prototype_of(&self.realm_global_object(), requested);
+        }
         if let Value::Proxy(proxy) = value {
             let (target, handler) = proxy.snapshot()?;
             let Some(trap) = self.proxy_trap(&handler, "setPrototypeOf")? else {

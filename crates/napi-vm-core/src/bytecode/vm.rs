@@ -511,17 +511,24 @@ fn run_loop(
                     let scope = current_scope(interp, frame);
                     interp.declare_binding_in(&scope, name, value, bind_kind(kind), initialized)?;
                 }
-                Instr::InitGlobal { name, src } => {
+                Instr::InitGlobal {
+                    name,
+                    src,
+                    function,
+                } => {
                     let name = const_string(frame.function, name)?;
                     let value = frame.registers[src as usize].clone_for_execution();
                     let scope = current_scope(interp, frame);
-                    interp.set_binding_in(&scope, name, value)?;
+                    if function {
+                        interp.declare_function_binding_in(&scope, name, value)?;
+                    } else {
+                        interp.set_binding_in(&scope, name, value)?;
+                    }
                 }
                 Instr::HoistVarGlobal { name } => {
                     let name = const_string(frame.function, name)?;
-                    if !interp.global.borrow().has(name) {
-                        interp.declare_binding(name, Value::Undefined, BindKind::Var, true)?;
-                    }
+                    let scope = current_scope(interp, frame);
+                    interp.hoist_var_binding_in(&scope, name)?;
                 }
                 Instr::BareVarLocal { slot } => {
                     if !frame.slots[slot as usize].initialized {

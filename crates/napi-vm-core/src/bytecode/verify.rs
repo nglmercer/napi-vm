@@ -370,7 +370,7 @@ impl Checker<'_> {
                 self.check_slot(address, *slot)?;
                 self.check_reg(address, *src)?;
             }
-            Instr::InitGlobal { name, src } => {
+            Instr::InitGlobal { name, src, .. } => {
                 self.check_const_is(address, *name, "string")?;
                 self.check_reg(address, *src)?;
             }

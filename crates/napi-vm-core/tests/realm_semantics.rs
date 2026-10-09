@@ -1562,3 +1562,189 @@ fn proxy_get_protects_frozen_values_and_undefined_getters() {
     "#,
     );
 }
+
+#[test]
+fn realm_global_object_properties_are_separate_from_lexical_bindings() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        let globalLexical = 1;
+        globalThis.globalLexical = 2;
+        globalLexical === 1 && globalThis.globalLexical === 2;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        Object.defineProperty(globalThis,'globalLexical',{value:3});
+        globalLexical === 1 && globalThis.globalLexical === 3 && Reflect.deleteProperty(globalThis,'globalLexical') && globalLexical === 1 && !Object.hasOwn(globalThis,'globalLexical');
+    "#,
+    );
+}
+
+#[test]
+fn realm_globals_share_descriptors_symbols_and_mutable_prototype_operations() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('global'),receiver;
+        Object.defineProperty(other,symbol,{get(){receiver=this;return 42;},configurable:true});
+        var keys=Reflect.ownKeys(other);
+        other[symbol]===42&&receiver===other&&keys[keys.length-1]===symbol&&Object.getOwnPropertySymbols(other)[0]===symbol;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var prototype={inherited:7};
+        Reflect.setPrototypeOf(other,prototype)&&Object.getPrototypeOf(other)===prototype&&other.inherited===7&&Reflect.setPrototypeOf(other,null)&&Object.getPrototypeOf(other)===null&&other.inherited===undefined;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        Reflect.isExtensible(other)&&Reflect.preventExtensions(other)&&!Reflect.isExtensible(other)&&!Reflect.defineProperty(other,'newProperty',{value:1})&&!Reflect.set(other,'newProperty',1)&&Reflect.setPrototypeOf(other,null);
+    "#,
+    );
+}
+
+#[test]
+fn global_object_accessors_are_used_for_identifier_references() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var value=1,readReceiver,writeReceiver;
+        Object.defineProperty(globalThis,'globalAccessor',{get(){readReceiver=this;return value;},set(v){writeReceiver=this;value=v;},configurable:true});
+        globalAccessor+=2;
+        value===3&&readReceiver===globalThis&&writeReceiver===globalThis&&globalAccessor===3;
+    "#,
+    );
+}
+
+fn run_global_ast(vm: &mut Interpreter, source: &str) -> Result<Value, napi_vm_core::VmErr> {
+    let tokens = napi_vm_core::Lexer::new(source).tokenize_with_spans();
+    let statements = napi_vm_core::Parser::new_with_spans(tokens).parse();
+    vm.run_program_body(&statements)
+}
+
+#[test]
+fn global_declaration_checks_precede_binding_creation_and_guest_effects() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("let priorLexical = 1;").unwrap();
+    assert!(
+        vm.eval_source("var createdBeforeConflict; var priorLexical;")
+            .is_err()
+    );
+    truth(
+        &mut vm,
+        "!Object.hasOwn(globalThis,'createdBeforeConflict')&&priorLexical===1;",
+    );
+    vm.eval_source("Object.defineProperty(globalThis,'protectedFunction',{value:1,writable:true,enumerable:false});").unwrap();
+    assert!(
+        run_global_ast(
+            &mut vm,
+            "var createdBeforeFunction; function protectedFunction(){};"
+        )
+        .is_err()
+    );
+    truth(
+        &mut vm,
+        "!Object.hasOwn(globalThis,'createdBeforeFunction')&&protectedFunction===1;",
+    );
+}
+
+#[test]
+fn global_function_declarations_replace_configurable_accessors_without_calling_them() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var calls=0;Object.defineProperty(globalThis,'replaceable',{get(){calls++;},set(){calls++;},configurable:true});").unwrap();
+    vm.eval_source("function replaceable(){return 42;}")
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var descriptor=Object.getOwnPropertyDescriptor(globalThis,'replaceable');
+        calls===0&&replaceable()===42&&descriptor.writable&&descriptor.enumerable&&!descriptor.configurable&&descriptor.get===undefined;
+    "#,
+    );
+}
+
+#[test]
+fn global_var_metadata_distinguishes_properties_from_declarations_in_both_tiers() {
+    type Eval = fn(&mut Interpreter, &str) -> Result<Value, napi_vm_core::VmErr>;
+    let runners: [Eval; 2] = [run_global_ast, Interpreter::eval_source];
+    for run in runners {
+        let mut vm = Interpreter::with_builtins();
+        run(&mut vm, "globalThis.objectOnly=1;").unwrap();
+        run(&mut vm, "let objectOnly=2;").unwrap();
+        truth(&mut vm, "objectOnly===2&&globalThis.objectOnly===1;");
+        run(&mut vm, "globalThis.declaredObject=1;var declaredObject;").unwrap();
+        assert!(run(&mut vm, "let declaredObject;").is_err());
+        run(
+            &mut vm,
+            "eval('var deletableEval=1;function deletableFunction(){return 2;}');",
+        )
+        .unwrap();
+        truth(
+            &mut vm,
+            "Object.getOwnPropertyDescriptor(globalThis,'deletableEval').configurable&&Object.getOwnPropertyDescriptor(globalThis,'deletableFunction').configurable;",
+        );
+        truth(&mut vm, "delete deletableEval&&delete deletableFunction;");
+        run(&mut vm, "let deletableEval=3;let deletableFunction=4;").unwrap();
+    }
+}
+
+#[test]
+fn lexical_loop_heads_do_not_mutate_or_escape_the_global_declarative_record() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        let outer=9;var closures=[];
+        for(let outer of [1,2]){closures.push(()=>outer);}
+        outer===9&&closures[0]()===1&&closures[1]()===2&&!Object.hasOwn(globalThis,'outer');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var caught;try{for(let outer of outer){}}catch(e){caught=e;}
+        caught instanceof ReferenceError&&outer===9;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var names=[];for(const key in {a:1,b:2}){names.push(()=>key);}
+        names[0]()==='a'&&names[1]()==='b'&&typeof key==='undefined';
+    "#,
+    );
+}
+
+#[test]
+fn proxy_prototypes_preserve_receivers_and_frozen_get_invariants() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var receiver,key;var p=new Proxy({}, {get(t,k,r){receiver=r;key=k;return 42;}});var o=Object.create(p);o.x===42&&receiver===o&&key==='x';",
+    );
+    truth(&mut vm, "var s=Symbol();o[s]===42&&receiver===o&&key===s;");
+    truth(
+        &mut vm,
+        "var t={};Object.defineProperty(t,'x',{value:1,writable:false,configurable:false});var bad=Object.create(new Proxy(t,{get(){return 2;}}));var caught;try{bad.x;}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    truth(&mut vm, "Object('abc').length===3;");
+    for source in ["Object.create()", "Object.create(undefined)"] {
+        assert!(
+            vm.eval_source(source)
+                .unwrap_err()
+                .to_string()
+                .contains("TypeError")
+        );
+    }
+}

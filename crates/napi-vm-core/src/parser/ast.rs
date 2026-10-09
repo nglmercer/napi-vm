@@ -610,6 +610,37 @@ fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
 /// functions or classes, which begin their own variable scope. Function
 /// declarations are collected too: they are `var`-scoped, and the interpreter
 /// defines them eagerly during hoisting.
+/// Lexical names introduced by this statement list, without descending into
+/// lexical blocks or nested functions. Used by declaration instantiation and
+/// by the compiler's representation of the same declarations.
+pub(crate) fn top_lexical_names(body: &[Statement]) -> Vec<String> {
+    let mut names = Vec::new();
+    for statement in body {
+        match statement {
+            Statement::VarDecl {
+                name,
+                kind,
+                destructuring,
+                ..
+            } if *kind != VarKind::Var => {
+                if let Some(pattern) = destructuring {
+                    names.extend(pattern_names(pattern));
+                } else {
+                    names.push(name.clone());
+                }
+            }
+            Statement::ClassDecl { name, .. } => names.push(name.clone()),
+            Statement::Declarations(inner)
+            | Statement::ResourceDeclaration {
+                declarations: inner,
+                ..
+            } => names.extend(top_lexical_names(inner)),
+            _ => {}
+        }
+    }
+    names
+}
+
 pub fn collect_var_names(stmts: &[Statement], out: &mut Vec<String>) {
     collect_scoped_var_names(stmts, out, true);
 }

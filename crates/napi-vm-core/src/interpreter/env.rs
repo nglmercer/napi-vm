@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use crate::value::{MAX_GLOBAL_BINDINGS, Value, limit_err};
+use crate::value::{MAX_GLOBAL_BINDINGS, ObjectCell, PropAttrs, Value, limit_err};
 
 pub type Env = Rc<RefCell<Environment>>;
 
@@ -216,11 +216,57 @@ impl Vars {
     }
 }
 
+/// The object side of a realm's GlobalEnvironment. Lexical declarations stay
+/// in Environment::vars; properties, descriptors, prototype and extensibility
+/// use the same storage as ordinary objects.
+#[derive(Clone)]
+struct GlobalEnvironment {
+    object: Rc<ObjectCell>,
+    var_names: HashSet<String>,
+    user_names: HashSet<String>,
+}
+
+impl GlobalEnvironment {
+    fn new(parent: Option<&Env>) -> Self {
+        let _realm = super::realm::AllocationRealm::enter(None);
+        let mut entries = Vec::new();
+        let mut attributes = Vec::new();
+        if let Some(parent) = parent {
+            let parent = parent.borrow();
+            for name in parent.global_property_keys() {
+                if let Some((value, attrs)) = parent.global_property(&name) {
+                    entries.push((name.clone(), value));
+                    attributes.push((name, attrs));
+                }
+            }
+        }
+        let value = Value::object(entries);
+        let Value::Object { props } = &value else {
+            unreachable!()
+        };
+        for (name, attrs) in attributes {
+            props.meta.borrow_mut().set_attrs(&name, attrs);
+        }
+        Self {
+            object: props.clone(),
+            var_names: HashSet::new(),
+            user_names: HashSet::new(),
+        }
+    }
+
+    fn value(&self) -> Value {
+        Value::Object {
+            props: self.object.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Environment {
     pub(crate) class_initializer: bool,
     pub(crate) with_object: Option<Value>,
     vars: Vars,
+    global_environment: Option<GlobalEnvironment>,
     parent: Option<Env>,
     /// Only the persistent user-global frame has a binding quota. Local
     /// function/catch frames and the trusted builtins frame leave this unset.
@@ -394,11 +440,103 @@ impl Environment {
             })
     }
 
-    pub(crate) fn set_property_attributes(&mut self, name: &str, attrs: crate::value::PropAttrs) {
-        self.property_attributes.insert(name.into(), attrs);
+    pub(crate) fn global_object(&self) -> Option<Value> {
+        self.global_environment
+            .as_ref()
+            .map(GlobalEnvironment::value)
     }
 
-    pub(crate) fn global_property(&self, name: &str) -> Option<(Value, crate::value::PropAttrs)> {
+    pub(crate) fn create_global_var_binding(
+        &mut self,
+        name: &str,
+        value: Value,
+        deletable: bool,
+    ) -> Result<(), crate::error::VmErr> {
+        self.check_global_quota(name)?;
+        if self.vars.get(name).is_some() {
+            return Err(crate::error::VmErr::Msg(format!(
+                "SyntaxError: Identifier '{name}' has already been declared"
+            )));
+        }
+        let Some(record) = &mut self.global_environment else {
+            unreachable!("global environment");
+        };
+        if record.object.own_value(name).is_none() {
+            if record.object.meta.borrow().non_extensible {
+                return Err(crate::error::VmErr::Msg(format!(
+                    "TypeError: Cannot declare global variable '{name}'"
+                )));
+            }
+            record.value().set_prop(name.into(), value)?;
+            record.object.meta.borrow_mut().set_attrs(
+                name,
+                PropAttrs {
+                    writable: true,
+                    enumerable: true,
+                    configurable: deletable,
+                },
+            );
+        }
+        record.var_names.insert(name.into());
+        record.user_names.insert(name.into());
+        Ok(())
+    }
+
+    pub(crate) fn own_lexical_binding(&self, name: &str) -> bool {
+        self.vars.get(name).is_some()
+    }
+
+    pub(crate) fn has_var_declaration(&self, name: &str) -> bool {
+        self.global_environment
+            .as_ref()
+            .is_some_and(|record| record.var_names.contains(name))
+    }
+
+    pub(crate) fn check_global_quota(&self, name: &str) -> Result<(), crate::error::VmErr> {
+        if let Some(record) = &self.global_environment
+            && self.vars.get(name).is_none()
+            && !record.user_names.contains(name)
+            && self
+                .global_limit
+                .is_some_and(|limit| self.vars.len() + record.user_names.len() >= limit)
+        {
+            return Err(limit_err("Maximum global binding count exceeded"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn note_global_property(&mut self, name: &str) {
+        if let Some(record) = &mut self.global_environment {
+            record.user_names.insert(name.into());
+        }
+    }
+
+    pub(crate) fn remove_global_var_name(&mut self, name: &str) {
+        if let Some(record) = &mut self.global_environment {
+            record.var_names.remove(name);
+            if record.object.own_value(name).is_none() {
+                record.user_names.remove(name);
+            }
+        }
+    }
+
+    pub(crate) fn set_property_attributes(&mut self, name: &str, attrs: PropAttrs) {
+        if let Some(record) = &self.global_environment {
+            record.object.meta.borrow_mut().set_attrs(name, attrs);
+        } else {
+            self.property_attributes.insert(name.into(), attrs);
+        }
+    }
+
+    pub(crate) fn global_property(&self, name: &str) -> Option<(Value, PropAttrs)> {
+        if let Some(record) = &self.global_environment {
+            return record.object.own_value(name).map(|value| {
+                (
+                    value.deref_binding(),
+                    record.object.meta.borrow().attrs_of(name),
+                )
+            });
+        }
         if let Some(binding) = self.vars.get(name)
             && (binding.kind == BindKind::Var || self.property_attributes.contains_key(name))
         {
@@ -422,16 +560,22 @@ impl Environment {
         if !attrs.configurable {
             return false;
         }
-        if self
-            .vars
-            .get(name)
-            .is_some_and(|binding| binding.kind == BindKind::Var)
-        {
-            self.remove(name);
+        if let Some(record) = &mut self.global_environment {
+            let companion = format!("__setter:{name}__");
+            record
+                .object
+                .borrow_mut()
+                .retain(|(key, _)| key != name && key != &companion);
+            record.object.meta.borrow_mut().forget(name);
+            record.object.meta.borrow_mut().forget(&companion);
+            record.object.note_mutated();
+            if !record.var_names.contains(name) {
+                record.user_names.remove(name);
+            }
+            return true;
         }
+        self.remove(name);
         self.property_attributes.remove(name);
-        // User shadows and the builtin parent represent one global property;
-        // deleting it must not reveal an earlier value from that parent.
         if let Some(parent) = &self.parent {
             parent.borrow_mut().delete_global_property(name);
         }
@@ -439,6 +583,18 @@ impl Environment {
     }
 
     pub(crate) fn global_property_keys(&self) -> Vec<String> {
+        if let Some(record) = &self.global_environment {
+            let meta = record.object.meta.borrow();
+            return record
+                .object
+                .borrow()
+                .iter()
+                .filter(|(name, _)| {
+                    meta.symbol_key(name).is_none() && !name.starts_with("__setter:")
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+        }
         self.all_keys()
             .into_iter()
             .filter(|name| self.global_property(name).is_some())
@@ -478,6 +634,7 @@ impl Environment {
     pub fn new() -> Self {
         Self {
             vars: Vars::Small(SmallVec::new()),
+            global_environment: None,
             parent: None,
             global_limit: None,
             module_context: None,
@@ -502,6 +659,7 @@ impl Environment {
     pub fn child(p: Env) -> Self {
         Self {
             vars: Vars::Small(SmallVec::new()),
+            global_environment: None,
             parent: Some(p),
             global_limit: None,
             module_context: None,
@@ -527,8 +685,10 @@ impl Environment {
     /// trusted builtins frame, and only this frame enforces the guest binding
     /// quota.
     pub fn global(parent: Option<Env>) -> Self {
+        let record = GlobalEnvironment::new(parent.as_ref());
         Self {
             vars: Vars::Small(SmallVec::new()),
+            global_environment: Some(record),
             parent,
             global_limit: Some(MAX_GLOBAL_BINDINGS),
             module_context: None,
@@ -568,6 +728,7 @@ impl Environment {
         };
         Self {
             vars,
+            global_environment: None,
             parent: Some(p),
             global_limit: None,
             module_context: None,
@@ -702,6 +863,13 @@ impl Environment {
                 Lookup::Uninitialized
             };
         }
+        if let Some(record) = &self.global_environment {
+            return record
+                .object
+                .own_value(n)
+                .map(|value| Lookup::Value(value.deref_binding()))
+                .unwrap_or(Lookup::Missing);
+        }
         match self.parent {
             Some(ref p) => p.borrow().lookup(n),
             None => Lookup::Missing,
@@ -713,15 +881,9 @@ impl Environment {
     /// `initialized: false` puts a `let`/`const` into its temporal dead zone;
     /// the declaration statement later calls [`Environment::initialize`].
     pub fn declare(&mut self, n: &str, value: Value, kind: BindKind, initialized: bool) {
-        if self.global_limit.is_some() && kind == BindKind::Var {
-            let attrs = self.global_property(n).map(|(_, attrs)| attrs).unwrap_or(
-                crate::value::PropAttrs {
-                    writable: true,
-                    enumerable: true,
-                    configurable: false,
-                },
-            );
-            self.property_attributes.entry(n.into()).or_insert(attrs);
+        if kind == BindKind::Var && self.global_environment.is_some() {
+            let _ = self.create_global_var_binding(n, value, false);
+            return;
         }
         let binding = Binding {
             silent_immutable: false,
@@ -759,12 +921,21 @@ impl Environment {
         kind: BindKind,
         initialized: bool,
     ) -> Result<(), crate::error::VmErr> {
-        if self.vars.get(n).is_none()
-            && self
-                .global_limit
-                .is_some_and(|limit| self.vars.len() >= limit)
-        {
-            return Err(limit_err("Maximum global binding count exceeded"));
+        if kind == BindKind::Var && self.global_environment.is_some() {
+            return self.create_global_var_binding(n, value, false);
+        }
+        self.check_global_quota(n)?;
+        if self.global_environment.is_some() && kind != BindKind::Var {
+            let conflict = self.vars.get(n).is_some_and(|binding| binding.initialized)
+                || self.has_var_declaration(n)
+                || self
+                    .global_property(n)
+                    .is_some_and(|(_, attrs)| !attrs.configurable);
+            if conflict {
+                return Err(crate::error::VmErr::Msg(format!(
+                    "SyntaxError: Identifier '{n}' has already been declared"
+                )));
+            }
         }
         self.declare(n, value, kind, initialized);
         Ok(())
@@ -811,7 +982,11 @@ impl Environment {
     /// binding. Used to recognize a re-import of a name already linked to the
     /// same cell.
     pub fn own_binding(&self, n: &str) -> Option<Value> {
-        self.vars.get(n).map(|b| b.value.clone())
+        self.vars.get(n).map(|b| b.value.clone()).or_else(|| {
+            self.global_environment
+                .as_ref()
+                .and_then(|record| record.object.own_value(n))
+        })
     }
 
     /// Move the binding named `n` into an existing cell, so a name already
@@ -849,10 +1024,19 @@ impl Environment {
 
     /// The declaration kind of `n` in this frame only, if bound.
     pub fn kind_of(&self, n: &str) -> Option<BindKind> {
-        self.vars.get(n).map(|b| b.kind)
+        self.vars.get(n).map(|b| b.kind).or_else(|| {
+            self.global_environment
+                .as_ref()
+                .filter(|record| record.object.own_value(n).is_some())
+                .map(|_| BindKind::Var)
+        })
     }
 
     pub fn set(&mut self, n: &str, v: Value) {
+        if self.global_environment.is_some() && self.vars.get(n).is_none() {
+            let _ = self.try_set(n, v);
+            return;
+        }
         // Reuse the existing key allocation when the variable is already bound
         // (the common case in loops); only allocate on first insertion. A name
         // created this way is `var`-like, matching an assignment to an
@@ -866,6 +1050,13 @@ impl Environment {
     /// Insert or replace a binding in this frame, enforcing the frame's
     /// optional quota before allocating a new key/value slot.
     pub fn try_set(&mut self, n: &str, v: Value) -> Result<(), crate::error::VmErr> {
+        if self.vars.get(n).is_none() {
+            self.check_global_quota(n)?;
+            if let Some(record) = self.global_environment.as_mut() {
+                record.user_names.insert(n.into());
+                return record.value().set_prop(n.into(), v);
+            }
+        }
         if let Err(v) = self.vars.try_set(n, v) {
             if self
                 .global_limit
@@ -916,6 +1107,19 @@ impl Environment {
             }
             return AssignOutcome::Assigned;
         }
+        if let Some(record) = &self.global_environment {
+            if record.object.own_value(n).is_none() {
+                return AssignOutcome::Missing;
+            }
+            if !record.object.meta.borrow().attrs_of(n).writable {
+                return AssignOutcome::ReadOnly;
+            }
+            record
+                .value()
+                .set_prop(n.into(), v)
+                .expect("existing global property");
+            return AssignOutcome::Assigned;
+        }
         match self.parent {
             Some(ref p) => p.borrow_mut().assign(n, v),
             None => AssignOutcome::Missing,
@@ -963,6 +1167,20 @@ impl Environment {
             }
             return ModifyOutcome::Updated(value);
         }
+        if let Some(record) = &self.global_environment {
+            let Some(current) = record.object.own_value(n) else {
+                return ModifyOutcome::Missing;
+            };
+            let value = f(current.deref_binding());
+            if !record.object.meta.borrow().attrs_of(n).writable {
+                return ModifyOutcome::ReadOnly(value);
+            }
+            record
+                .value()
+                .set_prop(n.into(), value.clone())
+                .expect("existing global property");
+            return ModifyOutcome::Updated(value);
+        }
         match self.parent {
             Some(ref p) => p.borrow_mut().modify(n, f),
             None => ModifyOutcome::Missing,
@@ -988,6 +1206,10 @@ impl Environment {
     /// Check whether a binding exists in this frame only (no parent walk).
     pub fn has(&self, n: &str) -> bool {
         self.vars.get(n).is_some()
+            || self
+                .global_environment
+                .as_ref()
+                .is_some_and(|record| record.object.own_value(n).is_some())
     }
 
     /// Return the parent environment, if any. Used by a generator body
@@ -1024,6 +1246,11 @@ impl Environment {
     /// Bound values for the cycle collector's marker.
     pub(crate) fn trace_values(&self) -> Vec<Value> {
         let mut values = self.vars.values_cloned();
+        values.extend(
+            self.global_environment
+                .as_ref()
+                .map(GlobalEnvironment::value),
+        );
         values.extend(self.with_object.iter().cloned());
         values.extend(self.new_target.iter().cloned());
         values.extend(self.constructor_this.iter().flatten().cloned());
@@ -1041,6 +1268,7 @@ impl Environment {
     #[doc(hidden)]
     pub fn clear_edges(&mut self) {
         self.vars.clear();
+        self.global_environment = None;
         self.with_object = None;
         self.property_attributes.clear();
         self.intrinsics.clear();
@@ -1058,6 +1286,7 @@ impl Environment {
                 Ok(cell) => {
                     let mut env = cell.into_inner();
                     env.vars.drain_into(work);
+                    work.extend(env.global_environment.take().map(|record| record.value()));
                     work.extend(env.with_object.take());
                     work.extend(env.new_target.take());
                     work.extend(env.constructor_this.take().flatten());
@@ -1073,10 +1302,14 @@ impl Environment {
     /// chain). Used by `Object.getOwnPropertyNames(window)` to enumerate
     /// globals.
     pub fn own_keys(&self) -> Vec<String> {
-        match &self.vars {
+        let mut keys: Vec<String> = match &self.vars {
             Vars::Small(v) => v.iter().map(|(k, _)| k.to_string()).collect(),
             Vars::Large(m) => m.keys().map(|k| k.to_string()).collect(),
+        };
+        if let Some(record) = &self.global_environment {
+            keys.extend(record.object.borrow().iter().map(|(name, _)| name.clone()));
         }
+        keys
     }
 
     /// Return all variable names reachable from this scope, walking the parent

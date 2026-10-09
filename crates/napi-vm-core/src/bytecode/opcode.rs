@@ -78,6 +78,9 @@ pub enum Instr {
     InitGlobal {
         name: u16,
         src: Reg,
+        /// Function declarations use CreateGlobalFunctionBinding rather than
+        /// the initialization operation for a lexical binding.
+        function: bool,
     },
     /// Top-level `var` hoisting: define `undefined` only when no binding
     /// exists yet, mirroring `hoist_vars` (a previous `eval` may own it).
@@ -757,7 +760,7 @@ impl fmt::Display for Instr {
                 write!(f, "DECLARE_LOCAL s{slot}, {kind:?}, init={initialized}")
             }
             Instr::InitLocal { slot, src } => write!(f, "INIT_LOCAL s{slot}, r{src}"),
-            Instr::InitGlobal { name, src } => write!(f, "INIT_GLOBAL c{name}, r{src}"),
+            Instr::InitGlobal { name, src, .. } => write!(f, "INIT_GLOBAL c{name}, r{src}"),
             Instr::HoistVarGlobal { name } => write!(f, "HOIST_VAR_GLOBAL c{name}"),
             Instr::BareVarLocal { slot } => write!(f, "BARE_VAR_LOCAL s{slot}"),
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),

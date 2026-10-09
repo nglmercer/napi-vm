@@ -305,6 +305,8 @@ pub struct Interpreter {
 
     /// Maximum guest call-stack depth. Default [`MAX_CALL_DEPTH`].
     max_call_depth: usize,
+    /// Bounded nesting of shared [[Get]], including Proxy/prototype delegation.
+    property_get_depth: usize,
     /// Maximum jobs drained per drain call. Default [`MAX_JOBS_PER_DRAIN`].
     max_jobs_per_drain: usize,
     /// Active synchronous guest statement bodies. Node-API `make_callback`
@@ -430,6 +432,9 @@ impl Interpreter {
 
     pub fn new() -> Self {
         let global = Rc::new(RefCell::new(Environment::global(None)));
+        if let Some(Value::Object { ref props }) = global.borrow().global_object() {
+            props.meta.borrow_mut().realm_global = Some(global.clone());
+        }
         let mut interp = Self {
             global: global.clone(),
             persistent_global: global,
@@ -471,6 +476,7 @@ impl Interpreter {
             fuel_budget: DEFAULT_FUEL_BUDGET,
 
             max_call_depth: MAX_CALL_DEPTH,
+            property_get_depth: 0,
             max_jobs_per_drain: jobs::MAX_JOBS_PER_DRAIN,
             guest_execution_depth: Rc::new(Cell::new(0)),
             gc_id: 0,
@@ -497,6 +503,14 @@ impl Interpreter {
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
+        if let Some(Value::Object { ref props }) = interp.persistent_global.borrow().global_object()
+        {
+            props.meta.borrow_mut().realm_global = Some(interp.persistent_global.clone());
+        }
+        interp
+            .persistent_global
+            .borrow_mut()
+            .set("globalThis", interp.realm_global_object());
         interp.publish_module_realm();
         if let Some(builtins) = interp.persistent_global.borrow().parent_env() {
             builtins
@@ -860,6 +874,10 @@ export default { createRequire, isBuiltin, builtinModules };
         &mut self,
         program: &PreparedProgram,
     ) -> Result<Value, VmErr> {
+        if matches!(&program.executable, Executable::Bytecode(_)) {
+            let script = self.global.borrow().is_global_scope();
+            self.validate_global_declarations(&program.statements, script)?;
+        }
         match &program.executable {
             Executable::Bytecode(module) => self.run_bytecode_module(module),
             Executable::Ast => self.run_program_body(&program.statements),
@@ -1486,11 +1504,10 @@ impl Interpreter {
             AssignOutcome::Missing => {
                 let strict = self.cur_mod.is_some() || env.strict();
                 drop(env);
-                if strict && !self.inherited_global_has(name) {
+                if strict {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
                 }
-                self.persistent_global.borrow_mut().try_set(name, value)?;
-                Ok(())
+                self.assign_member_str(&self.realm_global_object(), name, value)
             }
         }
     }
@@ -1509,16 +1526,8 @@ impl Interpreter {
     }
 
     pub(crate) fn set_global_property(&mut self, name: &str, value: Value) -> Result<bool, VmErr> {
-        let mut global = self.persistent_global.borrow_mut();
-        let attributes = global.global_property(name).map(|(_, attrs)| attrs);
-        if attributes.is_some_and(|attrs| !attrs.writable) {
-            return Ok(false);
-        }
-        global.try_set(name, value)?;
-        if let Some(attrs) = attributes {
-            global.set_property_attributes(name, attrs);
-        }
-        Ok(true)
+        let target = self.realm_global_object();
+        self.set_member_with_receiver(&target, &Value::String(name.into()), value, &target)
     }
 
     #[doc(hidden)]
@@ -1894,9 +1903,11 @@ impl Interpreter {
         let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
+        let script = scope.borrow().is_global_scope();
         let result = {
             let _execution_guard = GuestExecutionGuard(depth.clone());
-            self.hoist_vars(stmts)
+            self.validate_global_declarations(stmts, script)
+                .and_then(|()| self.hoist_vars(stmts))
                 .and_then(|()| self.hoist_lexical(stmts))
                 .and_then(|()| self.run(stmts))
         };
@@ -1938,6 +1949,147 @@ impl Interpreter {
     /// error paths, so a `throw` cannot leave the interpreter in the block.
     pub(crate) fn pop_scope(&mut self, outer: Env) {
         self.global = outer;
+    }
+
+    /// Validate every declaration before creating any binding. Script globals
+    /// and sloppy eval use the same object/declarative record checks.
+    pub(crate) fn validate_global_declarations(
+        &mut self,
+        body: &[Statement],
+        script: bool,
+    ) -> Result<(), VmErr> {
+        let variable_scope = Environment::variable_environment(&self.global);
+        if !variable_scope.borrow().is_global_scope() {
+            return Ok(());
+        }
+        fn top_names(body: &[Statement], lexical: &mut Vec<String>, functions: &mut Vec<String>) {
+            for statement in body {
+                match statement {
+                    Statement::VarDecl {
+                        name,
+                        kind,
+                        destructuring,
+                        ..
+                    } if *kind != VarKind::Var => {
+                        if let Some(pattern) = destructuring {
+                            lexical.extend(pattern_names(pattern));
+                        } else {
+                            lexical.push(name.clone());
+                        }
+                    }
+                    Statement::ClassDecl { name, .. } => lexical.push(name.clone()),
+                    Statement::FnDecl { name, .. } => functions.push(name.clone()),
+                    Statement::Declarations(inner)
+                    | Statement::ResourceDeclaration {
+                        declarations: inner,
+                        ..
+                    } => top_names(inner, lexical, functions),
+                    _ => {}
+                }
+            }
+        }
+        let mut lexical = Vec::new();
+        let mut functions = Vec::new();
+        top_names(body, &mut lexical, &mut functions);
+        if script {
+            let scope = variable_scope.borrow();
+            for name in &lexical {
+                if scope.own_lexical_binding(name)
+                    || scope.has_var_declaration(name)
+                    || scope
+                        .global_property(name)
+                        .is_some_and(|(_, attrs)| !attrs.configurable)
+                {
+                    return Err(VmErr::Msg(format!(
+                        "SyntaxError: Identifier '{name}' has already been declared"
+                    )));
+                }
+            }
+        }
+        let mut variables = Vec::new();
+        crate::parser::collect_var_declaration_names(body, &mut variables);
+        variables.extend(functions.iter().cloned());
+        for name in &variables {
+            if variable_scope.borrow().own_lexical_binding(name) {
+                return Err(VmErr::Msg(format!(
+                    "SyntaxError: Identifier '{name}' has already been declared"
+                )));
+            }
+        }
+        let global = Value::RealmGlobal(variable_scope.clone());
+        let extensible = self.is_extensible(&global)?;
+        for name in &functions {
+            let descriptor = crate::builtins::object::descriptor_for_key_in(
+                self,
+                &global,
+                &Value::String(name.as_str().into()),
+            )?;
+            let definable = if matches!(descriptor, Value::Undefined) {
+                extensible
+            } else {
+                descriptor
+                    .get_prop("configurable")
+                    .is_some_and(|v| v.is_truthy())
+                    || descriptor.get_prop("value").is_some()
+                        && descriptor
+                            .get_prop("writable")
+                            .is_some_and(|v| v.is_truthy())
+                        && descriptor
+                            .get_prop("enumerable")
+                            .is_some_and(|v| v.is_truthy())
+            };
+            if !definable {
+                return Err(VmErr::Msg(format!(
+                    "TypeError: Cannot declare global function '{name}'"
+                )));
+            }
+        }
+        for name in &variables {
+            if variable_scope.borrow().global_property(name).is_none() && !extensible {
+                return Err(VmErr::Msg(format!(
+                    "TypeError: Cannot declare global variable '{name}'"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn declare_function_binding_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        if !scope.borrow().is_global_scope() {
+            return self.set_binding_in(scope, name, value);
+        }
+        let target = Value::RealmGlobal(scope.clone());
+        let key = Value::String(name.into());
+        let previous = crate::builtins::object::descriptor_for_key_in(self, &target, &key)?;
+        let mut fields = vec![("value".into(), value)];
+        if matches!(previous, Value::Undefined)
+            || previous
+                .get_prop("configurable")
+                .is_some_and(|v| v.is_truthy())
+        {
+            fields.extend([
+                ("writable".into(), Value::Bool(true)),
+                ("enumerable".into(), Value::Bool(true)),
+                (
+                    "configurable".into(),
+                    Value::Bool(self.global.borrow().is_eval_scope()),
+                ),
+            ]);
+        }
+        if !self.define_own_property(&target, &key, &Value::object(fields))? {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot declare global function '{name}'"
+            )));
+        }
+        let deletable = self.global.borrow().is_eval_scope();
+        scope
+            .borrow_mut()
+            .create_global_var_binding(name, Value::Undefined, deletable)
     }
 
     /// Declare a name in the current scope, honouring the global frame's
@@ -2045,25 +2197,36 @@ impl Interpreter {
     fn hoist_vars(&mut self, stmts: &[Statement]) -> Result<(), VmErr> {
         let mut names = Vec::new();
         collect_var_names(stmts, &mut names);
-        let variable_scope = Environment::variable_environment(&self.global);
+        let lexical = crate::parser::top_lexical_names(stmts);
+        let scope = self.global.clone();
         for name in names {
-            // Only create the binding if nothing already provides it: a
-            // parameter of the same name keeps its argument value, and a
-            // repeated `var` must not erase an earlier assignment.
-            let exists = {
-                let scope = variable_scope.borrow();
-                scope.own_binding(&name).is_some()
-                    || (scope.is_global_scope() && scope.global_property(&name).is_some())
-            };
-            if !exists {
-                self.declare_binding_in(
-                    &variable_scope,
-                    &name,
-                    Value::Undefined,
-                    BindKind::Var,
-                    true,
-                )?;
+            // Annex B block-function var bindings are ineligible when they
+            // collide with a lexical declaration in the enclosing list.
+            if lexical.contains(&name) {
+                continue;
             }
+            self.hoist_var_binding_in(&scope, &name)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn hoist_var_binding_in(&mut self, scope: &Env, name: &str) -> Result<(), VmErr> {
+        let variable_scope = Environment::variable_environment(scope);
+        if variable_scope.borrow().is_global_scope() {
+            // Ordinary var/function collisions have already failed preflight;
+            // only ineligible Annex B block functions can reach this case.
+            if variable_scope.borrow().own_lexical_binding(name) {
+                return Ok(());
+            }
+            let deletable = scope.borrow().is_eval_scope();
+            return variable_scope.borrow_mut().create_global_var_binding(
+                name,
+                Value::Undefined,
+                deletable,
+            );
+        }
+        if variable_scope.borrow().own_binding(name).is_none() {
+            self.declare_binding_in(&variable_scope, name, Value::Undefined, BindKind::Var, true)?;
         }
         Ok(())
     }

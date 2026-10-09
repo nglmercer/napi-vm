@@ -61,11 +61,6 @@ impl Interpreter {
             .intrinsic(name)
             .and_then(|constructor| constructor.get_prop("prototype"))
     }
-    pub(crate) fn inherited_global_has(&self, name: &str) -> bool {
-        self.prototype_of(&self.realm_global_object())
-            .is_some_and(|prototype| prototype.has_prop(name))
-    }
-
     pub(crate) fn lookup_binding_in(
         &mut self,
         scope: &super::Env,
@@ -73,14 +68,27 @@ impl Interpreter {
     ) -> Result<super::Lookup, VmErr> {
         let mut frame = Some(scope.clone());
         while let Some(environment) = frame {
-            let (local, object, parent) = {
-                let environment = environment.borrow();
+            let (local, object, parent, global) = {
+                let frame = environment.borrow();
                 (
-                    environment.kind_of(name).is_some(),
-                    environment.with_object.clone(),
-                    environment.parent_env(),
+                    frame.own_lexical_binding(name),
+                    frame.with_object.clone(),
+                    frame.parent_env(),
+                    frame.is_global_scope(),
                 )
             };
+            if global {
+                if local {
+                    return Ok(environment.borrow().lookup(name));
+                }
+                let object = Value::RealmGlobal(environment.clone());
+                return if self.has_property(&object, &Value::String(name.into()))? {
+                    self.get_prop_value_str(&object, name)
+                        .map(super::Lookup::Value)
+                } else {
+                    Ok(super::Lookup::Missing)
+                };
+            }
             if local {
                 return Ok(environment.borrow().lookup(name));
             }
@@ -129,14 +137,24 @@ impl Interpreter {
     ) -> Result<Option<Value>, VmErr> {
         let mut frame = Some(scope.clone());
         while let Some(environment) = frame {
-            let (local, object, parent) = {
-                let environment = environment.borrow();
+            let (local, object, parent, global) = {
+                let frame = environment.borrow();
                 (
-                    environment.kind_of(name).is_some(),
-                    environment.with_object.clone(),
-                    environment.parent_env(),
+                    frame.own_lexical_binding(name),
+                    frame.with_object.clone(),
+                    frame.parent_env(),
+                    frame.is_global_scope(),
                 )
             };
+            if global {
+                if local {
+                    return Ok(None);
+                }
+                let object = Value::RealmGlobal(environment.clone());
+                return self
+                    .has_property(&object, &Value::String(name.into()))
+                    .map(|has| has.then_some(object));
+            }
             if local {
                 return Ok(None);
             }
@@ -159,28 +177,30 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<Value, VmErr> {
-        let builtins = self.persistent_global.borrow().parent_env();
         let mut frame = Some(scope.clone());
         while let Some(environment) = frame {
-            let (kind, global, object, parent) = {
+            let (local, global, object, parent) = {
                 let frame = environment.borrow();
                 (
-                    frame.kind_of(name),
+                    frame.own_lexical_binding(name),
                     frame.is_global_scope(),
                     frame.with_object.clone(),
                     frame.parent_env(),
                 )
             };
-            if let Some(kind) = kind {
-                let object_record = global
-                    || builtins
-                        .as_ref()
-                        .is_some_and(|builtins| Rc::ptr_eq(builtins, &environment));
-                if object_record && kind == super::BindKind::Var {
-                    return self
-                        .delete_member(&self.realm_global_object(), &Value::String(name.into()));
-                }
+            if local {
                 return Ok(Value::Bool(false));
+            }
+            if global {
+                let object = Value::RealmGlobal(environment.clone());
+                if self.has_property(&object, &Value::String(name.into()))? {
+                    let result = self.delete_member(&object, &Value::String(name.into()))?;
+                    if matches!(result, Value::Bool(true)) {
+                        environment.borrow_mut().remove_global_var_name(name);
+                    }
+                    return Ok(result);
+                }
+                return Ok(Value::Bool(true));
             }
             if let Some(object) = object
                 && self.with_has_binding(&object, name)?
@@ -201,9 +221,14 @@ impl Interpreter {
         {
             return properties.proto();
         }
-        if let Value::RealmGlobal(global) = object {
-            return global
-                .borrow()
+        if let Some(global) = self.global_scope_of(object) {
+            let scope = global.borrow();
+            let record = scope.global_object()?;
+            let props = record.property_cell()?;
+            if !props.meta.borrow().uses_default_prototype {
+                return props.proto();
+            }
+            return scope
                 .intrinsic("Object")?
                 .get_prop("prototype")
                 .map(Rc::new);
@@ -672,7 +697,32 @@ impl Interpreter {
         self.get_prop_value_with_receiver(o, p, o)
     }
 
+    fn with_property_get<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T, VmErr>,
+    ) -> Result<T, VmErr> {
+        self.check_execution_interrupt()?;
+        if self.property_get_depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+            return Err(crate::value::limit_err(
+                "Maximum property operation depth exceeded",
+            ));
+        }
+        self.property_get_depth += 1;
+        let result = stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || operation(self));
+        self.property_get_depth -= 1;
+        result
+    }
+
     pub(crate) fn get_prop_value_with_receiver(
+        &mut self,
+        o: &Value,
+        p: &Value,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
+        self.with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, p, receiver))
+    }
+
+    fn get_prop_value_with_receiver_inner(
         &mut self,
         o: &Value,
         p: &Value,
@@ -682,6 +732,14 @@ impl Interpreter {
             return self.with_global_storage(global.clone(), |vm| {
                 vm.get_prop_value_with_receiver(&Value::GlobalObject, p, receiver)
             });
+        }
+        if matches!(o, Value::GlobalObject) {
+            let record = self
+                .persistent_global
+                .borrow()
+                .global_object()
+                .expect("global object record");
+            return self.get_prop_value_with_receiver(&record, p, receiver);
         }
         // String keys take the borrowed-key path below, which never allocates
         // a key `Value`. Only symbols, numbers, and exotic keys stay here.
@@ -723,6 +781,22 @@ impl Interpreter {
                 },
                 key
             )));
+        }
+        if let Value::Object { props } = o {
+            let key = self.proxy_property_key(p)?;
+            let slot = self.property_key(&key)?;
+            let inherited = {
+                let own = props.borrow().iter().any(|(name, _)| name == &slot);
+                if own { None } else { props.proto() }
+            };
+            if let Some(prototype) = inherited
+                && matches!(
+                    crate::builtins::object::descriptor_for_key_in(self, o, &key)?,
+                    Value::Undefined
+                )
+            {
+                return self.get_prop_value_with_receiver(&prototype, &key, receiver);
+            }
         }
         let v = self.prop(o, p)?;
         // Accessors are represented by specially named functions. Most
@@ -770,10 +844,27 @@ impl Interpreter {
         key: &str,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        self.with_property_get(|vm| vm.get_prop_value_str_with_receiver_inner(o, key, receiver))
+    }
+
+    fn get_prop_value_str_with_receiver_inner(
+        &mut self,
+        o: &Value,
+        key: &str,
+        receiver: &Value,
+    ) -> Result<Value, VmErr> {
         if let Value::RealmGlobal(global) = o {
             return self.with_global_storage(global.clone(), |vm| {
                 vm.get_prop_value_str_with_receiver(&Value::GlobalObject, key, receiver)
             });
+        }
+        if matches!(o, Value::GlobalObject) {
+            let record = self
+                .persistent_global
+                .borrow()
+                .global_object()
+                .expect("global object record");
+            return self.get_prop_value_str_with_receiver(&record, key, receiver);
         }
         let value = self.get_prop_value_str_inner(o, key, receiver)?;
         if matches!(value, Value::Uninitialized) {
@@ -824,6 +915,26 @@ impl Interpreter {
                 },
                 key
             )));
+        }
+        // Ordinary [[Get]] delegates missing own properties to the prototype's
+        // internal operation, retaining the original receiver for accessors.
+        if let Value::Object { props } = o {
+            let inherited = {
+                let own = props.borrow().iter().any(|(name, _)| name == key);
+                if own { None } else { props.proto() }
+            };
+            if let Some(prototype) = inherited
+                && matches!(
+                    crate::builtins::object::descriptor_for_key_in(
+                        self,
+                        o,
+                        &Value::String(key.into())
+                    )?,
+                    Value::Undefined
+                )
+            {
+                return self.get_prop_value_str_with_receiver(&prototype, key, receiver);
+            }
         }
         let v = self.prop_str(o, key)?;
         let accessor_name = match &v {

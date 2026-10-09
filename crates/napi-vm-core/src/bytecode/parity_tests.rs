@@ -684,10 +684,10 @@ fn declined_units_stay_on_ast() {
         "function o(){ function i(){ return 1; } return i(); } o()",
         true,
     );
-    // A head in an unscoped block nested in a pushed one still declines.
+    // Lexical iteration heads box independently of surrounding block scopes.
     check(
         "function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; } g({})",
-        false,
+        true,
     );
 }
 
@@ -1069,7 +1069,7 @@ fn for_in_loops() {
         "let o = {a: 1, b: 2}; let s = 0; for (let k in o) { s += o[k]; } s",
         true,
     );
-    // Heads assign, never shadow: top level updates the global binding.
+    // Lexical heads shadow outer bindings and restore them after the loop.
     check("let k = 9; for (let k in {a: 1}) {} k", true);
     check("for (var k in {a: 1}) {} k", true);
     check(
@@ -1128,7 +1128,7 @@ fn for_in_loops() {
 fn for_of_loops() {
     check("let s = 0; for (let v of [1, 2, 3]) { s += v; } s", true);
     check("let r = ''; for (let c of 'ab') { r += c; } r", true);
-    // Heads assign like `for-in` heads do.
+    // Lexical heads shadow like `for-in` heads do.
     check("let v = 9; for (let v of [1]) {} v", true);
     check(
         "function f(){ let v = 9; for (let v of [1]) {} return v; } f()",
@@ -1368,6 +1368,35 @@ fn shared_proxy_deletion_and_atomic_hints_match_both_tiers() {
         "'use strict';var p=new Proxy(new String('x'),{});delete p[0];",
         "var p=new Proxy(new Uint8Array(1),{});Reflect.deleteProperty(p,'0');",
         "Atomics.pause(1)===undefined;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn realm_global_records_use_shared_declaration_and_property_operations() {
+    for source in [
+        "let x=1;globalThis.x=2;x+globalThis.x;",
+        "var x=1;Object.getOwnPropertyDescriptor(globalThis,'x').configurable;",
+        "Object.defineProperty(globalThis,'f',{get(){throw 1;},configurable:true});eval('function f(){return 42;}');f();",
+        "var receiver;Object.defineProperty(globalThis,'x',{get(){receiver=this;return 1;},set(v){}});x++;receiver===globalThis;",
+        "let f=1;{function f(){}}f;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn lexical_iteration_tdz_and_capture() {
+    for source in [
+        "let x = [1]; for (let x of x) {}",
+        "let x = {}; for (let x in x) {}",
+        "let a=[]; for(let x of [1,2]) { a.push(()=>x); } a[0]()+a[1]()",
+        "let a=[]; for(const x of [1,2]) { a.push(()=>x); } a[0]()+a[1]()",
+        "let a=[]; for(let x in {a:1,b:2}) { a.push(()=>x); } a[0]()+a[1]()",
+        "for(const x of [1]) { x=2; }",
+        "let x=9; try { for(let x of [1]) { throw x; } } catch(e) {} x",
+        "let a=[]; for(let [x] of [[1],[2]]) { a.push(()=>x); } a[0]()+a[1]()",
     ] {
         check(source, true);
     }

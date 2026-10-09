@@ -2721,6 +2721,10 @@ impl Value {
     pub(crate) fn property_cell(&self) -> Option<Rc<ObjectCell>> {
         match self {
             Self::Object { props } => Some(props.clone()),
+            Self::RealmGlobal(global) => global
+                .borrow()
+                .global_object()
+                .and_then(|object| object.property_cell()),
             Self::Class(class) => Some(class.statics.clone()),
             Self::Function(function) => Some(function.properties.clone()),
             Self::HostFunction { properties, .. } => Some(properties.clone()),

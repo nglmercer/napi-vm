@@ -1079,7 +1079,7 @@ impl Interpreter {
                 } else {
                     self.global.clone()
                 };
-                self.set_binding_in(
+                self.declare_function_binding_in(
                     &scope,
                     name,
                     Value::Function(Rc::new(FunctionData {
@@ -1235,102 +1235,16 @@ impl Interpreter {
                 result
             }
             Statement::ForIn { binding, obj, body } => {
-                if let ForBinding::Declaration {
-                    pattern,
-                    initializer: Some(value),
-                    ..
-                } = binding
-                {
-                    let value = self.eval_expr(value)?;
-                    self.destructure(pattern, &value)?;
-                }
-                let o = self.eval_expr(obj)?;
-                let ks = self.keys_with_proxy_trap(&o)?;
-                let body_needs_scope = block_needs_lexical_scope(body);
-                let mut r = Value::Undefined;
-                let label = self.active_label.take();
-                for k in ks {
-                    self.consume_loop()?;
-                    self.assign_iteration_binding(binding, &Value::String(k.into()))?;
-                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                        Err(VmErr::Break(None)) => break,
-                        Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                        Err(VmErr::Continue(None)) => continue,
-                        Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
-                        other => r = other?,
-                    }
-                }
-                Ok(r)
+                self.with_loop_binding_scope(binding, |vm| vm.run_for_in(binding, obj, body))
             }
             Statement::ForOf {
                 binding,
                 iter,
                 body,
                 is_await,
-            } => {
-                let source = self.eval_expr(iter)?;
-                let body_needs_scope = block_needs_lexical_scope(body);
-                let iterator = if *is_await {
-                    self.async_iterator_for(&source)?
-                } else {
-                    self.iterator_for(&source)?
-                };
-                let next_fn = self.member(&iterator, "next")?;
-                if matches!(next_fn, Value::Undefined) {
-                    return vm_err("TypeError: iterator has no next() method");
-                }
-                let mut r = Value::Undefined;
-                let label = self.active_label.take();
-                // Leaving before the iterator reports `done` must close it, so
-                // a suspended generator runs its `finally` blocks. Tracked here
-                // and acted on at every exit, error paths included.
-                let mut exhausted = false;
-                loop {
-                    // Account for the iterator's next call as well as the
-                    // body iteration. This keeps custom/infinite iterators
-                    // budgeted without eagerly collecting their output.
-                    self.consume_loop()?;
-                    let mut result = self.call_this(&next_fn, iterator.clone(), vec![])?;
-                    // `for await` awaits the step object itself, which is what
-                    // lets an async iterator return a promise of `{value,
-                    // done}` rather than the object directly.
-                    if *is_await {
-                        result = self.perform_await(result)?;
-                    }
-                    let (done, value) = self.iterator_result_fields(&result)?;
-                    if done {
-                        exhausted = true;
-                        break;
-                    }
-                    if let Err(error) = self.assign_iteration_binding(binding, &value) {
-                        if !error.is_abandon() {
-                            let _ = self.close_guest_iterator(&iterator, *is_await);
-                        }
-                        return Err(error);
-                    }
-                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                        Err(VmErr::Break(None)) => break,
-                        Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                        Err(VmErr::Continue(None)) => continue,
-                        Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
-                        // `return`, `throw`, or a break/continue aimed at an
-                        // outer label also leaves the loop, and also closes.
-                        // An abandon teardown is the exception: it runs no
-                        // handlers, so it must not close either.
-                        Err(error) => {
-                            if !error.is_abandon() {
-                                self.close_guest_iterator_for_abrupt(&iterator, *is_await, &error)?;
-                            }
-                            return Err(error);
-                        }
-                        Ok(value) => r = value,
-                    }
-                }
-                if !exhausted {
-                    self.close_guest_iterator(&iterator, *is_await)?;
-                }
-                Ok(r)
-            }
+            } => self.with_loop_binding_scope(binding, |vm| {
+                vm.run_for_of(binding, iter, body, *is_await)
+            }),
             Statement::Block(s) => self.run_block(s),
             // A declarator group shares the enclosing scope: no new frame.
             Statement::Declarations(s) => self.run(s),
@@ -1734,6 +1648,169 @@ impl Interpreter {
         Ok(())
     }
 
+    fn run_for_in(
+        &mut self,
+        binding: &ForBinding,
+        obj: &Expr,
+        body: &[Statement],
+    ) -> Result<Value, VmErr> {
+        if let ForBinding::Declaration {
+            pattern,
+            initializer: Some(value),
+            ..
+        } = binding
+        {
+            let value = self.eval_expr(value)?;
+            self.destructure(pattern, &value)?;
+        }
+        let o = self.eval_expr(obj)?;
+        let ks = self.keys_with_proxy_trap(&o)?;
+        let body_needs_scope = block_needs_lexical_scope(body);
+        let mut r = Value::Undefined;
+        let label = self.active_label.take();
+        for k in ks {
+            self.consume_loop()?;
+            self.enter_iteration_binding_scope(binding);
+            self.assign_iteration_binding(binding, &Value::String(k.into()))?;
+            match self.run_block_with_lexical_scope(body, body_needs_scope) {
+                Err(VmErr::Break(None)) => break,
+                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
+                Err(VmErr::Continue(None)) => continue,
+                Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
+                other => r = other?,
+            }
+        }
+        Ok(r)
+    }
+
+    fn run_for_of(
+        &mut self,
+        binding: &ForBinding,
+        iter: &Expr,
+        body: &[Statement],
+        is_await: bool,
+    ) -> Result<Value, VmErr> {
+        let source = self.eval_expr(iter)?;
+        let body_needs_scope = block_needs_lexical_scope(body);
+        let iterator = if is_await {
+            self.async_iterator_for(&source)?
+        } else {
+            self.iterator_for(&source)?
+        };
+        let next_fn = self.member(&iterator, "next")?;
+        if matches!(next_fn, Value::Undefined) {
+            return vm_err("TypeError: iterator has no next() method");
+        }
+        let mut r = Value::Undefined;
+        let label = self.active_label.take();
+        // Leaving before the iterator reports `done` must close it, so
+        // a suspended generator runs its `finally` blocks. Tracked here
+        // and acted on at every exit, error paths included.
+        let mut exhausted = false;
+        loop {
+            // Account for the iterator's next call as well as the
+            // body iteration. This keeps custom/infinite iterators
+            // budgeted without eagerly collecting their output.
+            self.consume_loop()?;
+            let mut result = self.call_this(&next_fn, iterator.clone(), vec![])?;
+            // `for await` awaits the step object itself, which is what
+            // lets an async iterator return a promise of `{value,
+            // done}` rather than the object directly.
+            if is_await {
+                result = self.perform_await(result)?;
+            }
+            let (done, value) = self.iterator_result_fields(&result)?;
+            if done {
+                exhausted = true;
+                break;
+            }
+            self.enter_iteration_binding_scope(binding);
+            if let Err(error) = self.assign_iteration_binding(binding, &value) {
+                if !error.is_abandon() {
+                    let _ = self.close_guest_iterator(&iterator, is_await);
+                }
+                return Err(error);
+            }
+            match self.run_block_with_lexical_scope(body, body_needs_scope) {
+                Err(VmErr::Break(None)) => break,
+                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
+                Err(VmErr::Continue(None)) => continue,
+                Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
+                // `return`, `throw`, or a break/continue aimed at an
+                // outer label also leaves the loop, and also closes.
+                // An abandon teardown is the exception: it runs no
+                // handlers, so it must not close either.
+                Err(error) => {
+                    if !error.is_abandon() {
+                        self.close_guest_iterator_for_abrupt(&iterator, is_await, &error)?;
+                    }
+                    return Err(error);
+                }
+                Ok(value) => r = value,
+            }
+        }
+        if !exhausted {
+            self.close_guest_iterator(&iterator, is_await)?;
+        }
+        Ok(r)
+    }
+
+    fn with_loop_binding_scope<R>(
+        &mut self,
+        binding: &ForBinding,
+        operation: impl FnOnce(&mut Self) -> Result<R, VmErr>,
+    ) -> Result<R, VmErr> {
+        if !matches!(
+            binding,
+            ForBinding::Declaration {
+                kind: VarKind::Let | VarKind::Const,
+                ..
+            }
+        ) {
+            return operation(self);
+        }
+        let outer = self.global.clone();
+        self.enter_iteration_binding_scope_from(binding, outer.clone());
+        let result = operation(self);
+        self.global = outer;
+        result
+    }
+
+    fn enter_iteration_binding_scope(&mut self, binding: &ForBinding) {
+        if matches!(
+            binding,
+            ForBinding::Declaration {
+                kind: VarKind::Let | VarKind::Const,
+                ..
+            }
+        ) {
+            let outer = self
+                .global
+                .borrow()
+                .parent_env()
+                .expect("loop lexical environment");
+            self.enter_iteration_binding_scope_from(binding, outer);
+        }
+    }
+
+    fn enter_iteration_binding_scope_from(&mut self, binding: &ForBinding, outer: Env) {
+        let ForBinding::Declaration { pattern, kind, .. } = binding else {
+            unreachable!()
+        };
+        let scope = Rc::new(RefCell::new(Environment::child(outer)));
+        let kind = if *kind == VarKind::Const {
+            BindKind::Const
+        } else {
+            BindKind::Let
+        };
+        for name in crate::parser::pattern_names(pattern) {
+            scope
+                .borrow_mut()
+                .declare(&name, Value::Undefined, kind, false);
+        }
+        self.global = scope;
+    }
+
     fn assign_iteration_binding(
         &mut self,
         binding: &ForBinding,
@@ -1748,6 +1825,14 @@ impl Interpreter {
             }
             ForBinding::Declaration {
                 pattern: crate::parser::Pattern::Ident(name),
+                kind: VarKind::Var,
+                ..
+            } => {
+                self.assign_or_set_binding(name, value.clone())?;
+                Ok(value.clone())
+            }
+            ForBinding::Declaration {
+                pattern: crate::parser::Pattern::Ident(name),
                 ..
             } => {
                 self.set_binding(name, value.clone())?;
@@ -1758,8 +1843,13 @@ impl Interpreter {
                 pattern,
                 ..
             } => self.destructure_assignment(pattern, value),
-            ForBinding::Declaration { pattern, .. } => {
-                self.initialize_pattern_binding(pattern, value, BindKind::Let)
+            ForBinding::Declaration { pattern, kind, .. } => {
+                let kind = if *kind == VarKind::Const {
+                    BindKind::Const
+                } else {
+                    BindKind::Let
+                };
+                self.initialize_pattern_binding(pattern, value, kind)
             }
         }
     }
@@ -2300,7 +2390,15 @@ impl Interpreter {
                             let scope = self.global.clone();
                             let receiver = if let Expr::Identifier(name) = callee.unparenthesized()
                             {
+                                // Global object records resolve property-backed names,
+                                // but only `with` records supply a call receiver.
                                 self.with_binding_object(&scope, name)?
+                                    .filter(|object| {
+                                        !matches!(
+                                            object,
+                                            Value::RealmGlobal(_) | Value::GlobalObject
+                                        )
+                                    })
                                     .unwrap_or(Value::Undefined)
                             } else {
                                 Value::Undefined
