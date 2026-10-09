@@ -308,23 +308,7 @@ fn render_plain_value(
 
 /// ECMAScript Number::toString, separate from host inspection's signed zero.
 pub(crate) fn ecmascript_number_string(n: f64) -> String {
-    if n == 0.0 {
-        return "0".into();
-    }
-    if !n.is_finite() {
-        return number_string(n);
-    }
-    if n.abs() >= 1e21 || n.abs() < 1e-6 {
-        let scientific = format!("{n:e}");
-        let (mantissa, exponent) = scientific.split_once('e').expect("scientific number");
-        if exponent.starts_with('-') {
-            scientific
-        } else {
-            format!("{mantissa}e+{exponent}")
-        }
-    } else {
-        n.to_string()
-    }
+    ryu_js::Buffer::new().format(n).to_owned()
 }
 
 pub fn number_string(n: f64) -> String {

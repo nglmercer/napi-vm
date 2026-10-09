@@ -610,12 +610,8 @@ impl Interpreter {
         allow(dead_code)
     )]
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
-        let property = self.property_key(key)?;
-        let trap_key = if matches!(key, Value::Symbol(_)) {
-            key.clone()
-        } else {
-            Value::String(crate::JsString::from_key(&property))
-        };
+        let trap_key = self.proxy_property_key(key)?;
+        let property = self.property_key(&trap_key)?;
         let mut current = object.clone();
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
             if let Value::Proxy(proxy) = &current {
@@ -625,8 +621,9 @@ impl Interpreter {
                         .call_this(&trap, handler, vec![target.clone(), trap_key.clone()])?
                         .is_truthy();
                     if !accepted {
-                        let descriptor =
-                            crate::builtins::object::descriptor_for_in(self, &target, &property)?;
+                        let descriptor = crate::builtins::object::descriptor_for_key_in(
+                            self, &target, &trap_key,
+                        )?;
                         if !matches!(descriptor, Value::Undefined)
                             && (!descriptor
                                 .get_prop("configurable")
@@ -643,24 +640,13 @@ impl Interpreter {
                 current = target;
                 continue;
             }
-            if let Value::TypedArray(view) = &current {
-                let numeric = property.parse::<f64>().ok();
-                if property == "-0"
-                    || property == "NaN"
-                    || property == "Infinity"
-                    || property == "-Infinity"
-                    || numeric.is_some_and(|number| number.to_string() == property)
-                {
-                    return Ok(property != "-0"
-                        && numeric.is_some_and(|number| {
-                            number.is_finite()
-                                && number >= 0.0
-                                && number.fract() == 0.0
-                                && number < view.effective_length() as f64
-                        }));
-                }
+            if let Value::TypedArray(view) = &current
+                && let Some(index) = crate::builtins::canonical_numeric_index(&property)
+            {
+                return Ok(crate::builtins::valid_integer_index(view, index));
             }
-            let descriptor = crate::builtins::object::descriptor_for_in(self, &current, &property)?;
+            let descriptor =
+                crate::builtins::object::descriptor_for_key_in(self, &current, &trap_key)?;
             if !matches!(descriptor, Value::Undefined) {
                 return Ok(true);
             }
@@ -1233,10 +1219,13 @@ impl Interpreter {
                 })
             }
             Value::TypedArray(view) => {
-                if let Ok(index) = k.parse::<usize>() {
-                    return Ok(
-                        crate::builtins::read_element(view, index).unwrap_or(Value::Undefined)
-                    );
+                if let Some(index) = crate::builtins::canonical_numeric_index(k) {
+                    return Ok(if crate::builtins::valid_integer_index(view, index) {
+                        crate::builtins::read_element(view, index as usize)
+                            .unwrap_or(Value::Undefined)
+                    } else {
+                        Value::Undefined
+                    });
                 }
                 if let Some(value) = crate::builtins::typed_member(view, k) {
                     return Ok(value);

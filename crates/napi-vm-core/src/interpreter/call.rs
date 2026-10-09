@@ -746,22 +746,17 @@ impl Interpreter {
 
     fn set_array_length(
         &mut self,
-        array: &crate::value::ArrayCell,
+        array: &Rc<crate::value::ArrayCell>,
         value: &Value,
     ) -> Result<bool, VmErr> {
         if !array.meta.borrow().attrs_of("length").writable {
             return Ok(false);
         }
-        let length = self.ecmascript_to_number(value)?;
-        if !length.is_finite() || length < 0.0 || length.fract() != 0.0 || length > u32::MAX as f64
-        {
-            return Err(VmErr::Msg("RangeError: Invalid array length".into()));
-        }
-        if length > crate::value::MAX_ARRAY_LEN as f64 {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
-        }
-        array.set_length(length as usize);
-        Ok(array.borrow().len() == length as usize)
+        self.define_own_property(
+            &Value::Array(array.clone()),
+            &Value::String("length".into()),
+            &Value::object(vec![("value".into(), value.clone())]),
+        )
     }
 
     fn set_cell_property(

@@ -173,6 +173,26 @@ impl Interpreter {
             }
             return Ok(true);
         }
+        let converted;
+        let descriptor = if matches!(object, Value::Array(_))
+            && slot == "length"
+            && let Some(value) = descriptor.get_prop("value")
+        {
+            let length = super::array::array_length_value(self, &value)?;
+            let Value::Object { props } = descriptor else {
+                unreachable!("normalized descriptor");
+            };
+            let mut fields = props.borrow().clone();
+            let (_, value) = fields
+                .iter_mut()
+                .find(|(name, _)| name == "value")
+                .expect("descriptor value");
+            *value = length;
+            converted = Value::object(fields);
+            &converted
+        } else {
+            descriptor
+        };
         let current = super::object::descriptor_for_key_in(self, object, key)?;
         if matches!(current, Value::Undefined) && !self.is_extensible(object)?
             || !super::object::compatible_descriptor(&current, descriptor)

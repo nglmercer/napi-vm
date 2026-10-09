@@ -156,3 +156,18 @@ The subsequent full validation must still cover these changes. This does not
 complete realm-global ObjectRecord/DeclarativeRecord semantics or the pending
 private-element and exotic descriptor dependencies. Full AST/bytecode mismatch
 measurement remains outstanding.
+
+## Canonical keys and Array length
+
+Typed-array Get and HasProperty now share the canonical numeric-index rules used
+by Set and DefineOwnProperty. Guest number strings use ECMAScript shortest-rounding
+rules, while host inspection retains its signed-zero rendering. Proxy HasProperty
+and Object.getOwnPropertyDescriptor retain symbol identities and observe key
+conversion once.
+
+Array assignment and descriptor definition share ArraySetLength conversion through
+DefineOwnProperty. ToUint32 and ToNumber each observe the original value, invalid
+lengths raise RangeError, and a failed shrink still applies a requested non-writable
+length. Regression coverage includes conversion side effects and non-configurable
+array elements. The 54 realm tests pass; fresh required checks and focused/full
+worker evidence are necessary for these source changes.

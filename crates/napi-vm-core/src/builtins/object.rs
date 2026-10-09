@@ -1304,6 +1304,11 @@ fn define_array_property(
         if let Some(length) = requested_length {
             array.set_length(length);
             if array.borrow().len() != length {
+                if !requested_writable {
+                    let mut attributes = array.meta.borrow().attrs_of("length");
+                    attributes.writable = false;
+                    array.meta.borrow_mut().set_attrs("length", attributes);
+                }
                 return Err(type_err("Cannot remove a non-configurable array element"));
             }
         }
@@ -1420,9 +1425,9 @@ fn object_get_own_descriptor(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let key = interp.property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
-    descriptor_for_in(interp, &target, &key)
+    let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.proxy_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    descriptor_for_key_in(interp, &target, &key)
 }
 
 fn object_get_own_descriptors(

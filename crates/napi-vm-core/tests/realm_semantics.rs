@@ -1268,3 +1268,92 @@ fn shared_define_preserves_symbol_keys_and_proxy_invariants() {
     "#,
     );
 }
+
+#[test]
+fn integer_index_operations_share_ecmascript_number_keys() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        String(-0) === '0' && String(1e21) === '1e+21' &&
+        String(1e-7) === '1e-7' && String(1e-6) === '0.000001' &&
+        String(1000000000000000128) === '1000000000000000100';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var array = new Int8Array([7]);
+        array['01'] = 42;
+        array['1.0'] = 43;
+        array['01'] === 42 && array['1.0'] === 43 && array[0] === 7 &&
+        Reflect.has(array, '01') && !Reflect.has(array, '-0') && array['-0'] === undefined;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var key = Symbol('protected'), object = {}, received;
+        Object.defineProperty(object, key, {value: 1});
+        var proxy = new Proxy(object, {has(target, symbol){received=symbol; return false;}});
+        var rejected = false;
+        try { Reflect.has(proxy, key); } catch (error) { rejected = error instanceof TypeError; }
+        rejected && received === key;
+    "#,
+    );
+}
+
+#[test]
+fn descriptor_queries_coerce_keys_once_and_preserve_proxy_symbols() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol = Symbol('x'), calls = 0, received;
+        var target = {}; Object.defineProperty(target, symbol, {value: 42, configurable: true});
+        var proxy = new Proxy(target, {getOwnPropertyDescriptor(object, key){received=key; return Reflect.getOwnPropertyDescriptor(object,key);}});
+        var key = {[Symbol.toPrimitive](hint){calls++; if(hint !== 'string') throw new Error('hint'); return symbol;}};
+        Object.getOwnPropertyDescriptor(proxy,key).value === 42 && received === symbol && calls === 1;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var descriptor = Object.getOwnPropertyDescriptor('ab','0');
+        descriptor.value === 'a' && descriptor.enumerable && !descriptor.writable && !descriptor.configurable;
+    "#,
+    );
+}
+
+#[test]
+fn array_length_definitions_share_conversion_and_failed_truncation_rules() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var array = [1,2,3], calls = 0;
+        var length = {valueOf(){calls++; return 1;}};
+        array.length = length;
+        array.length === 1 && calls === 2;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var array = [], calls = 0, rejected = false;
+        var length = {valueOf(){calls++; return calls;}};
+        try {Reflect.defineProperty(array, 'length', {value:length});}
+        catch(error){rejected = error instanceof RangeError;}
+        rejected && calls === 2 && array.length === 0;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var array = [1,2,3];
+        Object.defineProperty(array,'1',{configurable:false});
+        Reflect.defineProperty(array,'length',{value:0,writable:false}) === false &&
+        array.length === 2 && Object.getOwnPropertyDescriptor(array,'length').writable === false;
+    "#,
+    );
+}

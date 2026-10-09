@@ -8,6 +8,20 @@ use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
 use crate::value::{Value, to_integer_or_infinity};
 
+/// ArraySetLength converts the original value twice: ToUint32, then ToNumber.
+/// Both observable conversions precede descriptor compatibility checks.
+pub(super) fn array_length_value(interp: &mut Interpreter, value: &Value) -> Result<Value, VmErr> {
+    let unsigned = crate::value::to_int32(interp.ecmascript_to_number(value)?) as u32;
+    let number = interp.ecmascript_to_number(value)?;
+    if number != unsigned as f64 {
+        return Err(VmErr::Msg("RangeError: Invalid array length".into()));
+    }
+    if unsigned as usize > crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    Ok(Value::Number(unsigned as f64))
+}
+
 pub(super) fn callback(a: &[Value]) -> Result<Value, VmErr> {
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     if !crate::interpreter::call::is_callable_value(&cb) {
