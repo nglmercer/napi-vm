@@ -118,6 +118,20 @@ fn promise_resolving_functions_have_call_but_no_construct() {
         "var settled=false;var p=new Promise(function(resolve){resolve(42);});p.then(function(v){settled=v===42;});true;",
     );
     truth(&mut vm, "settled;");
+    truth(
+        &mut vm,
+        "resolve.name===''&&resolve.length===1&&reject.name===''&&reject.length===1&&Object.getPrototypeOf(resolve)===Function.prototype&&Object.getPrototypeOf(reject)===Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "var p=new Promise(function(resolve){resolve.call({unrelated:true},7);});var result;p.then(function(value){result=value;});true;",
+    );
+    truth(&mut vm, "result===7;");
+    truth(
+        &mut vm,
+        "Promise.resolve(1).then(()=>Promise.resolve());var savedThen=Promise.prototype.then;var checked=0;Promise.prototype.then=function(resolve,reject){if(resolve.name!==''||resolve.length!==1||reject.name!==''||reject.length!==1)throw 42;checked++;return savedThen.call(this,resolve,reject);};true;",
+    );
+    truth(&mut vm, "checked>0;");
 }
 
 #[test]

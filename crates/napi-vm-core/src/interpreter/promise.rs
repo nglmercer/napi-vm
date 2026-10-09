@@ -177,32 +177,10 @@ impl Interpreter {
         promise: Rc<RefCell<PromiseInner>>,
     ) -> (Value, Value) {
         let carrier = Value::Promise(promise);
-        let resolve = Value::object(vec![
-            (TARGET_SLOT.to_string(), carrier.clone()),
-            (
-                crate::interpreter::call::CALL_SLOT.to_string(),
-                Value::NativeFunction {
-                    name: "resolve".into(),
-                    callable: executor_resolve,
-                },
-            ),
-        ]);
-        let reject = Value::object(vec![
-            (TARGET_SLOT.to_string(), carrier),
-            (
-                crate::interpreter::call::CALL_SLOT.to_string(),
-                Value::NativeFunction {
-                    name: "reject".into(),
-                    callable: executor_reject,
-                },
-            ),
-        ]);
-        for resolver in [&resolve, &reject] {
-            if let Value::Object { props } = resolver {
-                props.meta.borrow_mut().call_only = true;
-            }
-        }
-        (resolve, reject)
+        (
+            resolving_function(&carrier, None, executor_resolve),
+            resolving_function(&carrier, None, executor_reject),
+        )
     }
 
     fn thenable_settle_functions(
@@ -210,26 +188,9 @@ impl Interpreter {
         resolution_guard: Value,
     ) -> (Value, Value) {
         let carrier = Value::Promise(promise);
-        let make_resolver = |name: &str, callable| {
-            let resolver = Value::object(vec![
-                (TARGET_SLOT.to_owned(), carrier.clone()),
-                (RESOLUTION_GUARD_SLOT.to_owned(), resolution_guard.clone()),
-                (
-                    crate::interpreter::call::CALL_SLOT.to_owned(),
-                    Value::NativeFunction {
-                        name: name.into(),
-                        callable,
-                    },
-                ),
-            ]);
-            if let Value::Object { props } = &resolver {
-                props.meta.borrow_mut().call_only = true;
-            }
-            resolver
-        };
         (
-            make_resolver("resolve", thenable_resolve),
-            make_resolver("reject", thenable_reject),
+            resolving_function(&carrier, Some(&resolution_guard), thenable_resolve),
+            resolving_function(&carrier, Some(&resolution_guard), thenable_reject),
         )
     }
 
@@ -755,6 +716,48 @@ impl Interpreter {
 /// Hidden slot carrying the promise a `resolve`/`reject` function settles.
 const TARGET_SLOT: &str = "__symbol_promise_target__";
 const RESOLUTION_GUARD_SLOT: &str = "__symbol_promise_resolution_guard__";
+
+fn resolving_function(
+    carrier: &Value,
+    guard: Option<&Value>,
+    callable: crate::builtins::NativeFn,
+) -> Value {
+    let mut properties = vec![
+        (TARGET_SLOT.into(), carrier.clone()),
+        ("name".into(), Value::String("".into())),
+        ("length".into(), Value::Number(1.0)),
+        (
+            super::call::CALL_SLOT.into(),
+            Value::NativeFunction {
+                name: "".into(),
+                callable,
+            },
+        ),
+    ];
+    if let Some(guard) = guard {
+        properties.push((RESOLUTION_GUARD_SLOT.into(), guard.clone()));
+    }
+    let prototype = super::realm::allocation_global()
+        .and_then(|realm| crate::value::FunctionData::default_function_prototype(&realm));
+    let result = Value::object_with_proto(properties, prototype.map(Rc::new));
+    let Value::Object { props } = &result else {
+        unreachable!()
+    };
+    let mut metadata = props.meta.borrow_mut();
+    metadata.call_only = true;
+    for name in ["name", "length"] {
+        metadata.set_attrs(
+            name,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
+    drop(metadata);
+    result
+}
 
 fn target_of(this: &Value) -> Option<Rc<RefCell<PromiseInner>>> {
     this.get_prop(TARGET_SLOT)?.as_promise()

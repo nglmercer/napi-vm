@@ -148,3 +148,22 @@ parameter-patterns, catch-bindings, iteration-bindings, contextual-identifiers,
 literal-grammar, regexp-grammar and cover-grammar. The full run includes every
 variant from these groups. Compressed outcome reports and comparisons are retained
 in [validation evidence](../tools/test262/evidence/foundations-phase2/README.md).
+
+## Current source audit (`1005a4c`)
+
+The complete pinned source audit was repeated after the Phase 1 follow-up. Across
+102,956 variants it rejects all 8,659 parse negatives and accepts no invalid
+sources. It accepts 94,143 of 94,297 variants requiring acceptance. Every source
+acceptance outcome matches `313146b`; the same 154 documented proposal/limit
+rejections remain visible. This closes the Phase 2 foundation grammar audit;
+proposal syntax and the preserved execution/parse limits remain explicit.
+
+The companion digest is
+`fb73a2c6be3df0de8cd6a4c07e28e36f051ad2f35b4ed2483bc89468550a9201`.
+Exact outcomes and checksums are in
+[1005a4c-syntax-summary.json](../tools/test262/evidence/foundations-phase2/1005a4c-syntax-summary.json).
+The first attempt failed to link its companion because its dependency search
+path omitted Cargo's `deps` directory. That driver failure is retained separately;
+no corpus outcomes were produced by it. The fixed tooling passes all ten tests.
+This compile-only result does not establish runtime conformance, Phase 1 realm
+completion, or full-corpus tier parity.

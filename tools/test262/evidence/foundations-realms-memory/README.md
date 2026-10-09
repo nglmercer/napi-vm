@@ -86,3 +86,12 @@ The source/check/archive details are in `bbca33c-summary.json`.
 `7c0a9ce-triage.json` retains every outcome by path and engine phase. Non-passing
 phases are runtime (49,725), parse (154), resolution (29), and timeout (2).
 These buckets do not claim all remaining failures are outside Phase 1–3.
+
+The `372c20b-*` follow-up records all required checks passing (872 workspace,
+203 minimal, 73 Node, 14 WASM, ten tooling tests; four existing workspace ignored).
+Its exploratory 2,044-variant agent/realm/GC/regression selection has 1,852 passes,
+192 failures, 130 new passes, four lost passes, and zero special outcomes versus
+the explicitly labeled matching `7c0a9ce` full-report projection. The full run
+was blocked by the regression gate. The four losses expose missing metadata on
+Promise resolving functions after their constructibility fix; follow-up changes
+must be separately revalidated. These files do not establish Phase 1 completion.

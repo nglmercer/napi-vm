@@ -1,0 +1,23 @@
+{
+  "domain": "source syntax only",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "source_commit": "1005a4c83aedcbcbbdbfb4e6ba32dc589657e64c",
+  "engine_sha256": "fb73a2c6be3df0de8cd6a4c07e28e36f051ad2f35b4ed2483bc89468550a9201",
+  "total": 102956,
+  "counts": {
+    "parse_negative": 8659,
+    "accepted_invalid": 0,
+    "requires_acceptance": 94297,
+    "rejected_valid": 154
+  },
+  "limitations": [
+    "No harness or guest execution; acceptance is not a Test262 execution pass."
+  ],
+  "classification": "Phase 2 source grammar validation; not execution or Phase 1 completion",
+  "syntax_transitions_from_313146b": [],
+  "archive_sha256": {
+    "1005a4c-syntax.json.gz": "f5e8d0e41cb5551a4c55aed2fb1d74bd68f8fdf140e9ee27609c9664c8114716",
+    "1005a4c-syntax.log.gz": "5eac80841a7d9f858a79bf37aa6e8cd8b57019a3742b040d82dc2532d8738c32",
+    "372c20b-companion-link-driver-failure.log.gz": "e3459c51177133df92cb0361a802e6e79edd050ff0f7e9baa7bdf88ba4655f8e"
+  }
+}

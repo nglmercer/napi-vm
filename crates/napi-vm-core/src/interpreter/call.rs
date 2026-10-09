@@ -1937,13 +1937,17 @@ impl Interpreter {
             // carrying its statics *and* an internal call slot, so it can be
             // both `String.fromCharCode(…)` and `String(x)`.
             Value::Object { .. } => match callable_slot(f, CALL_SLOT) {
-                // The object itself becomes the receiver when the call site
-                // supplied none. A native function is a bare pointer with
+                // Stateful call-only functions retain their internal receiver;
+                // namespace calls use it when the call site supplied none.
+                // A native function is a bare pointer with
                 // nowhere to keep state, so the built-ins that need to carry
                 // something — a promise's `resolve`, a combinator's slot index
                 // — keep it in a hidden property and read it off `this`.
                 Some(target) => {
-                    let receiver = if matches!(this_val, Value::Undefined) {
+                    let call_only = f
+                        .property_cell()
+                        .is_some_and(|cell| cell.meta.borrow().call_only);
+                    let receiver = if call_only || matches!(this_val, Value::Undefined) {
                         f.clone()
                     } else {
                         this_val

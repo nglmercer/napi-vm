@@ -144,3 +144,8 @@ To reproduce execution, build source 165dddf with Rust 1.98.1 using
 `tools/test262/run.py /workspace/test262 --engine <frozen-worker> --revision
 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 --jobs 4 --timeout 5 --output <report>`.
 The worker fixes fuel/loop/call-depth/job limits to the configuration above.
+
+The fresh `1005a4c-syntax-*` evidence repeats all 102,956 source-grammar outcomes
+with zero acceptance transitions from `313146b` and no invalid syntax accepted.
+`372c20b-companion-link-driver-failure.log.gz` is the failed tooling attempt,
+not a Test262 conformance report; `1005a4c` fixes its Cargo dependency search path.
