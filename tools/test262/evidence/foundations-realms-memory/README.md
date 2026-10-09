@@ -95,3 +95,13 @@ the explicitly labeled matching `7c0a9ce` full-report projection. The full run
 was blocked by the regression gate. The four losses expose missing metadata on
 Promise resolving functions after their constructibility fix; follow-up changes
 must be separately revalidated. These files do not establish Phase 1 completion.
+
+### Source 8314510: expanded Array species follow-up
+
+The immutable worker passed 2,637/2,945 variants across agents, realms, GC/WeakRef,
+all map/filter tests, and the 14 earlier regression cases. The matching independent
+7c0a9ce projection shows 170 new passes and zero lost passes. No crashes, timeouts,
+harness errors, or skips occurred. All required checks passed; see
+`8314510-summary.json` and archived logs. This source does not complete Phase 1;
+Proxy revocation and remaining Array allocation dependencies are still open.
+No full corpus or full AST/bytecode differential measurement is claimed.

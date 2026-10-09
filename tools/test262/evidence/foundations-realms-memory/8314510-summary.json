@@ -1,0 +1,48 @@
+{
+  "source_commit": "83145109117f6c16909a152749b2a4579e676b2a",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "14b5e53392e5d054495107674c003d05f84d6aa8b98578b3208cf284742a9acc",
+  "classification": "Expanded focused regression validation; Phase 1 not complete; no full corpus run",
+  "total": 2945,
+  "counts": {
+    "pass": 2637,
+    "fail": 308,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 170,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 874,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Array.from/of and other species methods; revoked Proxy lifecycle in progress; global/private/exotic dependencies pending",
+  "archive_sha256": {
+    "8314510-release-build.log.gz": "c5d896093e97d121b768187b645a0c2ae060b29f4220c88c273e15d1713e9d5e",
+    "8314510-tooling-tests.log.gz": "0e2fe4c9d66730a3aef29ebc5f18592e98a3a40ec26cad2ee2bb4beb4058d99b",
+    "8314510-wasm-tests.log.gz": "a341a938f55ba91bcbe671613395dd208c8ddf9f6fad8c50529607206c57f166",
+    "8314510-node-tests.log.gz": "5a35cef36afcd72abb654b48656cd35d8893e5ba8a1b7e4921478a3d883697ee",
+    "8314510-native-build.log.gz": "23db3c7952f80bfd83fe4f1d525a4dc54524a17c699cebe505f9ba183a0b0001",
+    "8314510-minimal-tests.log.gz": "b2f9b63a9cf8c3e532a49e1a22f608849b629a8ff2d80247f6e746d52c97d9ec",
+    "8314510-allfeatures-tests.log.gz": "75201eae575f879176bdb591a9efa93031ea3aec9720edab64de062eebd87e7d",
+    "8314510-clippy.log.gz": "5c36a953e0063587abc2a75d146da44122cf7d8404795b53a95a59692bc4511f",
+    "8314510-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "8314510-focused.json.gz": "e13a8b823bdde3aaffb76a8055b0ee4451f6d2a354a7b2bb1e63fb206b3be272",
+    "8314510-focused.jsonl.gz": "b2cc1bb1925f68663f61a23113b954aa0d2d41a33c01d38e1d68c6f23bbe74e8",
+    "8314510-focused-transitions.json.gz": "32ee2770015c62a9027f29584932004fb18921f922217bb7dc72ccbb0c660865",
+    "8314510-focused-7c0a9ce-projection.json.gz": "aa664b984a84b52a8b5070dd49fb41ce4e3614fe11ba59bead18e4b9cffe8e75"
+  }
+}

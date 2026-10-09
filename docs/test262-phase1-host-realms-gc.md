@@ -85,3 +85,25 @@ Phase 2 source-grammar coverage and its pinned compile-only audit are documented
 in [test262-phase2-contexts.md](test262-phase2-contexts.md). Validation for this
 follow-up must record its own source and immutable worker identities; previous
 full reports do not measure these changes.
+
+## Follow-up source 8314510
+
+Thenable jobs capture and trace the realm of their `then` function. Resolving
+functions use the existing bound-native function representation, including
+Function branding, non-constructibility, standard metadata, and realm-owned
+Function.prototype. No interpreter crosses an owner-thread boundary.
+
+Array.map/filter now share ArraySpeciesCreate and descriptor-based result writes.
+Foreign intrinsic Array constructors are ignored before observing Symbol.species;
+custom species constructors allocate before callbacks and preserve sparse input
+indices. Array's species accessor has owned native metadata. All 38 realm tests
+and all required checks passed. The frozen worker passed 2,637/2,945 focused
+variants with 170 new passes, zero lost passes, and zero special outcomes against
+the matching 7c0a9ce projection. This is scoped evidence, not a full-corpus result.
+
+This source does not close the open dependencies above. Array.from/of, other
+species methods, and Proxy-backed result definitions still need shared internal
+operations. An additional runtime gap was reproduced: array literal elisions are
+currently represented as present undefined values by the AST evaluator. That is
+an execution issue, not a parser acceptance/early-error defect; sparse-result
+regression tests create holes by deleting indices.
