@@ -143,8 +143,12 @@ fn request_gc(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmE
 }
 
 fn collect_requested_gc(vm: &mut Interpreter) {
-    if GC_REQUESTED.with(|requested| requested.replace(false)) {
-        vm.collect_cycles();
+    if GC_REQUESTED.with(|requested| requested.replace(false))
+        && vm.collect_cycles().skipped.is_some()
+    {
+        // Retain the request for the next owner-thread checkpoint instead of
+        // losing it while a coroutine or host borrow prevents collection.
+        GC_REQUESTED.with(|requested| requested.set(true));
     }
 }
 
@@ -240,6 +244,7 @@ fn failure(phase: &str, error: &VmErr) -> Json {
     json!({"status": "error", "phase": phase, "error_type": error_type(error), "message": error.to_string()})
 }
 fn execute(request: Request) -> Json {
+    GC_REQUESTED.with(|requested| requested.set(false));
     let agents = agents::Session::new();
     // Parse test source separately: a harness failure cannot satisfy a negative test.
     let goal = if request.module {
@@ -379,6 +384,28 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deferred_gc_request_survives_an_unsafe_checkpoint() {
+        let mut vm = Interpreter::with_builtins();
+        let object = vm
+            .eval_source("var root={child:{answer:42}};root.child.self=root.child;root;")
+            .unwrap();
+        let Value::Object { props } = &object else {
+            panic!("object")
+        };
+        let borrow = props.borrow_mut();
+        request_gc(&mut vm, Value::Undefined, vec![]).unwrap();
+        collect_requested_gc(&mut vm);
+        assert!(GC_REQUESTED.with(|requested| requested.get()));
+        drop(borrow);
+        collect_requested_gc(&mut vm);
+        assert!(!GC_REQUESTED.with(|requested| requested.get()));
+        assert!(matches!(
+            vm.eval_source("root.child.answer"),
+            Ok(Value::Number(42.))
+        ));
+    }
 
     #[test]
     fn realm_eval_script_performs_guest_string_coercion() {

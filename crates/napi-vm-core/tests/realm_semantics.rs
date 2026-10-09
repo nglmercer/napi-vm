@@ -1,6 +1,103 @@
 use napi_vm_core::{Interpreter, Value};
 
 #[test]
+fn string_and_regexp_brand_errors_belong_to_the_accessor_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "var caught;try{other.String.prototype.valueOf.call({valueOf(){return '';}});}catch(e){caught=e;}caught instanceof other.TypeError&&other.String.prototype.valueOf.call(Object('ok'))==='ok';",
+    );
+    for name in [
+        "source",
+        "global",
+        "ignoreCase",
+        "multiline",
+        "dotAll",
+        "sticky",
+        "unicode",
+        "unicodeSets",
+        "hasIndices",
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var getter=Object.getOwnPropertyDescriptor(other.RegExp.prototype,'{name}').get;var caught;try{{getter.call(RegExp.prototype);}}catch(e){{caught=e;}}caught instanceof other.TypeError&&Object.getPrototypeOf(getter)===other.Function.prototype;"
+            ),
+        );
+    }
+    truth(
+        &mut vm,
+        "other.RegExp.prototype.source==='(?:)'&&other.RegExp.prototype.global===undefined;",
+    );
+}
+
+#[test]
+fn shared_typed_elements_use_observable_numeric_and_bigint_conversion() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var count=0;var b=new SharedArrayBuffer(16);var a=new BigInt64Array(b);a[0]={valueOf(){count++;return '42';}};a.fill(true,1);Atomics.add(a,0,'1')===42n&&a[0]===43n&&a[1]===1n&&count===1;",
+    );
+    truth(
+        &mut vm,
+        "var order='';var source={length:2,get 0(){order+='a';return {valueOf(){order+='b';return '7';}};},get 1(){order+='c';return '8';}};var copied=new BigInt64Array(source);order==='abc'&&copied[0]===7n&&copied[1]===8n;",
+    );
+    truth(
+        &mut vm,
+        "var calls=0;var source={get [Symbol.iterator](){calls++;return function(){return ['0','1'][Symbol.iterator]();};}};var a=new BigUint64Array(source);calls===1&&a[1]===1n;",
+    );
+    truth(
+        &mut vm,
+        "var view=new BigInt64Array(new ArrayBuffer(8));Atomics.add(view,0,'2')===0n&&view[0]===2n;",
+    );
+    truth(
+        &mut vm,
+        "var caught;try{new BigInt64Array(new Uint8Array(0));}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    truth(
+        &mut vm,
+        "new Uint8Array(2.9).length===2&&new Uint8Array('3').length===3;",
+    );
+}
+
+#[test]
+fn buffer_slice_observes_species_and_allocates_in_the_method_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for name in ["ArrayBuffer", "SharedArrayBuffer"] {
+        truth(
+            &mut vm,
+            &format!(
+                "var C={name};var b=new C(8);var bytes=new Uint8Array(b);bytes[2]=42;var order='';var chosen;var ctor={{get [Symbol.species](){{order+='s';return function(n){{order+='c';return chosen=new C(n+1);}};}}}};Object.defineProperty(b,'constructor',{{get(){{order+='k';return ctor;}}}});var result=b.slice({{valueOf(){{order+='a';return 2;}}}},{{valueOf(){{order+='z';return 4;}}}});order==='azksc'&&result===chosen&&result.byteLength===3&&new Uint8Array(result)[0]===42;"
+            ),
+        );
+        truth(
+            &mut vm,
+            &format!(
+                "var fresh=new C(4);fresh.constructor=undefined;var foreign=other.{name}.prototype.slice.call(fresh);Object.getPrototypeOf(foreign)===other.{name}.prototype;"
+            ),
+        );
+        truth(
+            &mut vm,
+            "var same=new C(4);same.constructor={[Symbol.species]:function(){return same;}};var caught;try{same.slice();}catch(e){caught=e;}caught instanceof TypeError;",
+        );
+        truth(
+            &mut vm,
+            "C[Symbol.species]===C&&Object.getOwnPropertyDescriptor(C,'length').value===1&&C.prototype.slice.length===2;",
+        );
+    }
+    truth(
+        &mut vm,
+        "SharedArrayBuffer.prototype[Symbol.toStringTag]==='SharedArrayBuffer';",
+    );
+}
+
+#[test]
 fn implicit_derived_constructors_forward_arguments_without_iteration() {
     let mut vm = Interpreter::with_builtins();
     truth(

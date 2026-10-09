@@ -39,9 +39,77 @@ pub(super) fn install(e: &mut Environment) {
                 );
             }
         }
+        for (name, getter) in [
+            ("source", regexp_source as super::NativeFn),
+            ("global", regexp_global),
+            ("ignoreCase", regexp_ignore_case),
+            ("multiline", regexp_multiline),
+            ("dotAll", regexp_dot_all),
+            ("sticky", regexp_sticky),
+            ("unicode", regexp_unicode),
+            ("unicodeSets", regexp_unicode_sets),
+            ("hasIndices", regexp_has_indices),
+        ] {
+            super::object::define_property(
+                &prototype,
+                name,
+                &Value::object(vec![
+                    (
+                        "get".into(),
+                        super::native_method(
+                            &format!("get {name}"),
+                            0,
+                            getter,
+                            e.get("Function").and_then(|f| f.get_prop("prototype")),
+                        ),
+                    ),
+                    ("configurable".into(), Value::Bool(true)),
+                ]),
+            )
+            .expect("RegExp intrinsic getter");
+        }
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
 }
+
+fn regexp_attribute(interp: &mut Interpreter, this: Value, name: &str) -> Result<Value, VmErr> {
+    if let Value::RegExp(data) = &this {
+        return Ok(match name {
+            "hasIndices" => Value::Bool(data.regex.borrow().flags.contains('d')),
+            "unicodeSets" => Value::Bool(data.regex.borrow().flags.contains('v')),
+            _ => regexp_member(data, name).expect("RegExp attribute"),
+        });
+    }
+    let constructor = interp.member(&interp.realm_global_object(), "RegExp")?;
+    let prototype = interp.member(&constructor, "prototype")?;
+    if crate::interpreter::strict_equals(&this, &prototype) {
+        return Ok(if name == "source" {
+            Value::String("(?:)".into())
+        } else {
+            Value::Undefined
+        });
+    }
+    Err(VmErr::Msg("TypeError: incompatible RegExp receiver".into()))
+}
+
+macro_rules! regexp_attribute_getters {
+    ($(($function:ident, $name:literal)),* $(,)?) => {
+        $(fn $function(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+            regexp_attribute(interp, this, $name)
+        })*
+    };
+}
+regexp_attribute_getters!(
+    (regexp_source, "source"),
+    (regexp_global, "global"),
+    (regexp_ignore_case, "ignoreCase"),
+    (regexp_multiline, "multiline"),
+    (regexp_dot_all, "dotAll"),
+    (regexp_sticky, "sticky"),
+    (regexp_unicode, "unicode"),
+    (regexp_unicode_sets, "unicodeSets"),
+    (regexp_has_indices, "hasIndices"),
+);
 
 fn type_err(message: String) -> VmErr {
     VmErr::Msg(format!("SyntaxError: {}", message))

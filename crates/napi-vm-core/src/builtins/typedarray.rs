@@ -35,6 +35,50 @@ pub(super) fn install(e: &mut Environment) {
         .and_then(|object| object.get_prop("prototype"))
         .map(Rc::new);
 
+    for name in ["ArrayBuffer", "SharedArrayBuffer"] {
+        let constructor = e.get(name).expect("buffer constructor");
+        constructor
+            .set_prop("length".into(), Value::Number(1.0))
+            .expect("constructor length");
+        if let Value::Object { props } = &constructor {
+            props.meta.borrow_mut().set_attrs(
+                "length",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        let key = super::well_known("species").expect("Symbol.species");
+        super::object::define_property(
+            &constructor,
+            &match &key {
+                Value::Symbol(symbol) => crate::interpreter::symbol_slot_key(symbol),
+                _ => unreachable!(),
+            },
+            &Value::object(vec![
+                (
+                    "get".into(),
+                    super::native_method(
+                        "get [Symbol.species]",
+                        0,
+                        buffer_species,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .expect("buffer species getter");
+        if let (Value::Object { props }, Value::Symbol(symbol)) = (&constructor, &key) {
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            props
+                .meta
+                .borrow_mut()
+                .set_symbol_key(&slot, symbol.clone());
+        }
+    }
     if let Some(namespace) = e.get("ArrayBuffer") {
         namespace
             .set_prop(
@@ -47,7 +91,15 @@ pub(super) fn install(e: &mut Environment) {
             object_prototype.clone(),
             namespace.clone(),
             [
-                ("slice", super::nf("slice", array_buffer_slice)),
+                (
+                    "slice",
+                    super::native_method(
+                        "slice",
+                        2,
+                        array_buffer_slice,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                ),
                 (
                     "resize",
                     super::native_method(
@@ -103,7 +155,15 @@ pub(super) fn install(e: &mut Environment) {
             object_prototype.clone(),
             namespace.clone(),
             [
-                ("slice", super::nf("slice", shared_array_buffer_slice)),
+                (
+                    "slice",
+                    super::native_method(
+                        "slice",
+                        2,
+                        shared_array_buffer_slice,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                ),
                 (
                     "grow",
                     super::native_method(
@@ -138,6 +198,24 @@ pub(super) fn install(e: &mut Environment) {
                 meta.has_accessors = true;
                 meta.set_attrs(
                     name,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            prototype
+                .set_prop(slot.clone(), Value::String("SharedArrayBuffer".into()))
+                .expect("buffer tag");
+            if let Value::Object { props } = &prototype {
+                let mut meta = props.meta.borrow_mut();
+                meta.set_symbol_key(&slot, symbol.clone());
+                meta.set_attrs(
+                    &slot,
                     crate::value::PropAttrs {
                         writable: false,
                         enumerable: false,
@@ -1123,20 +1201,7 @@ fn atomics_coerce_argument(
     value: &Value,
 ) -> Result<Value, VmErr> {
     if matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64) {
-        let primitive = interp.coerce_object_to_primitive(value, "number")?;
-        let bigint = match &primitive {
-            Value::BigInt(value) => return Ok(Value::BigInt(value.clone())),
-            Value::Bool(false) => crate::bigint::BigInt::zero(),
-            Value::Bool(true) => crate::bigint::BigInt::from_i64(1),
-            Value::String(value) => crate::bigint::BigInt::parse(value)
-                .map_err(|_| VmErr::Msg("SyntaxError: invalid BigInt value".into()))?,
-            _ => {
-                return Err(VmErr::Msg(
-                    "TypeError: Atomics BigInt typed arrays require a BigInt value".into(),
-                ));
-            }
-        };
-        Ok(Value::BigInt(Rc::new(bigint)))
+        interp.ecmascript_to_bigint(value)
     } else {
         Ok(Value::Number(crate::value::to_integer_or_infinity(
             interp.ecmascript_to_number(value)?,
@@ -1200,11 +1265,8 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
     match a.first() {
         None | Some(Value::Undefined) => Ok(typed(kind, new_buffer(0)?, 0, 0)),
         Some(Value::Number(n)) => {
-            if !n.is_finite() || *n < 0.0 || n.fract() != 0.0 {
-                return Err(range_err("Invalid typed array length"));
-            }
-            let length = *n as usize;
-            Ok(typed(kind, new_buffer(length * size)?, 0, length))
+            let length = constructor_index(interp, Some(&Value::Number(*n)))?;
+            allocate_typed(kind, length)
         }
         Some(Value::ArrayBuffer(buffer)) => {
             if buffer.is_detached() {
@@ -1292,25 +1354,87 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
                 length_tracking,
             ))
         }
-        // A typed array or any iterable copies element-wise.
-        Some(source) => {
-            let items = match source {
-                Value::Symbol(_) | Value::BigInt(_) => {
-                    return Err(VmErr::Msg("TypeError: Invalid typed array length".into()));
-                }
-                Value::TypedArray(view) => read_all(view),
-                other => interp.iterate(other)?,
-            };
-            let view = typed(kind, new_buffer(items.len() * size)?, 0, items.len());
-            let Value::TypedArray(data) = &view else {
-                unreachable!("typed() returns a typed array");
-            };
-            for (index, item) in items.iter().enumerate() {
-                write_element(data, index, item)?;
+        Some(source) if !crate::interpreter::call::is_js_object(source) => {
+            let length = constructor_index(interp, Some(source))?;
+            allocate_typed(kind, length)
+        }
+        Some(Value::TypedArray(source)) => {
+            if source.is_out_of_bounds() || is_bigint_kind(source.kind) != is_bigint_kind(kind) {
+                return Err(VmErr::Msg(
+                    "TypeError: incompatible typed array source".into(),
+                ));
             }
-            Ok(view)
+            typed_from_items(interp, kind, read_all(source))
+        }
+        Some(source) => {
+            let key = super::well_known("iterator").expect("Symbol.iterator");
+            if let Some(method) = interp.get_method(source, &key)? {
+                let iterator = interp.iterator_from_method(source, &method)?;
+                let items = interp.drain_iterator(&iterator)?;
+                return typed_from_items(interp, kind, items);
+            }
+            let length = interp.member(source, "length")?;
+            let number = interp.ecmascript_to_number(&length)?;
+            let length = if number.is_nan() || number <= 0.0 {
+                0.0
+            } else {
+                number.floor()
+            };
+            if length > crate::value::MAX_ARRAY_LEN as f64 {
+                return Err(range_err("Invalid typed array length"));
+            }
+            let result = allocate_typed(kind, length as usize)?;
+            let Value::TypedArray(view) = &result else {
+                unreachable!()
+            };
+            for index in 0..length as usize {
+                interp.check_execution()?;
+                let value = interp.member(source, &index.to_string())?;
+                write_element_in(interp, view, index, &value)?;
+            }
+            Ok(result)
         }
     }
+}
+
+fn is_bigint_kind(kind: TypedKind) -> bool {
+    matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64)
+}
+
+fn allocate_typed(kind: TypedKind, length: usize) -> Result<Value, VmErr> {
+    let bytes = length
+        .checked_mul(kind.size())
+        .ok_or_else(|| range_err("Invalid typed array length"))?;
+    Ok(typed(kind, new_buffer(bytes)?, 0, length))
+}
+
+fn typed_from_items(
+    interp: &mut Interpreter,
+    kind: TypedKind,
+    items: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let result = allocate_typed(kind, items.len())?;
+    let Value::TypedArray(view) = &result else {
+        unreachable!()
+    };
+    for (index, value) in items.iter().enumerate() {
+        write_element_in(interp, view, index, value)?;
+    }
+    Ok(result)
+}
+
+pub(crate) fn write_element_in(
+    interp: &mut Interpreter,
+    view: &Rc<TypedArrayData>,
+    index: usize,
+    value: &Value,
+) -> Result<(), VmErr> {
+    let converted = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(value)?
+    } else {
+        Value::Number(interp.ecmascript_to_number(value)?)
+    };
+    write_element(view, index, &converted)
 }
 
 fn typed(
@@ -1645,7 +1769,7 @@ fn typed_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
         return Err(range_err("Source is too large"));
     }
     for (index, item) in items.iter().enumerate() {
-        write_element(&view, offset + index, item)?;
+        write_element_in(interp, &view, offset + index, item)?;
     }
     Ok(Value::Undefined)
 }
@@ -1702,9 +1826,14 @@ fn typed_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value,
     Ok(typed(view.kind, copy, 0, end - start))
 }
 
-fn typed_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn typed_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
-    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    let input = a.first().cloned().unwrap_or(Value::Undefined);
+    let value = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(&input)?
+    } else {
+        Value::Number(interp.ecmascript_to_number(&input)?)
+    };
     let (start, end) = window(view.effective_length(), &a[1.min(a.len())..]);
     for index in start..end {
         write_element(&view, index, &value)?;
@@ -1733,42 +1862,100 @@ pub fn shared_array_buffer_member(buffer: &SharedBuffer, key: &str) -> Option<Va
     })
 }
 
-fn array_buffer_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::ArrayBuffer(buffer) = &this else {
-        return Err(VmErr::Msg("TypeError: not an ArrayBuffer".to_string()));
-    };
-    if buffer.is_detached() {
-        return Err(VmErr::Msg(
-            "TypeError: Cannot slice a detached ArrayBuffer".to_string(),
-        ));
-    }
-    let length = buffer.borrow().len();
-    let (start, end) = window(length, &a);
-    let copy = new_buffer(end - start)?;
-    copy.borrow_mut()
-        .copy_from_slice(&buffer.borrow()[start..end]);
-    Ok(Value::ArrayBuffer(copy))
+fn buffer_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(this)
+}
+
+fn array_buffer_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    buffer_slice(interp, this, args, false)
 }
 
 fn shared_array_buffer_slice(
-    _: &mut Interpreter,
+    interp: &mut Interpreter,
     this: Value,
-    a: Vec<Value>,
+    args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let Value::SharedArrayBuffer(buffer) = &this else {
-        return Err(VmErr::Msg("TypeError: not a SharedArrayBuffer".to_string()));
-    };
-    let (start, end) = window(buffer.len(), &a);
-    let copy = SharedBuffer::zeroed(end - start)
-        .ok_or_else(|| range_err("Invalid shared array buffer length"))?;
-    let bytes = buffer
-        .read(start, end - start)
-        .ok_or_else(|| range_err("Invalid shared array buffer range"))?;
-    copy.write(0, &bytes);
-    Ok(Value::SharedArrayBuffer(copy))
+    buffer_slice(interp, this, args, true)
 }
 
-// --- DataView ---------------------------------------------------------------
+fn buffer_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    shared: bool,
+) -> Result<Value, VmErr> {
+    let source: BufferBacking = match (&this, shared) {
+        (Value::ArrayBuffer(buffer), false) => buffer.clone().into(),
+        (Value::SharedArrayBuffer(buffer), true) => buffer.clone().into(),
+        _ => {
+            return Err(VmErr::Msg(
+                "TypeError: incompatible buffer slice receiver".into(),
+            ));
+        }
+    };
+    if source.is_detached() {
+        return Err(VmErr::Msg("TypeError: detached buffer".into()));
+    }
+    let length = source.len();
+    let relative = |number: f64| {
+        let integer = crate::value::to_integer_or_infinity(number);
+        if integer < 0.0 {
+            (length as f64 + integer).max(0.0) as usize
+        } else {
+            integer.min(length as f64) as usize
+        }
+    };
+    let start = relative(interp.ecmascript_to_number(args.first().unwrap_or(&Value::Undefined))?);
+    let end = match args.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative(interp.ecmascript_to_number(value)?),
+    };
+    let count = end.saturating_sub(start);
+    let name = if shared {
+        "SharedArrayBuffer"
+    } else {
+        "ArrayBuffer"
+    };
+    let constructor = interp.species_constructor(&this, name)?;
+    let result = interp.ctor(&constructor, vec![Value::Number(count as f64)])?;
+    let destination: BufferBacking = match (&result, shared) {
+        (Value::ArrayBuffer(buffer), false) => buffer.clone().into(),
+        (Value::SharedArrayBuffer(buffer), true) => buffer.clone().into(),
+        _ => {
+            return Err(VmErr::Msg(
+                "TypeError: species returned an incompatible buffer".into(),
+            ));
+        }
+    };
+    let same = match (&source, &destination) {
+        (BufferBacking::Shared(a), BufferBacking::Shared(b)) => {
+            a.wait_identity() == b.wait_identity()
+        }
+        _ => source.identity() == destination.identity(),
+    };
+    if same || destination.is_detached() || destination.len() < count {
+        return Err(VmErr::Msg("TypeError: invalid species buffer".into()));
+    }
+    if source.is_detached() {
+        return Err(VmErr::Msg(
+            "TypeError: source buffer detached during slice".into(),
+        ));
+    }
+    let count = count.min(source.len().saturating_sub(start));
+    if count > 0 {
+        let bytes = source.read(start, count).expect("validated source range");
+        if !destination.write(0, &bytes) {
+            return Err(VmErr::Msg(
+                "TypeError: species buffer changed during slice".into(),
+            ));
+        }
+    }
+    Ok(result)
+}
 
 fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let Some(value @ (Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_))) = a.first() else {

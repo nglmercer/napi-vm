@@ -1437,7 +1437,11 @@ impl Interpreter {
     /// generator raises a catchable `RangeError` instead of hanging.
     pub(crate) fn drain_iterable(&mut self, source: &Value) -> Result<Vec<Value>, VmErr> {
         let iterator = self.iterator_for(source)?;
-        let next_fn = self.member(&iterator, "next")?;
+        self.drain_iterator(&iterator)
+    }
+
+    pub(crate) fn drain_iterator(&mut self, iterator: &Value) -> Result<Vec<Value>, VmErr> {
+        let next_fn = self.member(iterator, "next")?;
         let mut out = Vec::new();
         loop {
             self.consume_loop()?;
@@ -1494,7 +1498,15 @@ impl Interpreter {
         let Some(method) = self.get_method(source, &key)? else {
             return vm_err("TypeError: Value has no callable Symbol.iterator");
         };
-        let iterator = self.call_this(&method, source.clone(), vec![])?;
+        self.iterator_from_method(source, &method)
+    }
+
+    pub(crate) fn iterator_from_method(
+        &mut self,
+        source: &Value,
+        method: &Value,
+    ) -> Result<Value, VmErr> {
+        let iterator = self.call_this(method, source.clone(), vec![])?;
         if !super::call::is_js_object(&iterator) {
             return vm_err("TypeError: Iterator method must return an object");
         }

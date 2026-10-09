@@ -45,6 +45,7 @@ pub use symbol::new_symbol;
 pub(crate) use symbol::symbol_for_key;
 pub use symbol::symbol_method;
 pub(crate) use symbol::{is_iterator_symbol, symbol_for, symbol_key_for, well_known};
+pub(crate) use typedarray::write_element_in;
 pub use typedarray::{
     array_buffer_member, data_view_member, read_element, shared_array_buffer_member, typed_member,
     write_element,

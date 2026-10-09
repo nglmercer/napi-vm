@@ -134,6 +134,39 @@ pub(crate) fn is_js_object(value: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// SpeciesConstructor observes constructor/species getters before deciding
+    /// whether to use the intrinsic from the executing builtin's realm.
+    pub(crate) fn species_constructor(
+        &mut self,
+        object: &Value,
+        intrinsic: &str,
+    ) -> Result<Value, VmErr> {
+        let default = self
+            .persistent_global
+            .borrow()
+            .intrinsic(intrinsic)
+            .expect("installed species intrinsic");
+        let constructor = self.get_prop_value_str(object, "constructor")?;
+        if matches!(constructor, Value::Undefined) {
+            return Ok(default);
+        }
+        if !is_js_object(&constructor) {
+            return Err(VmErr::Msg(
+                "TypeError: constructor must be an object".into(),
+            ));
+        }
+        let species = crate::builtins::well_known("species").expect("Symbol.species");
+        let species = self.get_prop_value(&constructor, &species)?;
+        if matches!(species, Value::Undefined | Value::Null) {
+            return Ok(default);
+        }
+        if !crate::builtins::is_constructor(&species) {
+            return Err(VmErr::Msg(
+                "TypeError: species must be a constructor".into(),
+            ));
+        }
+        Ok(species)
+    }
     /// CreateListFromArrayLike for call/construct argument lists. Property
     /// reads stay observable; these operations do not use iterator methods.
     pub(crate) fn argument_list_from_array_like(
@@ -1100,7 +1133,7 @@ impl Interpreter {
                 }
                 let index = self.tn(key);
                 if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
-                    crate::builtins::write_element(view, index as usize, &val)?;
+                    crate::builtins::write_element_in(self, view, index as usize, &val)?;
                 }
                 Ok(())
             }

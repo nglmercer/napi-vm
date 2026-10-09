@@ -9,6 +9,23 @@ use crate::value::{BoxedPrimitive, FunctionData, Value};
 use std::rc::Rc;
 
 impl Interpreter {
+    /// ToBigInt is shared by typed elements and atomic operations. Unlike
+    /// BigInt(number), it rejects Number primitives after observable coercion.
+    pub(crate) fn ecmascript_to_bigint(&mut self, value: &Value) -> Result<Value, VmErr> {
+        let primitive = self.coerce_object_to_primitive(value, "number")?;
+        let bigint = match &primitive {
+            Value::BigInt(value) => return Ok(Value::BigInt(value.clone())),
+            Value::Bool(value) => crate::bigint::BigInt::from_i64(i64::from(*value)),
+            Value::String(value) => crate::bigint::BigInt::parse(value)
+                .map_err(|_| VmErr::Msg("SyntaxError: invalid BigInt value".into()))?,
+            _ => {
+                return Err(VmErr::Msg(
+                    "TypeError: Cannot convert value to a BigInt".into(),
+                ));
+            }
+        };
+        Ok(Value::BigInt(Rc::new(bigint)))
+    }
     /// ECMAScript GetMethod, shared by iterator protocols and Proxy traps.
     /// Resolve getters before checking callability and treat only nullish
     /// values as absent.
