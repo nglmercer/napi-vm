@@ -2132,6 +2132,13 @@ impl Interpreter {
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
         let caller = self.persistent_global.clone();
+        // EvaluateNew checks IsConstructor in the evaluating caller's realm,
+        // before entering the operand's realm or reading newTarget.prototype.
+        if !crate::builtins::is_constructor(f) {
+            let _error_realm = super::realm::AllocationRealm::enter(Some(caller));
+            return Err(VmErr::Msg("TypeError: value is not a constructor".into())
+                .with_context(None, self.get_stack()));
+        }
         let owner = if matches!(f, Value::Proxy(_)) {
             caller.clone()
         } else {

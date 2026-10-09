@@ -707,6 +707,15 @@ fn constructor_post_return_errors_belong_to_the_constructing_caller() {
 fn native_constructor_prototype_errors_belong_to_the_constructor_realm() {
     let mut vm = Interpreter::with_builtins();
     let child = vm.create_realm();
+    vm.set_global_checked(
+        "foreignNonConstructor",
+        child.global_value("parseInt").unwrap(),
+    )
+    .unwrap();
+    truth(
+        &mut vm,
+        "var caught;try{new foreignNonConstructor(0);}catch(e){caught=e;}caught instanceof TypeError;",
+    );
     vm.set_global_checked("other", child.realm_global_object())
         .unwrap();
     truth(
