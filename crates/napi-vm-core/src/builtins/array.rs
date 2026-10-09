@@ -206,7 +206,7 @@ fn array_is_array(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value,
     // ECMAScript's IsArray operation follows Proxy [[ProxyTarget]] links.
     // Iterate so deeply nested proxies do not consume the Rust call stack.
     while let Value::Proxy(proxy) = &value {
-        value = proxy.target.clone();
+        value = proxy.snapshot()?.0;
     }
     Ok(Value::Bool(matches!(value, Value::Array(_))))
 }

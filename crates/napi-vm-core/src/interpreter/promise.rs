@@ -735,51 +735,7 @@ fn resolving_function(
     let state = Value::object(slots);
     let prototype = super::realm::allocation_global()
         .and_then(|realm| crate::value::FunctionData::default_function_prototype(&realm));
-    let target = crate::builtins::native_method("", 1, callable, prototype.clone());
-    let properties = Value::object_with_proto(
-        vec![
-            ("name".into(), Value::String("".into())),
-            ("length".into(), Value::Number(1.0)),
-        ],
-        prototype.map(Rc::new),
-    )
-    .property_cell()
-    .expect("function properties");
-    for name in ["name", "length"] {
-        properties.meta.borrow_mut().set_attrs(
-            name,
-            crate::value::PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            },
-        );
-    }
-    // Reuse the existing bound-call machinery: state is an internal receiver,
-    // never an observable property and never replaced by the caller's this.
-    Value::Function(Rc::new(crate::value::FunctionData {
-        strict: true,
-        native: None,
-        identity: Rc::new(0),
-        name: Some("".into()),
-        properties,
-        standard_properties_initialized: Rc::new(std::cell::Cell::new(true)),
-        params: Rc::new(Vec::new()),
-        body: Rc::new(Vec::new()),
-        closure: None,
-        is_arrow: false,
-        is_constructor: false,
-        is_async: false,
-        is_generator: false,
-        uses_arguments: false,
-        needs_hoisting: false,
-        bytecode: None,
-        bound: Some(Rc::new(crate::value::BoundFunctionData {
-            target,
-            this_value: state,
-            arguments: Rc::new(Vec::new()),
-        })),
-    }))
+    crate::builtins::bound_native_method("", 1, callable, prototype, state)
 }
 
 fn target_of(this: &Value) -> Option<Rc<RefCell<PromiseInner>>> {

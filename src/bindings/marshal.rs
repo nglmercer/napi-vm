@@ -247,7 +247,7 @@ fn to_napi_d(
             // A proxy crosses as what it wraps: the traps are guest code and
             // cannot follow the value out.
             Value::Proxy(proxy) => {
-                return to_napi_d(env, &proxy.target, depth, active);
+                return to_napi_d(env, &proxy.snapshot()?.0, depth, active);
             }
             Value::Promise(promise) => {
                 out = make_promise(env, promise, depth, active)?;

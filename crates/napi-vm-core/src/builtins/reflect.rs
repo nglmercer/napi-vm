@@ -91,8 +91,18 @@ fn reflect_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 
 fn reflect_has(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let key = interp.property_key(&arg(&a, 1))?;
-    Ok(Value::Bool(arg(&a, 0).has_prop(&key)))
+    let target = reflect_object_target(&a)?;
+    interp.has_property(&target, &arg(&a, 1)).map(Value::Bool)
+}
+
+fn reflect_object_target(arguments: &[Value]) -> Result<Value, VmErr> {
+    let target = arg(arguments, 0);
+    if !crate::interpreter::call::is_js_object(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect target must be an object".into(),
+        ));
+    }
+    Ok(target)
 }
 
 fn reflect_delete(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -139,8 +149,16 @@ fn reflect_set_prototype_of(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "setPrototypeOf", a)?;
-    Ok(Value::Bool(true))
+    let target = reflect_object_target(&a)?;
+    let prototype = arg(&a, 1);
+    if !matches!(prototype, Value::Null) && !crate::interpreter::call::is_js_object(&prototype) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect prototype must be an object or null".into(),
+        ));
+    }
+    interp
+        .set_prototype_of(&target, &prototype)
+        .map(Value::Bool)
 }
 
 fn reflect_is_extensible(
@@ -148,7 +166,8 @@ fn reflect_is_extensible(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "isExtensible", a)
+    let target = reflect_object_target(&a)?;
+    interp.is_extensible(&target).map(Value::Bool)
 }
 
 fn reflect_prevent_extensions(
@@ -156,8 +175,8 @@ fn reflect_prevent_extensions(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "preventExtensions", a)?;
-    Ok(Value::Bool(true))
+    let target = reflect_object_target(&a)?;
+    interp.prevent_extensions(&target).map(Value::Bool)
 }
 
 fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

@@ -281,3 +281,23 @@ fn with_object_environment_keeps_captured_receivers_alive() {
     assert!(vm.collect_cycles().collected > 0);
     yes(&mut vm, "weak.deref()===undefined;");
 }
+
+#[test]
+fn proxy_revokers_trace_live_slots_and_release_targets_and_handlers() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var target={answer:42};target.self=target;var handler={};handler.self=handler;var targetRef=new WeakRef(target);var handlerRef=new WeakRef(handler);var pair=Proxy.revocable(target,handler);var revoke=pair.revoke;target=undefined;handler=undefined;pair=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "targetRef.deref().answer===42&&handlerRef.deref()!==undefined;",
+    );
+    run(&mut vm, "revoke();");
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "targetRef.deref()===undefined&&handlerRef.deref()===undefined;",
+    );
+}

@@ -669,7 +669,7 @@ pub(super) fn napi_value_type(value: &Value) -> i32 {
         Value::String(_) => 4, // napi_string
         Value::Symbol(_) => 5, // napi_symbol
         Value::BigInt(_) => 9, // napi_bigint
-        Value::Proxy(proxy) => napi_value_type(&proxy.target),
+        Value::Proxy(_) => 6,
         _ => 6, // napi_object
     }
 }

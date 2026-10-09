@@ -327,7 +327,7 @@ impl Interpreter {
             }
             // A proxy completes as what it stands in for.
             Value::Proxy(proxy) => {
-                let target = proxy.target.clone();
+                let target = proxy.target_for_inspection();
                 self.collect_completion_members(&target, members, depth + 1);
             }
             // Everything else has a fixed member set the catalog already
@@ -570,9 +570,8 @@ impl Interpreter {
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
         let property = self.property_key(key)?;
         if let Some(proxy) = object.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "has")? {
-                let handler = proxy.handler.clone();
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "has")? {
                 let trap_key = self.proxy_property_key(key)?;
                 let result = self.call_this(&trap, handler, vec![target, trap_key])?;
                 return Ok(result.is_truthy());
@@ -618,10 +617,10 @@ impl Interpreter {
         // A proxy's `get` trap replaces the read entirely; without one the
         // read falls through to the target.
         if let Some(proxy) = o.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "get")? {
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "get")? {
                 let key = self.proxy_property_key(p)?;
-                let handler = proxy.handler.clone();
+
                 return self.call_this(&trap, handler, vec![target, key, receiver.clone()]);
             }
             return self.get_prop_value_with_receiver(&target, p, receiver);
@@ -708,11 +707,11 @@ impl Interpreter {
         receiver: &Value,
     ) -> Result<Value, VmErr> {
         if let Some(proxy) = o.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "get")? {
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "get")? {
                 let trap_key = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&trap_key)?;
-                let handler = proxy.handler.clone();
+
                 return self.call_this(&trap, handler, vec![target, trap_key, receiver.clone()]);
             }
             return self.get_prop_value_str_with_receiver(&target, key, receiver);
@@ -1869,7 +1868,7 @@ fn has_default_object_prototype(value: &Value) -> bool {
             let meta = props.meta.borrow();
             meta.uses_default_prototype || meta.proto.is_some()
         }
-        Value::Proxy(proxy) => has_default_object_prototype(&proxy.target),
+        Value::Proxy(proxy) => has_default_object_prototype(&proxy.target_for_inspection()),
         // Built-in object kinds use their own prototype methods where the VM
         // models them; missing Object methods come from Object.prototype.
         _ => true,

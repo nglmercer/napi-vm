@@ -155,7 +155,7 @@ pub(super) fn is_napi_function(value: &Value) -> bool {
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_napi_function(&proxy.target),
+        Value::Proxy(proxy) => proxy.callable,
         Value::Object { .. } => value.get_prop("__symbol_call__").is_some_and(|target| {
             matches!(
                 target,
@@ -529,7 +529,7 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
             Ok(true)
         }
         Value::Proxy(proxy) => napi_direct_delete_property(
-            &proxy.target,
+            &proxy.target_for_inspection(),
             &Value::String(crate::JsString::from_key(&key)),
         ),
         _ => Ok(true),
@@ -571,7 +571,7 @@ pub(super) fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
             names.extend(array.named.borrow().iter().map(|(key, _)| key.clone()));
             names
         }
-        Value::Proxy(proxy) => napi_direct_own_property_names(&proxy.target),
+        Value::Proxy(proxy) => napi_direct_own_property_names(&proxy.target_for_inspection()),
         Value::Error(error) => {
             let mut names = vec!["name".to_owned(), "message".to_owned(), "stack".to_owned()];
             if error.code.is_some() {
@@ -611,7 +611,9 @@ pub(super) fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> b
                     || array.named_prop(key).is_some()
                         && array.meta.borrow().attrs_of(key).enumerable)
         }
-        Value::Proxy(proxy) => napi_direct_property_is_enumerable(&proxy.target, key),
+        Value::Proxy(proxy) => {
+            napi_direct_property_is_enumerable(&proxy.target_for_inspection(), key)
+        }
         Value::RealmGlobal(global) => global
             .borrow()
             .global_property(key)
@@ -680,11 +682,11 @@ pub(super) fn napi_guest_own_property_keys(
         });
     };
 
-    let target = proxy.target.clone();
-    let Some(trap) = interpreter.proxy_trap(proxy, "ownKeys")? else {
+    let (target, handler) = proxy.snapshot()?;
+    let Some(trap) = interpreter.proxy_trap(&handler, "ownKeys")? else {
         return napi_guest_own_property_keys(interpreter, &target, depth + 1);
     };
-    let result = interpreter.call_this(&trap, proxy.handler.clone(), vec![target.clone()])?;
+    let result = interpreter.call_this(&trap, handler, vec![target.clone()])?;
     let Value::Array(trap_keys) = &result else {
         return Err(VmErr::Msg(
             "TypeError: Proxy ownKeys trap must return an array".into(),
@@ -757,7 +759,7 @@ pub(super) fn napi_guest_object_is_extensible(object: &Value) -> bool {
         Value::Function(function) => !function.properties.meta.borrow().non_extensible,
         Value::HostFunction { properties, .. } => !properties.meta.borrow().non_extensible,
         Value::Class(class) => !class.statics.meta.borrow().non_extensible,
-        Value::Proxy(proxy) => napi_guest_object_is_extensible(&proxy.target),
+        Value::Proxy(proxy) => napi_guest_object_is_extensible(&proxy.target_for_inspection()),
         _ => true,
     }
 }
@@ -814,7 +816,7 @@ pub(super) fn napi_guest_get_all_property_names(
             return Value::checked_array(names);
         }
         let prototype = match &current {
-            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target),
+            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target_for_inspection()),
             _ => interpreter.prototype_of(&current),
         };
         let Some(prototype) = prototype else {
@@ -1039,7 +1041,7 @@ pub(super) fn napi_direct_prototype(
     object: &Value,
 ) -> Result<Option<Rc<Value>>, i32> {
     let direct = match object {
-        Value::Proxy(proxy) => proxy.target.proto_of(),
+        Value::Proxy(proxy) => proxy.target_for_inspection().proto_of(),
         _ => object.proto_of(),
     };
     if direct.is_some() || matches!(object, Value::Proxy(_)) {
@@ -1215,7 +1217,7 @@ pub(super) fn napi_guest_get_property_names(
         // up the prototype chain.
         seen.extend(napi_direct_own_property_names(&current));
         let prototype = match &current {
-            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target),
+            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target_for_inspection()),
             _ => interpreter.prototype_of(&current),
         };
         let Some(prototype) = prototype else {

@@ -218,6 +218,8 @@ pub struct ObjectMeta {
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
     /// property cell so that value remains compact.
     pub(crate) host_function_id: Option<usize>,
+    /// The revoker's internal [[RevocableProxy]], invisible to property keys.
+    pub(crate) revocable_proxy: Option<Rc<ProxyData>>,
 }
 
 // Prototype and realm edges form cycles. Debug output must not traverse them.
@@ -625,6 +627,7 @@ impl ArrayCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.private_fields.values().cloned());
+            out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.async_from_sync {
                 out.extend(slots.values());
             }
@@ -657,6 +660,7 @@ impl ArrayCell {
         named.clear();
         meta.private_fields.clear();
         meta.async_from_sync = None;
+        meta.revocable_proxy = None;
         meta.proto = None;
         meta.realm_global = None;
         true
@@ -750,6 +754,7 @@ impl ObjectCell {
         }
         if let Ok(meta) = self.meta.try_borrow() {
             out.extend(meta.private_fields.values().cloned());
+            out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.async_from_sync {
                 out.extend(slots.values());
             }
@@ -786,6 +791,7 @@ impl ObjectCell {
         meta.symbol_keys.clear();
         meta.private_fields.clear();
         meta.async_from_sync = None;
+        meta.revocable_proxy = None;
         meta.proto = None;
         meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access
@@ -2125,8 +2131,49 @@ impl TypedArrayData {
 /// Payload of `Value::Proxy`.
 #[derive(Debug)]
 pub struct ProxyData {
-    pub target: Value,
-    pub handler: Value,
+    slots: RefCell<Option<(Value, Value)>>,
+    pub(crate) callable: bool,
+    pub(crate) constructible: bool,
+}
+
+impl ProxyData {
+    pub fn new(target: Value, handler: Value) -> Self {
+        let callable = crate::interpreter::call::is_callable_value(&target);
+        let constructible = crate::builtins::is_constructor(&target);
+        Self {
+            slots: RefCell::new(Some((target, handler))),
+            callable,
+            constructible,
+        }
+    }
+
+    /// ValidateNonRevokedProxy. Both slots are captured before guest re-entry;
+    /// revocation during a trap getter does not alter this operation's slots.
+    pub fn snapshot(&self) -> Result<(Value, Value), VmErr> {
+        self.slots.borrow().clone().ok_or_else(|| {
+            VmErr::Msg("TypeError: Cannot perform operation on a revoked Proxy".into())
+        })
+    }
+
+    /// Non-observable host inspection. Guest internal methods use snapshot.
+    pub(crate) fn target_for_inspection(&self) -> Value {
+        self.slots
+            .borrow()
+            .as_ref()
+            .map_or(Value::Null, |(target, _)| target.clone())
+    }
+
+    pub(crate) fn revoke(&self) {
+        self.slots.borrow_mut().take();
+    }
+
+    pub(crate) fn trace_children(&self) -> Option<Vec<Value>> {
+        self.slots.try_borrow().ok().map(|slots| {
+            slots.as_ref().map_or_else(Vec::new, |(target, handler)| {
+                vec![target.clone(), handler.clone()]
+            })
+        })
+    }
 }
 
 /// Payload of `Value::Error`, boxed so the enum itself stays small.
@@ -3141,7 +3188,7 @@ impl Value {
         // A proxy without a `has` trap answers for its target. The trap
         // itself is applied by `bin_op`, which can call guest code.
         if let Value::Proxy(proxy) = self {
-            return proxy.target.has_prop(key);
+            return proxy.target_for_inspection().has_prop(key);
         }
         if let Value::Function(function) = self {
             if key == "prototype" {
@@ -3348,9 +3395,11 @@ impl Value {
                 }
             }
             Value::Proxy(data) => {
-                if let Some(data) = Rc::get_mut(data) {
-                    work.push(std::mem::replace(&mut data.target, Value::Undefined));
-                    work.push(std::mem::replace(&mut data.handler, Value::Undefined));
+                if let Some(data) = Rc::get_mut(data)
+                    && let Some((target, handler)) = data.slots.get_mut().take()
+                {
+                    work.push(target);
+                    work.push(handler);
                 }
             }
             Value::Promise(inner) => {
@@ -3436,6 +3485,7 @@ fn drain_object_cell(cell: &Rc<ObjectCell>, work: &mut Vec<Value>) {
 fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
     let taken = meta.try_borrow_mut().ok().and_then(|mut meta| {
         work.extend(meta.private_fields.drain().map(|(_, value)| value));
+        work.extend(meta.revocable_proxy.take().map(Value::Proxy));
         if let Some(slots) = meta.async_from_sync.take() {
             work.extend(slots.values());
         }
@@ -3593,10 +3643,10 @@ mod drop_tests {
 
         let mut proxy = Value::Number(0.0);
         for _ in 0..DEPTH {
-            proxy = Value::Proxy(std::rc::Rc::new(ProxyData {
-                target: proxy,
-                handler: Value::object(vec![]),
-            }));
+            proxy = Value::Proxy(std::rc::Rc::new(ProxyData::new(
+                proxy,
+                Value::object(vec![]),
+            )));
         }
         drop(proxy);
     }

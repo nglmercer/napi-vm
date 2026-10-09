@@ -364,7 +364,7 @@ fn is_callable(value: &Value) -> bool {
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_callable(&proxy.target),
+        Value::Proxy(proxy) => proxy.callable,
         Value::Object { .. } => {
             crate::interpreter::call::callable_slot(value, crate::interpreter::call::CALL_SLOT)
                 .is_some()
@@ -377,7 +377,7 @@ pub(crate) fn is_constructor(value: &Value) -> bool {
     match value {
         Value::Function(function) => function.is_constructor,
         Value::HostFunction { .. } | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_constructor(&proxy.target),
+        Value::Proxy(proxy) => proxy.constructible,
         Value::Object { .. } => crate::interpreter::call::construct_slot(value).is_some(),
         _ => false,
     }

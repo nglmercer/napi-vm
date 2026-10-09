@@ -134,7 +134,7 @@ fn value_to_json_depth(
             Ok(JsonValue::Array(out))
         }
         Value::Date(ms) => Ok(JsonValue::String(crate::builtins::iso_string(ms.get()))),
-        Value::Proxy(proxy) => value_to_json_depth(interp, &proxy.target, visited, depth),
+        Value::Proxy(proxy) => value_to_json_depth(interp, &proxy.snapshot()?.0, visited, depth),
         Value::Object { props, .. } => {
             let to_json = interp.member(value, "toJSON")?;
             if crate::interpreter::call::is_callable_value(&to_json) {

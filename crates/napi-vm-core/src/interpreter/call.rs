@@ -49,17 +49,15 @@ pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
 }
 
 #[doc(hidden)]
-pub fn is_callable_value(mut value: &Value) -> bool {
-    loop {
-        match value {
-            Value::Proxy(proxy) => value = &proxy.target,
-            Value::Function(_)
-            | Value::NativeFunction { .. }
-            | Value::HostFunction { .. }
-            | Value::Class(_) => return true,
-            Value::Object { .. } => return callable_slot(value, CALL_SLOT).is_some(),
-            _ => return false,
-        }
+pub fn is_callable_value(value: &Value) -> bool {
+    match value {
+        Value::Proxy(proxy) => proxy.callable,
+        Value::Function(_)
+        | Value::NativeFunction { .. }
+        | Value::HostFunction { .. }
+        | Value::Class(_) => true,
+        Value::Object { .. } => callable_slot(value, CALL_SLOT).is_some(),
+        _ => false,
     }
 }
 
@@ -550,10 +548,10 @@ impl Interpreter {
     /// property is already absent, so deleting it succeeds.
     pub(crate) fn delete_member(&mut self, obj: &Value, key: &Value) -> Result<Value, VmErr> {
         if let Some(proxy) = obj.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "deleteProperty")? {
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "deleteProperty")? {
                 let name = self.proxy_property_key(key)?;
-                let handler = proxy.handler.clone();
+
                 let result = self.call_this(&trap, handler, vec![target, name])?;
                 return Ok(Value::Bool(result.is_truthy()));
             }
@@ -927,11 +925,11 @@ impl Interpreter {
             });
         }
         if let Some(proxy) = obj.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "set")? {
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "set")? {
                 let prop = Value::String(crate::JsString::from_key(key));
                 let trap_key = self.proxy_property_key(&prop)?;
-                let handler = proxy.handler.clone();
+
                 let accepted =
                     self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
                 if !accepted.is_truthy() {
@@ -1024,10 +1022,10 @@ impl Interpreter {
         // A proxy's `set` trap replaces the write; without one it falls
         // through to the target.
         if let Some(proxy) = obj.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "set")? {
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "set")? {
                 let key = self.proxy_property_key(prop)?;
-                let handler = proxy.handler.clone();
+
                 let accepted =
                     self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
                 if !accepted.is_truthy() {
@@ -1917,10 +1915,9 @@ impl Interpreter {
             }
             // A proxy over a function: `apply` intercepts the call.
             Value::Proxy(proxy) => {
-                let target = proxy.target.clone();
-                match self.proxy_trap(&proxy.clone(), "apply")? {
+                let (target, handler) = proxy.snapshot()?;
+                match self.proxy_trap(&handler, "apply")? {
                     Some(trap) => {
-                        let handler = proxy.handler.clone();
                         let arg_list = Value::checked_array(args)?;
                         self.call_this(&trap, handler, vec![target, this_val, arg_list])
                     }
@@ -2249,16 +2246,15 @@ impl Interpreter {
             return Ok(result);
         }
         if let Some(proxy) = f.as_proxy() {
-            let target = proxy.target.clone();
+            let (target, handler) = proxy.snapshot()?;
             // A construct trap cannot make a non-constructible target into a
             // constructor. Reject it before even reading the handler.
             if !crate::builtins::is_constructor(&target) {
                 return vm_err("TypeError: Proxy target is not a constructor");
             }
-            return match self.proxy_trap(&proxy, "construct")? {
+            return match self.proxy_trap(&handler, "construct")? {
                 None => self.ctor_with_new_target(&target, args, new_target),
                 Some(trap) => {
-                    let handler = proxy.handler.clone();
                     let arg_list = Value::checked_array(args)?;
                     let result =
                         self.call_this(&trap, handler, vec![target, arg_list, new_target])?;

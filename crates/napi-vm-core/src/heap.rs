@@ -568,8 +568,13 @@ impl Marker {
                     // collection refuses to run while one is suspended.
                 }
                 MarkItem::Proxy(data) => {
-                    self.mark_value(&data.target);
-                    self.mark_value(&data.handler);
+                    if let Some(children) = data.trace_children() {
+                        for child in children {
+                            self.mark_value(&child);
+                        }
+                    } else {
+                        self.borrowed = true;
+                    }
                 }
                 MarkItem::Binding(cell) => {
                     let Ok(borrowed) = cell.try_borrow() else {

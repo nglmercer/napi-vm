@@ -211,7 +211,7 @@ fn json_serialize(
         // A proxy serializes as its target. Routing this through the `get`
         // trap would need the interpreter, which the serializer does not have.
         Value::Proxy(proxy) => {
-            let target = proxy.target.clone();
+            let target = proxy.snapshot()?.0;
             return json_serialize(interp, &target, out, visited, depth);
         }
         Value::Object { props, .. } => {

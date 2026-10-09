@@ -997,3 +997,43 @@ fn array_species_allocation_observes_custom_constructors_and_foreign_intrinsics(
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn proxy_revocation_preserves_flags_and_captures_slots_before_trap_getters() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other
+        .eval_source("var revocable=Proxy.revocable;var Target=function(){};")
+        .unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var pair=other.revocable(other.Target,{});var proxy=pair.proxy;Object.getPrototypeOf(pair.revoke)===other.Function.prototype&&pair.revoke.name===''&&pair.revoke.length===0&&!Object.prototype.hasOwnProperty.call(pair.revoke,'prototype');",
+        "pair.revoke.call({});pair.revoke();typeof proxy==='function';",
+        "var caught;caught=undefined;try{proxy.x;}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "caught=undefined;try{proxy();}catch(e){caught=e;}caught instanceof TypeError;",
+        "caught=undefined;try{new proxy();}catch(e){caught=e;}caught instanceof TypeError;",
+        "var pair=Proxy.revocable([1],{});pair.revoke();caught=undefined;try{Array.isArray(pair.proxy);}catch(e){caught=e;}caught instanceof TypeError;",
+        "var state,seen;var handler={get get(){state.revoke();return function(target,key,receiver){seen=this===handler&&target.answer===42&&receiver===state.proxy;return target[key];};}};state=Proxy.revocable({answer:42},handler);state.proxy.answer===42&&seen;",
+        "var state=Proxy.revocable(other.Target,{get get(){state.revoke();return ()=>null;}});caught=undefined;try{Reflect.construct(Object,[],state.proxy);}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn proxy_extensibility_and_prototype_operations_share_invariant_checks() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var target={};var proxy=new Proxy(target,{});Object.isExtensible(proxy)&&Reflect.preventExtensions(proxy)&&!Object.isExtensible(target);",
+        "var caught;try{Object.isExtensible(new Proxy({}, {isExtensible(){return false;}}));}catch(e){caught=e;}caught instanceof TypeError;",
+        "caught=undefined;try{Reflect.preventExtensions(new Proxy({}, {preventExtensions(){return true;}}));}catch(e){caught=e;}caught instanceof TypeError;",
+        "!Reflect.preventExtensions(new Proxy({}, {preventExtensions(){return false;}}));",
+        "var proto={};var target={};var proxy=new Proxy(target,{});Reflect.setPrototypeOf(proxy,proto)&&Object.getPrototypeOf(target)===proto;",
+        "Object.preventExtensions(target);!Reflect.setPrototypeOf(proxy,{})&&Reflect.setPrototypeOf(proxy,proto);",
+        "caught=undefined;try{Object.setPrototypeOf(new Proxy(target,{setPrototypeOf(){return true;}}),{});}catch(e){caught=e;}caught instanceof TypeError;",
+        "var pair=Proxy.revocable({},{});pair.revoke();var operations=[()=>Reflect.has(pair.proxy,'x'),()=>Object.isExtensible(pair.proxy),()=>Object.preventExtensions(pair.proxy),()=>Object.setPrototypeOf(pair.proxy,null)];operations.every(operation=>{try{operation();return false;}catch(e){return e instanceof TypeError;}});",
+    ] {
+        truth(&mut vm, source);
+    }
+}

@@ -123,11 +123,11 @@ impl Interpreter {
         if matches!(op, BinOp::In)
             && let Some(proxy) = r.as_proxy()
         {
-            let target = proxy.target.clone();
-            return match self.proxy_trap(&proxy, "has")? {
+            let (target, handler) = proxy.snapshot()?;
+            return match self.proxy_trap(&handler, "has")? {
                 Some(trap) => {
                     let key = self.proxy_property_key(l)?;
-                    let handler = proxy.handler.clone();
+
                     let result = self.call_this(&trap, handler, vec![target, key])?;
                     Ok(Value::Bool(result.is_truthy()))
                 }
@@ -528,7 +528,9 @@ impl Interpreter {
                     // A proxy reports the type of what it wraps, so wrapping a
                     // function still reports as one.
                     Value::Proxy(proxy) => {
-                        return self.un_op(op, &proxy.target);
+                        return Ok(Value::String(
+                            if proxy.callable { "function" } else { "object" }.into(),
+                        ));
                     }
                     // Internal values, resolved before they reach guest code.
                     #[cfg(stackful_coroutines)]
@@ -559,7 +561,7 @@ impl Interpreter {
             // Without an `ownKeys` trap a proxy enumerates its target. The
             // trap needs to call guest code, so it is applied in `Object.keys`
             // and `for…in`, which have `&mut self`.
-            Value::Proxy(proxy) => self.keys(&proxy.target),
+            Value::Proxy(proxy) => self.keys(&proxy.target_for_inspection()),
             Value::Array(i) => (0..i.borrow().len())
                 .filter(|index| i.has_index(*index))
                 .map(|x| x.to_string())
@@ -729,7 +731,9 @@ impl Interpreter {
                 }
                 Ok(())
             }
-            Value::Proxy(proxy) => self.vs_rec(&proxy.target, visited, depth, output),
+            Value::Proxy(proxy) => {
+                self.vs_rec(&proxy.target_for_inspection(), visited, depth, output)
+            }
             Value::Date(ms) => output.push_str(&crate::builtins::iso_string(ms.get())),
             Value::ArrayBuffer(_) => output.push_str("[object ArrayBuffer]"),
             Value::SharedArrayBuffer(_) => output.push_str("[object SharedArrayBuffer]"),

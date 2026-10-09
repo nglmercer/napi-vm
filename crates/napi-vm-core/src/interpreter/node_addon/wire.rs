@@ -321,10 +321,11 @@ pub(super) fn guest_to_wire(
                     } else {
                         let node_id = graph.register(proxy_id, v.clone())?;
                         graph.active_proxies.insert(proxy_id);
+                        let (proxy_target, proxy_handler) = proxy.snapshot()?;
                         let target =
-                            guest_to_wire(sidecar, &proxy.target, depth + 1, graph, proxy_ids)?;
+                            guest_to_wire(sidecar, &proxy_target, depth + 1, graph, proxy_ids)?;
                         let handler =
-                            guest_to_wire(sidecar, &proxy.handler, depth + 1, graph, proxy_ids)?;
+                            guest_to_wire(sidecar, &proxy_handler, depth + 1, graph, proxy_ids)?;
                         graph.active_proxies.remove(&proxy_id);
                         json!({
                             "t":"proxy",

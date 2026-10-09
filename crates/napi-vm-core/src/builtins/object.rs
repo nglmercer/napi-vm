@@ -818,59 +818,21 @@ fn object_set_prototype(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = this.deref_binding();
-    if !is_ecmascript_object(&target) || args.is_empty() {
-        return Ok(Value::Undefined);
+    if matches!(target, Value::Null | Value::Undefined) {
+        return Err(type_err("Cannot convert undefined or null to object"));
     }
-    let requested = match args[0].deref_binding() {
-        Value::Null => None,
-        value if is_ecmascript_object(&value) => Some(Rc::new(value)),
-        _ => return Ok(Value::Undefined),
+    let Some(requested) = args.first() else {
+        return Ok(Value::Undefined);
     };
-    if !matches!(
-        &target,
-        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_)
-    ) {
-        return Ok(Value::Undefined);
-    }
-    if !object_is_extensible_value(&target)
-        && !crate::interpreter::strict_equals(
-            &interp
-                .prototype_of(&target)
-                .map_or(Value::Null, |prototype| prototype.as_ref().clone()),
-            &requested
-                .as_ref()
-                .map_or(Value::Null, |prototype| prototype.as_ref().clone()),
-        )
+    if (!matches!(requested, Value::Null) && !is_ecmascript_object(requested))
+        || !is_ecmascript_object(&target)
     {
         return Ok(Value::Undefined);
     }
-    let mut current = requested
-        .clone()
-        .map(|prototype| prototype.as_ref().clone());
-    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-        let Some(prototype) = current else { break };
-        if crate::interpreter::strict_equals(&target, &prototype) {
-            return Ok(Value::Undefined);
-        }
-        current = interp
-            .prototype_of(&prototype)
-            .map(|prototype| prototype.as_ref().clone());
-    }
-    match &target {
-        Value::Object { props } => props.set_proto(requested),
-        Value::Array(array) => array.set_proto(requested),
-        Value::Function(function) => function.properties.set_proto(requested),
-        Value::Class(class) => class.statics.set_proto(requested),
-        _ => {}
+    if !interp.set_prototype_of(&target, requested)? {
+        return Err(type_err("Cannot set object prototype"));
     }
     Ok(Value::Undefined)
-}
-
-fn object_is_extensible_value(value: &Value) -> bool {
-    if let Value::Array(array) = value {
-        return !array.meta.borrow().non_extensible;
-    }
-    cell(value).is_some_and(|properties| !properties.meta.borrow().non_extensible)
 }
 
 fn object_is(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -903,16 +865,25 @@ fn object_get_prototype_of(
     interp.get_prototype_of(&v)
 }
 
-fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    let proto = a.get(1).cloned().unwrap_or(Value::Null);
-    let proto = proto_arg(&proto)?;
-    if let Value::Array(array) = &v {
-        array.set_proto(proto);
-    } else if let Some(c) = cell(&v) {
-        c.set_proto(proto);
+fn object_set_prototype_of(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    let prototype = a.get(1).cloned().unwrap_or(Value::Undefined);
+    if matches!(value, Value::Null | Value::Undefined) {
+        return Err(type_err("Cannot convert undefined or null to object"));
     }
-    Ok(v)
+    if !matches!(prototype, Value::Null) && !crate::interpreter::call::is_js_object(&prototype) {
+        return Err(type_err("Object prototype may only be an Object or null"));
+    }
+    if crate::interpreter::call::is_js_object(&value)
+        && !interp.set_prototype_of(&value, &prototype)?
+    {
+        return Err(type_err("Cannot set object prototype"));
+    }
+    Ok(value)
 }
 
 /// Validate and wrap the prototype argument shared by `create` and
@@ -1534,8 +1505,7 @@ fn object_get_own_descriptors(
 /// property does not exist.
 fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Result<Value, VmErr> {
     if let Value::Proxy(proxy) = target {
-        let handler = proxy.handler.clone();
-        let target = proxy.target.clone();
+        let (target, handler) = proxy.snapshot()?;
         let trap = interp.get_prop_value_str(&handler, "getOwnPropertyDescriptor")?;
         if matches!(trap, Value::Undefined | Value::Null) {
             return descriptor_for_in(interp, &target, key);
@@ -1562,7 +1532,7 @@ fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Res
         let exists = !matches!(previous, Value::Undefined);
         let extensible = match &target {
             Value::GlobalObject | Value::RealmGlobal(_) => true,
-            _ => object_is_extensible_value(&target),
+            _ => interp.is_extensible(&target)?,
         };
         let configurable = previous
             .get_prop("configurable")
@@ -1825,19 +1795,20 @@ fn object_is_sealed(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
     let v = a.first().cloned().unwrap_or(Value::Undefined);
     Ok(Value::Bool(locked(&v, false)))
 }
-fn object_prevent_extensions(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if let Value::Array(array) = &v {
-        array.meta.borrow_mut().non_extensible = true;
-    } else if let Some(c) = cell(&v) {
-        c.meta.borrow_mut().non_extensible = true;
+fn object_prevent_extensions(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    if crate::interpreter::call::is_js_object(&value) && !interp.prevent_extensions(&value)? {
+        return Err(type_err("Cannot prevent extensions"));
     }
-    Ok(v)
+    Ok(value)
 }
-fn object_is_extensible(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(Value::Bool(match &v {
-        Value::Array(array) => !array.meta.borrow().non_extensible,
-        _ => cell(&v).is_some_and(|c| !c.meta.borrow().non_extensible),
-    }))
+fn object_is_extensible(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    Ok(Value::Bool(
+        crate::interpreter::call::is_js_object(&value) && interp.is_extensible(&value)?,
+    ))
 }

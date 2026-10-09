@@ -2554,11 +2554,11 @@ impl Interpreter {
         let Some(proxy) = value.as_proxy() else {
             return Ok(self.keys(value));
         };
-        let target = proxy.target.clone();
-        let Some(trap) = self.proxy_trap(&proxy, "ownKeys")? else {
+        let (target, handler) = proxy.snapshot()?;
+        let Some(trap) = self.proxy_trap(&handler, "ownKeys")? else {
             return Ok(self.keys(&target));
         };
-        let handler = proxy.handler.clone();
+
         let keys = self.call_this(&trap, handler, vec![target])?;
         let Value::Array(keys) = &keys else {
             return Err(VmErr::Msg(

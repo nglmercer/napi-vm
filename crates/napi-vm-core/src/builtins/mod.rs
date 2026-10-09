@@ -279,6 +279,29 @@ fn nf(name: &str, callable: NativeFn) -> Value {
     }
 }
 
+/// A native function with an internal, traced receiver which callers cannot
+/// replace. Promise resolving functions and Proxy revokers share bound calls.
+pub(crate) fn bound_native_method(
+    name: &str,
+    length: usize,
+    callable: NativeFn,
+    prototype: Option<Value>,
+    state: Value,
+) -> Value {
+    let target = native_method(name, length, callable, prototype.clone());
+    let mut result = native_method(name, length, callable, prototype);
+    if let Value::Function(function) = &mut result {
+        let function = std::rc::Rc::get_mut(function).expect("fresh native function");
+        function.native = None;
+        function.bound = Some(std::rc::Rc::new(crate::value::BoundFunctionData {
+            target,
+            this_value: state,
+            arguments: std::rc::Rc::new(Vec::new()),
+        }));
+    }
+    result
+}
+
 /// A native method with ordinary, mutable function property descriptors.
 pub(crate) fn native_method(
     name: &str,
