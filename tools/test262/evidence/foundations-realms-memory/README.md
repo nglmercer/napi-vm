@@ -174,3 +174,24 @@ passed on rerun. This does not close the remaining foundation dependencies.
 The `7dce903` full run was interrupted after 21,288 files without a final report.
 Its ordered checkpoint is preserved for resumption with the same worker digest,
 revision and configuration. A partial checkpoint is not full-corpus evidence.
+
+Both subsequent full pinned runs pass the regression gate. Source `7dce903`
+finishes its verified checkpoint with 61,995/102,956 passes, 20,588 new passes,
+zero lost passes versus PR #23, 40,959 failures, two known deep-WeakMap timeouts,
+and zero harness errors, crashes or skips. It also loses zero passes versus
+7c0a9ce; interrupted/resumed logs remain archived with the final ordered outcomes.
+
+The current source `6456b53` completes a fresh full run with **62,107/102,956
+passes**, **20,700 new passes and zero lost passes** versus PR #23. It has **40,847
+failures, two timeouts, zero harness errors, zero crashes and zero skips**. Versus
+7c0a9ce it gains 9,061 and loses zero. Exact outcomes, checkpoints, comparisons,
+configuration, worker hashes and log digests are in the two `*-full-summary.json`
+files and their referenced archives. Both timeouts remain the Script/strict
+`staging/sm/regress/regress-1507322-deep-weakmap.js` variants.
+
+These passing regression gates do not declare Phase 1–3 semantics complete.
+Realm-global records, complete private elements, accessor descriptors and remaining
+Proxy/exotic operations remain open. Full-corpus AST/bytecode mismatches are not
+measured; fallback remains enabled. Temporal/Intl, broader RegExp/standard-library
+algorithms, deferred/JSON imports, resource management and decorators/auto-accessors
+remain unsupported or incomplete outside the foundation scope and in the denominator.

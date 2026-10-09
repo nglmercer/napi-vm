@@ -171,3 +171,25 @@ lengths raise RangeError, and a failed shrink still applies a requested non-writ
 length. Regression coverage includes conversion side effects and non-configurable
 array elements. The 54 realm tests pass; fresh required checks and focused/full
 worker evidence are necessary for these source changes.
+
+## Current validation: 6456b53
+
+All required checks pass: formatting, strict Clippy, 891 workspace tests (four
+existing ignored), 203 minimal-feature tests, 73 Node tests, 14 WASM tests and
+10 Test262 tooling tests. The expanded focus passes 8,122/8,845 variants with
+1,946 new passes and zero lost passes or special outcomes versus the matching
+7c0a9ce projection.
+
+The fresh full pinned corpus passes 62,107/102,956 variants: 20,700 new passes,
+zero lost passes, 40,847 failures, zero harness errors, two known deep-WeakMap
+timeouts, zero crashes and zero skips versus PR #23. It gains 9,061 and loses zero
+versus 7c0a9ce. The frozen worker digest is
+`a3b96f79678538a9a67bbae3d848d75149d9fd3d6fda4ab5a1f404b0945e17df`.
+The required revision, four workers, five-second timeout and all execution limits
+are recorded in the exact [full summary](../tools/test262/evidence/foundations-realms-memory/6456b53-full-summary.json).
+
+The earlier 7dce903 full run also finishes with zero losses after checkpoint
+resumption, and all earlier failed gates remain archived. These results close the
+reported regressions, not the remaining realm-global/private/descriptor/Proxy
+foundation dependencies. Phase 1 is still open and full-corpus AST/bytecode
+measurement is outstanding.

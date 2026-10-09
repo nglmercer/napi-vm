@@ -1,0 +1,52 @@
+{
+  "source_commit": "7dce90392e45ca8cd4d3279c091a2bc4ec5fbb38",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "58190860d349fb11c3155920328fe98c732402bb3c9df901c4bcd6f86d46d0ec",
+  "classification": "Full pinned regression gate passed; remaining foundation semantic gates still open",
+  "counts": {
+    "pass": 61995,
+    "fail": 40959,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "total": 102956,
+  "new_passes": 20588,
+  "lost_passes": 0,
+  "versus_7c0a9ce": {
+    "new_passes": 8949,
+    "lost_passes": 0
+  },
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "resumed_files": 21288,
+  "required_checks": "All passed; see 7dce903-summary.json and archived logs",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "known_timeouts": [
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "script"
+    },
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "strict"
+    }
+  ],
+  "remaining_gaps": "Realm-global records, complete private elements, typed accessor descriptors and remaining Proxy/exotics, Phase 4; broader standard-library/proposals remain outside foundation scope",
+  "archive_sha256": {
+    "7dce903-full.json.gz": "12688fb0903277a8a8c1cb831752ca28a2a6fb9bf133f63ae00c8e4f7b9693b8",
+    "7dce903-full.jsonl.gz": "31ecf40280ae5812dd1cc3cb51c54030d3a73ae21a8a2a33ad06f4c9151961a0",
+    "7dce903-full-pr23-transitions.json.gz": "3a0bb2bc27dc48e7582cd3121d14282f136ec52a7fdd6c75bcdb5ea46bcebfab",
+    "7dce903-full-7c0a9ce-transitions.json.gz": "e3253d577224ff2f311da8d07fb8cfdb284a571a540cbfb91f1e30c66b9a4be8",
+    "7dce903-full-interrupted.log.gz": "b5b30f2f4785f31c3f96c1853719a54a538bc2c829ce812a2b200ad1992cd262",
+    "7dce903-full-resumed.log.gz": "171bfefd8af0482d7ec568a6e0ae767a583930a56d379ee35ec4db9648a4ca11"
+  }
+}
