@@ -127,3 +127,12 @@ Native constructor prototype lookup enters the constructor's realm, including
 Reflect.construct and Proxy delegation, while derived-constructor post-return
 errors retain their specified caller realm. These source changes require fresh
 full checks and Test262 evidence before they can be treated as validated.
+
+Source `0577fc2` passes all required checks: 884 workspace tests (four existing
+ignored), 203 minimal tests, 73 Node tests, 14 WASM tests, and ten tooling tests,
+plus formatting and strict Clippy. Its immutable worker SHA256 is
+`ccbc78ac0d0a12a32dbc781db9bbe291bf9c9d5b529c11d65c588eef622498e7`.
+The expanded 5,267-variant focused selection passes 4,796, gains 1,282 and loses
+zero against the matching 7c0a9ce full projection, with zero special outcomes.
+The earlier f9aa579 two-loss report remains archived. Full-corpus validation is
+pending; known global-object/private/internal-operation dependencies remain open.

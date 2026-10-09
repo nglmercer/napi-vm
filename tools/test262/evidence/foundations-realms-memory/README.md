@@ -124,3 +124,14 @@ passes 4,794/5,267 variants, gaining 1,282 and losing two against the independen
 non-constructor TypeError realm regressions introduced by construction-context
 entry. This failed gate blocks a full run until corrected. The prior agent
 waitAsync fuel regression passes in this selection; no failed report is replaced.
+
+Source `0577fc2` restores both construction eligibility regressions by checking
+IsConstructor in the evaluating caller's realm before entering construction.
+All required checks pass with the same totals as f9aa579. The identical expanded
+selection passes 4,796/5,267 variants: 1,282 new passes, zero losses, and zero
+harness errors, timeouts, crashes or skips against the matching independent
+7c0a9ce projection. An environment restart interrupted this run after 1,136
+files; the runner verified the exact configuration and frozen worker digest and
+resumed the ordered checkpoint. Its final report retains every completed result.
+The full pinned corpus is pending; this focused result does not close Phase 1's
+remaining global-object/private/internal-operation dependencies.
