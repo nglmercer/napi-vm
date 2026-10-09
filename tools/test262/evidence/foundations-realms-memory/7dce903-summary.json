@@ -1,0 +1,48 @@
+{
+  "source_commit": "7dce90392e45ca8cd4d3279c091a2bc4ec5fbb38",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "58190860d349fb11c3155920328fe98c732402bb3c9df901c4bcd6f86d46d0ec",
+  "classification": "Expanded focused regression gate passed; full-corpus and remaining Phase 1 dependencies pending",
+  "total": 7709,
+  "counts": {
+    "pass": 7134,
+    "fail": 575,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 1730,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 888,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Realm-global object records, private identities/branding, remaining Proxy and exotic descriptor semantics, Phase 4 full differential measurement",
+  "archive_sha256": {
+    "7dce903-release-build.log.gz": "f9c5972ed0efecef916ba54cceadb28ae24bfbfb5b5a450224ed4fef853f5238",
+    "7dce903-tooling-tests.log.gz": "f15a1d04a20a4cc5142b5deb5fdfa63a614c2ef6ea41a15b39e6b4c77b555bb1",
+    "7dce903-wasm-tests.log.gz": "20d690e17ad78f82632ff489259b81e38c4b7a7a703b59154a57d18cc222d65c",
+    "7dce903-node-tests.log.gz": "7fc21f611d02ce23ec19a8bc9bab9a8ca5007b856880a2ae7a73606bcb176524",
+    "7dce903-native-build.log.gz": "1457b697915521340d7cf43d3054ca93d7a51bb17cd685f39f5760d7089c14c2",
+    "7dce903-minimal-tests.log.gz": "1e660a76920c64a03761127a2dacf1d7e70168d4a85c7777663443278d263947",
+    "7dce903-allfeatures-tests.log.gz": "1123a1b0d2148dbe9b0f9387ff425f4066a81493ca66aa0cb8ecffd87a695d48",
+    "7dce903-clippy.log.gz": "e98d3ba23b850fc1faeb5301b14a7cb68010a8e6d4bb2d55ad15b0674c706233",
+    "7dce903-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "7dce903-focused.json.gz": "915a3df31fa6bbc51dd8f863c0d1a2fb2b445bd26b27be8ccc44d693fc2ab605",
+    "7dce903-focused.jsonl.gz": "8ae01baa5ddb923406e7c4d75c2e664c93f629f02e1d5a610f666364ac83b966",
+    "7dce903-focused-transitions.json.gz": "82f1db9484c8b9f33be63071a8fad2b72f7a29105106311d0b9c7651f57d66f9",
+    "7dce903-focused-7c0a9ce-projection.json.gz": "c17ef81b133044e828d63d49538ebdb0118938eb9200f3f6ed37dfbf85af24b6"
+  }
+}

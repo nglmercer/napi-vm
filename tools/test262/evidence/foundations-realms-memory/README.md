@@ -145,3 +145,16 @@ global/with deletion resolution. These are regressions to fix, not silently
 excluded variants. The positive focused gate does not override this failed full
 gate. Exact full outcomes, both comparisons and the worker/check identities are
 archived in `0577fc2-full-*` and `0577fc2-summary.json`.
+
+Source `7dce903` shares receiver-preserving assignment/Reflect.set and normalized
+Object/Reflect/Proxy descriptor definitions, including Proxy-backed array species
+results. Its expanded focused gate passes 7,134/7,709 variants: 1,730 new passes,
+zero lost passes, and zero harness errors, timeouts, crashes or skips against the
+matching independent 7c0a9ce projection. All 12 variants lost by the previous
+0577fc2 full run are selected and restored. Required checks pass: 888 workspace
+(four existing ignored), 203 minimal-feature, 73 Node, 14 WASM and 10 tooling tests;
+formatting and strict Clippy pass. The frozen worker digest is
+`58190860d349fb11c3155920328fe98c732402bb3c9df901c4bcd6f86d46d0ec`.
+Exact focused outcomes, transitions, checkpoint and check logs are archived in
+`7dce903-*`. The full pinned run is in progress; this focused result is not full
+merge evidence and does not close pending realm-global/private/exotic semantics.
