@@ -315,6 +315,31 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
+    let species = super::well_known("species").expect("Symbol.species");
+    if let Value::Symbol(symbol) = &species {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        super::object::define_property(
+            &abstract_constructor,
+            &key,
+            &Value::object(vec![
+                (
+                    "get".into(),
+                    super::native_method(
+                        "get [Symbol.species]",
+                        0,
+                        buffer_species,
+                        e.get("Function")
+                            .and_then(|function| function.get_prop("prototype")),
+                    ),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .expect("TypedArray species getter");
+        if let Value::Object { props } = &abstract_constructor {
+            props.meta.borrow_mut().set_symbol_key(&key, symbol.clone());
+        }
+    }
     typed_array_prototype
         .set_prop("constructor".into(), abstract_constructor.clone())
         .expect("typed-array prototype constructor");
@@ -1475,45 +1500,132 @@ fn typed_with_tracking(
     }))
 }
 
-fn typed_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    new_typed_array(interp, this, vec![Value::array(a)])
+/// TypedArrayCreate validates the actual constructor result before any
+/// element writes. Static factories and species allocation share this path.
+fn typed_array_create(
+    interp: &mut Interpreter,
+    constructor: &Value,
+    arguments: Vec<Value>,
+    minimum_length: Option<usize>,
+) -> Result<Value, VmErr> {
+    if !super::is_constructor(constructor) {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray constructor must be constructible".into(),
+        ));
+    }
+    let result = interp.ctor(constructor, arguments)?;
+    let view = require(&result)?;
+    if view.is_out_of_bounds()
+        || minimum_length.is_some_and(|minimum| view.effective_length() < minimum)
+    {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray constructor returned an invalid or short view".into(),
+        ));
+    }
+    Ok(result)
 }
 
-fn typed_from(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let source = a.first().cloned().unwrap_or(Value::Undefined);
-    let items = match &source {
-        Value::TypedArray(view) => read_all(view),
-        Value::Object { .. } => {
-            // An array-like: read `length` and the index properties.
-            let length = interp.member(&source, "length")?.to_number();
-            let length = if length.is_finite() && length > 0.0 {
-                (length as usize).min(crate::value::MAX_ARRAY_LEN)
-            } else {
-                0
-            };
-            let mut out = Vec::with_capacity(length.min(1024));
-            for index in 0..length {
-                out.push(interp.member(&source, &index.to_string())?);
-            }
-            out
-        }
-        other => interp.iterate(other)?,
+fn typed_species_create(
+    interp: &mut Interpreter,
+    original: &Value,
+    arguments: Vec<Value>,
+    minimum_length: Option<usize>,
+) -> Result<Value, VmErr> {
+    let source = require(original)?;
+    let constructor = interp.species_constructor(original, source.kind.name())?;
+    let result = typed_array_create(interp, &constructor, arguments, minimum_length)?;
+    if is_bigint_kind(source.kind) != is_bigint_kind(require(&result)?.kind) {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray species has a different content type".into(),
+        ));
+    }
+    Ok(result)
+}
+
+fn typed_of(
+    interp: &mut Interpreter,
+    constructor: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let length = arguments.len();
+    let result = typed_array_create(
+        interp,
+        &constructor,
+        vec![Value::Number(length as f64)],
+        Some(length),
+    )?;
+    let view = require(&result)?;
+    for (index, value) in arguments.iter().enumerate() {
+        write_element_in(interp, &view, index, value)?;
+    }
+    Ok(result)
+}
+
+fn typed_from(
+    interp: &mut Interpreter,
+    constructor: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if !super::is_constructor(&constructor) {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray.from receiver must be a constructor".into(),
+        ));
+    }
+    let mapper = arguments
+        .get(1)
+        .filter(|value| !matches!(value, Value::Undefined))
+        .cloned();
+    if mapper
+        .as_ref()
+        .is_some_and(|mapper| !crate::interpreter::call::is_callable_value(mapper))
+    {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray.from mapper must be callable".into(),
+        ));
+    }
+    let receiver = arguments.get(2).cloned().unwrap_or(Value::Undefined);
+    let source = arguments.first().cloned().unwrap_or(Value::Undefined);
+    let method = interp.get_method(
+        &source,
+        &super::well_known("iterator").expect("Symbol.iterator"),
+    )?;
+    let items = if let Some(method) = method {
+        let iterator = interp.iterator_from_method(&source, &method)?;
+        Some(interp.drain_iterator(&iterator)?)
+    } else {
+        None
     };
-    let mapped = match a.get(1) {
-        Some(mapper) if !matches!(mapper, Value::Undefined | Value::Null) => {
-            let mut out = Vec::with_capacity(items.len());
-            for (index, item) in items.into_iter().enumerate() {
-                out.push(interp.call_this(
-                    mapper,
-                    Value::Undefined,
-                    vec![item, Value::Number(index as f64)],
-                )?);
-            }
-            out
-        }
-        _ => items,
+    let length = if let Some(items) = &items {
+        items.len()
+    } else {
+        super::array::array_like_length(interp, &source)?
     };
-    new_typed_array(interp, this, vec![Value::array(mapped)])
+    let result = typed_array_create(
+        interp,
+        &constructor,
+        vec![Value::Number(length as f64)],
+        Some(length),
+    )?;
+    let view = require(&result)?;
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = if let Some(items) = &items {
+            items[index].clone()
+        } else {
+            interp.get_prop_value_str(&source, &index.to_string())?
+        };
+        let value = if let Some(mapper) = &mapper {
+            interp.call_this(
+                mapper,
+                receiver.clone(),
+                vec![value, Value::Number(index as f64)],
+            )?
+        } else {
+            value
+        };
+        write_element_in(interp, &view, index, &value)?;
+    }
+    Ok(result)
 }
 
 // --- Element access ---------------------------------------------------------
@@ -1630,9 +1742,8 @@ fn require(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
 
 /// Run an `Array.prototype` method over a copy of the elements.
 ///
-/// The methods that produce a new collection return a plain array here rather
-/// than a typed one. That differs from the specification for `map`, `filter`
-/// and `slice`; it is the honest report of what this implementation does.
+/// Legacy non-allocating delegates still share Array iteration over a copy.
+/// Allocating methods use TypedArrayCreate and species helpers below.
 fn typed_delegate_named(
     interp: &mut Interpreter,
     this: Value,
@@ -1657,8 +1768,77 @@ macro_rules! typed_delegate_method {
     };
 }
 
-typed_delegate_method!(typed_map, "map");
-typed_delegate_method!(typed_filter, "filter");
+fn validated_typed_source(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
+    let view = require(this)?;
+    if view.is_out_of_bounds() {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray is detached or out of bounds".into(),
+        ));
+    }
+    Ok(view)
+}
+
+fn typed_map(interp: &mut Interpreter, this: Value, arguments: Vec<Value>) -> Result<Value, VmErr> {
+    let source = validated_typed_source(&this)?;
+    let length = source.effective_length();
+    let callback = super::array::callback(&arguments)?;
+    let receiver = arguments.get(1).cloned().unwrap_or(Value::Undefined);
+    let result = typed_species_create(
+        interp,
+        &this,
+        vec![Value::Number(length as f64)],
+        Some(length),
+    )?;
+    let destination = require(&result)?;
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = read_element(&source, index).unwrap_or(Value::Undefined);
+        let mapped = interp.call_this(
+            &callback,
+            receiver.clone(),
+            vec![value, Value::Number(index as f64), this.clone()],
+        )?;
+        write_element_in(interp, &destination, index, &mapped)?;
+    }
+    Ok(result)
+}
+
+fn typed_filter(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = validated_typed_source(&this)?;
+    let length = source.effective_length();
+    let callback = super::array::callback(&arguments)?;
+    let receiver = arguments.get(1).cloned().unwrap_or(Value::Undefined);
+    let mut kept = Vec::new();
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = read_element(&source, index).unwrap_or(Value::Undefined);
+        if interp
+            .call_this(
+                &callback,
+                receiver.clone(),
+                vec![value.clone(), Value::Number(index as f64), this.clone()],
+            )?
+            .is_truthy()
+        {
+            kept.push(value);
+        }
+    }
+    let result = typed_species_create(
+        interp,
+        &this,
+        vec![Value::Number(kept.len() as f64)],
+        Some(kept.len()),
+    )?;
+    let destination = require(&result)?;
+    for (index, value) in kept.iter().enumerate() {
+        write_element_in(interp, &destination, index, value)?;
+    }
+    Ok(result)
+}
 typed_delegate_method!(typed_for_each, "forEach");
 typed_delegate_method!(typed_reduce, "reduce");
 typed_delegate_method!(typed_some, "some");
@@ -1798,32 +1978,87 @@ fn window(length: usize, a: &[Value]) -> (usize, usize) {
     (start, end)
 }
 
-/// `subarray`: a *view* over the same buffer, so writes are shared.
-fn typed_subarray(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let (start, end) = window(view.effective_length(), &a);
-    Ok(typed_with_tracking(
-        view.kind,
-        view.buffer.clone(),
-        view.effective_byte_offset() + start * view.kind.size(),
-        end - start,
-        view.is_buffer,
-        view.length_tracking && a.get(1).is_none_or(|end| matches!(end, Value::Undefined)),
-    ))
+fn window_in(
+    interp: &mut Interpreter,
+    length: usize,
+    arguments: &[Value],
+) -> Result<(usize, usize), VmErr> {
+    let start = super::array::relative_index(
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let end = match arguments.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => super::array::relative_index(interp.ecmascript_to_number(value)?, length),
+    };
+    Ok((start, end.max(start)))
 }
 
-/// `slice`: a *copy*, so writes are not shared.
-fn typed_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let (start, end) = window(view.effective_length(), &a);
-    let size = view.kind.size();
-    let copy = new_buffer((end - start) * size)?;
-    let from = view.effective_byte_offset() + start * size;
-    let to = view.effective_byte_offset() + end * size;
-    if let Some(source) = view.buffer.read(from, to - from) {
-        copy.borrow_mut().copy_from_slice(&source);
+/// subarray passes the original backing wrapper and offset to the species
+/// constructor, omitting length when the source's view tracks buffer growth.
+fn typed_subarray(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = require(&this)?;
+    let (start, end) = window_in(interp, source.effective_length(), &arguments)?;
+    let mut constructor_arguments = vec![
+        source.buffer.to_value(),
+        Value::Number((source.byte_offset + start * source.kind.size()) as f64),
+    ];
+    if !source.length_tracking
+        || arguments
+            .get(1)
+            .is_some_and(|end| !matches!(end, Value::Undefined))
+    {
+        constructor_arguments.push(Value::Number((end - start) as f64));
     }
-    Ok(typed(view.kind, copy, 0, end - start))
+    typed_species_create(interp, &this, constructor_arguments, None)
+}
+
+fn typed_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = validated_typed_source(&this)?;
+    let (start, end) = window_in(interp, source.effective_length(), &arguments)?;
+    let count = end - start;
+    let result = typed_species_create(
+        interp,
+        &this,
+        vec![Value::Number(count as f64)],
+        Some(count),
+    )?;
+    if count == 0 {
+        return Ok(result);
+    }
+    if source.is_out_of_bounds() {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray source became detached or out of bounds".into(),
+        ));
+    }
+    let destination = require(&result)?;
+    let count = count.min(source.effective_length().saturating_sub(start));
+    if source.kind == destination.kind {
+        let bytes = source
+            .buffer
+            .read(
+                source.byte_offset + start * source.kind.size(),
+                count * source.kind.size(),
+            )
+            .ok_or_else(|| VmErr::Msg("TypeError: TypedArray source became detached".into()))?;
+        destination.buffer.write(destination.byte_offset, &bytes);
+    } else {
+        let values = (start..start + count)
+            .map(|index| read_element(&source, index).unwrap_or(Value::Undefined))
+            .collect::<Vec<_>>();
+        for (index, value) in values.iter().enumerate() {
+            write_element_in(interp, &destination, index, value)?;
+        }
+    }
+    Ok(result)
 }
 
 fn typed_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {

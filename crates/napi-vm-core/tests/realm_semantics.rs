@@ -704,6 +704,22 @@ fn constructor_post_return_errors_belong_to_the_constructing_caller() {
 }
 
 #[test]
+fn native_constructor_prototype_errors_belong_to_the_constructor_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "var pair=Proxy.revocable(function(){},{get(target,key){if(key==='prototype'){pair.revoke();return null;}return target[key];}});var caught;try{Reflect.construct(other.Array,[1],pair.proxy);}catch(e){caught=e;}caught instanceof other.TypeError;",
+    );
+    truth(
+        &mut vm,
+        "var observed=false;var target=new Proxy(function(){},{get(target,key){if(key==='prototype'){observed=true;throw new other.TypeError();}return target[key];}});var caught;try{Reflect.construct(Array,[1.5],target);}catch(e){caught=e;}observed&&caught instanceof other.TypeError;",
+    );
+}
+
+#[test]
 fn cross_realm_instances_use_prototypes_for_brand_checks() {
     let mut vm = Interpreter::with_builtins();
     let other = vm.create_realm();
@@ -1111,6 +1127,45 @@ fn shared_set_results_do_not_inherit_guest_assignment_strictness() {
         "'use strict';!Reflect.set(locked,0,2)&&!Reflect.set(new Proxy({}, {set(){return false;}}),'x',1);",
         "var caught;try{(function(){'use strict';locked[0]=2;})();}catch(e){caught=e;}caught instanceof TypeError;",
         "var target={};Object.defineProperty(target,'x',{get(){return 1;}});!Reflect.set(target,'x',2);",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn typed_array_species_preserves_source_realm_and_allocation_order() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child
+        .eval_source("var input=new Uint8Array([2,4]);")
+        .unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var result=Uint8Array.prototype.map.call(other.input,x=>x+1);Object.getPrototypeOf(result)===other.Uint8Array.prototype&&result[1]===5;",
+        "var input=new Uint8Array([2,4]);var log='';input.constructor={get [Symbol.species](){log+='s';return other.Uint16Array;}};var result=input.map((v,i,a)=>{log+='m';if(a!==input)throw Error();return v+256;});log==='smm'&&Object.getPrototypeOf(result)===other.Uint16Array.prototype&&result[1]===260;",
+        "log='';var result=input.filter((v,i,a)=>{log+='f';return a===input&&i===1;});log==='ffs'&&result instanceof other.Uint16Array&&result.length===1&&result[0]===4;",
+        "input.constructor={[Symbol.species]:function(n){return new Uint8Array(n-1);}};var called=false;var caught;try{input.map(()=>{called=true;});}catch(e){caught=e;}caught instanceof TypeError&&!called;",
+        "input.constructor={[Symbol.species]:BigInt64Array};var caught;try{input.slice();}catch(e){caught=e;}caught instanceof TypeError;",
+        "var shared=new SharedArrayBuffer(4);var view=new Uint8Array(shared);view[1]=42;var result=view.subarray(1,3);result.buffer===shared&&result.length===2&&result[0]===42;",
+        "var view=new Uint8Array([1,2,3]);var result=view.slice(1);result instanceof Uint8Array&&result[0]===2&&result.buffer!==view.buffer;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn typed_array_factories_use_the_receiver_and_observe_iterators_before_allocation() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var result=Uint8Array.of.call(other.Uint16Array,257,258);result instanceof other.Uint16Array&&result[0]===257&&result[1]===258;",
+        "var log='';var C=function(n){log+='c';return new Uint16Array(n);};var source={get [Symbol.iterator](){log+='g';return function(){log+='i';var i=0;return {next(){log+='n';return i++===0?{value:3,done:false}:{done:true};}};};}};var receiver={};var result=Uint8Array.from.call(C,source,function(v,i){log+='m';if(this!==receiver)throw Error();return v+256;},receiver);log==='ginncm'&&result[0]===259;",
+        "log='';var source={get length(){log+='l';return 1;},get 0(){log+='v';return 7;}};var result=Uint8Array.from.call(C,source,v=>{log+='m';return v;});log==='lcvm'&&result[0]===7;",
+        "var caught;try{Uint8Array.of.call(function(){return [];},1);}catch(e){caught=e;}caught instanceof TypeError;",
+        "var caught;try{Uint8Array.from.call(Uint8Array,[],null);}catch(e){caught=e;}caught instanceof TypeError;",
     ] {
         truth(&mut vm, source);
     }

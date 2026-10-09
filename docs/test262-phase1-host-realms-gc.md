@@ -69,10 +69,9 @@ errors now belong to the executing function/accessor realm.
 The following known cases remain visible and must not be called completed merely
 because basic constructor realm tests pass:
 
-- Array.from/of and array species algorithms still need their custom constructor
-  behavior, which also determines allocation realm.
-- Revoked Proxy GetFunctionRealm depends on the pending Phase 3 Proxy lifecycle
-  and internal-operation model. Missing revocation is a foundation dependency.
+- Proxy-backed species result definitions still need the shared Phase 3
+  DefineOwnProperty operation; ordinary custom constructors now determine
+  allocation realm for Array.from/of and all seven implemented species methods.
 - Realm-global property/exotic operations and private method/accessor branding
   depend on the pending Phase 3 global/private/internal-operation work.
 - RegExp legacy statics and missing standard-library algorithms, Intl, ShadowRealm,
@@ -107,3 +106,24 @@ operations. An additional runtime gap was reproduced: array literal elisions are
 currently represented as present undefined values by the AST evaluator. That is
 an execution issue, not a parser acceptance/early-error defect; sparse-result
 regression tests create holes by deleting indices.
+
+## Current allocation and lifecycle follow-up
+
+Proxy revocation now clears target and handler references, preserves callable and
+constructible classification, and validates GetFunctionRealm. GC regressions
+cover release of revoked references. The earlier 564efab focused run recorded
+one lost Atomics waitAsync pass due to instruction fuel; isolated repeats passed,
+but those repeats do not replace the failed gate. Agent broadcast now acknowledges
+publication into the worker owner's queue before returning and yields after all
+acknowledgements. A fresh focused run must validate this change.
+
+Array.from/of and map/filter/slice/splice/concat/flat/flatMap use shared allocation
+helpers. TypedArray.from/of and map/filter/slice/subarray now validate actual
+typed-array constructor results, respect content type and custom species, and
+preserve shared backing stores for subarray. Regression tests cover foreign
+constructor prototypes, callback/source identity, allocation ordering, short
+species results, and iterator consumption before TypedArray.from allocation.
+Native constructor prototype lookup enters the constructor's realm, including
+Reflect.construct and Proxy delegation, while derived-constructor post-return
+errors retain their specified caller realm. These source changes require fresh
+full checks and Test262 evidence before they can be treated as validated.

@@ -8,7 +8,7 @@ use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
 use crate::value::{Value, to_integer_or_infinity};
 
-fn callback(a: &[Value]) -> Result<Value, VmErr> {
+pub(super) fn callback(a: &[Value]) -> Result<Value, VmErr> {
     let cb = a.first().cloned().unwrap_or(Value::Undefined);
     if !crate::interpreter::call::is_callable_value(&cb) {
         return Err(VmErr::Msg("TypeError: callback is not a function".into()));
@@ -29,7 +29,7 @@ fn array_element(
     interp.get_prop_value(this, &key).map(Some)
 }
 
-fn relative_index(number: f64, length: usize) -> usize {
+pub(super) fn relative_index(number: f64, length: usize) -> usize {
     let integer = to_integer_or_infinity(number);
     if integer < 0.0 {
         (length as f64 + integer).max(0.0) as usize
@@ -859,7 +859,7 @@ fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
 
 /// `LengthOfArrayLike`: `ToLength(Get(O, "length"))`, clamped to the VM's
 /// array bound so a hostile `length` cannot drive an unbounded loop.
-fn array_like_length(interp: &mut Interpreter, this: &Value) -> Result<usize, VmErr> {
+pub(super) fn array_like_length(interp: &mut Interpreter, this: &Value) -> Result<usize, VmErr> {
     let len_val = interp.get_prop_value_str(this, "length")?;
     let n = interp.ecmascript_to_number(&len_val)?;
     if !n.is_finite() || n <= 0.0 {

@@ -2175,6 +2175,27 @@ impl Interpreter {
         args: Vec<Value>,
         new_target: Value,
     ) -> Result<Value, VmErr> {
+        // Proxy [[Construct]] runs in its caller's context; delegation enters
+        // the target's realm. Native prototype lookup is part of construction,
+        // so it must enter that realm before any observable newTarget access.
+        let owner = if matches!(f, Value::Proxy(_)) {
+            self.persistent_global.clone()
+        } else {
+            super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone())
+        };
+        self.with_global_storage(owner.clone(), |vm| {
+            let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
+            vm.ctor_with_new_target_in_context(f, args, new_target)
+                .map_err(|error| error.with_context(None, vm.get_stack()))
+        })
+    }
+
+    fn ctor_with_new_target_in_context(
+        &mut self,
+        f: &Value,
+        args: Vec<Value>,
+        new_target: Value,
+    ) -> Result<Value, VmErr> {
         // A built-in namespace object constructs through its internal slot:
         // `new Map()` and `Map()` reach the same implementation unless the
         // built-in installs a separate one.
@@ -2207,7 +2228,8 @@ impl Interpreter {
                 // prototype when constructed with its own newTarget.
                 return self.call_this(&target, f.clone(), args);
             }
-            let prototype_after_arguments = (builtin.ends_with("Array")
+            let prototype_after_arguments = (builtin != "Array"
+                && builtin.ends_with("Array")
                 && args.first().is_some_and(|value| !is_js_object(value)))
                 || matches!(
                     builtin.as_str(),
