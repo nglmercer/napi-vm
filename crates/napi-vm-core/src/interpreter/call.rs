@@ -697,7 +697,7 @@ impl Interpreter {
     pub(crate) fn property_key(&self, key: &Value) -> Result<String, VmErr> {
         Ok(match key {
             Value::String(k) => k.to_key(),
-            Value::Number(n) => crate::format::number_string(*n),
+            Value::Number(n) => crate::format::ecmascript_number_string(*n),
             Value::Symbol(s) => crate::interpreter::symbol_slot_key(s),
             other => self.to_js_string(other)?.to_key(),
         })
@@ -718,7 +718,8 @@ impl Interpreter {
         key: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let accepted = self.set_member_str(object, key, value)?;
+        let accepted =
+            self.set_member_with_receiver(object, &Value::String(key.into()), value, object)?;
         self.finish_property_write(accepted, key, self.global.borrow().strict())
     }
 
@@ -728,7 +729,7 @@ impl Interpreter {
         key: &Value,
         value: Value,
     ) -> Result<(), VmErr> {
-        let accepted = self.set_member(object, key, value)?;
+        let accepted = self.set_member_with_receiver(object, key, value, object)?;
         self.finish_property_write(accepted, "property", self.global.borrow().strict())
     }
 
@@ -738,7 +739,8 @@ impl Interpreter {
         key: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let accepted = self.set_member_str(object, key, value)?;
+        let accepted =
+            self.set_member_with_receiver(object, &Value::String(key.into()), value, object)?;
         self.finish_property_write(accepted, key, true)
     }
 
@@ -949,10 +951,130 @@ impl Interpreter {
         Ok(None)
     }
 
-    /// Borrowed-key variant of [`set_member`](Self::set_member).
-    /// Static member writes (`o.key = v`) resolve through `&str` end to end:
-    /// no key `String` and no key `Value` is allocated. Typed arrays, exotic
-    /// receivers, and primitives keep the general path, exactly as before.
+    /// Shared [[Set]] operation, preserving the original receiver while
+    /// traversing prototypes and Proxy targets.
+    pub(crate) fn set_member_with_receiver(
+        &mut self,
+        target: &Value,
+        property: &Value,
+        value: Value,
+        receiver: &Value,
+    ) -> Result<bool, VmErr> {
+        let key = self.proxy_property_key(property)?;
+        let slot = self.property_key(&key)?;
+        let mut current = crate::builtins::object::to_object_receiver(target)?;
+        for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+            if let Value::Proxy(proxy) = &current {
+                let (target, handler) = proxy.snapshot()?;
+                if let Some(trap) = self.proxy_trap(&handler, "set")? {
+                    let accepted = self
+                        .call_this(
+                            &trap,
+                            handler,
+                            vec![target.clone(), key.clone(), value.clone(), receiver.clone()],
+                        )?
+                        .is_truthy();
+                    if !accepted {
+                        return Ok(false);
+                    }
+                    let descriptor =
+                        crate::builtins::object::descriptor_for_key_in(self, &target, &key)?;
+                    if !matches!(descriptor, Value::Undefined)
+                        && !descriptor
+                            .get_prop("configurable")
+                            .is_some_and(|value| value.is_truthy())
+                    {
+                        if let Some(previous) = descriptor.get_prop("value") {
+                            if !descriptor
+                                .get_prop("writable")
+                                .is_some_and(|value| value.is_truthy())
+                                && !crate::builtins::object::same_value(&previous, &value)
+                            {
+                                return Err(VmErr::Msg(
+                                    "TypeError: Proxy set cannot change a frozen target property"
+                                        .into(),
+                                ));
+                            }
+                        } else if matches!(descriptor.get_prop("set"), Some(Value::Undefined)) {
+                            return Err(VmErr::Msg("TypeError: Proxy set cannot write a protected accessor without a setter".into()));
+                        }
+                    }
+                    return Ok(true);
+                }
+                current = target;
+                continue;
+            }
+            if let Value::TypedArray(view) = &current
+                && let Some(index) = crate::builtins::canonical_numeric_index(&slot)
+            {
+                if crate::interpreter::strict_equals(&current, receiver) {
+                    crate::builtins::set_integer_index_in(self, view, index, &value)?;
+                    return Ok(true);
+                }
+                if !crate::builtins::valid_integer_index(view, index) {
+                    // Another receiver never coerces the value for an invalid
+                    // integer index and does not fall through to prototypes.
+                    return Ok(true);
+                }
+            }
+            if crate::interpreter::strict_equals(&current, receiver)
+                && (matches!(current, Value::GlobalObject | Value::RealmGlobal(_))
+                    || matches!(current, Value::RegExp(_)) && slot == "lastIndex"
+                    || matches!(current, Value::Array(_)) && slot == "length")
+            {
+                // Keep the existing realm-global and exotic storage helpers.
+                return self.set_member(&current, &key, value);
+            }
+            if current
+                .property_cell()
+                .is_some_and(|cell| cell.meta.borrow().module_namespace)
+            {
+                return Ok(false);
+            }
+            let descriptor = crate::builtins::object::descriptor_for_key_in(self, &current, &key)?;
+            if matches!(descriptor, Value::Undefined) {
+                let prototype = self.get_prototype_of(&current)?;
+                if !matches!(prototype, Value::Null) {
+                    current = prototype;
+                    continue;
+                }
+            } else if descriptor.get_prop("get").is_some() || descriptor.get_prop("set").is_some() {
+                let setter = descriptor.get_prop("set").unwrap_or(Value::Undefined);
+                if matches!(setter, Value::Undefined) {
+                    return Ok(false);
+                }
+                self.call_this(&setter, receiver.clone(), vec![value])?;
+                return Ok(true);
+            } else if !descriptor
+                .get_prop("writable")
+                .is_some_and(|value| value.is_truthy())
+            {
+                return Ok(false);
+            }
+            if !is_js_object(receiver) {
+                return Ok(false);
+            }
+            let existing = crate::builtins::object::descriptor_for_key_in(self, receiver, &key)?;
+            let mut fields = vec![("value".into(), value)];
+            if matches!(existing, Value::Undefined) {
+                fields.extend([
+                    ("writable".into(), Value::Bool(true)),
+                    ("enumerable".into(), Value::Bool(true)),
+                    ("configurable".into(), Value::Bool(true)),
+                ]);
+            } else if existing.get_prop("get").is_some()
+                || existing.get_prop("set").is_some()
+                || !existing
+                    .get_prop("writable")
+                    .is_some_and(|value| value.is_truthy())
+            {
+                return Ok(false);
+            }
+            return self.define_own_property(receiver, &key, &Value::object(fields));
+        }
+        Err(crate::value::limit_err("Maximum prototype depth exceeded"))
+    }
+
     pub(crate) fn set_member_str(
         &mut self,
         obj: &Value,
@@ -964,17 +1086,13 @@ impl Interpreter {
                 vm.set_member_str(&Value::GlobalObject, key, val)
             });
         }
-        if let Some(proxy) = obj.as_proxy() {
-            let (target, handler) = proxy.snapshot()?;
-            if let Some(trap) = self.proxy_trap(&handler, "set")? {
-                let prop = Value::String(crate::JsString::from_key(key));
-                let trap_key = self.proxy_property_key(&prop)?;
-
-                let accepted =
-                    self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
-                return Ok(accepted.is_truthy());
-            }
-            return self.set_member_str(&target, key, val);
+        if matches!(obj, Value::Proxy(_)) {
+            return self.set_member_with_receiver(
+                obj,
+                &Value::String(crate::JsString::from_key(key)),
+                val,
+                obj,
+            );
         }
         match obj {
             Value::Function(function) => {
@@ -1048,18 +1166,8 @@ impl Interpreter {
                 vm.set_member(&Value::GlobalObject, prop, val)
             });
         }
-        // A proxy's `set` trap replaces the write; without one it falls
-        // through to the target.
-        if let Some(proxy) = obj.as_proxy() {
-            let (target, handler) = proxy.snapshot()?;
-            if let Some(trap) = self.proxy_trap(&handler, "set")? {
-                let key = self.proxy_property_key(prop)?;
-
-                let accepted =
-                    self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
-                return Ok(accepted.is_truthy());
-            }
-            return self.set_member(&target, prop, val);
+        if matches!(obj, Value::Proxy(_)) {
+            return self.set_member_with_receiver(obj, prop, val, obj);
         }
         match (obj, prop) {
             (Value::Function(function), Value::Symbol(symbol)) => {

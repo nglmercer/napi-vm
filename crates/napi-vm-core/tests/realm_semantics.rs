@@ -1220,3 +1220,51 @@ fn identifier_deletion_uses_global_property_attributes_and_with_exclusions() {
         "var first=function(){};var constructed=new Function();var removed=delete Function;var last=function(){};removed&&!('Function' in globalThis)&&Object.getPrototypeOf(first)===Object.getPrototypeOf(constructed)&&Object.getPrototypeOf(last)===Object.getPrototypeOf(first);",
     );
 }
+
+#[test]
+fn shared_set_preserves_receivers_and_invalid_integer_index_ordering() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var target = new Int8Array(1), receiver = {}, conversions = 0;
+        var value = {valueOf(){conversions++; return 9;}};
+        Reflect.set(target, '2', value, receiver) === true && conversions === 0 &&
+        Reflect.set(target, '-0', value, 7) === true && conversions === 0 &&
+        Reflect.set(target, '0', value, receiver) === true && receiver[0] === value && target[0] === 0 &&
+        Reflect.set(target, '2', value) === true && conversions === 1;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var base = {x: 1}, receiver = {};
+        Reflect.set(base, 'x', 2, receiver) && base.x === 1 && receiver.x === 2;
+    "#,
+    );
+}
+
+#[test]
+fn shared_define_preserves_symbol_keys_and_proxy_invariants() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol = Symbol('key'), seen, target = {};
+        var proxy = new Proxy(target, {defineProperty(t, key, d){seen=key; return Reflect.defineProperty(t,key,d);}});
+        Object.defineProperty(proxy, symbol, {value:42, configurable:true});
+        seen === symbol && Reflect.getOwnPropertyDescriptor(proxy,symbol).value === 42;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var fixed = {};
+        Object.defineProperty(fixed, 'x', {value:1});
+        var rejected = false;
+        try { Reflect.set(new Proxy(fixed,{set(){return true;}}),'x',2); }
+        catch (error) { rejected = error instanceof TypeError; }
+        rejected && Reflect.defineProperty(fixed,'x',{value:2}) === false;
+    "#,
+    );
+}

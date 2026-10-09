@@ -82,8 +82,9 @@ fn reflect_get(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 
 fn reflect_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let target = reflect_object_target(&a)?;
+    let receiver = a.get(3).cloned().unwrap_or_else(|| target.clone());
     interp
-        .set_member(&target, &arg(&a, 1), arg(&a, 2))
+        .set_member_with_receiver(&target, &arg(&a, 1), arg(&a, 2), &receiver)
         .map(Value::Bool)
 }
 
@@ -115,14 +116,12 @@ fn reflect_define_property(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    // `Reflect.defineProperty` reports failure rather than throwing.
-    let target = arg(&a, 0);
-    let key = interp.property_key(&arg(&a, 1))?;
-    match super::object::define_property(&target, &key, &arg(&a, 2)) {
-        Ok(()) => Ok(Value::Bool(true)),
-        Err(VmErr::Msg(_)) => Ok(Value::Bool(false)),
-        Err(other) => Err(other),
-    }
+    let target = reflect_object_target(&a)?;
+    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    let descriptor = super::object::to_property_descriptor(interp, &arg(&a, 2))?;
+    interp
+        .define_own_property(&target, &key, &descriptor)
+        .map(Value::Bool)
 }
 
 fn reflect_get_own_descriptor(
@@ -130,7 +129,9 @@ fn reflect_get_own_descriptor(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "getOwnPropertyDescriptor", a)
+    let target = reflect_object_target(&a)?;
+    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    super::object::descriptor_for_key_in(interp, &target, &key)
 }
 
 fn reflect_get_prototype_of(

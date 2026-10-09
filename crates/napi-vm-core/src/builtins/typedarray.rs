@@ -1462,6 +1462,41 @@ pub(crate) fn write_element_in(
     write_element(view, index, &converted)
 }
 
+/// CanonicalNumericIndexString excludes ordinary numeric-looking names.
+pub(crate) fn canonical_numeric_index(key: &str) -> Option<f64> {
+    if key == "-0" {
+        return Some(-0.0);
+    }
+    let number = key.parse::<f64>().ok()?;
+    (crate::format::ecmascript_number_string(number) == key).then_some(number)
+}
+
+pub(crate) fn valid_integer_index(view: &TypedArrayData, index: f64) -> bool {
+    index.is_finite()
+        && index >= 0.0
+        && !(index == 0.0 && index.is_sign_negative())
+        && index.fract() == 0.0
+        && index < view.effective_length() as f64
+}
+
+/// Conversion precedes validation when the receiver is the typed array itself.
+pub(crate) fn set_integer_index_in(
+    interp: &mut Interpreter,
+    view: &Rc<TypedArrayData>,
+    index: f64,
+    value: &Value,
+) -> Result<(), VmErr> {
+    let converted = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(value)?
+    } else {
+        Value::Number(interp.ecmascript_to_number(value)?)
+    };
+    if valid_integer_index(view, index) {
+        write_element(view, index as usize, &converted)?;
+    }
+    Ok(())
+}
+
 fn typed(
     kind: TypedKind,
     buffer: impl Into<BufferBacking>,

@@ -653,6 +653,7 @@ impl Interpreter {
             }
             match v {
                 Value::String(s) => Ok(s.clone()),
+                Value::Number(n) => Ok(crate::format::ecmascript_number_string(*n).into()),
                 Value::Binding(cell) => convert(interp, &cell.borrow(), seen, depth + 1),
                 Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
                     Some(crate::value::BoxedPrimitive::String(s)) => Ok(s.clone()),

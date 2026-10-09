@@ -86,6 +86,119 @@ fn proxy_revoke(_: &mut Interpreter, state: Value, _: Vec<Value>) -> Result<Valu
 }
 
 impl Interpreter {
+    /// [[DefineOwnProperty]] consumes a normalized descriptor. Public callers
+    /// perform ToPropertyDescriptor first; internal allocation uses data records.
+    pub(crate) fn define_own_property(
+        &mut self,
+        object: &Value,
+        key: &Value,
+        descriptor: &Value,
+    ) -> Result<bool, VmErr> {
+        if let Value::Proxy(proxy) = object {
+            let (target, handler) = proxy.snapshot()?;
+            let Some(trap) = self.proxy_trap(&handler, "defineProperty")? else {
+                return self.define_own_property(&target, key, descriptor);
+            };
+            let result = self.call_this(
+                &trap,
+                handler,
+                vec![target.clone(), key.clone(), {
+                    let Value::Object { props } = descriptor else {
+                        unreachable!("normalized descriptor");
+                    };
+                    Value::object(props.borrow().clone())
+                }],
+            )?;
+            if !result.is_truthy() {
+                return Ok(false);
+            }
+            let current = super::object::descriptor_for_key_in(self, &target, key)?;
+            let extensible = self.is_extensible(&target)?;
+            let setting_non_configurable = descriptor
+                .get_prop("configurable")
+                .is_some_and(|value| !value.is_truthy());
+            if matches!(current, Value::Undefined) {
+                if !extensible || setting_non_configurable {
+                    return Err(VmErr::Msg(
+                        "TypeError: Proxy cannot invent a protected property".into(),
+                    ));
+                }
+            } else {
+                if !super::object::compatible_descriptor(&current, descriptor) {
+                    return Err(VmErr::Msg(
+                        "TypeError: Proxy defineProperty is incompatible with its target".into(),
+                    ));
+                }
+                let configurable = current
+                    .get_prop("configurable")
+                    .is_some_and(|value| value.is_truthy());
+                if setting_non_configurable && configurable {
+                    return Err(VmErr::Msg("TypeError: Proxy cannot make a configurable target property non-configurable".into()));
+                }
+                if !configurable
+                    && current
+                        .get_prop("writable")
+                        .is_some_and(|value| value.is_truthy())
+                    && descriptor
+                        .get_prop("writable")
+                        .is_some_and(|value| !value.is_truthy())
+                {
+                    return Err(VmErr::Msg(
+                        "TypeError: Proxy cannot report a writable target property as frozen"
+                            .into(),
+                    ));
+                }
+            }
+            return Ok(true);
+        }
+        let slot = self.property_key(key)?;
+        if let Value::TypedArray(view) = object
+            && let Some(index) = super::canonical_numeric_index(&slot)
+        {
+            if !super::valid_integer_index(view, index)
+                || descriptor.get_prop("get").is_some()
+                || descriptor.get_prop("set").is_some()
+                || ["configurable", "enumerable", "writable"]
+                    .iter()
+                    .any(|name| {
+                        descriptor
+                            .get_prop(name)
+                            .is_some_and(|value| !value.is_truthy())
+                    })
+            {
+                return Ok(false);
+            }
+            if let Some(value) = descriptor.get_prop("value") {
+                super::write_element_in(self, view, index as usize, &value)?;
+            }
+            return Ok(true);
+        }
+        let current = super::object::descriptor_for_key_in(self, object, key)?;
+        if matches!(current, Value::Undefined) && !self.is_extensible(object)?
+            || !super::object::compatible_descriptor(&current, descriptor)
+        {
+            return Ok(false);
+        }
+        let result = super::object::define_property(object, &slot, descriptor);
+        match result {
+            Ok(()) => {
+                if let Value::Symbol(symbol) = key {
+                    if let Value::Array(array) = object {
+                        array.set_symbol_key(&slot, symbol.clone());
+                    } else if let Some(properties) = object.property_cell() {
+                        properties
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&slot, symbol.clone());
+                    }
+                }
+                Ok(true)
+            }
+            Err(VmErr::Msg(message)) if message.starts_with("TypeError:") => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     /// The handler's trap named `name`, if it defines one.
     pub(crate) fn proxy_trap(
         &mut self,
@@ -99,11 +212,10 @@ impl Interpreter {
     /// symbols for proxy traps. The trap receives the original symbol value,
     /// rather than a string description of it.
     pub(crate) fn proxy_property_key(&mut self, key: &Value) -> Result<Value, VmErr> {
-        match key {
-            Value::Symbol(_) => Ok(key.clone()),
-            _ => Ok(Value::String(crate::JsString::from_key(
-                &self.property_key(key)?,
-            ))),
+        let primitive = self.coerce_object_to_primitive(key, "string")?;
+        match primitive {
+            Value::Symbol(_) => Ok(primitive),
+            _ => self.ecmascript_to_string(&primitive).map(Value::String),
         }
     }
 

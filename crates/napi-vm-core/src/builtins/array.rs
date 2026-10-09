@@ -256,7 +256,7 @@ fn array_of(
     let length = arguments.len();
     let result = array_result_create(interp, &constructor, length, false)?;
     for (index, value) in arguments.into_iter().enumerate() {
-        create_array_result_element(&result, index, value)?;
+        create_array_result_element(interp, &result, index, value)?;
     }
     interp.set_member_str_or_throw(&result, "length", Value::Number(length as f64))?;
     Ok(result)
@@ -313,7 +313,7 @@ fn array_from(
                 } else {
                     value
                 };
-                create_array_result_element(&result, index, value)
+                create_array_result_element(interp, &result, index, value)
             })();
             if let Err(error) = definition {
                 interp.close_guest_iterator_for_abrupt(&iterator, false, &error)?;
@@ -336,7 +336,7 @@ fn array_from(
         } else {
             value
         };
-        create_array_result_element(&result, index, value)?;
+        create_array_result_element(interp, &result, index, value)?;
     }
     interp.set_member_str_or_throw(&result, "length", Value::Number(length as f64))?;
     Ok(result)
@@ -447,7 +447,7 @@ fn array_splice(
     for offset in 0..remove {
         interp.consume_loop()?;
         if let Some(value) = array_element(interp, &this, start + offset, true)? {
-            create_array_result_element(&result, offset, value)?;
+            create_array_result_element(interp, &result, offset, value)?;
         }
     }
     interp.set_member_str_or_throw(&result, "length", Value::Number(remove as f64))?;
@@ -709,17 +709,29 @@ fn array_species_create(
     interp.ctor(&constructor, vec![Value::Number(length as f64)])
 }
 
-fn create_array_result_element(result: &Value, index: usize, value: Value) -> Result<(), VmErr> {
-    super::object::define_property(
+fn create_array_result_element(
+    interp: &mut Interpreter,
+    result: &Value,
+    index: usize,
+    value: Value,
+) -> Result<(), VmErr> {
+    let descriptor = Value::object(vec![
+        ("value".into(), value),
+        ("writable".into(), Value::Bool(true)),
+        ("enumerable".into(), Value::Bool(true)),
+        ("configurable".into(), Value::Bool(true)),
+    ]);
+    if interp.define_own_property(
         result,
-        &index.to_string(),
-        &Value::object(vec![
-            ("value".into(), value),
-            ("writable".into(), Value::Bool(true)),
-            ("enumerable".into(), Value::Bool(true)),
-            ("configurable".into(), Value::Bool(true)),
-        ]),
-    )
+        &Value::String(index.to_string().into()),
+        &descriptor,
+    )? {
+        Ok(())
+    } else {
+        Err(VmErr::Msg(
+            "TypeError: Cannot define array result element".into(),
+        ))
+    }
 }
 
 fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -735,7 +747,7 @@ fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
                 receiver.clone(),
                 vec![value, Value::Number(index as f64), this.clone()],
             )?;
-            create_array_result_element(&result, index, mapped)?;
+            create_array_result_element(interp, &result, index, mapped)?;
         }
     }
     Ok(result)
@@ -760,7 +772,7 @@ fn array_filter(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
             )?
             .is_truthy()
         {
-            create_array_result_element(&result, next, value)?;
+            create_array_result_element(interp, &result, next, value)?;
             next += 1;
         }
     }
@@ -1036,7 +1048,7 @@ fn array_slice(
     for offset in 0..count {
         interp.consume_loop()?;
         if let Some(value) = array_element(interp, &this, start + offset, true)? {
-            create_array_result_element(&result, offset, value)?;
+            create_array_result_element(interp, &result, offset, value)?;
         }
     }
     interp.set_member_str_or_throw(&result, "length", Value::Number(count as f64))?;
@@ -1071,7 +1083,7 @@ fn array_concat(
             for index in 0..length {
                 interp.consume_loop()?;
                 if let Some(value) = array_element(interp, &item, index, true)? {
-                    create_array_result_element(&result, next, value)?;
+                    create_array_result_element(interp, &result, next, value)?;
                 }
                 next += 1;
             }
@@ -1079,7 +1091,7 @@ fn array_concat(
             if next >= crate::value::MAX_ARRAY_LEN {
                 return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
-            create_array_result_element(&result, next, item)?;
+            create_array_result_element(interp, &result, next, item)?;
             next += 1;
         }
     }
@@ -1303,7 +1315,7 @@ fn flatten_array_result(
             if next >= crate::value::MAX_ARRAY_LEN {
                 return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
-            create_array_result_element(&result, next, value)?;
+            create_array_result_element(interp, &result, next, value)?;
             next += 1;
         }
     }

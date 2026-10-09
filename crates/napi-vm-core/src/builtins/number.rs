@@ -178,7 +178,9 @@ fn number_to_string(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
     }
     let radix = radix as u32;
     if radix == 10 {
-        return Ok(Value::String((crate::format::number_string(value)).into()));
+        return Ok(Value::String(
+            (crate::format::ecmascript_number_string(value)).into(),
+        ));
     }
     if !value.is_finite() {
         return Ok(Value::String((crate::format::number_string(value)).into()));

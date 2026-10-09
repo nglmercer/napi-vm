@@ -136,3 +136,23 @@ The expanded 5,267-variant focused selection passes 4,796, gains 1,282 and loses
 zero against the matching 7c0a9ce full projection, with zero special outcomes.
 The earlier f9aa579 two-loss report remains archived. Full-corpus validation is
 pending; known global-object/private/internal-operation dependencies remain open.
+
+## Shared assignment and descriptor follow-up
+
+Assignment and Reflect.set now share a receiver-preserving Set operation. Proxy
+traps receive the original receiver and enforce protected-property invariants.
+Integer-indexed writes distinguish the typed-array target from another receiver:
+invalid indices on another receiver return without coercing the value, while
+writes to the typed array perform conversion before checking index validity.
+Object-literal getter/setter pairs remain visible through descriptor lookup.
+
+Object.defineProperty, Reflect.defineProperty, and array result-element creation
+use a shared DefineOwnProperty operation and descriptor compatibility checks.
+Public descriptors undergo observable ToPropertyDescriptor reads in specification
+order; symbol keys retain identity through Proxy traps and descriptor queries.
+Array species results can therefore use Proxy-backed definition operations.
+
+The subsequent full validation must still cover these changes. This does not
+complete realm-global ObjectRecord/DeclarativeRecord semantics or the pending
+private-element and exotic descriptor dependencies. Full AST/bytecode mismatch
+measurement remains outstanding.
