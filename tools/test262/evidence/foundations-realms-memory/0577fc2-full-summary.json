@@ -1,0 +1,31 @@
+{
+  "source_commit": "0577fc2f7238bd96160141469e8bee6c6517f280",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "ccbc78ac0d0a12a32dbc781db9bbe291bf9c9d5b529c11d65c588eef622498e7",
+  "classification": "Exploratory full run: regression gate failed",
+  "counts": {
+    "pass": 61379,
+    "fail": 41575,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "total": 102956,
+  "new_passes": 19981,
+  "lost_passes": 9,
+  "versus_7c0a9ce": {
+    "new_passes": 8345,
+    "lost_passes": 12
+  },
+  "required_checks": "All pass; see 0577fc2-summary.json and archived logs",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "known_timeouts": "Script and strict staging deep-WeakMap regression; retain exact outcomes",
+  "remaining_gaps": "Realm-global/private/internal-operation foundations and outside-scope standard-library/proposals remain open",
+  "archive_sha256": {
+    "0577fc2-full.json.gz": "6730753302888697d776096aa16f55eb367c15ae3b24bc26ec1b63482a98f053",
+    "0577fc2-full.jsonl.gz": "4378788f4ba08b23318d9bfed6cdbf5aed240dcbc3657572c10cf3d8c3ebd079",
+    "0577fc2-full-pr23-transitions.json.gz": "bf049efc347eec8900713a990ac85a9e9acf117c408a2162e28106403ad30b53",
+    "0577fc2-full-7c0a9ce-transitions.json.gz": "8cfb63f460d8db02f27af21d94b48da7c54fca6c1332e003ccf69628aa532814"
+  }
+}

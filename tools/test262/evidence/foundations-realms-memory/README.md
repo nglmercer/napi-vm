@@ -135,3 +135,13 @@ files; the runner verified the exact configuration and frozen worker digest and
 resumed the ordered checkpoint. Its final report retains every completed result.
 The full pinned corpus is pending; this focused result does not close Phase 1's
 remaining global-object/private/internal-operation dependencies.
+
+The subsequent `0577fc2` full run is exploratory: 61,379 passes, 41,575 failures,
+two timeouts, zero harness errors/crashes/skips across all 102,956 variants. It
+gains 19,981 and loses nine versus PR #23; against 7c0a9ce it gains 8,345 and loses
+12. Eight losses involve TypedArray [[Set]] with another receiver and invalid
+indices. Other losses involve primitive string iterator deletion and inherited
+global/with deletion resolution. These are regressions to fix, not silently
+excluded variants. The positive focused gate does not override this failed full
+gate. Exact full outcomes, both comparisons and the worker/check identities are
+archived in `0577fc2-full-*` and `0577fc2-summary.json`.
