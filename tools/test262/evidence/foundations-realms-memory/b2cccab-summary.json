@@ -1,0 +1,53 @@
+{
+  "source_commit": "b2cccabc2773ff400718a44ab1fd9cd54068ed35",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "39d2fd5fc487c8631e6ba14ccddf6656ba68f505efbc77fbda4b50ed4a57090f",
+  "classification": "Validated Proxy ownKeys and deletion invariants; expanded keys and GC groups",
+  "total": 8937,
+  "counts": {
+    "pass": 8232,
+    "fail": 705,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 2016,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 895,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Realm-global records and private/descriptor dependencies remain open; full AST/bytecode mismatch count is not measured",
+  "archive_sha256": {
+    "b2cccab-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "b2cccab-clippy.log.gz": "7e5fbcd790e8026de9f8e7c7d97c8f6b394103b3256190785efdfff92336bc42",
+    "b2cccab-allfeatures-tests.log.gz": "803d854c30adc1fb510077a3b3922c1cca9016b413d8a3af310264bbdddc635b",
+    "b2cccab-minimal-tests.log.gz": "acea05abc7842e998b880f13542e8358ffec75590e00d51c935a8de58e15242c",
+    "b2cccab-native-build.log.gz": "161f81a0e3d81158bfa83c51c78acd99716cdfa2b27f956187381d7f29b84e28",
+    "b2cccab-node-tests.log.gz": "5e3316db327034559879e1ca7171bce8a484acf8a9f3d5f67f14d083b64b2c5d",
+    "b2cccab-wasm-tests.log.gz": "60847839778d42f22698ab8dc82b6778d73a092fd06f9ee5045e8aea4492bf1e",
+    "b2cccab-tooling-tests.log.gz": "c4fbdc99b58d61b293b611c8f255ec991ad8e9cc63786092da3ca42cfdb94574",
+    "b2cccab-release-build.log.gz": "877b7359b3dd1cf5e7f2157dcbaa962804e97fa6db4810208f839bdde7706e1d",
+    "b2cccab-focused.json.gz": "c48141b5fb545588b6fbe3660784b864880ab7b874c0f1d08f2ceca2a98eb1a9",
+    "b2cccab-focused.jsonl.gz": "d52ab5e499f0aa8eddfba0db380d8d7d524710ce9fc9b3f45f26f26e2ae8def8",
+    "b2cccab-focused-transitions.json.gz": "fb3e42ae050cc13a6e615d7e3477dc689c826e9454013070e9801d8e87b614b3",
+    "b2cccab-focused-7c0a9ce-projection.json.gz": "cf930f7706b457e6c0ff67d9b82b05209622c9c0688fa7f802b20c9b27b0e665",
+    "b2cccab-focused-6456b53-projection.json.gz": "5a074c17567eacb5aa12be878280f70a5976666971d63d384ebfe92e94678051",
+    "b2cccab-focused-6456b53-transitions.json.gz": "6f0a19b2d49c334696043c49e227acef6c5022f1f6e7d0775ec0062cdaf513e1"
+  },
+  "recent_baseline": "Matching projection from independent 6456b53 full report",
+  "recent_baseline_new_passes": 70,
+  "recent_baseline_lost_passes": 0
+}

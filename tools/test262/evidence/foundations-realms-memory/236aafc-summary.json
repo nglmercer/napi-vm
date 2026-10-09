@@ -1,0 +1,53 @@
+{
+  "source_commit": "236aafca6161d1c0b2a26803817f102b81c5ca41",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "33b1adc0e67cc623364904352d74d56a04b3b6f9c53bb747646b959d7bbe4978",
+  "classification": "Atomics.pause, observable BigInt conversion, protected Proxy get and exotic deletion",
+  "total": 9339,
+  "counts": {
+    "pass": 8603,
+    "fail": 736,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 2083,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 901,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Realm-global records and private/descriptor dependencies remain open; full AST/bytecode mismatch count is not measured",
+  "archive_sha256": {
+    "236aafc-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "236aafc-clippy.log.gz": "9ff15f39d769ba3540504a5ec65059f5fbf9cb00329438c0c06956b741f037c0",
+    "236aafc-allfeatures-tests.log.gz": "bb40ad7399d0cbb54a6af51437b02b5d43456bcd1bbf463f21ab0dd80d958b92",
+    "236aafc-minimal-tests.log.gz": "17142c5269af8c7dc002d515c9bd9040f00bb1033f71dd979348fcba5925ccb7",
+    "236aafc-native-build.log.gz": "aeafc65a44bb9dee3a64208ad0c90a5d63cdc29b815d080aff4c8714b22ae795",
+    "236aafc-node-tests.log.gz": "38930f6efba1a676cbab135b620187e7346da8957c891b5e0f40477950997da6",
+    "236aafc-wasm-tests.log.gz": "dd99658d71a5a848e0e7e161b6eec48b7b15b07e19e4c1c8f480ba66172bf2ee",
+    "236aafc-tooling-tests.log.gz": "3b9006623fd7e2c6b519a98824a39d670418601461c0deb31a9c9638f7fa05b1",
+    "236aafc-release-build.log.gz": "e1ddf98038583cefd9db559a4760a3557ae0a740d2affdb3832e5a55c8470422",
+    "236aafc-focused.json.gz": "df25122d9493693dbcd168652888b1e14f3dbc87a450b2298f640081df3dbc2b",
+    "236aafc-focused.jsonl.gz": "877fa1151c8c6639f3174e908294c3c89ade5f760a8660d5792001765ca1fd24",
+    "236aafc-focused-transitions.json.gz": "53cd1f56af27791708d41d2002e8f7f78b3fb76a57b060d2ef5c737b91e4e150",
+    "236aafc-focused-7c0a9ce-projection.json.gz": "0acf0920fe0336748469b44936e8a24e5d768cb544eac6db356cbb087dfb2ae9",
+    "236aafc-focused-6456b53-projection.json.gz": "0658d72dd31de5998a97ca068a86df21a8d121477fcb0bba9afce1ccca7c3ed1",
+    "236aafc-focused-6456b53-transitions.json.gz": "346d4b2106b309bbdb53638595a98f94eedadc3fc0f60efd3b47fb7040472eb6"
+  },
+  "recent_baseline": "Matching projection from independent 6456b53 full report",
+  "recent_new_passes": 137,
+  "recent_lost_passes": 0
+}
