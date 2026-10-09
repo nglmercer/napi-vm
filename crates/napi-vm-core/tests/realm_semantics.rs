@@ -1357,3 +1357,86 @@ fn array_length_definitions_share_conversion_and_failed_truncation_rules() {
     "#,
     );
 }
+
+#[test]
+fn proxy_own_keys_preserves_symbols_and_accepts_array_like_results() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('key'), target={visible:1}; target[symbol]=2;
+        Object.defineProperty(target,'hidden',{value:3});
+        var proxy=new Proxy(target,{ownKeys(){return {0:symbol,1:'hidden',2:'visible',length:3};}});
+        var keys=Reflect.ownKeys(proxy), symbols=Object.getOwnPropertySymbols(proxy);
+        keys.length===3&&keys[0]===symbol&&keys[1]==='hidden'&&symbols.length===1&&symbols[0]===symbol&&Object.keys(proxy).join(',')==='visible';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('key'), target={b:1,'10':2,'2':3,a:4}; target[symbol]=5;
+        var keys=Reflect.ownKeys(new Proxy(new Proxy(target,{}),{}));
+        keys.length===5&&keys[0]==='2'&&keys[1]==='10'&&keys[2]==='b'&&keys[3]==='a'&&keys[4]===symbol;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_own_keys_checks_duplicates_and_required_target_keys() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        function rejects(target,keys){try{Reflect.ownKeys(new Proxy(target,{ownKeys(){return keys;}}));return false;}catch(e){return e instanceof TypeError;}}
+        var symbol=Symbol('key'), target={};Object.defineProperty(target,symbol,{value:1});
+        var sealed={x:1};Object.preventExtensions(sealed);
+        rejects({},['x','x'])&&rejects({},[symbol,symbol])&&rejects({},[1])&&rejects(target,[])&&rejects(sealed,[])&&rejects(sealed,['x','extra'])&&!rejects({},[Symbol('same'),Symbol('same')]);
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={x:1},proxy=new Proxy(target,{ownKeys(){delete target.x;Object.preventExtensions(target);return [];}});
+        Reflect.ownKeys(proxy).length===0;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_delete_validates_post_trap_descriptors_and_extensibility() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        function rejects(target,key){try{Reflect.deleteProperty(new Proxy(target,{deleteProperty(){return true;}}),key);return false;}catch(e){return e instanceof TypeError;}}
+        var fixed={};Object.defineProperty(fixed,'x',{value:1});
+        var sealed={x:1};Object.preventExtensions(sealed);
+        var symbol=Symbol('key'), symbolic={};Object.defineProperty(symbolic,symbol,{value:1});
+        rejects(fixed,'x')&&rejects(sealed,'x')&&rejects(symbolic,symbol)&&Reflect.deleteProperty(new Proxy(sealed,{deleteProperty(){return true;}}),'absent');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={x:1};Object.preventExtensions(target);
+        var proxy=new Proxy(target,{deleteProperty(t,k){delete t[k];return true;}});
+        Reflect.deleteProperty(proxy,'x')&&!Reflect.has(target,'x');
+    "#,
+    );
+}
+
+#[test]
+fn proxy_key_invariant_errors_use_the_operation_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var proxy=new Proxy({},{ownKeys(){return ['x','x'];}}),caught;
+        try{other.Reflect.ownKeys(proxy);}catch(e){caught=e;}
+        caught instanceof other.TypeError && !(caught instanceof TypeError);
+    "#,
+    );
+}

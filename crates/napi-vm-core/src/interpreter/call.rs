@@ -552,8 +552,24 @@ impl Interpreter {
             if let Some(trap) = self.proxy_trap(&handler, "deleteProperty")? {
                 let name = self.proxy_property_key(key)?;
 
-                let result = self.call_this(&trap, handler, vec![target, name])?;
-                return Ok(Value::Bool(result.is_truthy()));
+                let result = self.call_this(&trap, handler, vec![target.clone(), name.clone()])?;
+                if !result.is_truthy() {
+                    return Ok(Value::Bool(false));
+                }
+                let descriptor =
+                    crate::builtins::object::descriptor_for_key_in(self, &target, &name)?;
+                if !matches!(descriptor, Value::Undefined) {
+                    if !descriptor
+                        .get_prop("configurable")
+                        .is_some_and(|value| value.is_truthy())
+                    {
+                        return Err(VmErr::Msg("TypeError: Proxy deleteProperty cannot hide a non-configurable property".into()));
+                    }
+                    if !self.is_extensible(&target)? {
+                        return Err(VmErr::Msg("TypeError: Proxy deleteProperty cannot hide a property of a non-extensible target".into()));
+                    }
+                }
+                return Ok(Value::Bool(true));
             }
             return self.delete_member(&target, key);
         }

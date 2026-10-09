@@ -96,6 +96,7 @@ pub(super) fn install(e: &mut Environment) {
         ("entries", object_entries),
         ("assign", object_assign),
         ("getOwnPropertyNames", object_get_own_property_names),
+        ("getOwnPropertySymbols", object_get_own_property_symbols),
         ("create", object_create),
         ("defineProperty", object_define_property),
         ("defineProperties", object_define_properties),
@@ -204,11 +205,68 @@ pub(crate) fn own_names_for(
             .collect());
     }
     if matches!(value, Value::Proxy(_)) {
-        // The current Proxy model exposes ownKeys as a string array. Native
-        // addon proxies return the host object's enumerable own keys here.
-        return interp.keys_with_proxy_trap(value);
+        let mut names = Vec::new();
+        for key in interp.own_property_keys(value)? {
+            if let Value::String(name) = &key {
+                if enumerable_only {
+                    let descriptor = descriptor_for_key_in(interp, value, &key)?;
+                    if !descriptor
+                        .get_prop("enumerable")
+                        .is_some_and(|value| value.is_truthy())
+                    {
+                        continue;
+                    }
+                }
+                names.push(name.to_key());
+            }
+        }
+        return Ok(names);
     }
     Ok(own_names(value, enumerable_only))
+}
+
+/// Ordinary [[OwnPropertyKeys]], including the indexed exotic keys and
+/// symbols stored separately from string slots.
+pub(crate) fn ordinary_own_property_keys(
+    interp: &Interpreter,
+    value: &Value,
+) -> Result<Vec<Value>, VmErr> {
+    let mut names = if let Some(global) = interp.global_scope_of(value) {
+        global.borrow().global_property_keys()
+    } else {
+        own_names(value, false)
+    };
+    if let Value::TypedArray(view) = value {
+        names.splice(
+            0..0,
+            (0..view.effective_length()).map(|index| index.to_string()),
+        );
+    }
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|name| seen.insert(name.clone()));
+    // Integer index keys precede other strings; the sort is stable for the
+    // remaining strings, which retain their creation order.
+    names.sort_by_key(|name| crate::value::array_index(name).map_or((1, 0), |index| (0, index)));
+    let mut keys: Vec<Value> = names
+        .into_iter()
+        .map(|name| Value::String(crate::JsString::from_key(&name)))
+        .collect();
+    if let Value::Array(array) = value {
+        for (slot, symbol) in array.symbol_keys.borrow().iter() {
+            if array.named_prop(slot).is_some() {
+                keys.push(Value::Symbol(symbol.clone()));
+            }
+        }
+    } else if let Some(properties) = cell(value) {
+        let meta = properties.meta.borrow();
+        let slots = properties.borrow();
+        for (slot, symbol) in &meta.symbol_keys {
+            if slots.iter().any(|(name, _)| name == slot) {
+                keys.push(Value::Symbol(symbol.clone()));
+            }
+        }
+    }
+    Ok(keys)
 }
 
 /// Read an own property slot without walking the prototype chain and without
@@ -386,7 +444,7 @@ fn object_get_own_property_names(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
+    let v = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
     let names = match v {
         Value::GlobalObject => interp.global_keys(),
         ref other => own_names_for(interp, other, false)?,
@@ -395,6 +453,21 @@ fn object_get_own_property_names(
         names
             .into_iter()
             .map(|value| Value::String(crate::JsString::from_key(&value)))
+            .collect(),
+    )
+}
+
+fn object_get_own_property_symbols(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let target = to_object_receiver(&args.first().cloned().unwrap_or(Value::Undefined))?;
+    Value::checked_array(
+        interp
+            .own_property_keys(&target)?
+            .into_iter()
+            .filter(|key| matches!(key, Value::Symbol(_)))
             .collect(),
     )
 }

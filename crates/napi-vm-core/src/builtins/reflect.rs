@@ -104,11 +104,13 @@ fn reflect_object_target(arguments: &[Value]) -> Result<Value, VmErr> {
 }
 
 fn reflect_delete(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    interp.delete_member(&arg(&a, 0), &arg(&a, 1))
+    let target = reflect_object_target(&a)?;
+    interp.delete_member(&target, &arg(&a, 1))
 }
 
 fn reflect_own_keys(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    via_object(interp, "getOwnPropertyNames", a)
+    let target = reflect_object_target(&a)?;
+    Value::checked_array(interp.own_property_keys(&target)?)
 }
 
 fn reflect_define_property(

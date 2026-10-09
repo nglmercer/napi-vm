@@ -2547,32 +2547,112 @@ impl Interpreter {
         self.persistent_global.borrow().global_property(name)
     }
 
-    /// Enumerate a proxy through its `ownKeys` trap when one is installed.
-    pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
+    /// [[OwnPropertyKeys]] preserves symbol identity and validates Proxy results
+    /// before callers filter keys by type or enumerability.
+    pub(crate) fn own_property_keys(&mut self, value: &Value) -> Result<Vec<Value>, VmErr> {
+        self.own_property_keys_at(value, 0)
+    }
+
+    fn own_property_keys_at(&mut self, value: &Value, depth: usize) -> Result<Vec<Value>, VmErr> {
+        stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
+            self.own_property_keys_inner(value, depth)
+        })
+    }
+
+    fn own_property_keys_inner(
+        &mut self,
+        value: &Value,
+        depth: usize,
+    ) -> Result<Vec<Value>, VmErr> {
+        self.execution.check()?;
+        if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+            return Err(crate::value::limit_err(
+                "Maximum Proxy traversal depth exceeded",
+            ));
+        }
         let Some(proxy) = value.as_proxy() else {
-            return Ok(self.keys(value));
+            return crate::builtins::object::ordinary_own_property_keys(self, value);
         };
         let (target, handler) = proxy.snapshot()?;
         let Some(trap) = self.proxy_trap(&handler, "ownKeys")? else {
-            return Ok(self.keys(&target));
+            return self.own_property_keys_at(&target, depth + 1);
         };
-
-        let keys = self.call_this(&trap, handler, vec![target])?;
-        let Value::Array(keys) = &keys else {
+        let list = self.call_this(&trap, handler, vec![target.clone()])?;
+        if !call::is_js_object(&list) {
             return Err(VmErr::Msg(
-                "TypeError: Proxy ownKeys trap must return an array".into(),
+                "TypeError: Proxy ownKeys result must be an object".into(),
             ));
+        }
+        let length = self.get_prop_value_str(&list, "length")?;
+        let length = self.ecmascript_to_number(&length)?;
+        let length = if length.is_nan() || length <= 0.0 {
+            0.0
+        } else {
+            length.floor()
         };
-        let keys = keys.borrow().clone();
-        let mut names = Vec::with_capacity(keys.len());
-        for key in &keys {
-            match key {
-                Value::String(name) => names.push(name.to_key()),
-                Value::Symbol(_) => {}
-                _ => {
-                    return Err(VmErr::Msg(
-                        "TypeError: Proxy ownKeys trap returned a non-key".into(),
-                    ));
+        if length > crate::value::MAX_OBJECT_PROPS as f64 {
+            return Err(crate::value::limit_err("Maximum property count exceeded"));
+        }
+        let mut keys = Vec::with_capacity(length as usize);
+        let mut seen = std::collections::HashSet::new();
+        for index in 0..length as usize {
+            let key = self.get_prop_value_str(&list, &index.to_string())?;
+            if !matches!(key, Value::String(_) | Value::Symbol(_)) {
+                return Err(VmErr::Msg(
+                    "TypeError: Proxy ownKeys returned a non-key".into(),
+                ));
+            }
+            // String and symbol slots occupy separate namespaces, including
+            // strings whose contents resemble the internal symbol encoding.
+            let identity = match &key {
+                Value::String(name) => (false, name.to_key()),
+                Value::Symbol(symbol) => (true, symbol.id.to_string()),
+                _ => unreachable!(),
+            };
+            if !seen.insert(identity) {
+                return Err(VmErr::Msg(
+                    "TypeError: Proxy ownKeys returned duplicate keys".into(),
+                ));
+            }
+            keys.push(key);
+        }
+        let extensible = self.is_extensible(&target)?;
+        let target_keys = self.own_property_keys_at(&target, depth + 1)?;
+        for key in &target_keys {
+            let descriptor = crate::builtins::object::descriptor_for_key_in(self, &target, key)?;
+            let protected = !matches!(descriptor, Value::Undefined)
+                && !descriptor
+                    .get_prop("configurable")
+                    .is_some_and(|value| value.is_truthy());
+            if (protected || !extensible)
+                && !keys.iter().any(|candidate| strict_equals(candidate, key))
+            {
+                return Err(VmErr::Msg(
+                    "TypeError: Proxy ownKeys omitted a required target key".into(),
+                ));
+            }
+        }
+        if !extensible && keys.len() != target_keys.len() {
+            return Err(VmErr::Msg(
+                "TypeError: Proxy ownKeys added keys to a non-extensible target".into(),
+            ));
+        }
+        Ok(keys)
+    }
+
+    pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
+        if !matches!(value, Value::Proxy(_)) {
+            return Ok(self.keys(value));
+        }
+        let mut names = Vec::new();
+        for key in self.own_property_keys(value)? {
+            if let Value::String(name) = &key {
+                let descriptor = crate::builtins::object::descriptor_for_key_in(self, value, &key)?;
+                if descriptor
+                    .get_prop("enumerable")
+                    .is_some_and(|value| value.is_truthy())
+                {
+                    names.push(name.to_key());
                 }
             }
         }
