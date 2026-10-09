@@ -116,6 +116,8 @@ impl Interpreter {
                 self.jobs
                     .borrow_mut()
                     .push_microtask(Job::PromiseResolveThenable {
+                        realm: super::realm::value_realm(&then)
+                            .unwrap_or_else(|| self.persistent_global.clone()),
                         target: promise.clone(),
                         thenable: value,
                         then,
@@ -345,11 +347,15 @@ impl Interpreter {
                 reaction,
             } => self.run_reaction(state, value, reaction),
             Job::PromiseResolveThenable {
+                realm,
                 target,
                 thenable,
                 then,
                 resolution_guard,
-            } => self.run_thenable_job(target, &thenable, &then, resolution_guard),
+            } => self.with_global_storage(realm.clone(), |vm| {
+                let _allocation = super::realm::AllocationRealm::enter(Some(realm));
+                vm.run_thenable_job(target, &thenable, &then, resolution_guard)
+            }),
             Job::Callback { callback, args } => self
                 .call_this(&callback, Value::Undefined, args)
                 .map(|_| ()),
@@ -722,31 +728,25 @@ fn resolving_function(
     guard: Option<&Value>,
     callable: crate::builtins::NativeFn,
 ) -> Value {
-    let mut properties = vec![
-        (TARGET_SLOT.into(), carrier.clone()),
-        ("name".into(), Value::String("".into())),
-        ("length".into(), Value::Number(1.0)),
-        (
-            super::call::CALL_SLOT.into(),
-            Value::NativeFunction {
-                name: "".into(),
-                callable,
-            },
-        ),
-    ];
+    let mut slots = vec![(TARGET_SLOT.into(), carrier.clone())];
     if let Some(guard) = guard {
-        properties.push((RESOLUTION_GUARD_SLOT.into(), guard.clone()));
+        slots.push((RESOLUTION_GUARD_SLOT.into(), guard.clone()));
     }
+    let state = Value::object(slots);
     let prototype = super::realm::allocation_global()
         .and_then(|realm| crate::value::FunctionData::default_function_prototype(&realm));
-    let result = Value::object_with_proto(properties, prototype.map(Rc::new));
-    let Value::Object { props } = &result else {
-        unreachable!()
-    };
-    let mut metadata = props.meta.borrow_mut();
-    metadata.call_only = true;
+    let target = crate::builtins::native_method("", 1, callable, prototype.clone());
+    let properties = Value::object_with_proto(
+        vec![
+            ("name".into(), Value::String("".into())),
+            ("length".into(), Value::Number(1.0)),
+        ],
+        prototype.map(Rc::new),
+    )
+    .property_cell()
+    .expect("function properties");
     for name in ["name", "length"] {
-        metadata.set_attrs(
+        properties.meta.borrow_mut().set_attrs(
             name,
             crate::value::PropAttrs {
                 writable: false,
@@ -755,8 +755,31 @@ fn resolving_function(
             },
         );
     }
-    drop(metadata);
-    result
+    // Reuse the existing bound-call machinery: state is an internal receiver,
+    // never an observable property and never replaced by the caller's this.
+    Value::Function(Rc::new(crate::value::FunctionData {
+        strict: true,
+        native: None,
+        identity: Rc::new(0),
+        name: Some("".into()),
+        properties,
+        standard_properties_initialized: Rc::new(std::cell::Cell::new(true)),
+        params: Rc::new(Vec::new()),
+        body: Rc::new(Vec::new()),
+        closure: None,
+        is_arrow: false,
+        is_constructor: false,
+        is_async: false,
+        is_generator: false,
+        uses_arguments: false,
+        needs_hoisting: false,
+        bytecode: None,
+        bound: Some(Rc::new(crate::value::BoundFunctionData {
+            target,
+            this_value: state,
+            arguments: Rc::new(Vec::new()),
+        })),
+    }))
 }
 
 fn target_of(this: &Value) -> Option<Rc<RefCell<PromiseInner>>> {

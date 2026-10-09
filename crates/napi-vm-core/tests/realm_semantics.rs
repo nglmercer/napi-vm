@@ -1,6 +1,36 @@
 use napi_vm_core::{Interpreter, Value};
 
 #[test]
+fn thenable_jobs_retain_the_function_realm_for_resolver_allocation() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("var saved;var then=function(resolve,reject){saved=[resolve,reject];resolve.call(null,42);};").unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    vm.set_global_checked("foreignThen", child.eval_source("then").unwrap())
+        .unwrap();
+    drop(child);
+    vm.eval_source_with_options(
+        "var settled;Promise.resolve({then:foreignThen}).then(v=>{settled=v;});",
+        napi_vm_core::interpreter::EvaluationOptions {
+            drain: napi_vm_core::interpreter::DrainPolicy::None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(vm.collect_cycles().skipped.is_none());
+    vm.drain_jobs().unwrap();
+    truth(
+        &mut vm,
+        "settled===42&&Object.getPrototypeOf(other.saved[0])===other.Function.prototype&&Object.getPrototypeOf(other.saved[1])===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "Object.getOwnPropertyNames(other.saved[0]).length===2&&Object.prototype.toString.call(other.saved[0])==='[object Function]';",
+    );
+}
+
+#[test]
 fn string_and_regexp_brand_errors_belong_to_the_accessor_realm() {
     let mut vm = Interpreter::with_builtins();
     let child = vm.create_realm();

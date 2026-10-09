@@ -1,0 +1,47 @@
+{
+  "source_commit": "f9190cd458db0a7ff3a6445fb42e9dc963117768",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "e22385ec2f7bded7af2fdfd4d771698fb0ff2409e3b0474e8ec89b01cf2d47a6",
+  "classification": "Focused regression validation; not complete Phase 1 or a full corpus run",
+  "total": 2044,
+  "counts": {
+    "pass": 1856,
+    "fail": 188,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 130,
+  "lost_passes": 0,
+  "baseline": "Matching 7c0a9ce full report projection, not a separate baseline rerun",
+  "checks": {
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "allfeatures-tests": {
+      "passed": 872,
+      "failed": 0,
+      "ignored": 4
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Queued thenable helper realm fixed by a newer source; custom Array allocation and revoked Proxy realm dependencies remain",
+  "archive_sha256": {
+    "f9190cd-focused.json.gz": "ecb5fd88bcac8466566e5c0e4cc0b42ae8eab3ecbd7734c7c10f178551c59e53",
+    "f9190cd-focused-transitions.json.gz": "e7d7fe62487156d900b5eb9027fdf72f26dfbec3ab592df40b074ee39e328eac",
+    "f9190cd-focused-7c0a9ce-projection.json.gz": "0c0818eeedcad0869d4dc2996e1ff7f7b150a48c63d00435825d2bf3f1374a8c",
+    "f9190cd-release-build.log.gz": "e7a6dcb5d3c9e1de27285f21f1be7beaa7c185eb153e41e4d5090f6a4b6de4f5",
+    "f9190cd-tooling-tests.log.gz": "d5a4adedb68e9ea3033d46fa7eef778c764f8d0db53dd89bdad84879d5df059c",
+    "f9190cd-wasm-tests.log.gz": "f4aee099e1258ca11a27042ee4b3b92130fc588630b0c8cee03be6cc31d52001",
+    "f9190cd-node-tests.log.gz": "14c9fe4b785fef34e75d79c60fbf83e1f3b8700d225a948cdad11d8011fcdf63",
+    "f9190cd-native-build.log.gz": "0c1e2534a42d0aa5b3e5b96db7ee6f090ec37b091326f7c07155b22c4360a1c1",
+    "f9190cd-minimal-tests.log.gz": "263fc07acc3e4f8475459cdb54e44096a93064341d72bc90b5521ed6f6a37fa1",
+    "f9190cd-allfeatures-tests.log.gz": "c0917b405f27df2a7960b54946cb71a1240ed907c955fa44b90a2d91d298f506",
+    "f9190cd-clippy.log.gz": "b47b80449a63503d26527489f8a20f94ecd1143d11e8ac2d9bcd383be8ec73da",
+    "f9190cd-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+  }
+}

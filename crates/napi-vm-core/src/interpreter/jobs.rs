@@ -43,6 +43,7 @@ pub enum Job {
     /// Invoke a thenable's `then` method in a PromiseResolveThenableJob, after
     /// the current JavaScript stack has finished.
     PromiseResolveThenable {
+        realm: super::Env,
         target: Rc<RefCell<PromiseInner>>,
         thenable: Value,
         then: Value,
@@ -99,11 +100,13 @@ impl Job {
                 Value::Promise(reaction.derived.clone()),
             ]),
             Job::PromiseResolveThenable {
+                realm,
                 target,
                 thenable,
                 then,
                 resolution_guard,
             } => out.extend([
+                Value::RealmGlobal(realm.clone()),
                 Value::Promise(target.clone()),
                 thenable.clone(),
                 then.clone(),
