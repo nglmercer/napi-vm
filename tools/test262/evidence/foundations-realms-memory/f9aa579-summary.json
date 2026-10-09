@@ -1,0 +1,48 @@
+{
+  "source_commit": "f9aa5798d475cf2003a831c7d49403590a32a7ec",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "4ee07ce734d46b991d202abb0fb7bfa89863b2758836d64ff76b4d58a2f9fb4e",
+  "classification": "Exploratory focused gate failed: two non-constructor error-realm regressions",
+  "total": 5267,
+  "counts": {
+    "pass": 4794,
+    "fail": 473,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 1282,
+  "lost_passes": 2,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 884,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Realm-global/private dependencies and Proxy DefineOwnProperty remain; full-corpus tier mismatch measurement pending",
+  "archive_sha256": {
+    "f9aa579-release-build.log.gz": "6e8864e456be8077d1d3b14fac492d5ceae4750f094344dd5484c4c5c6dca285",
+    "f9aa579-tooling-tests.log.gz": "d95c50da6cedcd3e7448a227b230a8fd2197d0b68bed567cd4214ff60eb1c2bc",
+    "f9aa579-wasm-tests.log.gz": "f413fa7f2cc6af3ccd715e8d779533c6e3da4254d9c8a05842ab7b703767eb71",
+    "f9aa579-node-tests.log.gz": "180a9a752ea62dac8a8f2ee48e4bf1e3f4f3a81bacef400f31594c7cef322a0d",
+    "f9aa579-native-build.log.gz": "b4a08512fc3f94f8aebc86fd60f8c52c4691ae2e83bd935c4f74c01bfc3d2202",
+    "f9aa579-minimal-tests.log.gz": "5daf4637510dd5e19a802e9da01a2eb1d6a4bcaa8b153539f4cd0533fa524f7f",
+    "f9aa579-allfeatures-tests.log.gz": "a34a4089349ec50db8b4f37f6dde6a9f3e8c830376063be6874ed6aa1a64041c",
+    "f9aa579-clippy.log.gz": "c2eeabbc6df3851330bc04a85494ab0a0dc2e275ec4b17eaf5736f34642a74ab",
+    "f9aa579-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "f9aa579-focused.json.gz": "855a0a096678da6876621ab3750d155ebd652daf1bb635a0cfd2b2db8b302d07",
+    "f9aa579-focused.jsonl.gz": "7efc0739886d3966edf3168c897b34de5b0d316571a9a031d310711b08eac64e",
+    "f9aa579-focused-transitions.json.gz": "5daf5a560dc2b3fb964ca3efffdf2ca5925a2c3e36c76cbbaa45ad5a7706832c",
+    "f9aa579-focused-7c0a9ce-projection.json.gz": "5129962d2b3864eea895aa1a38da973ec64d7c84b18443464f56faa4712b3aee"
+  }
+}

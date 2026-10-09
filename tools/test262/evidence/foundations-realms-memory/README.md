@@ -116,3 +116,11 @@ it did not trigger a full run. Thirty isolated repetitions passed and are archiv
 as diagnostics, not as replacement conformance evidence. A newer source corrects
 broadcast acknowledgement ordering and yields after queue publication. Validation
 of that source must include another complete focused gate.
+
+Source `f9aa579` passes all required checks (884 workspace tests, four existing
+ignored; 203 minimal; 73 Node; 14 WASM; 10 tooling). Its expanded focused selection
+passes 4,794/5,267 variants, gaining 1,282 and losing two against the independent
+7c0a9ce projection, with no special outcomes. Both losses are foreign
+non-constructor TypeError realm regressions introduced by construction-context
+entry. This failed gate blocks a full run until corrected. The prior agent
+waitAsync fuel regression passes in this selection; no failed report is replaced.
