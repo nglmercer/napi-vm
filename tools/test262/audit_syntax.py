@@ -47,7 +47,10 @@ def main():
             "rustc", "--edition=2021", str(Path(__file__).with_suffix(".rs")),
             "--extern", f"napi_vm_core={libraries['napi_vm_core']}",
             "--extern", f"serde_json={libraries['serde_json']}",
-            "-L", f"dependency={Path(libraries['napi_vm_core']).parent}", "-o", str(engine)
+            # Cargo can emit the top-level core rlib in debug/ while its
+            # dependencies live in debug/deps/. The dependency artifact's
+            # parent works for both top-level and hashed core artifacts.
+            "-L", f"dependency={Path(libraries['serde_json']).parent}", "-o", str(engine)
         ], check=True)
     expectations = {}
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as requests, \
