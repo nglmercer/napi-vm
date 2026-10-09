@@ -2106,19 +2106,11 @@ impl Interpreter {
                             let key = self.eval_expr(property)?;
                             return self.delete_member(&obj, &key);
                         }
-                        // `delete someBinding` is `false`: declared bindings
-                        // are not configurable. An unresolvable name is not a
-                        // reference at all, so it deletes vacuously — and does
-                        // not raise the `ReferenceError` that reading it would.
+                        // Resolve object and declarative bindings through the
+                        // shared environment operation used by both tiers.
                         Expr::Identifier(name) => {
                             let scope = self.global.clone();
-                            if let Some(object) = self.with_binding_object(&scope, name)? {
-                                return self
-                                    .delete_member(&object, &Value::String(name.as_str().into()));
-                            }
-                            let bound = self.global.borrow().kind_of(name).is_some()
-                                || self.global.borrow().get(name).is_some();
-                            return Ok(Value::Bool(!bound));
+                            return self.delete_binding_in(&scope, name);
                         }
                         // `delete 42`: not a reference, so nothing to remove.
                         other => {

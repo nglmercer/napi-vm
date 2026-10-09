@@ -648,8 +648,7 @@ fn run_loop(
                 Instr::DelGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
                     let scope = current_scope(interp, frame);
-                    let bound = scope.borrow().get(name).is_some();
-                    frame.registers[dst as usize] = Value::Bool(!bound);
+                    frame.registers[dst as usize] = interp.delete_binding_in(&scope, name)?;
                 }
                 Instr::Jump { target } => {
                     frame.ip = target as usize;

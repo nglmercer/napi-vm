@@ -1179,3 +1179,44 @@ fn typed_array_factories_use_the_receiver_and_observe_iterators_before_allocatio
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn string_iterator_lookup_respects_mutation_and_deletion_in_the_active_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r"var pair='\uD834\uDD1E';Array.from(pair).length===1;",
+    );
+    truth(
+        &mut vm,
+        "String.prototype[Symbol.iterator]=function*(){yield 7;};Array.from('text')[0]===7&&other.eval(\"Array.from('text').length\")===4;",
+    );
+    truth(
+        &mut vm,
+        "delete String.prototype[Symbol.iterator];var result=Array.from(pair);result.length===2&&result[0].charCodeAt(0)===0xD834&&result[1].charCodeAt(0)===0xDD1E;",
+    );
+    truth(
+        &mut vm,
+        "var result=Array.from(Object(pair));result.length===2&&result[1].charCodeAt(0)===0xDD1E;",
+    );
+}
+
+#[test]
+fn identifier_deletion_uses_global_property_attributes_and_with_exclusions() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "globalThis.niche=7;var object={niche:8,[Symbol.unscopables]:{niche:true}};var removed;with(object){removed=delete niche;}removed&&object.niche===8&&!('niche' in globalThis);",
+    );
+    truth(
+        &mut vm,
+        "var fixed=1;let lexical=2;!delete fixed&&!delete lexical&&delete missing;",
+    );
+    truth(
+        &mut vm,
+        "var first=function(){};var constructed=new Function();var removed=delete Function;var last=function(){};removed&&!('Function' in globalThis)&&Object.getPrototypeOf(first)===Object.getPrototypeOf(constructed)&&Object.getPrototypeOf(last)===Object.getPrototypeOf(first);",
+    );
+}

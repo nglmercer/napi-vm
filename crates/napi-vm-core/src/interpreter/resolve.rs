@@ -150,6 +150,48 @@ impl Interpreter {
         Ok(None)
     }
 
+    /// Resolve a deletion reference using the same environment ordering as
+    /// reads and writes. Global object bindings use property configurability;
+    /// declarative bindings are not deletable. With exclusions apply before
+    /// continuing to the outer environment.
+    pub(crate) fn delete_binding_in(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        let builtins = self.persistent_global.borrow().parent_env();
+        let mut frame = Some(scope.clone());
+        while let Some(environment) = frame {
+            let (kind, global, object, parent) = {
+                let frame = environment.borrow();
+                (
+                    frame.kind_of(name),
+                    frame.is_global_scope(),
+                    frame.with_object.clone(),
+                    frame.parent_env(),
+                )
+            };
+            if let Some(kind) = kind {
+                let object_record = global
+                    || builtins
+                        .as_ref()
+                        .is_some_and(|builtins| Rc::ptr_eq(builtins, &environment));
+                if object_record && kind == super::BindKind::Var {
+                    return self
+                        .delete_member(&self.realm_global_object(), &Value::String(name.into()));
+                }
+                return Ok(Value::Bool(false));
+            }
+            if let Some(object) = object
+                && self.with_has_binding(&object, name)?
+            {
+                return self.delete_member(&object, &Value::String(name.into()));
+            }
+            frame = parent;
+        }
+        Ok(Value::Bool(true))
+    }
+
     /// Resolve an object's represented [[Prototype]], including the realm's
     /// default Object.prototype and Function.prototype links that are stored
     /// as defaults rather than copied into every property cell.
@@ -964,12 +1006,9 @@ impl Interpreter {
                     Ok(Value::Undefined)
                 }
             }
-            (Value::String(_), Value::Symbol(_)) if crate::builtins::is_iterator_symbol(p) => {
-                Ok(Value::NativeFunction {
-                    name: "[Symbol.iterator]".into(),
-                    callable: string_iter,
-                })
-            }
+            (Value::String(_), Value::Symbol(_)) if crate::builtins::is_iterator_symbol(p) => self
+                .primitive_reference_prototype(o)
+                .map_or(Ok(Value::Undefined), |prototype| self.prop(&prototype, p)),
             (Value::RegExp(_), Value::Symbol(_)) => {
                 if let Some(prototype) = self.prototype_of(o) {
                     self.prop(&prototype, p)
@@ -991,23 +1030,11 @@ impl Interpreter {
             }
             // Object symbol-keyed lookup: `obj[Symbol.iterator]` resolves the
             // internal `__symbol_iterator__` property.
-            (Value::Object { props }, Value::Symbol(symbol)) => {
+            (Value::Object { .. }, Value::Symbol(symbol)) => {
                 if let Some(value) = lookup_chain_found(self, o, &super::symbol_slot_key(symbol))? {
                     return Ok(value);
                 }
-                if crate::builtins::is_iterator_symbol(p)
-                    && matches!(
-                        props.meta.borrow().boxed_primitive.as_ref(),
-                        Some(BoxedPrimitive::String(_))
-                    )
-                {
-                    Ok(Value::NativeFunction {
-                        name: "[Symbol.iterator]".into(),
-                        callable: string_iter,
-                    })
-                } else {
-                    Ok(Value::Undefined)
-                }
+                Ok(Value::Undefined)
             }
             _ => Ok(Value::Undefined),
         }
