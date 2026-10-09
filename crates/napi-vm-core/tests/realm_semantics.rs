@@ -976,3 +976,24 @@ fn non_strict_ordinary_functions_keep_legacy_properties_without_exposing_callers
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn array_species_allocation_observes_custom_constructors_and_foreign_intrinsics() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var input=[2,0,4];delete input[1];var Result=function(n){this.size=n;};Object.defineProperty(Array,Symbol.species,{get(){throw new Error('foreign species observed');}});").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var mapped=Array.prototype.map.call(other.input,x=>x*2);Object.getPrototypeOf(mapped)===Array.prototype;",
+        "mapped.length===3;",
+        "mapped[0]===4;",
+        "!(1 in mapped);",
+        "var log='';var input=[2,0,4];delete input[1];input.constructor={get [Symbol.species](){log+='s';return other.Result;}};var output=input.map(x=>{log+='m';return x+1;});log==='smm'&&Object.getPrototypeOf(output)===other.Result.prototype&&output.size===3&&output[0]===3&&!(1 in output)&&output[2]===5;",
+        "var filtered=input.filter(x=>x>2);Object.getPrototypeOf(filtered)===other.Result.prototype&&filtered.size===0&&filtered[0]===4;",
+        "var descriptor=Object.getOwnPropertyDescriptor(Array,Symbol.species);descriptor.get.call(other.Result)===other.Result&&!descriptor.enumerable&&descriptor.configurable&&descriptor.get.length===0;",
+        "input.constructor={[Symbol.species]:null};Array.isArray(input.map(x=>x));",
+    ] {
+        truth(&mut vm, source);
+    }
+}

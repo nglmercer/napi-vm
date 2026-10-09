@@ -64,6 +64,33 @@ pub(super) fn install(e: &mut Environment) {
         let function_prototype = e
             .get("Function")
             .and_then(|function| function.get_prop("prototype"));
+        let species = super::well_known("species").expect("Symbol.species");
+        if let Value::Symbol(symbol) = &species {
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            super::object::define_property(
+                &a,
+                &slot,
+                &Value::object(vec![
+                    (
+                        "get".into(),
+                        super::native_method(
+                            "get [Symbol.species]",
+                            0,
+                            array_species,
+                            function_prototype.clone(),
+                        ),
+                    ),
+                    ("configurable".into(), Value::Bool(true)),
+                ]),
+            )
+            .expect("Array species getter");
+            if let Value::Object { props } = &a {
+                props
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
+            }
+        }
         let prototype = Value::array(Vec::new());
         prototype
             .set_prop("constructor".into(), a.clone())
@@ -569,47 +596,108 @@ fn array_entries(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Valu
     crate::interpreter::array_iter_with_kind(this, "entries")
 }
 
+fn array_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(this)
+}
+
+/// ArraySpeciesCreate uses the executing method's intrinsic Array, and ignores
+/// another realm's intrinsic Array before observing its species property.
+fn array_species_create(
+    interp: &mut Interpreter,
+    original: &Value,
+    length: usize,
+) -> Result<Value, VmErr> {
+    let default =
+        || Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length]);
+    if !array_is_array(interp, Value::Undefined, vec![original.clone()])?.is_truthy() {
+        return default();
+    }
+    let mut constructor = interp.get_prop_value_str(original, "constructor")?;
+    if super::is_constructor(&constructor)
+        && let Some(realm) = crate::interpreter::realm::value_realm(&constructor)
+        && let Some(current) = crate::interpreter::realm::allocation_global()
+        && !Rc::ptr_eq(&realm, &current)
+        && realm
+            .borrow()
+            .intrinsic("Array")
+            .is_some_and(|array| crate::interpreter::strict_equals(&array, &constructor))
+    {
+        constructor = Value::Undefined;
+    }
+    if crate::interpreter::call::is_js_object(&constructor) {
+        constructor = interp.get_prop_value(
+            &constructor,
+            &super::well_known("species").expect("Symbol.species"),
+        )?;
+        if matches!(constructor, Value::Null) {
+            constructor = Value::Undefined;
+        }
+    }
+    if matches!(constructor, Value::Undefined) {
+        return default();
+    }
+    if !super::is_constructor(&constructor) {
+        return Err(VmErr::Msg(
+            "TypeError: Array species must be a constructor".into(),
+        ));
+    }
+    interp.ctor(&constructor, vec![Value::Number(length as f64)])
+}
+
+fn create_array_result_element(result: &Value, index: usize, value: Value) -> Result<(), VmErr> {
+    super::object::define_property(
+        result,
+        &index.to_string(),
+        &Value::object(vec![
+            ("value".into(), value),
+            ("writable".into(), Value::Bool(true)),
+            ("enumerable".into(), Value::Bool(true)),
+            ("configurable".into(), Value::Bool(true)),
+        ]),
+    )
+}
+
 fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let length = array_like_length(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    let mut out = Vec::with_capacity(length);
-    let mut presence = Vec::with_capacity(length);
+    let result = array_species_create(interp, &this, length)?;
     for index in 0..length {
         if let Some(value) = array_element(interp, &this, index, true)? {
-            out.push(interp.call_this(
+            let mapped = interp.call_this(
                 &cb,
                 receiver.clone(),
                 vec![value, Value::Number(index as f64), this.clone()],
-            )?);
-            presence.push(true);
-        } else {
-            out.push(Value::Undefined);
-            presence.push(false);
+            )?;
+            create_array_result_element(&result, index, mapped)?;
         }
     }
-    Value::checked_array_with_presence(out, presence)
+    Ok(result)
 }
 
 fn array_filter(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let length = array_like_length(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    let mut out = Vec::new();
+    let result = array_species_create(interp, &this, 0)?;
+    let mut next = 0;
     for index in 0..length {
         let Some(value) = array_element(interp, &this, index, true)? else {
             continue;
         };
-        let keep = interp.call_this(
-            &cb,
-            receiver.clone(),
-            vec![value.clone(), Value::Number(index as f64), this.clone()],
-        )?;
-        if keep.is_truthy() {
-            out.push(value);
+        if interp
+            .call_this(
+                &cb,
+                receiver.clone(),
+                vec![value.clone(), Value::Number(index as f64), this.clone()],
+            )?
+            .is_truthy()
+        {
+            create_array_result_element(&result, next, value)?;
+            next += 1;
         }
     }
-    Value::checked_array(out)
+    Ok(result)
 }
 
 fn reduce_direction(
