@@ -158,3 +158,19 @@ formatting and strict Clippy pass. The frozen worker digest is
 Exact focused outcomes, transitions, checkpoint and check logs are archived in
 `7dce903-*`. The full pinned run is in progress; this focused result is not full
 merge evidence and does not close pending realm-global/private/exotic semantics.
+
+Source `6456b53` extends shared canonical-index handling to typed-array Get and
+HasProperty, preserves symbols through descriptor queries, and shares Array length
+conversion/definition with assignment. Its focused gate passes 8,122/8,845 variants:
+1,946 new passes, zero losses, and zero harness errors, timeouts, crashes or skips
+against the matching independent 7c0a9ce projection. Required checks pass: 891
+workspace (four existing ignored), 203 minimal-feature, 73 Node, 14 WASM, 10 tooling,
+formatting and strict Clippy. Worker SHA256:
+`a3b96f79678538a9a67bbae3d848d75149d9fd3d6fda4ab5a1f404b0945e17df`.
+The initial minimal build encountered a disk-full linker failure; its log is
+retained, stale compiled executables were removed, and the entire check pipeline
+passed on rerun. This does not close the remaining foundation dependencies.
+
+The `7dce903` full run was interrupted after 21,288 files without a final report.
+Its ordered checkpoint is preserved for resumption with the same worker digest,
+revision and configuration. A partial checkpoint is not full-corpus evidence.
