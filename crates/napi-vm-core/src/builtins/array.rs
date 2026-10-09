@@ -229,93 +229,117 @@ fn array_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmE
     Value::checked_array(a)
 }
 
-fn array_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    Value::checked_array(a)
+fn array_result_create(
+    interp: &mut Interpreter,
+    constructor: &Value,
+    length: usize,
+    iterable: bool,
+) -> Result<Value, VmErr> {
+    if super::is_constructor(constructor) {
+        return interp.ctor(
+            constructor,
+            if iterable {
+                vec![]
+            } else {
+                vec![Value::Number(length as f64)]
+            },
+        );
+    }
+    Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length])
 }
 
-/// `Array.from(source, mapFn?)`: drains an iterable, or reads `length` and the
-/// index properties of an array-like.
-fn array_from(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let source = a.first().cloned().unwrap_or(Value::Undefined);
-    let mapper = a.get(1).filter(|v| !matches!(v, Value::Undefined)).cloned();
+fn array_of(
+    interp: &mut Interpreter,
+    constructor: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let length = arguments.len();
+    let result = array_result_create(interp, &constructor, length, false)?;
+    for (index, value) in arguments.into_iter().enumerate() {
+        create_array_result_element(&result, index, value)?;
+    }
+    interp.set_member_str_or_throw(&result, "length", Value::Number(length as f64))?;
+    Ok(result)
+}
+
+/// Array.from creates its result before calling the iterator or reading
+/// indexed values. Only mapping/definition failures close an active iterator.
+fn array_from(
+    interp: &mut Interpreter,
+    constructor: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = arguments.first().cloned().unwrap_or(Value::Undefined);
+    let mapper = arguments
+        .get(1)
+        .filter(|value| !matches!(value, Value::Undefined))
+        .cloned();
     if mapper
         .as_ref()
-        .is_some_and(|m| !crate::interpreter::call::is_callable_value(m))
+        .is_some_and(|mapper| !crate::interpreter::call::is_callable_value(mapper))
     {
         return Err(VmErr::Msg(
             "TypeError: Array.from mapper is not a function".into(),
         ));
     }
-    let receiver = a.get(2).cloned().unwrap_or(Value::Undefined);
-    let iterator_method =
-        interp.get_prop_value_str(&source, crate::interpreter::SYMBOL_ITERATOR_SLOT)?;
-    let mut out = Vec::new();
-    if !matches!(iterator_method, Value::Undefined | Value::Null) {
-        let iterator = interp.call_this(&iterator_method, source.clone(), vec![])?;
+    let receiver = arguments.get(2).cloned().unwrap_or(Value::Undefined);
+    let method = interp.get_method(
+        &source,
+        &super::well_known("iterator").expect("Symbol.iterator"),
+    )?;
+    if let Some(method) = method {
+        let result = array_result_create(interp, &constructor, 0, true)?;
+        let iterator = interp.iterator_from_method(&source, &method)?;
         let next = interp.get_prop_value_str(&iterator, "next")?;
+        let mut index = 0;
         loop {
             interp.consume_loop()?;
             let step = interp.call_this(&next, iterator.clone(), vec![])?;
-            if matches!(
-                step,
-                Value::Undefined
-                    | Value::Null
-                    | Value::Bool(_)
-                    | Value::Number(_)
-                    | Value::String(_)
-                    | Value::BigInt(_)
-                    | Value::Symbol(_)
-            ) {
-                return Err(VmErr::Msg(
-                    "TypeError: iterator result is not an object".into(),
-                ));
+            let (done, value) = interp.iterator_result_fields(&step)?;
+            if done {
+                interp.set_member_str_or_throw(&result, "length", Value::Number(index as f64))?;
+                return Ok(result);
             }
-            if interp.get_prop_value_str(&step, "done")?.is_truthy() {
-                break;
-            }
-            let value = interp.get_prop_value_str(&step, "value")?;
-            let result = (|| {
-                if out.len() >= crate::value::MAX_ARRAY_LEN {
+            let definition = (|| {
+                if index >= crate::value::MAX_ARRAY_LEN {
                     return Err(crate::value::limit_err("Maximum array length exceeded"));
                 }
-                match &mapper {
-                    Some(mapper) => interp.call_this(
+                let value = if let Some(mapper) = &mapper {
+                    interp.call_this(
                         mapper,
                         receiver.clone(),
-                        vec![value, Value::Number(out.len() as f64)],
-                    ),
-                    None => Ok(value),
-                }
+                        vec![value, Value::Number(index as f64)],
+                    )?
+                } else {
+                    value
+                };
+                create_array_result_element(&result, index, value)
             })();
-            match result {
-                Ok(value) => out.push(value),
-                Err(error) => {
-                    // A mapping failure closes the iterator (including a
-                    // generator's finally block), retaining the original error.
-                    if let Ok(close) = interp.get_prop_value_str(&iterator, "return")
-                        && crate::interpreter::call::is_callable_value(&close)
-                    {
-                        let _ = interp.call_this(&close, iterator.clone(), vec![]);
-                    }
-                    return Err(error);
-                }
+            if let Err(error) = definition {
+                interp.close_guest_iterator_for_abrupt(&iterator, false, &error)?;
+                return Err(error);
             }
-        }
-    } else {
-        let length = array_like_length(interp, &source)?;
-        for index in 0..length {
-            let value = interp.get_prop_value_str(&source, &index.to_string())?;
-            out.push(match &mapper {
-                Some(mapper) => interp.call_this(
-                    mapper,
-                    receiver.clone(),
-                    vec![value, Value::Number(index as f64)],
-                )?,
-                None => value,
-            });
+            index += 1;
         }
     }
-    Value::checked_array(out)
+    let length = array_like_length(interp, &source)?;
+    let result = array_result_create(interp, &constructor, length, false)?;
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = interp.get_prop_value_str(&source, &index.to_string())?;
+        let value = if let Some(mapper) = &mapper {
+            interp.call_this(
+                mapper,
+                receiver.clone(),
+                vec![value, Value::Number(index as f64)],
+            )?
+        } else {
+            value
+        };
+        create_array_result_element(&result, index, value)?;
+    }
+    interp.set_member_str_or_throw(&result, "length", Value::Number(length as f64))?;
+    Ok(result)
 }
 
 // --- Array prototype --------------------------------------------------------
@@ -380,41 +404,82 @@ fn array_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Resu
 
 /// `splice(start, deleteCount, ...items)`: remove a range in place and insert
 /// replacements, returning what was removed.
-fn array_splice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::Array(cell) = &this else {
-        return Value::checked_array(vec![]);
+fn delete_array_property_or_throw(
+    interp: &mut Interpreter,
+    object: &Value,
+    index: usize,
+) -> Result<(), VmErr> {
+    if !interp
+        .delete_member(object, &Value::String(index.to_string().into()))?
+        .is_truthy()
+    {
+        return Err(VmErr::Msg("TypeError: Cannot delete array property".into()));
+    }
+    Ok(())
+}
+
+fn array_splice(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    let start = relative_index(
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let remove = if arguments.is_empty() {
+        0
+    } else if arguments.len() == 1 {
+        length - start
+    } else {
+        to_integer_or_infinity(interp.ecmascript_to_number(&arguments[1])?)
+            .max(0.0)
+            .min((length - start) as f64) as usize
     };
-    reject_frozen_array_mutation(cell)?;
-    let length = cell.borrow().len();
-    let start = relative_index(a.first().map(Value::to_number).unwrap_or(0.0), length);
-    let remove = match a.get(1) {
-        // No `deleteCount` removes everything from `start` onwards.
-        None => {
-            if a.is_empty() {
-                0
-            } else {
-                length - start
-            }
-        }
-        Some(v) => {
-            let n = v.to_number();
-            (n as usize).min(length - start)
-        }
-    };
-    let inserted: Vec<Value> = a.iter().skip(2).cloned().collect();
-    if length - remove + inserted.len() > crate::value::MAX_ARRAY_LEN {
+    let inserted = arguments.len().saturating_sub(2);
+    let new_length = length - remove + inserted;
+    if new_length > crate::value::MAX_ARRAY_LEN {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
-    let mut presence = cell.presence_snapshot();
-    let removed_presence: Vec<bool> = presence
-        .splice(start..start + remove, vec![true; inserted.len()])
-        .collect();
-    let removed: Vec<Value> = cell
-        .borrow_mut()
-        .splice(start..start + remove, inserted)
-        .collect();
-    cell.replace_presence(presence);
-    Value::checked_array_with_presence(removed, removed_presence)
+    let result = array_species_create(interp, &this, remove)?;
+    for offset in 0..remove {
+        interp.consume_loop()?;
+        if let Some(value) = array_element(interp, &this, start + offset, true)? {
+            create_array_result_element(&result, offset, value)?;
+        }
+    }
+    interp.set_member_str_or_throw(&result, "length", Value::Number(remove as f64))?;
+    if inserted < remove {
+        for index in start..length - remove {
+            interp.consume_loop()?;
+            let destination = index + inserted;
+            if let Some(value) = array_element(interp, &this, index + remove, true)? {
+                interp.set_member_str_or_throw(&this, &destination.to_string(), value)?;
+            } else {
+                delete_array_property_or_throw(interp, &this, destination)?;
+            }
+        }
+        for index in (new_length..length).rev() {
+            delete_array_property_or_throw(interp, &this, index)?;
+        }
+    } else if inserted > remove {
+        for index in (start..length - remove).rev() {
+            interp.consume_loop()?;
+            let destination = index + inserted;
+            if let Some(value) = array_element(interp, &this, index + remove, true)? {
+                interp.set_member_str_or_throw(&this, &destination.to_string(), value)?;
+            } else {
+                delete_array_property_or_throw(interp, &this, destination)?;
+            }
+        }
+    }
+    for (offset, value) in arguments.into_iter().skip(2).enumerate() {
+        interp.set_member_str_or_throw(&this, &(start + offset).to_string(), value)?;
+    }
+    interp.set_member_str_or_throw(&this, "length", Value::Number(new_length as f64))?;
+    Ok(result)
 }
 
 /// `at(index)`: a negative index counts back from the end.
@@ -658,6 +723,7 @@ fn create_array_result_element(result: &Value, index: usize, value: Value) -> Re
 }
 
 fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
     let length = array_like_length(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
@@ -676,6 +742,7 @@ fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
 }
 
 fn array_filter(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
     let length = array_like_length(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
@@ -949,62 +1016,75 @@ fn array_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
     Ok(Value::Bool(false))
 }
 
-fn array_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
-    let presence = arr_presence(&this);
-    let len = items.len() as i64;
-    let norm = |v: f64| -> i64 {
-        if v.is_nan() {
-            return 0;
+fn array_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    let start = relative_index(
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let end = match arguments.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative_index(interp.ecmascript_to_number(value)?, length),
+    };
+    let count = end.saturating_sub(start);
+    let result = array_species_create(interp, &this, count)?;
+    for offset in 0..count {
+        interp.consume_loop()?;
+        if let Some(value) = array_element(interp, &this, start + offset, true)? {
+            create_array_result_element(&result, offset, value)?;
         }
-        let i = v as i64;
-        if i < 0 { (len + i).max(0) } else { i.min(len) }
-    };
-    let start = norm(a.first().map(|v| v.to_number()).unwrap_or(0.0));
-    let end = match a.get(1) {
-        Some(Value::Undefined) | None => len,
-        Some(v) => norm(v.to_number()),
-    };
-    if start >= end {
-        return Ok(Value::array(vec![]));
     }
-    Value::checked_array_with_presence(
-        items[start as usize..end as usize].to_vec(),
-        presence[start as usize..end as usize].to_vec(),
-    )
+    interp.set_member_str_or_throw(&result, "length", Value::Number(count as f64))?;
+    Ok(result)
 }
 
-fn array_concat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let mut out = arr_items(&this);
-    let mut presence = arr_presence(&this);
-    for v in a {
-        match &v {
-            Value::Array(items) => {
-                let source = items.borrow();
-                if out.len().saturating_add(source.len()) > crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum array length exceeded"));
-                }
-                out.extend(source.iter().cloned());
-                presence.extend(
-                    source
-                        .iter()
-                        .enumerate()
-                        .map(|(index, _)| items.has_index(index)),
-                );
+fn array_concat(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let result = array_species_create(interp, &this, 0)?;
+    let spreadable = super::well_known("isConcatSpreadable").expect("Symbol.isConcatSpreadable");
+    let mut next = 0;
+    for item in std::iter::once(this).chain(arguments) {
+        let spread = if crate::interpreter::call::is_js_object(&item) {
+            let value = interp.get_prop_value(&item, &spreadable)?;
+            if matches!(value, Value::Undefined) {
+                array_is_array(interp, Value::Undefined, vec![item.clone()])?.is_truthy()
+            } else {
+                value.is_truthy()
             }
-            _ => {
-                if out.len() >= crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum array length exceeded"));
-                }
-                out.push(v);
-                presence.push(true);
+        } else {
+            false
+        };
+        if spread {
+            let length = array_like_length(interp, &item)?;
+            if next + length > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
-        }
-        if out.len() > crate::value::MAX_ARRAY_LEN {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
+            for index in 0..length {
+                interp.consume_loop()?;
+                if let Some(value) = array_element(interp, &item, index, true)? {
+                    create_array_result_element(&result, next, value)?;
+                }
+                next += 1;
+            }
+        } else {
+            if next >= crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            }
+            create_array_result_element(&result, next, item)?;
+            next += 1;
         }
     }
-    Value::checked_array_with_presence(out, presence)
+    interp.set_member_str_or_throw(&result, "length", Value::Number(next as f64))?;
+    Ok(result)
 }
 
 fn array_reverse(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
@@ -1166,106 +1246,94 @@ fn reject_frozen_array_mutation(array: &crate::value::ArrayCell) -> Result<(), V
     }
 }
 
-fn array_flat(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
-    let presence = arr_presence(&this);
-    let depth = match a.first() {
-        Some(Value::Undefined) | None => 1.0,
-        Some(v) => to_integer_or_infinity(v.to_number()),
-    };
-
-    // Use an explicit work stack. Guest code can construct deeply nested
-    // arrays dynamically, so parser and call-depth limits do not protect the
-    // recursive implementation that used to live here.
-    enum Work {
-        Value(Value, f64),
-        Leave(usize),
+fn flatten_array_result(
+    interp: &mut Interpreter,
+    source: Value,
+    length: usize,
+    depth: f64,
+    mapper: Option<(Value, Value)>,
+) -> Result<Value, VmErr> {
+    struct Frame {
+        source: Value,
+        length: usize,
+        index: usize,
+        depth: f64,
     }
-
-    let mut work = Vec::with_capacity(items.len());
-    for (index, item) in items.into_iter().enumerate().rev() {
-        if presence.get(index).copied().unwrap_or(true) {
-            work.push(Work::Value(item, depth));
+    let result = array_species_create(interp, &source, 0)?;
+    let mut frames = vec![Frame {
+        source: source.clone(),
+        length,
+        index: 0,
+        depth,
+    }];
+    let mut next = 0;
+    while let Some(frame) = frames.last_mut() {
+        if frame.index == frame.length {
+            frames.pop();
+            continue;
         }
-    }
-    let mut active = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    while let Some(entry) = work.pop() {
-        match entry {
-            Work::Leave(identity) => {
-                active.remove(&identity);
-            }
-            Work::Value(value, remaining) => {
-                if remaining > 0.0
-                    && let Value::Array(inner) = &value
-                {
-                    let identity = std::rc::Rc::as_ptr(inner) as usize;
-                    // A cyclic array cannot be expanded forever. Treat the
-                    // back-edge as a leaf, matching the boundary's other
-                    // cycle-safe representations.
-                    if active.insert(identity) {
-                        work.push(Work::Leave(identity));
-                        let children = inner.borrow().clone();
-                        let child_presence = inner.presence_snapshot();
-                        for (index, child) in children.into_iter().enumerate().rev() {
-                            if child_presence.get(index).copied().unwrap_or(true) {
-                                work.push(Work::Value(child, remaining - 1.0));
-                            }
-                        }
-                        continue;
-                    }
-                }
-                out.push(value);
-                if out.len() > crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum array length exceeded"));
-                }
-            }
-        }
-    }
-    Value::checked_array(out)
-}
-
-fn array_flat_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let length = array_like_length(interp, &this)?;
-    let cb = callback(&a)?;
-    let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    let mut out = Vec::new();
-    for i in 0..length {
-        let Some(it) = array_element(interp, &this, i, true)? else {
+        let index = frame.index;
+        frame.index += 1;
+        let current = frame.source.clone();
+        let remaining = frame.depth;
+        interp.consume_loop()?;
+        let Some(mut value) = array_element(interp, &current, index, true)? else {
             continue;
         };
-        let r = interp.call_this(
-            &cb,
-            receiver.clone(),
-            vec![it.clone(), Value::Number(i as f64), this.clone()],
-        )?;
-        match &r {
-            Value::Array(inner) => {
-                let values = inner.borrow().clone();
-                let inner_presence = inner.presence_snapshot();
-                let added = inner_presence.iter().filter(|present| **present).count();
-                if out.len().saturating_add(added) > crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum array length exceeded"));
-                }
-                out.extend(
-                    values
-                        .into_iter()
-                        .zip(inner_presence)
-                        .filter_map(|(value, present)| present.then_some(value)),
-                );
-            }
-            _ => {
-                if out.len() >= crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum array length exceeded"));
-                }
-                out.push(r);
-            }
+        if frames.len() == 1
+            && let Some((callback, receiver)) = &mapper
+        {
+            value = interp.call_this(
+                callback,
+                receiver.clone(),
+                vec![value, Value::Number(index as f64), source.clone()],
+            )?;
         }
-        if out.len() > crate::value::MAX_ARRAY_LEN {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        if remaining > 0.0
+            && array_is_array(interp, Value::Undefined, vec![value.clone()])?.is_truthy()
+        {
+            let length = array_like_length(interp, &value)?;
+            frames.push(Frame {
+                source: value,
+                length,
+                index: 0,
+                depth: remaining - 1.0,
+            });
+        } else {
+            if next >= crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            }
+            create_array_result_element(&result, next, value)?;
+            next += 1;
         }
     }
-    Value::checked_array(out)
+    Ok(result)
+}
+
+fn array_flat(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    let depth = match arguments.first() {
+        None | Some(Value::Undefined) => 1.0,
+        Some(value) => to_integer_or_infinity(interp.ecmascript_to_number(value)?).max(0.0),
+    };
+    flatten_array_result(interp, this, length, depth, None)
+}
+
+fn array_flat_map(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    let callback = callback(&arguments)?;
+    let receiver = arguments.get(1).cloned().unwrap_or(Value::Undefined);
+    flatten_array_result(interp, this, length, 1.0, Some((callback, receiver)))
 }
 
 fn array_reduce_right(

@@ -569,19 +569,65 @@ impl Interpreter {
     )]
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
         let property = self.property_key(key)?;
-        if let Some(proxy) = object.as_proxy() {
-            let (target, handler) = proxy.snapshot()?;
-            if let Some(trap) = self.proxy_trap(&handler, "has")? {
-                let trap_key = self.proxy_property_key(key)?;
-                let result = self.call_this(&trap, handler, vec![target, trap_key])?;
-                return Ok(result.is_truthy());
+        let trap_key = if matches!(key, Value::Symbol(_)) {
+            key.clone()
+        } else {
+            Value::String(crate::JsString::from_key(&property))
+        };
+        let mut current = object.clone();
+        for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+            if let Value::Proxy(proxy) = &current {
+                let (target, handler) = proxy.snapshot()?;
+                if let Some(trap) = self.proxy_trap(&handler, "has")? {
+                    let accepted = self
+                        .call_this(&trap, handler, vec![target.clone(), trap_key.clone()])?
+                        .is_truthy();
+                    if !accepted {
+                        let descriptor =
+                            crate::builtins::object::descriptor_for_in(self, &target, &property)?;
+                        if !matches!(descriptor, Value::Undefined)
+                            && (!descriptor
+                                .get_prop("configurable")
+                                .is_some_and(|value| value.is_truthy())
+                                || !self.is_extensible(&target)?)
+                        {
+                            return Err(VmErr::Msg(
+                                "TypeError: Proxy has trap cannot hide a protected property".into(),
+                            ));
+                        }
+                    }
+                    return Ok(accepted);
+                }
+                current = target;
+                continue;
             }
-            return self.has_property(
-                &target,
-                &Value::String(crate::JsString::from_key(&property)),
-            );
+            if let Value::TypedArray(view) = &current {
+                let numeric = property.parse::<f64>().ok();
+                if property == "-0"
+                    || property == "NaN"
+                    || property == "Infinity"
+                    || property == "-Infinity"
+                    || numeric.is_some_and(|number| number.to_string() == property)
+                {
+                    return Ok(property != "-0"
+                        && numeric.is_some_and(|number| {
+                            number.is_finite()
+                                && number >= 0.0
+                                && number.fract() == 0.0
+                                && number < view.effective_length() as f64
+                        }));
+                }
+            }
+            let descriptor = crate::builtins::object::descriptor_for_in(self, &current, &property)?;
+            if !matches!(descriptor, Value::Undefined) {
+                return Ok(true);
+            }
+            current = self.get_prototype_of(&current)?;
+            if matches!(current, Value::Null) {
+                return Ok(false);
+            }
         }
-        Ok(object.has_prop(&property))
+        Err(crate::value::limit_err("Maximum prototype depth exceeded"))
     }
 
     /// Every value an iterable produces, as a `Vec`.
@@ -613,6 +659,10 @@ impl Interpreter {
         // a key `Value`. Only symbols, numbers, and exotic keys stay here.
         if let Value::String(key) = p {
             return self.get_prop_value_str_with_receiver(o, &key.to_key(), receiver);
+        }
+        if !matches!(p, Value::Symbol(_)) {
+            let key = self.property_key(p)?;
+            return self.get_prop_value_str_with_receiver(o, &key, receiver);
         }
         // A proxy's `get` trap replaces the read entirely; without one the
         // read falls through to the target.
@@ -706,6 +756,16 @@ impl Interpreter {
         key: &str,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        if let Value::Array(array) = o
+            && let Some(index) = crate::value::array_index(key)
+            && !array.has_index(index)
+        {
+            return if let Some(prototype) = self.prototype_of(o) {
+                self.get_prop_value_str_with_receiver(prototype.as_ref(), key, receiver)
+            } else {
+                Ok(Value::Undefined)
+            };
+        }
         if let Some(proxy) = o.as_proxy() {
             let (target, handler) = proxy.snapshot()?;
             if let Some(trap) = self.proxy_trap(&handler, "get")? {
@@ -775,6 +835,12 @@ impl Interpreter {
     }
 
     fn prop_raw(&self, o: &Value, p: &Value) -> Result<Value, VmErr> {
+        if let Value::Symbol(symbol) = p
+            && let Some(properties) = o.exotic_properties()
+            && let Some(value) = properties.own_value(&crate::interpreter::symbol_slot_key(symbol))
+        {
+            return Ok(value);
+        }
         // String keys dispatch on the receiver alone in `prop_str_raw`; the
         // match below only sees symbols, numbers, and exotic keys.
         if let Value::String(k) = p {

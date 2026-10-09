@@ -120,19 +120,13 @@ impl Interpreter {
             let right = self.coerce_for_concat(r)?;
             return self.bin_op(op, &left, &right);
         }
-        if matches!(op, BinOp::In)
-            && let Some(proxy) = r.as_proxy()
-        {
-            let (target, handler) = proxy.snapshot()?;
-            return match self.proxy_trap(&handler, "has")? {
-                Some(trap) => {
-                    let key = self.proxy_property_key(l)?;
-
-                    let result = self.call_this(&trap, handler, vec![target, key])?;
-                    Ok(Value::Bool(result.is_truthy()))
-                }
-                None => self.bin_op(op, l, &target),
-            };
+        if matches!(op, BinOp::In) {
+            if !super::call::is_js_object(r) {
+                return Err(VmErr::Msg(
+                    "TypeError: Right-hand side of in must be an object".into(),
+                ));
+            }
+            return self.has_property(r, l).map(Value::Bool);
         }
         self.bin_op(op, l, r)
     }

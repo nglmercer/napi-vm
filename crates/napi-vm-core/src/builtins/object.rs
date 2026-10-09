@@ -232,6 +232,21 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
         }
         return array.named_prop(key);
     }
+    if let Value::Object { props } = v
+        && let Some(BoxedPrimitive::String(string)) = &props.meta.borrow().boxed_primitive
+    {
+        if key == "length" {
+            return Some(Value::Number(string.len() as f64));
+        }
+        if let Some(index) = crate::value::array_index(key) {
+            return crate::value::str_char_at(string, index);
+        }
+    }
+    if let Value::TypedArray(view) = v
+        && let Some(index) = crate::value::array_index(key)
+    {
+        return crate::builtins::read_element(view, index);
+    }
     cell(v)?
         .borrow()
         .iter()
@@ -465,7 +480,7 @@ fn is_ecmascript_object(value: &Value) -> bool {
     )
 }
 
-fn to_object_receiver(value: &Value) -> Result<Value, VmErr> {
+pub(crate) fn to_object_receiver(value: &Value) -> Result<Value, VmErr> {
     let value = value.deref_binding();
     if matches!(value, Value::Undefined | Value::Null) {
         return Err(type_err("Cannot convert undefined or null to object"));
@@ -1679,7 +1694,8 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     let Some(value) = own_slot(target, key) else {
         return Value::Undefined;
     };
-    let attrs = c.meta.borrow().attrs_of(key);
+    let attrs =
+        object_property_attributes(target, key).unwrap_or_else(|| c.meta.borrow().attrs_of(key));
     let mut fields = Vec::new();
     match accessor_kind(key, &value) {
         Some("get") => {

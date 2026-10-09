@@ -703,21 +703,74 @@ impl Interpreter {
         })
     }
 
-    fn assign_cell_property(
+    fn finish_property_write(&self, accepted: bool, key: &str, throw: bool) -> Result<(), VmErr> {
+        if !accepted && throw {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot assign to property {key}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn assign_member_str(
+        &mut self,
+        object: &Value,
+        key: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member_str(object, key, value)?;
+        self.finish_property_write(accepted, key, self.global.borrow().strict())
+    }
+
+    pub(crate) fn assign_member(
+        &mut self,
+        object: &Value,
+        key: &Value,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member(object, key, value)?;
+        self.finish_property_write(accepted, "property", self.global.borrow().strict())
+    }
+
+    pub(crate) fn set_member_str_or_throw(
+        &mut self,
+        object: &Value,
+        key: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member_str(object, key, value)?;
+        self.finish_property_write(accepted, key, true)
+    }
+
+    fn set_array_length(
+        &mut self,
+        array: &crate::value::ArrayCell,
+        value: &Value,
+    ) -> Result<bool, VmErr> {
+        if !array.meta.borrow().attrs_of("length").writable {
+            return Ok(false);
+        }
+        let length = self.ecmascript_to_number(value)?;
+        if !length.is_finite() || length < 0.0 || length.fract() != 0.0 || length > u32::MAX as f64
+        {
+            return Err(VmErr::Msg("RangeError: Invalid array length".into()));
+        }
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        }
+        array.set_length(length as usize);
+        Ok(array.borrow().len() == length as usize)
+    }
+
+    fn set_cell_property(
         &mut self,
         receiver: &Value,
         props: &ObjectCell,
         key: &str,
         value: Value,
-    ) -> Result<(), VmErr> {
+    ) -> Result<bool, VmErr> {
         if props.meta.borrow().module_namespace {
-            return if self.cur_mod.is_some() {
-                Err(VmErr::Msg(
-                    "TypeError: Cannot assign to a module namespace".into(),
-                ))
-            } else {
-                Ok(())
-            };
+            return Ok(false);
         }
         let is_setter = |value: &Value| match value {
             Value::Function(function) => {
@@ -758,7 +811,7 @@ impl Interpreter {
         };
         if let Some((_, Some(setter), _)) = &existing {
             self.call_this(setter, receiver.clone(), vec![value])?;
-            return Ok(());
+            return Ok(true);
         }
         if props.meta.borrow().has_accessors {
             let companion = format!("__setter:{}__", key);
@@ -769,29 +822,30 @@ impl Interpreter {
                 .map(|(_, value)| value.clone());
             if let Some(setter) = setter {
                 self.call_this(&setter, receiver.clone(), vec![value])?;
-                return Ok(());
+                return Ok(true);
             }
         }
         if let Some((_, _, true)) = existing {
             // A getter without a setter is an accessor, not a writable data
             // property. Accessors with a setter returned above.
-            return self.reject_property_write(key);
+            return Ok(false);
         }
         if let Some((index, _, _)) = existing {
             if props.meta.borrow().attrs_of(key).writable {
                 props.borrow_mut()[index].1.assign_for_execution(value);
             } else {
-                return self.reject_property_write(key);
+                return Ok(false);
             }
-            return Ok(());
+            return Ok(true);
         }
         if let Some(prototype) = self.prototype_of(receiver)
-            && self.assign_inherited_property(receiver, prototype.as_ref(), key, &value)?
+            && let Some(accepted) =
+                self.set_inherited_property(receiver, prototype.as_ref(), key, &value)?
         {
-            return Ok(());
+            return Ok(accepted);
         }
         if props.meta.borrow().non_extensible {
-            return self.reject_property_write(key);
+            return Ok(false);
         }
         {
             let mut slots = props.borrow_mut();
@@ -803,20 +857,20 @@ impl Interpreter {
             slots.push((key.to_owned(), value));
         }
         props.note_key_added(key);
-        Ok(())
+        Ok(true)
     }
 
     /// Apply the `[[Set]]` behavior for a property found on the prototype
     /// chain. Inherited accessors receive the original object as `this`,
     /// inherited getter-only and non-writable properties block creation of an
     /// own property, and inherited writable data properties allow it.
-    fn assign_inherited_property(
+    fn set_inherited_property(
         &mut self,
         receiver: &Value,
         prototype: &Value,
         key: &str,
         value: &Value,
-    ) -> Result<bool, VmErr> {
+    ) -> Result<Option<bool>, VmErr> {
         let setter_name = format!("set {key}");
         let getter_name = format!("get {key}");
         let is_setter = |value: &Value| match value {
@@ -861,7 +915,7 @@ impl Interpreter {
                         meta.has_accessors,
                     )
                 }
-                _ => return Ok(false),
+                _ => return Ok(None),
             };
             if let Some((_, property)) = slots.iter().find(|(name, _)| name == key) {
                 let companion = format!("__setter:{}__", key);
@@ -878,50 +932,36 @@ impl Interpreter {
                 };
                 if let Some(setter) = setter {
                     self.call_this(&setter, receiver.clone(), vec![value.clone()])?;
-                    return Ok(true);
+                    return Ok(Some(true));
                 }
                 if is_getter(property)
                     || has_accessors && slots.iter().any(|(name, _)| name == &companion)
                 {
-                    self.reject_property_write(key)?;
-                    return Ok(true);
+                    return Ok(Some(false));
                 }
-                if !attributes.writable {
-                    self.reject_property_write(key)?;
-                }
-                return Ok(!attributes.writable);
+                return Ok((!attributes.writable).then_some(false));
             }
             let Some(next) = self.prototype_of(&current) else {
-                return Ok(false);
+                return Ok(None);
             };
             current = next.as_ref().clone();
         }
-        Ok(false)
+        Ok(None)
     }
 
-    /// Borrowed-key variant of [`assign_member`](Self::assign_member).
+    /// Borrowed-key variant of [`set_member`](Self::set_member).
     /// Static member writes (`o.key = v`) resolve through `&str` end to end:
     /// no key `String` and no key `Value` is allocated. Typed arrays, exotic
     /// receivers, and primitives keep the general path, exactly as before.
-    fn reject_property_write(&self, key: &str) -> Result<(), VmErr> {
-        if self.global.borrow().strict() {
-            Err(VmErr::Msg(format!(
-                "TypeError: Cannot assign to property {key}"
-            )))
-        } else {
-            Ok(())
-        }
-    }
-
-    pub(crate) fn assign_member_str(
+    pub(crate) fn set_member_str(
         &mut self,
         obj: &Value,
         key: &str,
         val: Value,
-    ) -> Result<(), VmErr> {
+    ) -> Result<bool, VmErr> {
         if let Value::RealmGlobal(global) = obj {
             return self.with_global_storage(global.clone(), |vm| {
-                vm.assign_member_str(&Value::GlobalObject, key, val)
+                vm.set_member_str(&Value::GlobalObject, key, val)
             });
         }
         if let Some(proxy) = obj.as_proxy() {
@@ -932,24 +972,21 @@ impl Interpreter {
 
                 let accepted =
                     self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
-                if !accepted.is_truthy() {
-                    self.reject_property_write(key)?;
-                }
-                return Ok(());
+                return Ok(accepted.is_truthy());
             }
-            return self.assign_member_str(&target, key, val);
+            return self.set_member_str(&target, key, val);
         }
         match obj {
             Value::Function(function) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
-                self.assign_cell_property(obj, &function.properties, key, val)
+                self.set_cell_property(obj, &function.properties, key, val)
             }
             Value::HostFunction { properties, .. } => {
-                self.assign_cell_property(obj, properties, key, val)
+                self.set_cell_property(obj, properties, key, val)
             }
-            Value::Object { props } => self.assign_cell_property(obj, props, key, val),
-            Value::Class(class) => self.assign_cell_property(obj, &class.statics, key, val),
+            Value::Object { props } => self.set_cell_property(obj, props, key, val),
+            Value::Class(class) => self.set_cell_property(obj, &class.statics, key, val),
             // `re.lastIndex = 0` resets a global pattern's scan position.
             Value::RegExp(data) if key == "lastIndex" => {
                 let index = self.tn(&val);
@@ -958,10 +995,10 @@ impl Interpreter {
                 } else {
                     0
                 });
-                Ok(())
+                Ok(true)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
-            Value::GlobalObject => self.set_global_checked(key, val),
+            Value::GlobalObject => self.set_global_property(key, val),
             Value::Array(cell) => {
                 // A non-index key on an array is a named property, not an
                 // element: `strings.raw`, `arr.total = 3`.
@@ -971,52 +1008,44 @@ impl Interpreter {
                         let current = cell.named_prop(key);
                         if let Some(setter) = array_property_setter(cell, key, current.as_ref()) {
                             self.call_this(&setter, obj.clone(), vec![val])?;
-                            return Ok(());
+                            return Ok(true);
                         }
                     }
                     if !exists
                         && let Some(prototype) = self.prototype_of(obj)
-                        && self.assign_inherited_property(obj, prototype.as_ref(), key, &val)?
+                        && let Some(accepted) =
+                            self.set_inherited_property(obj, prototype.as_ref(), key, &val)?
                     {
-                        return Ok(());
+                        return Ok(accepted);
                     }
                     if (exists && !cell.meta.borrow().attrs_of(key).writable)
                         || (!exists && cell.meta.borrow().non_extensible)
                     {
-                        return Ok(());
+                        return Ok(false);
                     }
                     cell.set_named(key.to_owned(), val);
-                    Ok(())
+                    Ok(true)
                 } else if key == "length" {
-                    let length = self.tn(&val);
-                    if cell.meta.borrow().attrs_of("length").writable
-                        && length.is_finite()
-                        && length >= 0.0
-                        && length.fract() == 0.0
-                    {
-                        let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
-                        cell.set_length(length);
-                    }
-                    Ok(())
+                    self.set_array_length(cell, &val)
                 } else {
                     let index =
                         crate::value::array_index(key).expect("canonical array index guard");
-                    self.assign_member(obj, &Value::Number(index as f64), val)
+                    self.set_member(obj, &Value::Number(index as f64), val)
                 }
             }
-            _ => self.assign_member(obj, &Value::String(crate::JsString::from_key(key)), val),
+            _ => self.set_member(obj, &Value::String(crate::JsString::from_key(key)), val),
         }
     }
 
-    pub(crate) fn assign_member(
+    pub(crate) fn set_member(
         &mut self,
         obj: &Value,
         prop: &Value,
         val: Value,
-    ) -> Result<(), VmErr> {
+    ) -> Result<bool, VmErr> {
         if let Value::RealmGlobal(global) = obj {
             return self.with_global_storage(global.clone(), |vm| {
-                vm.assign_member(&Value::GlobalObject, prop, val)
+                vm.set_member(&Value::GlobalObject, prop, val)
             });
         }
         // A proxy's `set` trap replaces the write; without one it falls
@@ -1028,85 +1057,82 @@ impl Interpreter {
 
                 let accepted =
                     self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
-                if !accepted.is_truthy() {
-                    self.reject_property_write("proxy property")?;
-                }
-                return Ok(());
+                return Ok(accepted.is_truthy());
             }
-            return self.assign_member(&target, prop, val);
+            return self.set_member(&target, prop, val);
         }
         match (obj, prop) {
             (Value::Function(function), Value::Symbol(symbol)) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, &function.properties, &slot, val)?;
+                let accepted = self.set_cell_property(obj, &function.properties, &slot, val)?;
                 function
                     .properties
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::Function(function), Value::String(key)) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
-                self.assign_cell_property(obj, &function.properties, &key.to_key(), val)
+                self.set_cell_property(obj, &function.properties, &key.to_key(), val)
             }
             (Value::Function(_), _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             (Value::HostFunction { properties, .. }, Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, properties, &slot, val)?;
+                let accepted = self.set_cell_property(obj, properties, &slot, val)?;
                 properties
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::HostFunction { properties, .. }, Value::String(key)) => {
-                self.assign_cell_property(obj, properties, &key.to_key(), val)
+                self.set_cell_property(obj, properties, &key.to_key(), val)
             }
             (Value::HostFunction { .. }, _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             (Value::Object { props }, Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, props, &slot, val)?;
+                let accepted = self.set_cell_property(obj, props, &slot, val)?;
                 props
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::Object { props }, Value::String(k)) => {
-                self.assign_cell_property(obj, props, &k.to_key(), val)
+                self.set_cell_property(obj, props, &k.to_key(), val)
             }
             // Any other key on an object is coerced to its slot name first:
             // `o[1] = v`, `o[sym] = v`, `o[{}] = v`.
             (Value::Object { .. }, _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             (Value::Class(class), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, &class.statics, &slot, val)?;
+                let accepted = self.set_cell_property(obj, &class.statics, &slot, val)?;
                 class
                     .statics
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::Class(class), Value::String(k)) => {
-                self.assign_cell_property(obj, &class.statics, &k.to_key(), val)
+                self.set_cell_property(obj, &class.statics, &k.to_key(), val)
             }
             (Value::Class(_), _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             // Writing an element of a typed array converts and wraps it to
             // the element type; an out-of-range index is ignored, not grown.
@@ -1114,20 +1140,20 @@ impl Interpreter {
                 let slot = self.property_key(key)?;
                 if slot.parse::<f64>().is_err() {
                     let properties = view.properties.clone();
-                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    let accepted = self.set_cell_property(obj, &properties, &slot, val)?;
                     if let Value::Symbol(symbol) = key {
                         properties
                             .meta
                             .borrow_mut()
                             .set_symbol_key(&slot, symbol.clone());
                     }
-                    return Ok(());
+                    return Ok(accepted);
                 }
                 let index = self.tn(key);
                 if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
                     crate::builtins::write_element_in(self, view, index as usize, &val)?;
                 }
-                Ok(())
+                Ok(true)
             }
             // `re.lastIndex = 0` resets a global pattern's scan position.
             (Value::RegExp(data), Value::String(k)) if k == "lastIndex" => {
@@ -1137,16 +1163,16 @@ impl Interpreter {
                 } else {
                     0
                 });
-                Ok(())
+                Ok(true)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
-            (Value::GlobalObject, Value::String(k)) => self.set_global_checked(&k.to_key(), val),
+            (Value::GlobalObject, Value::String(k)) => self.set_global_property(&k.to_key(), val),
             // A non-index key on an array is a named property, not an
             // element: `strings.raw`, `arr.total = 3`.
             (Value::Array(_), Value::String(k))
                 if k != "length" && crate::value::array_index(k).is_none() =>
             {
-                self.assign_member_str(obj, &k.to_key(), val)
+                self.set_member_str(obj, &k.to_key(), val)
             }
             (Value::Array(cell), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
@@ -1155,39 +1181,31 @@ impl Interpreter {
                     let current = cell.named_prop(&slot);
                     if let Some(setter) = array_property_setter(cell, &slot, current.as_ref()) {
                         self.call_this(&setter, obj.clone(), vec![val])?;
-                        return Ok(());
+                        return Ok(true);
                     }
                 }
                 if !exists
                     && let Some(prototype) = self.prototype_of(obj)
-                    && self.assign_inherited_property(obj, prototype.as_ref(), &slot, &val)?
+                    && let Some(accepted) =
+                        self.set_inherited_property(obj, prototype.as_ref(), &slot, &val)?
                 {
-                    return Ok(());
+                    return Ok(accepted);
                 }
                 if (exists && !cell.meta.borrow().attrs_of(&slot).writable)
                     || (!exists && cell.meta.borrow().non_extensible)
                 {
-                    return Ok(());
+                    return Ok(false);
                 }
                 cell.set_named(slot.clone(), val);
                 cell.set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(true)
             }
             (Value::Array(cell), Value::String(k)) if k == "length" => {
-                let length = self.tn(&val);
-                if cell.meta.borrow().attrs_of("length").writable
-                    && length.is_finite()
-                    && length >= 0.0
-                    && length.fract() == 0.0
-                {
-                    let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
-                    cell.set_length(length);
-                }
-                Ok(())
+                self.set_array_length(cell, &val)
             }
             (Value::Array(_), Value::String(k)) => {
                 let index = crate::value::array_index(k).expect("canonical array index guard");
-                self.assign_member(obj, &Value::Number(index as f64), val)
+                self.set_member(obj, &Value::Number(index as f64), val)
             }
             (Value::Array(items), Value::Number(i)) => {
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
@@ -1204,7 +1222,7 @@ impl Interpreter {
                     let current = items.borrow().get(idx).cloned();
                     if let Some(setter) = array_property_setter(items, &key, current.as_ref()) {
                         self.call_this(&setter, obj.clone(), vec![val])?;
-                        return Ok(());
+                        return Ok(true);
                     }
                 }
                 let attributes = items.meta.borrow().attrs_of(&key);
@@ -1212,7 +1230,7 @@ impl Interpreter {
                     || (!exists && items.meta.borrow().non_extensible)
                     || (idx >= old_length && !items.meta.borrow().attrs_of("length").writable)
                 {
-                    return Ok(());
+                    return Ok(false);
                 }
                 let mut items = items.borrow_mut();
                 if idx < items.len() {
@@ -1231,19 +1249,19 @@ impl Interpreter {
                     }
                     cell.set_index_presence(idx, true);
                 }
-                Ok(())
+                Ok(true)
             }
             _ => {
                 if let Some(properties) = obj.exotic_properties() {
                     let slot = self.property_key(prop)?;
-                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    let accepted = self.set_cell_property(obj, &properties, &slot, val)?;
                     if let Value::Symbol(symbol) = prop {
                         properties
                             .meta
                             .borrow_mut()
                             .set_symbol_key(&slot, symbol.clone());
                     }
-                    Ok(())
+                    Ok(accepted)
                 } else {
                     Err(VmErr::Msg("Invalid assignment target".to_string()))
                 }

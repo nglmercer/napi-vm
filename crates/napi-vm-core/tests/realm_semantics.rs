@@ -1055,3 +1055,63 @@ fn bound_functions_observe_target_prototypes_before_metadata_and_realm_lookup() 
         truth(&mut vm, source);
     }
 }
+
+#[test]
+fn array_from_and_of_use_constructor_realms_and_observable_initialization_order() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var Result=function(n){this.count=arguments.length;this.size=n;};Result.prototype=null;").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var result=Array.of.call(other.Result,7,8);Object.getPrototypeOf(result)===other.Object.prototype&&result.size===2&&result.count===1&&result.length===2&&result[1]===8;",
+        "var result=Array.from.call(other.Result,[7,8]);Object.getPrototypeOf(result)===other.Object.prototype&&result.count===0&&result.length===2&&result[0]===7;",
+        "var result=Array.from.call(other.Result,{0:7,length:1});result.count===1&&result.size===1&&result[0]===7;",
+        "var log='';function Result(n){log+='c';this.size=n;}var source={get [Symbol.iterator](){log+='i';return undefined;},get length(){log+='l';return 2;},get 0(){log+='a';return 7;},get 1(){log+='b';return 8;}};Array.from.call(Result,source,x=>{log+='m';return x;});log==='ilcambm';",
+        "var closed=false;var sentinel={};var iterable={[Symbol.iterator](){return {next(){return {value:1,done:false};},return(){closed=true;throw new Error('close');}};}};var caught;try{Array.from(iterable,()=>{throw sentinel;});}catch(e){caught=e;}caught===sentinel&&closed;",
+        "function Locked(){Object.defineProperty(this,'length',{value:0,writable:false});}caught=undefined;try{Array.of.call(Locked,1);}catch(e){caught=e;}caught instanceof TypeError;",
+        "var stored=0;var locked=Object.freeze({x:0});function WithSetter(){Object.defineProperty(this,'length',{set(n){locked.x=1;stored=n;}});}Array.of.call(WithSetter,1,2);stored===2&&locked.x===0;",
+        "var descriptor=Object.getOwnPropertyDescriptor(result,'0');descriptor.writable&&descriptor.enumerable&&descriptor.configurable;",
+        "Array.isArray(Array.from.call(()=>{},[1]))&&Array.isArray(Array.of.call(()=>{},1));",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn array_species_methods_allocate_before_reads_and_preserve_sparse_generic_inputs() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other
+        .eval_source("var Result=function(n){this.size=n;};")
+        .unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var input=[2,0,4];delete input[1];input.constructor={[Symbol.species]:other.Result};var result=input.slice(0);Object.getPrototypeOf(result)===other.Result.prototype&&result.size===3&&result.length===3&&result[2]===4&&!(1 in result);",
+        "var result=input.concat([5]);Object.getPrototypeOf(result)===other.Result.prototype&&result.size===0&&result.length===4&&result[3]===5&&!(1 in result);",
+        "var result=input.splice(1,2,7);Object.getPrototypeOf(result)===other.Result.prototype&&result.size===2&&result.length===2&&!(0 in result)&&result[1]===4&&input.length===2&&input[1]===7;",
+        "var input=[[1],[2]];input.constructor={[Symbol.species]:other.Result};var result=input.flat();Object.getPrototypeOf(result)===other.Result.prototype&&result.size===0&&result[1]===2&&!('length' in result);",
+        "var result=input.flatMap(x=>[x[0]*2]);Object.getPrototypeOf(result)===other.Result.prototype&&result[0]===2&&result[1]===4;",
+        "var generic={0:'a',2:'c',length:3};var result=Array.prototype.splice.call(generic,1,1,'b','B');result.length===1&&!(0 in result)&&generic.length===4&&generic[1]==='b'&&generic[2]==='B'&&generic[3]==='c';",
+        "var source={0:7,length:2,[Symbol.isConcatSpreadable]:true};var result=[1].concat(source);result.length===3&&result[1]===7&&!(2 in result);",
+        "var proto={1:8};var source=[7,0,9];delete source[1];Object.setPrototypeOf(source,proto);Array.prototype.slice.call(source)[1]===8&&Reflect.has(source,'1');",
+        "var typed=new Uint8Array([7,8]);typed[Symbol.isConcatSpreadable]=true;var result=[].concat(typed);result[0]===7&&result[1]===8&&!Reflect.has(typed,'-0');",
+        "var boxed;Array.prototype.map.call('ab',(value,index,source)=>{boxed=source;return value;}).join('')==='ab'&&typeof boxed==='object';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn shared_set_results_do_not_inherit_guest_assignment_strictness() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var locked=Object.freeze([1]);!Reflect.set(locked,0,2)&&locked[0]===1;",
+        "'use strict';!Reflect.set(locked,0,2)&&!Reflect.set(new Proxy({}, {set(){return false;}}),'x',1);",
+        "var caught;try{(function(){'use strict';locked[0]=2;})();}catch(e){caught=e;}caught instanceof TypeError;",
+        "var target={};Object.defineProperty(target,'x',{get(){return 1;}});!Reflect.set(target,'x',2);",
+    ] {
+        truth(&mut vm, source);
+    }
+}

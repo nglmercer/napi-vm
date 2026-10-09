@@ -1500,27 +1500,25 @@ impl Interpreter {
     /// is currently executing inside a function/catch environment.
     #[doc(hidden)]
     pub fn set_global_checked(&mut self, name: &str, value: Value) -> Result<(), VmErr> {
-        let strict = self.global.borrow().strict();
+        if !self.set_global_property(name, value)? && self.global.borrow().strict() {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot assign to read-only property {name}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn set_global_property(&mut self, name: &str, value: Value) -> Result<bool, VmErr> {
         let mut global = self.persistent_global.borrow_mut();
-        // An explicit write through the global object creates or updates an
-        // own user-global binding. Do not use `assign` here: it walks into the
-        // trusted builtins parent and would mutate (for example) builtin
-        // `Math` instead of creating a user shadow.
         let attributes = global.global_property(name).map(|(_, attrs)| attrs);
         if attributes.is_some_and(|attrs| !attrs.writable) {
-            return if strict {
-                Err(VmErr::Msg(format!(
-                    "TypeError: Cannot assign to read-only property {name}"
-                )))
-            } else {
-                Ok(())
-            };
+            return Ok(false);
         }
         global.try_set(name, value)?;
         if let Some(attrs) = attributes {
             global.set_property_attributes(name, attrs);
         }
-        Ok(())
+        Ok(true)
     }
 
     #[doc(hidden)]
