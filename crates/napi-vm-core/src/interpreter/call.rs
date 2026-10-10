@@ -1703,9 +1703,8 @@ impl Interpreter {
         }
     }
 
-    /// Compound assignment to a property: read, apply, write back. Member
-    /// compounds never coerce for `+` (unlike identifier ones) — the
-    /// evaluator's own asymmetry, preserved here. Shared by both tiers.
+    /// Read and write a compound assignment through the same property key.
+    /// Shared by both execution tiers so observable conversion happens once.
     pub(crate) fn compound_assign_prop(
         &mut self,
         obj: &Value,
@@ -1713,9 +1712,15 @@ impl Interpreter {
         bin: BinOp,
         v: Value,
     ) -> Result<Value, VmErr> {
-        let c = self.get_prop_value(obj, prop)?;
+        if matches!(obj, Value::Null | Value::Undefined) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot assign a property of null or undefined".into(),
+            ));
+        }
+        let key = self.ecmascript_to_property_key(prop)?;
+        let c = self.get_prop_value(obj, &key)?;
         let fv = self.bin_op(bin, &c, &v)?;
-        self.assign_member(obj, prop, fv.clone())?;
+        self.assign_member(obj, &key, fv.clone())?;
         Ok(fv)
     }
 

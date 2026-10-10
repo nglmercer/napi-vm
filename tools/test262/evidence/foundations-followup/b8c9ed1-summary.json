@@ -1,6 +1,6 @@
 {
   "source_commit": "b8c9ed14ab8023a7d0d3545043d905811ca387b7",
-  "classification": "Shared class, call and spread semantics; ordinary call fuel accounting restored; focused/full validation pending",
+  "classification": "Shared class, call and spread semantics; ordinary call fuel accounting restored; completed full pinned corpus",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -48,7 +48,51 @@
     "b8c9ed1-node-tests.log.gz": "0ef66189a302935f26006b2168246e49755ee929abcac79f0098fe521758400b",
     "b8c9ed1-release-build.log.gz": "2853410e51139c94d6d18796f3a18d44fa4d12eaec096cff0f3325eee3fb5ce5",
     "b8c9ed1-tooling-tests.log.gz": "303067a8b48da8c84f103d1818a82836a1848c3ba812beecdb05530ba734a815",
-    "b8c9ed1-wasm-tests.log.gz": "9622319290ead7ca4d2b1658f59598f4e2eb92dd2bcbcb74c4b12f835e1b0e2d"
+    "b8c9ed1-wasm-tests.log.gz": "9622319290ead7ca4d2b1658f59598f4e2eb92dd2bcbcb74c4b12f835e1b0e2d",
+    "b8c9ed1-focused.jsonl.gz": "f2dc10980d1fd879014cfba81dd30c659c0f46987c7a44591de03e573d34677a",
+    "b8c9ed1-focused-c82f617-projection.json.gz": "f5b4c0536a929d11264522b4be24162d52d09a3c28fe5cce4a9fadcab6a6ac6e",
+    "b8c9ed1-focused-transitions.json.gz": "c7125f7ec11a3adf124df3844ce9c3acba5b00bc67e9a02891d7d494ee13bacf",
+    "b8c9ed1-focused-c82f617-transitions.json.gz": "95a9f8581609fe9810e5983c8cd50d01a7e92abd80b8283289fc9446e780d299",
+    "b8c9ed1-focused.json.gz": "fee2f3672e1a3452789807994b1a26c9a838f823565fb0ffb752325ba30777fc",
+    "b8c9ed1-focused-7c0a9ce-projection.json.gz": "4b48a7460974a7be800131a0157ea9cec99241ed3b5bf83c1bb5a26528481fc0",
+    "b8c9ed1-full-7c0a9ce-transitions.json.gz": "73c7c1d06562da73694faade1d942b625ffc7defde3fdfda275050ac7acf0de2",
+    "b8c9ed1-full-pr23-transitions.json.gz": "818efcbaed077d55824ea0acddb6de357d420148e77ec692cacd39597c1ff2ae",
+    "b8c9ed1-full-c82f617-transitions.json.gz": "a910c006800a6d740c729cd2ab749851812c5684bf41c23b36ac71df39534cb0",
+    "b8c9ed1-full-6456b53-transitions.json.gz": "bdbb18fe3b166ea3203b997e6ab71f9dd1dd020486cb7b8384c212735b592461",
+    "b8c9ed1-full.json.gz": "cf2f90752c55f1e401bdcb5e02b7cd286268177b8c8b8f45688aa6926f20cfe8",
+    "b8c9ed1-full.jsonl.gz": "c958463be78eab9307d767329f949c0161bc7020b346028e5fe20427ea24dafd"
   },
-  "worker_sha256": "ff760bd92c0f508ac4a8bb42e2a9f68676f065a620b0d5eb52e20f03713b9280"
+  "worker_sha256": "ff760bd92c0f508ac4a8bb42e2a9f68676f065a620b0d5eb52e20f03713b9280",
+  "focused": {
+    "total": 52734,
+    "current_counts": {
+      "pass": 42348,
+      "fail": 10386,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 1995,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent c82f617 full report"
+  },
+  "full": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 65744,
+      "fail": 37210,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 24359,
+    "lost_passes": 22,
+    "baseline": "PR #23"
+  },
+  "full_recent": {
+    "new_passes": 2093,
+    "lost_passes": 22
+  }
 }

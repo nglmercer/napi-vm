@@ -128,6 +128,16 @@ ten tooling tests, formatting and strict Clippy. The release worker is immutable
 and its digest/check logs are archived. Its expanded focused gate includes the
 host/realm/GC, grammar/private-name/class, Object/Reflect/Proxy and typed-array
 groups before the full pinned corpus. No limits or feature skips were changed.
+The focused run passed 42,348/52,734 variants, with 1,995 new and zero lost passes
+against the matching c82f617 selection. The completed full corpus passed
+65,744/102,956 variants: 24,359 new and 22 lost passes against PR #23; 2,093 new
+and the same 22 lost passes against c82f617. It recorded 37,210 failures, two
+timeouts, zero crashes, zero harness errors and zero skips. All losses are
+compound-assignment key-conversion variants outside that focused selection.
+The exact full report and transitions are retained. This run fails the zero-loss
+gate. Follow-up shared compound-property logic captures the canonical property
+key once for both its read and write; forced AST/bytecode tests cover all eleven
+compound operators. New required checks and pinned validation are required.
 
 ## Remaining work
 

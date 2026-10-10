@@ -1640,3 +1640,19 @@ fn null_receiver_checks_and_immutable_prototypes_share_internal_operations() {
         );
     }
 }
+
+#[test]
+fn compound_members_convert_property_keys_once_in_both_tiers() {
+    for operator in [
+        "*=", "/=", "%=", "+=", "-=", "<<=", ">>=", ">>>=", "&=", "^=", "|=",
+    ] {
+        let source = format!(
+            "var calls=0;var key={{toString(){{calls++;return 'x';}}}};var object={{x:8}};object[key]{operator}2;calls===1;"
+        );
+        check(&source, true);
+        assert!(matches!(
+            run_ast_with_modules(&source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
