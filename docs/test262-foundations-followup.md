@@ -70,7 +70,7 @@ in member reads and String construction. The regression gate blocked the full
 run; the unsuccessful evidence is retained. Follow-up corrections and their
 validation are pending. Previous measurements do not validate these changes.
 
-## Object-literal follow-up (validation pending)
+## Object-literal follow-up
 
 The uncomputed colon form `__proto__: value` now sets the literal prototype
 through the shared internal operation; primitives are ignored. Computed keys,
@@ -78,7 +78,15 @@ shorthand and methods remain ordinary properties. Bytecode uses the result of
 ToPropertyKey rather than the original register, and static numeric keys use
 ECMAScript number formatting. Member reads and String construction use observable
 string-hint conversion, resolving the function-key regression at its shared
-conversion boundary. AST/bytecode fixtures cover these paths.
+conversion boundary. All 52 bytecode parity tests pass. Source ccedb3d passed all required checks:
+971 workspace tests (four existing ignored), 203 minimal-feature tests, 73 Node
+tests, 15 WASM tests, ten tooling tests, formatting and strict Clippy. Its frozen
+worker is running the expanded focused corpus, including String conversion.
+The intermediate full run is deferred while call-reference ordering is addressed;
+the final source still requires the full pinned corpus. The failed 496883d
+workspace gate is archived: the legacy prototype fixture's debug formatter
+recursed through Object.prototype's constructor cycle. The corrected fixture
+asserts guest-visible prototype and property behavior.
 
 ## Remaining work
 
