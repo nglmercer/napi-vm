@@ -121,6 +121,14 @@ ordinary calls. The unsuccessful report is retained; follow-up code emits that
 instruction only for optional calls. Fuel and other limits remain unchanged.
 Another frozen gate and a full pinned corpus remain required.
 
+Source b8c9ed1 retains the call/reference semantics while avoiding the ordinary
+call's extra charged instruction. All required checks pass: 975 workspace tests
+(four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM tests,
+ten tooling tests, formatting and strict Clippy. The release worker is immutable
+and its digest/check logs are archived. Its expanded focused gate includes the
+host/realm/GC, grammar/private-name/class, Object/Reflect/Proxy and typed-array
+groups before the full pinned corpus. No limits or feature skips were changed.
+
 ## Remaining work
 
 Complete descriptor/internal-operation coverage remains open, including replacing

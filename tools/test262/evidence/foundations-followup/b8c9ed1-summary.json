@@ -1,0 +1,54 @@
+{
+  "source_commit": "b8c9ed14ab8023a7d0d3545043d905811ca387b7",
+  "classification": "Shared class, call and spread semantics; ordinary call fuel accounting restored; focused/full validation pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 975,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "b8c9ed1-allfeatures-tests.log.gz": "127ae37bdc8e0bb75a068d4b24722a9aa8a591e4c15931f0104143ebec92b0e7",
+    "b8c9ed1-clippy.log.gz": "fd07ead2656456b2dd004660c28b5384d42f48716ab707c0f9e3cdab7deaab20",
+    "b8c9ed1-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "b8c9ed1-minimal-tests.log.gz": "ac960dde9149c8e44277ca0e42231aca6ad0fd3e5df538e9f9f3f1331f1e7c84",
+    "b8c9ed1-native-build.log.gz": "14522c5c8ec90e7ff4d8d8ff37ad3ec88aa52d76699d68fe13638d03a6da9707",
+    "b8c9ed1-node-tests.log.gz": "0ef66189a302935f26006b2168246e49755ee929abcac79f0098fe521758400b",
+    "b8c9ed1-release-build.log.gz": "2853410e51139c94d6d18796f3a18d44fa4d12eaec096cff0f3325eee3fb5ce5",
+    "b8c9ed1-tooling-tests.log.gz": "303067a8b48da8c84f103d1818a82836a1848c3ba812beecdb05530ba734a815",
+    "b8c9ed1-wasm-tests.log.gz": "9622319290ead7ca4d2b1658f59598f4e2eb92dd2bcbcb74c4b12f835e1b0e2d"
+  },
+  "worker_sha256": "ff760bd92c0f508ac4a8bb42e2a9f68676f065a620b0d5eb52e20f03713b9280"
+}
