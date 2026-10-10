@@ -345,8 +345,10 @@ keeps AST field/block evaluation through the shared helper.
 
 Targeted checks passed: 362 core unit tests, 11 private-element tests and 21 GC
 tests. Differential fixtures require successful compilation and verification,
-then compare actual bytecode execution with AST execution. The required repository
-checks and new corpus validation are separate gates; the 287bddc full result
-above does not measure this later implementation. Computed Symbol retention,
+then compare actual bytecode execution with AST execution. The 5868d51 required repository checks passed: formatting, strict Clippy,
+942 workspace tests (four existing ignored), 203 minimal-feature tests, 73 Node
+tests, 15 WASM tests and ten runner/tooling tests. New corpus validation remains
+a separate gate; the 287bddc full result above does not measure this later
+implementation. Computed Symbol retention,
 observable class-key conversion, dynamic home-object super lookup and complete
 internal-operation/realm coverage remain open dependencies.

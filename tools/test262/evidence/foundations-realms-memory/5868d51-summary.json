@@ -1,0 +1,53 @@
+{
+  "source_commit": "5868d510c10b1e36dd3d2bfd0b0c55f3b81e9674",
+  "classification": "Typed lexical private elements and shared class initialization; complete corpus pending",
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 942,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Complete realm/internal-operation dependencies, computed Symbol/key conversion, dynamic home-object super lookup, private-write bytecode fallback and complete corpus evidence",
+  "archive_sha256": {
+    "5868d51-tooling-tests.log.gz": "fc38b3e0a907a67d6b001a35a7679c0eee5ce94ed95acfd633ec1e845b85df61",
+    "5868d51-wasm-tests.log.gz": "b07b076ac8ef43d8d80d90bc5fba70a96225112d56d4c911277cd3628c5b660e",
+    "5868d51-node-tests.log.gz": "0542b9ff1be063e9bbc97ffe06fda6e6a098f792ebbf5ce58bfc562756bf51e9",
+    "5868d51-native-build.log.gz": "4fd0d561865afeaeef67bd8936a84e4aa6825db53657817b6853c98d667aed31",
+    "5868d51-minimal-tests.log.gz": "b5bc5c1647f7668b624516c4563e60f5881dbc7745d50993fb58704553a869b8",
+    "5868d51-allfeatures-tests.log.gz": "a76e51933eb7da99666484b0d4f50c12248136dba798d68703206c6aba92f931",
+    "5868d51-clippy.log.gz": "14aad944183fd96be01ff6b59154cdb0507cca56a898050b078c3027fea47430",
+    "5868d51-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "5868d51-release-build.log.gz": "0885898aa055c807e240e83f0f06df502bc39f50aceee2e98da3868fe6d516c6"
+  },
+  "worker_sha256": "3740b83cd0a530c3221822f1e825ddbe85ce82d4b0c9906b4a36dc207ff96373",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  }
+}
