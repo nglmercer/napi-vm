@@ -392,3 +392,13 @@ including forced AST/bytecode differential fixtures. The ffb6e8c required checks
 tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
 tests and ten runner/tooling tests. Focused/full pinned corpus validation must
 be recorded separately; the latest completed full measurement remains 5868d51.
+
+
+The expanded frozen ffb6e8c focus passed 29,052/37,581 variants, with 8,528
+failures, one timeout and zero crashes/harness errors/skips. Against 5868d51:
+48 new passes, one loss due to the strict escaped Unicode-identifier timeout.
+The full run was blocked. Both frozen workers then passed all four affected
+identifier variants in each of three matched reruns at the unchanged pinned
+limits. These results and the first timeout are archived without replacing or
+skipping them. A general dictionary-layout growth improvement is being validated
+before repeating the focused/full gates.
