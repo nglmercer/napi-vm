@@ -4277,7 +4277,13 @@ impl<'a> Compiler<'a> {
         if direct_eval && (!self.top_level || self.scopes.len() != 1) {
             return Err(Decline::Func("direct eval requires a lexical environment"));
         }
-        let dst = self.load_undefined()?;
+        // Only optional calls need a default result on the short-circuit
+        // branch. Avoid an extra charged instruction on ordinary calls.
+        let dst = if matches!(callee, Expr::OptionalChain { .. }) {
+            self.load_undefined()?
+        } else {
+            self.alloc_reg()?
+        };
         let mut ends = Vec::new();
         let is_super = matches!(callee, Expr::Super);
         let (function, receiver) = if is_super {

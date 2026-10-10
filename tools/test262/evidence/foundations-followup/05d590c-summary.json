@@ -1,6 +1,6 @@
 {
   "source_commit": "05d590cc5331fa4229373cdf244db76d9afcca8e",
-  "classification": "Shared call references, ordered spread, key receiver validation and immutable prototypes; focused/full validation pending",
+  "classification": "Shared call references, ordered spread, key receiver validation and immutable prototypes; focused evidence, full pending",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -48,7 +48,27 @@
     "05d590c-node-tests.log.gz": "c6638fafbc7df99ff91ae0d439f049b118afdce773226bbdd7e3e5496a69ad5d",
     "05d590c-release-build.log.gz": "7d0ebf20c0e9501d62ad42a6aafdde33a0ea3f8ab366f8e4c13156a7125ce1c4",
     "05d590c-tooling-tests.log.gz": "e2254ee0a06b73bd3bd3a2af9282e345fc3c0eb72ad84e7e268942ddc2e018bf",
-    "05d590c-wasm-tests.log.gz": "70ff4a9ba420bab5fd119fc388a72933d68ba7ee2e36a87c4c6b9c6669829cae"
+    "05d590c-wasm-tests.log.gz": "70ff4a9ba420bab5fd119fc388a72933d68ba7ee2e36a87c4c6b9c6669829cae",
+    "05d590c-focused-c82f617-transitions.json.gz": "92e3fb149a1be3ee13d4d5b813358110863527d77504f58c75f4c46da7dfd65c",
+    "05d590c-focused.json.gz": "883ba59802db57586c24e9ad6ca9f8a931a874a925b9ffa81c2543df4d0de805",
+    "05d590c-focused-transitions.json.gz": "6f4194b72fb90726fef2af9e574a7c4fde7461ecbc1537e5ee84fb200e26e451",
+    "05d590c-focused.jsonl.gz": "42a0f03c71c5c28ca227c2f0aa1b8363cea4f59afd2802b869e882f9f38d0f5f",
+    "05d590c-focused-c82f617-projection.json.gz": "bd602e67dc4ec71783ce993c41f881703e3ab7882d6e01b605a615d21dd39e5f",
+    "05d590c-focused-7c0a9ce-projection.json.gz": "5802989922cd3fbbba19d3cabc21474333703dbcaac4913d5621033465b2684a"
   },
-  "worker_sha256": "d37b675377eee6a1ae5fbcdc8162e253d32a94d2cc644587e3846f14b6a56030"
+  "worker_sha256": "d37b675377eee6a1ae5fbcdc8162e253d32a94d2cc644587e3846f14b6a56030",
+  "focused": {
+    "total": 44796,
+    "current_counts": {
+      "pass": 36671,
+      "fail": 8125,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 1995,
+    "lost_passes": 2,
+    "baseline": "Matching projection from independent c82f617 full report"
+  }
 }

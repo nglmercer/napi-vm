@@ -113,7 +113,13 @@ Source 05d590c passed 378 core unit tests and every required check: 975 workspac
 tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
 tests, ten tooling tests, formatting and strict Clippy. Exact check logs and the
 immutable worker digest are archived under foundations-followup/05d590c*.
-The expanded focused corpus is running before the full pinned corpus.
+The expanded focused run completed: 36,671/44,796 passes, 1,995 new passes and
+two lost passes against c82f617, with no crashes, timeouts, harness errors or skips.
+All earlier semantic losses recovered. The two ownkeys-linear variants exhausted
+fuel after the compiler introduced an unconditional default-result instruction on
+ordinary calls. The unsuccessful report is retained; follow-up code emits that
+instruction only for optional calls. Fuel and other limits remain unchanged.
+Another frozen gate and a full pinned corpus remain required.
 
 ## Remaining work
 
