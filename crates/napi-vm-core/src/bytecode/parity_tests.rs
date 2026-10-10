@@ -1700,3 +1700,18 @@ fn json_stringification_uses_shared_semantics_in_both_execution_tiers() {
         );
     }
 }
+
+#[test]
+fn typed_array_static_inheritance_uses_the_same_native_helpers_in_both_tiers() {
+    for source in [
+        "var T=Object.getPrototypeOf(Int8Array);T.from===Uint8Array.from&&!Object.hasOwn(Int8Array,'from');",
+        "class Derived extends Int8Array{}var value=Derived.from([1,2]);value instanceof Derived&&value[1]===2;",
+        "var T=Object.getPrototypeOf(Int8Array);var value=T.of.call(Uint8Array,3,4);value instanceof Uint8Array&&value[0]===3;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

@@ -287,3 +287,14 @@ constructor diagnostic reaches index 28 (missing Intl.Collator), after the
 first 28 constructors correctly invoke the revoking prototype trap. This
 diagnostic does not turn the failing staging test into a pass. Shared typed
 constructor static inheritance remains a separate genuine dependency.
+
+The `193998b` execution report also verifies all 8,659 parse-negative phase/
+error classifications, with zero nonpasses; this audit is archived separately.
+
+The next Phase 1 fix moves `%TypedArray%.from` and `.of` from duplicate
+concrete-constructor properties onto the common realm-owned abstract intrinsic.
+Concrete constructors and shared-memory subclasses inherit one method identity
+per realm, with the standard method lengths and property attributes. Existing
+generic construction/mapper helpers are reused. Five focused realm tests and
+forced AST/bytecode parity pass, including a SAB-backed subclass. New required
+checks and focused/full execution are pending for this source.

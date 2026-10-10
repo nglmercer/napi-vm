@@ -1959,3 +1959,54 @@ fn escaped_array_methods_retain_allocation_and_error_realms_after_gc() {
         "var failures=0;for(var name of ['values','keys','entries']){for(var receiver of [null,undefined]){try{other.Array.prototype[name].call(receiver);}catch(e){if(e instanceof other.TypeError)failures++;}}}failures===6;",
     );
 }
+
+#[test]
+fn typed_array_static_methods_are_shared_inherited_and_realm_owned() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    drop(child);
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        r#"
+        var T=Object.getPrototypeOf(Int8Array);var U=Object.getPrototypeOf(other.Int8Array);
+        var d=Object.getOwnPropertyDescriptor(T,'from');
+        !Object.hasOwn(Int8Array,'from') && !Object.hasOwn(Uint8Array,'of') &&
+        Int8Array.from===Uint8Array.from && T.from===Int8Array.from &&
+        T.of===Float64Array.of && T.from!==U.from &&
+        T.from.length===3 && T.of.length===0 &&
+        d.writable && !d.enumerable && d.configurable &&
+        Object.getPrototypeOf(U.from)===other.Function.prototype;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var from=other.Int8Array.from;
+        var a=from.call(Uint8Array,[1,2]);var b=Uint8Array.from.call(other.Int8Array,[3,4]);
+        var errors=0;try{from.call({},[]);}catch(e){if(e instanceof other.TypeError)errors++;}
+        a instanceof Uint8Array && b instanceof other.Int8Array && errors===1;
+    "#,
+    );
+}
+
+#[test]
+fn shared_typed_array_subclasses_inherit_generic_static_construction() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var T=Object.getPrototypeOf(Int8Array);
+        class Shared extends T {
+            constructor(length) {
+                return Reflect.construct(Int8Array,[new SharedArrayBuffer(length)],new.target);
+            }
+        }
+        var a=Shared.from([1,2,3]);var b=Shared.of(4,5);
+        a instanceof Shared && a.buffer instanceof SharedArrayBuffer && a[2]===3 &&
+        b instanceof Shared && b[0]===4 && b[1]===5;
+    "#,
+    );
+}

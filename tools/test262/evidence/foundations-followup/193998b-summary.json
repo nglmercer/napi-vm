@@ -68,7 +68,8 @@
     "193998b-syntax.log.gz": "76b1007d9e22669c3d0c38fac2ff966c244499813421ffdcbb50665cce4d0d9e",
     "193998b-contextual.json.gz": "888536dbb783ff1cad035502e648f0e4a68048bf09bdc313863c8ff781038894",
     "193998b-contextual.log.gz": "26d8bc73491eee2508fecd4fad856d9fec9c8ee697eb709391ab03d0a69de14e",
-    "193998b-constructor-diagnostic.py.gz": "ac5f1edbdee8a2e24ab03946cd5928a198c8054c13aa6f504a15540b8d423200"
+    "193998b-constructor-diagnostic.py.gz": "ac5f1edbdee8a2e24ab03946cd5928a198c8054c13aa6f504a15540b8d423200",
+    "193998b-phase-classification.json.gz": "9cc652bcba214f1407bd8c7e68bc3fcc728686a96b9896b5d0b7aa80b8f784fd"
   },
   "worker_sha256": "7a3751d3bb770200c557943131658c715a792eb7f9f275676309ff418a71d163",
   "focused": {
@@ -142,5 +143,9 @@
     "new_passes": 80,
     "lost_passes": 0,
     "baseline": "Matching full 32a469b projection"
+  },
+  "phase_classification": {
+    "parse_negative_variants": 8659,
+    "nonpasses": 0
   }
 }
