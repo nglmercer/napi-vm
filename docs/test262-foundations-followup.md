@@ -59,8 +59,12 @@ bodies to compile; verifier tests reject invalid operands; runtime assertions an
 forced AST/bytecode differential fixtures cover the changed semantics. Existing
 fallback remains enabled.
 
-Required checks and a new frozen-worker focused/full pinned run must be recorded
-for this source. Previous measurements do not validate these changes.
+Source 7a71cca passed all required checks: formatting, strict Clippy, 970 workspace
+tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
+tests and ten Test262 tooling tests. Check logs and the immutable worker checksum
+are archived under tools/test262/evidence/foundations-followup/7a71cca*. Its
+expanded focused/full pinned corpus validation is running separately. Previous
+measurements do not validate these changes.
 
 ## Remaining work
 

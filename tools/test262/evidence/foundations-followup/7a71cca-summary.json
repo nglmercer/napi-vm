@@ -1,0 +1,54 @@
+{
+  "source_commit": "7a71ccacaf6a6ba098fa41db21227231c52d6e77",
+  "classification": "Shared class keys and lexical super/home references; focused/full validation pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 970,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "7a71cca-allfeatures-tests.log.gz": "f9c15aa50417194593b8632c38656e2d6d868b60747b721716b8edaccd407514",
+    "7a71cca-clippy.log.gz": "024b599e3331e696e10c1545c28bda93f1caaa7925786ac8de6495e841079b23",
+    "7a71cca-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "7a71cca-minimal-tests.log.gz": "024d1750d154edf618ae405b556fc1041f86de6e8b22d3c4a20a8bc9b5f7a7c8",
+    "7a71cca-native-build.log.gz": "efeefee4b856677cb4675c1c3ea4fde738729e5cdecdfa82741d860d8efbcd97",
+    "7a71cca-node-tests.log.gz": "f49931b4135898299c6003850515d4e23992a7998f5de239e68dbd66dd5db7dc",
+    "7a71cca-release-build.log.gz": "66c960d2bde9bd6e90d43e999abf96edf4dd21cd50553b92abded972f823a205",
+    "7a71cca-tooling-tests.log.gz": "2e011beca3d77a4724e8524b9929c8feb697b9e078013d0dedf9171791527e3a",
+    "7a71cca-wasm-tests.log.gz": "52cd7419f6a86366285d35896c00345b1bc39470912bed94e60e6a13efbfa9b5"
+  },
+  "worker_sha256": "1e0559676c2cc02caf9b22254a19a61a1149f03d97f515b7d766fa7a70fa2d05"
+}
