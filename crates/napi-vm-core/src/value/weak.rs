@@ -82,12 +82,14 @@ impl WeakTarget {
                 }
             }
             Value::Error(error) => {
+                let properties = Rc::downgrade(&error.properties);
                 let name = error.name.clone();
                 let message = error.message.clone();
                 let code = error.code.clone();
                 let stack = error.stack.clone();
                 Self::rc(&error.identity, move |identity| {
                     Value::Error(Box::new(ErrorData {
+                        properties: properties.upgrade().expect("live error properties"),
                         identity,
                         name: name.clone(),
                         message: message.clone(),
@@ -158,6 +160,7 @@ impl WeakStorage {
 impl Value {
     pub(crate) fn weak_identity(&self) -> Option<usize> {
         Some(match self {
+            Value::RealmGlobal(global) => Rc::as_ptr(global) as usize,
             Value::Object { props } => Rc::as_ptr(props) as usize,
             Value::Array(value) => Rc::as_ptr(value) as usize,
             Value::Function(value) => Rc::as_ptr(value) as usize,

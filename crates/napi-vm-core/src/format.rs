@@ -212,7 +212,9 @@ fn render_plain_value(
         Value::BigInt(value) => output.push_str(&value.to_decimal()),
         Value::Date(ms) => output.push_str(&crate::builtins::iso_string(ms.get())),
         // A proxy renders as its target: it is meant to stand in for it.
-        Value::Proxy(proxy) => render_plain_value(&proxy.target, visited, depth, output),
+        Value::Proxy(proxy) => {
+            render_plain_value(&proxy.target_for_inspection(), visited, depth, output)
+        }
         Value::ArrayBuffer(bytes) => {
             output.push_str(&format!("[object ArrayBuffer({})]", bytes.borrow().len()))
         }
@@ -302,6 +304,11 @@ fn render_plain_value(
         Value::Symbol(s) => output.push_str(&s.to_display()),
         Value::Error(e) => output.push_str(&e.message),
     }
+}
+
+/// ECMAScript Number::toString, separate from host inspection's signed zero.
+pub(crate) fn ecmascript_number_string(n: f64) -> String {
+    ryu_js::Buffer::new().format(n).to_owned()
 }
 
 pub fn number_string(n: f64) -> String {
@@ -443,7 +450,9 @@ fn render_inspect_value(
         Value::BigInt(value) => {
             painter.write_wrapped(context.output, "33", &format!("{}n", value.to_decimal()))
         }
-        Value::Proxy(proxy) => render_inspect_value(&proxy.target, depth, pretty, context),
+        Value::Proxy(proxy) => {
+            render_inspect_value(&proxy.target_for_inspection(), depth, pretty, context)
+        }
         Value::Date(ms) => {
             painter.write_wrapped(context.output, "35", &crate::builtins::iso_string(ms.get()))
         }

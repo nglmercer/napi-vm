@@ -1,0 +1,63 @@
+{
+  "source_commit": "e193e23f682fb7432a741cf923b0d1751c271790",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker": "artifacts/test262/engines/phase1-e193e23-test262",
+  "worker_sha256": "1f9cb15598cd68cde3c815d8741f1cf9e986a31d78fb52f08e82517026020bd2",
+  "groups": [
+    "agents",
+    "realms",
+    "gc-weak",
+    "generators",
+    "async-generators"
+  ],
+  "worker_jobs": 4,
+  "timeout_seconds": 5,
+  "fuel": 1000000,
+  "loop_budget": 100000,
+  "max_call_depth": 128,
+  "max_jobs": 10000,
+  "runtime_capabilities": "disabled",
+  "total": 5186,
+  "counts": {
+    "pass": 4192,
+    "fail": 994,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 1084,
+  "lost_passes": 0,
+  "comparison": "Matching selection projected from independently measured full 7c0a9ce report; projection is not a separate baseline run",
+  "checks": {
+    "fmt": "pass",
+    "clippy": "pass",
+    "workspace": {
+      "passed": 840,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 182
+    },
+    "node": 73,
+    "wasm": 14,
+    "tooling": 10
+  },
+  "ast_bytecode_mismatches": "Full corpus not measured; repository parity suite passed",
+  "phase_completion": false,
+  "full_run": "Not measured for this source",
+  "archive_sha256": {
+    "e193e23-focused.json.gz": "b7558ddca2da936e1141719fccf12db88770fe9b49d6613885c73e6e646fa8df",
+    "e193e23-7c0a9ce-projection.json.gz": "c4056cf1fec69b8e678fab386679ed60b9b0a9c40f2459a0a10973eef09f25bf",
+    "e193e23-transitions.json.gz": "5f86711055246e50b15c7352b0583e7ac7c8bec49c4bf58e969cc24d19d2ab7d",
+    "e193e23-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "e193e23-clippy.log.gz": "3bd527ff160a71f7ab277f6b55cfea054952c28437fbab206fb869d6c6f71f74",
+    "e193e23-allfeatures-tests.log.gz": "810e130fe5bd97fb5096d7ab012e4d75eda5a5fc9bca82f030ac00148f6a4ef0",
+    "e193e23-minimal-tests.log.gz": "0a6e382b48aecbb2c6923dec4aa30d552a6a6d99940d3cde453ecd9d5d6d49aa",
+    "e193e23-native-build.log.gz": "36ae52984e6e944e8f693aedb179cac0b34008e949462c537c0004e450a04dd3",
+    "e193e23-node-tests.log.gz": "b5c92571b4437a17d30f5d4d283028a972534f2d6b937c4a8daaf1ed923a2926",
+    "e193e23-wasm-tests.log.gz": "312d085287b659785f816ff2e95da1b2bc2b1398dc9f82abd825d33b775e362e",
+    "e193e23-tooling-tests.log.gz": "d5a4adedb68e9ea3033d46fa7eef778c764f8d0db53dd89bdad84879d5df059c",
+    "e193e23-release-build.log.gz": "b6dd6ed515c79b2d1824a442c2ce06de913be1c18059b93053ae1b4c5bdda744"
+  }
+}

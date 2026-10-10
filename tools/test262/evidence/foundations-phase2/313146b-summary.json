@@ -1,0 +1,114 @@
+{
+  "source_commit": "313146b5820347886729dd82bcb387f0876b1855",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "89fa54b52af415a2a15829abb33496c17dab8b9e9a2f0c86a708100ca558c837",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000
+  },
+  "counts": {
+    "pass": 50926,
+    "fail": 51982,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 46
+  },
+  "new_passes_vs_pr23": 9519,
+  "lost_passes_vs_pr23": 0,
+  "new_passes_vs165": 4584,
+  "lost_passes_vs165": 0,
+  "new_passes_vs885": 2,
+  "lost_passes_vs885": 0,
+  "parse_negative_execution": {
+    "total": 8659,
+    "pass": 8659
+  },
+  "syntax_audit": {
+    "parse_negative": 8659,
+    "accepted_invalid": 0,
+    "requires_acceptance": 94297,
+    "rejected_valid": 154
+  },
+  "focused_groups": [
+    "async-generator-grammar",
+    "super",
+    "private-names",
+    "eval-globals",
+    "statement-positions",
+    "parameter-patterns",
+    "catch-bindings",
+    "iteration-bindings",
+    "contextual-identifiers",
+    "literal-grammar",
+    "regexp-grammar",
+    "cover-grammar"
+  ],
+  "focused_counts": {
+    "pass": 23054,
+    "fail": 15768,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "focused_total": 38822,
+  "focused_derived_from_full_run": true,
+  "required_checks": {
+    "fmt": true,
+    "clippy": true,
+    "workspace_passed": 793,
+    "workspace_existing_ignored": 4,
+    "minimal_passed": 158,
+    "node_passed": 73,
+    "wasm_passed": 14,
+    "tooling_passed": 9
+  },
+  "ast_bytecode_mismatches": {
+    "repository_differential": 0,
+    "full_corpus": "not measured"
+  },
+  "remaining_gates": [
+    "Broader Phase 1 realm and GC audit",
+    "Phase 3 global environments, private/class runtime, descriptors, Proxy/exotics",
+    "Phase 4 bytecode parity"
+  ],
+  "outside_foundation": [
+    "Temporal/Intl algorithms",
+    "RegExp matching and broader standard-library algorithms",
+    "Deferred/JSON imports",
+    "Resource management",
+    "Decorators/auto-accessors"
+  ],
+  "timeouts": [
+    [
+      "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "script"
+    ],
+    [
+      "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "strict"
+    ]
+  ],
+  "sha256": {
+    "313146b-full.json.gz": "148cd563b7e13f1b59c8dbb03b18791303dbeaa6037b373e8e8a614547f17c3f",
+    "313146b-syntax.json.gz": "931b1b698a761d408db3e5805dd7d25b38f36aa7b020b24075981e04070c93c8",
+    "313146b-focused.json.gz": "d1c4f92a9b082fd92273f86f640e4b37d4c270415ce9c067275a7f9316985615",
+    "313146b-regressions.json.gz": "5f09f1da2b2e6a9017a5b48a379163a50a10e427e78703235381d278782ee130",
+    "313146b-combined-transitions.json.gz": "354b42f403f1e2c578fbf47e965c7359134dc3cf8654e675e4b9ff618821efde",
+    "313146b-vs165-transitions.json.gz": "dc0374343a1d7374cfe61c164c639f302f6467c1cdc24bfde883183ccbe321ee",
+    "313146b-vs885-transitions.json.gz": "ca5271fb307bf1d03846e8828d4adaac234fcc6f9deacaa2a5db422d0cd9d1f4",
+    "313146b-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "313146b-clippy.log.gz": "9b7c34154804bf1d837e6c4a7354dd42f9b3112b068d4751b23afd889101a0f8",
+    "313146b-allfeatures-tests.log.gz": "99c4871d7cfcf7d6b1ab70bb2d534a42d4663a9a918b261b97bad35e5806a9df",
+    "313146b-minimal-tests.log.gz": "f4c2686c0578567d5e0ecf92955948e8cbaadd1067e674bdc46b7f149b84cd20",
+    "313146b-native-build.log.gz": "9646c256ef6dee02f4ec68765eea32d18b54c65a0a9f0091b7352e94fced58b5",
+    "313146b-node-tests.log.gz": "a3b6bdca0fd0002f91f90b189307951a87f9fb2111170e85453c578f58e584b3",
+    "313146b-wasm-tests.log.gz": "3e094ea3b36ebc5f888347c568fa5ce050530c7987185cd96a00996da6cd4cc3",
+    "313146b-tooling-tests.log.gz": "6121f0221086913a4222cd717b389ce7914a81b4fb3d8dc67db5aa1bdd749807"
+  }
+}

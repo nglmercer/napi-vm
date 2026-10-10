@@ -3,6 +3,7 @@
 /// templates expose both; an ordinary template literal uses only `cooked`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct TemplateChunk {
+    pub invalid_escape: bool,
     pub cooked: crate::JsString,
     pub raw: crate::JsString,
 }
@@ -10,6 +11,7 @@ pub struct TemplateChunk {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Number(f64),
+    LegacyNumber(f64),
     /// A `BigInt` literal, carrying its digits (`123n` → `"123"`).
     BigInt(String),
     /// A character that begins no valid token, e.g. `@` or `#`.
@@ -21,7 +23,10 @@ pub enum Token {
     String(crate::JsString),
     /// A string literal containing escapes; it cannot be a Use Strict Directive.
     EscapedString(crate::JsString),
+    LegacyString(crate::JsString),
     Identifier(String),
+    /// IdentifierName containing a Unicode escape. It cannot act as a keyword.
+    EscapedIdentifier(String),
     Plus,
     Minus,
     Star,
@@ -69,6 +74,7 @@ pub enum Token {
     KwElse,
     KwFor,
     KwWhile,
+    KwWith,
     KwDo,
     KwSwitch,
     KwCase,
@@ -101,6 +107,8 @@ pub enum Token {
     KwUndefined,
     KwDelete,
     KwVoid,
+    KwDebugger,
+    KwEnum,
     KwStatic,
     KwGet,
     KwSet,
@@ -111,6 +119,8 @@ pub enum Token {
     Tilde,
     /// `#`, which begins a private class member name.
     Hash,
+    /// A contiguous #IdentifierName; whitespace cannot split this token.
+    PrivateIdentifier(String),
     Shl,
     Shr,
     UShr,
@@ -140,6 +150,84 @@ pub enum Token {
     EOF,
 }
 
+impl Token {
+    /// IdentifierName includes keywords; binding contexts impose their own restrictions.
+    pub(crate) fn identifier_name(&self) -> Option<&str> {
+        Some(match self {
+            Self::Identifier(name) | Self::EscapedIdentifier(name) => name,
+            Self::KwVar => "var",
+            Self::KwLet => "let",
+            Self::KwConst => "const",
+            Self::KwFunction => "function",
+            Self::KwReturn => "return",
+            Self::KwIf => "if",
+            Self::KwElse => "else",
+            Self::KwFor => "for",
+            Self::KwWhile => "while",
+            Self::KwWith => "with",
+            Self::KwDo => "do",
+            Self::KwSwitch => "switch",
+            Self::KwCase => "case",
+            Self::KwDefault => "default",
+            Self::KwBreak => "break",
+            Self::KwContinue => "continue",
+            Self::KwClass => "class",
+            Self::KwExtends => "extends",
+            Self::KwNew => "new",
+            Self::KwThis => "this",
+            Self::KwSuper => "super",
+            Self::KwImport => "import",
+            Self::KwExport => "export",
+            Self::KwFrom => "from",
+            Self::KwAs => "as",
+            Self::KwAsync => "async",
+            Self::KwAwait => "await",
+            Self::KwYield => "yield",
+            Self::KwTry => "try",
+            Self::KwCatch => "catch",
+            Self::KwFinally => "finally",
+            Self::KwThrow => "throw",
+            Self::KwTypeof => "typeof",
+            Self::KwInstanceof => "instanceof",
+            Self::KwIn => "in",
+            Self::KwOf => "of",
+            Self::KwTrue => "true",
+            Self::KwFalse => "false",
+            Self::KwNull => "null",
+            Self::KwUndefined => "undefined",
+            Self::KwDelete => "delete",
+            Self::KwVoid => "void",
+            Self::KwDebugger => "debugger",
+            Self::KwEnum => "enum",
+            Self::KwStatic => "static",
+            Self::KwGet => "get",
+            Self::KwSet => "set",
+            Self::KwConstructor => "constructor",
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LexicalCallable {
+    depth: usize,
+    body_depth: Option<usize>,
+    expression: bool,
+    is_async: bool,
+    is_generator: bool,
+    arrow: bool,
+    field: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LexicalMember {
+    depth: usize,
+    head: bool,
+    async_names: usize,
+    generator: bool,
+    class: bool,
+}
+
 pub struct Lexer {
     src: Vec<char>,
     pos: usize,
@@ -148,6 +236,7 @@ pub struct Lexer {
     /// Tokens produced ahead of time (e.g. by template scanning), drained in
     /// FIFO order before lexing more source.
     pending: Vec<Token>,
+    lexical_errors: Vec<crate::span::SpannedToken>,
     /// Spans corresponding to tokens in `pending`.
     pending_spans: Vec<crate::span::Span>,
     /// The last token emitted, which decides whether a `/` starts a regular
@@ -156,7 +245,26 @@ pub struct Lexer {
     /// something that *ends a value* it is division, and otherwise it begins a
     /// literal.
     previous: Option<Token>,
+    before_previous: Option<Token>,
+    async_statement_start: bool,
+    async_line_break: bool,
+    last_token_end_line: usize,
+    current_line_break: bool,
+    // Closing statement delimiters select InputElementRegExp; expression
+    // delimiters select InputElementDiv. Function/class expressions retain
+    // their expression goal even though their bodies contain statements.
+    delimiters: Vec<(Token, bool)>,
+    closed_statement: bool,
+    conditional_depths: Vec<usize>,
+    statement_colon: bool,
+    callables: Vec<LexicalCallable>,
+    members: Vec<LexicalMember>,
+    async_arrow_depth: Option<usize>,
+    pending_class: Option<(usize, bool)>,
+    function_body: Option<bool>,
     encoded_source: bool,
+    module_goal: bool,
+    line_has_token: bool,
 }
 
 impl Lexer {
@@ -167,10 +275,33 @@ impl Lexer {
             line: 1,
             col: 1,
             pending: Vec::new(),
+            lexical_errors: Vec::new(),
             pending_spans: Vec::new(),
             previous: None,
+            before_previous: None,
+            async_statement_start: false,
+            async_line_break: false,
+            last_token_end_line: 1,
+            current_line_break: false,
+            delimiters: Vec::new(),
+            closed_statement: false,
+            conditional_depths: Vec::new(),
+            statement_colon: false,
+            callables: Vec::new(),
+            members: Vec::new(),
+            async_arrow_depth: None,
+            pending_class: None,
+            function_body: None,
             encoded_source: false,
+            module_goal: false,
+            line_has_token: false,
         }
+    }
+
+    /// Annex B HTML comments belong to Script/Function goals, never Module.
+    pub fn with_module_goal(mut self, module: bool) -> Self {
+        self.module_goal = module;
+        self
     }
 
     /// Parse source supplied by JavaScript without replacing lone surrogates.
@@ -216,6 +347,7 @@ impl Lexer {
                     .pop()
                     .unwrap_or(crate::span::Span::unknown());
                 toks.push((t, span));
+                self.line_has_token = true;
                 continue;
             }
             self.skip_ws();
@@ -223,10 +355,12 @@ impl Lexer {
                 break;
             }
             if let Some((t, span)) = self.next_with_span() {
-                self.previous = Some(t.clone());
+                self.record_token(&t, span.line, span.end_line);
+                self.line_has_token = true;
                 toks.push((t, span));
             }
         }
+        toks.append(&mut self.lexical_errors);
         let eof_span = crate::span::Span::new(self.line, self.col);
         toks.push((Token::EOF, eof_span));
         toks
@@ -235,18 +369,41 @@ impl Lexer {
     fn skip_ws(&mut self) {
         while self.pos < self.src.len() {
             let c = self.src[self.pos];
-            if c == '\n' {
+            let html_open = self.src[self.pos..].starts_with(&['<', '!', '-', '-']);
+            let html_close =
+                !self.line_has_token && self.src[self.pos..].starts_with(&['-', '-', '>']);
+            if self.pos == 0 && self.src.starts_with(&['#', '!']) {
+                while self.pos < self.src.len()
+                    && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+                {
+                    self.pos += 1;
+                    self.col += 1;
+                }
+            } else if !self.module_goal && (html_open || html_close) {
+                while self.pos < self.src.len()
+                    && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+                {
+                    self.pos += 1;
+                    self.col += 1;
+                }
+            } else if matches!(c, '\n' | '\u{2028}' | '\u{2029}') {
                 self.pos += 1;
                 self.line += 1;
                 self.col = 1;
+                self.line_has_token = false;
             } else if c == '\r' {
                 self.pos += 1;
                 self.line += 1;
                 self.col = 1;
+                self.line_has_token = false;
                 if self.pos < self.src.len() && self.src[self.pos] == '\n' {
                     self.pos += 1;
                 }
-            } else if c == '\t' || c == ' ' {
+            } else if matches!(
+                c,
+                '\t' | '\u{b}' | '\u{c}' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+                    ..='\u{200a}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
+            ) {
                 self.pos += 1;
                 self.col += 1;
             } else if c == '/' && self.pos + 1 < self.src.len() {
@@ -254,26 +411,39 @@ impl Lexer {
                 if n == '/' {
                     self.pos += 2;
                     self.col += 2;
-                    while self.pos < self.src.len() && self.src[self.pos] != '\n' {
+                    while self.pos < self.src.len()
+                        && !matches!(self.src[self.pos], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+                    {
                         self.pos += 1;
                         self.col += 1;
                     }
                 } else if n == '*' {
+                    let start = crate::span::Span::new(self.line, self.col);
                     self.pos += 2;
                     self.col += 2;
-                    while self.pos + 1 < self.src.len() {
-                        if self.src[self.pos] == '*' && self.src[self.pos + 1] == '/' {
+                    let mut closed = false;
+                    while self.pos < self.src.len() {
+                        if self.src[self.pos] == '*' && self.src.get(self.pos + 1) == Some(&'/') {
                             self.pos += 2;
                             self.col += 2;
+                            closed = true;
                             break;
                         }
-                        if self.src[self.pos] == '\n' {
+                        let c = self.src[self.pos];
+                        self.pos += 1;
+                        if matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                            if c == '\r' && self.src.get(self.pos) == Some(&'\n') {
+                                self.pos += 1;
+                            }
                             self.line += 1;
                             self.col = 1;
+                            self.line_has_token = false;
                         } else {
                             self.col += 1;
                         }
-                        self.pos += 1;
+                    }
+                    if !closed {
+                        self.lexical_errors.push((Token::Unknown('/'), start));
                     }
                 } else {
                     break;
@@ -285,7 +455,7 @@ impl Lexer {
     }
 
     /// Scan a template literal starting at the opening backtick, preserving the
-    /// raw text of each quasi (including whitespace). Emits:
+    /// raw text of each quasi, with ECMAScript line-ending normalization. Emits:
     /// `Backtick Quasi (DollarLBrace <expr tokens> RBrace Quasi)* Backtick`.
     fn read_template(&mut self) -> Vec<crate::span::SpannedToken> {
         self.pos += 1; // consume opening backtick
@@ -316,24 +486,30 @@ impl Lexer {
                 let start = self.pos;
                 self.pos += 1;
                 self.col += 1;
-                match self.read_escape() {
+                match self.read_escape(false) {
                     Ok(text) => quasi.cooked.push_str(text),
-                    Err(()) => {
-                        toks.push((
-                            Token::Unknown('\\'),
-                            crate::span::Span::new(self.line, self.col),
-                        ));
-                    }
+                    Err(()) => quasi.invalid_escape = true,
                 }
-                quasi
-                    .raw
-                    .push_str(self.src[start..self.pos].iter().collect::<String>());
+                quasi.raw.push_str(
+                    self.src[start..self.pos]
+                        .iter()
+                        .collect::<String>()
+                        .replace("\r\n", "\n")
+                        .replace('\r', "\n"),
+                );
             } else {
                 self.pos += 1;
-                let text = self.source_unit_string(c);
+                let text = if c == '\r' {
+                    if self.src.get(self.pos) == Some(&'\n') {
+                        self.pos += 1;
+                    }
+                    crate::JsString::from("\n")
+                } else {
+                    self.source_unit_string(c)
+                };
                 quasi.cooked.push_str(&text);
                 quasi.raw.push_str(text);
-                if c == '\n' {
+                if matches!(c, '\r' | '\n' | '\u{2028}' | '\u{2029}') {
                     self.line += 1;
                     self.col = 1;
                 } else {
@@ -344,7 +520,7 @@ impl Lexer {
         // Unterminated template: flush what we have.
         let span = crate::span::Span::new(self.line, self.col);
         toks.push((Token::TemplateQuasi(quasi), span));
-        toks.push((Token::Backtick, span));
+        toks.push((Token::Unknown('`'), span));
         toks
     }
 
@@ -352,6 +528,23 @@ impl Lexer {
     /// so nested object literals and templates terminate correctly. Consumes the
     /// matching closing brace and appends `RBrace`.
     fn lex_interp(&mut self, toks: &mut Vec<crate::span::SpannedToken>) {
+        // Each substitution starts in an expression lexical goal. Restore the
+        // enclosing goal after scanning it, including nested template literals.
+        let previous = self.previous.take();
+        let before_previous = self.before_previous.take();
+        let closed_statement = std::mem::replace(&mut self.closed_statement, false);
+        let conditional_depths = std::mem::take(&mut self.conditional_depths);
+        let statement_colon = std::mem::replace(&mut self.statement_colon, false);
+        let callables = self.callables.clone();
+        let members = self.members.clone();
+        let async_arrow_depth = self.async_arrow_depth;
+        let pending_class = self.pending_class.take();
+        let function_body = self.function_body.take();
+        let async_statement_start = self.async_statement_start;
+        let async_line_break = self.async_line_break;
+        let last_token_end_line = self.last_token_end_line;
+        let current_line_break = self.current_line_break;
+        let delimiter_depth = self.delimiters.len();
         let mut depth = 1i32;
         while self.pos < self.src.len() && depth > 0 {
             self.skip_ws();
@@ -359,40 +552,57 @@ impl Lexer {
                 break;
             }
             let c = self.src[self.pos];
-            match c {
-                '{' => {
-                    depth += 1;
-                    let span = crate::span::Span::new(self.line, self.col);
-                    toks.push((Token::LBrace, span));
-                    self.pos += 1;
-                    self.col += 1;
+            if c == '`' {
+                let start_line = self.line;
+                let nested = self.read_template();
+                toks.extend(nested);
+                self.record_token(&Token::Backtick, start_line, self.line);
+                continue;
+            }
+            if let Some((token, span)) = self.next_with_span() {
+                match token {
+                    Token::LBrace => depth += 1,
+                    Token::RBrace => depth -= 1,
+                    _ => {}
                 }
-                '}' => {
-                    depth -= 1;
-                    self.pos += 1;
-                    self.col += 1;
-                    let span = crate::span::Span::new(self.line, self.col - 1);
-                    toks.push((Token::RBrace, span));
-                    if depth == 0 {
-                        return;
-                    }
+                if depth > 0 {
+                    self.record_token(&token, span.line, span.end_line);
                 }
-                '`' => {
-                    let nested = self.read_template();
-                    toks.extend(nested);
-                }
-                _ => {
-                    if let Some((t, span)) = self.next_with_span() {
-                        toks.push((t, span));
-                    }
-                }
+                toks.push((token, span));
             }
         }
+        self.previous = previous;
+        self.before_previous = before_previous;
+        self.closed_statement = closed_statement;
+        self.conditional_depths = conditional_depths;
+        self.statement_colon = statement_colon;
+        self.callables = callables;
+        self.members = members;
+        self.async_arrow_depth = async_arrow_depth;
+        self.pending_class = pending_class;
+        self.function_body = function_body;
+        self.async_statement_start = async_statement_start;
+        self.async_line_break = async_line_break;
+        self.last_token_end_line = last_token_end_line;
+        self.current_line_break = current_line_break;
+        self.delimiters.truncate(delimiter_depth);
     }
 
     fn next_with_span(&mut self) -> Option<crate::span::SpannedToken> {
-        let span = crate::span::Span::new(self.line, self.col);
-        let t = self.next()?;
+        let mut span = crate::span::Span::new(self.line, self.col);
+        let mut t = self.next()?;
+        if matches!(
+            t,
+            Token::Number(_) | Token::LegacyNumber(_) | Token::BigInt(_)
+        ) && let Some(&following) = self.src.get(self.pos)
+            && (is_identifier_start(following) || following.is_ascii_digit() || following == '\\')
+        {
+            t = Token::Unknown(following);
+        }
+        // Templates emit individual spans for their delimiters/interpolations.
+        if !matches!(t, Token::Backtick) {
+            span.end_line = self.line;
+        }
         Some((t, span))
     }
 
@@ -456,7 +666,7 @@ impl Lexer {
                         Token::QuestionQuestion
                     }
                 }
-                Some('.') => {
+                Some('.') if !self.src.get(self.pos + 2).is_some_and(char::is_ascii_digit) => {
                     self.pos += 2;
                     self.col += 2;
                     Token::QuestionDot
@@ -489,6 +699,7 @@ impl Lexer {
                     self.read_ident()
                 }
             }
+            '.' if self.src.get(self.pos + 1).is_some_and(char::is_ascii_digit) => self.read_num(),
             '.' => {
                 if self.pos + 2 < self.src.len()
                     && self.src[self.pos + 1] == '.'
@@ -744,11 +955,23 @@ impl Lexer {
             '#' => {
                 self.pos += 1;
                 self.col += 1;
-                Token::Hash
+                if self
+                    .src
+                    .get(self.pos)
+                    .is_some_and(|c| is_identifier_start(*c) || *c == '\\')
+                {
+                    let token = self.read_ident();
+                    match token.identifier_name() {
+                        Some(name) => Token::PrivateIdentifier(name.to_owned()),
+                        None => token,
+                    }
+                } else {
+                    Token::Unknown('#')
+                }
             }
             '"' | '\'' => self.read_str(c),
             c if c.is_ascii_digit() => self.read_num(),
-            c if c.is_ascii_alphabetic() || c == '_' || c == '$' => self.read_ident(),
+            c if is_identifier_start(c) || c == '\\' => self.read_ident(),
             _ => {
                 self.pos += 1;
                 self.col += 1;
@@ -762,21 +985,392 @@ impl Lexer {
     /// It is division only when the previous token ends a value. Everything
     /// else — the start of the program, an operator, a keyword, an opening
     /// bracket — is a position where an expression may begin.
+    fn record_token(&mut self, token: &Token, line: usize, end_line: usize) {
+        self.current_line_break = line > self.last_token_end_line;
+        self.async_line_break =
+            matches!(self.previous, Some(Token::KwAsync)) && line > self.last_token_end_line;
+        if self.async_line_break {
+            self.async_arrow_depth = None;
+            self.async_statement_start = false;
+            if let Some(member) = self.members.last_mut() {
+                member.async_names = member.async_names.saturating_sub(1);
+            }
+        }
+        self.observe_token(token);
+        self.last_token_end_line = end_line;
+        self.before_previous = self.previous.replace(token.clone());
+    }
+
+    fn observe_token(&mut self, token: &Token) {
+        let previous = self.previous.as_ref();
+        let statement_start = previous.is_none()
+            || matches!(
+                previous,
+                Some(
+                    Token::Semicolon
+                        | Token::LBrace
+                        | Token::KwElse
+                        | Token::KwExport
+                        | Token::KwDefault
+                )
+            )
+            || (self.closed_statement && matches!(previous, Some(Token::RBrace | Token::RParen)));
+        let field_boundary = self.members.last().is_some_and(|member| {
+            member.class && member.depth == self.delimiters.len() && !member.head
+        }) && self.current_line_break
+            && (token.identifier_name().is_some()
+                && !matches!(token, Token::KwIn | Token::KwInstanceof)
+                || matches!(
+                    token,
+                    Token::PrivateIdentifier(_)
+                        | Token::String(_)
+                        | Token::EscapedString(_)
+                        | Token::Number(_)
+                        | Token::BigInt(_)
+                ))
+            && previous.is_some_and(|token| {
+                token.identifier_name().is_some()
+                    || matches!(
+                        token,
+                        Token::Number(_)
+                            | Token::BigInt(_)
+                            | Token::String(_)
+                            | Token::EscapedString(_)
+                            | Token::RParen
+                            | Token::RBracket
+                            | Token::RBrace
+                            | Token::Backtick
+                    )
+            });
+        if field_boundary {
+            while self.callables.last().is_some_and(|callable| {
+                (callable.field || callable.arrow)
+                    && callable.body_depth.is_none()
+                    && callable.depth == self.delimiters.len()
+            }) {
+                self.callables.pop();
+            }
+            if let Some(member) = self.members.last_mut() {
+                member.head = true;
+                member.async_names = 0;
+                member.generator = false;
+            }
+        }
+        let member_head = self
+            .members
+            .last()
+            .is_some_and(|member| member.depth == self.delimiters.len() && member.head);
+        if matches!(token, Token::Comma | Token::Semicolon) {
+            while self.callables.last().is_some_and(|callable| {
+                (callable.arrow || callable.field)
+                    && callable.body_depth.is_none()
+                    && callable.depth == self.delimiters.len()
+            }) {
+                self.callables.pop();
+            }
+            if self
+                .async_arrow_depth
+                .is_some_and(|depth| depth == self.delimiters.len())
+            {
+                self.async_arrow_depth = None;
+            }
+        }
+        if let Some(member) = self.members.last_mut()
+            && member.depth == self.delimiters.len()
+        {
+            match token {
+                Token::Comma | Token::Semicolon => {
+                    member.head = true;
+                    member.async_names = 0;
+                    member.generator = false;
+                }
+                Token::Colon | Token::Equal => member.head = false,
+                Token::KwAsync if member.head => member.async_names += 1,
+                Token::Star if member.head => member.generator = true,
+                _ => {}
+            }
+        }
+        match token {
+            Token::Equal
+                if member_head && self.members.last().is_some_and(|member| member.class) =>
+            {
+                self.callables.push(LexicalCallable {
+                    depth: self.delimiters.len(),
+                    body_depth: None,
+                    expression: true,
+                    is_async: false,
+                    is_generator: false,
+                    arrow: false,
+                    field: true,
+                });
+            }
+            Token::Question => self.conditional_depths.push(self.delimiters.len()),
+            Token::Colon => {
+                if self.conditional_depths.last() == Some(&self.delimiters.len()) {
+                    self.conditional_depths.pop();
+                    self.statement_colon = false;
+                } else {
+                    self.statement_colon = !self
+                        .members
+                        .last()
+                        .is_some_and(|member| member.depth == self.delimiters.len());
+                }
+            }
+            Token::KwAsync => {
+                self.async_statement_start = statement_start;
+                if !matches!(previous, Some(Token::Dot | Token::QuestionDot)) {
+                    self.async_arrow_depth = Some(self.delimiters.len());
+                }
+            }
+            Token::KwFunction
+                if !member_head && !matches!(previous, Some(Token::Dot | Token::QuestionDot)) =>
+            {
+                let statement = statement_start
+                    || self.async_line_break
+                    || matches!(previous, Some(Token::KwAsync)) && self.async_statement_start;
+                self.callables.push(LexicalCallable {
+                    depth: self.delimiters.len(),
+                    body_depth: None,
+                    expression: !statement,
+                    is_async: matches!(previous, Some(Token::KwAsync)) && !self.async_line_break,
+                    is_generator: false,
+                    arrow: false,
+                    field: false,
+                });
+                self.async_arrow_depth = None;
+            }
+            Token::KwClass
+                if !member_head && !matches!(previous, Some(Token::Dot | Token::QuestionDot)) =>
+            {
+                self.pending_class = Some((self.delimiters.len(), !statement_start));
+            }
+            Token::Star if matches!(previous, Some(Token::KwFunction)) => {
+                if let Some(callable) = self.callables.last_mut() {
+                    callable.is_generator = true;
+                }
+            }
+            Token::Arrow => {
+                let is_async = self.async_arrow_depth.take() == Some(self.delimiters.len());
+                self.callables.push(LexicalCallable {
+                    depth: self.delimiters.len(),
+                    body_depth: None,
+                    expression: true,
+                    is_async,
+                    is_generator: false,
+                    arrow: true,
+                    field: false,
+                });
+            }
+            Token::LParen => {
+                if member_head
+                    && previous.is_some_and(|token| {
+                        token.identifier_name().is_some()
+                            || matches!(
+                                token,
+                                Token::String(_)
+                                    | Token::EscapedString(_)
+                                    | Token::Number(_)
+                                    | Token::BigInt(_)
+                                    | Token::PrivateIdentifier(_)
+                                    | Token::RBracket
+                            )
+                    })
+                {
+                    let member = self.members.last().unwrap();
+                    self.callables.push(LexicalCallable {
+                        depth: self.delimiters.len(),
+                        body_depth: None,
+                        expression: true,
+                        is_async: member.async_names > 0
+                            && (!matches!(previous, Some(Token::KwAsync))
+                                || member.async_names > 1),
+                        is_generator: member.generator,
+                        arrow: false,
+                        field: false,
+                    });
+                    self.members.last_mut().unwrap().head = false;
+                }
+                let control =
+                    !matches!(self.before_previous, Some(Token::Dot | Token::QuestionDot))
+                        && matches!(
+                            previous,
+                            Some(
+                                Token::KwIf
+                                    | Token::KwWhile
+                                    | Token::KwFor
+                                    | Token::KwWith
+                                    | Token::KwSwitch
+                                    | Token::KwCatch
+                            )
+                        );
+                self.delimiters.push((Token::LParen, control));
+            }
+            Token::RParen => {
+                if let Some((Token::LParen, control)) = self.delimiters.pop() {
+                    self.closed_statement = control;
+                }
+                if let Some(callable) = self.callables.last_mut()
+                    && !callable.arrow
+                    && !callable.field
+                    && callable.body_depth.is_none()
+                    && callable.depth == self.delimiters.len()
+                {
+                    self.function_body = Some(callable.expression);
+                    callable.body_depth = Some(self.delimiters.len() + 1);
+                }
+                self.finish_concise_arrows();
+                return;
+            }
+            Token::LBracket => self.delimiters.push((Token::LBracket, false)),
+            Token::RBracket => {
+                self.delimiters.pop();
+                self.finish_concise_arrows();
+            }
+            Token::LBrace => {
+                let callable_body =
+                    self.function_body.is_some() || matches!(previous, Some(Token::Arrow));
+                let class_body = self
+                    .pending_class
+                    .is_some_and(|(depth, _)| depth == self.delimiters.len());
+                if matches!(previous, Some(Token::Arrow))
+                    && let Some(callable) = self.callables.last_mut()
+                {
+                    callable.body_depth = Some(self.delimiters.len() + 1);
+                }
+                let statement = if let Some(expression) = self.function_body.take() {
+                    !expression
+                } else if let Some((depth, expression)) = self.pending_class
+                    && depth == self.delimiters.len()
+                {
+                    self.pending_class = None;
+                    !expression
+                } else {
+                    statement_start
+                        || matches!(previous, Some(Token::Colon)) && self.statement_colon
+                        || matches!(previous, Some(Token::KwStatic)) && member_head
+                        || matches!(
+                            previous,
+                            Some(Token::RParen | Token::KwTry | Token::KwFinally | Token::KwDo)
+                        )
+                };
+                self.delimiters.push((Token::LBrace, statement));
+                if class_body || !statement && !callable_body {
+                    self.members.push(LexicalMember {
+                        depth: self.delimiters.len(),
+                        head: true,
+                        async_names: 0,
+                        generator: false,
+                        class: class_body,
+                    });
+                }
+            }
+            Token::RBrace => {
+                let depth = self.delimiters.len();
+                while self
+                    .callables
+                    .last()
+                    .is_some_and(|callable| callable.field && callable.depth == depth)
+                {
+                    self.callables.pop();
+                }
+                if self
+                    .members
+                    .last()
+                    .is_some_and(|member| member.depth == depth)
+                {
+                    self.members.pop();
+                }
+                if self
+                    .callables
+                    .last()
+                    .is_some_and(|callable| callable.body_depth == Some(depth))
+                {
+                    self.callables.pop();
+                    if let Some(member) = self.members.last_mut() {
+                        member.head = true;
+                        member.async_names = 0;
+                        member.generator = false;
+                    }
+                }
+                if let Some((Token::LBrace, statement)) = self.delimiters.pop() {
+                    self.closed_statement = statement;
+                }
+                self.finish_concise_arrows();
+                return;
+            }
+            _ => {}
+        }
+        self.closed_statement = false;
+    }
+
+    fn finish_concise_arrows(&mut self) {
+        while self.callables.last().is_some_and(|callable| {
+            callable.arrow
+                && callable.body_depth.is_none()
+                && callable.depth > self.delimiters.len()
+        }) {
+            self.callables.pop();
+        }
+    }
+
     fn regex_allowed(&self) -> bool {
+        if matches!(self.before_previous, Some(Token::Dot | Token::QuestionDot))
+            && self
+                .previous
+                .as_ref()
+                .is_some_and(|token| token.identifier_name().is_some())
+        {
+            return false;
+        }
+        if matches!(self.previous, Some(Token::KwAwait | Token::KwYield)) {
+            if matches!(self.before_previous, Some(Token::Dot | Token::QuestionDot)) {
+                return false;
+            }
+            let (await_allowed, yield_allowed) = self
+                .callables
+                .last()
+                .map_or((self.module_goal, false), |callable| {
+                    (callable.is_async, callable.is_generator)
+                });
+            return if matches!(self.previous, Some(Token::KwAwait)) {
+                await_allowed
+            } else {
+                yield_allowed
+            };
+        }
+        if self.closed_statement && matches!(self.previous, Some(Token::RParen | Token::RBrace)) {
+            return true;
+        }
         match &self.previous {
             None => true,
             Some(token) => !matches!(
                 token,
                 Token::Identifier(_)
+                    | Token::EscapedIdentifier(_)
+                    | Token::PrivateIdentifier(_)
                     | Token::Number(_)
+                    | Token::BigInt(_)
+                    | Token::LegacyNumber(_)
                     | Token::String(_)
                     | Token::EscapedString(_)
+                    | Token::LegacyString(_)
                     | Token::Regex(_, _)
+                    | Token::Backtick
                     | Token::RParen
                     | Token::RBracket
                     | Token::RBrace
                     | Token::PlusPlus
                     | Token::MinusMinus
+                    | Token::KwAs
+                    | Token::KwAsync
+                    | Token::KwConstructor
+                    | Token::KwFrom
+                    | Token::KwGet
+                    | Token::KwLet
+                    | Token::KwOf
+                    | Token::KwSet
+                    | Token::KwStatic
+                    | Token::KwUndefined
                     | Token::KwThis
                     | Token::KwSuper
                     | Token::KwNull
@@ -825,6 +1419,10 @@ impl Lexer {
                 '\\' => {
                     pattern.push(c);
                     if let Some(&escaped) = self.src.get(self.pos) {
+                        if matches!(escaped, '\n' | '\r' | '\u{2028}' | '\u{2029}') {
+                            self.pos = start;
+                            return None;
+                        }
                         pattern.push(escaped);
                         self.pos += 1;
                         self.col += 1;
@@ -841,7 +1439,7 @@ impl Lexer {
                 '/' if !in_class => break,
                 // A line terminator ends a regular-expression literal's
                 // reach; what looked like one is a division operator.
-                '\n' => {
+                '\n' | '\r' | '\u{2028}' | '\u{2029}' => {
                     self.pos = start;
                     return None;
                 }
@@ -867,7 +1465,7 @@ impl Lexer {
         ))
     }
 
-    fn read_escape(&mut self) -> Result<crate::JsString, ()> {
+    fn read_escape(&mut self, legacy_allowed: bool) -> Result<crate::JsString, ()> {
         let e = *self.src.get(self.pos).ok_or(())?;
         self.pos += 1;
         self.col += 1;
@@ -878,8 +1476,35 @@ impl Lexer {
             'b' => "\u{0008}",
             'f' => "\u{000C}",
             'v' => "\u{000B}",
-            '0' => "\0",
+            '0' if !self.src.get(self.pos).is_some_and(char::is_ascii_digit) => "\0",
+            '0'..='7' => {
+                if !legacy_allowed {
+                    return Err(());
+                }
+                let mut value = e.to_digit(8).ok_or(())?;
+                let limit = if e <= '3' { 3 } else { 2 };
+                for _ in 1..limit {
+                    let Some(digit) = self.src.get(self.pos).and_then(|c| c.to_digit(8)) else {
+                        break;
+                    };
+                    value = value * 8 + digit;
+                    self.pos += 1;
+                    self.col += 1;
+                }
+                return Ok(crate::JsString::from_units(vec![value as u16]));
+            }
+            '8' | '9' => {
+                if !legacy_allowed {
+                    return Err(());
+                }
+                return Ok(self.source_unit_string(e));
+            }
             '\n' => {
+                self.line += 1;
+                self.col = 1;
+                return Ok(crate::JsString::default());
+            }
+            '\u{2028}' | '\u{2029}' => {
                 self.line += 1;
                 self.col = 1;
                 return Ok(crate::JsString::default());
@@ -941,11 +1566,14 @@ impl Lexer {
         self.col += 1;
         let mut text = crate::JsString::default();
         let mut escaped = false;
+        let mut legacy = false;
         while let Some(&c) = self.src.get(self.pos) {
             self.pos += 1;
             self.col += 1;
             if c == q {
-                return if escaped {
+                return if legacy {
+                    Token::LegacyString(text)
+                } else if escaped {
                     Token::EscapedString(text)
                 } else {
                     Token::String(text)
@@ -956,7 +1584,13 @@ impl Lexer {
             }
             if c == '\\' {
                 escaped = true;
-                match self.read_escape() {
+                legacy |= self
+                    .src
+                    .get(self.pos)
+                    .is_some_and(|c| matches!(c, '1'..='9'))
+                    || self.src.get(self.pos) == Some(&'0')
+                        && self.src.get(self.pos + 1).is_some_and(char::is_ascii_digit);
+                match self.read_escape(true) {
                     Ok(s) => text.push_str(s),
                     Err(()) => return Token::Unknown('\\'),
                 }
@@ -991,6 +1625,17 @@ impl Lexer {
                 self.pos += 1;
                 self.col += 1;
             }
+            let raw = &self.src[digits_start..self.pos];
+            if raw.is_empty()
+                || raw.iter().enumerate().any(|(index, c)| {
+                    *c == '_'
+                        && (index == 0
+                            || !raw[index - 1].is_digit(radix)
+                            || !raw.get(index + 1).is_some_and(|c| c.is_digit(radix)))
+                })
+            {
+                return Token::Unknown('_');
+            }
             let digits: String = self.src[digits_start..self.pos]
                 .iter()
                 .filter(|c| **c != '_')
@@ -1001,7 +1646,9 @@ impl Lexer {
                 let literal: String = self.src[s..self.pos - 1].iter().collect();
                 return Token::BigInt(literal);
             }
-            return Token::Number(u128::from_str_radix(&digits, radix).unwrap_or(0) as f64);
+            return Token::Number(digits.chars().fold(0.0, |value, digit| {
+                value * f64::from(radix) + f64::from(digit.to_digit(radix).unwrap_or(0))
+            }));
         }
         while self.pos < self.src.len()
             && (self.src[self.pos].is_ascii_digit() || self.src[self.pos] == '_')
@@ -1027,11 +1674,43 @@ impl Lexer {
             }
             if la < self.src.len() && self.src[la].is_ascii_digit() {
                 self.pos = la;
-                while self.pos < self.src.len() && self.src[self.pos].is_ascii_digit() {
+                while self.pos < self.src.len()
+                    && (self.src[self.pos].is_ascii_digit() || self.src[self.pos] == '_')
+                {
                     self.pos += 1;
                     self.col += 1;
                 }
             }
+        }
+        let legacy = self.src[s] == '0' && self.src.get(s + 1).is_some_and(char::is_ascii_digit);
+        let legacy_octal = legacy
+            && self.src[s..self.pos]
+                .iter()
+                .filter(|c| c.is_ascii_digit())
+                .all(|c| *c <= '7');
+        if self.src[s] == '0' && self.src.get(s + 1) == Some(&'_')
+            || legacy && self.src[s..self.pos].contains(&'_')
+            || legacy_octal
+                && self.src[s..self.pos]
+                    .iter()
+                    .any(|c| matches!(c, '.' | 'e' | 'E'))
+        {
+            return Token::Unknown('0');
+        }
+        if self.src[s..self.pos]
+            .iter()
+            .enumerate()
+            .any(|(index, character)| {
+                *character == '_'
+                    && (index == 0
+                        || !self.src[s + index - 1].is_ascii_digit()
+                        || !self
+                            .src
+                            .get(s + index + 1)
+                            .is_some_and(char::is_ascii_digit))
+            })
+        {
+            return Token::Unknown('_');
         }
         // A trailing `n` makes the literal a BigInt.
         if self.pos < self.src.len() && self.src[self.pos] == 'n' {
@@ -1041,26 +1720,104 @@ impl Lexer {
                 .collect();
             self.pos += 1;
             self.col += 1;
+            if digits.contains(['.', 'e', 'E']) || legacy {
+                return Token::Unknown('n');
+            }
             return Token::BigInt(digits);
         }
         let n: String = self.src[s..self.pos]
             .iter()
             .filter(|c| **c != '_')
             .collect();
-        Token::Number(n.parse().unwrap_or(0.0))
+        let value = if legacy_octal {
+            n.chars().fold(0.0, |value, digit| {
+                value * 8.0 + f64::from(digit.to_digit(8).unwrap_or(0))
+            })
+        } else {
+            n.parse().unwrap_or(0.0)
+        };
+        if legacy {
+            Token::LegacyNumber(value)
+        } else {
+            Token::Number(value)
+        }
     }
 
-    fn read_ident(&mut self) -> Token {
-        let s = self.pos;
-        while self.pos < self.src.len() {
-            let c = self.src[self.pos];
-            if !c.is_ascii_alphanumeric() && c != '_' && c != '$' {
+    fn identifier_escape(&mut self) -> Result<char, ()> {
+        self.pos += 1;
+        self.col += 1;
+        if self.src.get(self.pos) != Some(&'u') {
+            return Err(());
+        }
+        self.pos += 1;
+        self.col += 1;
+        let braced = self.src.get(self.pos) == Some(&'{');
+        if braced {
+            self.pos += 1;
+            self.col += 1;
+        }
+        let mut value = 0u32;
+        let mut digits = 0;
+        while let Some(&c) = self.src.get(self.pos) {
+            if braced && c == '}' || !braced && digits == 4 {
                 break;
+            }
+            let digit = c.to_digit(16).ok_or(())?;
+            value = value
+                .checked_mul(16)
+                .and_then(|v| v.checked_add(digit))
+                .ok_or(())?;
+            self.pos += 1;
+            self.col += 1;
+            digits += 1;
+        }
+        if digits == 0 || !braced && digits != 4 {
+            return Err(());
+        }
+        if braced {
+            if self.src.get(self.pos) != Some(&'}') {
+                return Err(());
             }
             self.pos += 1;
             self.col += 1;
         }
-        let i: String = self.src[s..self.pos].iter().collect();
+        char::from_u32(value).ok_or(())
+    }
+
+    fn read_ident(&mut self) -> Token {
+        let mut i = String::new();
+        let mut escaped = false;
+        while let Some(&c) = self.src.get(self.pos) {
+            let character = if c == '\\' {
+                escaped = true;
+                match self.identifier_escape() {
+                    Ok(character) => character,
+                    Err(()) => return Token::Unknown('\\'),
+                }
+            } else {
+                if !(if i.is_empty() {
+                    is_identifier_start(c)
+                } else {
+                    is_identifier_continue(c)
+                }) {
+                    break;
+                }
+                self.pos += 1;
+                self.col += 1;
+                c
+            };
+            if !(if i.is_empty() {
+                is_identifier_start(character)
+            } else {
+                is_identifier_continue(character)
+            }) {
+                return Token::Unknown('\\');
+            }
+            i.push(character);
+        }
+        if escaped {
+            return Token::EscapedIdentifier(i);
+        }
         match i.as_str() {
             "var" => Token::KwVar,
             "let" => Token::KwLet,
@@ -1071,6 +1828,7 @@ impl Lexer {
             "else" => Token::KwElse,
             "for" => Token::KwFor,
             "while" => Token::KwWhile,
+            "with" => Token::KwWith,
             "do" => Token::KwDo,
             "switch" => Token::KwSwitch,
             "case" => Token::KwCase,
@@ -1103,6 +1861,8 @@ impl Lexer {
             "undefined" => Token::KwUndefined,
             "delete" => Token::KwDelete,
             "void" => Token::KwVoid,
+            "debugger" => Token::KwDebugger,
+            "enum" => Token::KwEnum,
             "static" => Token::KwStatic,
             "get" => Token::KwGet,
             "set" => Token::KwSet,
@@ -1110,6 +1870,15 @@ impl Lexer {
             _ => Token::Identifier(i),
         }
     }
+}
+
+pub(crate) fn is_identifier_start(character: char) -> bool {
+    matches!(character, '$' | '_') || unicode_id_start::is_id_start(character)
+}
+
+pub(crate) fn is_identifier_continue(character: char) -> bool {
+    matches!(character, '$' | '_' | '\u{200c}' | '\u{200d}')
+        || unicode_id_start::is_id_continue(character)
 }
 
 /// Whether `name` may be used as a binding identifier in guest source --
@@ -1185,6 +1954,8 @@ mod tests {
         "delete",
         "void",
         "static",
+        "debugger",
+        "enum",
     ];
 
     const CONTEXTUAL_IDENTIFIERS: &[&str] =
@@ -1222,6 +1993,11 @@ mod tests {
     #[test]
     fn ordinary_names_are_binding_identifiers() {
         for name in [
+            "café",
+            "你好",
+            "𝒜",
+            "℘",
+            "a\u{200c}b",
             "read",
             "write",
             "_private",
@@ -1257,8 +2033,6 @@ mod tests {
             "a-b",
             "a.b",
             "a()",
-            "café",
-            "\u{4f60}\u{597d}",
             " a",
             "a ",
             "//x",

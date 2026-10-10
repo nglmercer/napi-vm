@@ -524,6 +524,32 @@ impl Marker {
                         self.borrowed = true;
                         continue;
                     };
+                    match borrowed.realm.gc_roots() {
+                        Ok(roots) => {
+                            self.mark_modules(&roots.modules);
+                            for value in roots.values {
+                                self.mark_value(&value);
+                            }
+                            for queue in roots.jobs {
+                                match queue.try_borrow() {
+                                    Ok(queue) => {
+                                        let mut values = Vec::new();
+                                        queue.trace_roots(&mut values);
+                                        for value in values {
+                                            self.mark_value(&value);
+                                        }
+                                    }
+                                    Err(_) => self.borrowed = true,
+                                }
+                            }
+                        }
+                        Err(_) => self.borrowed = true,
+                    }
+                    if let Some(state) = &borrowed.async_state {
+                        for value in state.trace_values() {
+                            self.mark_value(&value);
+                        }
+                    }
                     if let Some(closure) = &borrowed.closure {
                         self.mark_env(closure);
                     }
@@ -542,8 +568,13 @@ impl Marker {
                     // collection refuses to run while one is suspended.
                 }
                 MarkItem::Proxy(data) => {
-                    self.mark_value(&data.target);
-                    self.mark_value(&data.handler);
+                    if let Some(children) = data.trace_children() {
+                        for child in children {
+                            self.mark_value(&child);
+                        }
+                    } else {
+                        self.borrowed = true;
+                    }
                 }
                 MarkItem::Binding(cell) => {
                     let Ok(borrowed) = cell.try_borrow() else {
@@ -554,10 +585,12 @@ impl Marker {
                 }
                 #[cfg(stackful_coroutines)]
                 MarkItem::AsyncTask(inner) => {
-                    // The result promise is tracked in its own right; the
-                    // coroutine stack is opaque, hence the suspend barrier.
+                    // Registration is not reachability: a retained task also
+                    // retains its result promise after its coroutine finishes.
+                    // The coroutine stack is opaque, hence the suspend barrier.
                     if let Ok(task) = inner.try_borrow() {
                         self.opaque |= task.suspends_values();
+                        self.mark_value(&Value::Promise(task.result_promise()));
                         if let Some(owner) = task.owner() {
                             self.mark_env(&owner);
                         }

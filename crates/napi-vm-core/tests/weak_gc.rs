@@ -267,3 +267,149 @@ fn cached_module_rejections_are_traced_without_permanent_pins() {
     assert!(vm.collect_cycles().skipped.is_none());
     yes(&mut vm, "reference.deref()===undefined;");
 }
+
+#[test]
+fn with_object_environment_keeps_captured_receivers_alive() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var read;var receiver={answer:42};receiver.self=receiver;var weak=new WeakRef(receiver);with(receiver){read=function(){return answer;};}receiver=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "read()===42&&weak.deref().answer===42;");
+    run(&mut vm, "read=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "weak.deref()===undefined;");
+}
+
+#[test]
+fn proxy_revokers_trace_live_slots_and_release_targets_and_handlers() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var target={answer:42};target.self=target;var handler={};handler.self=handler;var targetRef=new WeakRef(target);var handlerRef=new WeakRef(handler);var pair=Proxy.revocable(target,handler);var revoke=pair.revoke;target=undefined;handler=undefined;pair=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "targetRef.deref().answer===42&&handlerRef.deref()!==undefined;",
+    );
+    run(&mut vm, "revoke();");
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "targetRef.deref()===undefined&&handlerRef.deref()===undefined;",
+    );
+}
+
+#[test]
+fn proxy_private_fields_preserve_branding_and_roots_after_revocation() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value;constructor(object,value){super(object);this.#value=value;}static read(object){return object.#value;}static write(object,value){object.#value=value;}}var traps=0;var target={};var revocable=Proxy.revocable(target,{get(){traps++;throw 'get';},set(){traps++;throw 'set';},defineProperty(){traps++;throw 'define';}});var proxy=revocable.proxy;var child={answer:42};child.self=proxy;var childRef=new WeakRef(child);new Stamp(proxy,child);revocable.revoke();child=undefined;revocable=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "Stamp.read(proxy)===childRef.deref()&&Stamp.read(proxy).answer===42&&traps===0;",
+    );
+    yes(
+        &mut vm,
+        "var missing;try{Stamp.read(target);}catch(e){missing=e;}missing instanceof TypeError&&traps===0;",
+    );
+    yes(
+        &mut vm,
+        "var duplicate;try{new Stamp(proxy,0);}catch(e){duplicate=e;}duplicate instanceof TypeError&&Stamp.read(proxy)===childRef.deref()&&traps===0;",
+    );
+    run(&mut vm, "proxy=undefined;target=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "childRef.deref()===undefined;");
+}
+
+#[test]
+fn proxy_private_field_chains_drop_without_native_recursion() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "class Identity{constructor(object){return object;}}class Node extends Identity{#next;constructor(next){super(new Proxy({},{}));this.#next=next;}}var head;for(var i=0;i<10000;i++){head=new Node(head);}head=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+}
+
+#[test]
+fn foreign_private_field_initializers_keep_their_realm_on_proxy_receivers() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("class Identity{constructor(object){return object;}}class Stamp extends Identity{#value={answer:42};static read(object){return object.#value;}}").unwrap();
+    vm.set_global_checked("ForeignStamp", child.eval_source("Stamp").unwrap())
+        .unwrap();
+    vm.set_global_checked(
+        "foreignObjectPrototype",
+        child.eval_source("Object.prototype").unwrap(),
+    )
+    .unwrap();
+    drop(child);
+    run(
+        &mut vm,
+        "var pair=Proxy.revocable({},{});var proxy=pair.proxy;pair.revoke();pair=undefined;new ForeignStamp(proxy);ForeignStamp.read(proxy).self=proxy;var ref=new WeakRef(ForeignStamp.read(proxy));",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "ForeignStamp.read(proxy)===ref.deref()&&ForeignStamp.read(proxy).answer===42&&Object.getPrototypeOf(ForeignStamp.read(proxy))===foreignObjectPrototype;",
+    );
+    run(&mut vm, "proxy=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "ref.deref()===undefined;");
+}
+
+#[test]
+fn primitive_proxy_private_fields_do_not_root_the_defining_constructor_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    let constructor=child.eval_source("class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=1;}Stamp;").unwrap();
+    vm.set_global_checked("ForeignStamp", constructor).unwrap();
+    drop(child);
+    run(
+        &mut vm,
+        "var proxy=new Proxy({},{});var constructorRef=new WeakRef(ForeignStamp);new ForeignStamp(proxy);ForeignStamp=undefined;",
+    );
+    let stats = vm.collect_cycles();
+    assert!(stats.skipped.is_none(), "{stats:?}");
+    yes(&mut vm, "constructorRef.deref()===undefined;");
+}
+
+#[test]
+fn private_method_and_accessor_definitions_trace_values_and_release_cycles() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var C=class{#method(){return 42;}get #access(){return this.#method;}method(){return this.#access;}};var instance=new C();var method=instance.method();method.instance=instance;var instanceRef=new WeakRef(instance);var methodRef=new WeakRef(method);instance=undefined;method=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "methodRef.deref().instance===instanceRef.deref()&&methodRef.deref()()===42;",
+    );
+    run(&mut vm, "C=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(
+        &mut vm,
+        "instanceRef.deref()===undefined&&methodRef.deref()===undefined;",
+    );
+}
+
+#[test]
+fn private_static_method_values_are_traced_and_collect_with_the_class() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var C=class{static #method(){return 42;}static read(){return this.#method;}};var method=C.read();method.owner=C;var ref=new WeakRef(method);method=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "C.read()===ref.deref()&&C.read()()===42;");
+    run(&mut vm, "C=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "ref.deref()===undefined;");
+}

@@ -1,5 +1,217 @@
 use napi_vm_core::{Interpreter, Value};
 
+#[test]
+fn thenable_jobs_retain_the_function_realm_for_resolver_allocation() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("var saved;var then=function(resolve,reject){saved=[resolve,reject];resolve.call(null,42);};").unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    vm.set_global_checked("foreignThen", child.eval_source("then").unwrap())
+        .unwrap();
+    drop(child);
+    vm.eval_source_with_options(
+        "var settled;Promise.resolve({then:foreignThen}).then(v=>{settled=v;});",
+        napi_vm_core::interpreter::EvaluationOptions {
+            drain: napi_vm_core::interpreter::DrainPolicy::None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(vm.collect_cycles().skipped.is_none());
+    vm.drain_jobs().unwrap();
+    truth(
+        &mut vm,
+        "settled===42&&Object.getPrototypeOf(other.saved[0])===other.Function.prototype&&Object.getPrototypeOf(other.saved[1])===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "Object.getOwnPropertyNames(other.saved[0]).length===2&&Object.prototype.toString.call(other.saved[0])==='[object Function]';",
+    );
+}
+
+#[test]
+fn string_and_regexp_brand_errors_belong_to_the_accessor_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "var caught;try{other.String.prototype.valueOf.call({valueOf(){return '';}});}catch(e){caught=e;}caught instanceof other.TypeError&&other.String.prototype.valueOf.call(Object('ok'))==='ok';",
+    );
+    for name in [
+        "source",
+        "global",
+        "ignoreCase",
+        "multiline",
+        "dotAll",
+        "sticky",
+        "unicode",
+        "unicodeSets",
+        "hasIndices",
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var getter=Object.getOwnPropertyDescriptor(other.RegExp.prototype,'{name}').get;var caught;try{{getter.call(RegExp.prototype);}}catch(e){{caught=e;}}caught instanceof other.TypeError&&Object.getPrototypeOf(getter)===other.Function.prototype;"
+            ),
+        );
+    }
+    truth(
+        &mut vm,
+        "other.RegExp.prototype.source==='(?:)'&&other.RegExp.prototype.global===undefined;",
+    );
+}
+
+#[test]
+fn shared_typed_elements_use_observable_numeric_and_bigint_conversion() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var count=0;var b=new SharedArrayBuffer(16);var a=new BigInt64Array(b);a[0]={valueOf(){count++;return '42';}};a.fill(true,1);Atomics.add(a,0,'1')===42n&&a[0]===43n&&a[1]===1n&&count===1;",
+    );
+    truth(
+        &mut vm,
+        "var order='';var source={length:2,get 0(){order+='a';return {valueOf(){order+='b';return '7';}};},get 1(){order+='c';return '8';}};var copied=new BigInt64Array(source);order==='abc'&&copied[0]===7n&&copied[1]===8n;",
+    );
+    truth(
+        &mut vm,
+        "var calls=0;var source={get [Symbol.iterator](){calls++;return function(){return ['0','1'][Symbol.iterator]();};}};var a=new BigUint64Array(source);calls===1&&a[1]===1n;",
+    );
+    truth(
+        &mut vm,
+        "var view=new BigInt64Array(new ArrayBuffer(8));Atomics.add(view,0,'2')===0n&&view[0]===2n;",
+    );
+    truth(
+        &mut vm,
+        "var caught;try{new BigInt64Array(new Uint8Array(0));}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    truth(
+        &mut vm,
+        "new Uint8Array(2.9).length===2&&new Uint8Array('3').length===3;",
+    );
+}
+
+#[test]
+fn buffer_slice_observes_species_and_allocates_in_the_method_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for name in ["ArrayBuffer", "SharedArrayBuffer"] {
+        truth(
+            &mut vm,
+            &format!(
+                "var C={name};var b=new C(8);var bytes=new Uint8Array(b);bytes[2]=42;var order='';var chosen;var ctor={{get [Symbol.species](){{order+='s';return function(n){{order+='c';return chosen=new C(n+1);}};}}}};Object.defineProperty(b,'constructor',{{get(){{order+='k';return ctor;}}}});var result=b.slice({{valueOf(){{order+='a';return 2;}}}},{{valueOf(){{order+='z';return 4;}}}});order==='azksc'&&result===chosen&&result.byteLength===3&&new Uint8Array(result)[0]===42;"
+            ),
+        );
+        truth(
+            &mut vm,
+            &format!(
+                "var fresh=new C(4);fresh.constructor=undefined;var foreign=other.{name}.prototype.slice.call(fresh);Object.getPrototypeOf(foreign)===other.{name}.prototype;"
+            ),
+        );
+        truth(
+            &mut vm,
+            "var same=new C(4);same.constructor={[Symbol.species]:function(){return same;}};var caught;try{same.slice();}catch(e){caught=e;}caught instanceof TypeError;",
+        );
+        truth(
+            &mut vm,
+            "C[Symbol.species]===C&&Object.getOwnPropertyDescriptor(C,'length').value===1&&C.prototype.slice.length===2;",
+        );
+    }
+    truth(
+        &mut vm,
+        "SharedArrayBuffer.prototype[Symbol.toStringTag]==='SharedArrayBuffer';",
+    );
+}
+
+#[test]
+fn implicit_derived_constructors_forward_arguments_without_iteration() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "Array.prototype[Symbol.iterator]=function(){throw 42;};class Base{constructor(a,b){this.sum=a+b;}}class Derived extends Base{field=7;}class Leaf extends Derived{}var instance=new Leaf(2,3);instance.sum===5&&instance.field===7&&instance instanceof Leaf;",
+    );
+}
+
+#[test]
+fn promise_resolving_functions_have_call_but_no_construct() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var resolve,reject;new Promise(function(a,b){resolve=a;reject=b;});var count=0;for(var fn of [resolve,reject]){try{Reflect.construct(function(){},[],fn);}catch(e){if(e instanceof TypeError)count++;}try{new fn();}catch(e){if(e instanceof TypeError)count++;}}count===4;",
+    );
+    truth(
+        &mut vm,
+        "var settled=false;var p=new Promise(function(resolve){resolve(42);});p.then(function(v){settled=v===42;});true;",
+    );
+    truth(&mut vm, "settled;");
+    truth(
+        &mut vm,
+        "resolve.name===''&&resolve.length===1&&reject.name===''&&reject.length===1&&Object.getPrototypeOf(resolve)===Function.prototype&&Object.getPrototypeOf(reject)===Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "var p=new Promise(function(resolve){resolve.call({unrelated:true},7);});var result;p.then(function(value){result=value;});true;",
+    );
+    truth(&mut vm, "result===7;");
+    truth(
+        &mut vm,
+        "Promise.resolve(1).then(()=>Promise.resolve());var savedThen=Promise.prototype.then;var checked=0;Promise.prototype.then=function(resolve,reject){if(resolve.name!==''||resolve.length!==1||reject.name!==''||reject.length!==1)throw 42;checked++;return savedThen.call(this,resolve,reject);};true;",
+    );
+    truth(&mut vm, "checked>0;");
+}
+
+#[test]
+fn promise_combinators_reject_iterator_step_errors_without_closing() {
+    let mut vm = Interpreter::with_builtins();
+    for method in ["all", "allSettled", "race", "any"] {
+        truth(
+            &mut vm,
+            &format!(
+                "var error={{}};var closed=0;var rejected=false;var iterable={{[Symbol.iterator](){{return {{next(){{return {{get done(){{throw error;}},get value(){{throw 42;}}}};}},return(){{closed++;return {{}};}}}};}}}};Promise.{method}(iterable).then(undefined,function(e){{rejected=e===error;}});closed===0;"
+            ),
+        );
+        truth(&mut vm, "rejected===true;");
+    }
+}
+
+#[test]
+fn concrete_typed_array_metadata_identifies_each_realms_constructor() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for name in [
+        "Int8Array",
+        "Uint8Array",
+        "Uint8ClampedArray",
+        "Int16Array",
+        "Uint16Array",
+        "Int32Array",
+        "Uint32Array",
+        "Float32Array",
+        "Float64Array",
+        "BigInt64Array",
+        "BigUint64Array",
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var C={name};var d=Object.getOwnPropertyDescriptor(C,'name');C.name==='{name}'&&d.value===C.name&&!d.writable&&!d.enumerable&&d.configurable&&C.length===3&&Object.getPrototypeOf(C)===Object.getPrototypeOf(Uint8Array);"
+            ),
+        );
+        truth(
+            &mut vm,
+            &format!(
+                "var target=other.{name}.bind(null);target.prototype=undefined;Object.getPrototypeOf(Reflect.construct({name},[0],target))===other[C.name].prototype;"
+            ),
+        );
+    }
+}
+
 fn truth(vm: &mut Interpreter, source: &str) {
     let result = vm.eval_source(source);
     assert!(
@@ -352,5 +564,1304 @@ fn commonjs_instances_and_escaped_require_use_the_defining_realm() {
     truth(
         &mut vm,
         "parentPackage.tag===10&&childRequire('pkg').tag===20&&childRequire('pkg')!==parentPackage&&cjsRuns===1;",
+    );
+}
+
+#[test]
+fn independent_primary_globals_keep_their_identity_and_storage() {
+    let mut first = Interpreter::with_builtins();
+    let mut second = Interpreter::with_builtins();
+    first
+        .eval_source("var tag=11;function receiver(){return this;}var array=[];")
+        .unwrap();
+    second.eval_source("var tag=22;").unwrap();
+    second
+        .set_global_checked("firstGlobal", first.realm_global_object())
+        .unwrap();
+    truth(
+        &mut second,
+        "firstGlobal!==globalThis&&firstGlobal.globalThis===firstGlobal&&firstGlobal.tag===11&&tag===22;",
+    );
+    truth(
+        &mut second,
+        "var f=firstGlobal.receiver;f()===firstGlobal&&Object.getPrototypeOf(firstGlobal.array)===firstGlobal.Array.prototype;",
+    );
+    truth(
+        &mut second,
+        "firstGlobal.tag=33;firstGlobal.tag===33&&tag===22;",
+    );
+    truth(&mut first, "tag===33&&this===globalThis;");
+    drop(first);
+    assert!(second.collect_cycles().skipped.is_none());
+    truth(
+        &mut second,
+        "firstGlobal.tag===33&&firstGlobal.receiver()===firstGlobal&&Object.getPrototypeOf(firstGlobal)===firstGlobal.Object.prototype;",
+    );
+}
+
+#[test]
+fn weak_collections_keep_live_primary_globals_and_release_dead_realms() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source(
+        "var map=new WeakMap();map.set(globalThis,{answer:42});var ref=new WeakRef(globalThis);",
+    )
+    .unwrap();
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "ref.deref()===globalThis&&map.get(globalThis).answer===42;",
+    );
+    let foreign = Interpreter::with_builtins();
+    vm.set_global_checked("foreign", foreign.realm_global_object())
+        .unwrap();
+    vm.eval_source("var foreignRef=new WeakRef(foreign);map.set(foreign,{owner:foreign});")
+        .unwrap();
+    drop(foreign);
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "foreignRef.deref()===foreign&&map.get(foreign).owner===foreign;",
+    );
+    vm.eval_source("foreign=undefined;").unwrap();
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "foreignRef.deref()===undefined&&ref.deref()===globalThis;",
+    );
+}
+
+#[test]
+fn foreign_native_and_guest_errors_keep_their_originating_intrinsics() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = Interpreter::with_builtins();
+    other.eval_source("function bad(){null.x;}function* generator(){null.x;}async function asynchronous(){await 0;null.x;}function F(){}").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    drop(other);
+    for source in [
+        "var caught;try{other.bad();}catch(e){caught=e;}caught.constructor===other.TypeError&&Object.getPrototypeOf(caught)===other.TypeError.prototype&&!(caught instanceof TypeError);",
+        "try{other.Object.getPrototypeOf(undefined);}catch(e){caught=e;}caught.constructor===other.TypeError&&Object.getPrototypeOf(caught)===other.TypeError.prototype;",
+        "try{other.generator().next();}catch(e){caught=e;}caught.constructor===other.TypeError;",
+        "try{await other.asynchronous();}catch(e){caught=e;}caught.constructor===other.TypeError;",
+        "Object.getPrototypeOf(other.F.prototype)===other.Object.prototype;",
+        "try{other.Function('return )');}catch(e){caught=e;}caught.constructor===other.SyntaxError;",
+    ] {
+        truth(&mut vm, source);
+    }
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(&mut vm, "caught.constructor===other.SyntaxError;");
+}
+
+#[test]
+fn iterators_have_shared_realm_owned_prototypes_and_methods() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = Interpreter::with_builtins();
+    other.eval_source("function* generator(){yield 1;}var g=generator();var arrayIterator=[1].values();var stringIterator='x'[Symbol.iterator]();").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    drop(other);
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.g)===other.generator.prototype&&other.g.next===Object.getPrototypeOf(other.generator.prototype).next;",
+    );
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.arrayIterator)!==Object.getPrototypeOf([].values())&&Object.getPrototypeOf(other.arrayIterator.next)===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.stringIterator)!==Object.getPrototypeOf(''[Symbol.iterator]())&&Object.getPrototypeOf(other.stringIterator.next)===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "other.arrayIterator.next().value===1&&other.stringIterator.next().value==='x'&&other.g.next().value===1;",
+    );
+    // Finish the generator before the conservative opaque-stack collection boundary.
+    truth(&mut vm, "other.g.next().done;");
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(other.arrayIterator.next)===other.Function.prototype;",
+    );
+}
+
+#[test]
+fn constructor_post_return_errors_belong_to_the_constructing_caller() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("var Primitive=class extends Object{constructor(){return null;}};var Missing=class extends Object{constructor(){}};var Thrown=class extends Object{constructor(){null.x;}};").unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{new other.Primitive();}catch(e){caught=e;}caught.constructor===TypeError;",
+        "try{new other.Missing();}catch(e){caught=e;}caught.constructor===ReferenceError;",
+        "try{new other.Thrown();}catch(e){caught=e;}caught.constructor===other.TypeError;",
+        "try{Reflect.construct(other.Primitive,[]);}catch(e){caught=e;}caught.constructor===TypeError;",
+        "try{Reflect.construct(other.Missing,[]);}catch(e){caught=e;}caught.constructor===ReferenceError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn native_constructor_prototype_errors_belong_to_the_constructor_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked(
+        "foreignNonConstructor",
+        child.global_value("parseInt").unwrap(),
+    )
+    .unwrap();
+    truth(
+        &mut vm,
+        "var caught;try{new foreignNonConstructor(0);}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "var pair=Proxy.revocable(function(){},{get(target,key){if(key==='prototype'){pair.revoke();return null;}return target[key];}});var caught;try{Reflect.construct(other.Array,[1],pair.proxy);}catch(e){caught=e;}caught instanceof other.TypeError;",
+    );
+    truth(
+        &mut vm,
+        "var observed=false;var target=new Proxy(function(){},{get(target,key){if(key==='prototype'){observed=true;throw new other.TypeError();}return target[key];}});var caught;try{Reflect.construct(Array,[1.5],target);}catch(e){caught=e;}observed&&caught instanceof other.TypeError;",
+    );
+}
+
+#[test]
+fn cross_realm_instances_use_prototypes_for_brand_checks() {
+    let mut vm = Interpreter::with_builtins();
+    let other = vm.create_realm();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for (kind, args) in [
+        ("Object", ""),
+        ("Array", ""),
+        ("Date", "0"),
+        ("RegExp", "'x'"),
+        ("Map", ""),
+        ("Set", ""),
+        ("WeakMap", ""),
+        ("WeakSet", ""),
+        ("ArrayBuffer", "4"),
+        ("SharedArrayBuffer", "4"),
+        ("Int32Array", "4"),
+        ("DataView", "new other.ArrayBuffer(4)"),
+        ("WeakRef", "{}"),
+        ("FinalizationRegistry", "()=>{}"),
+        ("Error", "'x'"),
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var instance=new other.{kind}({args});instance instanceof other.{kind}&&!(instance instanceof {kind});"
+            ),
+        );
+    }
+}
+
+#[test]
+fn error_prototype_chains_and_generic_to_string_preserve_realm_semantics() {
+    let mut vm = Interpreter::with_builtins();
+    let other = vm.create_realm();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "Object.getPrototypeOf(other.Error.prototype)===other.Object.prototype;",
+        "Object.getPrototypeOf(other.TypeError)===other.Error&&other.Error.length===1;",
+        "var called=other.TypeError.call(null,'message');called instanceof other.TypeError&&called.message==='message'&&!Object.prototype.hasOwnProperty.call(called,'name');",
+        "var noMessage=other.Error();!Object.prototype.hasOwnProperty.call(noMessage,'message');",
+        "var caused=other.Error('x',{cause:42});caused.cause===42&&!Object.getOwnPropertyDescriptor(caused,'cause').enumerable;",
+        "var Derived=class extends other.Error{};var derived=new Derived('x');derived instanceof Derived&&derived instanceof other.Error&&derived.message==='x';",
+        "var error=new other.TypeError('message');error instanceof other.Object&&error instanceof other.Error&&!(error instanceof Object);",
+        "Error.prototype.toString.call({name:'',message:'message'})==='message';",
+        "Error.prototype.toString.call({name:12,message:34})==='12: 34';",
+        "Error.prototype.toString.call({})==='Error';",
+        "var order='';Error.prototype.toString.call({name:{toString(){order+='n';return 'N';}},get message(){order+='m';return 'M';}})==='N: M'&&order==='nm';",
+        "var caught;try{other.Error.prototype.toString.call(1);}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var marker={};try{Error.prototype.toString.call({name:Symbol(),get message(){throw marker;}});}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn weak_intrinsics_and_iterator_aliases_have_owned_standard_metadata() {
+    let mut vm = Interpreter::with_builtins();
+    let other = vm.create_realm();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "other.Array.prototype.values===other.Array.prototype[Symbol.iterator];",
+        "Object.getPrototypeOf(other.WeakRef)===other.Function.prototype&&other.WeakRef.length===1&&other.WeakRef.name==='WeakRef';",
+        "Object.getPrototypeOf(other.FinalizationRegistry)===other.Function.prototype&&other.FinalizationRegistry.length===1;",
+        "Object.getPrototypeOf(other.WeakRef.prototype)===other.Object.prototype&&other.WeakRef.prototype[Symbol.toStringTag]==='WeakRef';",
+        "other.FinalizationRegistry.prototype.register.length===2&&other.FinalizationRegistry.prototype.unregister.length===1;",
+        "Object.getPrototypeOf(other.WeakRef.prototype.deref)===other.Function.prototype;",
+        "var descriptor=Object.getOwnPropertyDescriptor(other.WeakRef,'prototype');!descriptor.writable&&!descriptor.enumerable&&!descriptor.configurable;",
+        "!Object.getOwnPropertyDescriptor(other.FinalizationRegistry.prototype,'constructor').enumerable;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn class_call_and_non_callable_apply_use_the_required_error_realms() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child
+        .eval_source("var C = class {}; var object = {};")
+        .unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{other.C();}catch(error){caught=error;}caught instanceof other.TypeError;",
+        "try{other.Function.prototype.apply.call({}, null, []);}catch(error){caught=error;}caught instanceof other.TypeError;",
+        "try{Function.prototype.call.call(other.object);}catch(error){caught=error;}caught instanceof TypeError;",
+        "try{other.Function.prototype.apply.call(function(){}, null, 42);}catch(error){caught=error;}caught instanceof other.TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn aggregate_errors_and_error_branding_preserve_realm_and_identity() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var error=other.AggregateError([1,2],'message',{cause:42});error instanceof other.AggregateError&&error instanceof other.Error&&error.message==='message'&&error.cause===42&&error.errors.join(',')==='1,2';",
+        "Object.getPrototypeOf(error.errors)===other.Array.prototype&&Object.prototype.toString.call(error)==='[object Error]';",
+        "Error.isError(error)&&other.Error.isError(new Error())&&!Error.isError(Object.create(Error.prototype))&&!Error.isError(new Proxy(error,{}));",
+        "var descriptor=Object.getOwnPropertyDescriptor(error,'errors');descriptor.writable&&!descriptor.enumerable&&descriptor.configurable;",
+        "var Target=new other.Function();Target.prototype=null;Object.getPrototypeOf(Reflect.construct(AggregateError,[[]],Target))===other.AggregateError.prototype;",
+        "var order='';var errors={};errors[Symbol.iterator]=function(){order+='i';return [1][Symbol.iterator]();};var message={toString(){order+='m';return 'message';}};var options={get cause(){order+='c';return 42;}};AggregateError(errors,message,options);order==='mci';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn apply_and_construct_share_array_like_property_access_order() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var order='';var list={get length(){order+='l';return 2;},get 0(){order+='a';return 1;},get 1(){order+='b';return 2;}};function add(a,b){return a+b;}add.apply(null,list)===3&&order==='lab';",
+        "order='';Reflect.apply(add,null,list)===3&&order==='lab';",
+        "order='';function C(a,b){this.value=a+b;}Reflect.construct(C,list).value===3&&order==='lab';",
+        "var caught;try{Reflect.apply(add,null,undefined);}catch(error){caught=error;}caught instanceof TypeError;",
+        "order='';try{Function.prototype.apply.call({},null,list);}catch(error){caught=error;}caught instanceof TypeError&&order==='';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn regexp_compile_checks_the_defining_realm_of_its_receiver() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child.eval_source("var regex=/child/;").unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{RegExp.prototype.compile.call(other.regex,'main');}catch(error){caught=error;}caught instanceof TypeError&&other.regex.source==='child';",
+        "try{other.RegExp.prototype.compile.call(/main/,'child');}catch(error){caught=error;}caught instanceof other.TypeError;",
+        "other.regex.compile('changed')===other.regex&&other.regex.source==='changed';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn primitive_property_references_use_the_current_execution_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("Number.prototype.realm='child';String.prototype.realm='child';Boolean.prototype.realm='child';Symbol.prototype.realm='child';BigInt.prototype.realm='child';var read=value=>value.realm;var iterator=value=>value[Symbol.iterator];").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "other.read(1)==='child'&&other.read('')==='child'&&other.read(true)==='child'&&other.read(Symbol())==='child'&&other.read(1n)==='child';",
+        "(1).realm===undefined&&''.realm===undefined;",
+        "other.iterator('')===other.String.prototype[Symbol.iterator];",
+        "Symbol('description').description==='description'&&Object(Symbol('boxed')).description==='boxed';",
+        "other.eval(\"String.prototype['01']='inherited';'abc'['01']==='inherited'&&'abc'[1]==='b'\");",
+        "other.eval(\"Object.defineProperty(Number.prototype,'receiver',{get(){'use strict';return this;}});(42).receiver===42\");",
+        "other.eval(\"Number=function(){};(1).realm==='child'\");",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn proxy_internal_errors_use_the_caller_realm_and_preserve_trap_abrupt_completions() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var target=function(){};var callable=new Proxy(target,{apply:1});var constructible=new Proxy(target,{construct:1});var Class=class{};var throwing=new Proxy(target,{get apply(){throw new TypeError('foreign getter');}});").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var caught;try{other.callable();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "try{new other.constructible();}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "try{other.Class();}catch(e){caught=e;}caught instanceof other.TypeError&&!(caught instanceof TypeError);",
+        "try{other.throwing();}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var apply=new Proxy(function(target,receiver,args){return args[0];},{});new Proxy(function(){},{apply})(42)===42;",
+        "new Proxy({x:42},new Proxy({},{})).x===42;",
+        "var handler=[];handler.get=function(){return 42;};new Proxy({},handler).x===42;",
+        "try{other.Proxy({},{});}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var reads=0;var newTarget=function(){}.bind(null);Object.defineProperty(newTarget,'prototype',{get(){reads++;throw 'read';}});Reflect.construct(Proxy,[{},{}],newTarget);reads===0;",
+    ] {
+        truth(&mut vm, source);
+    }
+    for (name, operation) in [
+        ("get", "proxy.x"),
+        ("set", "proxy.x=1"),
+        ("has", "'x' in proxy"),
+        ("deleteProperty", "delete proxy.x"),
+        ("ownKeys", "Object.keys(proxy)"),
+        ("getPrototypeOf", "Object.getPrototypeOf(proxy)"),
+    ] {
+        for trap in ["get(){throw marker;}", "value:1"] {
+            truth(
+                &mut vm,
+                &format!(
+                    "var marker={{}};var handler={{}};Object.defineProperty(handler,'{name}',{{{trap}}});var proxy=new Proxy({{}},handler);var caught;try{{{operation};}}catch(e){{caught=e;}}{};",
+                    if trap.starts_with("get") {
+                        "caught===marker"
+                    } else {
+                        "caught instanceof TypeError"
+                    }
+                ),
+            );
+        }
+    }
+}
+
+#[test]
+fn restricted_accessors_share_one_thrower_per_realm_and_keep_argument_identity() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var strictArgs=function(){'use strict';return arguments;};var defaults=function(a=0){return arguments;};var rest=function(...a){return arguments;};var ordinary=function(){return arguments;};").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var foreign=Object.getOwnPropertyDescriptor(other.strictArgs(),'callee');var caller=Object.getOwnPropertyDescriptor(other.Function.prototype,'caller');foreign.get===foreign.set&&foreign.get===caller.get&&foreign.get===caller.set;",
+        "Object.getOwnPropertyDescriptor(other.defaults(),'callee').get===foreign.get&&Object.getOwnPropertyDescriptor(other.rest(),'callee').set===foreign.get;",
+        "var local=Object.getOwnPropertyDescriptor(Function.prototype,'caller').get;foreign.get!==local&&Object.getPrototypeOf(foreign.get)===other.Function.prototype;",
+        "foreign.get.name===''&&foreign.get.length===0&&!Object.isExtensible(foreign.get)&&!Object.getOwnPropertyDescriptor(foreign.get,'name').configurable;",
+        "var caught;try{other.strictArgs().callee;}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "try{other.Function.prototype.caller=1;}catch(e){caught=e;}caught instanceof other.TypeError;",
+        "var arguments=other.ordinary(42);arguments.callee===other.ordinary&&arguments[0]===42&&arguments[Symbol.iterator]===other.Array.prototype.values;",
+        "!Object.getOwnPropertyDescriptor(other.strictArgs(),'callee').configurable&&!Object.getOwnPropertyDescriptor(arguments,'length').enumerable;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn async_generator_prototype_ownership_preserves_existing_iteration() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other
+        .eval_source("var generate=async function*(){yield 42;};")
+        .unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        "var generator=other.generate();Object.getPrototypeOf(generator)===other.generate.prototype&&Object.getPrototypeOf(generator.next)===other.Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "var sum=0;for await(var value of generator){sum+=value;}sum===42;",
+    );
+    truth(
+        &mut vm,
+        "var fallback=Object.getPrototypeOf(other.generate.prototype);other.generate.prototype=undefined;Object.getPrototypeOf(other.generate())===fallback;",
+    );
+    truth(
+        &mut vm,
+        "var caught;try{Error({toString:undefined,valueOf:undefined});}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    truth(
+        &mut vm,
+        "Number.prototype.split=String.prototype.split;try{(42).split({toString(){return /x/;}});}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+}
+
+#[test]
+fn non_strict_ordinary_functions_keep_legacy_properties_without_exposing_callers() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "function ordinary(){return ordinary.caller;}function strict(){'use strict';return ordinary();}strict()===null;",
+        "eval(\"'use strict';ordinary();\")===null;",
+        "ordinary.arguments===null&&!Object.getOwnPropertyDescriptor(ordinary,'caller').configurable;",
+        "var caught;try{strict.caller;}catch(e){caught=e;}caught instanceof TypeError;",
+        "try{(()=>{}).caller;}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn array_species_allocation_observes_custom_constructors_and_foreign_intrinsics() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var input=[2,0,4];delete input[1];var Result=function(n){this.size=n;};Object.defineProperty(Array,Symbol.species,{get(){throw new Error('foreign species observed');}});").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var mapped=Array.prototype.map.call(other.input,x=>x*2);Object.getPrototypeOf(mapped)===Array.prototype;",
+        "mapped.length===3;",
+        "mapped[0]===4;",
+        "!(1 in mapped);",
+        "var log='';var input=[2,0,4];delete input[1];input.constructor={get [Symbol.species](){log+='s';return other.Result;}};var output=input.map(x=>{log+='m';return x+1;});log==='smm'&&Object.getPrototypeOf(output)===other.Result.prototype&&output.size===3&&output[0]===3&&!(1 in output)&&output[2]===5;",
+        "var filtered=input.filter(x=>x>2);Object.getPrototypeOf(filtered)===other.Result.prototype&&filtered.size===0&&filtered[0]===4;",
+        "var descriptor=Object.getOwnPropertyDescriptor(Array,Symbol.species);descriptor.get.call(other.Result)===other.Result&&!descriptor.enumerable&&descriptor.configurable&&descriptor.get.length===0;",
+        "input.constructor={[Symbol.species]:null};Array.isArray(input.map(x=>x));",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn proxy_revocation_preserves_flags_and_captures_slots_before_trap_getters() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other
+        .eval_source("var revocable=Proxy.revocable;var Target=function(){};")
+        .unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var pair=other.revocable(other.Target,{});var proxy=pair.proxy;Object.getPrototypeOf(pair.revoke)===other.Function.prototype&&pair.revoke.name===''&&pair.revoke.length===0&&!Object.prototype.hasOwnProperty.call(pair.revoke,'prototype');",
+        "pair.revoke.call({});pair.revoke();typeof proxy==='function';",
+        "var caught;caught=undefined;try{proxy.x;}catch(e){caught=e;}caught instanceof TypeError&&!(caught instanceof other.TypeError);",
+        "caught=undefined;try{proxy();}catch(e){caught=e;}caught instanceof TypeError;",
+        "caught=undefined;try{new proxy();}catch(e){caught=e;}caught instanceof TypeError;",
+        "var pair=Proxy.revocable([1],{});pair.revoke();caught=undefined;try{Array.isArray(pair.proxy);}catch(e){caught=e;}caught instanceof TypeError;",
+        "var state,seen;var handler={get get(){state.revoke();return function(target,key,receiver){seen=this===handler&&target.answer===42&&receiver===state.proxy;return target[key];};}};state=Proxy.revocable({answer:42},handler);state.proxy.answer===42&&seen;",
+        "var state=Proxy.revocable(other.Target,{get get(){state.revoke();return ()=>null;}});caught=undefined;try{Reflect.construct(Object,[],state.proxy);}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn proxy_extensibility_and_prototype_operations_share_invariant_checks() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var target={};var proxy=new Proxy(target,{});Object.isExtensible(proxy)&&Reflect.preventExtensions(proxy)&&!Object.isExtensible(target);",
+        "var caught;try{Object.isExtensible(new Proxy({}, {isExtensible(){return false;}}));}catch(e){caught=e;}caught instanceof TypeError;",
+        "caught=undefined;try{Reflect.preventExtensions(new Proxy({}, {preventExtensions(){return true;}}));}catch(e){caught=e;}caught instanceof TypeError;",
+        "!Reflect.preventExtensions(new Proxy({}, {preventExtensions(){return false;}}));",
+        "var proto={};var target={};var proxy=new Proxy(target,{});Reflect.setPrototypeOf(proxy,proto)&&Object.getPrototypeOf(target)===proto;",
+        "Object.preventExtensions(target);!Reflect.setPrototypeOf(proxy,{})&&Reflect.setPrototypeOf(proxy,proto);",
+        "caught=undefined;try{Object.setPrototypeOf(new Proxy(target,{setPrototypeOf(){return true;}}),{});}catch(e){caught=e;}caught instanceof TypeError;",
+        "var pair=Proxy.revocable({},{});pair.revoke();var operations=[()=>Reflect.has(pair.proxy,'x'),()=>Object.isExtensible(pair.proxy),()=>Object.preventExtensions(pair.proxy),()=>Object.setPrototypeOf(pair.proxy,null)];operations.every(operation=>{try{operation();return false;}catch(e){return e instanceof TypeError;}});",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn bound_functions_observe_target_prototypes_before_metadata_and_realm_lookup() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var target=function(a,b,c){};").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "Object.getPrototypeOf(Function.prototype.bind.call(other.target,null))===other.Function.prototype;",
+        "var log='';var proto={};var target=new Proxy(other.target,{getPrototypeOf(){log+='p';return proto;},getOwnPropertyDescriptor(target,key){log+='d';return Reflect.getOwnPropertyDescriptor(target,key);},get(target,key){log+=key==='length'?'l':'n';return target[key];}});var bound=Function.prototype.bind.call(target,null,1);log==='pdln'&&bound.length===2&&Object.getPrototypeOf(bound)===proto;",
+        "var target=function(){};Object.defineProperty(target,'length',{value:{valueOf(){throw new Error('length conversion');}}});target.bind(null).length===0;",
+        "var pair=Proxy.revocable(other.target,{});var bound=Function.prototype.bind.call(pair.proxy,null);pair.revoke();var observed=false;Object.defineProperty(bound,Symbol.species,{get(){observed=true;return Array;}});var input=[1];input.constructor=bound;var caught;try{input.map(x=>x);}catch(e){caught=e;}caught instanceof TypeError&&!observed;",
+        "caught=undefined;try{Function.prototype.bind.call(pair.proxy,null);}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn array_from_and_of_use_constructor_realms_and_observable_initialization_order() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other.eval_source("var Result=function(n){this.count=arguments.length;this.size=n;};Result.prototype=null;").unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var result=Array.of.call(other.Result,7,8);Object.getPrototypeOf(result)===other.Object.prototype&&result.size===2&&result.count===1&&result.length===2&&result[1]===8;",
+        "var result=Array.from.call(other.Result,[7,8]);Object.getPrototypeOf(result)===other.Object.prototype&&result.count===0&&result.length===2&&result[0]===7;",
+        "var result=Array.from.call(other.Result,{0:7,length:1});result.count===1&&result.size===1&&result[0]===7;",
+        "var log='';function Result(n){log+='c';this.size=n;}var source={get [Symbol.iterator](){log+='i';return undefined;},get length(){log+='l';return 2;},get 0(){log+='a';return 7;},get 1(){log+='b';return 8;}};Array.from.call(Result,source,x=>{log+='m';return x;});log==='ilcambm';",
+        "var closed=false;var sentinel={};var iterable={[Symbol.iterator](){return {next(){return {value:1,done:false};},return(){closed=true;throw new Error('close');}};}};var caught;try{Array.from(iterable,()=>{throw sentinel;});}catch(e){caught=e;}caught===sentinel&&closed;",
+        "function Locked(){Object.defineProperty(this,'length',{value:0,writable:false});}caught=undefined;try{Array.of.call(Locked,1);}catch(e){caught=e;}caught instanceof TypeError;",
+        "var stored=0;var locked=Object.freeze({x:0});function WithSetter(){Object.defineProperty(this,'length',{set(n){locked.x=1;stored=n;}});}Array.of.call(WithSetter,1,2);stored===2&&locked.x===0;",
+        "var descriptor=Object.getOwnPropertyDescriptor(result,'0');descriptor.writable&&descriptor.enumerable&&descriptor.configurable;",
+        "Array.isArray(Array.from.call(()=>{},[1]))&&Array.isArray(Array.of.call(()=>{},1));",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn array_species_methods_allocate_before_reads_and_preserve_sparse_generic_inputs() {
+    let mut vm = Interpreter::with_builtins();
+    let mut other = vm.create_realm();
+    other
+        .eval_source("var Result=function(n){this.size=n;};")
+        .unwrap();
+    vm.set_global_checked("other", other.realm_global_object())
+        .unwrap();
+    for source in [
+        "var input=[2,0,4];delete input[1];input.constructor={[Symbol.species]:other.Result};var result=input.slice(0);Object.getPrototypeOf(result)===other.Result.prototype&&result.size===3&&result.length===3&&result[2]===4&&!(1 in result);",
+        "var result=input.concat([5]);Object.getPrototypeOf(result)===other.Result.prototype&&result.size===0&&result.length===4&&result[3]===5&&!(1 in result);",
+        "var result=input.splice(1,2,7);Object.getPrototypeOf(result)===other.Result.prototype&&result.size===2&&result.length===2&&!(0 in result)&&result[1]===4&&input.length===2&&input[1]===7;",
+        "var input=[[1],[2]];input.constructor={[Symbol.species]:other.Result};var result=input.flat();Object.getPrototypeOf(result)===other.Result.prototype&&result.size===0&&result[1]===2&&!('length' in result);",
+        "var result=input.flatMap(x=>[x[0]*2]);Object.getPrototypeOf(result)===other.Result.prototype&&result[0]===2&&result[1]===4;",
+        "var generic={0:'a',2:'c',length:3};var result=Array.prototype.splice.call(generic,1,1,'b','B');result.length===1&&!(0 in result)&&generic.length===4&&generic[1]==='b'&&generic[2]==='B'&&generic[3]==='c';",
+        "var source={0:7,length:2,[Symbol.isConcatSpreadable]:true};var result=[1].concat(source);result.length===3&&result[1]===7&&!(2 in result);",
+        "var proto={1:8};var source=[7,0,9];delete source[1];Object.setPrototypeOf(source,proto);Array.prototype.slice.call(source)[1]===8&&Reflect.has(source,'1');",
+        "var typed=new Uint8Array([7,8]);typed[Symbol.isConcatSpreadable]=true;var result=[].concat(typed);result[0]===7&&result[1]===8&&!Reflect.has(typed,'-0');",
+        "var boxed;Array.prototype.map.call('ab',(value,index,source)=>{boxed=source;return value;}).join('')==='ab'&&typeof boxed==='object';",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn shared_set_results_do_not_inherit_guest_assignment_strictness() {
+    let mut vm = Interpreter::with_builtins();
+    for source in [
+        "var locked=Object.freeze([1]);!Reflect.set(locked,0,2)&&locked[0]===1;",
+        "'use strict';!Reflect.set(locked,0,2)&&!Reflect.set(new Proxy({}, {set(){return false;}}),'x',1);",
+        "var caught;try{(function(){'use strict';locked[0]=2;})();}catch(e){caught=e;}caught instanceof TypeError;",
+        "var target={};Object.defineProperty(target,'x',{get(){return 1;}});!Reflect.set(target,'x',2);",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn typed_array_species_preserves_source_realm_and_allocation_order() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    child
+        .eval_source("var input=new Uint8Array([2,4]);")
+        .unwrap();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var result=Uint8Array.prototype.map.call(other.input,x=>x+1);Object.getPrototypeOf(result)===other.Uint8Array.prototype&&result[1]===5;",
+        "var input=new Uint8Array([2,4]);var log='';input.constructor={get [Symbol.species](){log+='s';return other.Uint16Array;}};var result=input.map((v,i,a)=>{log+='m';if(a!==input)throw Error();return v+256;});log==='smm'&&Object.getPrototypeOf(result)===other.Uint16Array.prototype&&result[1]===260;",
+        "log='';var result=input.filter((v,i,a)=>{log+='f';return a===input&&i===1;});log==='ffs'&&result instanceof other.Uint16Array&&result.length===1&&result[0]===4;",
+        "input.constructor={[Symbol.species]:function(n){return new Uint8Array(n-1);}};var called=false;var caught;try{input.map(()=>{called=true;});}catch(e){caught=e;}caught instanceof TypeError&&!called;",
+        "input.constructor={[Symbol.species]:BigInt64Array};var caught;try{input.slice();}catch(e){caught=e;}caught instanceof TypeError;",
+        "var shared=new SharedArrayBuffer(4);var view=new Uint8Array(shared);view[1]=42;var result=view.subarray(1,3);result.buffer===shared&&result.length===2&&result[0]===42;",
+        "var view=new Uint8Array([1,2,3]);var result=view.slice(1);result instanceof Uint8Array&&result[0]===2&&result.buffer!==view.buffer;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn typed_array_factories_use_the_receiver_and_observe_iterators_before_allocation() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    for source in [
+        "var result=Uint8Array.of.call(other.Uint16Array,257,258);result instanceof other.Uint16Array&&result[0]===257&&result[1]===258;",
+        "var log='';var C=function(n){log+='c';return new Uint16Array(n);};var source={get [Symbol.iterator](){log+='g';return function(){log+='i';var i=0;return {next(){log+='n';return i++===0?{value:3,done:false}:{done:true};}};};}};var receiver={};var result=Uint8Array.from.call(C,source,function(v,i){log+='m';if(this!==receiver)throw Error();return v+256;},receiver);log==='ginncm'&&result[0]===259;",
+        "log='';var source={get length(){log+='l';return 1;},get 0(){log+='v';return 7;}};var result=Uint8Array.from.call(C,source,v=>{log+='m';return v;});log==='lcvm'&&result[0]===7;",
+        "var caught;try{Uint8Array.of.call(function(){return [];},1);}catch(e){caught=e;}caught instanceof TypeError;",
+        "var caught;try{Uint8Array.from.call(Uint8Array,[],null);}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        truth(&mut vm, source);
+    }
+}
+
+#[test]
+fn string_iterator_lookup_respects_mutation_and_deletion_in_the_active_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r"var pair='\uD834\uDD1E';Array.from(pair).length===1;",
+    );
+    truth(
+        &mut vm,
+        "String.prototype[Symbol.iterator]=function*(){yield 7;};Array.from('text')[0]===7&&other.eval(\"Array.from('text').length\")===4;",
+    );
+    truth(
+        &mut vm,
+        "delete String.prototype[Symbol.iterator];var result=Array.from(pair);result.length===2&&result[0].charCodeAt(0)===0xD834&&result[1].charCodeAt(0)===0xDD1E;",
+    );
+    truth(
+        &mut vm,
+        "var result=Array.from(Object(pair));result.length===2&&result[1].charCodeAt(0)===0xDD1E;",
+    );
+}
+
+#[test]
+fn identifier_deletion_uses_global_property_attributes_and_with_exclusions() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "globalThis.niche=7;var object={niche:8,[Symbol.unscopables]:{niche:true}};var removed;with(object){removed=delete niche;}removed&&object.niche===8&&!('niche' in globalThis);",
+    );
+    truth(
+        &mut vm,
+        "var fixed=1;let lexical=2;!delete fixed&&!delete lexical&&delete missing;",
+    );
+    truth(
+        &mut vm,
+        "var first=function(){};var constructed=new Function();var removed=delete Function;var last=function(){};removed&&!('Function' in globalThis)&&Object.getPrototypeOf(first)===Object.getPrototypeOf(constructed)&&Object.getPrototypeOf(last)===Object.getPrototypeOf(first);",
+    );
+}
+
+#[test]
+fn shared_set_preserves_receivers_and_invalid_integer_index_ordering() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var target = new Int8Array(1), receiver = {}, conversions = 0;
+        var value = {valueOf(){conversions++; return 9;}};
+        Reflect.set(target, '2', value, receiver) === true && conversions === 0 &&
+        Reflect.set(target, '-0', value, 7) === true && conversions === 0 &&
+        Reflect.set(target, '0', value, receiver) === true && receiver[0] === value && target[0] === 0 &&
+        Reflect.set(target, '2', value) === true && conversions === 1;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var base = {x: 1}, receiver = {};
+        Reflect.set(base, 'x', 2, receiver) && base.x === 1 && receiver.x === 2;
+    "#,
+    );
+}
+
+#[test]
+fn shared_define_preserves_symbol_keys_and_proxy_invariants() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol = Symbol('key'), seen, target = {};
+        var proxy = new Proxy(target, {defineProperty(t, key, d){seen=key; return Reflect.defineProperty(t,key,d);}});
+        Object.defineProperty(proxy, symbol, {value:42, configurable:true});
+        seen === symbol && Reflect.getOwnPropertyDescriptor(proxy,symbol).value === 42;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var fixed = {};
+        Object.defineProperty(fixed, 'x', {value:1});
+        var rejected = false;
+        try { Reflect.set(new Proxy(fixed,{set(){return true;}}),'x',2); }
+        catch (error) { rejected = error instanceof TypeError; }
+        rejected && Reflect.defineProperty(fixed,'x',{value:2}) === false;
+    "#,
+    );
+}
+
+#[test]
+fn integer_index_operations_share_ecmascript_number_keys() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        String(-0) === '0' && String(1e21) === '1e+21' &&
+        String(1e-7) === '1e-7' && String(1e-6) === '0.000001' &&
+        String(1000000000000000128) === '1000000000000000100';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var array = new Int8Array([7]);
+        array['01'] = 42;
+        array['1.0'] = 43;
+        array['01'] === 42 && array['1.0'] === 43 && array[0] === 7 &&
+        Reflect.has(array, '01') && !Reflect.has(array, '-0') && array['-0'] === undefined;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var key = Symbol('protected'), object = {}, received;
+        Object.defineProperty(object, key, {value: 1});
+        var proxy = new Proxy(object, {has(target, symbol){received=symbol; return false;}});
+        var rejected = false;
+        try { Reflect.has(proxy, key); } catch (error) { rejected = error instanceof TypeError; }
+        rejected && received === key;
+    "#,
+    );
+}
+
+#[test]
+fn descriptor_queries_coerce_keys_once_and_preserve_proxy_symbols() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol = Symbol('x'), calls = 0, received;
+        var target = {}; Object.defineProperty(target, symbol, {value: 42, configurable: true});
+        var proxy = new Proxy(target, {getOwnPropertyDescriptor(object, key){received=key; return Reflect.getOwnPropertyDescriptor(object,key);}});
+        var key = {[Symbol.toPrimitive](hint){calls++; if(hint !== 'string') throw new Error('hint'); return symbol;}};
+        Object.getOwnPropertyDescriptor(proxy,key).value === 42 && received === symbol && calls === 1;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var descriptor = Object.getOwnPropertyDescriptor('ab','0');
+        descriptor.value === 'a' && descriptor.enumerable && !descriptor.writable && !descriptor.configurable;
+    "#,
+    );
+}
+
+#[test]
+fn array_length_definitions_share_conversion_and_failed_truncation_rules() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var array = [1,2,3], calls = 0;
+        var length = {valueOf(){calls++; return 1;}};
+        array.length = length;
+        array.length === 1 && calls === 2;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var array = [], calls = 0, rejected = false;
+        var length = {valueOf(){calls++; return calls;}};
+        try {Reflect.defineProperty(array, 'length', {value:length});}
+        catch(error){rejected = error instanceof RangeError;}
+        rejected && calls === 2 && array.length === 0;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var array = [1,2,3];
+        Object.defineProperty(array,'1',{configurable:false});
+        Reflect.defineProperty(array,'length',{value:0,writable:false}) === false &&
+        array.length === 2 && Object.getOwnPropertyDescriptor(array,'length').writable === false;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_own_keys_preserves_symbols_and_accepts_array_like_results() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('key'), target={visible:1}; target[symbol]=2;
+        Object.defineProperty(target,'hidden',{value:3});
+        var proxy=new Proxy(target,{ownKeys(){return {0:symbol,1:'hidden',2:'visible',length:3};}});
+        var keys=Reflect.ownKeys(proxy), symbols=Object.getOwnPropertySymbols(proxy);
+        keys.length===3&&keys[0]===symbol&&keys[1]==='hidden'&&symbols.length===1&&symbols[0]===symbol&&Object.keys(proxy).join(',')==='visible';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('key'), target={b:1,'10':2,'2':3,a:4}; target[symbol]=5;
+        var keys=Reflect.ownKeys(new Proxy(new Proxy(target,{}),{}));
+        keys.length===5&&keys[0]==='2'&&keys[1]==='10'&&keys[2]==='b'&&keys[3]==='a'&&keys[4]===symbol;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_own_keys_checks_duplicates_and_required_target_keys() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        function rejects(target,keys){try{Reflect.ownKeys(new Proxy(target,{ownKeys(){return keys;}}));return false;}catch(e){return e instanceof TypeError;}}
+        var symbol=Symbol('key'), target={};Object.defineProperty(target,symbol,{value:1});
+        var sealed={x:1};Object.preventExtensions(sealed);
+        rejects({},['x','x'])&&rejects({},[symbol,symbol])&&rejects({},[1])&&rejects(target,[])&&rejects(sealed,[])&&rejects(sealed,['x','extra'])&&!rejects({},[Symbol('same'),Symbol('same')]);
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={x:1},proxy=new Proxy(target,{ownKeys(){delete target.x;Object.preventExtensions(target);return [];}});
+        Reflect.ownKeys(proxy).length===0;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_delete_validates_post_trap_descriptors_and_extensibility() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        function rejects(target,key){try{Reflect.deleteProperty(new Proxy(target,{deleteProperty(){return true;}}),key);return false;}catch(e){return e instanceof TypeError;}}
+        var fixed={};Object.defineProperty(fixed,'x',{value:1});
+        var sealed={x:1};Object.preventExtensions(sealed);
+        var symbol=Symbol('key'), symbolic={};Object.defineProperty(symbolic,symbol,{value:1});
+        rejects(fixed,'x')&&rejects(sealed,'x')&&rejects(symbolic,symbol)&&Reflect.deleteProperty(new Proxy(sealed,{deleteProperty(){return true;}}),'absent');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={x:1};Object.preventExtensions(target);
+        var proxy=new Proxy(target,{deleteProperty(t,k){delete t[k];return true;}});
+        Reflect.deleteProperty(proxy,'x')&&!Reflect.has(target,'x');
+    "#,
+    );
+}
+
+#[test]
+fn proxy_key_invariant_errors_use_the_operation_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var proxy=new Proxy({},{ownKeys(){return ['x','x'];}}),caught;
+        try{other.Reflect.ownKeys(proxy);}catch(e){caught=e;}
+        caught instanceof other.TypeError && !(caught instanceof TypeError);
+    "#,
+    );
+}
+
+#[test]
+fn atomic_pause_is_a_noncoercing_realm_owned_scheduling_hint() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var calls=0,bad={valueOf(){calls++;return 1;}},caught;
+        try{other.Atomics.pause(bad);}catch(e){caught=e;}
+        other.Atomics.pause()===undefined&&other.Atomics.pause(0)===undefined&&other.Atomics.pause(-0)===undefined&&other.Atomics.pause(1)===undefined&&calls===0&&caught instanceof other.TypeError&&Object.getPrototypeOf(other.Atomics.pause)===other.Function.prototype&&other.Atomics.pause.length===0&&other.Atomics.pause.name==='pause';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var invalid=[null,-1,0.5,NaN,Infinity,'1',1n],rejected=0;
+        for(var value of invalid){try{Atomics.pause(value);}catch(e){if(e instanceof TypeError)rejected++;}}
+        var construct=false;try{new Atomics.pause();}catch(e){construct=e instanceof TypeError;}
+        rejected===invalid.length&&construct;
+    "#,
+    );
+}
+
+#[test]
+fn shared_atomic_bigint_results_use_observable_primitive_conversion() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var calls=0,value={valueOf(){calls++;return 33n;}};
+        var array=new BigInt64Array(new SharedArrayBuffer(8));
+        Atomics.store(array,0,value)===BigInt(value)&&Atomics.load(array,0)===33n&&calls===2&&BigInt({valueOf(){return 42;}})===42n;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_deletion_coerces_keys_before_dispatch_and_only_once() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var calls=0,events='',key={toString(){calls++;events+='k';return 'x';}};
+        var handler={get deleteProperty(){events+='t';return function(t,k){events+='d';return k==='x';};}};
+        var proxy=new Proxy(new Proxy({},handler),{});
+        Reflect.deleteProperty(proxy,key)&&calls===1&&events==='ktd';
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var marker={},key={toString(){throw marker;}},r=Proxy.revocable({},{}),caught;r.revoke();
+        try{Reflect.deleteProperty(r.proxy,key);}catch(e){caught=e;}
+        caught===marker;
+    "#,
+    );
+}
+
+#[test]
+fn proxy_string_exotics_preserve_keys_and_strict_deletion_rules() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol(),string=new String('str');string[symbol]=1;
+        var proxy=new Proxy(new Proxy(string,{}),{}),keys=Reflect.ownKeys(proxy);
+        keys.length===5&&keys[0]==='0'&&keys[1]==='1'&&keys[2]==='2'&&keys[3]==='length'&&keys[4]===symbol&&!Reflect.deleteProperty(proxy,'0');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var fn=function(){},proxy=new Proxy(new Proxy(fn,{}),{}),caught;
+        function strictDelete(){'use strict';delete proxy.prototype;}
+        try{strictDelete();}catch(e){caught=e;}
+        caught instanceof TypeError&&!Reflect.deleteProperty(proxy,'prototype');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var proxy=new Proxy(new Proxy(/x/g,{}),{deleteProperty:null}),caught;
+        function strictDelete(){'use strict';delete proxy.lastIndex;}
+        try{strictDelete();}catch(e){caught=e;}
+        caught instanceof TypeError&&!Reflect.deleteProperty(proxy,'lastIndex');
+    "#,
+    );
+}
+
+#[test]
+fn proxy_get_protects_frozen_values_and_undefined_getters() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('key'),target={};Object.defineProperty(target,symbol,{value:NaN});
+        var proxy=new Proxy(target,{get(){return NaN;}});
+        Number.isNaN(Reflect.get(proxy,symbol));
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={};Object.defineProperty(target,'x',{value:-0});
+        var proxy=new Proxy(target,{get(){return 0;}}),caught;
+        try{proxy.x;}catch(e){caught=e;}
+        caught instanceof TypeError;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var target={};Object.defineProperty(target,'x',{set(v){}});
+        var bad=new Proxy(target,{get(){return 1;}}),good=new Proxy(target,{get(){return undefined;}}),caught;
+        try{Reflect.get(bad,'x');}catch(e){caught=e;}
+        caught instanceof TypeError&&good.x===undefined;
+    "#,
+    );
+}
+
+#[test]
+fn realm_global_object_properties_are_separate_from_lexical_bindings() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        let globalLexical = 1;
+        globalThis.globalLexical = 2;
+        globalLexical === 1 && globalThis.globalLexical === 2;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        Object.defineProperty(globalThis,'globalLexical',{value:3});
+        globalLexical === 1 && globalThis.globalLexical === 3 && Reflect.deleteProperty(globalThis,'globalLexical') && globalLexical === 1 && !Object.hasOwn(globalThis,'globalLexical');
+    "#,
+    );
+}
+
+#[test]
+fn realm_globals_share_descriptors_symbols_and_mutable_prototype_operations() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var symbol=Symbol('global'),receiver;
+        Object.defineProperty(other,symbol,{get(){receiver=this;return 42;},configurable:true});
+        var keys=Reflect.ownKeys(other);
+        other[symbol]===42&&receiver===other&&keys[keys.length-1]===symbol&&Object.getOwnPropertySymbols(other)[0]===symbol;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var prototype={inherited:7};
+        Reflect.setPrototypeOf(other,prototype)&&Object.getPrototypeOf(other)===prototype&&other.inherited===7&&Reflect.setPrototypeOf(other,null)&&Object.getPrototypeOf(other)===null&&other.inherited===undefined;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        Reflect.isExtensible(other)&&Reflect.preventExtensions(other)&&!Reflect.isExtensible(other)&&!Reflect.defineProperty(other,'newProperty',{value:1})&&!Reflect.set(other,'newProperty',1)&&Reflect.setPrototypeOf(other,null);
+    "#,
+    );
+}
+
+#[test]
+fn global_object_accessors_are_used_for_identifier_references() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var value=1,readReceiver,writeReceiver;
+        Object.defineProperty(globalThis,'globalAccessor',{get(){readReceiver=this;return value;},set(v){writeReceiver=this;value=v;},configurable:true});
+        globalAccessor+=2;
+        value===3&&readReceiver===globalThis&&writeReceiver===globalThis&&globalAccessor===3;
+    "#,
+    );
+}
+
+fn run_global_ast(vm: &mut Interpreter, source: &str) -> Result<Value, napi_vm_core::VmErr> {
+    let tokens = napi_vm_core::Lexer::new(source).tokenize_with_spans();
+    let statements = napi_vm_core::Parser::new_with_spans(tokens).parse();
+    vm.run_program_body(&statements)
+}
+
+#[test]
+fn global_declaration_checks_precede_binding_creation_and_guest_effects() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("let priorLexical = 1;").unwrap();
+    assert!(
+        vm.eval_source("var createdBeforeConflict; var priorLexical;")
+            .is_err()
+    );
+    truth(
+        &mut vm,
+        "!Object.hasOwn(globalThis,'createdBeforeConflict')&&priorLexical===1;",
+    );
+    vm.eval_source("Object.defineProperty(globalThis,'protectedFunction',{value:1,writable:true,enumerable:false});").unwrap();
+    assert!(
+        run_global_ast(
+            &mut vm,
+            "var createdBeforeFunction; function protectedFunction(){};"
+        )
+        .is_err()
+    );
+    truth(
+        &mut vm,
+        "!Object.hasOwn(globalThis,'createdBeforeFunction')&&protectedFunction===1;",
+    );
+}
+
+#[test]
+fn global_function_declarations_replace_configurable_accessors_without_calling_them() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var calls=0;Object.defineProperty(globalThis,'replaceable',{get(){calls++;},set(){calls++;},configurable:true});").unwrap();
+    vm.eval_source("function replaceable(){return 42;}")
+        .unwrap();
+    truth(
+        &mut vm,
+        r#"
+        var descriptor=Object.getOwnPropertyDescriptor(globalThis,'replaceable');
+        calls===0&&replaceable()===42&&descriptor.writable&&descriptor.enumerable&&!descriptor.configurable&&descriptor.get===undefined;
+    "#,
+    );
+}
+
+#[test]
+fn global_var_metadata_distinguishes_properties_from_declarations_in_both_tiers() {
+    type Eval = fn(&mut Interpreter, &str) -> Result<Value, napi_vm_core::VmErr>;
+    let runners: [Eval; 2] = [run_global_ast, Interpreter::eval_source];
+    for run in runners {
+        let mut vm = Interpreter::with_builtins();
+        run(&mut vm, "globalThis.objectOnly=1;").unwrap();
+        run(&mut vm, "let objectOnly=2;").unwrap();
+        truth(&mut vm, "objectOnly===2&&globalThis.objectOnly===1;");
+        run(&mut vm, "globalThis.declaredObject=1;var declaredObject;").unwrap();
+        assert!(
+            vm.persistent_global
+                .borrow()
+                .has_var_declaration("declaredObject")
+        );
+        assert!(run(&mut vm, "let declaredObject;").is_err());
+        run(&mut vm, "globalThis.preexistingObject=1;").unwrap();
+        run(&mut vm, "var preexistingObject;").unwrap();
+        assert!(
+            vm.persistent_global
+                .borrow()
+                .has_var_declaration("preexistingObject")
+        );
+        run(&mut vm, "let preexistingObject=2;").unwrap();
+        truth(
+            &mut vm,
+            "preexistingObject===2&&globalThis.preexistingObject===1;",
+        );
+        run(
+            &mut vm,
+            "eval('var deletableEval=1;function deletableFunction(){return 2;}');",
+        )
+        .unwrap();
+        truth(
+            &mut vm,
+            "Object.getOwnPropertyDescriptor(globalThis,'deletableEval').configurable&&Object.getOwnPropertyDescriptor(globalThis,'deletableFunction').configurable;",
+        );
+        truth(&mut vm, "delete deletableEval&&delete deletableFunction;");
+        run(&mut vm, "let deletableEval=3;let deletableFunction=4;").unwrap();
+    }
+}
+
+#[test]
+fn lexical_loop_heads_do_not_mutate_or_escape_the_global_declarative_record() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        let outer=9;var closures=[];
+        for(let outer of [1,2]){closures.push(()=>outer);}
+        outer===9&&closures[0]()===1&&closures[1]()===2&&!Object.hasOwn(globalThis,'outer');
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var caught;try{for(let outer of outer){}}catch(e){caught=e;}
+        caught instanceof ReferenceError&&outer===9;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var names=[];for(const key in {a:1,b:2}){names.push(()=>key);}
+        names[0]()==='a'&&names[1]()==='b'&&typeof key==='undefined';
+    "#,
+    );
+}
+
+#[test]
+fn proxy_prototypes_preserve_receivers_and_frozen_get_invariants() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var receiver,key;var p=new Proxy({}, {get(t,k,r){receiver=r;key=k;return 42;}});var o=Object.create(p);o.x===42&&receiver===o&&key==='x';",
+    );
+    truth(&mut vm, "var s=Symbol();o[s]===42&&receiver===o&&key===s;");
+    truth(
+        &mut vm,
+        "var t={};Object.defineProperty(t,'x',{value:1,writable:false,configurable:false});var bad=Object.create(new Proxy(t,{get(){return 2;}}));var caught;try{bad.x;}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+    truth(&mut vm, "Object('abc').length===3;");
+    for source in ["Object.create()", "Object.create(undefined)"] {
+        assert!(
+            vm.eval_source(source)
+                .unwrap_err()
+                .to_string()
+                .contains("TypeError")
+        );
+    }
+}
+
+#[test]
+fn global_host_names_preserve_utf16_keys_and_removal_releases_the_record() {
+    let mut vm = Interpreter::with_builtins();
+    let key = napi_vm_core::JsString::from_units(vec![0xd800]).to_key();
+    vm.set_global_checked(&key, Value::Number(42.0)).unwrap();
+    assert!(matches!(vm.global_value(&key), Some(Value::Number(42.0))));
+    truth(&mut vm, "globalThis['\\ud800']===42;");
+    assert!(vm.persistent_global.borrow_mut().remove(&key));
+    assert!(vm.global_value(&key).is_none());
+    truth(&mut vm, "!Object.hasOwn(globalThis,'\\ud800');");
+    assert!(!vm.persistent_global.borrow_mut().remove(&key));
+}
+
+#[test]
+fn eval_created_configurable_properties_allow_later_global_lexicals() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("eval('var evalVariable=1;function evalFunction(){return 2;}');")
+        .unwrap();
+    vm.eval_source("let evalVariable=3;const evalFunction=4;")
+        .unwrap();
+    truth(
+        &mut vm,
+        "evalVariable===3&&evalFunction===4&&globalThis.evalVariable===1&&globalThis.evalFunction()===2;",
+    );
+}
+
+#[test]
+fn internal_descriptor_records_do_not_inherit_guest_descriptor_fields() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var data='data',obj={};Object.prototype.set=function(v){data=v;};Object.defineProperty(obj,'x',Math);obj.x='override';data==='override';",
+    );
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(Object.getOwnPropertyDescriptor(obj,'x'))===Object.prototype&&Object.getPrototypeOf(Reflect.getOwnPropertyDescriptor(obj,'x'))===Object.prototype;",
+    );
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var obj={};Object.prototype.get=function(){return 'ok';};var attrs=(function(){return arguments;})();Object.defineProperty(obj,'x',attrs);obj.x==='ok';",
+    );
+}
+
+#[test]
+fn global_callable_data_is_not_invoked_as_an_accessor() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var calls=0; var f=Object.getOwnPropertyDescriptor({get f(){calls++;}},'f').get; var d=Object.getOwnPropertyDescriptor(globalThis,'f'); typeof f==='function'&&d.value===f&&d.writable&&calls===0;",
+    );
+    truth(
+        &mut vm,
+        "Object.defineProperty(f,'prototype',{get(){throw new Error('poison');}}); var caught;try{f[Symbol.hasInstance]({});}catch(e){caught=e;}caught.message==='poison'&&calls===0;",
+    );
+}
+
+#[test]
+fn property_updates_require_object_before_key_coercion() {
+    for source in ["++base[key]", "base[key]++", "--base[key]", "base[key]--"] {
+        let mut vm = Interpreter::with_builtins();
+        truth(
+            &mut vm,
+            &format!(
+                "var count=0;var key={{toString(){{count++;throw new Error('key');}}}};var caught;var base=null;try{{{source};}}catch(e){{caught=e;}}caught instanceof TypeError&&count===0;"
+            ),
+        );
+    }
+}
+
+#[test]
+fn boxed_string_enumeration_includes_virtual_indices() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var s=new String('abc');var names=[];for(var key in s){if(s.hasOwnProperty(key))names.push(key);}names.join(',')==='0,1,2'&&Object.keys(s).join(',')===names.join(',');",
+    );
+}
+
+#[test]
+fn inherited_exotic_accessors_validate_the_original_receiver() {
+    let mut vm = Interpreter::with_builtins();
+    for prototype in [
+        "new ArrayBuffer(1)",
+        "new SharedArrayBuffer(1)",
+        "new Int32Array(1)",
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var object=Object.create({prototype});var caught;try{{object.byteLength;}}catch(e){{caught=e;}}caught instanceof TypeError;"
+            ),
+        );
+    }
+    truth(
+        &mut vm,
+        "var object=Object.create(new Int32Array(1));var caught;try{object.buffer;}catch(e){caught=e;}caught instanceof TypeError;",
     );
 }

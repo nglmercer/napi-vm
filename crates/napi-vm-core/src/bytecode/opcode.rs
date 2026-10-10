@@ -78,6 +78,9 @@ pub enum Instr {
     InitGlobal {
         name: u16,
         src: Reg,
+        /// Function declarations use CreateGlobalFunctionBinding rather than
+        /// the initialization operation for a lexical binding.
+        function: bool,
     },
     /// Top-level `var` hoisting: define `undefined` only when no binding
     /// exists yet, mirroring `hoist_vars` (a previous `eval` may own it).
@@ -356,8 +359,7 @@ pub enum Instr {
         slot: Slot,
     },
     /// `dst = callee(...spread_args)`: like [`Instr::Call`], but the
-    /// argument list in `constants[tmpl]` splices array-valued spread
-    /// elements and passes anything else as one argument.
+    /// argument list in `constants[tmpl]` consumes each spread iterable.
     CallSpread {
         dst: Reg,
         callee: Reg,
@@ -371,8 +373,7 @@ pub enum Instr {
         tmpl: u16,
     },
     /// `dst` = one array literal from `constants[tmpl]`: plain elements
-    /// plus spreads (arrays splice, strings spread per character, anything
-    /// else drains the iterator protocol).
+    /// plus spreads using the shared iterator protocol.
     BuildArray {
         dst: Reg,
         tmpl: u16,
@@ -422,17 +423,18 @@ pub enum Instr {
         src: Reg,
     },
     /// One `for-of` step: call `next` on `iter`; `done` reports truthy
-    /// `done` (missing counts as done), `value` the yielded value.
+    /// `done` (missing means false), `value` the yielded value.
     IterNext {
         done: Reg,
         value: Reg,
         iter: Reg,
         next: Reg,
     },
-    /// Close `src` as a `for-of` iterator (runs a suspended generator's
-    /// `finally` blocks); anything else ignores it.
+    /// Get and call an iterator's return method, validating its result.
     CloseIterator {
         src: Reg,
+        /// Use the pending abrupt completion in an exceptional unwind pad.
+        unwind: bool,
     },
     /// Push a catch handler: a catchable error (`Throw`, `Msg`,
     /// `RuntimeError`) abandons the protected region, stores the catch
@@ -493,6 +495,25 @@ pub enum Instr {
     PropertyKey {
         dst: Reg,
         src: Reg,
+    },
+    /// Enter the strict lexical class environment before heritage evaluation.
+    ClassScope {
+        name: Option<u16>,
+    },
+    /// Declare fresh lexical private identities after evaluating heritage.
+    ClassPrivateEnvironment {
+        names: u16,
+    },
+    /// Read and validate the superclass prototype before evaluating member names.
+    ClassHeritage {
+        dst: Reg,
+        superclass: Reg,
+    },
+    /// Test the lexical private name without invoking object or Proxy hooks.
+    PrivateIn {
+        dst: Reg,
+        obj: Reg,
+        name: u16,
     },
     /// Run the `import` statement in `constants[tmpl]`: resolve and
     /// evaluate the module, then bind its exports as live cells.
@@ -613,6 +634,10 @@ pub enum Opcode {
     Raise,
     BuildClass,
     PropertyKey,
+    PrivateIn,
+    ClassScope,
+    ClassPrivateEnvironment,
+    ClassHeritage,
     Import,
     ExportDefault,
     ExportNamed,
@@ -703,6 +728,10 @@ impl Instr {
             Instr::Raise { .. } => Opcode::Raise,
             Instr::BuildClass { .. } => Opcode::BuildClass,
             Instr::PropertyKey { .. } => Opcode::PropertyKey,
+            Instr::PrivateIn { .. } => Opcode::PrivateIn,
+            Instr::ClassScope { .. } => Opcode::ClassScope,
+            Instr::ClassPrivateEnvironment { .. } => Opcode::ClassPrivateEnvironment,
+            Instr::ClassHeritage { .. } => Opcode::ClassHeritage,
             Instr::Import { .. } => Opcode::Import,
             Instr::ExportDefault { .. } => Opcode::ExportDefault,
             Instr::ExportNamed { .. } => Opcode::ExportNamed,
@@ -758,7 +787,7 @@ impl fmt::Display for Instr {
                 write!(f, "DECLARE_LOCAL s{slot}, {kind:?}, init={initialized}")
             }
             Instr::InitLocal { slot, src } => write!(f, "INIT_LOCAL s{slot}, r{src}"),
-            Instr::InitGlobal { name, src } => write!(f, "INIT_GLOBAL c{name}, r{src}"),
+            Instr::InitGlobal { name, src, .. } => write!(f, "INIT_GLOBAL c{name}, r{src}"),
             Instr::HoistVarGlobal { name } => write!(f, "HOIST_VAR_GLOBAL c{name}"),
             Instr::BareVarLocal { slot } => write!(f, "BARE_VAR_LOCAL s{slot}"),
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
@@ -937,7 +966,9 @@ impl fmt::Display for Instr {
             } => {
                 write!(f, "ITER_NEXT r{done}, r{value}, r{iter}, r{next}")
             }
-            Instr::CloseIterator { src } => write!(f, "CLOSE_ITERATOR r{src}"),
+            Instr::CloseIterator { src, unwind } => {
+                write!(f, "CLOSE_ITERATOR r{src} unwind={unwind}")
+            }
             Instr::PushCatch { target, dst } => write!(f, "PUSH_CATCH @{target}, r{dst}"),
             Instr::PushFinally { target, dst } => write!(f, "PUSH_FINALLY @{target}, r{dst}"),
             Instr::PopHandler => write!(f, "POP_HANDLER"),
@@ -950,6 +981,12 @@ impl fmt::Display for Instr {
             Instr::Raise { msg } => write!(f, "RAISE c{msg}"),
             Instr::BuildClass { dst, tmpl } => write!(f, "BUILD_CLASS r{dst}, c{tmpl}"),
             Instr::PropertyKey { dst, src } => write!(f, "PROPERTY_KEY r{dst}, r{src}"),
+            Instr::PrivateIn { dst, obj, name } => write!(f, "PRIVATE_IN r{dst}, r{obj}, c{name}"),
+            Instr::ClassScope { name } => write!(f, "CLASS_SCOPE {name:?}"),
+            Instr::ClassPrivateEnvironment { names } => write!(f, "CLASS_PRIVATE_ENV c{names}"),
+            Instr::ClassHeritage { dst, superclass } => {
+                write!(f, "CLASS_HERITAGE r{dst}, r{superclass}")
+            }
             Instr::Import { tmpl } => write!(f, "IMPORT c{tmpl}"),
             Instr::ExportDefault { src } => write!(f, "EXPORT_DEFAULT r{src}"),
             Instr::ExportNamed { tmpl } => write!(f, "EXPORT_NAMED c{tmpl}"),

@@ -1,0 +1,8 @@
+{
+  "source_commit": "236aafc",
+  "classification": "Interrupted full run; environment restart terminated the worker before completion. No final totals or valid full pass rate exist for this source.",
+  "worker_sha256": "33b1adc0e67cc623364904352d74d56a04b3b6f9c53bb747646b959d7bbe4978",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "checkpoint_archive_sha256": "dfafa56e8d6cd28a061b1a9661adfa88969545065bcd0031ea6ba2a063409d93",
+  "superseded_by": "Fresh pinned b28ddd0 full run in progress"
+}

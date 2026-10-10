@@ -8,27 +8,36 @@ fn incompatible(name: &str) -> VmErr {
     ))
 }
 pub(super) fn install(env: &mut Environment) {
+    let function_prototype = env
+        .get("Function")
+        .and_then(|value| value.get_prop("prototype"));
+    let object_prototype = env
+        .get("Object")
+        .and_then(|value| value.get_prop("prototype"));
     for (name, constructor, methods) in [
         (
             "WeakRef",
             new_weak_ref as NativeFn,
-            vec![("deref", deref as NativeFn)],
+            vec![("deref", 0, deref as NativeFn)],
         ),
         (
             "FinalizationRegistry",
             new_registry as NativeFn,
             vec![
-                ("register", register as NativeFn),
-                ("unregister", unregister as NativeFn),
+                ("register", 2, register as NativeFn),
+                ("unregister", 1, unregister as NativeFn),
             ],
         ),
     ] {
         let namespace = env.get(name).expect("weak builtin namespace");
-        make_callable(&namespace, constructor, None);
-        let prototype = Value::object(vec![]);
-        for (method, callable) in methods {
+        make_callable(&namespace, super::require_new, Some(constructor));
+        let prototype = Value::object_with_proto(vec![], object_prototype.clone().map(Rc::new));
+        for (method, length, callable) in methods {
             prototype
-                .set_prop(method.into(), nf(method, callable))
+                .set_prop(
+                    method.into(),
+                    native_method(method, length, callable, function_prototype.clone()),
+                )
                 .expect("weak prototype");
             if let Value::Object { props } = &prototype {
                 props.meta.borrow_mut().set_attrs(
@@ -43,16 +52,56 @@ pub(super) fn install(env: &mut Environment) {
         prototype
             .set_prop("constructor".into(), namespace.clone())
             .expect("weak constructor");
+        if let Value::Object { props } = &prototype {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+            if let Some(Value::Symbol(ref symbol)) = well_known("toStringTag") {
+                let key = crate::interpreter::symbol_slot_key(symbol);
+                prototype
+                    .set_prop(key.clone(), Value::String(name.into()))
+                    .expect("weak toStringTag");
+                props.meta.borrow_mut().set_symbol_key(&key, symbol.clone());
+                props.meta.borrow_mut().set_attrs(
+                    &key,
+                    PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
+        set_builtin_constructor_prototype(env, &namespace, prototype);
         namespace
-            .set_prop("prototype".into(), prototype)
-            .expect("weak prototype link");
+            .set_prop("name".into(), Value::String(name.into()))
+            .expect("weak constructor name");
+        namespace
+            .set_prop("length".into(), Value::Number(1.0))
+            .expect("weak constructor length");
+        if let Value::Object { props } = &namespace {
+            for key in ["name", "length"] {
+                props.meta.borrow_mut().set_attrs(
+                    key,
+                    PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
     }
 }
 fn instance(interp: &Interpreter, name: &str, storage: WeakStorage) -> Value {
     let prototype = interp
         .persistent_global
         .borrow()
-        .get(name)
+        .intrinsic(name)
         .and_then(|constructor| constructor.get_prop("prototype"));
     let object = Value::object_with_proto(vec![], prototype.map(Rc::new));
     if let Value::Object { props } = &object {

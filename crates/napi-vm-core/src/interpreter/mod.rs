@@ -1,4 +1,6 @@
 pub(crate) mod async_fn;
+pub(crate) mod async_from_sync;
+pub(crate) mod async_generator;
 pub(crate) mod call;
 pub use call::is_callable_value;
 pub mod commonjs;
@@ -22,7 +24,7 @@ pub use scheduler::{
     TurnOutcome, VirtualClock, YieldReason,
 };
 pub(crate) mod realm;
-mod resolve;
+pub(crate) mod resolve;
 #[cfg(all(
     feature = "node-api-host",
     any(target_os = "linux", target_os = "macos", target_os = "windows")
@@ -37,8 +39,9 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 pub(crate) use eval::{
-    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, close_iterator, insert_class_accessor,
-    insert_object_property, intern_params, push_call_arg,
+    ClassAssembly, ClassStaticElement, ObjectAccessorKind, SUPER_PROTO,
+    define_class_private_element, insert_class_accessor, insert_object_property, intern_params,
+    push_call_arg,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_addon::{
@@ -80,6 +83,12 @@ pub struct Realm {
 }
 
 impl Realm {
+    pub(crate) fn gc_roots(&self) -> Result<crate::heap::GcRoots, ()> {
+        let mut roots =
+            ModuleRealm::roots_of(&self.modules, &self.module_graph, &self.commonjs_cache)?;
+        roots.jobs.push(self.jobs.clone());
+        Ok(roots)
+    }
     pub fn of(interp: &Interpreter) -> Self {
         Self {
             jobs: interp.jobs.clone(),
@@ -206,6 +215,7 @@ pub struct Interpreter {
     /// and catch frames while those bodies execute, but `globalThis` aliases
     /// and top-level binding quotas must always target this frame.
     pub persistent_global: Env,
+    pub(crate) constructor_error_realms: Vec<Env>,
     /// Export records, shared with every generator and async body: those run
     /// on their own `Interpreter`, and an `import` inside one must resolve
     /// against the same registry as the code that started it.
@@ -296,6 +306,8 @@ pub struct Interpreter {
 
     /// Maximum guest call-stack depth. Default [`MAX_CALL_DEPTH`].
     max_call_depth: usize,
+    /// Bounded nesting of shared [[Get]], including Proxy/prototype delegation.
+    property_get_depth: usize,
     /// Maximum jobs drained per drain call. Default [`MAX_JOBS_PER_DRAIN`].
     max_jobs_per_drain: usize,
     /// Active synchronous guest statement bodies. Node-API `make_callback`
@@ -362,7 +374,11 @@ pub(crate) fn block_needs_lexical_scope(stmts: &[Statement]) -> bool {
         | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
-        Statement::Declarations(inner) => block_needs_lexical_scope(inner),
+        Statement::Declarations(inner)
+        | Statement::ResourceDeclaration {
+            declarations: inner,
+            ..
+        } => block_needs_lexical_scope(inner),
         _ => false,
     })
 }
@@ -393,7 +409,11 @@ fn body_needs_lexical_hoist(stmts: &[Statement]) -> bool {
         | Statement::ClassInitialization { .. }
         | Statement::FnDecl { .. }
         | Statement::ClassDecl { .. } => true,
-        Statement::Declarations(inner) => body_needs_lexical_hoist(inner),
+        Statement::Declarations(inner)
+        | Statement::ResourceDeclaration {
+            declarations: inner,
+            ..
+        } => body_needs_lexical_hoist(inner),
         _ => false,
     })
 }
@@ -413,9 +433,13 @@ impl Interpreter {
 
     pub fn new() -> Self {
         let global = Rc::new(RefCell::new(Environment::global(None)));
+        if let Some(Value::Object { ref props }) = global.borrow().global_object() {
+            props.meta.borrow_mut().realm_global = Some(global.clone());
+        }
         let mut interp = Self {
             global: global.clone(),
             persistent_global: global,
+            constructor_error_realms: Vec::new(),
             modules: Rc::new(RefCell::new(HashMap::new())),
             module_sources: Rc::new(RefCell::new(HashMap::new())),
             module_aliases: Rc::new(RefCell::new(HashMap::new())),
@@ -453,6 +477,7 @@ impl Interpreter {
             fuel_budget: DEFAULT_FUEL_BUDGET,
 
             max_call_depth: MAX_CALL_DEPTH,
+            property_get_depth: 0,
             max_jobs_per_drain: jobs::MAX_JOBS_PER_DRAIN,
             guest_execution_depth: Rc::new(Cell::new(0)),
             gc_id: 0,
@@ -479,7 +504,20 @@ impl Interpreter {
         let global = Rc::new(RefCell::new(Environment::global(Some(builtins))));
         interp.global = global.clone();
         interp.persistent_global = global;
+        if let Some(Value::Object { ref props }) = interp.persistent_global.borrow().global_object()
+        {
+            props.meta.borrow_mut().realm_global = Some(interp.persistent_global.clone());
+        }
+        interp
+            .persistent_global
+            .borrow_mut()
+            .set("globalThis", interp.realm_global_object());
         interp.publish_module_realm();
+        if let Some(builtins) = interp.persistent_global.borrow().parent_env() {
+            builtins
+                .borrow_mut()
+                .set("globalThis", interp.realm_global_object());
+        }
         realm::own_intrinsics(&interp.persistent_global);
         interp.republish_roots();
         #[cfg(all(test, feature = "node-api-host"))]
@@ -780,7 +818,8 @@ export default { createRequire, isBuiltin, builtinModules };
         if let Ok(text) = source.to_utf8() {
             return Self::compile_with_goal(&text, goal);
         }
-        let mut lexer = crate::Lexer::from_js_string(source);
+        let mut lexer = crate::Lexer::from_js_string(source)
+            .with_module_goal(goal == crate::parser::ParseGoal::Module);
         let mut parser = crate::Parser::new_with_spans(lexer.tokenize_with_spans());
         let statements = parser
             .parse_program_with_goal(goal)
@@ -836,6 +875,10 @@ export default { createRequire, isBuiltin, builtinModules };
         &mut self,
         program: &PreparedProgram,
     ) -> Result<Value, VmErr> {
+        if matches!(&program.executable, Executable::Bytecode(_)) {
+            let script = self.global.borrow().is_global_scope();
+            self.validate_global_declarations(&program.statements, script)?;
+        }
         match &program.executable {
             Executable::Bytecode(module) => self.run_bytecode_module(module),
             Executable::Ast => self.run_program_body(&program.statements),
@@ -997,6 +1040,9 @@ export default { createRequire, isBuiltin, builtinModules };
             jobs: vec![self.jobs.clone()],
             modules: vec![self.modules.clone()],
         };
+        roots
+            .envs
+            .extend(self.constructor_error_realms.iter().cloned());
         if let Some(host) = &self.host {
             host.trace_roots(&mut roots.values, &mut roots.envs);
         }
@@ -1433,6 +1479,9 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            return self.assign_member_str(&object, name, value);
+        }
         let mut env = scope.borrow_mut();
         match env.assign(name, value.clone()) {
             AssignOutcome::Assigned => Ok(()),
@@ -1456,11 +1505,10 @@ impl Interpreter {
             AssignOutcome::Missing => {
                 let strict = self.cur_mod.is_some() || env.strict();
                 drop(env);
-                if strict && !self.inherited_global_has(name) {
+                if strict {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
                 }
-                self.persistent_global.borrow_mut().try_set(name, value)?;
-                Ok(())
+                self.assign_member_str(&self.realm_global_object(), name, value)
             }
         }
     }
@@ -1470,27 +1518,22 @@ impl Interpreter {
     /// is currently executing inside a function/catch environment.
     #[doc(hidden)]
     pub fn set_global_checked(&mut self, name: &str, value: Value) -> Result<(), VmErr> {
-        let strict = self.global.borrow().strict();
-        let mut global = self.persistent_global.borrow_mut();
-        // An explicit write through the global object creates or updates an
-        // own user-global binding. Do not use `assign` here: it walks into the
-        // trusted builtins parent and would mutate (for example) builtin
-        // `Math` instead of creating a user shadow.
-        let attributes = global.global_property(name).map(|(_, attrs)| attrs);
-        if attributes.is_some_and(|attrs| !attrs.writable) {
-            return if strict {
-                Err(VmErr::Msg(format!(
-                    "TypeError: Cannot assign to read-only property {name}"
-                )))
-            } else {
-                Ok(())
-            };
-        }
-        global.try_set(name, value)?;
-        if let Some(attrs) = attributes {
-            global.set_property_attributes(name, attrs);
+        if !self.set_global_property(name, value)? && self.global.borrow().strict() {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot assign to read-only property {name}"
+            )));
         }
         Ok(())
+    }
+
+    pub(crate) fn set_global_property(&mut self, name: &str, value: Value) -> Result<bool, VmErr> {
+        let target = self.realm_global_object();
+        self.set_member_with_receiver(
+            &target,
+            &Value::String(crate::JsString::from_key(name)),
+            value,
+            &target,
+        )
     }
 
     #[doc(hidden)]
@@ -1687,6 +1730,7 @@ impl Interpreter {
                     .get("this")
                     .unwrap_or(Value::Undefined),
             );
+            field_scope.borrow_mut().class_initializer = true;
             field_scope.borrow_mut().replace_strict(Some(true));
             field_scope.borrow_mut().set_new_target(Value::Undefined);
             self.global = field_scope;
@@ -1716,22 +1760,60 @@ impl Interpreter {
         }
     }
 
+    pub(crate) fn has_private_member(
+        &mut self,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        self.has_private_member_in(&self.global.clone(), receiver, name)
+    }
+
+    pub(crate) fn has_private_member_in(
+        &mut self,
+        scope: &Env,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        if !call::is_js_object(receiver) {
+            return Err(VmErr::Msg(
+                "TypeError: private brand check requires an object".into(),
+            ));
+        }
+        let id = scope
+            .borrow()
+            .private_name(name)
+            .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;
+        Ok(Value::Bool(receiver.has_private_element(id)))
+    }
+
     pub(crate) fn get_private_member(
         &mut self,
         receiver: &Value,
         name: &str,
     ) -> Result<Value, VmErr> {
-        let id = self.global.borrow().private_name(name);
-        if let Some(id) = id {
-            return receiver.private_field(id);
+        self.get_private_member_in(&self.global.clone(), receiver, name)
+    }
+
+    pub(crate) fn get_private_member_in(
+        &mut self,
+        scope: &Env,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        let id = scope
+            .borrow()
+            .private_name(name)
+            .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;
+        match receiver.private_element(id)? {
+            crate::value::PrivateElement::Field(value)
+            | crate::value::PrivateElement::Method(value) => Ok(value),
+            crate::value::PrivateElement::Accessor {
+                get: Some(getter), ..
+            } => self.call_this(&getter, receiver.clone(), Vec::new()),
+            crate::value::PrivateElement::Accessor { get: None, .. } => Err(VmErr::Msg(
+                "TypeError: private accessor has no getter".into(),
+            )),
         }
-        // Private methods/accessors still use their legacy class slots.
-        if !self.has_property(receiver, &Value::String(name.into()))? {
-            return Err(VmErr::Msg(
-                "TypeError: receiver does not contain the private member".into(),
-            ));
-        }
-        self.get_prop_value_str(receiver, name)
     }
 
     pub(crate) fn set_private_member(
@@ -1740,10 +1822,25 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        if let Some(id) = self.global.borrow().private_name(name) {
-            return receiver.set_private_field(id, value);
+        let id = self
+            .global
+            .borrow()
+            .private_name(name)
+            .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;
+        match receiver.private_element(id)? {
+            crate::value::PrivateElement::Field(_) => receiver.set_private_field(id, value),
+            crate::value::PrivateElement::Method(_) => Err(VmErr::Msg(
+                "TypeError: private method is not writable".into(),
+            )),
+            crate::value::PrivateElement::Accessor {
+                set: Some(setter), ..
+            } => self
+                .call_this(&setter, receiver.clone(), vec![value])
+                .map(|_| ()),
+            crate::value::PrivateElement::Accessor { set: None, .. } => Err(VmErr::Msg(
+                "TypeError: private accessor has no setter".into(),
+            )),
         }
-        self.assign_member_str(receiver, name, value)
     }
 
     /// Initialize fields in their defining lexical scope. DefineField creates
@@ -1761,12 +1858,18 @@ impl Interpreter {
                     .unwrap_or_else(|| self.persistent_global.clone()),
             )
         };
-        if fields.is_empty() {
+        let definitions = defining.borrow().private_instance_elements();
+        if fields.is_empty() && definitions.is_empty() {
             return Ok(());
         }
         let receiver = self.resolve_this(constructor_scope)?;
+        for (id, element) in definitions {
+            self.execution.check()?;
+            receiver.initialize_private_element(id, element)?;
+        }
         let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
         field_scope.borrow_mut().set("this", receiver.clone());
+        field_scope.borrow_mut().class_initializer = true;
         field_scope.borrow_mut().replace_strict(Some(true));
         field_scope.borrow_mut().set_new_target(Value::Undefined);
         let saved = std::mem::replace(&mut self.global, field_scope);
@@ -1789,7 +1892,7 @@ impl Interpreter {
                     receiver.initialize_private_field(id, value)?;
                     continue;
                 }
-                let descriptor = Value::object(vec![
+                let descriptor = Value::descriptor_record(vec![
                     ("value".into(), value),
                     ("writable".into(), Value::Bool(true)),
                     ("enumerable".into(), Value::Bool(true)),
@@ -1819,7 +1922,12 @@ impl Interpreter {
     /// declarations (recursively, through blocks but not into nested
     /// functions), then this level's lexical declarations.
     pub fn run_program_body(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
-        if let Some(Statement::ClassInitialization { derived, fields }) = stmts.first() {
+        if let Some(Statement::ClassInitialization {
+            derived,
+            fields,
+            forward_rest,
+        }) = stmts.first()
+        {
             let depth = self.guest_execution_depth.clone();
             depth.set(depth.get().saturating_add(1));
             let _execution_guard = GuestExecutionGuard(depth);
@@ -1827,6 +1935,20 @@ impl Interpreter {
             scope.borrow_mut().enter_constructor(*derived, fields);
             if !derived {
                 self.initialize_instance_fields(&scope)?;
+            }
+            if let Some(rest) = forward_rest {
+                let arguments = scope
+                    .borrow()
+                    .get(rest)
+                    .and_then(|value| value.as_array())
+                    .expect("implicit constructor rest parameter")
+                    .borrow()
+                    .clone();
+                let superclass = scope
+                    .borrow()
+                    .get("__super_ctor")
+                    .expect("implicit derived constructor superclass");
+                self.invoke_ctor(&superclass, Value::Undefined, arguments)?;
             }
             return self.run_program_body(&stmts[1..]);
         }
@@ -1845,9 +1967,11 @@ impl Interpreter {
         let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
+        let script = scope.borrow().is_global_scope();
         let result = {
             let _execution_guard = GuestExecutionGuard(depth.clone());
-            self.hoist_vars(stmts)
+            self.validate_global_declarations(stmts, script)
+                .and_then(|()| self.hoist_vars(stmts))
                 .and_then(|()| self.hoist_lexical(stmts))
                 .and_then(|()| self.run(stmts))
         };
@@ -1889,6 +2013,146 @@ impl Interpreter {
     /// error paths, so a `throw` cannot leave the interpreter in the block.
     pub(crate) fn pop_scope(&mut self, outer: Env) {
         self.global = outer;
+    }
+
+    /// Validate every declaration before creating any binding. Script globals
+    /// and sloppy eval use the same object/declarative record checks.
+    pub(crate) fn validate_global_declarations(
+        &mut self,
+        body: &[Statement],
+        script: bool,
+    ) -> Result<(), VmErr> {
+        let variable_scope = Environment::variable_environment(&self.global);
+        if !variable_scope.borrow().is_global_scope() {
+            return Ok(());
+        }
+        fn top_names(body: &[Statement], lexical: &mut Vec<String>, functions: &mut Vec<String>) {
+            for statement in body {
+                match statement {
+                    Statement::VarDecl {
+                        name,
+                        kind,
+                        destructuring,
+                        ..
+                    } if *kind != VarKind::Var => {
+                        if let Some(pattern) = destructuring {
+                            lexical.extend(pattern_names(pattern));
+                        } else {
+                            lexical.push(name.clone());
+                        }
+                    }
+                    Statement::ClassDecl { name, .. } => lexical.push(name.clone()),
+                    Statement::FnDecl { name, .. } => functions.push(name.clone()),
+                    Statement::Declarations(inner)
+                    | Statement::ResourceDeclaration {
+                        declarations: inner,
+                        ..
+                    } => top_names(inner, lexical, functions),
+                    _ => {}
+                }
+            }
+        }
+        let mut lexical = Vec::new();
+        let mut functions = Vec::new();
+        top_names(body, &mut lexical, &mut functions);
+        if script {
+            let scope = variable_scope.borrow();
+            for name in &lexical {
+                if scope.own_lexical_binding(name)
+                    || scope
+                        .global_property(name)
+                        .is_some_and(|(_, attrs)| !attrs.configurable)
+                {
+                    return Err(VmErr::Msg(format!(
+                        "SyntaxError: Identifier '{name}' has already been declared"
+                    )));
+                }
+            }
+        }
+        let mut variables = Vec::new();
+        crate::parser::collect_var_declaration_names(body, &mut variables);
+        variables.extend(functions.iter().cloned());
+        for name in &variables {
+            if variable_scope.borrow().own_lexical_binding(name) {
+                return Err(VmErr::Msg(format!(
+                    "SyntaxError: Identifier '{name}' has already been declared"
+                )));
+            }
+        }
+        let global = Value::RealmGlobal(variable_scope.clone());
+        let extensible = self.is_extensible(&global)?;
+        for name in &functions {
+            let descriptor = crate::builtins::object::descriptor_for_key_in(
+                self,
+                &global,
+                &Value::String(crate::JsString::from_key(name)),
+            )?;
+            let definable = if matches!(descriptor, Value::Undefined) {
+                extensible
+            } else {
+                descriptor
+                    .get_prop("configurable")
+                    .is_some_and(|v| v.is_truthy())
+                    || descriptor.get_prop("value").is_some()
+                        && descriptor
+                            .get_prop("writable")
+                            .is_some_and(|v| v.is_truthy())
+                        && descriptor
+                            .get_prop("enumerable")
+                            .is_some_and(|v| v.is_truthy())
+            };
+            if !definable {
+                return Err(VmErr::Msg(format!(
+                    "TypeError: Cannot declare global function '{name}'"
+                )));
+            }
+        }
+        for name in &variables {
+            if variable_scope.borrow().global_property(name).is_none() && !extensible {
+                return Err(VmErr::Msg(format!(
+                    "TypeError: Cannot declare global variable '{name}'"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn declare_function_binding_in(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        if !scope.borrow().is_global_scope() {
+            return self.set_binding_in(scope, name, value);
+        }
+        let target = Value::RealmGlobal(scope.clone());
+        let key = Value::String(crate::JsString::from_key(name));
+        let previous = crate::builtins::object::descriptor_for_key_in(self, &target, &key)?;
+        let mut fields = vec![("value".into(), value)];
+        if matches!(previous, Value::Undefined)
+            || previous
+                .get_prop("configurable")
+                .is_some_and(|v| v.is_truthy())
+        {
+            fields.extend([
+                ("writable".into(), Value::Bool(true)),
+                ("enumerable".into(), Value::Bool(true)),
+                (
+                    "configurable".into(),
+                    Value::Bool(self.global.borrow().is_eval_scope()),
+                ),
+            ]);
+        }
+        if !self.define_own_property(&target, &key, &Value::descriptor_record(fields))? {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot declare global function '{name}'"
+            )));
+        }
+        let deletable = self.global.borrow().is_eval_scope();
+        scope
+            .borrow_mut()
+            .create_global_var_binding(name, Value::Undefined, deletable)
     }
 
     /// Declare a name in the current scope, honouring the global frame's
@@ -1968,7 +2232,11 @@ impl Interpreter {
                     // declarations works.
                 }
                 // Transparent: its declarators belong to this scope.
-                Statement::Declarations(inner) => self.hoist_lexical(inner)?,
+                Statement::Declarations(inner)
+                | Statement::ResourceDeclaration {
+                    declarations: inner,
+                    ..
+                } => self.hoist_lexical(inner)?,
                 _ => {}
             }
         }
@@ -1992,25 +2260,36 @@ impl Interpreter {
     fn hoist_vars(&mut self, stmts: &[Statement]) -> Result<(), VmErr> {
         let mut names = Vec::new();
         collect_var_names(stmts, &mut names);
-        let variable_scope = Environment::variable_environment(&self.global);
+        let lexical = crate::parser::top_lexical_names(stmts);
+        let scope = self.global.clone();
         for name in names {
-            // Only create the binding if nothing already provides it: a
-            // parameter of the same name keeps its argument value, and a
-            // repeated `var` must not erase an earlier assignment.
-            let exists = {
-                let scope = variable_scope.borrow();
-                scope.own_binding(&name).is_some()
-                    || (scope.is_global_scope() && scope.global_property(&name).is_some())
-            };
-            if !exists {
-                self.declare_binding_in(
-                    &variable_scope,
-                    &name,
-                    Value::Undefined,
-                    BindKind::Var,
-                    true,
-                )?;
+            // Annex B block-function var bindings are ineligible when they
+            // collide with a lexical declaration in the enclosing list.
+            if lexical.contains(&name) {
+                continue;
             }
+            self.hoist_var_binding_in(&scope, &name)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn hoist_var_binding_in(&mut self, scope: &Env, name: &str) -> Result<(), VmErr> {
+        let variable_scope = Environment::variable_environment(scope);
+        if variable_scope.borrow().is_global_scope() {
+            // Ordinary var/function collisions have already failed preflight;
+            // only ineligible Annex B block functions can reach this case.
+            if variable_scope.borrow().own_lexical_binding(name) {
+                return Ok(());
+            }
+            let deletable = scope.borrow().is_eval_scope();
+            return variable_scope.borrow_mut().create_global_var_binding(
+                name,
+                Value::Undefined,
+                deletable,
+            );
+        }
+        if variable_scope.borrow().own_binding(name).is_none() {
+            self.declare_binding_in(&variable_scope, name, Value::Undefined, BindKind::Var, true)?;
         }
         Ok(())
     }
@@ -2282,6 +2561,24 @@ impl Interpreter {
         self.event_loop_options = options;
         Ok(())
     }
+    pub(crate) fn owner_wake_signal(&self) -> std::sync::Arc<crate::host::WakeSignal> {
+        self.execution.wake.clone()
+    }
+
+    /// Opt-in host permission to suspend this agent with Atomics.wait.
+    pub fn set_can_block(&mut self, can_block: bool) {
+        self.execution.can_block.set(can_block);
+    }
+
+    pub(crate) fn can_block(&self) -> bool {
+        self.execution.can_block.get()
+    }
+
+    /// Native blocking operations observe the same owner execution cancellation.
+    pub fn cancellation_token(&self) -> CancellationToken {
+        self.execution.cancellation.borrow().clone()
+    }
+
     pub fn set_cancellation_token(&mut self, token: CancellationToken) {
         if let Some(host) = &self.host {
             let remaining = self.execution.deadline.get().map(|d| {
@@ -2476,32 +2773,115 @@ impl Interpreter {
         self.persistent_global.borrow().global_property(name)
     }
 
-    /// Enumerate a proxy through its `ownKeys` trap when one is installed.
-    pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
-        let Some(proxy) = value.as_proxy() else {
-            return Ok(self.keys(value));
-        };
-        let target = proxy.target.clone();
-        let Some(trap) = self.proxy_trap(&proxy, "ownKeys") else {
-            return Ok(self.keys(&target));
-        };
-        let handler = proxy.handler.clone();
-        let keys = self.call_this(&trap, handler, vec![target])?;
-        let Value::Array(keys) = &keys else {
-            return Err(VmErr::Msg(
-                "TypeError: Proxy ownKeys trap must return an array".into(),
+    /// [[OwnPropertyKeys]] preserves symbol identity and validates Proxy results
+    /// before callers filter keys by type or enumerability.
+    pub(crate) fn own_property_keys(&mut self, value: &Value) -> Result<Vec<Value>, VmErr> {
+        self.own_property_keys_at(value, 0)
+    }
+
+    fn own_property_keys_at(&mut self, value: &Value, depth: usize) -> Result<Vec<Value>, VmErr> {
+        stacker::maybe_grow(1024 * 1024, 8 * 1024 * 1024, || {
+            self.own_property_keys_inner(value, depth)
+        })
+    }
+
+    fn own_property_keys_inner(
+        &mut self,
+        value: &Value,
+        depth: usize,
+    ) -> Result<Vec<Value>, VmErr> {
+        self.execution.check()?;
+        if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+            return Err(crate::value::limit_err(
+                "Maximum Proxy traversal depth exceeded",
             ));
+        }
+        let Some(proxy) = value.as_proxy() else {
+            return crate::builtins::object::ordinary_own_property_keys(self, value);
         };
-        let keys = keys.borrow().clone();
-        let mut names = Vec::with_capacity(keys.len());
-        for key in &keys {
-            match key {
-                Value::String(name) => names.push(name.to_key()),
-                Value::Symbol(_) => {}
-                _ => {
-                    return Err(VmErr::Msg(
-                        "TypeError: Proxy ownKeys trap returned a non-key".into(),
-                    ));
+        let (target, handler) = proxy.snapshot()?;
+        let Some(trap) = self.proxy_trap(&handler, "ownKeys")? else {
+            return self.own_property_keys_at(&target, depth + 1);
+        };
+        let list = self.call_this(&trap, handler, vec![target.clone()])?;
+        if !call::is_js_object(&list) {
+            return Err(VmErr::Msg(
+                "TypeError: Proxy ownKeys result must be an object".into(),
+            ));
+        }
+        let length = self.get_prop_value_str(&list, "length")?;
+        let length = self.ecmascript_to_number(&length)?;
+        let length = if length.is_nan() || length <= 0.0 {
+            0.0
+        } else {
+            length.floor()
+        };
+        if length > crate::value::MAX_OBJECT_PROPS as f64 {
+            return Err(crate::value::limit_err("Maximum property count exceeded"));
+        }
+        let mut keys = Vec::with_capacity(length as usize);
+        let mut seen = std::collections::HashSet::new();
+        for index in 0..length as usize {
+            let key = self.get_prop_value_str(&list, &index.to_string())?;
+            if !matches!(key, Value::String(_) | Value::Symbol(_)) {
+                return Err(VmErr::Msg(
+                    "TypeError: Proxy ownKeys returned a non-key".into(),
+                ));
+            }
+            // String and symbol slots occupy separate namespaces, including
+            // strings whose contents resemble the internal symbol encoding.
+            let identity = match &key {
+                Value::String(name) => (false, name.to_key()),
+                Value::Symbol(symbol) => (true, symbol.id.to_string()),
+                _ => unreachable!(),
+            };
+            if !seen.insert(identity) {
+                return Err(VmErr::Msg(
+                    "TypeError: Proxy ownKeys returned duplicate keys".into(),
+                ));
+            }
+            keys.push(key);
+        }
+        let extensible = self.is_extensible(&target)?;
+        let target_keys = self.own_property_keys_at(&target, depth + 1)?;
+        for key in &target_keys {
+            let descriptor = crate::builtins::object::descriptor_for_key_in(self, &target, key)?;
+            let protected = !matches!(descriptor, Value::Undefined)
+                && !descriptor
+                    .get_prop("configurable")
+                    .is_some_and(|value| value.is_truthy());
+            let identity = match key {
+                Value::String(name) => (false, name.to_key()),
+                Value::Symbol(symbol) => (true, symbol.id.to_string()),
+                _ => unreachable!("own property key"),
+            };
+            if (protected || !extensible) && !seen.contains(&identity) {
+                return Err(VmErr::Msg(
+                    "TypeError: Proxy ownKeys omitted a required target key".into(),
+                ));
+            }
+        }
+        if !extensible && keys.len() != target_keys.len() {
+            return Err(VmErr::Msg(
+                "TypeError: Proxy ownKeys added keys to a non-extensible target".into(),
+            ));
+        }
+        Ok(keys)
+    }
+
+    pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
+        if !matches!(value, Value::Proxy(_)) {
+            return crate::builtins::object::own_names_for(self, value, true);
+        }
+        let mut names = Vec::new();
+        for key in self.own_property_keys(value)? {
+            if let Value::String(name) = &key {
+                let descriptor = crate::builtins::object::descriptor_for_key_in(self, value, &key)?;
+                if descriptor
+                    .get_prop("enumerable")
+                    .is_some_and(|value| value.is_truthy())
+                {
+                    names.push(name.to_key());
                 }
             }
         }

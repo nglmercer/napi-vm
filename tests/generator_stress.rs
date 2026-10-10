@@ -25,6 +25,168 @@ use napi_vm::interpreter::Interpreter;
 use napi_vm::lexer::Lexer;
 use napi_vm::parser::Parser;
 
+#[test]
+fn return_completion_survives_yielding_finally() {
+    assert_eq!(
+        run(r#"
+        function* f() { try { yield 1; } finally { yield 2; yield 3; } }
+        let g = f(); g.next();
+        let a = g.return(42), b = g.next(), c = g.next();
+        [a.value, a.done, b.value, b.done, c.value, c.done].join(',');
+    "#),
+        "2,false,3,false,42,true"
+    );
+}
+
+#[test]
+fn finally_can_replace_return_completion() {
+    assert_eq!(
+        run(r#"
+        function* f() { try { yield 1; } finally { return 9; } }
+        let g = f(); g.next(); let r = g.return(42);
+        [r.value, r.done].join(',');
+    "#),
+        "9,true"
+    );
+}
+
+#[test]
+fn finally_throw_rejects_generator_return_and_completes_it() {
+    assert_eq!(
+        run(r#"
+        let reason = {}, seen = false;
+        function* f() { try { yield 1; } finally { throw reason; } }
+        let g = f(); g.next();
+        try { g.return(42); } catch (e) { seen = e === reason; }
+        seen && g.next().done;
+    "#),
+        "true"
+    );
+}
+
+#[test]
+fn return_before_start_does_not_execute_body() {
+    assert_eq!(
+        run(r#"
+        let ran = false;
+        function* f() { ran = true; yield 1; }
+        let g = f(), a = g.return(42), b = g.return(9);
+        [ran, a.value, a.done, b.value, b.done].join(',');
+    "#),
+        "false,42,true,9,true"
+    );
+}
+
+#[test]
+fn delegation_forwards_throw_to_the_delegate() {
+    assert_eq!(
+        run(r#"
+        let reason = {}, seen = false;
+        let iter = {
+            [Symbol.iterator]() { return this; },
+            next() { return { value: 1, done: false }; },
+            throw(value) { seen = this === iter && value === reason; return { value: 73, done: true }; }
+        };
+        function* f() { return yield* iter; }
+        let g = f(); g.next(); let result = g.throw(reason);
+        [seen, result.value, result.done].join(',');
+    "#),
+        "true,73,true"
+    );
+}
+
+#[test]
+fn delegation_forwards_return_and_preserves_yielding_cleanup() {
+    assert_eq!(
+        run(r#"
+        function* delegate() { try { yield 1; } finally { yield 2; } }
+        function* f() { return yield* delegate(); }
+        let g = f(); g.next(); let a = g.return(42), b = g.next();
+        [a.value, a.done, b.value, b.done].join(',');
+    "#),
+        "2,false,42,true"
+    );
+}
+
+#[test]
+fn delegation_without_throw_closes_then_throws_type_error() {
+    assert_eq!(
+        run(r#"
+        let closed = false, typed = false;
+        let iter = {
+            [Symbol.iterator]() { return this; },
+            next() { return { done: false }; },
+            return() { closed = arguments.length === 0; return {}; }
+        };
+        function* f() { yield* iter; }
+        let g = f(); g.next();
+        try { g.throw({}); } catch(e) { typed = e instanceof TypeError; }
+        closed && typed;
+    "#),
+        "true"
+    );
+}
+
+#[test]
+fn delegation_observes_result_getters_in_order() {
+    assert_eq!(
+        run(r#"
+        let log = '';
+        let iter = {
+            [Symbol.iterator]() { return this; },
+            next() { return {
+                get done() { log += 'd'; return true; },
+                get value() { log += 'v'; return 42; }
+            }; }
+        };
+        function* f() { return yield* iter; }
+        let result = f().next();
+        [log, result.value, result.done].join(',');
+    "#),
+        "dv,42,true"
+    );
+}
+
+#[test]
+fn completed_generator_next_does_not_repeat_its_return_value() {
+    assert_eq!(
+        run(r#"
+        function* f() { return 42; }
+        let g = f(), a = g.next(), b = g.next();
+        a.value === 42 && a.done && b.value === undefined && b.done;
+    "#),
+        "true"
+    );
+}
+
+#[test]
+fn generator_methods_reject_incompatible_receivers() {
+    assert_eq!(
+        run(r#"
+        let g = (function*() {})(), count = 0;
+        for (let name of ['next', 'return', 'throw']) {
+            try { g[name].call({}); } catch(e) { if (e instanceof TypeError) count++; }
+        }
+        count;
+    "#),
+        "3"
+    );
+}
+
+#[test]
+fn loop_close_does_not_abandon_a_generator_that_yields_in_finally() {
+    assert_eq!(
+        run(r#"
+        function* f() { try { yield 1; } finally { yield 2; yield 3; } }
+        let g = f();
+        for (let value of g) { break; }
+        let a = g.next(), b = g.next();
+        [a.value, a.done, b.value, b.done].join(',');
+    "#),
+        "3,false,,true"
+    );
+}
+
 /// Evaluate `source` in a fresh interpreter and return the result as a string.
 fn run(source: &str) -> String {
     let mut interp = Interpreter::with_builtins();

@@ -6,7 +6,7 @@ mod index;
 mod primary;
 mod stmt;
 mod validate;
-pub(crate) use validate::use_strict;
+pub(crate) use validate::{EvalContext, use_strict};
 
 pub use ast::*;
 pub use cache::{parse_cached, parse_cached_with_goal};
@@ -52,7 +52,7 @@ fn describe(token: &Token) -> String {
         Token::EOF => "end of input".to_string(),
         Token::Number(n) => format!("number `{n}`"),
         Token::String(s) | Token::EscapedString(s) => format!("string `{s}`"),
-        Token::Identifier(name) => format!("`{name}`"),
+        Token::Identifier(name) | Token::EscapedIdentifier(name) => format!("`{name}`"),
         Token::Unknown(c) => format!("`{c}`"),
         other => format!("`{other:?}`"),
     }
@@ -80,6 +80,11 @@ pub struct Parser {
     pub index: index::SymbolIndex,
     /// The scope occurrences are currently recorded into.
     current_scope: usize,
+    await_expression: bool,
+    yield_expression: bool,
+    in_expression: bool,
+    single_statement: bool,
+    allow_annex_b_function: bool,
 }
 
 /// A syntax error, with the source position of the token that caused it.
@@ -114,6 +119,11 @@ impl Parser {
             error: None,
             index: index::SymbolIndex::default(),
             current_scope: 0,
+            await_expression: true,
+            yield_expression: false,
+            in_expression: true,
+            single_statement: false,
+            allow_annex_b_function: false,
         }
     }
 
@@ -127,6 +137,11 @@ impl Parser {
             error: None,
             index: index::SymbolIndex::default(),
             current_scope: 0,
+            await_expression: true,
+            yield_expression: false,
+            in_expression: true,
+            single_statement: false,
+            allow_annex_b_function: false,
         }
     }
 
@@ -164,22 +179,26 @@ impl Parser {
         &mut self,
         new_target: bool,
     ) -> Result<Vec<Statement>, ParseError> {
-        self.parse_with_goal_context(ParseGoal::Auto, new_target, false)
+        self.parse_with_goal_context(ParseGoal::Auto, new_target, false, None)
     }
 
     pub fn parse_program_with_goal(
         &mut self,
         goal: ParseGoal,
     ) -> Result<Vec<Statement>, ParseError> {
-        self.parse_with_goal_context(goal, false, false)
+        self.parse_with_goal_context(goal, false, false, None)
     }
 
     pub(crate) fn parse_eval_context(
         &mut self,
-        new_target: bool,
-        strict: bool,
+        context: EvalContext,
     ) -> Result<Vec<Statement>, ParseError> {
-        self.parse_with_goal_context(ParseGoal::Script, new_target, strict)
+        self.parse_with_goal_context(
+            ParseGoal::Script,
+            context.new_target,
+            context.strict,
+            Some(context),
+        )
     }
 
     fn parse_with_goal_context(
@@ -187,9 +206,11 @@ impl Parser {
         goal: ParseGoal,
         new_target: bool,
         strict: bool,
+        eval: Option<EvalContext>,
     ) -> Result<Vec<Statement>, ParseError> {
         #[cfg(any(test, feature = "test-hooks"))]
         PARSE_PROGRAM_COUNT.with(|count| count.set(count.get() + 1));
+        self.await_expression = goal != ParseGoal::Script;
         let stmts = self.parse();
         if self.depth_exceeded {
             return Err(ParseError {
@@ -200,12 +221,12 @@ impl Parser {
         match self.error.take() {
             Some(error) => Err(error),
             None => {
-                validate::validate(&stmts, new_target, strict, goal).map_err(|message| {
-                    ParseError {
+                validate::validate(&stmts, new_target, strict, goal, eval.as_ref()).map_err(
+                    |message| ParseError {
                         message,
                         span: Span::unknown(),
-                    }
-                })?;
+                    },
+                )?;
                 Ok(stmts)
             }
         }
@@ -219,6 +240,13 @@ impl Parser {
         unique: bool,
     ) {
         let non_simple = !defaults.is_empty() || params.iter().any(|p| p.starts_with("..."));
+        if params
+            .iter()
+            .enumerate()
+            .any(|(index, name)| name.starts_with("...") && index + 1 != params.len())
+        {
+            self.record_error("rest parameter must be last".into());
+        }
         let strict = validate::use_strict(body);
         if non_simple && strict {
             self.record_error("use strict directive with non-simple parameters".into());
@@ -246,6 +274,136 @@ impl Parser {
                 self.record_error(format!("invalid strict-mode parameter: {name}"));
             }
         }
+    }
+
+    pub(crate) fn line_break_after_current(&self) -> bool {
+        self.toks
+            .get(self.pos + 1)
+            .is_some_and(|(_, span)| !span.is_unknown() && span.line > self.cur_span().end_line)
+    }
+
+    pub(crate) fn line_break_before_current(&self) -> bool {
+        self.pos > 0
+            && !self.cur_span().is_unknown()
+            && self.cur_span().line > self.toks[self.pos - 1].1.end_line
+    }
+
+    pub(crate) fn with_grammar<R>(
+        &mut self,
+        asynchronous: bool,
+        generator: bool,
+        operation: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let saved = (
+            self.await_expression,
+            self.yield_expression,
+            self.in_expression,
+        );
+        self.await_expression = asynchronous;
+        self.yield_expression = generator;
+        self.in_expression = true;
+        let result = operation(self);
+        (
+            self.await_expression,
+            self.yield_expression,
+            self.in_expression,
+        ) = saved;
+        result
+    }
+
+    pub(crate) fn with_statement_list<R>(&mut self, operation: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = (self.single_statement, self.allow_annex_b_function);
+        self.single_statement = false;
+        self.allow_annex_b_function = false;
+        let result = operation(self);
+        (self.single_statement, self.allow_annex_b_function) = saved;
+        result
+    }
+
+    pub(crate) fn with_in<R>(
+        &mut self,
+        allowed: bool,
+        operation: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let saved = self.in_expression;
+        self.in_expression = allowed;
+        let result = operation(self);
+        self.in_expression = saved;
+        result
+    }
+
+    /// Arrow parameters cannot start an unparenthesized ShiftExpression.
+    pub(crate) fn arrow_head_here(&self) -> bool {
+        if matches!(
+            self.cur(),
+            Token::Identifier(_)
+                | Token::EscapedIdentifier(_)
+                | Token::KwAs
+                | Token::KwLet
+                | Token::KwStatic
+                | Token::KwConstructor
+                | Token::KwFrom
+                | Token::KwGet
+                | Token::KwOf
+                | Token::KwSet
+                | Token::KwAsync
+        ) && matches!(self.peek(), Token::Arrow)
+        {
+            return true;
+        }
+        if !matches!(self.cur(), Token::LParen) {
+            return false;
+        }
+        let mut depth = 0;
+        for (index, (token, _)) in self.toks[self.pos..].iter().enumerate() {
+            match token {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self
+                            .toks
+                            .get(self.pos + index + 1)
+                            .is_some_and(|(token, _)| matches!(token, Token::Arrow));
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// The opening parenthesis has already been consumed by the caller.
+    pub(crate) fn callable_parts(
+        &mut self,
+        asynchronous: bool,
+        generator: bool,
+    ) -> (Vec<String>, Vec<Statement>, Vec<Statement>) {
+        self.with_grammar(asynchronous, generator, |parser| {
+            let (params, defaults) = parser.params();
+            parser.expect(&Token::RParen);
+            parser.expect(&Token::LBrace);
+            let body = parser.block_body();
+            parser.expect(&Token::RBrace);
+            (params, defaults, body)
+        })
+    }
+
+    pub(crate) fn check_accessor_parameters(
+        &mut self,
+        params: &[String],
+        defaults: &[Statement],
+        getter: bool,
+        setter: bool,
+    ) {
+        if getter && !params.is_empty()
+            || setter && (params.len() != 1 || params[0].starts_with("..."))
+        {
+            self.record_error("invalid accessor parameter list".into());
+        }
+        // A destructured/default setter has one formal parameter; its defaults
+        // remain in ParameterInitialization for contextual validation.
+        let _ = defaults;
     }
 
     /// The first syntax error recorded, if any.
@@ -388,16 +546,17 @@ impl Parser {
     /// `{ get() {} }`, `{ get }` and `{ get, x }` all name a property `get`.
     pub(crate) fn starts_accessor(&self, keyword: &Token) -> bool {
         self.cur() == keyword
-            && matches!(
-                self.peek(),
-                Token::Identifier(_)
-                    | Token::String(_)
-                    | Token::EscapedString(_)
-                    | Token::Number(_)
-                    | Token::LBracket
-                    | Token::KwGet
-                    | Token::KwSet
-            )
+            && (self.peek().identifier_name().is_some()
+                || matches!(
+                    self.peek(),
+                    Token::String(_)
+                        | Token::EscapedString(_)
+                        | Token::LegacyString(_)
+                        | Token::Number(_)
+                        | Token::LegacyNumber(_)
+                        | Token::BigInt(_)
+                        | Token::LBracket
+                ))
     }
 
     pub(crate) fn eat(&mut self, t: &Token) -> bool {
@@ -416,6 +575,10 @@ impl Parser {
     pub(crate) fn semi(&mut self) {
         if matches!(self.cur(), Token::Semicolon) {
             self.pos += 1;
+        } else if !matches!(self.cur(), Token::RBrace | Token::EOF)
+            && !self.line_break_before_current()
+        {
+            self.record_error("expected semicolon or line terminator".into());
         }
     }
 }

@@ -180,6 +180,7 @@ impl CancellationToken {
 }
 
 pub(super) struct ExecutionState {
+    pub can_block: Cell<bool>,
     pub wake: Arc<crate::host::WakeSignal>,
     pub fuel: Cell<u64>,
     pub poll_remaining: Cell<u64>,
@@ -200,6 +201,7 @@ impl ExecutionState {
             poll_remaining: Cell::new(0),
             loops: Cell::new(super::DEFAULT_LOOP_BUDGET),
             jobs: Cell::new(super::jobs::MAX_JOBS_PER_DRAIN),
+            can_block: Cell::new(false),
             cancellation: std::cell::RefCell::new(CancellationToken::default()),
             deadline: Cell::new(None),
             clock: Rc::new(RealTimeClock::default()),

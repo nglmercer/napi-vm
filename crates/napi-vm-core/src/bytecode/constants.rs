@@ -73,6 +73,7 @@ pub fn class_key_name(index: usize) -> String {
 #[derive(Debug, Clone)]
 pub enum ClassNameTemplate {
     Static(String),
+    Private(String),
     Computed(Reg),
 }
 
@@ -87,8 +88,6 @@ pub struct ClassMemberTemplate {
     pub name: ClassNameTemplate,
     /// Method/accessor function constant (bytecode or AST fallback).
     pub func: Option<u16>,
-    /// Static field initializer value.
-    pub value: Option<Reg>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +95,15 @@ pub enum ClassMemberKind {
     Method,
     Getter,
     Setter,
-    Field,
+}
+
+#[derive(Debug, Clone)]
+pub enum ClassStaticTemplate {
+    Field {
+        name: ClassNameTemplate,
+        init: crate::parser::Expr,
+    },
+    Block(u16),
 }
 
 /// A class definition template. Function-constant slots start as `u16::MAX`
@@ -104,19 +111,22 @@ pub enum ClassMemberKind {
 #[derive(Debug, Clone)]
 pub struct ClassTemplate {
     pub private_fields: Vec<String>,
+    /// Lexically declared names for direct eval's static semantics.
+    pub private_declarations: Vec<String>,
     pub name: String,
     /// A class *expression's* own name, bound in a child scope around the
     /// definition (declarations bind in the enclosing scope instead).
     pub expr_name: Option<String>,
     pub superclass: Option<Reg>,
+    pub super_proto: Option<Reg>,
     pub ctor_func: u16,
     pub ctor_length: usize,
     /// Computed instance-field keys, in field order, bound into the
     /// constructor's scope for the desugared field assignments to read.
     pub ctor_computed_keys: Vec<Reg>,
     pub members: Vec<ClassMemberTemplate>,
-    /// Static-block bodies as AST-function constants.
-    pub blocks: Vec<u16>,
+    /// Static fields and block constants in source order.
+    pub blocks: Vec<ClassStaticTemplate>,
 }
 
 /// One `import` statement: the module specifier plus the local names to
@@ -185,6 +195,8 @@ pub enum PropKind {
 /// variables must still resolve lexically, not through the caller's frame.
 #[derive(Debug, Clone)]
 pub struct AstFunction {
+    /// An explicit expression name owns an immutable lexical self binding.
+    pub named_expression: bool,
     pub name: Option<String>,
     pub params: Vec<String>,
     pub body: Rc<Vec<Statement>>,

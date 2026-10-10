@@ -24,42 +24,67 @@ pub(super) fn napi_global_scope(environment: &NapiEnvironment) -> Result<Env, i3
         .ok_or(NAPI_INVALID_ARG)
 }
 
-pub(super) fn napi_global_get(environment: &NapiEnvironment, key: &str) -> Result<Value, i32> {
-    Ok(napi_global_scope(environment)?
-        .borrow()
-        .get(key)
-        .unwrap_or(Value::Undefined))
+pub(super) fn napi_global_receiver(
+    environment: &NapiEnvironment,
+    object: &Value,
+) -> Result<Env, i32> {
+    match object {
+        Value::RealmGlobal(global) => Ok(global.clone()),
+        Value::GlobalObject => napi_global_scope(environment),
+        _ => Err(NAPI_OBJECT_EXPECTED),
+    }
 }
 
-pub(super) fn napi_global_has(environment: &NapiEnvironment, key: &str) -> Result<bool, i32> {
-    Ok(napi_global_scope(environment)?.borrow().get(key).is_some())
+pub(super) fn napi_global_get(
+    environment: &NapiEnvironment,
+    object: &Value,
+    key: &str,
+) -> Result<Value, i32> {
+    Ok(napi_global_receiver(environment, object)?
+        .borrow()
+        .global_property(key)
+        .map_or(Value::Undefined, |(value, _)| value))
 }
 
-pub(super) fn napi_global_has_own(environment: &NapiEnvironment, key: &str) -> Result<bool, i32> {
-    Ok(napi_global_scope(environment)?
+pub(super) fn napi_global_has(
+    environment: &NapiEnvironment,
+    object: &Value,
+    key: &str,
+) -> Result<bool, i32> {
+    Ok(napi_global_receiver(environment, object)?
         .borrow()
-        .all_keys()
-        .iter()
-        .any(|name| name == key))
+        .global_property(key)
+        .is_some())
+}
+
+pub(super) fn napi_global_has_own(
+    environment: &NapiEnvironment,
+    object: &Value,
+    key: &str,
+) -> Result<bool, i32> {
+    napi_global_has(environment, object, key)
 }
 
 pub(super) fn napi_global_set(
     environment: &NapiEnvironment,
+    object: &Value,
     key: &str,
     value: Value,
 ) -> Result<(), i32> {
-    napi_global_scope(environment)?
+    napi_global_receiver(environment, object)?
         .borrow_mut()
         .try_set(key, value)
         .map_err(|_| NAPI_GENERIC_FAILURE)
 }
 
-pub(super) fn napi_global_delete(environment: &NapiEnvironment, key: &str) -> Result<bool, i32> {
-    let global = napi_global_scope(environment)?;
-    if global.borrow().has(key) {
-        return Ok(global.borrow_mut().remove(key));
-    }
-    Ok(true)
+pub(super) fn napi_global_delete(
+    environment: &NapiEnvironment,
+    object: &Value,
+    key: &str,
+) -> Result<bool, i32> {
+    Ok(napi_global_receiver(environment, object)?
+        .borrow_mut()
+        .delete_global_property(key))
 }
 
 pub(super) fn run_napi_guest_operation(
@@ -92,6 +117,7 @@ pub(super) fn is_napi_property_object(value: &Value) -> bool {
             | Value::NativeFunction { .. }
             | Value::HostFunction { .. }
             | Value::GlobalObject
+            | Value::RealmGlobal(_)
             | Value::Class(_)
             | Value::Promise(_)
             | Value::Generator { .. }
@@ -129,7 +155,7 @@ pub(super) fn is_napi_function(value: &Value) -> bool {
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_napi_function(&proxy.target),
+        Value::Proxy(proxy) => proxy.callable,
         Value::Object { .. } => value.get_prop("__symbol_call__").is_some_and(|target| {
             matches!(
                 target,
@@ -503,7 +529,7 @@ pub(super) fn napi_direct_delete_property(object: &Value, key: &Value) -> Result
             Ok(true)
         }
         Value::Proxy(proxy) => napi_direct_delete_property(
-            &proxy.target,
+            &proxy.target_for_inspection(),
             &Value::String(crate::JsString::from_key(&key)),
         ),
         _ => Ok(true),
@@ -516,6 +542,7 @@ pub(super) fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
         function.prototype_value(object);
     }
     match object {
+        Value::RealmGlobal(global) => global.borrow().global_property_keys(),
         Value::Object { props } => props.borrow().iter().map(|(key, _)| key.clone()).collect(),
         Value::Function(function) => function
             .properties
@@ -544,7 +571,7 @@ pub(super) fn napi_direct_own_property_names(object: &Value) -> Vec<String> {
             names.extend(array.named.borrow().iter().map(|(key, _)| key.clone()));
             names
         }
-        Value::Proxy(proxy) => napi_direct_own_property_names(&proxy.target),
+        Value::Proxy(proxy) => napi_direct_own_property_names(&proxy.target_for_inspection()),
         Value::Error(error) => {
             let mut names = vec!["name".to_owned(), "message".to_owned(), "stack".to_owned()];
             if error.code.is_some() {
@@ -584,7 +611,13 @@ pub(super) fn napi_direct_property_is_enumerable(object: &Value, key: &str) -> b
                     || array.named_prop(key).is_some()
                         && array.meta.borrow().attrs_of(key).enumerable)
         }
-        Value::Proxy(proxy) => napi_direct_property_is_enumerable(&proxy.target, key),
+        Value::Proxy(proxy) => {
+            napi_direct_property_is_enumerable(&proxy.target_for_inspection(), key)
+        }
+        Value::RealmGlobal(global) => global
+            .borrow()
+            .global_property(key)
+            .is_some_and(|(_, attrs)| attrs.enumerable),
         Value::GlobalObject => true,
         Value::Error(error) => key == "code" && error.code.is_some(),
         _ => false,
@@ -625,12 +658,20 @@ pub(super) fn napi_guest_own_property_keys(
     if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
         return Err(crate::value::limit_err("Maximum prototype depth exceeded"));
     }
-    if matches!(object, Value::GlobalObject) {
-        let mut keys = interpreter
-            .global_keys()
+    if let Some(global) = interpreter.global_scope_of(object) {
+        let mut keys = global
+            .borrow()
+            .global_property_keys()
             .into_iter()
             .filter(|key| !crate::interpreter::is_internal_key(key))
-            .map(|key| (NapiPropertyKey::String(key), PropAttrs::default()))
+            .map(|key| {
+                let attrs = global
+                    .borrow()
+                    .global_property(&key)
+                    .expect("own global key")
+                    .1;
+                (NapiPropertyKey::String(key), attrs)
+            })
             .collect::<Vec<_>>();
         napi_sort_property_keys(&mut keys);
         return Ok(keys);
@@ -641,11 +682,11 @@ pub(super) fn napi_guest_own_property_keys(
         });
     };
 
-    let target = proxy.target.clone();
-    let Some(trap) = interpreter.proxy_trap(proxy, "ownKeys") else {
+    let (target, handler) = proxy.snapshot()?;
+    let Some(trap) = interpreter.proxy_trap(&handler, "ownKeys")? else {
         return napi_guest_own_property_keys(interpreter, &target, depth + 1);
     };
-    let result = interpreter.call_this(&trap, proxy.handler.clone(), vec![target.clone()])?;
+    let result = interpreter.call_this(&trap, handler, vec![target.clone()])?;
     let Value::Array(trap_keys) = &result else {
         return Err(VmErr::Msg(
             "TypeError: Proxy ownKeys trap must return an array".into(),
@@ -718,7 +759,7 @@ pub(super) fn napi_guest_object_is_extensible(object: &Value) -> bool {
         Value::Function(function) => !function.properties.meta.borrow().non_extensible,
         Value::HostFunction { properties, .. } => !properties.meta.borrow().non_extensible,
         Value::Class(class) => !class.statics.meta.borrow().non_extensible,
-        Value::Proxy(proxy) => napi_guest_object_is_extensible(&proxy.target),
+        Value::Proxy(proxy) => napi_guest_object_is_extensible(&proxy.target_for_inspection()),
         _ => true,
     }
 }
@@ -775,7 +816,7 @@ pub(super) fn napi_guest_get_all_property_names(
             return Value::checked_array(names);
         }
         let prototype = match &current {
-            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target),
+            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target_for_inspection()),
             _ => interpreter.prototype_of(&current),
         };
         let Some(prototype) = prototype else {
@@ -828,6 +869,16 @@ pub(super) fn napi_direct_all_property_keys(
 ) -> Result<Vec<(NapiPropertyKey, PropAttrs)>, i32> {
     let mut keys = Vec::new();
     match object {
+        Value::RealmGlobal(global) => {
+            for key in global.borrow().global_property_keys() {
+                let attrs = global
+                    .borrow()
+                    .global_property(&key)
+                    .expect("own global key")
+                    .1;
+                napi_push_direct_property_key(&mut keys, &key, None, attrs);
+            }
+        }
         Value::Object { props } => {
             let slots = props.borrow();
             let metadata = props.meta.borrow();
@@ -965,10 +1016,7 @@ pub(super) fn napi_direct_all_property_keys(
         | Value::DataView(_)
         | Value::StringIterator { .. }
         | Value::Generator { .. } => {}
-        Value::Proxy(_)
-        | Value::NativeFunction { .. }
-        | Value::GlobalObject
-        | Value::RealmGlobal(_) => {
+        Value::Proxy(_) | Value::NativeFunction { .. } | Value::GlobalObject => {
             return Err(NAPI_GENERIC_FAILURE);
         }
         Value::Uninitialized
@@ -993,7 +1041,7 @@ pub(super) fn napi_direct_prototype(
     object: &Value,
 ) -> Result<Option<Rc<Value>>, i32> {
     let direct = match object {
-        Value::Proxy(proxy) => proxy.target.proto_of(),
+        Value::Proxy(proxy) => proxy.target_for_inspection().proto_of(),
         _ => object.proto_of(),
     };
     if direct.is_some() || matches!(object, Value::Proxy(_)) {
@@ -1006,6 +1054,7 @@ pub(super) fn napi_direct_prototype(
             | Value::Function(_)
             | Value::Class(_)
             | Value::GlobalObject
+            | Value::RealmGlobal(_)
             | Value::NativeFunction { .. }
             | Value::HostFunction { .. }
             | Value::Promise(_)
@@ -1140,8 +1189,8 @@ pub(super) fn napi_guest_get_property_names(
     let mut seen = HashSet::new();
     let mut names = Vec::new();
     for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-        let trapped_keys = if matches!(current, Value::GlobalObject) {
-            Some(interpreter.global_keys())
+        let trapped_keys = if let Some(global) = interpreter.global_scope_of(&current) {
+            Some(global.borrow().global_property_keys())
         } else if matches!(current, Value::Proxy(_)) {
             Some(interpreter.keys_with_proxy_trap(&current)?)
         } else {
@@ -1168,7 +1217,7 @@ pub(super) fn napi_guest_get_property_names(
         // up the prototype chain.
         seen.extend(napi_direct_own_property_names(&current));
         let prototype = match &current {
-            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target),
+            Value::Proxy(proxy) => interpreter.prototype_of(&proxy.target_for_inspection()),
             _ => interpreter.prototype_of(&current),
         };
         let Some(prototype) = prototype else {

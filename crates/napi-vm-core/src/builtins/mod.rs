@@ -33,6 +33,7 @@ pub use collections::{collection_entries_of, collection_tag, describe_collection
 pub use date::{date_member, iso_string};
 pub use error::error_to_string;
 pub use number::number_method;
+pub(crate) use object::install_intrinsic_accessor;
 pub(crate) use regexp::compile as compile_regex;
 pub use regexp::regexp_member;
 pub use string::string_method;
@@ -47,6 +48,9 @@ pub(crate) use symbol::{is_iterator_symbol, symbol_for, symbol_key_for, well_kno
 pub use typedarray::{
     array_buffer_member, data_view_member, read_element, shared_array_buffer_member, typed_member,
     write_element,
+};
+pub(crate) use typedarray::{
+    canonical_numeric_index, set_integer_index_in, valid_integer_index, write_element_in,
 };
 
 use crate::error::VmErr;
@@ -159,6 +163,7 @@ pub fn setup_builtins(env: &Env) {
                 .expect("Number numeric parser alias");
         }
     }
+    crate::interpreter::resolve::install_iterator_intrinsics(&mut e);
     e.snapshot_intrinsics();
 }
 
@@ -276,8 +281,36 @@ fn nf(name: &str, callable: NativeFn) -> Value {
     }
 }
 
+/// A native function with an internal, traced receiver which callers cannot
+/// replace. Promise resolving functions and Proxy revokers share bound calls.
+pub(crate) fn bound_native_method(
+    name: &str,
+    length: usize,
+    callable: NativeFn,
+    prototype: Option<Value>,
+    state: Value,
+) -> Value {
+    let target = native_method(name, length, callable, prototype.clone());
+    let mut result = native_method(name, length, callable, prototype);
+    if let Value::Function(function) = &mut result {
+        let function = std::rc::Rc::get_mut(function).expect("fresh native function");
+        function.native = None;
+        function.bound = Some(std::rc::Rc::new(crate::value::BoundFunctionData {
+            target,
+            this_value: state,
+            arguments: std::rc::Rc::new(Vec::new()),
+        }));
+    }
+    result
+}
+
 /// A native method with ordinary, mutable function property descriptors.
-fn native_method(name: &str, length: usize, callable: NativeFn, prototype: Option<Value>) -> Value {
+pub(crate) fn native_method(
+    name: &str,
+    length: usize,
+    callable: NativeFn,
+    prototype: Option<Value>,
+) -> Value {
     let properties = crate::heap::tracked(std::rc::Rc::new(crate::value::ObjectCell::new(
         vec![
             ("name".into(), Value::String(name.into())),
@@ -314,6 +347,10 @@ fn native_method(name: &str, length: usize, callable: NativeFn, prototype: Optio
         bound: None,
         bytecode: None,
     }))
+}
+
+pub(super) fn require_new(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Err(VmErr::Msg("TypeError: constructor requires new".into()))
 }
 
 /// Make a built-in namespace object callable.
@@ -396,10 +433,9 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                 crate::Lexer::from_js_string(source).tokenize_with_spans(),
             );
             let body = parser
-                .parse_eval_context(
-                    interp.global.borrow().new_target().is_some(),
-                    interp.global.borrow().strict(),
-                )
+                .parse_eval_context(crate::interpreter::Environment::eval_context(
+                    &interp.global,
+                ))
                 .map_err(|error| VmErr::Msg(format!("SyntaxError: {}", error.message)))?;
             let strict = interp.global.borrow().strict() || crate::parser::use_strict(&body);
             let saved = interp.global.clone();
@@ -414,7 +450,7 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                 loop {
                     if names
                         .iter()
-                        .any(|name| scope.borrow().has_lexical_binding(name))
+                        .any(|name| scope.borrow().has_eval_var_conflict(name))
                     {
                         return Err(VmErr::Msg(
                             "SyntaxError: Eval variable conflicts with a lexical binding".into(),
@@ -430,32 +466,8 @@ pub(crate) fn eval_direct(interp: &mut Interpreter, args: Vec<Value>) -> Result<
                     }
                 }
             }
-            if !strict && std::rc::Rc::ptr_eq(&variable_scope, &interp.persistent_global) {
-                fn validate(
-                    body: &[crate::parser::Statement],
-                    scope: &crate::interpreter::Env,
-                ) -> Result<(), VmErr> {
-                    for statement in body {
-                        match statement {
-                            crate::parser::Statement::FnDecl { name, .. } => {
-                                if let Some((_, attributes)) = scope.borrow().global_property(name)
-                                    && !attributes.configurable
-                                    && !(attributes.writable && attributes.enumerable)
-                                {
-                                    return Err(VmErr::Msg(format!(
-                                        "TypeError: Cannot declare global function {name}"
-                                    )));
-                                }
-                            }
-                            crate::parser::Statement::Declarations(inner) => {
-                                validate(inner, scope)?
-                            }
-                            _ => {}
-                        }
-                    }
-                    Ok(())
-                }
-                validate(&body, &variable_scope)?;
+            if !strict {
+                interp.validate_global_declarations(&body, false)?;
             }
             interp.global = std::rc::Rc::new(std::cell::RefCell::new(
                 crate::interpreter::Environment::child(saved.clone()),

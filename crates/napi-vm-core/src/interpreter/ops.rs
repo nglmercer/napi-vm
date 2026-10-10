@@ -120,19 +120,13 @@ impl Interpreter {
             let right = self.coerce_for_concat(r)?;
             return self.bin_op(op, &left, &right);
         }
-        if matches!(op, BinOp::In)
-            && let Some(proxy) = r.as_proxy()
-        {
-            let target = proxy.target.clone();
-            return match self.proxy_trap(&proxy, "has") {
-                Some(trap) => {
-                    let key = self.proxy_property_key(l)?;
-                    let handler = proxy.handler.clone();
-                    let result = self.call_this(&trap, handler, vec![target, key])?;
-                    Ok(Value::Bool(result.is_truthy()))
-                }
-                None => self.bin_op(op, l, &target),
-            };
+        if matches!(op, BinOp::In) {
+            if !super::call::is_js_object(r) {
+                return Err(VmErr::Msg(
+                    "TypeError: Right-hand side of in must be an object".into(),
+                ));
+            }
+            return self.has_property(r, l).map(Value::Bool);
         }
         self.bin_op(op, l, r)
     }
@@ -528,7 +522,9 @@ impl Interpreter {
                     // A proxy reports the type of what it wraps, so wrapping a
                     // function still reports as one.
                     Value::Proxy(proxy) => {
-                        return self.un_op(op, &proxy.target);
+                        return Ok(Value::String(
+                            if proxy.callable { "function" } else { "object" }.into(),
+                        ));
                     }
                     // Internal values, resolved before they reach guest code.
                     #[cfg(stackful_coroutines)]
@@ -559,7 +555,7 @@ impl Interpreter {
             // Without an `ownKeys` trap a proxy enumerates its target. The
             // trap needs to call guest code, so it is applied in `Object.keys`
             // and `for…in`, which have `&mut self`.
-            Value::Proxy(proxy) => self.keys(&proxy.target),
+            Value::Proxy(proxy) => self.keys(&proxy.target_for_inspection()),
             Value::Array(i) => (0..i.borrow().len())
                 .filter(|index| i.has_index(*index))
                 .map(|x| x.to_string())
@@ -657,6 +653,7 @@ impl Interpreter {
             }
             match v {
                 Value::String(s) => Ok(s.clone()),
+                Value::Number(n) => Ok(crate::format::ecmascript_number_string(*n).into()),
                 Value::Binding(cell) => convert(interp, &cell.borrow(), seen, depth + 1),
                 Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
                     Some(crate::value::BoxedPrimitive::String(s)) => Ok(s.clone()),
@@ -729,7 +726,9 @@ impl Interpreter {
                 }
                 Ok(())
             }
-            Value::Proxy(proxy) => self.vs_rec(&proxy.target, visited, depth, output),
+            Value::Proxy(proxy) => {
+                self.vs_rec(&proxy.target_for_inspection(), visited, depth, output)
+            }
             Value::Date(ms) => output.push_str(&crate::builtins::iso_string(ms.get())),
             Value::ArrayBuffer(_) => output.push_str("[object ArrayBuffer]"),
             Value::SharedArrayBuffer(_) => output.push_str("[object SharedArrayBuffer]"),

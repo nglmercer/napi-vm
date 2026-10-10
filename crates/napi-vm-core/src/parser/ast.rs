@@ -96,8 +96,19 @@ impl AssignOp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImportPhase {
+    Evaluation,
+    Source,
+    Deferred,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    /// A legacy literal spelling permitted only in non-strict code.
+    LegacyLiteral(Box<Expr>),
+    /// Parentheses preserve references but restrict cover-pattern syntax.
+    Parenthesized(Box<Expr>),
     Number(f64),
     /// A `BigInt` literal, carrying its digits.
     BigIntLiteral(String),
@@ -110,8 +121,14 @@ pub enum Expr {
     Null,
     Undefined,
     Identifier(String),
-    Array(Vec<Expr>),
-    Object(Vec<ObjectProp>),
+    Array {
+        items: Vec<Expr>,
+        trailing_comma: bool,
+    },
+    Object {
+        props: Vec<ObjectProp>,
+        trailing_comma: bool,
+    },
     Binary {
         op: BinOp,
         left: Box<Expr>,
@@ -135,7 +152,7 @@ pub enum Expr {
     /// (carrying a `raw` companion array) followed by the interpolated values.
     TaggedTemplate {
         tag: Box<Expr>,
-        cooked: Vec<crate::JsString>,
+        cooked: Vec<Option<crate::JsString>>,
         raw: Vec<crate::JsString>,
         exprs: Vec<Expr>,
     },
@@ -188,7 +205,11 @@ pub enum Expr {
     ImportMeta,
     NewTarget,
     /// `import(specifier)`: resolves to the module's namespace object.
-    DynamicImport(Box<Expr>),
+    DynamicImport {
+        specifier: Box<Expr>,
+        options: Option<Box<Expr>>,
+        phase: ImportPhase,
+    },
     Template {
         quasis: Vec<crate::JsString>,
         exprs: Vec<Expr>,
@@ -207,9 +228,22 @@ pub enum Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectProp {
+    CoverInitializedName {
+        name: String,
+        initializer: Expr,
+    },
     Shorthand(String),
     KeyValue(String, Expr),
     Computed(Expr, Expr),
+    ComputedMethod {
+        key: Expr,
+        params: Vec<String>,
+        body: Vec<Statement>,
+        is_async: bool,
+        is_generator: bool,
+        is_getter: bool,
+        is_setter: bool,
+    },
     Method {
         name: String,
         params: Vec<String>,
@@ -235,8 +269,36 @@ pub enum ExprOrBlock {
     Block(Vec<Statement>),
 }
 
+impl Expr {
+    pub(crate) fn unparenthesized(&self) -> &Self {
+        match self {
+            Self::Parenthesized(inner) => inner.unparenthesized(),
+            _ => self,
+        }
+    }
+
+    pub(crate) fn is_string_literal(&self) -> bool {
+        match self {
+            Self::String(_) | Self::EscapedString(_) => true,
+            Self::LegacyLiteral(inner) => inner.is_string_literal(),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    ResourceForOf {
+        name: String,
+        iter: Box<Expr>,
+        body: Vec<Statement>,
+        is_await: bool,
+        await_disposal: bool,
+    },
+    ResourceDeclaration {
+        declarations: Vec<Statement>,
+        is_await: bool,
+    },
     Expr(Expr),
     VarDecl {
         kind: VarKind,
@@ -250,6 +312,9 @@ pub enum Statement {
         body: Vec<Statement>,
         is_async: bool,
         is_generator: bool,
+
+        /// Legacy declaration in an if clause or labelled statement.
+        annex_b_statement: bool,
     },
     ClassDecl {
         name: String,
@@ -261,6 +326,10 @@ pub enum Statement {
         test: Box<Expr>,
         then: Vec<Statement>,
         else_: Option<Vec<Statement>>,
+    },
+    With {
+        object: Box<Expr>,
+        body: Vec<Statement>,
     },
     While {
         test: Box<Expr>,
@@ -277,19 +346,14 @@ pub enum Statement {
         body: Vec<Statement>,
     },
     ForIn {
-        name: String,
+        binding: ForBinding,
         obj: Box<Expr>,
         body: Vec<Statement>,
     },
     ForOf {
-        name: String,
-        /// `for (const [k, v] of pairs)`: the head binds a pattern rather than
-        /// one name. `name` is then unused.
-        pattern: Option<Box<Pattern>>,
+        binding: ForBinding,
         iter: Box<Expr>,
         body: Vec<Statement>,
-        /// `for await (… of …)`: each step's result is awaited, and an async
-        /// iterator (`Symbol.asyncIterator`) is preferred over a sync one.
         is_await: bool,
     },
     Block(Vec<Statement>),
@@ -303,6 +367,8 @@ pub enum Statement {
     /// Internal constructor entry, before parameter and body initialization.
     ClassInitialization {
         derived: bool,
+        /// Implicit derived constructors forward the argument list without iteration.
+        forward_rest: Option<String>,
         fields: Vec<Statement>,
     },
     /// Non-simple formal parameters run before body declaration instantiation.
@@ -323,7 +389,7 @@ pub enum Statement {
     Throw(Box<Expr>),
     Try {
         body: Vec<Statement>,
-        catch: Option<(String, Vec<Statement>)>,
+        catch: Option<(Option<Pattern>, Vec<Statement>)>,
         finally: Option<Vec<Statement>>,
     },
     Switch {
@@ -332,6 +398,7 @@ pub enum Statement {
     },
     ExportDefault(Box<Expr>),
     ExportNamed {
+        attributes: Vec<(String, crate::JsString)>,
         specifiers: Vec<(String, String)>,
         source: Option<String>,
     },
@@ -339,10 +406,12 @@ pub enum Statement {
     /// other module's namespace object is exported under that one name;
     /// without it, every named export of `m` is re-exported.
     ExportAll {
+        attributes: Vec<(String, crate::JsString)>,
         source: String,
         alias: Option<String>,
     },
     Import {
+        attributes: Vec<(String, crate::JsString)>,
         module: String,
         default: Option<String>,
         named: Vec<(String, String)>,
@@ -356,6 +425,25 @@ pub enum VarKind {
     Var,
     Let,
     Const,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForBinding {
+    Declaration {
+        kind: VarKind,
+        pattern: Pattern,
+        initializer: Option<Box<Expr>>,
+    },
+    Assignment(Box<Expr>),
+}
+
+impl ForBinding {
+    pub fn declared_names(&self) -> Vec<String> {
+        match self {
+            Self::Declaration { pattern, .. } => pattern_names(pattern),
+            Self::Assignment(_) => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -387,6 +475,7 @@ pub struct SwitchCase {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemberName {
     Static(String),
+    Private(String),
     Computed(Expr),
 }
 
@@ -419,6 +508,26 @@ pub enum ClassMember {
         is_static: bool,
         body: Vec<Statement>,
     },
+}
+
+/// Source declarations for eval's lexical validation, independent of which
+/// private storage forms the runtime currently installs.
+pub(crate) fn class_private_declarations(body: &[ClassMember]) -> Vec<String> {
+    body.iter()
+        .filter_map(|member| {
+            let name = match member {
+                ClassMember::Method { name, .. }
+                | ClassMember::Field { name, .. }
+                | ClassMember::Getter { name, .. }
+                | ClassMember::Setter { name, .. } => name,
+                ClassMember::StaticBlock { .. } => return None,
+            };
+            match name {
+                MemberName::Private(name) => Some(name.clone()),
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// An object-pattern key: a static name, or `[expr]` evaluated at bind time.
@@ -501,6 +610,37 @@ fn collect_pattern_names(pattern: &Pattern, out: &mut Vec<String>) {
 /// functions or classes, which begin their own variable scope. Function
 /// declarations are collected too: they are `var`-scoped, and the interpreter
 /// defines them eagerly during hoisting.
+/// Lexical names introduced by this statement list, without descending into
+/// lexical blocks or nested functions. Used by declaration instantiation and
+/// by the compiler's representation of the same declarations.
+pub(crate) fn top_lexical_names(body: &[Statement]) -> Vec<String> {
+    let mut names = Vec::new();
+    for statement in body {
+        match statement {
+            Statement::VarDecl {
+                name,
+                kind,
+                destructuring,
+                ..
+            } if *kind != VarKind::Var => {
+                if let Some(pattern) = destructuring {
+                    names.extend(pattern_names(pattern));
+                } else {
+                    names.push(name.clone());
+                }
+            }
+            Statement::ClassDecl { name, .. } => names.push(name.clone()),
+            Statement::Declarations(inner)
+            | Statement::ResourceDeclaration {
+                declarations: inner,
+                ..
+            } => names.extend(top_lexical_names(inner)),
+            _ => {}
+        }
+    }
+    names
+}
+
 pub fn collect_var_names(stmts: &[Statement], out: &mut Vec<String>) {
     collect_scoped_var_names(stmts, out, true);
 }
@@ -535,9 +675,12 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
                 out.push(name.clone());
             }
         }
-        Statement::Block(body) | Statement::Declarations(body) => {
-            collect_scoped_var_names(body, out, functions)
+        Statement::Block(body)
+        | Statement::Declarations(body)
+        | Statement::ResourceDeclaration {
+            declarations: body, ..
         }
+        | Statement::With { body, .. } => collect_scoped_var_names(body, out, functions),
         Statement::If { then, else_, .. } => {
             collect_scoped_var_names(then, out, functions);
             if let Some(else_) = else_ {
@@ -546,8 +689,18 @@ fn collect_stmt_var_names(stmt: &Statement, out: &mut Vec<String>, functions: bo
         }
         Statement::While { body, .. }
         | Statement::DoWhile { body, .. }
-        | Statement::ForIn { body, .. }
-        | Statement::ForOf { body, .. } => collect_scoped_var_names(body, out, functions),
+        | Statement::ResourceForOf { body, .. } => collect_scoped_var_names(body, out, functions),
+        Statement::ForIn { binding, body, .. } | Statement::ForOf { binding, body, .. } => {
+            if let ForBinding::Declaration {
+                kind: VarKind::Var,
+                pattern,
+                ..
+            } = binding
+            {
+                out.extend(pattern_names(pattern));
+            }
+            collect_scoped_var_names(body, out, functions);
+        }
         Statement::For { init, body, .. } => {
             if let Some(init) = init {
                 match &**init {
@@ -626,6 +779,11 @@ fn member_name_references(member: &ClassMember, name: &str) -> bool {
     matches!(key, MemberName::Computed(e) if expr_references(e, name))
 }
 
+pub(crate) fn stmts_need_arguments(stmts: &[Statement]) -> bool {
+    // Direct eval may inspect the arguments binding even without a static reference.
+    stmts_reference(stmts, "arguments") || stmts_reference(stmts, "eval")
+}
+
 pub fn stmts_reference(stmts: &[Statement], name: &str) -> bool {
     stmts.iter().any(|s| stmt_references(s, name))
 }
@@ -659,6 +817,37 @@ pub fn for_loop_captures_bindings(
             || update.is_some_and(|expr| expr_captures_identifier(expr, name))
             || statements_capture_identifier(body, name)
     })
+}
+
+fn for_binding_captures(binding: &ForBinding, name: &str) -> bool {
+    match binding {
+        ForBinding::Assignment(target) => expr_captures_identifier(target, name),
+        ForBinding::Declaration {
+            pattern,
+            initializer,
+            ..
+        } => {
+            pattern_captures_identifier(pattern, name)
+                || initializer
+                    .as_deref()
+                    .is_some_and(|value| expr_captures_identifier(value, name))
+        }
+    }
+}
+fn for_binding_references(binding: &ForBinding, name: &str) -> bool {
+    match binding {
+        ForBinding::Assignment(target) => expr_references(target, name),
+        ForBinding::Declaration {
+            pattern,
+            initializer,
+            ..
+        } => {
+            pattern_references(pattern, name)
+                || initializer
+                    .as_deref()
+                    .is_some_and(|value| expr_references(value, name))
+        }
+    }
 }
 
 fn for_init_captures(init: &ForInit, name: &str) -> bool {
@@ -717,7 +906,9 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .as_ref()
                     .is_some_and(|stmts| statements_capture_identifier(stmts, name))
         }
-        Statement::While { test, body } | Statement::DoWhile { test, body } => {
+        Statement::With { object: test, body }
+        | Statement::While { test, body }
+        | Statement::DoWhile { test, body } => {
             expr_captures_identifier(test, name) || statements_capture_identifier(body, name)
         }
         Statement::For {
@@ -736,20 +927,23 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
                     .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || statements_capture_identifier(body, name)
         }
-        Statement::ForIn { obj, body, .. } => {
-            expr_captures_identifier(obj, name) || statements_capture_identifier(body, name)
+        Statement::ForIn { binding, obj, body } => {
+            for_binding_captures(binding, name)
+                || expr_captures_identifier(obj, name)
+                || statements_capture_identifier(body, name)
         }
         Statement::ForOf {
+            binding,
             iter,
-            pattern,
             body,
             ..
         } => {
-            expr_captures_identifier(iter, name)
-                || pattern
-                    .as_deref()
-                    .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
+            for_binding_captures(binding, name)
+                || expr_captures_identifier(iter, name)
                 || statements_capture_identifier(body, name)
+        }
+        Statement::ResourceForOf { iter, body, .. } => {
+            expr_captures_identifier(iter, name) || statements_capture_identifier(body, name)
         }
         Statement::ClassInitialization { fields, .. } => {
             statements_capture_identifier(fields, name)
@@ -762,9 +956,12 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
             statements_capture_identifier(initializers, name)
                 || statements_capture_identifier(fields, name)
         }
-        Statement::Block(stmts) | Statement::Declarations(stmts) => {
-            statements_capture_identifier(stmts, name)
-        }
+        Statement::Block(stmts)
+        | Statement::Declarations(stmts)
+        | Statement::ResourceDeclaration {
+            declarations: stmts,
+            ..
+        } => statements_capture_identifier(stmts, name),
         Statement::Labeled { body, .. } => {
             statements_capture_identifier(std::slice::from_ref(body.as_ref()), name)
         }
@@ -777,9 +974,12 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
             finally,
         } => {
             statements_capture_identifier(body, name)
-                || catch
-                    .as_ref()
-                    .is_some_and(|(_, stmts)| statements_capture_identifier(stmts, name))
+                || catch.as_ref().is_some_and(|(pattern, stmts)| {
+                    pattern
+                        .as_ref()
+                        .is_some_and(|pattern| pattern_captures_identifier(pattern, name))
+                        || statements_capture_identifier(stmts, name)
+                })
                 || finally
                     .as_ref()
                     .is_some_and(|stmts| statements_capture_identifier(stmts, name))
@@ -806,6 +1006,9 @@ pub(crate) fn statements_capture_identifier(stmts: &[Statement], name: &str) -> 
 
 pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
     match expr {
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => {
+            expr_captures_identifier(inner, name)
+        }
         Expr::ArrowFn { body, .. } => arrow_body_references(body, name),
         Expr::FnExpr { body, .. } => stmts_reference(body, name),
         Expr::ClassExpr {
@@ -816,16 +1019,21 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
                 .is_some_and(|expr| expr_captures_identifier(expr, name))
                 || class_members_capture_identifier(body, name)
         }
-        Expr::Array(items) => items
+        Expr::Array { items, .. } => items
             .iter()
             .any(|expr| expr_captures_identifier(expr, name)),
-        Expr::Object(props) => props.iter().any(|prop| match prop {
+        Expr::Object { props, .. } => props.iter().any(|prop| match prop {
             ObjectProp::Shorthand(_) => false,
-            ObjectProp::KeyValue(_, value) | ObjectProp::Spread(value) => {
-                expr_captures_identifier(value, name)
+            ObjectProp::CoverInitializedName {
+                initializer: value, ..
             }
+            | ObjectProp::KeyValue(_, value)
+            | ObjectProp::Spread(value) => expr_captures_identifier(value, name),
             ObjectProp::Computed(key, value) => {
                 expr_captures_identifier(key, name) || expr_captures_identifier(value, name)
+            }
+            ObjectProp::ComputedMethod { key, body, .. } => {
+                expr_captures_identifier(key, name) || stmts_reference(body, name)
             }
             ObjectProp::Method { body, .. }
             | ObjectProp::Getter { body, .. }
@@ -865,9 +1073,15 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
                 || expr_captures_identifier(consequent, name)
                 || expr_captures_identifier(alternate, name)
         }
-        Expr::DynamicImport(specifier) | Expr::YieldFrom(specifier) => {
+        Expr::DynamicImport {
+            specifier, options, ..
+        } => {
             expr_captures_identifier(specifier, name)
+                || options
+                    .as_deref()
+                    .is_some_and(|expr| expr_captures_identifier(expr, name))
         }
+        Expr::YieldFrom(specifier) => expr_captures_identifier(specifier, name),
         Expr::Template { exprs, .. } => exprs
             .iter()
             .any(|expr| expr_captures_identifier(expr, name)),
@@ -905,21 +1119,13 @@ fn class_members_capture_identifier(members: &[ClassMember], name: &str) -> bool
                 || stmts_reference(body, name)
         }
         ClassMember::Field {
-            name: key,
-            is_static: st,
-            init,
-            ..
+            name: key, init, ..
         } => {
             matches!(key, MemberName::Computed(expr) if expr_captures_identifier(expr, name))
                 || init.as_ref().is_some_and(|expr| {
-                    if *st {
-                        // Static initializers run inline at definition.
-                        expr_captures_identifier(expr, name)
-                    } else {
-                        // Instance initializers move into the constructor,
-                        // so any reference captures through its closure.
-                        expr_references(expr, name)
-                    }
+                    // Initializers execute in a child of the class scope,
+                    // including static fields through the shared class builder.
+                    expr_references(expr, name)
                 })
         }
         // Static blocks run in a fresh child of the defining scope, so any
@@ -1000,7 +1206,9 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                     .map(|b| stmts_reference(b, name))
                     .unwrap_or(false)
         }
-        Statement::While { test, body } | Statement::DoWhile { test, body } => {
+        Statement::With { object: test, body }
+        | Statement::While { test, body }
+        | Statement::DoWhile { test, body } => {
             expr_references(test, name) || stmts_reference(body, name)
         }
         Statement::For {
@@ -1043,10 +1251,22 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
                     .unwrap_or(false)
                 || stmts_reference(body, name)
         }
-        Statement::ForIn { obj, body, .. } => {
-            expr_references(obj, name) || stmts_reference(body, name)
+        Statement::ForIn { binding, obj, body } => {
+            for_binding_references(binding, name)
+                || expr_references(obj, name)
+                || stmts_reference(body, name)
         }
-        Statement::ForOf { iter, body, .. } => {
+        Statement::ForOf {
+            binding,
+            iter,
+            body,
+            ..
+        } => {
+            for_binding_references(binding, name)
+                || expr_references(iter, name)
+                || stmts_reference(body, name)
+        }
+        Statement::ResourceForOf { iter, body, .. } => {
             expr_references(iter, name) || stmts_reference(body, name)
         }
         Statement::ClassInitialization { fields, .. } => stmts_reference(fields, name),
@@ -1055,7 +1275,11 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
             fields,
             ..
         } => stmts_reference(initializers, name) || stmts_reference(fields, name),
-        Statement::Block(b) | Statement::Declarations(b) => stmts_reference(b, name),
+        Statement::Block(b)
+        | Statement::Declarations(b)
+        | Statement::ResourceDeclaration {
+            declarations: b, ..
+        } => stmts_reference(b, name),
         Statement::Labeled { body, .. } => stmt_references(body, name),
         Statement::Throw(e) => expr_references(e, name),
         Statement::Try {
@@ -1066,7 +1290,12 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
             stmts_reference(body, name)
                 || catch
                     .as_ref()
-                    .map(|(_, b)| stmts_reference(b, name))
+                    .map(|(pattern, b)| {
+                        pattern
+                            .as_ref()
+                            .is_some_and(|pattern| pattern_references(pattern, name))
+                            || stmts_reference(b, name)
+                    })
                     .unwrap_or(false)
                 || finally
                     .as_ref()
@@ -1097,13 +1326,20 @@ fn stmt_references(s: &Statement, name: &str) -> bool {
 
 fn expr_references(e: &Expr, name: &str) -> bool {
     match e {
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => expr_references(inner, name),
         Expr::Regex(_, _) | Expr::BigIntLiteral(_) => false,
         Expr::Identifier(n) => n == name,
-        Expr::Array(items) => items.iter().any(|x| expr_references(x, name)),
-        Expr::Object(props) => props.iter().any(|p| match p {
+        Expr::Array { items, .. } => items.iter().any(|x| expr_references(x, name)),
+        Expr::Object { props, .. } => props.iter().any(|p| match p {
             ObjectProp::Shorthand(n) => n == name,
+            ObjectProp::CoverInitializedName { initializer, .. } => {
+                expr_references(initializer, name)
+            }
             ObjectProp::KeyValue(_, v) => expr_references(v, name),
             ObjectProp::Computed(k, v) => expr_references(k, name) || expr_references(v, name),
+            ObjectProp::ComputedMethod { key, body, .. } => {
+                expr_references(key, name) || stmts_reference(body, name)
+            }
             ObjectProp::Method { body, .. } => stmts_reference(body, name),
             ObjectProp::Getter { body, .. } => stmts_reference(body, name),
             ObjectProp::Setter { body, .. } => stmts_reference(body, name),
@@ -1187,7 +1423,14 @@ fn expr_references(e: &Expr, name: &str) -> bool {
         | Expr::Super
         | Expr::ImportMeta
         | Expr::NewTarget => false,
-        Expr::DynamicImport(specifier) => expr_references(specifier, name),
+        Expr::DynamicImport {
+            specifier, options, ..
+        } => {
+            expr_references(specifier, name)
+                || options
+                    .as_deref()
+                    .is_some_and(|expr| expr_references(expr, name))
+        }
     }
 }
 
@@ -1196,6 +1439,7 @@ fn expr_references(e: &Expr, name: &str) -> bool {
 /// not a valid pattern and the assignment fails at runtime.
 pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
     Some(match expr {
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => return expr_to_pattern(inner),
         Expr::Identifier(name) => Pattern::Ident(name.clone()),
         Expr::Member {
             object,
@@ -1207,7 +1451,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
             private: !computed
                 && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
         },
-        Expr::Array(items) => Pattern::Array(
+        Expr::Array { items, .. } => Pattern::Array(
             items
                 .iter()
                 .map(|item| match item {
@@ -1220,10 +1464,17 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
                 })
                 .collect::<Option<Vec<_>>>()?,
         ),
-        Expr::Object(props) => Pattern::Object(
+        Expr::Object { props, .. } => Pattern::Object(
             props
                 .iter()
                 .map(|prop| match prop {
+                    ObjectProp::CoverInitializedName { name, initializer } => Some((
+                        PatternKey::Name(name.clone()),
+                        Some(Pattern::Default(
+                            Box::new(Pattern::Ident(name.clone())),
+                            Box::new(initializer.clone()),
+                        )),
+                    )),
                     ObjectProp::Shorthand(name) => Some((PatternKey::Name(name.clone()), None)),
                     ObjectProp::KeyValue(key, value) => {
                         Some((PatternKey::Name(key.clone()), Some(expr_to_pattern(value)?)))

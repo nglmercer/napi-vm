@@ -1,7 +1,9 @@
 //! Core statement parsing. Classes and `import` / `export` live in
 //! `compound.rs`.
 
-use super::{Expr, ForInit, Parser, Pattern, PatternKey, Statement, SwitchCase, VarKind};
+use super::{
+    Expr, ForBinding, ForInit, Parser, Pattern, PatternKey, Statement, SwitchCase, VarKind,
+};
 use crate::lexer::Token;
 
 impl Parser {
@@ -16,14 +18,110 @@ impl Parser {
     }
 
     fn stmt_inner(&mut self) -> Option<Statement> {
+        // Labeled statement: `label: statement`
+        if matches!(self.peek(), Token::Colon)
+            && let Some(label) = self.label_name()
+        {
+            self.adv(); // identifier
+            self.adv(); // colon
+            let saved = self.single_statement;
+            let saved_annex_b = self.allow_annex_b_function;
+            self.single_statement = true;
+            self.allow_annex_b_function = true;
+            let body = self.stmt();
+            self.single_statement = saved;
+            self.allow_annex_b_function = saved_annex_b;
+            let body = body?;
+            return Some(Statement::Labeled {
+                label,
+                body: Box::new(body),
+            });
+        }
         match self.cur() {
+            Token::Identifier(name)
+                if name == "using"
+                    && !self.line_break_after_current()
+                    && matches!(
+                        self.peek(),
+                        Token::Identifier(_)
+                            | Token::EscapedIdentifier(_)
+                            | Token::KwAwait
+                            | Token::KwYield
+                            | Token::KwOf
+                    ) =>
+            {
+                if self.single_statement {
+                    self.record_error("resource declaration requires a statement list".into());
+                }
+                self.resource_declaration(false)
+            }
+            Token::KwAwait
+                if matches!(self.peek(), Token::Identifier(name) if name == "using")
+                    && !self.line_break_after_current()
+                    && self.toks.get(self.pos + 2).is_some_and(|(token, _)| {
+                        matches!(token, Token::Identifier(_) | Token::EscapedIdentifier(_))
+                    }) =>
+            {
+                if self.single_statement {
+                    self.record_error("resource declaration requires a statement list".into());
+                }
+                self.adv();
+                self.resource_declaration(true)
+            }
+            Token::KwWith => {
+                self.adv();
+                self.expect(&Token::LParen);
+                let object = self.expr()?;
+                self.expect(&Token::RParen);
+                let body = self.block_or_stmt(false);
+                Some(Statement::With {
+                    object: Box::new(object),
+                    body,
+                })
+            }
             Token::KwVar => self.var_decl(VarKind::Var),
+            Token::KwLet
+                if self.single_statement
+                    || !matches!(
+                        self.peek(),
+                        Token::Identifier(_)
+                            | Token::EscapedIdentifier(_)
+                            | Token::LBracket
+                            | Token::LBrace
+                            | Token::KwAwait
+                            | Token::KwYield
+                            | Token::KwLet
+                            | Token::KwAsync
+                            | Token::KwAs
+                            | Token::KwUndefined
+                            | Token::KwConstructor
+                            | Token::KwFrom
+                            | Token::KwGet
+                            | Token::KwOf
+                            | Token::KwSet
+                            | Token::KwStatic
+                    ) =>
+            {
+                // ExpressionStatement excludes a leading `let [` even when
+                // the surrounding position cannot contain a declaration.
+                if matches!(self.peek(), Token::LBracket) {
+                    self.record_error("let [ cannot begin an expression statement".into());
+                }
+                let expression = self.expr()?;
+                self.semi();
+                Some(Statement::Expr(expression))
+            }
             Token::KwLet => self.var_decl(VarKind::Let),
-            Token::KwConst => self.var_decl(VarKind::Const),
+            Token::KwConst => {
+                if self.single_statement {
+                    self.record_error("const declaration requires a statement list".into());
+                }
+                self.var_decl(VarKind::Const)
+            }
             Token::KwFunction => self.fn_decl(false),
             Token::KwAsync => {
                 // `async function name(...) { ... }`
-                if matches!(self.peek(), Token::KwFunction) {
+                if !self.line_break_after_current() && matches!(self.peek(), Token::KwFunction) {
                     self.adv(); // consume `async`
                     self.fn_decl(true)
                 } else {
@@ -32,7 +130,12 @@ impl Parser {
                     Some(Statement::Expr(e))
                 }
             }
-            Token::KwClass => self.class_decl(),
+            Token::KwClass => {
+                if self.single_statement {
+                    self.record_error("class declaration requires a statement list".into());
+                }
+                self.class_decl()
+            }
             Token::KwReturn => self.ret(),
             Token::KwIf => self.if_(),
             Token::KwWhile => self.while_(),
@@ -40,8 +143,9 @@ impl Parser {
             Token::KwFor => self.for_(),
             Token::KwBreak => {
                 self.adv();
-                let label = if let Token::Identifier(n) = self.cur() {
-                    let l = n.clone();
+                let label = if !self.line_break_before_current()
+                    && let Some(l) = self.label_name()
+                {
                     self.adv();
                     Some(l)
                 } else {
@@ -56,8 +160,9 @@ impl Parser {
             }
             Token::KwContinue => {
                 self.adv();
-                let label = if let Token::Identifier(n) = self.cur() {
-                    let l = n.clone();
+                let label = if !self.line_break_before_current()
+                    && let Some(l) = self.label_name()
+                {
                     self.adv();
                     Some(l)
                 } else {
@@ -75,33 +180,13 @@ impl Parser {
             Token::KwSwitch => self.switch(),
             Token::KwExport => self.export(),
             Token::KwImport => {
-                let saved_pos = self.pos;
-                self.adv();
-                if self.eat(&Token::Dot)
-                    && let Token::Identifier(m) = self.cur()
-                    && m == "meta"
-                {
-                    self.adv();
-                    let mut expr = Expr::ImportMeta;
-                    while self.eat(&Token::Dot) {
-                        let prop = self.ident()?;
-                        expr = Expr::Member {
-                            object: Box::new(expr),
-                            property: Box::new(Expr::String((prop).into())),
-                            computed: false,
-                        };
-                    }
-                    self.semi();
-                    return Some(Statement::Expr(expr));
-                }
-                // `import('m')` at statement position is an expression.
-                if matches!(self.cur(), Token::LParen) {
-                    self.pos = saved_pos;
+                // Meta-properties and phased imports use the same postfix grammar
+                // as every other expression, including calls and computed members.
+                if matches!(self.peek(), Token::LParen | Token::Dot) {
                     let e = self.expr()?;
                     self.semi();
                     return Some(Statement::Expr(e));
                 }
-                self.pos = saved_pos;
                 self.import()
             }
             Token::LBrace => {
@@ -110,28 +195,22 @@ impl Parser {
                 self.expect(&Token::RBrace);
                 Some(Statement::Block(b))
             }
+            Token::KwDebugger => {
+                self.adv();
+                self.semi();
+                Some(Statement::Empty)
+            }
             Token::Semicolon => {
                 self.adv();
                 Some(Statement::Empty)
             }
             _ => {
-                // Labeled statement: `label: statement`
-                if let Token::Identifier(n) = self.cur()
-                    && matches!(self.peek(), Token::Colon)
-                {
-                    let label = n.clone();
-                    self.adv(); // identifier
-                    self.adv(); // colon
-                    let body = self.stmt()?;
-                    return Some(Statement::Labeled {
-                        label,
-                        body: Box::new(body),
-                    });
-                }
-                let literal_start =
-                    matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
+                let literal_start = matches!(
+                    self.cur(),
+                    Token::String(_) | Token::EscapedString(_) | Token::LegacyString(_)
+                );
                 let mut e = self.expr()?;
-                if !literal_start && matches!(e, Expr::String(_) | Expr::EscapedString(_)) {
+                if !literal_start && e.is_string_literal() {
                     // Parentheses are erased elsewhere in the AST. Preserve
                     // their non-directive status without changing completion.
                     e = Expr::Binary {
@@ -144,6 +223,30 @@ impl Parser {
                 Some(Statement::Expr(e))
             }
         }
+    }
+
+    fn resource_declaration(&mut self, is_await: bool) -> Option<Statement> {
+        self.adv();
+        let mut declarations = Vec::new();
+        loop {
+            let name = self.ident()?;
+            self.expect(&Token::Equal);
+            let init = self.assign()?;
+            declarations.push(Statement::VarDecl {
+                kind: VarKind::Const,
+                name,
+                init: Some(Box::new(init)),
+                destructuring: None,
+            });
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+        }
+        self.semi();
+        Some(Statement::ResourceDeclaration {
+            declarations,
+            is_await,
+        })
     }
 
     pub(crate) fn var_decl(&mut self, k: VarKind) -> Option<Statement> {
@@ -200,6 +303,16 @@ impl Parser {
         }
     }
 
+    fn pattern_element(&mut self) -> Option<Pattern> {
+        let pattern = self.pattern()?;
+        if matches!(pattern, Pattern::Array(_) | Pattern::Object(_)) && self.eat(&Token::Equal) {
+            let initializer = self.with_in(true, Self::assign)?;
+            Some(Pattern::Default(Box::new(pattern), Box::new(initializer)))
+        } else {
+            Some(pattern)
+        }
+    }
+
     pub(crate) fn pattern(&mut self) -> Option<Pattern> {
         match self.cur() {
             Token::LBracket => {
@@ -219,10 +332,10 @@ impl Parser {
                             );
                         }
                     } else {
-                        elements.push(self.pattern()?);
+                        elements.push(self.pattern_element()?);
                     }
                     if !matches!(self.cur(), Token::RBracket) {
-                        self.eat(&Token::Comma);
+                        self.expect(&Token::Comma);
                     }
                 }
                 self.expect(&Token::RBracket);
@@ -240,7 +353,10 @@ impl Parser {
                             Some(Pattern::Rest(Box::new(rest))),
                         ));
                         if !matches!(self.cur(), Token::RBrace) {
-                            self.eat(&Token::Comma);
+                            self.record_error(
+                                "object binding rest must be last without a trailing comma".into(),
+                            );
+                            self.expect(&Token::Comma);
                         }
                         continue;
                     }
@@ -248,17 +364,36 @@ impl Parser {
                     // numeric keys behave like their object-literal forms.
                     let mut keyword_only = false;
                     let key = if self.eat(&Token::LBracket) {
-                        let expr = self.assign()?;
+                        let expr = self.with_in(true, Self::assign)?;
                         self.expect(&Token::RBracket);
                         PatternKey::Computed(expr)
                     } else {
                         match self.cur() {
+                            Token::LegacyString(s) => {
+                                let expr =
+                                    Expr::LegacyLiteral(Box::new(Expr::EscapedString(s.clone())));
+                                self.adv();
+                                PatternKey::Computed(expr)
+                            }
+                            Token::LegacyNumber(n) => {
+                                let expr = Expr::LegacyLiteral(Box::new(Expr::Number(*n)));
+                                self.adv();
+                                PatternKey::Computed(expr)
+                            }
                             Token::String(s) | Token::EscapedString(s) => {
+                                keyword_only = true;
                                 let key = PatternKey::Name(s.to_key());
                                 self.adv();
                                 key
                             }
+                            Token::BigInt(digits) => {
+                                keyword_only = true;
+                                let name = crate::bigint::BigInt::parse(digits).ok()?.to_string();
+                                self.adv();
+                                PatternKey::Name(name)
+                            }
                             Token::Number(n) => {
+                                keyword_only = true;
                                 let key = PatternKey::Name(crate::format::number_string(*n));
                                 self.adv();
                                 key
@@ -286,7 +421,7 @@ impl Parser {
                     // property that is absent or `undefined`. A computed key
                     // without a colon (`{ [k] }`, `{ [k] = 1 }`) is invalid.
                     if self.eat(&Token::Equal) {
-                        let default = self.assign()?;
+                        let default = self.with_in(true, Self::assign)?;
                         let target = match (pat, &key) {
                             (Some(target), _) => target,
                             (None, PatternKey::Name(name)) => Pattern::Ident(name.clone()),
@@ -299,7 +434,7 @@ impl Parser {
                     }
                     props.push((key, pat));
                     if !matches!(self.cur(), Token::RBrace) {
-                        self.eat(&Token::Comma);
+                        self.expect(&Token::Comma);
                     }
                 }
                 self.expect(&Token::RBrace);
@@ -310,7 +445,7 @@ impl Parser {
                 if self.eat(&Token::Equal) {
                     Some(Pattern::Default(
                         Box::new(Pattern::Ident(name)),
-                        Box::new(self.assign()?),
+                        Box::new(self.with_in(true, Self::assign)?),
                     ))
                 } else {
                     Some(Pattern::Ident(name))
@@ -333,6 +468,12 @@ impl Parser {
         self.adv(); // consume `function`
         // Generator declaration: `function*`.
         let is_generator = self.eat(&Token::Star);
+        let annex_b_statement = self.single_statement;
+        if annex_b_statement && (!self.allow_annex_b_function || is_async || is_generator) {
+            self.record_error(
+                "function declaration is not permitted in this statement position".into(),
+            );
+        }
         let name_span = self.cur_span();
         let n = if let Some(name) = self.ident() {
             name
@@ -343,11 +484,7 @@ impl Parser {
         // parameters and body belong to a new one.
         let outer = self.push_scope(true);
         self.eat(&Token::LParen);
-        let (p, defaults) = self.params();
-        self.expect(&Token::RParen);
-        self.eat(&Token::LBrace);
-        let b = self.block_body();
-        self.expect(&Token::RBrace);
+        let (p, defaults, b) = self.callable_parts(is_async, is_generator);
         self.pop_scope(outer);
         self.record(
             &n,
@@ -358,6 +495,7 @@ impl Parser {
         self.check_parameters(&p, &defaults, &b, is_async || is_generator);
         let body = Self::function_body(&p, defaults, b);
         Some(Statement::FnDecl {
+            annex_b_statement,
             name: n,
             params: p,
             body,
@@ -368,7 +506,9 @@ impl Parser {
 
     fn ret(&mut self) -> Option<Statement> {
         self.adv();
-        let e = if matches!(self.cur(), Token::Semicolon) || matches!(self.cur(), Token::RBrace) {
+        let e = if self.line_break_before_current()
+            || matches!(self.cur(), Token::Semicolon | Token::RBrace | Token::EOF)
+        {
             None
         } else {
             Some(Box::new(self.expr()?))
@@ -382,12 +522,12 @@ impl Parser {
         self.eat(&Token::LParen);
         let t = Box::new(self.expr()?);
         self.expect(&Token::RParen);
-        let c = self.block_or_stmt();
+        let c = self.block_or_stmt(true);
         let a = if self.eat(&Token::KwElse) {
             if matches!(self.cur(), Token::KwIf) {
                 Some(vec![self.if_()?])
             } else {
-                Some(self.block_or_stmt())
+                Some(self.block_or_stmt(true))
             }
         } else {
             None
@@ -401,16 +541,38 @@ impl Parser {
 
     /// Parses either a `{ ... }` block or a single statement, returning the
     /// body as a statement list. Enables braceless `if`/`for`/`while` bodies.
-    fn block_or_stmt(&mut self) -> Vec<Statement> {
+    fn is_labelled_function(statement: &Statement) -> bool {
+        match statement {
+            Statement::Labeled { body, .. } => {
+                matches!(body.as_ref(), Statement::FnDecl { .. })
+                    || Self::is_labelled_function(body)
+            }
+            _ => false,
+        }
+    }
+
+    fn block_or_stmt(&mut self, allow_annex_b_function: bool) -> Vec<Statement> {
         if self.eat(&Token::LBrace) {
             let b = self.block_body();
             self.expect(&Token::RBrace);
             b
         } else {
-            match self.stmt() {
-                Some(s) => vec![s],
-                None => vec![],
+            let saved = self.single_statement;
+            let saved_annex_b = self.allow_annex_b_function;
+            self.single_statement = true;
+            self.allow_annex_b_function = allow_annex_b_function;
+            let statement = self.stmt();
+            if statement.is_none() {
+                self.record_error("expected a statement body".into());
             }
+            if statement.as_ref().is_some_and(Self::is_labelled_function) {
+                self.record_error(
+                    "labelled function is not permitted in this statement position".into(),
+                );
+            }
+            self.single_statement = saved;
+            self.allow_annex_b_function = saved_annex_b;
+            statement.into_iter().collect()
         }
     }
 
@@ -419,21 +581,56 @@ impl Parser {
         self.eat(&Token::LParen);
         let t = Box::new(self.expr()?);
         self.expect(&Token::RParen);
-        let b = self.block_or_stmt();
+        let b = self.block_or_stmt(false);
         Some(Statement::While { test: t, body: b })
     }
 
     fn do_(&mut self) -> Option<Statement> {
         self.adv();
-        let b = self.block_or_stmt();
+        let b = self.block_or_stmt(false);
         if !self.eat(&Token::KwWhile) {
             return None;
         }
         self.eat(&Token::LParen);
         let t = Box::new(self.expr()?);
         self.expect(&Token::RParen);
-        self.semi();
+        self.eat(&Token::Semicolon);
         Some(Statement::DoWhile { test: t, body: b })
+    }
+
+    fn iteration_binding(
+        &mut self,
+        init: &ForInit,
+        pattern: Option<Box<Pattern>>,
+    ) -> Option<ForBinding> {
+        Some(match init {
+            ForInit::Var { kind, decls } => {
+                let (name, initializer) = decls.first()?;
+                ForBinding::Declaration {
+                    kind: kind.clone(),
+                    pattern: pattern
+                        .map(|pattern| *pattern)
+                        .unwrap_or_else(|| Pattern::Ident(name.clone())),
+                    initializer: initializer.clone().map(Box::new),
+                }
+            }
+            ForInit::Pattern {
+                kind,
+                pattern,
+                init,
+                trailing,
+            } => {
+                if !trailing.is_empty() {
+                    self.record_error("multiple iteration declarations".into());
+                }
+                ForBinding::Declaration {
+                    kind: kind.clone(),
+                    pattern: pattern.clone(),
+                    initializer: Some(Box::new(init.clone())),
+                }
+            }
+            ForInit::Expr(target) => ForBinding::Assignment(Box::new(target.clone())),
+        })
     }
 
     fn for_(&mut self) -> Option<Statement> {
@@ -441,10 +638,52 @@ impl Parser {
         // `for await (… of …)`.
         let is_await = self.eat(&Token::KwAwait);
         self.eat(&Token::LParen);
+        let await_using = matches!(self.cur(), Token::KwAwait)
+            && matches!(self.peek(), Token::Identifier(name) if name == "using");
+        if await_using {
+            self.adv();
+        }
+        if matches!(self.cur(), Token::Identifier(name) if name == "using")
+            && matches!(
+                self.peek(),
+                Token::Identifier(_)
+                    | Token::EscapedIdentifier(_)
+                    | Token::KwAwait
+                    | Token::KwYield
+                    | Token::KwOf
+            )
+            && (await_using || !matches!(self.peek(), Token::KwOf))
+        {
+            self.adv();
+            let name = self.ident()?;
+            self.expect(&Token::KwOf);
+            let iter = Box::new(self.assign()?);
+            self.expect(&Token::RParen);
+            let body = self.block_or_stmt(false);
+            return Some(Statement::ResourceForOf {
+                name,
+                iter,
+                body,
+                is_await,
+                await_disposal: await_using,
+            });
+        }
         // `for (const [k, v] of pairs)` / `for (const { id } of rows)`: the
         // head binds a pattern, which the loop destructures per iteration.
         let mut head_pattern: Option<Box<Pattern>> = None;
-        let init = if matches!(self.cur(), Token::KwVar | Token::KwLet | Token::KwConst) {
+        let bare_async_head =
+            matches!(self.cur(), Token::KwAsync) && matches!(self.peek(), Token::KwOf);
+        let init = if matches!(self.cur(), Token::KwVar | Token::KwConst)
+            || (matches!(self.cur(), Token::KwLet)
+                && !matches!(
+                    self.peek(),
+                    Token::KwIn
+                        | Token::Semicolon
+                        | Token::RParen
+                        | Token::Equal
+                        | Token::PlusEqual
+                        | Token::MinusEqual
+                )) {
             let kind = match self.cur() {
                 Token::KwVar => VarKind::Var,
                 Token::KwLet => VarKind::Let,
@@ -453,16 +692,23 @@ impl Parser {
             self.adv();
             if matches!(self.cur(), Token::LBracket | Token::LBrace) {
                 let pattern = self.pattern()?;
+                if kind != VarKind::Var
+                    && super::pattern_names(&pattern)
+                        .iter()
+                        .any(|name| name == "let")
+                {
+                    self.record_error("let is not a lexical binding name".into());
+                }
                 // `for (… in …)` / `for (… of …)` heads carry no initializer;
                 // a `=` here means a C-style head with optional trailing
                 // `, name = init` declarators.
                 if self.eat(&Token::Equal) {
-                    let init_expr = self.assign()?;
+                    let init_expr = self.with_in(false, Self::assign)?;
                     let mut trailing = Vec::new();
                     while self.eat(&Token::Comma) {
                         let n = self.ident()?;
                         let i = if self.eat(&Token::Equal) {
-                            Some(self.assign()?)
+                            Some(self.with_in(false, Self::assign)?)
                         } else {
                             None
                         };
@@ -483,8 +729,11 @@ impl Parser {
                 let mut decls = Vec::new();
                 loop {
                     let n = self.ident()?;
+                    if kind != VarKind::Var && n == "let" {
+                        self.record_error("let is not a lexical binding name".into());
+                    }
                     let i = if self.eat(&Token::Equal) {
-                        Some(self.assign()?)
+                        Some(self.with_in(false, Self::assign)?)
                     } else {
                         None
                     };
@@ -498,56 +747,71 @@ impl Parser {
         } else if matches!(self.cur(), Token::Semicolon) {
             None
         } else {
-            Some(Box::new(ForInit::Expr(self.expr()?)))
+            Some(Box::new(ForInit::Expr(self.with_in(false, Self::expr)?)))
         };
         if let Some(init) = init.as_ref()
             && !matches!(self.cur(), Token::Semicolon)
         {
             if self.eat(&Token::KwIn) {
+                if is_await {
+                    self.record_error("for await requires of".into());
+                }
+                if let ForInit::Var { decls, .. } = init.as_ref()
+                    && decls.len() != 1
+                {
+                    self.record_error("multiple declarations in for-in".into());
+                }
                 let o = Box::new(self.expr()?);
                 self.expect(&Token::RParen);
-                let b = self.block_or_stmt();
-                let n = match init.as_ref() {
-                    ForInit::Var { decls, .. } => decls.first()?.0.clone(),
-                    _ => return None,
-                };
+                let b = self.block_or_stmt(false);
+                let binding = self.iteration_binding(init, head_pattern)?;
                 return Some(Statement::ForIn {
-                    name: n,
+                    binding,
                     obj: o,
                     body: b,
                 });
             }
             if self.eat(&Token::KwOf) {
-                let i = Box::new(self.expr()?);
+                if bare_async_head && !is_await {
+                    self.record_error("bare async is not a for-of assignment head".into());
+                }
+                if let ForInit::Var { decls, .. } = init.as_ref()
+                    && (decls.len() != 1 || decls[0].1.is_some())
+                {
+                    self.record_error("invalid for-of declaration".into());
+                }
+                let i = Box::new(self.assign()?);
                 self.expect(&Token::RParen);
-                let b = self.block_or_stmt();
-                let n = match init.as_ref() {
-                    ForInit::Var { decls, .. } => decls.first()?.0.clone(),
-                    _ => return None,
-                };
+                let b = self.block_or_stmt(false);
+                let binding = self.iteration_binding(init, head_pattern)?;
                 return Some(Statement::ForOf {
-                    name: n,
-                    pattern: head_pattern,
+                    binding,
                     iter: i,
                     body: b,
                     is_await,
                 });
             }
         }
-        self.semi();
+        if is_await {
+            self.record_error("for await requires of".into());
+        }
+        if head_pattern.is_some() {
+            self.record_error("destructuring declaration requires an initializer".into());
+        }
+        self.expect(&Token::Semicolon);
         let t = if !matches!(self.cur(), Token::Semicolon) {
             Some(Box::new(self.expr()?))
         } else {
             None
         };
-        self.semi();
+        self.expect(&Token::Semicolon);
         let u = if !matches!(self.cur(), Token::RParen) {
             Some(Box::new(self.expr()?))
         } else {
             None
         };
         self.expect(&Token::RParen);
-        let b = self.block_or_stmt();
+        let b = self.block_or_stmt(false);
         Some(Statement::For {
             init,
             test: t,
@@ -558,6 +822,9 @@ impl Parser {
 
     fn throw(&mut self) -> Option<Statement> {
         self.adv();
+        if self.line_break_before_current() {
+            self.record_error("line terminator after throw".into());
+        }
         let e = self.expr()?;
         self.semi();
         Some(Statement::Throw(Box::new(e)))
@@ -570,11 +837,15 @@ impl Parser {
         self.expect(&Token::RBrace);
         let c = if self.eat(&Token::KwCatch) {
             let p = if self.eat(&Token::LParen) {
-                let x = self.ident()?;
+                let binding = if matches!(self.cur(), Token::LBracket | Token::LBrace) {
+                    self.pattern()?
+                } else {
+                    Pattern::Ident(self.ident()?)
+                };
                 self.expect(&Token::RParen);
-                x
+                Some(binding)
             } else {
-                String::new()
+                None
             };
             self.eat(&Token::LBrace);
             let cb = self.block_body();
@@ -604,33 +875,36 @@ impl Parser {
         let d = Box::new(self.expr()?);
         self.expect(&Token::RParen);
         self.eat(&Token::LBrace);
-        let mut cs = Vec::new();
-        while self.until(&Token::RBrace) {
-            if self.eof() {
-                break;
-            }
-            let t = if self.eat(&Token::KwCase) {
-                let e = self.expr()?;
-                self.eat(&Token::Colon);
-                Some(e)
-            } else if self.eat(&Token::KwDefault) {
-                self.eat(&Token::Colon);
-                None
-            } else {
-                break;
-            };
-            let mut b = Vec::new();
-            while !matches!(self.cur(), Token::KwCase)
-                && !matches!(self.cur(), Token::KwDefault)
-                && !matches!(self.cur(), Token::RBrace)
-            {
-                if self.eof() {
+        let cs = self.with_statement_list(|parser| {
+            let mut cs = Vec::new();
+            while parser.until(&Token::RBrace) {
+                if parser.eof() {
                     break;
                 }
-                b.push(self.stmt()?);
+                let t = if parser.eat(&Token::KwCase) {
+                    let e = parser.expr()?;
+                    parser.eat(&Token::Colon);
+                    Some(e)
+                } else if parser.eat(&Token::KwDefault) {
+                    parser.eat(&Token::Colon);
+                    None
+                } else {
+                    break;
+                };
+                let mut b = Vec::new();
+                while !matches!(parser.cur(), Token::KwCase)
+                    && !matches!(parser.cur(), Token::KwDefault)
+                    && !matches!(parser.cur(), Token::RBrace)
+                {
+                    if parser.eof() {
+                        break;
+                    }
+                    b.push(parser.stmt()?);
+                }
+                cs.push(SwitchCase { test: t, body: b });
             }
-            cs.push(SwitchCase { test: t, body: b });
-        }
+            Some(cs)
+        })?;
         self.expect(&Token::RBrace);
         Some(Statement::Switch { disc: d, cases: cs })
     }
@@ -646,7 +920,24 @@ impl Parser {
         while self.until(&Token::RParen) {
             if self.eat(&Token::DotDotDot) {
                 let span = self.cur_span();
-                if let Some(name) = self.ident() {
+                if matches!(self.cur(), Token::LBracket | Token::LBrace) {
+                    let Some(pattern) = self.pattern() else {
+                        break;
+                    };
+                    let slot = format!("*pattern{}*", names.len());
+                    defaults.push(Statement::VarDecl {
+                        kind: VarKind::Let,
+                        name: String::new(),
+                        init: Some(Box::new(Expr::Identifier(slot.clone()))),
+                        destructuring: Some(Box::new(pattern)),
+                    });
+                    names.push(format!("...{slot}"));
+                    if !matches!(self.cur(), Token::RParen) {
+                        self.record_error(
+                            "rest parameter must be last without a trailing comma".into(),
+                        );
+                    }
+                } else if let Some(name) = self.ident() {
                     self.record(
                         &name,
                         span,
@@ -654,6 +945,13 @@ impl Parser {
                         None,
                     );
                     names.push(format!("...{}", name));
+                    if !matches!(self.cur(), Token::RParen) {
+                        self.record_error(
+                            "rest parameter must be last without a trailing comma".into(),
+                        );
+                    }
+                } else {
+                    self.record_error("expected rest parameter binding".into());
                 }
             } else if matches!(self.cur(), Token::LBracket | Token::LBrace) {
                 // A destructured parameter — `function f({ a, b })`. The
@@ -665,9 +963,11 @@ impl Parser {
                 };
                 let slot = format!("*pattern{}*", names.len());
                 let mut init: Expr = Expr::Identifier(slot.clone());
-                if self.eat(&Token::Equal)
-                    && let Some(default) = self.assign()
-                {
+                if self.eat(&Token::Equal) {
+                    let Some(default) = self.with_in(true, Self::assign) else {
+                        self.record_error("expected parameter default expression".into());
+                        break;
+                    };
                     // `function f({ a } = {})`: the default applies to the
                     // whole parameter before it is unpacked.
                     defaults.push(Self::default_guard(&slot, default));
@@ -689,26 +989,48 @@ impl Parser {
                         crate::parser::Occurrence::Declaration(crate::parser::DeclKind::Parameter),
                         None,
                     );
-                    if self.eat(&Token::Equal)
-                        && let Some(d) = self.assign()
-                    {
+                    if self.eat(&Token::Equal) {
+                        let Some(d) = self.with_in(true, Self::assign) else {
+                            self.record_error("expected parameter default expression".into());
+                            break;
+                        };
                         defaults.push(Self::default_guard(&name, d));
                     }
                     names.push(name);
                 } else {
+                    self.record_error("expected parameter binding".into());
                     self.adv();
                 }
             }
             if !matches!(self.cur(), Token::RParen) {
-                self.eat(&Token::Comma);
+                self.expect(&Token::Comma);
             }
         }
         (names, defaults)
     }
 
+    fn label_name(&self) -> Option<String> {
+        Some(match self.cur() {
+            Token::Identifier(name) | Token::EscapedIdentifier(name) => name.clone(),
+            Token::KwAs => "as".into(),
+            Token::KwAsync => "async".into(),
+            Token::KwAwait => "await".into(),
+            Token::KwConstructor => "constructor".into(),
+            Token::KwFrom => "from".into(),
+            Token::KwGet => "get".into(),
+            Token::KwLet => "let".into(),
+            Token::KwOf => "of".into(),
+            Token::KwSet => "set".into(),
+            Token::KwStatic => "static".into(),
+            Token::KwUndefined => "undefined".into(),
+            Token::KwYield => "yield".into(),
+            _ => return None,
+        })
+    }
+
     pub(crate) fn ident(&mut self) -> Option<String> {
         match self.cur() {
-            Token::Identifier(n) => {
+            Token::Identifier(n) | Token::EscapedIdentifier(n) => {
                 let v = n.clone();
                 self.adv();
                 Some(v)
@@ -718,6 +1040,11 @@ impl Parser {
             // (async functions, accessors and module syntax), while binding
             // positions may still use them as identifiers.
             Token::KwAs => self.consume_contextual_identifier("as"),
+            Token::KwLet => self.consume_contextual_identifier("let"),
+            Token::KwStatic => self.consume_contextual_identifier("static"),
+            Token::KwUndefined => self.consume_contextual_identifier("undefined"),
+            Token::KwAwait if !self.await_expression => self.consume_contextual_identifier("await"),
+            Token::KwYield if !self.yield_expression => self.consume_contextual_identifier("yield"),
             Token::KwAsync => self.consume_contextual_identifier("async"),
             Token::KwConstructor => self.consume_contextual_identifier("constructor"),
             Token::KwFrom => self.consume_contextual_identifier("from"),
@@ -735,195 +1062,19 @@ impl Parser {
 
     /// Like `ident()`, but also accepts keywords as property names (valid after
     /// `.` in member expressions: `obj.for`, `obj.of`, `obj.get`, etc.).
-    pub(crate) fn ident_or_keyword(&mut self) -> Option<String> {
-        match self.cur() {
-            Token::Identifier(n) => {
-                let v = n.clone();
-                self.adv();
-                Some(v)
-            }
-            // Keywords that can appear as property names after `.`.
-            Token::KwFor => {
-                self.adv();
-                Some("for".to_string())
-            }
-            Token::KwOf => {
-                self.adv();
-                Some("of".to_string())
-            }
-            Token::KwIn => {
-                self.adv();
-                Some("in".to_string())
-            }
-            Token::KwIf => {
-                self.adv();
-                Some("if".to_string())
-            }
-            Token::KwDo => {
-                self.adv();
-                Some("do".to_string())
-            }
-            Token::KwAs => {
-                self.adv();
-                Some("as".to_string())
-            }
-            Token::KwLet => {
-                self.adv();
-                Some("let".to_string())
-            }
-            Token::KwNew => {
-                self.adv();
-                Some("new".to_string())
-            }
-            Token::KwVar => {
-                self.adv();
-                Some("var".to_string())
-            }
-            Token::KwGet => {
-                self.adv();
-                Some("get".to_string())
-            }
-            Token::KwSet => {
-                self.adv();
-                Some("set".to_string())
-            }
-            Token::KwTry => {
-                self.adv();
-                Some("try".to_string())
-            }
-            Token::KwCase => {
-                self.adv();
-                Some("case".to_string())
-            }
-            Token::KwElse => {
-                self.adv();
-                Some("else".to_string())
-            }
-            Token::KwFrom => {
-                self.adv();
-                Some("from".to_string())
-            }
-            Token::KwVoid => {
-                self.adv();
-                Some("void".to_string())
-            }
-            Token::KwThis => {
-                self.adv();
-                Some("this".to_string())
-            }
-            Token::KwTrue => {
-                self.adv();
-                Some("true".to_string())
-            }
-            Token::KwNull => {
-                self.adv();
-                Some("null".to_string())
-            }
-            Token::KwAsync => {
-                self.adv();
-                Some("async".to_string())
-            }
-            Token::KwAwait => {
-                self.adv();
-                Some("await".to_string())
-            }
-            Token::KwBreak => {
-                self.adv();
-                Some("break".to_string())
-            }
-            Token::KwCatch => {
-                self.adv();
-                Some("catch".to_string())
-            }
-            Token::KwClass => {
-                self.adv();
-                Some("class".to_string())
-            }
-            Token::KwConst => {
-                self.adv();
-                Some("const".to_string())
-            }
-            Token::KwSuper => {
-                self.adv();
-                Some("super".to_string())
-            }
-            Token::KwThrow => {
-                self.adv();
-                Some("throw".to_string())
-            }
-            Token::KwWhile => {
-                self.adv();
-                Some("while".to_string())
-            }
-            Token::KwYield => {
-                self.adv();
-                Some("yield".to_string())
-            }
-            Token::KwFalse => {
-                self.adv();
-                Some("false".to_string())
-            }
-            Token::KwDelete => {
-                self.adv();
-                Some("delete".to_string())
-            }
-            Token::KwExport => {
-                self.adv();
-                Some("export".to_string())
-            }
-            Token::KwImport => {
-                self.adv();
-                Some("import".to_string())
-            }
-            Token::KwReturn => {
-                self.adv();
-                Some("return".to_string())
-            }
-            Token::KwStatic => {
-                self.adv();
-                Some("static".to_string())
-            }
-            Token::KwSwitch => {
-                self.adv();
-                Some("switch".to_string())
-            }
-            Token::KwTypeof => {
-                self.adv();
-                Some("typeof".to_string())
-            }
-            Token::KwDefault => {
-                self.adv();
-                Some("default".to_string())
-            }
-            Token::KwExtends => {
-                self.adv();
-                Some("extends".to_string())
-            }
-            Token::KwFinally => {
-                self.adv();
-                Some("finally".to_string())
-            }
-            Token::KwContinue => {
-                self.adv();
-                Some("continue".to_string())
-            }
-            Token::KwFunction => {
-                self.adv();
-                Some("function".to_string())
-            }
-            Token::KwInstanceof => {
-                self.adv();
-                Some("instanceof".to_string())
-            }
-            Token::KwUndefined => {
-                self.adv();
-                Some("undefined".to_string())
-            }
-            Token::KwConstructor => {
-                self.adv();
-                Some("constructor".to_string())
-            }
-            _ => None,
+    pub(crate) fn member_property_name(&mut self) -> Option<String> {
+        if let Token::PrivateIdentifier(name) = self.cur() {
+            let name = format!("#{name}");
+            self.adv();
+            Some(name)
+        } else {
+            self.ident_or_keyword()
         }
+    }
+
+    pub(crate) fn ident_or_keyword(&mut self) -> Option<String> {
+        let name = self.cur().identifier_name()?.to_owned();
+        self.adv();
+        Some(name)
     }
 }

@@ -1,0 +1,55 @@
+{
+  "source_commit": "885a8c7eae1c7c5de0ac7d90267b885f2f9fd85e",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "633331a0b3388681250b3fc239c104555a2d3fb167dc32dab011ba65196a5923",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000
+  },
+  "counts": {
+    "pass": 50924,
+    "fail": 51984,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 46
+  },
+  "new_passes_vs_pr23": 9517,
+  "lost_passes_vs_pr23": 0,
+  "new_passes_vs165": 4584,
+  "lost_passes_vs165": 2,
+  "syntax_audit": {
+    "parse_negative": 8659,
+    "accepted_invalid": 0,
+    "requires_acceptance": 94297,
+    "rejected_valid": 154
+  },
+  "required_checks": {
+    "fmt": true,
+    "clippy": true,
+    "workspace_passed": 791,
+    "workspace_existing_ignored": 4,
+    "minimal_passed": 158,
+    "node_passed": 73,
+    "wasm_passed": 14,
+    "tooling_passed": 9
+  },
+  "ast_bytecode_mismatches": {
+    "repository_differential": 0,
+    "full_corpus": "not measured"
+  },
+  "known_regressions": [
+    "using-for-using-of-of.js script",
+    "using-for-using-of-of.js strict"
+  ],
+  "sha256": {
+    "885a8c7-full.json.gz": "ea03f13f83b378b49882b7ada3406f6e70ddac71bfc0542098cc7e187c938db2",
+    "885a8c7-syntax.json.gz": "b919e48a3b6596820ffd98d217e5490f913475d625929f87c59680938b733bf2",
+    "885a8c7-combined-transitions.json.gz": "d0c223daf61eb085601dec67bcaebb33e30511adccf031cf3c5433e1cbff3272",
+    "885a8c7-vs165-transitions.json.gz": "650b72fd5f91bfd4e4c046e3fe7b67a81fbf16dc726a8bc519e4d6fd814e7736"
+  }
+}

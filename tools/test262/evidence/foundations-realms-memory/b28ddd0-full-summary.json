@@ -1,0 +1,27 @@
+{
+  "source_commit": "b28ddd0",
+  "classification": "Completed full corpus; NOT a regression-free result or merge gate",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "total": 102956,
+  "counts": {
+    "pass": 62596,
+    "fail": 40347,
+    "skip": 0,
+    "timeout": 13,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes_vs_pr23": 21210,
+  "lost_passes_vs_pr23": 21,
+  "new_passes_vs_6456b53": 522,
+  "lost_passes_vs_6456b53": 33,
+  "worker_sha256": "b02073c11eee38cbe361cf52cf95ef444790095d9ab3388acbfdd4251e9942b8",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "archive_sha256": {
+    "b28ddd0-full-6456b53-transitions.json.gz": "bfb94d2cf75db60fa4b4b4ddf0438f0f29ce20bc7440a7c045c4b184445021c7",
+    "b28ddd0-full-7c0a9ce-transitions.json.gz": "629b73701e2107aadcc1a2437360104841f7433644ee9288308f006e035252d0",
+    "b28ddd0-full.jsonl.gz": "725e2eaeac7ebdc632d19113cc2f94ae8cc87222c9adeeccec7c4f974d044b21",
+    "b28ddd0-full-pr23-transitions.json.gz": "642587f3cc63fa756323fcd847804d970861eb33975b44197d65ea291832721a",
+    "b28ddd0-full.json.gz": "7b8e8ac057313a8a232064ea212235d55b7a70c99eb4fc02005b4fcab1d451c0"
+  }
+}

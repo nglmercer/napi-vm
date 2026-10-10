@@ -206,6 +206,7 @@ pub(crate) fn run_function(
     this_value: Value,
     args: &[Value],
     strict: bool,
+    function: &Value,
 ) -> Result<Value, VmErr> {
     interp.check_execution()?;
     tier_check(interp, code, args);
@@ -220,7 +221,7 @@ pub(crate) fn run_function(
         if !code.is_arrow {
             fe.borrow_mut().set("this", this_value.clone());
         }
-        seed_captured(&fe, code, args)?;
+        seed_captured(interp, &fe, code, args, function)?;
     }
     let module_context = fe.borrow().module_context();
     let saved_module = std::mem::replace(&mut interp.cur_mod, module_context);
@@ -240,12 +241,18 @@ pub(crate) fn run_function(
 /// unless a lexical declaration merged the slot dead, plain `var`s start
 /// defined, lexicals dead. Hoisted-function cells are overwritten by the
 /// eager instantiation when the body starts.
-fn seed_captured(fe: &Env, code: &BytecodeFunction, args: &[Value]) -> Result<(), VmErr> {
+fn seed_captured(
+    interp: &Interpreter,
+    fe: &Env,
+    code: &BytecodeFunction,
+    args: &[Value],
+    function: &Value,
+) -> Result<(), VmErr> {
     // A nested arrow reads `arguments` through the chain: seed the object
     // first, like the evaluator, so a shadowing parameter or lexical still
     // wins. Arrows never carry the flag themselves.
     if code.captures_arguments && !code.is_arrow {
-        let args_obj = Value::arguments_object(args)?;
+        let args_obj = interp.function_arguments(function, args)?;
         fe.borrow_mut()
             .declare("arguments", args_obj, BindKind::Var, true);
     }
@@ -465,28 +472,25 @@ fn run_loop(
                 }
                 Instr::LoadGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
-                    if name == "undefined" {
-                        frame.registers[dst as usize] = Value::Undefined;
-                    } else {
-                        // Lookup cannot run guest code or change the active
-                        // scope. Borrow its existing root instead of bumping
-                        // the environment's Rc count for every global read.
-                        let scope = current_scope(interp, frame);
-                        let lookup = interp.lookup_binding_in(&scope, name)?;
-                        match lookup {
-                            Lookup::Value(v) => {
-                                frame.registers[dst as usize].assign_for_execution(v)
-                            }
-                            Lookup::Uninitialized => {
-                                return Err(VmErr::Msg(format!(
-                                    "ReferenceError: Cannot access '{name}' before initialization"
-                                )));
-                            }
-                            Lookup::Missing => {
-                                return Err(VmErr::Msg(format!(
-                                    "ReferenceError: {name} is not defined"
-                                )));
-                            }
+                    // Lookup cannot run guest code or change the active
+                    // scope. Borrow its existing root instead of bumping
+                    // the environment's Rc count for every global read.
+                    let scope = current_scope(interp, frame);
+                    let lookup = interp.lookup_binding_in(&scope, name)?;
+                    match lookup {
+                        Lookup::Value(v) => frame.registers[dst as usize].assign_for_execution(v),
+                        Lookup::Uninitialized => {
+                            return Err(VmErr::Msg(format!(
+                                "ReferenceError: Cannot access '{name}' before initialization"
+                            )));
+                        }
+                        Lookup::Missing if name == "undefined" => {
+                            frame.registers[dst as usize] = Value::Undefined;
+                        }
+                        Lookup::Missing => {
+                            return Err(VmErr::Msg(format!(
+                                "ReferenceError: {name} is not defined"
+                            )));
                         }
                     }
                 }
@@ -507,17 +511,24 @@ fn run_loop(
                     let scope = current_scope(interp, frame);
                     interp.declare_binding_in(&scope, name, value, bind_kind(kind), initialized)?;
                 }
-                Instr::InitGlobal { name, src } => {
+                Instr::InitGlobal {
+                    name,
+                    src,
+                    function,
+                } => {
                     let name = const_string(frame.function, name)?;
                     let value = frame.registers[src as usize].clone_for_execution();
                     let scope = current_scope(interp, frame);
-                    interp.set_binding_in(&scope, name, value)?;
+                    if function {
+                        interp.declare_function_binding_in(&scope, name, value)?;
+                    } else {
+                        interp.set_binding_in(&scope, name, value)?;
+                    }
                 }
                 Instr::HoistVarGlobal { name } => {
                     let name = const_string(frame.function, name)?;
-                    if !interp.global.borrow().has(name) {
-                        interp.declare_binding(name, Value::Undefined, BindKind::Var, true)?;
-                    }
+                    let scope = current_scope(interp, frame);
+                    interp.hoist_var_binding_in(&scope, name)?;
                 }
                 Instr::BareVarLocal { slot } => {
                     if !frame.slots[slot as usize].initialized {
@@ -639,13 +650,14 @@ fn run_loop(
                 Instr::DelProp { dst, obj, key } => {
                     let obj = frame.registers[obj as usize].clone_for_execution();
                     let key = frame.registers[key as usize].clone_for_execution();
-                    frame.registers[dst as usize] = interp.delete_member(&obj, &key)?;
+                    let strict = current_scope(interp, frame).borrow().strict();
+                    frame.registers[dst as usize] =
+                        interp.delete_member_or_throw(&obj, &key, strict)?;
                 }
                 Instr::DelGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
                     let scope = current_scope(interp, frame);
-                    let bound = scope.borrow().get(name).is_some();
-                    frame.registers[dst as usize] = Value::Bool(!bound);
+                    frame.registers[dst as usize] = interp.delete_binding_in(&scope, name)?;
                 }
                 Instr::Jump { target } => {
                     frame.ip = target as usize;
@@ -684,9 +696,8 @@ fn run_loop(
                 // `call_this` maps it to a value, `ctor` maps object returns to
                 // the returned object. Only falling off the end yields `Ok`.
                 Instr::Return { src } => {
-                    return Err(VmErr::Ret(
-                        frame.registers[src as usize].clone_for_execution(),
-                    ));
+                    let value = frame.registers[src as usize].clone_for_execution();
+                    return Err(VmErr::Ret(interp.prepare_return_value(value)?));
                 }
                 Instr::ReturnUndefined => {
                     return Err(VmErr::Ret(Value::Undefined));
@@ -705,8 +716,11 @@ fn run_loop(
                 } => {
                     if private {
                         let name = interp.property_key(&frame.registers[key as usize])?;
-                        frame.registers[dst as usize] =
-                            interp.get_private_member(&frame.registers[obj as usize], &name)?;
+                        frame.registers[dst as usize] = interp.get_private_member_in(
+                            &current_scope(interp, frame),
+                            &frame.registers[obj as usize],
+                            &name,
+                        )?;
                         return Ok(());
                     }
                     let value = get_prop_cached(
@@ -751,7 +765,7 @@ fn run_loop(
                 }
                 Instr::DirectEvalSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     frame.registers[dst as usize] =
                         if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
@@ -799,7 +813,7 @@ fn run_loop(
                 }
                 Instr::CallSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     frame.registers[dst as usize] =
                         interp.call_this(&callee, Value::Undefined, argv)?;
@@ -811,7 +825,7 @@ fn run_loop(
                     tmpl,
                 } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     let this = frame.registers[this as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
@@ -928,9 +942,11 @@ fn run_loop(
                 Instr::ForOfInit { iter, next, src } => {
                     let source = frame.registers[src as usize].clone_for_execution();
                     let iterator = interp.iterator_for(&source)?;
-                    let next_fn = interp.prop_str(&iterator, "next")?;
+                    let next_fn = interp.member(&iterator, "next")?;
                     if matches!(next_fn, Value::Undefined) {
-                        return Err(VmErr::Msg("iterator has no next() method".to_string()));
+                        return Err(VmErr::Msg(
+                            "TypeError: iterator has no next() method".to_string(),
+                        ));
                     }
                     frame.registers[iter as usize] = iterator;
                     frame.registers[next as usize] = next_fn;
@@ -944,16 +960,20 @@ fn run_loop(
                     let iterator = frame.registers[iter as usize].clone_for_execution();
                     let next_fn = frame.registers[next as usize].clone_for_execution();
                     let result = interp.call_this(&next_fn, iterator, vec![])?;
-                    let finished = result
-                        .get_prop("done")
-                        .map(|flag| flag.is_truthy())
-                        .unwrap_or(true);
+                    let (finished, produced) = interp.iterator_result_fields(&result)?;
                     frame.registers[done as usize] = Value::Bool(finished);
-                    frame.registers[value as usize] =
-                        result.get_prop("value").unwrap_or(Value::Undefined);
+                    frame.registers[value as usize] = produced;
                 }
-                Instr::CloseIterator { src } => {
-                    crate::interpreter::close_iterator(&frame.registers[src as usize]);
+                Instr::CloseIterator { src, unwind } => {
+                    let iterator = frame.registers[src as usize].clone_for_execution();
+                    if unwind {
+                        let completion = frame.pending.as_ref().ok_or_else(|| {
+                            internal("iterator unwind without a pending completion")
+                        })?;
+                        interp.close_guest_iterator_for_abrupt(&iterator, false, completion)?;
+                    } else {
+                        interp.close_guest_iterator(&iterator, false)?;
+                    }
                 }
                 Instr::PushCatch { target, dst } => {
                     let scope_depth = frame.scopes.len();
@@ -1012,7 +1032,7 @@ fn run_loop(
                 }
                 Instr::SuperCallSpread { dst, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
-                    let argv = spread_argv(frame, &template)?;
+                    let argv = spread_argv(interp, frame, &template)?;
                     frame.registers[dst as usize] = super_call(interp, frame, argv)?;
                 }
                 Instr::Raise { msg } => {
@@ -1031,6 +1051,42 @@ fn run_loop(
                     let key = frame.registers[src as usize].clone_for_execution();
                     let key = interp.property_key(&key)?;
                     frame.registers[dst as usize] = Value::String(crate::JsString::from_key(&key));
+                }
+                Instr::ClassScope { name } => {
+                    let name = name
+                        .map(|name| const_string(frame.function, name))
+                        .transpose()?
+                        .unwrap_or("");
+                    frame.scopes.push(Interpreter::class_environment(
+                        current_scope(interp, frame),
+                        name,
+                    ));
+                }
+                Instr::ClassPrivateEnvironment { names } => {
+                    let names: Vec<String> = match &frame.function.constants[names as usize] {
+                        Constant::StringList(names) => {
+                            names.iter().map(|name| name.to_string()).collect()
+                        }
+                        _ => return Err(internal("bad private declaration list")),
+                    };
+                    current_scope(interp, frame)
+                        .borrow_mut()
+                        .declare_private_declarations(names);
+                }
+                Instr::ClassHeritage { dst, superclass } => {
+                    let superclass = frame.registers[superclass as usize].clone_for_execution();
+                    frame.registers[dst as usize] = interp
+                        .super_proto_for(&Some(superclass))?
+                        .map(|proto| proto.as_ref().clone_for_execution())
+                        .unwrap_or(Value::Undefined);
+                }
+                Instr::PrivateIn { dst, obj, name } => {
+                    let name = const_string(frame.function, name)?;
+                    frame.registers[dst as usize] = interp.has_private_member_in(
+                        &current_scope(interp, frame),
+                        &frame.registers[obj as usize],
+                        name,
+                    )?;
                 }
                 Instr::Import { tmpl } => {
                     let template = match &frame.function.constants[tmpl as usize] {
@@ -1120,9 +1176,7 @@ fn land_handler(
     let value = match &error {
         VmErr::Throw(value) => value.clone(),
         VmErr::Msg(message) => crate::error::error_value_with_stack(message, interp.get_stack()),
-        VmErr::RuntimeError(data) => {
-            crate::error::error_value_with_stack(&data.message, &data.stack)
-        }
+        VmErr::RuntimeError(data) => data.guest_value(),
         VmErr::Ret(_) => Value::Undefined,
         _ => unreachable!("filtered above"),
     };
@@ -1136,6 +1190,7 @@ fn land_handler(
 fn bind_kind(kind: SlotKind) -> BindKind {
     match kind {
         SlotKind::Var => BindKind::Var,
+        SlotKind::Catch => BindKind::Catch,
         SlotKind::Let => BindKind::Let,
         SlotKind::Const => BindKind::Const,
     }
@@ -1219,24 +1274,24 @@ fn build_class_from_template(
     template: &super::constants::ClassTemplate,
 ) -> Result<Value, VmErr> {
     use super::constants::{ClassMemberKind, ClassNameTemplate};
-    use crate::interpreter::{ClassAssembly, insert_class_accessor};
+    use crate::interpreter::{ClassAssembly, define_class_private_element, insert_class_accessor};
+    use crate::value::PrivateElement;
 
-    let current = current_scope(interp, frame);
-    let def_scope = match &template.expr_name {
-        Some(_) => Rc::new(RefCell::new(Environment::child(current))),
-        None => current,
-    };
+    let member_scope = current_scope(interp, frame);
     let super_cls = template
         .superclass
         .map(|reg| frame.registers[reg as usize].clone_for_execution());
-    let super_proto = interp.super_proto_for(&super_cls)?;
-    let member_scope = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
-    for name in &template.private_fields {
-        member_scope.borrow_mut().declare_private_field(name);
-    }
+    let super_proto = template.super_proto.and_then(|reg| {
+        let value = frame.registers[reg as usize].clone_for_execution();
+        (!matches!(value, Value::Undefined)).then(|| Rc::new(value))
+    });
     let member_closure = Interpreter::member_closure_env(&member_scope, &super_proto);
     member_closure.borrow_mut().replace_strict(Some(true));
 
+    let mut private_statics = Vec::new();
+    let static_closure =
+        Interpreter::member_closure_env(&member_scope, &super_cls.clone().map(Rc::new));
+    static_closure.borrow_mut().replace_strict(Some(true));
     let mut proto_props = Vec::new();
     let mut statics = vec![(
         "name".to_string(),
@@ -1254,7 +1309,7 @@ fn build_class_from_template(
     for member in &template.members {
         let computed;
         let key = match &member.name {
-            ClassNameTemplate::Static(name) => name.clone(),
+            ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => name.clone(),
             ClassNameTemplate::Computed(reg) => {
                 computed = frame.registers[*reg as usize].clone_for_execution();
                 interp.property_key(&computed)?
@@ -1263,17 +1318,29 @@ fn build_class_from_template(
         // Computed names are known only now; static ones were set when
         // each function compiled.
         let display = |prefix: &str| match &member.name {
-            ClassNameTemplate::Static(_) => None,
+            ClassNameTemplate::Static(_) | ClassNameTemplate::Private(_) => None,
             ClassNameTemplate::Computed(_) => Some(Rc::from(format!("{prefix}{key}"))),
+        };
+        let closure = if member.is_static {
+            static_closure.clone()
+        } else {
+            member_closure.clone()
         };
         match member.kind {
             ClassMemberKind::Method => {
                 let func = member
                     .func
                     .ok_or_else(|| internal("method without function"))?;
-                let fn_val =
-                    class_function(interp, frame, func, member_closure.clone(), display(""))?;
-                if member.is_static {
+                let fn_val = class_function(interp, frame, func, closure.clone(), display(""))?;
+                if matches!(member.name, ClassNameTemplate::Private(_)) {
+                    define_class_private_element(
+                        &member_scope,
+                        &mut private_statics,
+                        &key,
+                        member.is_static,
+                        PrivateElement::Method(fn_val),
+                    )?;
+                } else if member.is_static {
                     statics.push((key.clone(), fn_val));
                     static_attrs.push((
                         key,
@@ -1296,9 +1363,27 @@ fn build_class_from_template(
                 } else {
                     "set "
                 };
-                let fn_val =
-                    class_function(interp, frame, func, member_closure.clone(), display(prefix))?;
-                if member.is_static {
+                let fn_val = class_function(interp, frame, func, closure, display(prefix))?;
+                if matches!(member.name, ClassNameTemplate::Private(_)) {
+                    let element = if member.kind == ClassMemberKind::Getter {
+                        PrivateElement::Accessor {
+                            get: Some(fn_val),
+                            set: None,
+                        }
+                    } else {
+                        PrivateElement::Accessor {
+                            get: None,
+                            set: Some(fn_val),
+                        }
+                    };
+                    define_class_private_element(
+                        &member_scope,
+                        &mut private_statics,
+                        &key,
+                        member.is_static,
+                        element,
+                    )?;
+                } else if member.is_static {
                     insert_class_accessor(&mut statics, &key, fn_val);
                     static_attrs.push((
                         key,
@@ -1312,14 +1397,6 @@ fn build_class_from_template(
                 } else {
                     insert_class_accessor(&mut proto_props, &key, fn_val);
                 }
-            }
-            ClassMemberKind::Field => {
-                let reg = member
-                    .value
-                    .ok_or_else(|| internal("field without value"))?;
-                let value = frame.registers[reg as usize].clone_for_execution();
-                statics.push((key.clone(), value));
-                static_attrs.push((key, PropAttrs::default()));
             }
         }
     }
@@ -1341,11 +1418,31 @@ fn build_class_from_template(
         }
     };
     let constructor = class_function(interp, frame, template.ctor_func, ctor_closure, None)?;
-    let mut static_blocks = Vec::with_capacity(template.blocks.len());
+    let mut static_elements = Vec::with_capacity(template.blocks.len());
     for block in &template.blocks {
-        match frame.function.constants.get(*block as usize) {
-            Some(Constant::AstFunction(ast)) => static_blocks.push(ast.body.clone()),
-            _ => return Err(internal("bad class static block")),
+        match block {
+            super::constants::ClassStaticTemplate::Block(index) => {
+                match frame.function.constants.get(*index as usize) {
+                    Some(Constant::AstFunction(ast)) => static_elements.push(
+                        crate::interpreter::ClassStaticElement::Block(ast.body.clone()),
+                    ),
+                    _ => return Err(internal("bad class static block")),
+                }
+            }
+            super::constants::ClassStaticTemplate::Field { name, init } => {
+                let (key, private) = match name {
+                    ClassNameTemplate::Static(name) => (name.clone(), false),
+                    ClassNameTemplate::Private(name) => (name.clone(), true),
+                    ClassNameTemplate::Computed(reg) => {
+                        (interp.property_key(&frame.registers[*reg as usize])?, false)
+                    }
+                };
+                static_elements.push(crate::interpreter::ClassStaticElement::Field {
+                    name: key,
+                    private,
+                    init: init.clone(),
+                });
+            }
         }
     }
     let class_val = interp.assemble_class(ClassAssembly {
@@ -1358,11 +1455,10 @@ fn build_class_from_template(
         statics,
         static_attrs,
         static_has_accessors,
-        static_blocks,
+        static_elements,
+        private_scope: member_scope,
+        private_statics,
     })?;
-    if let Some(name) = &template.expr_name {
-        def_scope.borrow_mut().set(name, class_val.clone());
-    }
     Ok(class_val)
 }
 
@@ -1493,34 +1589,25 @@ fn spread_template(frame: &CallFrame, tmpl: u16) -> Result<Vec<SpreadEntry>, VmE
     }
 }
 
-/// Build a call argument list with call-spread rules: arrays splice,
-/// anything else passes as one argument. Mirrors the evaluator's
-/// argument loop, including the count limit.
-fn spread_argv(frame: &CallFrame, template: &[SpreadEntry]) -> Result<Vec<Value>, VmErr> {
+/// Build a call argument list using the shared iterator protocol.
+fn spread_argv(
+    interp: &mut Interpreter,
+    frame: &CallFrame,
+    template: &[SpreadEntry],
+) -> Result<Vec<Value>, VmErr> {
     let mut argv = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if !entry.spread {
+        if entry.spread {
+            interp.append_iterable(&mut argv, &value, "Maximum argument count exceeded")?;
+        } else {
             push_call_arg(&mut argv, value)?;
-            continue;
-        }
-        match &value {
-            Value::Array(arr) => {
-                let items = arr.borrow();
-                if argv.len().saturating_add(items.len()) > crate::value::MAX_ARRAY_LEN {
-                    return Err(crate::value::limit_err("Maximum argument count exceeded"));
-                }
-                argv.extend(items.iter().cloned());
-            }
-            _ => push_call_arg(&mut argv, value)?,
         }
     }
     Ok(argv)
 }
 
-/// Build an array literal with element-spread rules: arrays splice, strings
-/// spread per character, anything else drains the iterator protocol.
-/// Mirrors the evaluator's element loop, including every limit check.
+/// Build an array literal using the same spread helper as the AST evaluator.
 fn spread_array(
     interp: &mut Interpreter,
     frame: &CallFrame,
@@ -1529,33 +1616,10 @@ fn spread_array(
     let mut items = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if !entry.spread {
-            items.push(value);
+        if entry.spread {
+            interp.append_iterable(&mut items, &value, "Maximum array length exceeded")?;
         } else {
-            match &value {
-                Value::Array(arr) => {
-                    let elements = arr.borrow();
-                    if items.len().saturating_add(elements.len()) > crate::value::MAX_ARRAY_LEN {
-                        return Err(crate::value::limit_err("Maximum array length exceeded"));
-                    }
-                    items.extend(elements.iter().cloned());
-                }
-                Value::String(s) => {
-                    if items.len().saturating_add(s.code_points().count())
-                        > crate::value::MAX_ARRAY_LEN
-                    {
-                        return Err(crate::value::limit_err("Maximum array length exceeded"));
-                    }
-                    items.extend(s.code_points().map(Value::String));
-                }
-                other => {
-                    let drained = interp.drain_iterable(other)?;
-                    if items.len().saturating_add(drained.len()) > crate::value::MAX_ARRAY_LEN {
-                        return Err(crate::value::limit_err("Maximum array length exceeded"));
-                    }
-                    items.extend(drained);
-                }
-            }
+            items.push(value);
         }
         if items.len() > crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum array length exceeded"));
@@ -1665,7 +1729,9 @@ fn make_function(
         .iter()
         .map(|slot| slot.name.clone())
         .collect();
-    Value::Function(Rc::new(FunctionData {
+    let expression_name = code.name.as_deref().filter(|_| code.named_expression);
+    let closure = Environment::named_function_scope(closure, expression_name);
+    let function = Value::Function(Rc::new(FunctionData {
         strict: closure.borrow().strict() || code.strict,
         native: None,
         identity: Rc::new(0),
@@ -1690,7 +1756,9 @@ fn make_function(
         // The AST body is an empty placeholder (calls dispatch on
         // `bytecode`), and an empty body needs no hoisting.
         needs_hoisting: false,
-    }))
+    }));
+    Environment::initialize_function_name(&closure, expression_name, &function);
+    function
 }
 
 /// Instantiate a per-function AST fallback: the evaluator's own function
@@ -1704,12 +1772,18 @@ fn make_ast_function(
     closure: Env,
     name_override: Option<Rc<str>>,
 ) -> Value {
-    Value::Function(Rc::new(FunctionData {
+    let expression_name = ast.name.as_deref().filter(|_| ast.named_expression);
+    let closure = Environment::named_function_scope(closure, expression_name);
+    let function = Value::Function(Rc::new(FunctionData {
         strict: closure.borrow().strict() || crate::parser::use_strict(&ast.body),
         native: None,
         identity: Rc::new(0),
         name: name_override.or_else(|| ast.name.as_deref().map(Rc::from)),
-        properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
+        properties: FunctionData::properties_with_function_kind(
+            &interp.persistent_global,
+            ast.is_async,
+            ast.is_generator,
+        ),
         standard_properties_initialized: Rc::new(Cell::new(false)),
         params: intern_params(&ast.params),
         body: ast.body.clone(),
@@ -1722,7 +1796,9 @@ fn make_ast_function(
         bound: None,
         bytecode: None,
         needs_hoisting: crate::interpreter::body_needs_hoisting(&ast.body),
-    }))
+    }));
+    Environment::initialize_function_name(&closure, expression_name, &function);
+    function
 }
 
 #[cfg(test)]

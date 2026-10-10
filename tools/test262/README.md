@@ -35,8 +35,15 @@ failures, timeouts, crashes and harness errors. A selected subset's percentage
 is never advertised as overall ECMAScript compatibility. Empty/non-passing
 runs return exit status 1 while still producing evidence.
 
-The latest complete development measurement is in `latest.json`: 34,736 passes
-out of 102,956 variants (33.74%), with zero feature skips. This does not establish
+For long runs, add `--checkpoint artifacts/test262/full.checkpoint.jsonl`.
+After an interrupted process, repeat the same command with `--resume`. The
+journal retains every completed variant outcome, including errors and timeouts.
+Resume rejects changes to the corpus revision, worker digest, selection, skips,
+worker count, or timeout. An interrupted final journal write is rerun. The final
+report still contains all selected outcomes and records the restored file count.
+
+The merged PR #23 development measurement is in `latest.json`: 41,407 passes
+out of 102,956 variants (40.2182%), with zero feature skips. This does not establish
 full conformance.
 
 The initial full development baseline is in `baseline.json`: 32,359 passes out
@@ -68,10 +75,13 @@ python3 tools/test262/triage.py artifacts/test262/full-results.json \
 See `docs/test262-conformance-validation.md` for the current validation evidence.
 
 
-Known runner limitations: `$262.createRealm` and agents are not implemented.
+The host implements `$262.createRealm` and real worker agents with shared-memory
+coordination. Full realm ownership and GC/finalization semantics remain incomplete.
 ArrayBuffer detachment is implemented; GC requests run at quiescent host boundaries
 and do not guarantee synchronous collection or finalization.
 See [phases 1–3 implementation notes](../../docs/test262-phases-1-3.md).
+See [foundation continuation status](../../docs/test262-foundations-completion.md)
+for the new agent implementation and remaining completion gates.
 Those limitations contribute failures or harness errors; they are not silently
 removed from the denominator. No stable compatibility claim is made.
 
@@ -81,3 +91,21 @@ Verification:
 python3 -m unittest discover -s tools/test262 -p 'test_*.py'
 cargo test --no-default-features --test test262_worker --test engine_boundary
 ```
+
+## Compile-only source audit
+
+`audit_syntax.py` checks source acceptance with the public compile-with-goal API.
+It uses the runner's pinned-corpus selection and strict/Script/Module variants,
+without evaluating a harness or guest code. These results are not execution
+passes. Invalid sources accepted and valid sources rejected remain explicit
+outcomes, including unsupported proposals and execution-limit errors.
+
+```sh
+python3 tools/test262/audit_syntax.py /workspace/test262 \
+  --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
+  --output artifacts/test262/syntax-audit.json
+```
+
+The command builds a compile-only Rust companion and records source/engine
+identities. An existing immutable companion can be supplied with `--engine`.
+Full execution and AST/bytecode differential validation remain separate gates.

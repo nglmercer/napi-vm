@@ -37,22 +37,25 @@ impl Parser {
     pub(crate) fn assign(&mut self) -> Option<Expr> {
         // `yield` sits at assignment precedence. A bare `yield` (followed by a
         // terminator) yields `undefined`; otherwise it yields the operand.
-        if matches!(self.cur(), Token::KwYield) {
+        if self.yield_expression && matches!(self.cur(), Token::KwYield) {
             self.adv();
+            let newline = self.pos > 0 && self.cur_span().line > self.toks[self.pos - 1].1.line;
             // `yield* iterable` delegates to another iterator.
-            if self.eat(&Token::Star) {
+            if !newline && self.eat(&Token::Star) {
                 let inner = self.assign()?;
                 return Some(Expr::YieldFrom(Box::new(inner)));
             }
-            let arg = if matches!(
-                self.cur(),
-                Token::Semicolon
-                    | Token::RParen
-                    | Token::RBrace
-                    | Token::RBracket
-                    | Token::Comma
-                    | Token::EOF
-            ) {
+            let arg = if newline
+                || matches!(
+                    self.cur(),
+                    Token::Semicolon
+                        | Token::RParen
+                        | Token::RBrace
+                        | Token::RBracket
+                        | Token::Comma
+                        | Token::Colon
+                        | Token::EOF
+                ) {
                 None
             } else {
                 Some(Box::new(self.assign()?))
@@ -199,8 +202,8 @@ impl Parser {
     fn cond(&mut self) -> Option<Expr> {
         let t = self.nullish()?;
         if self.eat(&Token::Question) {
-            let c = self.assign()?;
-            self.eat(&Token::Colon);
+            let c = self.with_in(true, Self::assign)?;
+            self.expect(&Token::Colon);
             let a = self.assign()?;
             Some(Expr::Conditional {
                 test: Box::new(t),
@@ -385,8 +388,13 @@ impl Parser {
                         right: Box::new(r),
                     };
                 }
-                Token::KwIn => {
+                Token::KwIn if self.in_expression => {
                     self.adv();
+                    if self.arrow_head_here() {
+                        self.record_error(
+                            "arrow expression requires parentheses as an in operand".into(),
+                        );
+                    }
                     let r = self.shift()?;
                     l = Expr::Binary {
                         op: BinOp::In,
@@ -583,7 +591,7 @@ impl Parser {
                     prefix: true,
                 })
             }
-            Token::KwAwait => {
+            Token::KwAwait if self.await_expression => {
                 self.adv();
                 let o = self.unary()?;
                 Some(Expr::Await(Box::new(o)))
@@ -600,13 +608,14 @@ impl Parser {
                     self.adv();
                     let mut a = Vec::new();
                     while self.until(&Token::RParen) {
-                        if let Some(arg) = self.assign() {
+                        if let Some(arg) = self.with_in(true, Self::assign) {
                             a.push(arg);
                         } else {
+                            self.record_error("expected call argument".into());
                             self.adv();
                         }
                         if !matches!(self.cur(), Token::RParen) {
-                            self.eat(&Token::Comma);
+                            self.expect(&Token::Comma);
                         }
                     }
                     self.expect(&Token::RParen);
@@ -617,38 +626,16 @@ impl Parser {
                 }
                 Token::Dot => {
                     self.adv();
-                    // `obj.#name`: a private member. The `#` is part of the
-                    // property name, so nothing outside the class body can
-                    // name it — that is the whole of the privacy.
-                    if self.eat(&Token::Hash) {
-                        let p = self.ident()?;
-                        e = Expr::Member {
-                            object: Box::new(e),
-                            property: Box::new(Expr::String((format!("#{}", p)).into())),
-                            computed: false,
-                        };
-                        continue;
-                    }
-                    if self.eat(&Token::QuestionDot) {
-                        // optional chaining: obj?.prop
-                        let p = self.ident_or_keyword()?;
-                        e = Expr::OptionalChain {
-                            object: Box::new(e),
-                            property: Box::new(Expr::String((p).into())),
-                            computed: false,
-                        };
-                    } else {
-                        let p = self.ident_or_keyword()?;
-                        e = Expr::Member {
-                            object: Box::new(e),
-                            property: Box::new(Expr::String((p).into())),
-                            computed: false,
-                        };
-                    }
+                    let p = self.member_property_name()?;
+                    e = Expr::Member {
+                        object: Box::new(e),
+                        property: Box::new(Expr::String(p.into())),
+                        computed: false,
+                    };
                 }
                 Token::LBracket => {
                     self.adv();
-                    let p = self.expr()?;
+                    let p = self.with_in(true, Self::expr)?;
                     self.expect(&Token::RBracket);
                     e = Expr::Member {
                         object: Box::new(e),
@@ -656,7 +643,7 @@ impl Parser {
                         computed: true,
                     };
                 }
-                Token::PlusPlus => {
+                Token::PlusPlus if !self.line_break_before_current() => {
                     self.adv();
                     e = Expr::Unary {
                         op: UnOp::Inc,
@@ -664,7 +651,7 @@ impl Parser {
                         prefix: false,
                     };
                 }
-                Token::MinusMinus => {
+                Token::MinusMinus if !self.line_break_before_current() => {
                     self.adv();
                     e = Expr::Unary {
                         op: UnOp::Dec,
@@ -678,13 +665,13 @@ impl Parser {
                         // Optional call: obj?.(args)
                         let mut a = Vec::new();
                         while self.until(&Token::RParen) {
-                            if let Some(arg) = self.assign() {
+                            if let Some(arg) = self.with_in(true, Self::assign) {
                                 a.push(arg);
                             } else {
                                 self.adv();
                             }
                             if !matches!(self.cur(), Token::RParen) {
-                                self.eat(&Token::Comma);
+                                self.expect(&Token::Comma);
                             }
                         }
                         self.expect(&Token::RParen);
@@ -698,7 +685,7 @@ impl Parser {
                         };
                     } else if self.eat(&Token::LBracket) {
                         // Optional computed member: obj?.[expr]
-                        let p = self.assign()?;
+                        let p = self.with_in(true, Self::expr)?;
                         self.expect(&Token::RBracket);
                         e = Expr::OptionalChain {
                             object: Box::new(e),
@@ -707,7 +694,7 @@ impl Parser {
                         };
                     } else {
                         // Optional member: obj?.prop
-                        let p = self.ident_or_keyword()?;
+                        let p = self.member_property_name()?;
                         e = Expr::OptionalChain {
                             object: Box::new(e),
                             property: Box::new(Expr::String((p).into())),
@@ -723,12 +710,18 @@ impl Parser {
                     let (quasis, exprs) = self.template_body()?;
                     e = Expr::TaggedTemplate {
                         tag: Box::new(e),
-                        cooked: quasis.iter().map(|q| q.cooked.clone()).collect(),
+                        cooked: quasis
+                            .iter()
+                            .map(|q| (!q.invalid_escape).then(|| q.cooked.clone()))
+                            .collect(),
                         raw: quasis.into_iter().map(|q| q.raw).collect(),
                         exprs,
                     };
                 }
                 Token::Arrow => {
+                    if self.line_break_before_current() {
+                        self.record_error("line terminator before arrow".into());
+                    }
                     if let Expr::Identifier(n) = e {
                         self.adv();
                         e = self.arrow_body(vec![n], vec![]);

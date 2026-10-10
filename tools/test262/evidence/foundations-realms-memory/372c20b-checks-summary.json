@@ -1,0 +1,49 @@
+{
+  "source_commit": "372c20ba998e1ffe02dfaf9719505588ec126956",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "12f62319778e090e84f36f9a9c9a867e4f889782003be34578370d837d437eff",
+  "checks": {
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "allfeatures-tests": {
+      "passed": 872,
+      "failed": 0,
+      "ignored": 4
+    }
+  },
+  "required_checks": "All passed; Node 73, WASM 14, tooling 10; see archived logs",
+  "execution_validation": {
+    "classification": "Exploratory; four lost passes block the full run",
+    "total": 2044,
+    "counts": {
+      "pass": 1852,
+      "fail": 192,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 130,
+    "lost_passes": 4,
+    "baseline": "Matching 7c0a9ce full report projection; not a separate baseline rerun"
+  },
+  "phase1_status": "Open custom Array allocation and revoked-Proxy realm dependencies; see the Phase 1 audit",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "archive_sha256": {
+    "372c20b-release-build.log.gz": "bd730a540a10cccf0c4e0dbb3a030731cd9538a83d348d05d0272d1b3e676681",
+    "372c20b-tooling-tests.log.gz": "7ed7f56b8cc4221c46a23a0a7e9af108ca9bc1ebc2b87a27e69db815c474e92e",
+    "372c20b-wasm-tests.log.gz": "17b488fcf06de4293ff6928cee43996cb5346484931f3460f0a8edef2ddae0f2",
+    "372c20b-node-tests.log.gz": "01378b54b98abb8af6b19217324cd7c6e38fcd8e007731ffcb37ff7e783f0241",
+    "372c20b-native-build.log.gz": "95d697775fa1154a6da98a4133876a8922e377e349972800ffd6984c397a0783",
+    "372c20b-minimal-tests.log.gz": "7443a07d78ace9abb033615b846c84b96fbf4c79fbd25ffe9966c4bfda852a01",
+    "372c20b-allfeatures-tests.log.gz": "70aa00a0bdf0ea811c7dce329cac968e7e64540a0104f5f757593b97ce4ca0d4",
+    "372c20b-clippy.log.gz": "ae0d282143500187ac9efb98033178105379d08ad849ce87cb25fdba377a4828",
+    "372c20b-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "372c20b-exploratory-focused.json.gz": "79d38f25dbd36d193a034a6c8595459ca51bc522e63ca39b278e5978ae4f1ee7",
+    "372c20b-exploratory-focused-transitions.json.gz": "68f8f6f6e8a7a369581c85839923251f0123d28bb1aac433adda392143cd7598",
+    "372c20b-exploratory-focused-7c0a9ce-projection.json.gz": "0c0818eeedcad0869d4dc2996e1ff7f7b150a48c63d00435825d2bf3f1374a8c"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "source_commit": "6456b53182ab52f866ed8656b57d3576056f34da",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "a3b96f79678538a9a67bbae3d848d75149d9fd3d6fda4ab5a1f404b0945e17df",
+  "classification": "Full pinned regression gate passed; remaining foundation semantic gates still open",
+  "counts": {
+    "pass": 62107,
+    "fail": 40847,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "total": 102956,
+  "new_passes": 20700,
+  "lost_passes": 0,
+  "versus_7c0a9ce": {
+    "new_passes": 9061,
+    "lost_passes": 0
+  },
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "resumed_files": 0,
+  "required_checks": "All passed; see 6456b53-summary.json and archived logs",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "known_timeouts": [
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "script"
+    },
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "strict"
+    }
+  ],
+  "remaining_gaps": "Realm-global ObjectRecord/DeclarativeRecord, complete private elements/branding, typed accessor descriptors, remaining Proxy/exotic operations, Phase 4; broader standard-library/proposals remain outside foundation scope",
+  "archive_sha256": {
+    "6456b53-full.json.gz": "90290995b6853c0f48bff2009c87dffc4b1f3874469dcdd059349601aa06453e",
+    "6456b53-full.jsonl.gz": "698e326a23f90259d92fc526e838814129f09936f36d0b254141ab5e9123ff6a",
+    "6456b53-full-pr23-transitions.json.gz": "bd4f02f64ab6778cefb9dfbe6c11210910b06439c2472650e27ed2e2141b80dd",
+    "6456b53-full-7c0a9ce-transitions.json.gz": "9b0af7d758fc5c56e65ee7669793176dadb3a9b7bd1964f19ea57fa4316620a1",
+    "6456b53-full.log.gz": "7611c94e7960f9eb3e06f528e9d89814322f850e3211c9e7c1ef9eba64ea2989"
+  }
+}

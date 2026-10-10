@@ -138,7 +138,12 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
                 walk_stmts(e, scope, runtime_handlers);
             }
         }
-        Statement::While { body, .. } | Statement::DoWhile { body, .. } => {
+        Statement::With { body, .. }
+        | Statement::ResourceDeclaration {
+            declarations: body, ..
+        }
+        | Statement::While { body, .. }
+        | Statement::DoWhile { body, .. } => {
             walk_stmts(body, scope, runtime_handlers);
         }
         Statement::For { init, body, .. } => {
@@ -164,7 +169,13 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             }
             walk_stmts(body, scope, runtime_handlers);
         }
-        Statement::ForIn { name, body, .. } | Statement::ForOf { name, body, .. } => {
+        Statement::ForIn { binding, body, .. } | Statement::ForOf { binding, body, .. } => {
+            for name in binding.declared_names() {
+                push(scope, &name, CompletionKind::Variable, None);
+            }
+            walk_stmts(body, scope, runtime_handlers);
+        }
+        Statement::ResourceForOf { name, body, .. } => {
             push(scope, name, CompletionKind::Variable, None);
             walk_stmts(body, scope, runtime_handlers);
         }
@@ -179,7 +190,11 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
         } => {
             walk_stmts(body, scope, runtime_handlers);
             if let Some((param, block)) = catch {
-                push(scope, param, CompletionKind::Variable, None);
+                if let Some(pattern) = param {
+                    for name in crate::parser::pattern_names(pattern) {
+                        push(scope, &name, CompletionKind::Variable, None);
+                    }
+                }
                 walk_stmts(block, scope, runtime_handlers);
             }
             if let Some(f) = finally {
@@ -196,6 +211,7 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             default,
             named,
             namespace,
+            ..
         } => {
             scope.modules.push(module.clone());
             if let Some(d) = default {
@@ -218,8 +234,8 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
 /// Infer a literal shape from an initializer expression, if it is one.
 fn init_shape(e: Option<&Expr>) -> Option<InitShape> {
     match e? {
-        Expr::Array(_) => Some(InitShape::Array),
-        Expr::Object(props) => Some(InitShape::Object(object_keys(props))),
+        Expr::Array { .. } => Some(InitShape::Array),
+        Expr::Object { props, .. } => Some(InitShape::Object(object_keys(props))),
         _ => None,
     }
 }
@@ -229,12 +245,15 @@ pub fn object_keys(props: &[ObjectProp]) -> Vec<String> {
     let mut keys = Vec::new();
     for p in props {
         match p {
-            ObjectProp::Shorthand(n)
+            ObjectProp::CoverInitializedName { name: n, .. }
+            | ObjectProp::Shorthand(n)
             | ObjectProp::KeyValue(n, _)
             | ObjectProp::Method { name: n, .. }
             | ObjectProp::Getter { name: n, .. }
             | ObjectProp::Setter { name: n, .. } => keys.push(n.clone()),
-            ObjectProp::Computed(_, _) | ObjectProp::Spread(_) => {}
+            ObjectProp::Computed(_, _)
+            | ObjectProp::ComputedMethod { .. }
+            | ObjectProp::Spread(_) => {}
         }
     }
     keys

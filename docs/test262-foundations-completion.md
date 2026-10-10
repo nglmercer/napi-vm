@@ -1,0 +1,321 @@
+# Test262 foundation completion: work in progress
+
+The continuation starts at merged PR #23 (`fc4c875`). **Phases 1–3 are not
+complete, and this continuation is not ready to merge.** The completion criteria
+are semantic coverage, zero unexplained regressions, zero crashes, correct
+negative-test phases, and reproducible full-corpus evidence. A percentage does
+not establish phase completion.
+
+## Internal implementation order
+
+1. Phase 1: agents, shared-memory coordination, realm ownership, and GC roots.
+2. Phase 2: grammar contexts, contextual validation, and declaration early errors.
+3. Phase 3: global/declaration environments, classes/private elements, descriptors,
+   shared internal operations, Proxy invariants, and exotics.
+4. Phase 4: bytecode coverage through shared semantic helpers, with compiler,
+   verifier, VM, differential, and focused Test262 validation before fallback removal.
+5. Full pinned-corpus validation, regression fixes, and final documentation.
+
+Phase 1 remains incomplete. Phase 2 contextual grammar/static semantics has a
+validated milestone; Phases 3–4 remain pending. PR #23's
+realm-owned module caches, async/module ownership, parameter and constructor
+environments, private instance fields, AST fallback, execution limits, and
+capabilities disabled by default are preserved.
+
+## Phase 1 agent and shared-memory implementation
+
+The Test262 host provides real `start`, `broadcast`, `receiveBroadcast`, `report`,
+`getReport`, `sleep`, `leaving`, `shutdown`, and `monotonicNow` operations.
+Each native worker constructs an independent interpreter on its own owner
+thread. No foreign thread enters another interpreter. Native channels carry
+source, primitive IDs/reports, and owned shared data blocks. Guest callbacks,
+realm environments, SAB wrappers, and other `Rc` values never cross a thread.
+
+`start` waits for worker initialization. `broadcast` waits for retrieval by
+active agents, tolerating an agent leaving concurrently. IDs preserve Int32
+conversion or full BigInt values. Reports preserve UTF-16 code units and FIFO
+order. Worker errors propagate to the parent; they cannot silently pass a
+variant. Worker count and report queues are bounded. Shutdown cancels execution,
+unblocks native waits, closes queues, and joins every worker on all exit paths.
+
+An owned SAB data block has an `Arc` lifetime separate from each guest wrapper.
+The transferable `SharedMemory` handle contains no guest state or addon finalizer.
+`Interpreter::shared_array_buffer_from_memory` creates the imported guest wrapper
+in the receiving realm, including when that realm later escapes or is dropped.
+External addon-owned storage cannot be transferred: its lifetime belongs to its
+original host. VM accesses to owned memory share an access lock, including
+mixed-width operations, to avoid overlapping Rust atomic-width data races.
+
+Blocking and async waits use one native FIFO list indexed by shared data block
+and byte offset. Equality checking and registration hold notify's list lock,
+preventing lost wakeups. Native notifications only update native signals. The VM
+owner settles promises at checkpoints and is awakened through the existing
+native wake latch; notifications never manipulate guest promises on foreign threads. Timeouts, cancellation, and dropping a registration
+remove stale waiters. Blocking waits observe execution deadlines and cancellation.
+
+The embeddable engine defaults to `CanBlock=false`. The isolated conformance host
+explicitly permits blocking unless Test262 metadata requires `CanBlockIsFalse`.
+Agents use real-time queues; pending async completions are polled on the owner.
+Broadcast callbacks enter through the existing scheduler's callback queue.
+
+Registered callbacks are explicit host GC roots until replacement or shutdown.
+Worker GC requests run only at quiescent owner boundaries. Native waiters retain
+the data block without retaining the guest wrapper and realm. External storage
+waiters retain their wrapper for its host-managed lifetime. The existing collector
+still conservatively refuses collection over opaque suspended guest stacks.
+
+Atomics uses shared numeric/coercion helpers for omitted/NaN indices, abrupt
+coercions, ToBigInt, timeouts/counts, and `store`'s unwrapped return value. Notify
+on a valid non-shared waitable view returns zero. Methods have ordinary function
+metadata/descriptors and retain intrinsic realm ownership through the existing
+intrinsic registry.
+
+## Focused validation groups
+
+`tools/test262/groups.json` defines repeatable `--group` selections:
+
+- `agents`, `shared-memory`, `realms`, `gc-weak`
+- `async-generator-grammar`, `super`, `private-names`, `eval-globals`
+- `classes-private`, `object-reflect-proxy`, `typedarray-exotics`
+
+Selections form a union and retain every selected outcome in the denominator.
+Unknown groups, missing paths, and escaping paths are errors. Named groups do
+not classify unselected tests as passes or silently skip unsupported features.
+
+```sh
+cargo build --locked --release --no-default-features --bin napi-vm-test262
+python3 tools/test262/run.py /workspace/test262 \
+  --engine target/release/napi-vm-test262 \
+  --revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81 \
+  --jobs 4 --timeout 5 --group agents --group realms --group gc-weak \
+  --output artifacts/test262/foundations-phase1-focused.json
+python3 -m unittest discover -s tools/test262 -p 'test_*.py'
+```
+
+Every worker uses fuel 1,000,000, loop budget 100,000, call depth 128, and max jobs
+10,000. Runtime capabilities remain disabled. The runner snapshots the worker
+binary and records its SHA-256 before running variants.
+
+The supplied baseline is 41,407 / 102,956, with 284 harness errors, two timeouts,
+and zero crashes. A fresh full rerun of `fc4c875` passes 41,409 / 102,956, with
+61,261 failures, 284 harness errors, two timeouts, zero crashes, and zero skips.
+The individual rerun outcomes are retained for actual transition comparisons;
+the two-pass difference from the supplied historical measurement is not attributed
+to implementation changes.
+
+The first exploratory focused comparison covered 2,030 variants: 1,357 passes,
+673 failures, and zero harness errors, timeouts, crashes, or skips. Compared with
+the identical baseline selection it gained 254 passes and lost zero. That worker
+predates the final ownership/deadline fixes and is not final-source evidence.
+These exploratory results are superseded by the final-source evidence below.
+
+The final-source focused rerun at `1a8162a` covered the same 2,030 variants:
+1,435 passes, 595 failures, and zero harness errors, timeouts, crashes, or skips.
+The exact outcome comparison gained 332 passes and lost zero; all gains are in
+Atomics. Its worker SHA-256 is
+`7c572cffae742ab4d231bcb5acc22fd934a6a03d1a9780f28e5b473ad4ca0cdb`.
+Full outcome files and transitions are retained under `artifacts/test262/`.
+This focused result does not establish phase completion.
+
+## Full-corpus evidence for this Phase 1 commit
+
+The final pinned run and an additional PR #23 baseline run used four workers,
+five-second timeouts, and the unchanged budgets above, without competing builds.
+
+| Outcome | PR #23 baseline | Phase 1 continuation |
+| --- | ---: | ---: |
+| Pass | 41,407 | 41,742 |
+| Fail | 61,263 | 61,152 |
+| Harness error | 284 | 60 |
+| Timeout | 2 | 2 |
+| Crash | 0 | 0 |
+| Skip | 0 | 0 |
+| Total | 102,956 | 102,956 |
+
+The exact comparison gains **335 passes and loses zero**. The pass rate is
+40.5435%; this is development evidence, not foundation completion or conformance.
+The first baseline run passed 41,409 and produced two apparent losses. Both are
+variants of `language/expressions/dynamic-import/await-import-evaluation.js`:
+its fixture spins for 100 ms and can exhaust the unchanged fuel budget when the
+host executes more iterations in that interval. The first baseline ran alongside
+builds; the later idle baseline and final implementation both fail these variants
+with instruction-fuel exhaustion. Both baseline reports are retained, including
+the first comparison's two losses. No outcomes were edited or excluded.
+
+The remaining harness errors are 46 missing-`EvalError` failures and 14 staging
+Set harness parse failures. Both timeouts are variants of the existing deep
+WeakMap fixture. Non-passing outcomes are reported as 53,666 runtime, 7,440 parse,
+46 resolution, 60 harness, and two timeout outcomes. These are observed runner
+phases; complete parser/static-semantics correctness remains pending Phase 2.
+
+Required checks passed: formatting, strict all-features Clippy, workspace tests
+(728 passed, four ignored), no-default tests (156 passed), Node (73 passed), WASM
+(14 passed), and runner/tooling tests (nine passed). A real-worker checkpoint
+smoke test preserves all 14 outcomes across resume. The Atomics differential test
+compares two raw-AST/verified-bytecode fixtures with zero mismatches; full-corpus
+AST/bytecode mismatch measurement remains pending.
+
+Compressed full outcome reports, digests, configuration, checks, and remaining
+gates are versioned in
+[`tools/test262/evidence/foundations-phase1`](../tools/test262/evidence/foundations-phase1/README.md).
+The runner's durable checkpoint journal preserves completed outcomes across
+execution-server disconnects. The successful final run completed without resume.
+
+## Remaining implementation gates
+
+Phase 1 still needs completion of the realm/intrinsic/prototype audit, real async
+generator scheduling, and complete GC/finalization host observation. Primary and
+child globals now share one realm-global model. Growable shared buffers,
+resizable ordinary buffers and tracking views are implemented and have focused
+validation; remaining shared-memory exotic semantics belong to the Phase 3
+internal-operation audit. Agents being implemented does not close these gates.
+
+Phase 2 now validates async/generator/arrow boundaries, parameter restrictions,
+super/new.target contexts, lexical private-name scope, class-element early errors,
+and import/export/block/catch declaration conflicts. It also validates semicolon
+insertion boundaries and parameter/call delimiters. This is not complete Phase 2:
+see [context implementation status](test262-phase2-contexts.md) for coverage,
+validation evidence, and the remaining parser representation gaps.
+
+Phase 3 still needs one global environment/declaration-instantiation model,
+complete lexical private identities and branding for methods/accessors/static
+elements, initialization ordering, and centralized descriptor/internal operations
+for all Proxy traps and exotic receivers.
+
+Phase 4 remains pending those semantics. No AST fallback has been removed.
+The new Atomics differential tests assert verified bytecode execution and compare
+against raw AST execution through the same native operations. They do not
+establish full-corpus AST/bytecode parity.
+
+Outside the requested foundation work, Temporal and Temporal Intl algorithms
+remain unsupported: the final triage records 9,210 non-passing built-in Temporal
+variants and 4,058 Intl Temporal variants. Broader RegExp, Array, String, and
+Iterator failures also remain; these clusters mix algorithm and foundation
+failures and require individual classification. They remain in the denominator.
+
+## Phase 2 foundation validation
+
+Frozen source `313146b` passes 50,926/102,956 at the pinned revision and required
+limits: 9,519 new passes and zero losses versus PR #23, and 4,584 gains with zero
+losses versus the earlier `165dddf` Phase 2 milestone. Remaining outcomes are
+51,982 failures, 46 harness errors, two timeouts, zero crashes and zero skips.
+All 8,659 parse-negative variants pass the runner's phase/error-type checks.
+
+Phase 2 implements contextual grammar/static semantics, declaration conflicts,
+class/private early errors, Unicode and literal grammar, binding defaults, module
+export names, import options, eval contexts and lexical goals. Explicit metadata
+preserves private versus quoted public hash properties, grammar parentheses,
+legacy literals, catch/loop bindings and optional/assignment target boundaries.
+The static audit accepts 94,143/94,297 sources requiring acceptance. Its remaining
+154 rejected variants cover deferred imports, resources, decorators/auto-accessors
+and two preserved parse-depth limits; every outcome remains in the denominator.
+
+All required checks pass: 793 workspace tests (four existing ignored), 158 minimal,
+73 Node, 14 WASM, nine tooling, fmt and strict Clippy. Repository differential
+fixtures have zero observed mismatches; full-corpus differential is not measured.
+The focused group projection passes 23,054/38,822 with zero harness errors,
+timeouts, crashes and skips; the live regression selection passes 2/2.
+
+The [Phase 2 status](test262-phase2-contexts.md) links full outcomes, source/worker
+identities, checksums and reproducible commands. The broader Phase 1 realm/GC
+audit, Phase 3 global/class/private/descriptor/Proxy/exotic runtime work and Phase 4
+bytecode parity remain open. No fallback has been removed, and this PR stays draft.
+
+## Realm and buffer continuation (`f078fcb`)
+
+Primary and child global objects now share realm-global identity. Native methods,
+errors, iterators and generator prototypes retain their defining realm, and weak
+collections recognize live realm globals. Constructor post-return errors use the
+constructing caller's realm. Shared native blocks support growable SABs; ordinary
+buffers support resizing. Tracking TypedArray/DataView views and live typed-array
+iterators observe growth, shrinking, detachment and out-of-bounds transitions.
+
+The pinned agents/realms/gc-weak union passes 1,640/2,030 variants: 139 new passes,
+zero lost passes, and zero crashes, timeouts or harness errors versus the matching
+Phase 2 baseline. All required checks pass. These are focused results, not a new
+full-corpus result or phase completion. The earlier exploratory run's four losses
+and their fixes are preserved in [realm/buffer evidence](../tools/test262/evidence/foundations-realms-memory/README.md).
+
+Phase 1 still needs the remaining intrinsic/async-generator and GC suspension
+semantics audit. Phase 3 global records, private methods/accessors/static elements,
+initialization order and centralized Proxy/exotic operations remain open.
+
+## Realm regression validation (`7c0a9ce`)
+
+The full pinned corpus now passes **53,046/102,956** variants, with **11,639 new
+passes and zero lost passes** against PR #23's exact 41,407-pass baseline. The
+remaining outcomes are **49,908 failures, zero harness errors, two timeouts and
+zero crashes**; no variants were skipped. The timeouts are the two deep-WeakMap
+staging variants. Against the Phase 2 `313146b` snapshot, there are 2,120 new
+passes and zero losses.
+
+The run uses four workers, a five-second timeout, fuel 1,000,000, loop budget
+100,000, call depth 128, job budget 10,000, disabled runtime capabilities, and
+revision `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`. All required checks pass for
+`7c0a9ce`. Exact outcome reports, worker/archive digests, check logs and
+transitions are in the [realm continuation evidence](../tools/test262/evidence/foundations-realms-memory/README.md).
+The preceding full runs with 310 and 25 losses remain archived as exploratory
+results; all 335 regressed variants pass on this snapshot.
+
+The shared arguments/Proxy helpers have three new verified AST/bytecode
+differential fixtures with no observed differences, in addition to the two
+buffer-growth fixtures. Full-corpus tier mismatches are **not measured**.
+The remaining Phase 1–3 gates above and Phase 4 coverage still block completion.
+Broader standard-library algorithms, Intl/Temporal, RegExp execution,
+deferred/JSON imports, resource management, decorators/auto-accessors and the
+Error stack accessor proposal also remain outside this foundation's coverage.
+These examples do not classify every remaining failure as outside Phase 1–3.
+
+The subsequent GC/host follow-up explicitly traces completed async tasks'
+result promises and applies guest ToString before source/report transfer or
+queue locking. All four new collection/coercion/worker tests pass, as do all
+required checks: 819 workspace tests (four existing ignored), 161 minimal tests,
+73 Node tests, 14 WASM tests, formatting and strict Clippy. The frozen `bbca33c`
+worker passes 1,712/2,030 agent/realm/GC variants with no special outcomes and no
+lost passes against the matching `7c0a9ce` full-run projection. The `7c0a9ce` full
+results do not measure this follow-up; a later full run remains required before
+merge. Runner validation now rejects non-executable workers before creating
+corpus outcomes, and all ten tooling tests pass. The initial worker-permission
+driver failure is retained and explicitly excluded from conformance comparisons.
+
+## Async-generator continuation (`e193e23`)
+
+Async generators now serialize real next/return/throw requests on the VM owner
+thread using the existing generator coroutine and promise scheduler. Await
+rejections resume the body at its suspension point; return completions survive
+yielding finally blocks. Captured realms and pending request promises are traced
+by GC. Generator delegation forwards abrupt completions, and loop closing uses
+the shared guest iterator protocol rather than abandoning the coroutine.
+
+The focused agents/realms/GC/generators/async-generators union passes
+**4,192/5,186** variants: **1,084 new passes and zero lost passes** against the
+matching selection projected from the `7c0a9ce` full report. There are zero
+harness errors, timeouts, crashes, or skips. All 122 `GeneratorPrototype` variants
+pass; 90/96 `AsyncGeneratorPrototype` variants pass. The six remaining builtin
+failures concern abrupt promise-constructor access during return-value awaiting.
+
+All required checks passed for this source: formatting, strict Clippy, 840
+workspace tests (four existing ignored), 182 minimal tests, 73 Node tests, 14 WASM
+tests, and ten tooling tests. Exact reports, the explicitly labeled baseline
+projection, transitions, logs, and digests are archived with the
+[realm continuation evidence](../tools/test262/evidence/foundations-realms-memory/README.md).
+This focused result does not replace the last full-corpus measurement. Async
+iterator adaptation, suspended GC auditing, the broader Phase 3 operations, and
+full-corpus bytecode differential measurement remain completion gates.
+
+### Exploratory full run at 121d115
+
+The pinned corpus completed with four workers and the required execution limits:
+57,941 passes, 45,013 failures, two timeouts, zero crashes, zero harness errors,
+and zero skips across 102,956 variants. Against PR23 this is 16,548 new passes
+and **14 lost passes**, so this snapshot is not ready for merge. The complete
+reports and both baseline comparisons are preserved in
+`tools/test262/evidence/foundations-realms-memory/121d115-exploratory-full-*`.
+Full-corpus AST/bytecode differential results remain unmeasured.
+
+The regressions concern synchronous propagation of Promise combinator iterator
+errors, constructible Promise resolving functions, and iterator observation by
+implicit derived constructors. Follow-up regression tests cover the first two
+issues, implicit constructor forwarding, and concrete typed-array constructor metadata; these changes are newer
+than the frozen full-run worker and must be revalidated against Test262. The
+remaining foundation completion gates stay open; all 33 realm regression tests pass.

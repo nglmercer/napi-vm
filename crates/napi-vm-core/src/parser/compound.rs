@@ -33,6 +33,7 @@ impl Parser {
     /// when it is not itself the member name (`get() {}`, `static = 1`).
     fn eat_modifier(&mut self, tok: &Token) -> bool {
         if matches!(self.cur(), t if t == tok)
+            && !(matches!(tok, Token::KwGet | Token::KwSet) && matches!(self.peek(), Token::Star))
             && !matches!(
                 self.peek(),
                 Token::LParen | Token::Equal | Token::Semicolon | Token::RBrace
@@ -54,9 +55,8 @@ impl Parser {
         self.adv();
         let name_span = self.cur_span();
         let n = match (self.cur(), fallback) {
-            (Token::Identifier(_), _) => self.ident()?,
-            (_, Some(name)) => name.to_string(),
-            _ => return None,
+            (Token::LBrace | Token::KwExtends, Some(name)) => name.to_string(),
+            _ => self.ident()?,
         };
         self.record(
             &n,
@@ -75,6 +75,9 @@ impl Parser {
         let class_scope = self.push_scope(true);
         let mut b = Vec::new();
         while self.until(&Token::RBrace) {
+            if self.eat(&Token::Semicolon) {
+                continue;
+            }
             if self.eof() {
                 break;
             }
@@ -84,35 +87,44 @@ impl Parser {
             // `static { … }`: a static initialization block, not a member.
             if st && matches!(self.cur(), Token::LBrace) {
                 self.adv();
-                let body = self.block_body();
+                let body = self.with_grammar(false, false, Self::block_body);
                 self.expect(&Token::RBrace);
                 b.push(ClassMember::StaticBlock { body });
                 continue;
             }
-            let is_async = self.eat_modifier(&Token::KwAsync);
+            let is_async = !self.line_break_after_current() && self.eat_modifier(&Token::KwAsync);
             let is_generator = self.eat(&Token::Star);
             let is_getter = self.eat_modifier(&Token::KwGet);
             let is_setter = self.eat_modifier(&Token::KwSet);
             let member_span = self.cur_span();
+            if matches!(self.cur(), Token::LegacyNumber(_) | Token::LegacyString(_)) {
+                self.record_error("legacy literal class member name".into());
+            }
             // `[expr]` evaluates when the class is defined; string and
             // numeric spellings name the same property as their bare form.
+            let private = matches!(self.cur(), Token::PrivateIdentifier(_));
             let mn = if self.eat(&Token::LBracket) {
-                let expr = self.assign()?;
+                let expr = self.with_in(true, Self::assign)?;
                 self.expect(&Token::RBracket);
                 MemberName::Computed(expr)
             } else {
                 let name = match self.cur() {
-                    Token::Identifier(x) => {
+                    Token::Identifier(x) | Token::EscapedIdentifier(x) => {
                         let v = x.clone();
                         self.adv();
                         v
                     }
-                    Token::String(s) | Token::EscapedString(s) => {
+                    Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
                         let v = s.to_key();
                         self.adv();
                         v
                     }
-                    Token::Number(n) => {
+                    Token::BigInt(digits) => {
+                        let name = crate::bigint::BigInt::parse(digits).ok()?.to_string();
+                        self.adv();
+                        name
+                    }
+                    Token::Number(n) | Token::LegacyNumber(n) => {
                         let v = crate::format::number_string(*n);
                         self.adv();
                         v
@@ -141,22 +153,20 @@ impl Parser {
                     // name, which is what keeps it out of reach of ordinary
                     // property access — there is no way to write the name from
                     // outside the class body.
-                    Token::Hash => {
+                    Token::PrivateIdentifier(name) => {
+                        let name = format!("#{name}");
                         self.adv();
-                        match self.cur() {
-                            Token::Identifier(x) => {
-                                let v = format!("#{}", x);
-                                self.adv();
-                                v
-                            }
-                            _ => return None,
-                        }
+                        name
                     }
                     _ => self.ident_or_keyword()?,
                 };
-                MemberName::Static(name)
+                if private {
+                    MemberName::Private(name)
+                } else {
+                    MemberName::Static(name)
+                }
             };
-            if let MemberName::Static(name) = &mn {
+            if let MemberName::Static(name) | MemberName::Private(name) = &mn {
                 self.record(
                     name,
                     member_span,
@@ -172,11 +182,11 @@ impl Parser {
             }
             if self.eat(&Token::LParen) {
                 let method_scope = self.push_scope(true);
-                let (p, defaults) = self.params();
-                self.expect(&Token::RParen);
-                self.eat(&Token::LBrace);
-                let bd = self.block_body();
-                self.expect(&Token::RBrace);
+                let (p, defaults, bd) = self.callable_parts(is_async, is_generator);
+                self.check_accessor_parameters(&p, &defaults, is_getter, is_setter);
+                if (is_getter || is_setter) && (is_async || is_generator) {
+                    self.record_error("accessor cannot be async or a generator".into());
+                }
                 self.pop_scope(method_scope);
                 self.check_parameters(&p, &defaults, &bd, true);
                 let body = Self::function_body(&p, defaults, bd);
@@ -205,8 +215,11 @@ impl Parser {
                     });
                 }
             } else {
+                if is_async || is_generator || is_getter || is_setter {
+                    self.record_error("method modifier on a field".into());
+                }
                 let i = if self.eat(&Token::Equal) {
-                    Some(self.assign()?)
+                    Some(self.with_grammar(false, false, Self::assign)?)
                 } else {
                     None
                 };
@@ -236,7 +249,10 @@ impl Parser {
             let decl = match self.cur() {
                 Token::KwClass => self.class_decl_named(Some(DEFAULT_BINDING)),
                 Token::KwFunction => self.fn_decl_named(false, Some(DEFAULT_BINDING)),
-                Token::KwAsync if matches!(self.peek(), Token::KwFunction) => {
+                Token::KwAsync
+                    if matches!(self.peek(), Token::KwFunction)
+                        && !self.line_break_after_current() =>
+                {
                     self.adv();
                     self.fn_decl_named(true, Some(DEFAULT_BINDING))
                 }
@@ -252,13 +268,13 @@ impl Parser {
                     Statement::ExportDefault(Box::new(Expr::Identifier(name))),
                 ]));
             }
-            let e = self.expr()?;
+            let e = self.assign()?;
             self.semi();
             Some(Statement::ExportDefault(Box::new(e)))
         } else if self.eat(&Token::Star) {
             // `export * from 'm'` / `export * as ns from 'm'`.
             let alias = if self.eat(&Token::KwAs) {
-                Some(self.ident_or_keyword()?)
+                Some(self.import_specifier_name()?)
             } else {
                 None
             };
@@ -273,27 +289,23 @@ impl Parser {
                 }
                 _ => return None,
             };
+            let attributes = self.import_attributes()?;
             self.semi();
             Some(Statement::ExportAll {
+                attributes,
                 source: self.module_specifier(source)?,
                 alias,
             })
         } else if self.eat(&Token::LBrace) {
             let mut sp = Vec::new();
+            let mut string_local = false;
             while self.until(&Token::RBrace) {
+                string_local |= matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
                 // `export { default as x }` names the default export, so the
                 // keyword is a valid specifier here.
-                let l = if self.eat(&Token::KwDefault) {
-                    "default".to_string()
-                } else {
-                    self.ident()?
-                };
+                let l = self.import_specifier_name()?;
                 let e = if self.eat(&Token::KwAs) {
-                    if self.eat(&Token::KwDefault) {
-                        "default".to_string()
-                    } else {
-                        self.ident_or_keyword()?
-                    }
+                    self.import_specifier_name()?
                 } else {
                     l.clone()
                 };
@@ -315,8 +327,17 @@ impl Parser {
             } else {
                 None
             };
+            if s.is_none() && string_local {
+                self.record_error("string export names require a source module".into());
+            }
+            let attributes = if s.is_some() {
+                self.import_attributes()?
+            } else {
+                Vec::new()
+            };
             self.semi();
             Some(Statement::ExportNamed {
+                attributes,
                 specifiers: sp,
                 source: s.and_then(|value| self.module_specifier(value)),
             })
@@ -351,7 +372,9 @@ impl Parser {
                 let n = decl_name(&d);
                 (d, n)
             }
-            Token::KwAsync if matches!(self.peek(), Token::KwFunction) => {
+            Token::KwAsync
+                if matches!(self.peek(), Token::KwFunction) && !self.line_break_after_current() =>
+            {
                 self.adv();
                 let d = self.fn_decl(true)?;
                 let n = decl_name(&d);
@@ -364,6 +387,7 @@ impl Parser {
             }
             _ => {
                 return Some(Statement::ExportNamed {
+                    attributes: Vec::new(),
                     specifiers: vec![],
                     source: None,
                 });
@@ -375,6 +399,7 @@ impl Parser {
         Some(Statement::Declarations(vec![
             decl,
             Statement::ExportNamed {
+                attributes: Vec::new(),
                 specifiers,
                 source: None,
             },
@@ -384,15 +409,17 @@ impl Parser {
     /// A name inside an `import { … }` list. `default` is a keyword but a
     /// legal specifier: `import { default as x } from 'm'`.
     fn import_specifier_name(&mut self) -> Option<String> {
-        if self.eat(&Token::KwDefault) {
-            return Some("default".to_string());
+        if let Token::String(value) | Token::EscapedString(value) = self.cur() {
+            let value = value.clone();
+            self.adv();
+            return self.module_specifier(value);
         }
         self.ident_or_keyword()
     }
 
     pub(super) fn import(&mut self) -> Option<Statement> {
         self.adv();
-        let def = if let Token::Identifier(n) = self.cur() {
+        let def = if let Token::Identifier(n) | Token::EscapedIdentifier(n) = self.cur() {
             let nm = n.clone();
             self.adv();
             if self.eat(&Token::Comma) {
@@ -413,10 +440,22 @@ impl Parser {
                     self.expect(&Token::RBrace);
                     let m = self.from()?;
                     Some(Statement::Import {
+                        attributes: Vec::new(),
                         module: m,
                         default: Some(nm),
                         named: nd,
                         namespace: None,
+                    })
+                } else if self.eat(&Token::Star) {
+                    self.expect(&Token::KwAs);
+                    let ns = self.ident()?;
+                    let m = self.from()?;
+                    Some(Statement::Import {
+                        attributes: Vec::new(),
+                        module: m,
+                        default: Some(nm),
+                        named: vec![],
+                        namespace: Some(ns),
                     })
                 } else {
                     None
@@ -424,6 +463,7 @@ impl Parser {
             } else if self.eat(&Token::KwFrom) {
                 let m = self.from()?;
                 Some(Statement::Import {
+                    attributes: Vec::new(),
                     module: m,
                     default: Some(nm),
                     named: vec![],
@@ -437,6 +477,7 @@ impl Parser {
             let ns = self.ident()?;
             let m = self.from()?;
             Some(Statement::Import {
+                attributes: Vec::new(),
                 module: m,
                 default: None,
                 named: vec![],
@@ -445,10 +486,15 @@ impl Parser {
         } else if self.eat(&Token::LBrace) {
             let mut nd = Vec::new();
             while self.until(&Token::RBrace) {
+                let string_import =
+                    matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
                 let imported = self.import_specifier_name()?;
                 let local = if self.eat(&Token::KwAs) {
                     self.ident()?
                 } else {
+                    if string_import {
+                        self.record_error("string import names require a local binding".into());
+                    }
                     imported.clone()
                 };
                 nd.push((imported, local));
@@ -459,6 +505,7 @@ impl Parser {
             self.expect(&Token::RBrace);
             let m = self.from()?;
             Some(Statement::Import {
+                attributes: Vec::new(),
                 module: m,
                 default: None,
                 named: nd,
@@ -467,8 +514,8 @@ impl Parser {
         } else if let Token::String(s) | Token::EscapedString(s) = self.cur() {
             let m = self.module_specifier(s.clone())?;
             self.adv();
-            self.semi();
             Some(Statement::Import {
+                attributes: Vec::new(),
                 module: m,
                 default: None,
                 named: vec![],
@@ -477,8 +524,56 @@ impl Parser {
         } else {
             None
         };
+        let attributes = self.import_attributes()?;
+        let def = def.map(|mut declaration| {
+            if let Statement::Import {
+                attributes: stored, ..
+            } = &mut declaration
+            {
+                *stored = attributes;
+            }
+            declaration
+        });
         self.semi();
         def
+    }
+
+    fn import_attributes(&mut self) -> Option<Vec<(String, crate::JsString)>> {
+        let mut attributes = Vec::new();
+        if !matches!(self.cur(), Token::KwWith) {
+            return Some(attributes);
+        }
+        self.adv();
+        self.expect(&Token::LBrace);
+        while self.until(&Token::RBrace) {
+            let key = match self.cur().clone() {
+                Token::String(value) | Token::EscapedString(value) => {
+                    self.adv();
+                    value.to_key()
+                }
+                _ => self.ident_or_keyword()?,
+            };
+            self.expect(&Token::Colon);
+            let value = match self.cur().clone() {
+                Token::String(value) | Token::EscapedString(value) => {
+                    self.adv();
+                    value
+                }
+                _ => {
+                    self.record_error("import attribute values must be strings".into());
+                    return None;
+                }
+            };
+            if attributes.iter().any(|(name, _)| name == &key) {
+                self.record_error("duplicate import attribute".into());
+            }
+            attributes.push((key, value));
+            if !matches!(self.cur(), Token::RBrace) {
+                self.expect(&Token::Comma);
+            }
+        }
+        self.expect(&Token::RBrace);
+        Some(attributes)
     }
 
     // Module loader identifiers are a UTF-8 host contract. Reject rather than
@@ -496,7 +591,7 @@ impl Parser {
     fn from(&mut self) -> Option<String> {
         self.eat(&Token::KwFrom);
         match self.cur() {
-            Token::String(s) | Token::EscapedString(s) => {
+            Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
                 let v = self.module_specifier(s.clone())?;
                 self.adv();
                 Some(v)
@@ -511,7 +606,7 @@ impl Parser {
     /// which is what makes rename safe.
     pub(crate) fn block_body(&mut self) -> Vec<Statement> {
         let outer = self.push_scope(false);
-        let body = self.block_body_inner();
+        let body = self.with_statement_list(Self::block_body_inner);
         self.pop_scope(outer);
         body
     }
@@ -525,6 +620,7 @@ impl Parser {
             if let Some(st) = self.stmt() {
                 s.push(st);
             } else {
+                self.record_error("invalid statement in block".into());
                 break;
             }
         }

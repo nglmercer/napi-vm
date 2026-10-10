@@ -4,6 +4,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import hashlib
+import os
 import shutil
 from tempfile import TemporaryDirectory
 import re
@@ -64,6 +65,7 @@ def run_variant(engine, root, test, source, data, mode, strict, timeout):
     request = {"source": ('"use strict";\n' if strict else "") + source,
                "harness": "\n".join(safe_harness(root, name) for name in harness),
                "module": mode == "module", "asynchronous": "async" in flags,
+               "can_block": "CanBlockIsFalse" not in flags,
                "modules": modules, "id": test.relative_to(root / "test").as_posix(),
                "corpus_root": str(root / "test")}
     try:
@@ -81,21 +83,89 @@ def run_variant(engine, root, test, source, data, mode, strict, timeout):
     return {"status": outcome(report, data), "engine": report}
 
 
+def validate_engine(engine):
+    """Reject driver setup errors before creating corpus outcomes."""
+    if not engine.is_file():
+        raise ValueError(f"engine is not a file: {engine}")
+    if not os.access(engine, os.X_OK):
+        raise ValueError(f"engine is not executable: {engine}")
+
+
+def selected_files(root, paths, groups, catalog):
+    """Union explicit focused selections; errors never become silent omissions."""
+    tests = set()
+    selections = [(path, None) for path in paths]
+    for group in groups:
+        if group not in catalog:
+            raise ValueError(f"unknown focused group: {group}")
+        entry = catalog[group]
+        pattern = re.compile(entry["pattern"]) if "pattern" in entry else None
+        selections.extend((path, pattern) for path in entry["paths"])
+    if not selections:
+        selections = [(".", None)]
+    for selection, pattern in selections:
+        selected = (root / "test" / selection).resolve()
+        if not selected.is_relative_to(root / "test"):
+            raise ValueError("selection escapes test directory")
+        if not selected.exists():
+            raise ValueError(f"selection does not exist: {selection}")
+        files = [selected] if selected.is_file() else selected.rglob("*.js")
+        for test in files:
+            if pattern is None or pattern.search(test.relative_to(root / "test").as_posix()):
+                tests.add(test)
+    return tests
+
+
+def resume_checkpoint(path, configuration, names):
+    """Restore a verified ordered prefix; an interrupted final write is rerun."""
+    contents = path.read_bytes()
+    end = contents.rfind(b'\n') + 1
+    lines = contents[:end].splitlines()
+    if not lines or json.loads(lines[0]) != configuration:
+        raise ValueError('checkpoint configuration or worker digest mismatch')
+    results = []
+    for index, line in enumerate(lines[1:]):
+        record = json.loads(line)
+        if index >= len(names) or record['test'] != names[index]:
+            raise ValueError('checkpoint is not an ordered selection prefix')
+        rows = record['rows']
+        if not rows or len({row['variant'] for row in rows}) != len(rows):
+            raise ValueError('checkpoint contains empty or duplicate variants')
+        for row in rows:
+            if row['test'] != names[index] or row['status'] not in (
+                    'pass', 'fail', 'skip', 'timeout', 'crash', 'harness_error'):
+                raise ValueError('invalid checkpoint outcome')
+        results.extend(rows)
+    if end != len(contents):
+        with path.open('r+b') as checkpoint:
+            checkpoint.truncate(end)
+    return len(lines) - 1, results
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("corpus", type=Path)
     parser.add_argument("--engine", required=True, type=Path)
     parser.add_argument("--revision", required=True, help="exact checked-out Test262 commit SHA")
     parser.add_argument("--path", action="append", default=[], help="test-relative subset path (repeatable)")
+    parser.add_argument("--group", action="append", default=[], help="named focused group from groups.json (repeatable)")
     parser.add_argument("--skip-feature", action="append", default=[])
     parser.add_argument("--jobs", type=int, default=1, help="isolated worker processes in parallel")
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--output", type=Path, default=Path("test262-results.json"))
+    parser.add_argument("--checkpoint", type=Path, help="durable per-file outcome journal")
+    parser.add_argument("--resume", action="store_true", help="resume a matching checkpoint")
     args = parser.parse_args()
     if args.jobs <= 0:
         parser.error("jobs must be positive")
     if args.timeout <= 0:
         parser.error("timeout must be positive")
+    if args.resume and not args.checkpoint:
+        parser.error("--resume requires --checkpoint")
+    try:
+        validate_engine(args.engine)
+    except ValueError as error:
+        parser.error(str(error))
     root = args.corpus.resolve()
     revision = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
     if revision != args.revision:
@@ -103,13 +173,12 @@ def main():
     dirty = subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=all"], text=True)
     if dirty:
         parser.error("corpus has modified tracked files")
-    selections = args.path or ["."]
-    tests = set()
-    for selection in selections:
-        selected = (root / "test" / selection).resolve()
-        if not selected.is_relative_to(root / "test"):
-            parser.error("selection escapes test directory")
-        tests.update([selected] if selected.is_file() else selected.rglob("*.js"))
+    catalog = json.loads(Path(__file__).with_name("groups.json").read_text())
+    try:
+        tests = selected_files(root, args.path, args.group, catalog)
+    except (ValueError, re.error) as error:
+        parser.error(str(error))
+    selections = args.path or (["."] if not args.group else [])
     def run_test(test):
         rows = []
         name = test.relative_to(root / "test").as_posix()
@@ -132,20 +201,53 @@ def main():
         engine = Path(temporary) / "worker"
         shutil.copy2(args.engine.resolve(), engine)
         engine_sha256 = hashlib.sha256(engine.read_bytes()).hexdigest()
-        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            for index, rows in enumerate(pool.map(run_test, selected_tests), 1):
-                results.extend(rows)
-                if index % 1000 == 0:
-                    print(f"Test262: {index}/{len(selected_tests)} files", flush=True)
+        names = [test.relative_to(root / 'test').as_posix() for test in selected_tests]
+        configuration = {'revision': revision, 'engine_sha256': engine_sha256,
+                         'worker_jobs': args.jobs, 'timeout_seconds': args.timeout,
+                         'skip_features': args.skip_feature, 'selection': selections,
+                         'groups': args.group,
+                         'selection_sha256': hashlib.sha256(json.dumps(names).encode()).hexdigest()}
+        resumed_files = 0
+        if args.resume:
+            try:
+                resumed_files, results = resume_checkpoint(args.checkpoint, configuration, names)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                parser.error(str(error))
+            print(f'Test262: restored {resumed_files}/{len(selected_tests)} files', flush=True)
+        checkpoint = None
+        if args.checkpoint:
+            args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
+            checkpoint = args.checkpoint.open('a' if args.resume else 'w', encoding='utf-8')
+            if not args.resume:
+                checkpoint.write(json.dumps(configuration) + '\n')
+                checkpoint.flush()
+                os.fsync(checkpoint.fileno())
+        try:
+            with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+                for index, rows in enumerate(pool.map(run_test, selected_tests[resumed_files:]), resumed_files + 1):
+                    results.extend(rows)
+                    if checkpoint:
+                        checkpoint.write(json.dumps({'test': names[index - 1], 'rows': rows}) + '\n')
+                        checkpoint.flush()
+                    if index % 1000 == 0:
+                        if checkpoint:
+                            os.fsync(checkpoint.fileno())
+                        print(f"Test262: {index}/{len(selected_tests)} files", flush=True)
+        finally:
+            if checkpoint:
+                checkpoint.flush()
+                os.fsync(checkpoint.fileno())
+                checkpoint.close()
     counts = {status: sum(r["status"] == status for r in results)
               for status in ("pass", "fail", "skip", "timeout", "crash", "harness_error")}
     report = {"domain": "ECMAScript", "suite": "Test262", "revision": revision,
-              "selection": selections, "engine_sha256": engine_sha256, "skip_features": args.skip_feature,
+              "selection": selections, "groups": args.group, "engine_sha256": engine_sha256, "skip_features": args.skip_feature,
               "denominator": "all selected variants, including skips and errors",
               "worker_jobs": args.jobs, "timeout_seconds": args.timeout,
+              "resumed_files": resumed_files,
               "total": len(results), "counts": counts,
               "pass_percentage": 100 * counts["pass"] / len(results) if results else None,
-              "limitations": ["Agents are not implemented; GC requests run at quiescent host boundaries"],
+              "limitations": ["Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"],
               "results": results}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in report.items() if key != "results"}, indent=2))

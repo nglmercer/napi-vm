@@ -1,0 +1,48 @@
+{
+  "source_commit": "6456b53182ab52f866ed8656b57d3576056f34da",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "a3b96f79678538a9a67bbae3d848d75149d9fd3d6fda4ab5a1f404b0945e17df",
+  "classification": "Expanded canonical-index and Array-length focused gate passed; full-corpus and remaining Phase 1 dependencies pending",
+  "total": 8845,
+  "counts": {
+    "pass": 8122,
+    "fail": 723,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 1946,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 891,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Realm-global ObjectRecord/DeclarativeRecord, complete private elements/branding, typed accessor descriptors and remaining Proxy/exotic operations, full AST/bytecode measurement",
+  "archive_sha256": {
+    "6456b53-release-build.log.gz": "cb6096f2f91ac44484c0c5b04aa4af52bf9a8f0d42983c3c23f38f9613c1b1e0",
+    "6456b53-tooling-tests.log.gz": "01cb57122973eb7469ce62cb0fb8344c18471a98f2b2bad7f7c39134567ad8b7",
+    "6456b53-wasm-tests.log.gz": "f056fdde7210448f484b71418225f708021731792054f37f8c702c9ba2f898ed",
+    "6456b53-node-tests.log.gz": "1dbee6ccba5dad30f3bcf9f47b2eafa64ff93b99d73c9620186ce21f1d610af3",
+    "6456b53-native-build.log.gz": "d7206446d95a0737ce26122c13c3230cd7a95fff5c582d9d7f54647e013156a5",
+    "6456b53-minimal-tests.log.gz": "b18162e051ec52dcc5687119a44a4faa749c556df2a6aa157f67c3d9d8725d2b",
+    "6456b53-allfeatures-tests.log.gz": "868e6af81b7119f82859267ce1485c7fc16030eeace97f53543eba855184a514",
+    "6456b53-clippy.log.gz": "5563ec2a729a0ac8a820a53f6011d97345ee39cea794c46639b5642fa118c498",
+    "6456b53-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "6456b53-focused.json.gz": "134b4a09ad8d06396b85a73392e2be070b2051686d258be66a7cff826f8d2af1",
+    "6456b53-focused.jsonl.gz": "030e3ced6c7b5b6f30f67e4dc04511a682b40bbf10328b058bdb1003c8d515ab",
+    "6456b53-focused-transitions.json.gz": "54b9e288b18e70780d2676b92c1b285bcfddd45981df799844ad458ddab0c78a",
+    "6456b53-focused-7c0a9ce-projection.json.gz": "3db82f9db3d6f880d0729a86b8ef45dfeb1c0a805f7c1519861ddb252a3171b0"
+  }
+}

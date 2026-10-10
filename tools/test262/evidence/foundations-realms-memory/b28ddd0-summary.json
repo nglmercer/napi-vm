@@ -1,0 +1,54 @@
+{
+  "source_commit": "b28ddd0ebadd47f14437a74ca172595badc210eb",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "b02073c11eee38cbe361cf52cf95ef444790095d9ab3388acbfdd4251e9942b8",
+  "classification": "Validated realm-global object/declarative records, lexical iteration scopes, and prototype-free internal descriptors; 47 intermediate focused losses recovered",
+  "total": 14662,
+  "counts": {
+    "pass": 12978,
+    "fail": 1684,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 2290,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 916,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 15, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Full b28ddd0 corpus run is in progress. Private elements, descriptor storage, and remaining Proxy/exotic ownership dependencies are still open; full AST/bytecode mismatch count is not measured.",
+  "archive_sha256": {
+    "b28ddd0-release-build.log.gz": "823cc7e945bcabb8c574dd5dc854251f62a046377c4e8b0a3fbaabc5e3fc127d",
+    "b28ddd0-tooling-tests.log.gz": "b0ea0d9ca0609a6b01fa0f7a48f1dc72fe7dd48fb43a25cda63836e7c27d485a",
+    "b28ddd0-wasm-tests.log.gz": "652122eb9c5a36154336acf23e5f39d5b6e14f717d19df5ef3c4174f0a094b9f",
+    "b28ddd0-node-tests.log.gz": "4cfbdd76413ac5fc01e6d3fd053d5fae977a6bfcf9d63bcbcdec646097733b4d",
+    "b28ddd0-native-build.log.gz": "1f11918c43c01b28c99b75cf06063198b1189bb42f9871296f0f7c767caf78ab",
+    "b28ddd0-minimal-tests.log.gz": "2cee5b7229fbfc246431ef715e662766bd7fb43a478416440a1482b25afa8500",
+    "b28ddd0-allfeatures-tests.log.gz": "d6eb773a4d1fd15d3a3c6354625a9c5baea4993c611d5d79da63245e3ba5cc80",
+    "b28ddd0-clippy.log.gz": "478ebac0d45d6c2008e1596ea6ef641e20af0ed0f37ef18d831fd7c949cd667e",
+    "b28ddd0-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "b28ddd0-focused.json.gz": "615347357540c5c9a0273006d9efae1595c3818e27046f1cf4d4ebabc094fd38",
+    "b28ddd0-focused.jsonl.gz": "f31178ab7c3fc1077cfa5e9fa7cd7d26c81edb8f629a2ebe26f01987bfa3e0d5",
+    "b28ddd0-focused-transitions.json.gz": "e9fd8cf6f65f7b75433baa5014fca945c4f97605c68347bee437a57ee108fac8",
+    "b28ddd0-focused-7c0a9ce-projection.json.gz": "062340eb66da03b527a41f3296a907e0febf683a8fd73ce26309f6de5d1c681d",
+    "b28ddd0-focused-6456b53-projection.json.gz": "b991fa747be3e5e63f43130bb38963282df8a450c3a3338393d8b7ba2927488e",
+    "b28ddd0-focused-6456b53-transitions.json.gz": "14fd6652e4f33467cdd838ca59b9986005eeeef82e517c0711a117a7da963c7d"
+  },
+  "recent_baseline": "Matching projection from independent 6456b53 full report",
+  "recent_new_passes": 279,
+  "recent_lost_passes": 0,
+  "recovered_intermediate_losses": 47
+}

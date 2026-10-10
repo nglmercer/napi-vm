@@ -1,0 +1,37 @@
+{
+  "source": "63f16b6",
+  "baseline": "09498f5 identical iteration-bindings selection",
+  "total": 4837,
+  "pass": 2240,
+  "fail": 2597,
+  "new_passes": 450,
+  "lost_passes": 0,
+  "harness_errors": 0,
+  "timeouts": 0,
+  "crashes": 0,
+  "grammar_tests_passed": 25,
+  "required_checks": "passed at 5eb88fe; rerun required for subsequent repairs",
+  "full_corpus": {
+    "pass": 46320,
+    "fail": 56588,
+    "harness_error": 46,
+    "timeout": 2,
+    "crash": 0,
+    "skip": 0,
+    "total": 102956,
+    "new_passes_vs_pr23": 4916,
+    "lost_passes_vs_pr23": 3,
+    "new_passes_vs_754ed80": 864,
+    "lost_passes_vs_754ed80": 3,
+    "classification": "exploratory; catch/eval and var-pattern binding losses require repairs"
+  },
+  "engine_sha256": "9b7a925db8a8549597a44781da2e5331de44f742b588e79573aaf3ad3c1a8109",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "sha256": {
+    "63f16b6-focused-transitions.json.gz": "b6c6ee24b80d3f22153837476699806e365e398410de5f99d36639414fb144ad",
+    "63f16b6-full.json.gz": "77c4c01a8ff3ee6b62e3ecb4f6ec2096abb1f2ffd3f4440b28f80406ac605df7",
+    "63f16b6-focused.json.gz": "f26c305531eba46b70db8a4231e7e095cbdbad06fdaa82b4e2911b936fd69b71",
+    "63f16b6-combined-transitions.json.gz": "e8bdc9ddaa77acf614c60406d1427ec5b8be767faddcba0655e07ea24a765807",
+    "63f16b6-full-transitions.json.gz": "bcd4edc47a2d0dbd3e32348ed1a3260f9c58cdea8b74296d6e61abc2b3769983"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "source_commit": "ffb6e8c4c35e5bf14b3756437fdf2cff35dbebe1",
+  "classification": "Realm-owned RegExp state; full corpus blocked by focused identifier timeout",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 949,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Complete realm/internal-operation dependencies, class computed Symbol/key conversion, dynamic home-object super lookup, private-write bytecode fallback and complete corpus evidence",
+  "archive_sha256": {
+    "ffb6e8c-tooling-tests.log.gz": "c1271afb84ed196e9ee8db069b5f3fcf64ac74fac6c5d7f39944ccf1cdc07a00",
+    "ffb6e8c-wasm-tests.log.gz": "09c63dc6207cacb5d40147774955e13123171e69855acbc3af20e6bfb09efaa8",
+    "ffb6e8c-node-tests.log.gz": "f9a533211bf5aaf52c71221f71226fe6fbcf24125fe20c2ee29c676d761ed865",
+    "ffb6e8c-native-build.log.gz": "cf21088c4e0538ec83108394de7ad900b1bbfffeef4ae0e1d43b8adb8e728c42",
+    "ffb6e8c-minimal-tests.log.gz": "50af6b8d9cbcd6375ed503a34c8d44915ef90878284690d5022ea2fad33292ef",
+    "ffb6e8c-allfeatures-tests.log.gz": "0419c66a1922cae861c0c660faa00a65db2ffcd3c5961a5ad8e785d1e1bf2e35",
+    "ffb6e8c-clippy.log.gz": "b4d0dd2480a93cb38a51338464aa824271fab26b1c6e0a57d39f859bd4186a91",
+    "ffb6e8c-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "ffb6e8c-release-build.log.gz": "6b2dd1f96cbc1788167727fc6348190c5278c853f1b79dc0e786c99cb2df3edb",
+    "ffb6e8c-focused-transitions.json.gz": "3b70268b9eec8167d5e5082a2718d5e0f21c1f91604ef965178679d2efdafcd0",
+    "ffb6e8c-focused.json.gz": "859a7379a27a5f313b331e9754c78ae3da732c79156c1f7fea2a97f10f6d9e32",
+    "ffb6e8c-focused-7c0a9ce-projection.json.gz": "11c28f35d1f2df70a7795de67239b7804ff97935ae2cead514236c18eb602c94",
+    "ffb6e8c-focused-5868d51-projection.json.gz": "7506ed95fa35f20fca3a458fe951eaf8bad2b95815ca4d90ce2da0bd0a4cff6b",
+    "ffb6e8c-focused.jsonl.gz": "189c6055056c057d3f5a2ac3c8922d1b6bb60ec96a092020246ff740f0badd3b",
+    "ffb6e8c-focused-5868d51-transitions.json.gz": "f804903764b414f1404a04676ed97fd6ff016035814a71fc7a1b4506659676a3",
+    "5868d51-identifiers-repeat-3.json.gz": "a3f5b5f3aa4c284983dc192efc8dc12537f17b27c1e092072ae09bb73f9f3271",
+    "ffb6e8c-identifiers-repeat-3.json.gz": "0020208acccda82b6ffba6ae8125069a0d4aae148090468cd3a6cf2d4b34a956",
+    "5868d51-identifiers-repeat-1.json.gz": "a3f5b5f3aa4c284983dc192efc8dc12537f17b27c1e092072ae09bb73f9f3271",
+    "ffb6e8c-identifiers-repeat-1.json.gz": "0020208acccda82b6ffba6ae8125069a0d4aae148090468cd3a6cf2d4b34a956",
+    "5868d51-identifiers-repeat-2.json.gz": "a3f5b5f3aa4c284983dc192efc8dc12537f17b27c1e092072ae09bb73f9f3271",
+    "ffb6e8c-identifiers-repeat-2.json.gz": "0020208acccda82b6ffba6ae8125069a0d4aae148090468cd3a6cf2d4b34a956"
+  },
+  "worker_sha256": "70733a16f06cb0f530166e5c3f788b54ca7cbe93e46b30fe88e4fced1a4bbd91",
+  "focused": {
+    "total": 37581,
+    "current_counts": {
+      "pass": 29052,
+      "fail": 8528,
+      "skip": 0,
+      "timeout": 1,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 48,
+    "lost_passes": 1,
+    "baseline": "Matching projection from independent 5868d51 full report"
+  },
+  "identifier_repeats": "Both frozen workers passed all four variants in all three matched reruns at unchanged workers/limits; dictionary shape growth follow-up requires its own validation"
+}

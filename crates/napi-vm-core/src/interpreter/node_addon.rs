@@ -1060,7 +1060,7 @@ impl NodeAddonSidecar {
             ));
         }
         let handler = Value::object(traps);
-        let proxy_data = Rc::new(crate::value::ProxyData { target, handler });
+        let proxy_data = Rc::new(crate::value::ProxyData::new(target, handler));
         let proxy_id = Rc::as_ptr(&proxy_data) as usize;
         let proxy = Value::Proxy(proxy_data);
         state.proxy_ids.insert(proxy_id, object_id);

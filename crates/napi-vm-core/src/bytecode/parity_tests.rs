@@ -405,7 +405,7 @@ fn optional_chaining() {
 
 #[test]
 fn spreads() {
-    // Call spread: arrays splice, anything else is one argument.
+    // Call spread follows the iterator protocol, including strings and errors.
     check(
         "function f(a, b, c){ return a + b + c; } f(...[1, 2], 3)",
         true,
@@ -415,7 +415,19 @@ fn spreads() {
     check("function f(a){ return a; } f(...'ab')", true);
     check("function f(a){ return typeof a; } f(...5)", true);
     check("let o = {m(a, b){ return a * b; }}; o.m(...[6, 7])", true);
-    // Array spread: arrays splice, strings per character, else iterables.
+    check(
+        "let a=[1,2]; a[Symbol.iterator]=function*(){yield 42;}; function f(x){return x;} f(...a)",
+        true,
+    );
+    check(
+        "let a=[1,2]; a[Symbol.iterator]=function*(){yield 42;}; [...a].join(',')",
+        true,
+    );
+    check(
+        "let n=0;let o={};o[Symbol.iterator]=function(){return {next(){return ++n===2?{done:true}:{value:42};}}};function f(x){return x;}f(...o)",
+        true,
+    );
+    // Array spread follows the same iterator protocol.
     check("let a = [...[1, 2], 3]; a.join(',')", true);
     check("let a = [...'ab']; a.join(',')", true);
     check("let a = [0, ...[1, 2], ...[3]]; a.join(',')", true);
@@ -500,7 +512,7 @@ fn classes() {
     // Errors agree across tiers.
     check("class C { m(){ return super.m(); } } new C().m()", true);
     check("class C extends null {} 1", true);
-    check("class C { constructor(){ super(); } } new C()", true);
+    assert!(parse_cached("class C { constructor(){ super(); } } new C()").is_err());
 }
 
 #[test]
@@ -672,10 +684,10 @@ fn declined_units_stay_on_ast() {
         "function o(){ function i(){ return 1; } return i(); } o()",
         true,
     );
-    // A head in an unscoped block nested in a pushed one still declines.
+    // Lexical iteration heads box independently of surrounding block scopes.
     check(
         "function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; } g({})",
-        false,
+        true,
     );
 }
 
@@ -1057,7 +1069,7 @@ fn for_in_loops() {
         "let o = {a: 1, b: 2}; let s = 0; for (let k in o) { s += o[k]; } s",
         true,
     );
-    // Heads assign, never shadow: top level updates the global binding.
+    // Lexical heads shadow outer bindings and restore them after the loop.
     check("let k = 9; for (let k in {a: 1}) {} k", true);
     check("for (var k in {a: 1}) {} k", true);
     check(
@@ -1108,15 +1120,15 @@ fn for_in_loops() {
         "function f(){ for (let k in {a: 1, b: 2}) {} function g(){ return k; } return g(); } f()",
         true,
     );
-    // A pattern head in `for-in` binds the placeholder name.
-    check("let o = {x: 1}; for (let [a] in o) {} typeof a", true);
+    // Pattern heads now retain their actual binding and use AST fallback.
+    check("let o = {x: 1}; for (let [a] in o) {} typeof a", false);
 }
 
 #[test]
 fn for_of_loops() {
     check("let s = 0; for (let v of [1, 2, 3]) { s += v; } s", true);
     check("let r = ''; for (let c of 'ab') { r += c; } r", true);
-    // Heads assign like `for-in` heads do.
+    // Lexical heads shadow like `for-in` heads do.
     check("let v = 9; for (let v of [1]) {} v", true);
     check(
         "function f(){ let v = 9; for (let v of [1]) {} return v; } f()",
@@ -1173,15 +1185,32 @@ fn for_of_loops() {
         "function* g(){ try { yield null; } finally { log += 'c'; } } let log = ''; try { for (let {a} of g()) {} } catch (e) { log += 'e'; } log",
         true,
     );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){throw e;},return(){throw 42;}};};try{for(let x of o){}}catch(x){caught=x;}caught===e",
+        true,
+    );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){return {done:false};},get return(){throw 42;}};};try{for(let x of o){throw e;}}catch(x){caught=x;}caught===e",
+        true,
+    );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){return {done:false};},return:42};};try{for(let x of o){throw e;}}catch(x){caught=x;}caught===e",
+        true,
+    );
+    check(
+        "let e={},caught;let o={};o[Symbol.iterator]=function(){return {next(){return {get done(){throw e;}};},return(){throw 42;}};};try{for(let x of o){}}catch(x){caught=x;}caught===e",
+        true,
+    );
     // Non-iterables and method-less iterators fail like the evaluator.
     check("for (let v of {}) {}", true);
     check(
         "let o = {}; o['__symbol_iterator__'] = function() { return {}; }; for (let v of o) {}",
         true,
     );
-    // A missing `done` counts as done; a missing value is undefined.
+    // A missing `done` is false; a missing value is undefined. Bound the
+    // consumer because this iterator deliberately never reports completion.
     check(
-        "let o = {}; o['__symbol_iterator__'] = function() { return { next: function() { return {}; } }; }; let n = 0; for (let v of o) { n++; } n",
+        "let o = {}; o['__symbol_iterator__'] = function() { return { next: function() { return {}; } }; }; let n = 0; for (let v of o) { n++; if (n === 2) break; } n",
         true,
     );
     check(
@@ -1226,8 +1255,249 @@ fn arrow_super_uses_lexical_receiver() {
         "class A { method(){ return this.x; } } class B extends A { constructor(){super();this.x=7;} method(){return (()=>super.method())();} } new B().method();",
         "class A { method(){ return this.x; } } class B extends A { constructor(){super();this.x=7;} method(){return (()=>(()=>super.method())())();} } new B().method();",
         "class A { constructor(){this.x=1;} } class B extends A { constructor(){super();function inner(){return this;}this.y=inner();} } new B().y;",
-        "class A { method(){return this.x;} } class B extends A { constructor(){super();this.x=7;} method(){function inner(){return super.method();}return inner.call({x:9});} } new B().method();",
     ] {
         check(source, true);
     }
+    assert!(parse_cached("class A { method(){return this.x;} } class B extends A { method(){function inner(){return super.method();}return inner.call({x:9});} }").is_err());
+}
+
+#[test]
+fn named_expression_bindings_are_lexical_and_immutable_in_both_tiers() {
+    for source in [
+        "var f=function self(n){return n ? self(n-1) : 7;};f(4)",
+        "var f=function self(){self=1;return typeof self;};f()",
+        "var f=function self(){'use strict';self=1;};f()",
+        "var f=function self(){self+=1;return typeof self;};f()",
+        "function f(){return f;}var old=f;f=7;old()",
+        "var f=function self(){return self;};typeof self",
+        "var f=async function self(){return typeof self;};f().then(v=>{if(v!=='function')throw 1;})",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn catch_identifier_bindings_remain_lexical_and_mutable_in_both_tiers() {
+    for source in [
+        "var e=7;try{throw 1;}catch(e){var e=3;}e;",
+        "let f;try{throw 1;}catch(e){f=()=>++e;}f()+f();",
+        "let e=7;try{throw 1;}catch{e=9;}e;",
+        "function f(){let e=7;try{throw 1;}catch(e){e=3;}return e;}f();",
+    ] {
+        check(source, true);
+    }
+    check("try{throw {x:7};}catch({x}){x;}", false);
+    // Direct eval still declines compilation until lexical-environment parity.
+    check("var e=7;try{throw 1;}catch(e){eval('var e=3');}e;", false);
+    check("try{throw 1;}catch(e){eval('function e(){}');e;}", false);
+}
+
+#[test]
+fn iteration_assignment_forms_retain_fallback_and_declaration_tier_parity() {
+    for source in [
+        "var x;for(x of [1,2]){}x;",
+        "let x;for([x] of [[7]]){}x;",
+        "let o={x:0};for(o.x of [9]){}o.x;",
+        "for(var x=7 in {a:1}){}x;",
+    ] {
+        check(source, false);
+    }
+    check("function f(){for(var x of []){}return x;}f();", true);
+    check("function f(){for(var x in {}){}return x;}f();", true);
+}
+
+#[test]
+fn literal_metadata_keeps_primitive_and_object_tier_parity() {
+    for source in [
+        "010+1;",
+        r"'\012'.charCodeAt(0);",
+        r"({'\1':3})['\1'];",
+        r"var \u0061=6;a/2;",
+        "var α=3;α+1;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn parenthesized_references_keep_existing_tier_parity() {
+    for source in [
+        "var x=1;(x)++;(x)=4;x;",
+        "typeof (missing);",
+        "var o={x:1};delete (o.x);'x' in o;",
+        "var o={x:3,f:function(){return this.x;}};(o.f)();",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn public_hash_properties_preserve_private_field_tier_parity() {
+    check(
+        "class C{#x=1;'#x'=2;m(){return this.#x+this['#x'];}}new C().m();",
+        true,
+    );
+}
+
+#[test]
+fn native_buffer_growth_uses_the_same_semantics_in_both_tiers() {
+    for source in [
+        "var b=new SharedArrayBuffer(4,{maxByteLength:16});var a=new Int32Array(b);a[0]=7;b.grow(16);Atomics.store(a,3,42);a.length===4&&a[0]===7&&a[3]===42;",
+        "var b=new ArrayBuffer(8,{maxByteLength:16});var a=new Uint8Array(b,4,4);b.resize(2);var empty=a.length===0;b.resize(16);empty&&a.length===4&&a[0]===0;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn realm_intrinsic_arguments_and_proxy_abrupt_completions_share_tier_semantics() {
+    for source in [
+        "function f(){'use strict';return()=>arguments;}var args=f()();var getter=Object.getOwnPropertyDescriptor(args,'callee').get;getter===Object.getOwnPropertyDescriptor(Function.prototype,'caller').get;",
+        "function f(){return arguments;}var args=f(42);args.callee===f&&args[0]===42&&args[Symbol.iterator]===Array.prototype.values;",
+        "var proxy=new Proxy({},{get:1});var caught=false;try{proxy.x;}catch(e){caught=e instanceof TypeError;}caught;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn shared_proxy_deletion_and_atomic_hints_match_both_tiers() {
+    for source in [
+        "'use strict';var o={};Object.defineProperty(o,'x',{value:1});delete o.x;",
+        "var o={};Object.defineProperty(o,'x',{value:1});delete o.x;",
+        "'use strict';var p=new Proxy(new String('x'),{});delete p[0];",
+        "var p=new Proxy(new Uint8Array(1),{});Reflect.deleteProperty(p,'0');",
+        "Atomics.pause(1)===undefined;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn realm_global_records_use_shared_declaration_and_property_operations() {
+    for source in [
+        "let x=1;globalThis.x=2;x+globalThis.x;",
+        "var x=1;Object.getOwnPropertyDescriptor(globalThis,'x').configurable;",
+        "Object.defineProperty(globalThis,'f',{get(){throw 1;},configurable:true});eval('function f(){return 42;}');f();",
+        "var receiver;Object.defineProperty(globalThis,'x',{get(){receiver=this;return 1;},set(v){}});x++;receiver===globalThis;",
+        "let f=1;{function f(){}}f;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn lexical_iteration_tdz_and_capture() {
+    for source in [
+        "let x = [1]; for (let x of x) {}",
+        "let x = {}; for (let x in x) {}",
+        "let a=[]; for(let x of [1,2]) { a.push(()=>x); } a[0]()+a[1]()",
+        "let a=[]; for(const x of [1,2]) { a.push(()=>x); } a[0]()+a[1]()",
+        "let a=[]; for(let x in {a:1,b:2}) { a.push(()=>x); } a[0]()+a[1]()",
+        "for(const x of [1]) { x=2; }",
+        "let x=9; try { for(let x of [1]) { throw x; } } catch(e) {} x",
+        "let a=[]; for(let [x] of [[1],[2]]) { a.push(()=>x); } a[0]()+a[1]()",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn property_update_fast_paths_preserve_observable_operations() {
+    for source in [
+        "var calls=0,o={x:1},key={toString(){calls++;return 'x';}};var old=o[key]++;[calls,old,o.x]",
+        "var reads=0,writes=0,value=1,o={get x(){reads++;return value;},set x(v){writes++;value=v;}};var old=o.x++;[reads,writes,old,value]",
+        "var reads=0,writes=0,o=new Proxy({x:1},{get(t,k,r){reads++;return Reflect.get(t,k,r);},set(t,k,v,r){writes++;return Reflect.set(t,k,v,r);}});var old=o.x++;[reads,writes,old,o.x]",
+        "var o={};Object.defineProperty(o,'x',{value:1,writable:false});var old=o.x++;[old,o.x]",
+        "var value=1,reads=0,writes=0;Object.defineProperty(globalThis,'x',{get(){reads++;return value;},set(v){writes++;value=v;},configurable:true});var old=x++;[reads,writes,old,value]",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn empty_lexical_iteration_patterns_own_and_unwind_runtime_scopes() {
+    for source in [
+        "var n=0;for(let [] of [[],[]]){n++;}n",
+        "var n=0;for(const {} of [{},{}]){n++;}n",
+        "var n=0;for(let [[]] of [[[]],[[]]]){n++;}n",
+        "try{for(let {} of [null]){}}catch(e){e instanceof TypeError;}",
+        "try{for(const {} of [undefined]){}}catch(e){e instanceof TypeError;}",
+        "var n=0;for(let [] of [[],[]]){if(++n===1)continue;break;}n",
+        "var n=0;for(const [] of [[],[]]){try{n++;}finally{}}n",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn global_callable_data_and_update_reference_order_match_both_tiers() {
+    for source in [
+        "var calls=0;var f=Object.getOwnPropertyDescriptor({get f(){calls++;}},'f').get;typeof f==='function'&&calls===0&&Object.getOwnPropertyDescriptor(globalThis,'f').value===f;",
+        "var count=0;var key={toString(){count++;throw 1;}};var caught;try{++null[key];}catch(e){caught=e;}caught instanceof TypeError&&count===0;",
+        "var count=0;var key={toString(){count++;throw 1;}};var caught;try{null[key]--;}catch(e){caught=e;}caught instanceof TypeError&&count===0;",
+        "var names=[];for(var key in new String('abc')){names.push(key);}names.join(',');",
+        "var object=Object.create(new Int32Array(1));var caught;try{object.buffer;}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn proxy_private_field_stamping_uses_shared_brand_storage_in_both_tiers() {
+    for source in [
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=42;static read(object){return object.#value;}static write(object,value){object.#value=value;}}var target={};var traps=0;var proxy=new Proxy(target,{get(){traps++;throw 1;},set(){traps++;throw 2;}});new Stamp(proxy);Stamp.write(proxy,7);Stamp.read(proxy)===7&&traps===0;",
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=42;static read(object){return object.#value;}}var pair=Proxy.revocable({},{});pair.revoke();new Stamp(pair.proxy);Stamp.read(pair.proxy);",
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=42;}var proxy=new Proxy({},{});new Stamp(proxy);new Stamp(proxy);",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn private_field_brand_checks_use_lexical_slots_in_both_tiers() {
+    for source in [
+        "class A{#x;static has(o){return #x in o;}}var a=new A();A.has(a)&&!A.has({})&&!A.has(Object.create(a));",
+        "class A{#x;static has(o){return #x in o;}}var caught;try{A.has(1);}catch(e){caught=e;}caught instanceof TypeError;",
+        "class Identity{constructor(o){return o;}}class A extends Identity{#x;static has(o){return #x in o;}}var p=Proxy.revocable({},{});p.revoke();new A(p.proxy);A.has(p.proxy);",
+        "class A{#x;static has(o){return #x in o;}}class B{#x;static has(o){return #x in o;}}var a=new A();A.has(a)&&!B.has(a);",
+        "var calls=0;class A{#x;static has(){return #x in (++calls,new A());}}A.has()&&calls===1;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn class_private_methods_accessors_and_static_order_share_semantics() {
+    for source in [
+        "class A{#value=this.#method();#method(){return 42;}read(){return this.#value;}}new A().read();",
+        "class A{#method(){}static has(o){return #method in o;}write(){this.#method=1;}}var a=new A();var caught;try{a.write();}catch(e){caught=e;}A.has(a)&&caught instanceof TypeError;",
+        "class A{#value=1;get #access(){return this.#value;}set #access(v){this.#value=v;}read(){return this.#access;}write(v){this.#access=v;}}var a=new A();a.write(42);a.read();",
+        "class A{static #field=1;static #method(){return this.#field;}static get #access(){return this.#method();}static set #access(v){this.#field=v;}static read(){return this.#access;}static write(v){this.#access=v;}}A.write(42);A.read();",
+        "var order='';class A{static x=(order+='a',1);static{order+='b';}static #y=(order+='c',this.x+1);static{order+='d';}static read(){return this.#y;}}order==='abcd'&&A.read()===2;",
+        "function make(v){class A{static x=v;static #y=v+1;static read(){return this.#y;}}return A;}var A=make(41);A.x===41&&A.read()===42;",
+        "class Base{static value=41;}class A extends Base{static x=super.value+1;static read(){return super.value;}}A.x===42&&A.read()===41;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn legacy_regexp_state_and_descriptors_match_in_both_tiers() {
+    for source in [
+        "/(a)(b)/.exec('xabz');RegExp.$1==='a'&&RegExp.lastMatch==='ab'&&RegExp.leftContext==='x'&&RegExp.rightContext==='z';",
+        "var caught;try{Reflect.get(RegExp,'lastMatch',{});}catch(e){caught=e;}caught instanceof TypeError;",
+        "var calls=0;RegExp.input={toString(){calls++;return 'input';}};RegExp.input==='input'&&calls===1;",
+        "class Derived extends RegExp{}new Derived('a').test('a');RegExp.input='restored';var caught;try{RegExp.lastMatch;}catch(e){caught=e;}RegExp.input==='restored'&&caught instanceof TypeError;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn dictionary_growth_preserves_property_reads_and_key_order_in_both_tiers() {
+    check(
+        "var object={};for(var i=0;i<256;i++){object['key'+i]=i;}function read(){return object.key1;}read();read();object.extra=7;var keys=Object.keys(object);read()===1&&object.key255===255&&keys.length===257&&keys[256]==='extra';",
+        true,
+    );
 }

@@ -26,6 +26,10 @@ pub(crate) const CALL_SLOT: &str = "__symbol_call__";
 /// built-ins whose `new` form differs from their call form.
 pub(crate) const CONSTRUCT_SLOT: &str = "__symbol_construct__";
 
+pub(crate) fn construct_slot(value: &Value) -> Option<Value> {
+    callable_slot(value, CONSTRUCT_SLOT).or_else(|| callable_slot(value, CALL_SLOT))
+}
+
 /// The function stored in one of the internal call slots, if any.
 pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
     let Value::Object { props } = value else {
@@ -47,11 +51,11 @@ pub(crate) fn callable_slot(value: &Value, slot: &str) -> Option<Value> {
 #[doc(hidden)]
 pub fn is_callable_value(value: &Value) -> bool {
     match value {
+        Value::Proxy(proxy) => proxy.callable,
         Value::Function(_)
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_callable_value(&proxy.target),
         Value::Object { .. } => callable_slot(value, CALL_SLOT).is_some(),
         _ => false,
     }
@@ -122,6 +126,130 @@ pub(crate) fn is_js_object(value: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// SpeciesConstructor observes constructor/species getters before deciding
+    /// whether to use the intrinsic from the executing builtin's realm.
+    pub(crate) fn species_constructor(
+        &mut self,
+        object: &Value,
+        intrinsic: &str,
+    ) -> Result<Value, VmErr> {
+        let default = self
+            .persistent_global
+            .borrow()
+            .intrinsic(intrinsic)
+            .expect("installed species intrinsic");
+        let constructor = self.get_prop_value_str(object, "constructor")?;
+        if matches!(constructor, Value::Undefined) {
+            return Ok(default);
+        }
+        if !is_js_object(&constructor) {
+            return Err(VmErr::Msg(
+                "TypeError: constructor must be an object".into(),
+            ));
+        }
+        let species = crate::builtins::well_known("species").expect("Symbol.species");
+        let species = self.get_prop_value(&constructor, &species)?;
+        if matches!(species, Value::Undefined | Value::Null) {
+            return Ok(default);
+        }
+        if !crate::builtins::is_constructor(&species) {
+            return Err(VmErr::Msg(
+                "TypeError: species must be a constructor".into(),
+            ));
+        }
+        Ok(species)
+    }
+    /// CreateListFromArrayLike for call/construct argument lists. Property
+    /// reads stay observable; these operations do not use iterator methods.
+    pub(crate) fn argument_list_from_array_like(
+        &mut self,
+        value: &Value,
+    ) -> Result<Vec<Value>, VmErr> {
+        if !is_js_object(value) {
+            return Err(VmErr::Msg(
+                "TypeError: Arguments list must be an object".into(),
+            ));
+        }
+        let length = self.get_prop_value_str(value, "length")?;
+        let number = self.ecmascript_to_number(&length)?;
+        let length = if number.is_nan() || number <= 0.0 {
+            0.0
+        } else {
+            number.floor()
+        };
+        if !length.is_finite() || length > crate::value::MAX_ARRAY_LEN as f64 {
+            return Err(crate::value::limit_err("Maximum argument count exceeded"));
+        }
+        let mut arguments = Vec::with_capacity((length as usize).min(1024));
+        for index in 0..length as usize {
+            self.execution.check()?;
+            arguments.push(self.get_prop_value_str(value, &index.to_string())?);
+        }
+        Ok(arguments)
+    }
+    /// Build arguments through one shared path for AST and bytecode calls.
+    pub(crate) fn function_arguments(
+        &self,
+        function: &Value,
+        args: &[Value],
+    ) -> Result<Value, VmErr> {
+        let Value::Function(data) = function else {
+            return Value::arguments_object(args);
+        };
+        let object = Value::arguments_object(args)?;
+        let unmapped = data.strict
+            || data.params.iter().any(|name| name.starts_with("..."))
+            || data
+                .body
+                .iter()
+                .find(|statement| !matches!(statement, Statement::ClassInitialization { .. }))
+                .is_some_and(|statement| {
+                    matches!(statement, Statement::ParameterInitialization { .. })
+                });
+        if unmapped {
+            if let Some(thrower) = self
+                .persistent_global
+                .borrow()
+                .intrinsic("%ThrowTypeError%")
+            {
+                crate::builtins::install_intrinsic_accessor(
+                    &object, "callee", &thrower, &thrower, false,
+                );
+            }
+        } else {
+            object.set_prop("callee".into(), function.clone())?;
+        }
+        if let Some(method) = self
+            .persistent_global
+            .borrow()
+            .intrinsic("Array")
+            .and_then(|constructor| constructor.get_prop("prototype"))
+            .and_then(|prototype| prototype.get_prop("values"))
+        {
+            object.set_prop(super::SYMBOL_ITERATOR_SLOT.into(), method)?;
+            if let Some(Value::Symbol(ref symbol)) = crate::builtins::well_known("iterator") {
+                object
+                    .property_cell()
+                    .expect("arguments properties")
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(super::SYMBOL_ITERATOR_SLOT, symbol.clone());
+            }
+        }
+        let properties = object.property_cell().expect("arguments properties");
+        for key in ["length", "callee", super::SYMBOL_ITERATOR_SLOT] {
+            if key != "callee" || !unmapped {
+                properties.meta.borrow_mut().set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        Ok(object)
+    }
     /// ECMAScript `instanceof`, including a guest-defined
     /// `Symbol.hasInstance` method. This lives on the mutable interpreter
     /// path because reading the method and invoking it can execute guest code.
@@ -168,18 +296,6 @@ impl Interpreter {
             return self.instance_of(object, &bound.target);
         }
 
-        if matches!(object, Value::Date(_))
-            && matches!(constructor, Value::Object { props }
-                if props.meta.borrow().builtin_constructor == Some(crate::value::BuiltinConstructor::Date))
-        {
-            return Ok(Value::Bool(true));
-        }
-        if let (Value::Error(error), Value::Class(class)) = (object, constructor) {
-            return Ok(Value::Bool(
-                class.name == "Error" || class.name == error.name,
-            ));
-        }
-
         let prototype = self.get_prop_value_str(constructor, "prototype")?;
         if !is_js_object(&prototype) {
             return Err(VmErr::Msg(
@@ -220,6 +336,21 @@ impl Interpreter {
     }
 
     pub(super) fn destructure(&mut self, pat: &Pattern, val: &Value) -> Result<Value, VmErr> {
+        self.destructure_pattern(pat, val, true)
+    }
+    pub(super) fn destructure_assignment(
+        &mut self,
+        pat: &Pattern,
+        val: &Value,
+    ) -> Result<Value, VmErr> {
+        self.destructure_pattern(pat, val, false)
+    }
+    fn destructure_pattern(
+        &mut self,
+        pat: &Pattern,
+        val: &Value,
+        initialize: bool,
+    ) -> Result<Value, VmErr> {
         match pat {
             Pattern::Elision => Ok(Value::Undefined),
             Pattern::Ident(name) => {
@@ -228,7 +359,7 @@ impl Interpreter {
                 // initialization, which `assign` would refuse. Anything else
                 // is a destructuring *assignment*, which must reach the
                 // binding it names wherever that is.
-                if self.global.borrow_mut().initialize(name, val.clone()) {
+                if initialize && self.global.borrow_mut().initialize(name, val.clone()) {
                     return Ok(val.clone());
                 }
                 self.assign_or_set_binding(name, val.clone())?;
@@ -272,9 +403,9 @@ impl Interpreter {
                         break;
                     }
                     if let Some(v) = values.get(i) {
-                        self.destructure(elem, v)?;
+                        self.destructure_pattern(elem, v, initialize)?;
                     } else {
-                        self.destructure(elem, &Value::Undefined)?;
+                        self.destructure_pattern(elem, &Value::Undefined, initialize)?;
                     }
                 }
                 if let Some(rest_idx) = rest_target
@@ -282,7 +413,7 @@ impl Interpreter {
                 {
                     let rest_vals = values.get(rest_idx..).unwrap_or(&[]).to_vec();
                     let rest_val = Value::array(rest_vals);
-                    self.destructure(rest_pat, &rest_val)?;
+                    self.destructure_pattern(rest_pat, &rest_val, initialize)?;
                 }
                 Ok(val.clone())
             }
@@ -333,7 +464,7 @@ impl Interpreter {
                             remaining.push((k.clone(), v));
                         }
                         let rest = Value::checked_object(remaining)?;
-                        self.destructure(target, &rest)?;
+                        self.destructure_pattern(target, &rest, initialize)?;
                         continue;
                     }
                     let key_str = match key {
@@ -348,7 +479,7 @@ impl Interpreter {
                     taken.push(key_str.clone());
                     let found = self.get_prop_value_str(val, &key_str)?;
                     if let Some(p) = pat {
-                        self.destructure(p, &found)?;
+                        self.destructure_pattern(p, &found, initialize)?;
                     } else {
                         self.set_binding(&key_str, found)?;
                     }
@@ -359,28 +490,49 @@ impl Interpreter {
             Pattern::Default(pat, default_expr) => {
                 if matches!(val, Value::Undefined | Value::Null) {
                     let default_val = self.eval_expr(default_expr)?;
-                    self.destructure(pat, &default_val)
+                    self.destructure_pattern(pat, &default_val, initialize)
                 } else {
-                    self.destructure(pat, val)
+                    self.destructure_pattern(pat, val, initialize)
                 }
             }
         }
     }
 
+    pub(crate) fn initialize_pattern_binding(
+        &mut self,
+        pattern: &Pattern,
+        value: &Value,
+        kind: super::BindKind,
+    ) -> Result<Value, VmErr> {
+        for bound in crate::parser::pattern_names(pattern) {
+            self.declare_binding(&bound, Value::Undefined, kind, false)?;
+        }
+        self.destructure(pattern, value)
+    }
+
     pub(super) fn run_catch(
         &mut self,
-        catch: &Option<(String, Vec<Statement>)>,
+        catch: &Option<(Option<Pattern>, Vec<Statement>)>,
         err_val: Value,
     ) -> Result<Value, VmErr> {
         if let Some((p, cb)) = catch {
             let ce = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-            ce.borrow_mut().set(p, err_val);
             // The catch parameter lives in its own scope, and the catch block
             // is a block: its lexical declarations belong to that scope too.
             let s = std::mem::replace(&mut self.global, ce);
             // Only lexical hoisting here: a `var` inside `catch` belongs to
             // the enclosing function scope, where it was already hoisted.
-            let r = self.run_hoisted_here(cb);
+            let r = (|| {
+                if let Some(pattern) = p {
+                    let kind = if matches!(pattern, Pattern::Ident(_)) {
+                        super::BindKind::Catch
+                    } else {
+                        super::BindKind::Let
+                    };
+                    self.initialize_pattern_binding(pattern, &err_val, kind)?;
+                }
+                self.run_hoisted_here(cb)
+            })();
             self.global = s;
             r
         } else {
@@ -394,16 +546,82 @@ impl Interpreter {
     ///
     /// Non-configurable properties survive and yield `false`; a missing
     /// property is already absent, so deleting it succeeds.
+    pub(crate) fn delete_member_or_throw(
+        &mut self,
+        obj: &Value,
+        key: &Value,
+        strict: bool,
+    ) -> Result<Value, VmErr> {
+        let result = self.delete_member(obj, key)?;
+        if strict && matches!(result, Value::Bool(false)) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot delete a non-configurable property".into(),
+            ));
+        }
+        Ok(result)
+    }
+
     pub(crate) fn delete_member(&mut self, obj: &Value, key: &Value) -> Result<Value, VmErr> {
+        let key = self.proxy_property_key(key)?;
+        self.delete_member_key(obj, &key, 0)
+    }
+
+    fn delete_member_key(
+        &mut self,
+        obj: &Value,
+        key: &Value,
+        depth: usize,
+    ) -> Result<Value, VmErr> {
+        self.check_execution_interrupt()?;
+        if depth >= crate::value::MAX_PROTOTYPE_DEPTH {
+            return Err(crate::value::limit_err(
+                "Maximum Proxy traversal depth exceeded",
+            ));
+        }
+        stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
+            self.delete_member_inner(obj, key, depth)
+        })
+    }
+
+    fn delete_member_inner(
+        &mut self,
+        obj: &Value,
+        key: &Value,
+        depth: usize,
+    ) -> Result<Value, VmErr> {
         if let Some(proxy) = obj.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "deleteProperty") {
-                let name = self.proxy_property_key(key)?;
-                let handler = proxy.handler.clone();
-                let result = self.call_this(&trap, handler, vec![target, name])?;
-                return Ok(Value::Bool(result.is_truthy()));
+            let (target, handler) = proxy.snapshot()?;
+            if let Some(trap) = self.proxy_trap(&handler, "deleteProperty")? {
+                let name = key.clone();
+
+                let result = self.call_this(&trap, handler, vec![target.clone(), name.clone()])?;
+                if !result.is_truthy() {
+                    return Ok(Value::Bool(false));
+                }
+                let descriptor =
+                    crate::builtins::object::descriptor_for_key_in(self, &target, &name)?;
+                if !matches!(descriptor, Value::Undefined) {
+                    if !descriptor
+                        .get_prop("configurable")
+                        .is_some_and(|value| value.is_truthy())
+                    {
+                        return Err(VmErr::Msg("TypeError: Proxy deleteProperty cannot hide a non-configurable property".into()));
+                    }
+                    if !self.is_extensible(&target)? {
+                        return Err(VmErr::Msg("TypeError: Proxy deleteProperty cannot hide a property of a non-extensible target".into()));
+                    }
+                }
+                return Ok(Value::Bool(true));
             }
-            return self.delete_member(&target, key);
+            return self.delete_member_key(&target, key, depth + 1);
+        }
+        let descriptor = crate::builtins::object::descriptor_for_key_in(self, obj, key)?;
+        if !matches!(descriptor, Value::Undefined)
+            && !descriptor
+                .get_prop("configurable")
+                .is_some_and(|value| value.is_truthy())
+        {
+            return Ok(Value::Bool(false));
         }
         match obj {
             Value::RealmGlobal(global) => {
@@ -419,6 +637,21 @@ impl Interpreter {
                         .borrow_mut()
                         .delete_global_property(&key),
                 ))
+            }
+            Value::TypedArray(view) => {
+                let slot = self.property_key(key)?;
+                if let Some(index) = crate::builtins::canonical_numeric_index(&slot) {
+                    return Ok(Value::Bool(!crate::builtins::valid_integer_index(
+                        view, index,
+                    )));
+                }
+                self.delete_member_key(
+                    &Value::Object {
+                        props: view.properties.clone(),
+                    },
+                    key,
+                    depth + 1,
+                )
             }
             Value::Object { props } => {
                 let slot = self.property_key(key)?;
@@ -533,7 +766,11 @@ impl Interpreter {
             }
             _ => {
                 if let Some(properties) = obj.exotic_properties() {
-                    return self.delete_member(&Value::Object { props: properties }, key);
+                    return self.delete_member_key(
+                        &Value::Object { props: properties },
+                        key,
+                        depth + 1,
+                    );
                 }
                 Ok(Value::Bool(true))
             }
@@ -545,27 +782,85 @@ impl Interpreter {
     pub(crate) fn property_key(&self, key: &Value) -> Result<String, VmErr> {
         Ok(match key {
             Value::String(k) => k.to_key(),
-            Value::Number(n) => crate::format::number_string(*n),
+            Value::Number(n) => crate::format::ecmascript_number_string(*n),
             Value::Symbol(s) => crate::interpreter::symbol_slot_key(s),
             other => self.to_js_string(other)?.to_key(),
         })
     }
 
-    fn assign_cell_property(
+    fn finish_property_write(&self, accepted: bool, key: &str, throw: bool) -> Result<(), VmErr> {
+        if !accepted && throw {
+            return Err(VmErr::Msg(format!(
+                "TypeError: Cannot assign to property {key}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn assign_member_str(
+        &mut self,
+        object: &Value,
+        key: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member_with_receiver(
+            object,
+            &Value::String(crate::JsString::from_key(key)),
+            value,
+            object,
+        )?;
+        self.finish_property_write(accepted, key, self.global.borrow().strict())
+    }
+
+    pub(crate) fn assign_member(
+        &mut self,
+        object: &Value,
+        key: &Value,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member_with_receiver(object, key, value, object)?;
+        self.finish_property_write(accepted, "property", self.global.borrow().strict())
+    }
+
+    pub(crate) fn set_member_str_or_throw(
+        &mut self,
+        object: &Value,
+        key: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member_with_receiver(
+            object,
+            &Value::String(crate::JsString::from_key(key)),
+            value,
+            object,
+        )?;
+        self.finish_property_write(accepted, key, true)
+    }
+
+    fn set_array_length(
+        &mut self,
+        array: &Rc<crate::value::ArrayCell>,
+        value: &Value,
+    ) -> Result<bool, VmErr> {
+        if !array.meta.borrow().attrs_of("length").writable {
+            return Ok(false);
+        }
+        self.define_own_property(
+            &Value::Array(array.clone()),
+            &Value::String("length".into()),
+            &Value::descriptor_record(vec![("value".into(), value.clone())]),
+        )
+    }
+
+    fn set_cell_property(
         &mut self,
         receiver: &Value,
         props: &ObjectCell,
         key: &str,
         value: Value,
-    ) -> Result<(), VmErr> {
+    ) -> Result<bool, VmErr> {
         if props.meta.borrow().module_namespace {
-            return if self.cur_mod.is_some() {
-                Err(VmErr::Msg(
-                    "TypeError: Cannot assign to a module namespace".into(),
-                ))
-            } else {
-                Ok(())
-            };
+            return Ok(false);
         }
         let is_setter = |value: &Value| match value {
             Value::Function(function) => {
@@ -606,7 +901,7 @@ impl Interpreter {
         };
         if let Some((_, Some(setter), _)) = &existing {
             self.call_this(setter, receiver.clone(), vec![value])?;
-            return Ok(());
+            return Ok(true);
         }
         if props.meta.borrow().has_accessors {
             let companion = format!("__setter:{}__", key);
@@ -617,29 +912,30 @@ impl Interpreter {
                 .map(|(_, value)| value.clone());
             if let Some(setter) = setter {
                 self.call_this(&setter, receiver.clone(), vec![value])?;
-                return Ok(());
+                return Ok(true);
             }
         }
         if let Some((_, _, true)) = existing {
             // A getter without a setter is an accessor, not a writable data
             // property. Accessors with a setter returned above.
-            return self.reject_property_write(key);
+            return Ok(false);
         }
         if let Some((index, _, _)) = existing {
             if props.meta.borrow().attrs_of(key).writable {
                 props.borrow_mut()[index].1.assign_for_execution(value);
             } else {
-                return self.reject_property_write(key);
+                return Ok(false);
             }
-            return Ok(());
+            return Ok(true);
         }
         if let Some(prototype) = self.prototype_of(receiver)
-            && self.assign_inherited_property(receiver, prototype.as_ref(), key, &value)?
+            && let Some(accepted) =
+                self.set_inherited_property(receiver, prototype.as_ref(), key, &value)?
         {
-            return Ok(());
+            return Ok(accepted);
         }
         if props.meta.borrow().non_extensible {
-            return self.reject_property_write(key);
+            return Ok(false);
         }
         {
             let mut slots = props.borrow_mut();
@@ -651,20 +947,20 @@ impl Interpreter {
             slots.push((key.to_owned(), value));
         }
         props.note_key_added(key);
-        Ok(())
+        Ok(true)
     }
 
     /// Apply the `[[Set]]` behavior for a property found on the prototype
     /// chain. Inherited accessors receive the original object as `this`,
     /// inherited getter-only and non-writable properties block creation of an
     /// own property, and inherited writable data properties allow it.
-    fn assign_inherited_property(
+    fn set_inherited_property(
         &mut self,
         receiver: &Value,
         prototype: &Value,
         key: &str,
         value: &Value,
-    ) -> Result<bool, VmErr> {
+    ) -> Result<Option<bool>, VmErr> {
         let setter_name = format!("set {key}");
         let getter_name = format!("get {key}");
         let is_setter = |value: &Value| match value {
@@ -709,7 +1005,7 @@ impl Interpreter {
                         meta.has_accessors,
                     )
                 }
-                _ => return Ok(false),
+                _ => return Ok(None),
             };
             if let Some((_, property)) = slots.iter().find(|(name, _)| name == key) {
                 let companion = format!("__setter:{}__", key);
@@ -726,78 +1022,180 @@ impl Interpreter {
                 };
                 if let Some(setter) = setter {
                     self.call_this(&setter, receiver.clone(), vec![value.clone()])?;
-                    return Ok(true);
+                    return Ok(Some(true));
                 }
                 if is_getter(property)
                     || has_accessors && slots.iter().any(|(name, _)| name == &companion)
                 {
-                    self.reject_property_write(key)?;
-                    return Ok(true);
+                    return Ok(Some(false));
                 }
-                if !attributes.writable {
-                    self.reject_property_write(key)?;
-                }
-                return Ok(!attributes.writable);
+                return Ok((!attributes.writable).then_some(false));
             }
             let Some(next) = self.prototype_of(&current) else {
-                return Ok(false);
+                return Ok(None);
             };
             current = next.as_ref().clone();
         }
-        Ok(false)
+        Ok(None)
     }
 
-    /// Borrowed-key variant of [`assign_member`](Self::assign_member).
-    /// Static member writes (`o.key = v`) resolve through `&str` end to end:
-    /// no key `String` and no key `Value` is allocated. Typed arrays, exotic
-    /// receivers, and primitives keep the general path, exactly as before.
-    fn reject_property_write(&self, key: &str) -> Result<(), VmErr> {
-        if self.global.borrow().strict() {
-            Err(VmErr::Msg(format!(
-                "TypeError: Cannot assign to property {key}"
-            )))
+    /// Shared [[Set]] operation, preserving the original receiver while
+    /// traversing prototypes and Proxy targets.
+    pub(crate) fn set_member_with_receiver(
+        &mut self,
+        target: &Value,
+        property: &Value,
+        value: Value,
+        receiver: &Value,
+    ) -> Result<bool, VmErr> {
+        let key = self.proxy_property_key(property)?;
+        let slot = self.property_key(&key)?;
+        let mut current = if matches!(target, Value::GlobalObject) {
+            self.realm_global_object()
         } else {
-            Ok(())
+            crate::builtins::object::to_object_receiver(target)?
+        };
+        for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+            if let Value::Proxy(proxy) = &current {
+                let (target, handler) = proxy.snapshot()?;
+                if let Some(trap) = self.proxy_trap(&handler, "set")? {
+                    let accepted = self
+                        .call_this(
+                            &trap,
+                            handler,
+                            vec![target.clone(), key.clone(), value.clone(), receiver.clone()],
+                        )?
+                        .is_truthy();
+                    if !accepted {
+                        return Ok(false);
+                    }
+                    let descriptor =
+                        crate::builtins::object::descriptor_for_key_in(self, &target, &key)?;
+                    if !matches!(descriptor, Value::Undefined)
+                        && !descriptor
+                            .get_prop("configurable")
+                            .is_some_and(|value| value.is_truthy())
+                    {
+                        if let Some(previous) = descriptor.get_prop("value") {
+                            if !descriptor
+                                .get_prop("writable")
+                                .is_some_and(|value| value.is_truthy())
+                                && !crate::builtins::object::same_value(&previous, &value)
+                            {
+                                return Err(VmErr::Msg(
+                                    "TypeError: Proxy set cannot change a frozen target property"
+                                        .into(),
+                                ));
+                            }
+                        } else if matches!(descriptor.get_prop("set"), Some(Value::Undefined)) {
+                            return Err(VmErr::Msg("TypeError: Proxy set cannot write a protected accessor without a setter".into()));
+                        }
+                    }
+                    return Ok(true);
+                }
+                current = target;
+                continue;
+            }
+            if let Value::TypedArray(view) = &current
+                && let Some(index) = crate::builtins::canonical_numeric_index(&slot)
+            {
+                if crate::interpreter::strict_equals(&current, receiver) {
+                    crate::builtins::set_integer_index_in(self, view, index, &value)?;
+                    return Ok(true);
+                }
+                if !crate::builtins::valid_integer_index(view, index) {
+                    // Another receiver never coerces the value for an invalid
+                    // integer index and does not fall through to prototypes.
+                    return Ok(true);
+                }
+            }
+            if crate::interpreter::strict_equals(&current, receiver)
+                && (matches!(current, Value::RegExp(_)) && slot == "lastIndex"
+                    || matches!(current, Value::Array(_)) && slot == "length")
+            {
+                // Keep the existing exotic storage helpers.
+                return self.set_member(&current, &key, value);
+            }
+            if current
+                .property_cell()
+                .is_some_and(|cell| cell.meta.borrow().module_namespace)
+            {
+                return Ok(false);
+            }
+            let descriptor = crate::builtins::object::descriptor_for_key_in(self, &current, &key)?;
+            if matches!(descriptor, Value::Undefined) {
+                let prototype = self.get_prototype_of(&current)?;
+                if !matches!(prototype, Value::Null) {
+                    current = prototype;
+                    continue;
+                }
+            } else if descriptor.get_prop("get").is_some() || descriptor.get_prop("set").is_some() {
+                let setter = descriptor.get_prop("set").unwrap_or(Value::Undefined);
+                if matches!(setter, Value::Undefined) {
+                    return Ok(false);
+                }
+                self.call_this(&setter, receiver.clone(), vec![value])?;
+                return Ok(true);
+            } else if !descriptor
+                .get_prop("writable")
+                .is_some_and(|value| value.is_truthy())
+            {
+                return Ok(false);
+            }
+            if !is_js_object(receiver) {
+                return Ok(false);
+            }
+            let existing = crate::builtins::object::descriptor_for_key_in(self, receiver, &key)?;
+            let mut fields = vec![("value".into(), value)];
+            if matches!(existing, Value::Undefined) {
+                fields.extend([
+                    ("writable".into(), Value::Bool(true)),
+                    ("enumerable".into(), Value::Bool(true)),
+                    ("configurable".into(), Value::Bool(true)),
+                ]);
+            } else if existing.get_prop("get").is_some()
+                || existing.get_prop("set").is_some()
+                || !existing
+                    .get_prop("writable")
+                    .is_some_and(|value| value.is_truthy())
+            {
+                return Ok(false);
+            }
+            return self.define_own_property(receiver, &key, &Value::descriptor_record(fields));
         }
+        Err(crate::value::limit_err("Maximum prototype depth exceeded"))
     }
 
-    pub(crate) fn assign_member_str(
+    pub(crate) fn set_member_str(
         &mut self,
         obj: &Value,
         key: &str,
         val: Value,
-    ) -> Result<(), VmErr> {
+    ) -> Result<bool, VmErr> {
         if let Value::RealmGlobal(global) = obj {
             return self.with_global_storage(global.clone(), |vm| {
-                vm.assign_member_str(&Value::GlobalObject, key, val)
+                vm.set_member_str(&Value::GlobalObject, key, val)
             });
         }
-        if let Some(proxy) = obj.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "set") {
-                let prop = Value::String(crate::JsString::from_key(key));
-                let trap_key = self.proxy_property_key(&prop)?;
-                let handler = proxy.handler.clone();
-                let accepted =
-                    self.call_this(&trap, handler, vec![target, trap_key, val, obj.clone()])?;
-                if !accepted.is_truthy() {
-                    self.reject_property_write(key)?;
-                }
-                return Ok(());
-            }
-            return self.assign_member_str(&target, key, val);
+        if matches!(obj, Value::Proxy(_)) {
+            return self.set_member_with_receiver(
+                obj,
+                &Value::String(crate::JsString::from_key(key)),
+                val,
+                obj,
+            );
         }
         match obj {
             Value::Function(function) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
-                self.assign_cell_property(obj, &function.properties, key, val)
+                self.set_cell_property(obj, &function.properties, key, val)
             }
             Value::HostFunction { properties, .. } => {
-                self.assign_cell_property(obj, properties, key, val)
+                self.set_cell_property(obj, properties, key, val)
             }
-            Value::Object { props } => self.assign_cell_property(obj, props, key, val),
-            Value::Class(class) => self.assign_cell_property(obj, &class.statics, key, val),
+            Value::Object { props } => self.set_cell_property(obj, props, key, val),
+            Value::Class(class) => self.set_cell_property(obj, &class.statics, key, val),
             // `re.lastIndex = 0` resets a global pattern's scan position.
             Value::RegExp(data) if key == "lastIndex" => {
                 let index = self.tn(&val);
@@ -806,10 +1204,10 @@ impl Interpreter {
                 } else {
                     0
                 });
-                Ok(())
+                Ok(true)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
-            Value::GlobalObject => self.set_global_checked(key, val),
+            Value::GlobalObject => self.set_global_property(key, val),
             Value::Array(cell) => {
                 // A non-index key on an array is a named property, not an
                 // element: `strings.raw`, `arr.total = 3`.
@@ -819,142 +1217,121 @@ impl Interpreter {
                         let current = cell.named_prop(key);
                         if let Some(setter) = array_property_setter(cell, key, current.as_ref()) {
                             self.call_this(&setter, obj.clone(), vec![val])?;
-                            return Ok(());
+                            return Ok(true);
                         }
                     }
                     if !exists
                         && let Some(prototype) = self.prototype_of(obj)
-                        && self.assign_inherited_property(obj, prototype.as_ref(), key, &val)?
+                        && let Some(accepted) =
+                            self.set_inherited_property(obj, prototype.as_ref(), key, &val)?
                     {
-                        return Ok(());
+                        return Ok(accepted);
                     }
                     if (exists && !cell.meta.borrow().attrs_of(key).writable)
                         || (!exists && cell.meta.borrow().non_extensible)
                     {
-                        return Ok(());
+                        return Ok(false);
                     }
                     cell.set_named(key.to_owned(), val);
-                    Ok(())
+                    Ok(true)
                 } else if key == "length" {
-                    let length = self.tn(&val);
-                    if cell.meta.borrow().attrs_of("length").writable
-                        && length.is_finite()
-                        && length >= 0.0
-                        && length.fract() == 0.0
-                    {
-                        let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
-                        cell.set_length(length);
-                    }
-                    Ok(())
+                    self.set_array_length(cell, &val)
                 } else {
                     let index =
                         crate::value::array_index(key).expect("canonical array index guard");
-                    self.assign_member(obj, &Value::Number(index as f64), val)
+                    self.set_member(obj, &Value::Number(index as f64), val)
                 }
             }
-            _ => self.assign_member(obj, &Value::String(crate::JsString::from_key(key)), val),
+            _ => self.set_member(obj, &Value::String(crate::JsString::from_key(key)), val),
         }
     }
 
-    pub(crate) fn assign_member(
+    pub(crate) fn set_member(
         &mut self,
         obj: &Value,
         prop: &Value,
         val: Value,
-    ) -> Result<(), VmErr> {
+    ) -> Result<bool, VmErr> {
         if let Value::RealmGlobal(global) = obj {
             return self.with_global_storage(global.clone(), |vm| {
-                vm.assign_member(&Value::GlobalObject, prop, val)
+                vm.set_member(&Value::GlobalObject, prop, val)
             });
         }
-        // A proxy's `set` trap replaces the write; without one it falls
-        // through to the target.
-        if let Some(proxy) = obj.as_proxy() {
-            let target = proxy.target.clone();
-            if let Some(trap) = self.proxy_trap(&proxy, "set") {
-                let key = self.proxy_property_key(prop)?;
-                let handler = proxy.handler.clone();
-                let accepted =
-                    self.call_this(&trap, handler, vec![target, key, val, obj.clone()])?;
-                if !accepted.is_truthy() {
-                    self.reject_property_write("proxy property")?;
-                }
-                return Ok(());
-            }
-            return self.assign_member(&target, prop, val);
+        if matches!(obj, Value::Proxy(_)) {
+            return self.set_member_with_receiver(obj, prop, val, obj);
         }
         match (obj, prop) {
             (Value::Function(function), Value::Symbol(symbol)) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, &function.properties, &slot, val)?;
+                let accepted = self.set_cell_property(obj, &function.properties, &slot, val)?;
                 function
                     .properties
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::Function(function), Value::String(key)) => {
                 function.ensure_name_length_properties();
                 function.prototype_value(obj);
-                self.assign_cell_property(obj, &function.properties, &key.to_key(), val)
+                self.set_cell_property(obj, &function.properties, &key.to_key(), val)
             }
             (Value::Function(_), _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             (Value::HostFunction { properties, .. }, Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, properties, &slot, val)?;
+                let accepted = self.set_cell_property(obj, properties, &slot, val)?;
                 properties
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::HostFunction { properties, .. }, Value::String(key)) => {
-                self.assign_cell_property(obj, properties, &key.to_key(), val)
+                self.set_cell_property(obj, properties, &key.to_key(), val)
             }
             (Value::HostFunction { .. }, _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             (Value::Object { props }, Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, props, &slot, val)?;
+                let accepted = self.set_cell_property(obj, props, &slot, val)?;
                 props
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::Object { props }, Value::String(k)) => {
-                self.assign_cell_property(obj, props, &k.to_key(), val)
+                self.set_cell_property(obj, props, &k.to_key(), val)
             }
             // Any other key on an object is coerced to its slot name first:
             // `o[1] = v`, `o[sym] = v`, `o[{}] = v`.
             (Value::Object { .. }, _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             (Value::Class(class), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
-                self.assign_cell_property(obj, &class.statics, &slot, val)?;
+                let accepted = self.set_cell_property(obj, &class.statics, &slot, val)?;
                 class
                     .statics
                     .meta
                     .borrow_mut()
                     .set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(accepted)
             }
             (Value::Class(class), Value::String(k)) => {
-                self.assign_cell_property(obj, &class.statics, &k.to_key(), val)
+                self.set_cell_property(obj, &class.statics, &k.to_key(), val)
             }
             (Value::Class(_), _) => {
                 let slot = self.property_key(prop)?;
-                self.assign_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
+                self.set_member(obj, &Value::String(crate::JsString::from_key(&slot)), val)
             }
             // Writing an element of a typed array converts and wraps it to
             // the element type; an out-of-range index is ignored, not grown.
@@ -962,20 +1339,20 @@ impl Interpreter {
                 let slot = self.property_key(key)?;
                 if slot.parse::<f64>().is_err() {
                     let properties = view.properties.clone();
-                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    let accepted = self.set_cell_property(obj, &properties, &slot, val)?;
                     if let Value::Symbol(symbol) = key {
                         properties
                             .meta
                             .borrow_mut()
                             .set_symbol_key(&slot, symbol.clone());
                     }
-                    return Ok(());
+                    return Ok(accepted);
                 }
                 let index = self.tn(key);
                 if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
-                    crate::builtins::write_element(view, index as usize, &val)?;
+                    crate::builtins::write_element_in(self, view, index as usize, &val)?;
                 }
-                Ok(())
+                Ok(true)
             }
             // `re.lastIndex = 0` resets a global pattern's scan position.
             (Value::RegExp(data), Value::String(k)) if k == "lastIndex" => {
@@ -985,16 +1362,16 @@ impl Interpreter {
                 } else {
                     0
                 });
-                Ok(())
+                Ok(true)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
-            (Value::GlobalObject, Value::String(k)) => self.set_global_checked(&k.to_key(), val),
+            (Value::GlobalObject, Value::String(k)) => self.set_global_property(&k.to_key(), val),
             // A non-index key on an array is a named property, not an
             // element: `strings.raw`, `arr.total = 3`.
             (Value::Array(_), Value::String(k))
                 if k != "length" && crate::value::array_index(k).is_none() =>
             {
-                self.assign_member_str(obj, &k.to_key(), val)
+                self.set_member_str(obj, &k.to_key(), val)
             }
             (Value::Array(cell), Value::Symbol(symbol)) => {
                 let slot = crate::interpreter::symbol_slot_key(symbol);
@@ -1003,39 +1380,31 @@ impl Interpreter {
                     let current = cell.named_prop(&slot);
                     if let Some(setter) = array_property_setter(cell, &slot, current.as_ref()) {
                         self.call_this(&setter, obj.clone(), vec![val])?;
-                        return Ok(());
+                        return Ok(true);
                     }
                 }
                 if !exists
                     && let Some(prototype) = self.prototype_of(obj)
-                    && self.assign_inherited_property(obj, prototype.as_ref(), &slot, &val)?
+                    && let Some(accepted) =
+                        self.set_inherited_property(obj, prototype.as_ref(), &slot, &val)?
                 {
-                    return Ok(());
+                    return Ok(accepted);
                 }
                 if (exists && !cell.meta.borrow().attrs_of(&slot).writable)
                     || (!exists && cell.meta.borrow().non_extensible)
                 {
-                    return Ok(());
+                    return Ok(false);
                 }
                 cell.set_named(slot.clone(), val);
                 cell.set_symbol_key(&slot, symbol.clone());
-                Ok(())
+                Ok(true)
             }
             (Value::Array(cell), Value::String(k)) if k == "length" => {
-                let length = self.tn(&val);
-                if cell.meta.borrow().attrs_of("length").writable
-                    && length.is_finite()
-                    && length >= 0.0
-                    && length.fract() == 0.0
-                {
-                    let length = (length as usize).min(crate::value::MAX_ARRAY_LEN);
-                    cell.set_length(length);
-                }
-                Ok(())
+                self.set_array_length(cell, &val)
             }
             (Value::Array(_), Value::String(k)) => {
                 let index = crate::value::array_index(k).expect("canonical array index guard");
-                self.assign_member(obj, &Value::Number(index as f64), val)
+                self.set_member(obj, &Value::Number(index as f64), val)
             }
             (Value::Array(items), Value::Number(i)) => {
                 if !i.is_finite() || *i < 0.0 || i.fract() != 0.0 {
@@ -1052,7 +1421,7 @@ impl Interpreter {
                     let current = items.borrow().get(idx).cloned();
                     if let Some(setter) = array_property_setter(items, &key, current.as_ref()) {
                         self.call_this(&setter, obj.clone(), vec![val])?;
-                        return Ok(());
+                        return Ok(true);
                     }
                 }
                 let attributes = items.meta.borrow().attrs_of(&key);
@@ -1060,7 +1429,7 @@ impl Interpreter {
                     || (!exists && items.meta.borrow().non_extensible)
                     || (idx >= old_length && !items.meta.borrow().attrs_of("length").writable)
                 {
-                    return Ok(());
+                    return Ok(false);
                 }
                 let mut items = items.borrow_mut();
                 if idx < items.len() {
@@ -1079,19 +1448,19 @@ impl Interpreter {
                     }
                     cell.set_index_presence(idx, true);
                 }
-                Ok(())
+                Ok(true)
             }
             _ => {
                 if let Some(properties) = obj.exotic_properties() {
                     let slot = self.property_key(prop)?;
-                    self.assign_cell_property(obj, &properties, &slot, val)?;
+                    let accepted = self.set_cell_property(obj, &properties, &slot, val)?;
                     if let Value::Symbol(symbol) = prop {
                         properties
                             .meta
                             .borrow_mut()
                             .set_symbol_key(&slot, symbol.clone());
                     }
-                    Ok(())
+                    Ok(accepted)
                 } else {
                     Err(VmErr::Msg("Invalid assignment target".to_string()))
                 }
@@ -1132,6 +1501,17 @@ impl Interpreter {
         } else {
             v
         };
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            let current = self.get_prop_value_str(&object, name)?;
+            let current = if bin == BinOp::Add {
+                self.coerce_for_concat(&current)?
+            } else {
+                current
+            };
+            let combined = self.bin_op(bin, &current, &v)?;
+            self.assign_member_str(&object, name, combined.clone())?;
+            return Ok(combined);
+        }
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
         // read borrow then a write borrow. `bin_op` can still fail (e.g.
         // string-length cap); capture the error and leave the slot unchanged.
@@ -1168,6 +1548,15 @@ impl Interpreter {
         }
         match res {
             ModifyOutcome::Updated(v) => Ok(v),
+            ModifyOutcome::ReadOnly(v) => {
+                if scope.borrow().strict() {
+                    vm_err(format!(
+                        "TypeError: Cannot assign to read-only binding {name}"
+                    ))
+                } else {
+                    Ok(v)
+                }
+            }
             ModifyOutcome::Missing => vm_err(format!("ReferenceError: {name} is not defined")),
             ModifyOutcome::Const => vm_err(format!(
                 "TypeError: Assignment to constant variable '{name}'"
@@ -1199,6 +1588,10 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            let key = Value::String(crate::JsString::from_key(name));
+            return self.inc_prop_value(&object, &key, inc, prefix);
+        }
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
         // read borrow followed by a separate write borrow. `old` captures
         // the value before the update so postfix can return it.
@@ -1213,6 +1606,14 @@ impl Interpreter {
         };
         let new_val = match new_val {
             ModifyOutcome::Updated(v) => v,
+            ModifyOutcome::ReadOnly(v) => {
+                if scope.borrow().strict() {
+                    return vm_err(format!(
+                        "TypeError: Cannot assign to read-only binding {name}"
+                    ));
+                }
+                v
+            }
             ModifyOutcome::Missing => {
                 return vm_err(format!("ReferenceError: {name} is not defined"));
             }
@@ -1259,13 +1660,38 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
-        let cur = self.get_prop_value(obj, prop)?;
+        // An own writable Number data slot cannot invoke guest conversion or
+        // prototype setters. Update it directly through the same property cell,
+        // preserving descriptors and avoiding temporary descriptor objects.
+        // RequireObjectCoercible precedes ToPropertyKey after evaluating the
+        // member expression. A key object's coercion must not run on null.
+        if matches!(obj, Value::Null | Value::Undefined) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot update a property of null or undefined".into(),
+            ));
+        }
+        let key = self.proxy_property_key(prop)?;
+        let name = self.property_key(&key)?;
+        if let Some(cell) = obj.property_cell()
+            && let Some(index) = cell.own_index(&name)
+            && cell.meta.borrow().attrs_of(&name).writable
+            && let Some(Value::Number(number)) = cell.slot_verified(index, &name)
+        {
+            let updated = Value::Number(if inc { number + 1.0 } else { number - 1.0 });
+            cell.borrow_mut()[index].1 = updated.clone();
+            return Ok(if prefix {
+                updated
+            } else {
+                Value::Number(number)
+            });
+        }
+        let cur = self.get_prop_value(obj, &key)?;
         let new_val = Value::Number(if inc {
             self.tn(&cur) + 1.0
         } else {
             self.tn(&cur) - 1.0
         });
-        self.assign_member(obj, prop, new_val.clone())?;
+        self.assign_member(obj, &key, new_val.clone())?;
         if prefix { Ok(new_val) } else { Ok(cur) }
     }
 
@@ -1323,6 +1749,7 @@ impl Interpreter {
                         self.function_this(fd, this_val),
                         args,
                         fd.strict,
+                        f,
                     )
                 })
             }));
@@ -1336,6 +1763,7 @@ impl Interpreter {
             let result = match outcome.expect("panic resumed above") {
                 Err(VmErr::Ret(v)) | Ok(v) => Ok(v),
                 Err(VmErr::Msg(message)) => Err(VmErr::RuntimeError(Box::new(RuntimeErrorData {
+                    realm: super::realm::allocation_global(),
                     message,
                     span: None,
                     stack: self.get_stack().to_vec(),
@@ -1355,7 +1783,18 @@ impl Interpreter {
         this_val: Value,
         args: Vec<Value>,
     ) -> Result<Value, VmErr> {
-        let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
+        if matches!(f, Value::Proxy(_)) {
+            // Proxy internal methods execute in the caller's context.
+            // A trap or target call enters its own realm.
+            return self
+                .call_this_in_context(f, this_val, args)
+                .map_err(|error| error.with_context(None, self.get_stack()));
+        }
+        let owner = if is_callable_value(f) {
+            super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone())
+        } else {
+            self.persistent_global.clone()
+        };
         let saved_modules = self.enter_module_realm(&owner);
         let saved_persistent = std::mem::replace(&mut self.persistent_global, owner.clone());
         let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
@@ -1368,7 +1807,9 @@ impl Interpreter {
             _ => None,
         };
         let saved = module.map(|module| std::mem::replace(&mut self.cur_mod, module));
-        let result = self.call_this_in_context(f, this_val, args);
+        let result = self
+            .call_this_in_context(f, this_val, args)
+            .map_err(|error| error.with_context(None, self.get_stack()));
         if let Some(saved) = saved {
             self.cur_mod = saved;
         }
@@ -1413,7 +1854,7 @@ impl Interpreter {
                     if fd.needs_arguments_object() {
                         context
                             .borrow_mut()
-                            .set("arguments", Value::arguments_object(&args)?);
+                            .set("arguments", self.function_arguments(f, &args)?);
                     }
                     let (body, closure, parameters_initialized) =
                         if let Some(Statement::ParameterInitialization {
@@ -1452,7 +1893,23 @@ impl Interpreter {
                         } else {
                             (fd.body.clone(), context, false)
                         };
+                    let properties = Value::instance_properties();
+                    let prototype = fd.prototype_value(f);
+                    let prototype = if is_js_object(&prototype) {
+                        Some(prototype)
+                    } else {
+                        crate::value::FunctionData::generator_default_prototype(
+                            &self.persistent_global,
+                            fd.is_async,
+                        )
+                    };
+                    properties.set_proto(prototype.map(Rc::new));
                     let inner = GeneratorInner {
+                        realm: super::Realm::of(self),
+                        async_state: fd
+                            .is_async
+                            .then(super::async_generator::AsyncGeneratorState::new),
+                        properties,
                         parameters_initialized,
                         body,
                         closure: Some(crate::heap::capture_env(&closure)),
@@ -1517,7 +1974,7 @@ impl Interpreter {
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
                         if fd.needs_arguments_object() {
-                            let args_obj = Value::arguments_object(args.as_slice())?;
+                            let args_obj = self.function_arguments(f, args.as_slice())?;
                             vars.push((Key::from("arguments"), args_obj));
                         }
                         Rc::new(RefCell::new(Environment::with_bindings(parent_env, vars)))
@@ -1555,7 +2012,7 @@ impl Interpreter {
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
                         if fd.needs_arguments_object() {
-                            let args_obj = Value::arguments_object(args.as_slice())?;
+                            let args_obj = self.function_arguments(f, args.as_slice())?;
                             fe.borrow_mut().set("arguments", args_obj);
                         }
                         fe
@@ -1619,6 +2076,7 @@ impl Interpreter {
                     // the inner EntityDecoder).
                     Ok(_) => Ok(Value::Undefined),
                     Err(VmErr::Msg(msg)) => Err(VmErr::RuntimeError(Box::new(RuntimeErrorData {
+                        realm: super::realm::allocation_global(),
                         message: msg,
                         span: None,
                         stack: self.get_stack().to_vec(),
@@ -1629,12 +2087,22 @@ impl Interpreter {
                     fd.body.first(),
                     Some(Statement::ClassInitialization { derived: true, .. })
                 ) {
+                    // [[Construct]] validates the return and retrieves this
+                    // after the function's execution context has been removed.
+                    // These errors therefore belong to the constructing caller.
+                    let _error_realm = super::realm::AllocationRealm::enter(
+                        self.constructor_error_realms.last().cloned(),
+                    );
                     match result {
                         Ok(value) if is_js_object(&value) => Ok(value),
-                        Ok(Value::Undefined) => self.resolve_this(&constructor_scope),
-                        Ok(_) => vm_err(
-                            "TypeError: derived constructor must return an object or undefined",
-                        ),
+                        Ok(Value::Undefined) => self
+                            .resolve_this(&constructor_scope)
+                            .map_err(|error| error.with_context(None, self.get_stack())),
+                        Ok(_) => Err(VmErr::Msg(
+                            "TypeError: derived constructor must return an object or undefined"
+                                .into(),
+                        )
+                        .with_context(None, self.get_stack())),
                         error => error,
                     }
                 } else {
@@ -1689,10 +2157,9 @@ impl Interpreter {
             }
             // A proxy over a function: `apply` intercepts the call.
             Value::Proxy(proxy) => {
-                let target = proxy.target.clone();
-                match self.proxy_trap(&proxy.clone(), "apply") {
+                let (target, handler) = proxy.snapshot()?;
+                match self.proxy_trap(&handler, "apply")? {
                     Some(trap) => {
-                        let handler = proxy.handler.clone();
                         let arg_list = Value::checked_array(args)?;
                         self.call_this(&trap, handler, vec![target, this_val, arg_list])
                     }
@@ -1836,9 +2303,7 @@ impl Interpreter {
             // called directly and their fresh result is discarded by the
             // caller, matching the pre-existing `super()` contract.
             Value::Object { .. } => {
-                if let Some(target) =
-                    callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
-                {
+                if let Some(target) = construct_slot(f) {
                     return self.call_this(&target, this_val, args);
                 }
                 vm_err("TypeError: object is not a constructor".to_string())
@@ -1890,11 +2355,26 @@ impl Interpreter {
     }
 
     pub(crate) fn ctor(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
-        let owner = super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
-        self.with_global_storage(owner.clone(), |vm| {
+        let caller = self.persistent_global.clone();
+        // EvaluateNew checks IsConstructor in the evaluating caller's realm,
+        // before entering the operand's realm or reading newTarget.prototype.
+        if !crate::builtins::is_constructor(f) {
+            let _error_realm = super::realm::AllocationRealm::enter(Some(caller));
+            return Err(VmErr::Msg("TypeError: value is not a constructor".into())
+                .with_context(None, self.get_stack()));
+        }
+        let owner = if matches!(f, Value::Proxy(_)) {
+            caller.clone()
+        } else {
+            super::realm::value_realm(f).unwrap_or_else(|| caller.clone())
+        };
+        self.constructor_error_realms.push(caller);
+        let result = self.with_global_storage(owner.clone(), |vm| {
             let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
             vm.ctor_in_realm(f, args)
-        })
+        });
+        self.constructor_error_realms.pop();
+        result
     }
 
     fn ctor_in_realm(&mut self, f: &Value, args: Vec<Value>) -> Result<Value, VmErr> {
@@ -1912,7 +2392,10 @@ impl Interpreter {
         new_target: Value,
     ) -> Result<Value, VmErr> {
         self.new_target_stack.push(new_target.clone());
+        self.constructor_error_realms
+            .push(self.persistent_global.clone());
         let result = self.ctor_with_new_target(target, args, new_target);
+        self.constructor_error_realms.pop();
         self.new_target_stack.pop();
         result
     }
@@ -1923,12 +2406,32 @@ impl Interpreter {
         args: Vec<Value>,
         new_target: Value,
     ) -> Result<Value, VmErr> {
+        // Proxy [[Construct]] runs in its caller's context; delegation enters
+        // the target's realm. Native prototype lookup is part of construction,
+        // so it must enter that realm before any observable newTarget access.
+        let owner = if matches!(f, Value::Proxy(_)) {
+            self.persistent_global.clone()
+        } else {
+            super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone())
+        };
+        self.with_global_storage(owner.clone(), |vm| {
+            let _allocation_realm = super::realm::AllocationRealm::enter(Some(owner));
+            vm.ctor_with_new_target_in_context(f, args, new_target)
+                .map_err(|error| error.with_context(None, vm.get_stack()))
+        })
+    }
+
+    fn ctor_with_new_target_in_context(
+        &mut self,
+        f: &Value,
+        args: Vec<Value>,
+        new_target: Value,
+    ) -> Result<Value, VmErr> {
         // A built-in namespace object constructs through its internal slot:
         // `new Map()` and `Map()` reach the same implementation unless the
         // built-in installs a separate one.
         if let Value::Object { .. } = f
-            && let Some(target) =
-                callable_slot(f, CONSTRUCT_SLOT).or_else(|| callable_slot(f, CALL_SLOT))
+            && let Some(target) = construct_slot(f)
         {
             let owner =
                 super::realm::value_realm(f).unwrap_or_else(|| self.persistent_global.clone());
@@ -1936,8 +2439,17 @@ impl Interpreter {
                 .borrow()
                 .intrinsic_name(f)
                 .unwrap_or_else(|| "Object".into());
-            if matches!(builtin.as_str(), "Map" | "Set" | "WeakMap" | "WeakSet") {
-                // Collections already perform OrdinaryCreateFromConstructor
+            if matches!(
+                builtin.as_str(),
+                "Map"
+                    | "Set"
+                    | "WeakMap"
+                    | "WeakSet"
+                    | "ArrayBuffer"
+                    | "SharedArrayBuffer"
+                    | "Proxy"
+            ) {
+                // These constructors perform OrdinaryCreateFromConstructor
                 // using the active newTarget. Do not read prototype twice.
                 return self.call_this(&target, f.clone(), args);
             }
@@ -1947,7 +2459,8 @@ impl Interpreter {
                 // prototype when constructed with its own newTarget.
                 return self.call_this(&target, f.clone(), args);
             }
-            let prototype_after_arguments = (builtin.ends_with("Array")
+            let prototype_after_arguments = (builtin != "Array"
+                && builtin.ends_with("Array")
                 && args.first().is_some_and(|value| !is_js_object(value)))
                 || matches!(
                     builtin.as_str(),
@@ -1960,6 +2473,9 @@ impl Interpreter {
                         | "SharedArrayBuffer"
                         | "DataView"
                         | "Function"
+                        | "%AsyncFunction%"
+                        | "%GeneratorFunction%"
+                        | "%AsyncGeneratorFunction%"
                         | "WeakRef"
                         | "FinalizationRegistry"
                 );
@@ -2001,22 +2517,15 @@ impl Interpreter {
             return Ok(result);
         }
         if let Some(proxy) = f.as_proxy() {
-            let target = proxy.target.clone();
+            let (target, handler) = proxy.snapshot()?;
             // A construct trap cannot make a non-constructible target into a
             // constructor. Reject it before even reading the handler.
             if !crate::builtins::is_constructor(&target) {
                 return vm_err("TypeError: Proxy target is not a constructor");
             }
-            let trap = self.get_prop_value_str(&proxy.handler, "construct")?;
-            return match trap {
-                Value::Undefined | Value::Null => {
-                    self.ctor_with_new_target(&target, args, new_target)
-                }
-                trap => {
-                    if !is_callable_value(&trap) {
-                        return vm_err("TypeError: Proxy construct trap must be callable");
-                    }
-                    let handler = proxy.handler.clone();
+            return match self.proxy_trap(&handler, "construct")? {
+                None => self.ctor_with_new_target(&target, args, new_target),
+                Some(trap) => {
                     let arg_list = Value::checked_array(args)?;
                     let result =
                         self.call_this(&trap, handler, vec![target, arg_list, new_target])?;
@@ -2144,12 +2653,17 @@ fn make_generator_coroutine(
     args: Vec<Value>,
     builtins_env: Option<super::Env>,
     gen_depth: u32,
-    realm: super::Realm,
+    continuation: (
+        super::Realm,
+        Option<Rc<std::cell::Cell<crate::value::GenSuspension>>>,
+    ),
 ) -> Option<crate::value::GenCoroutine> {
     use corosensei::Coroutine;
     use corosensei::stack::DefaultStack;
 
     let (params, parameters_initialized) = parameters;
+    let (realm, suspension) = continuation;
+    let asynchronous = suspension.is_some();
     let stack = DefaultStack::new(GENERATOR_STACK_SIZE).ok()?;
 
     // The first `next()` only starts the body; JS discards its argument, since
@@ -2184,6 +2698,23 @@ fn make_generator_coroutine(
             // outlive its referent, and `GenYielder` is `!Send`, so it cannot
             // leave this thread. See `crate::value::GenYielder`.
             interp.gen_yielder = Some(unsafe { crate::value::GenYielder::new(yielder) });
+            if let Some(state) = suspension {
+                // SAFETY: both handles live only on this coroutine's owner stack.
+                interp.gen_yielder = Some(unsafe {
+                    crate::value::GenYielder::with_suspension(
+                        yielder,
+                        state.clone(),
+                        crate::value::GenSuspension::Yield,
+                    )
+                });
+                interp.await_yielder = Some(unsafe {
+                    crate::value::GenYielder::with_suspension(
+                        yielder,
+                        state,
+                        crate::value::GenSuspension::Await,
+                    )
+                });
+            }
 
             // Bind parameters in a child of the defining scope.
             let parent_env = closure.unwrap_or_else(|| interp.global.clone());
@@ -2193,6 +2724,7 @@ fn make_generator_coroutine(
                 Rc::new(RefCell::new(Environment::function_child(parent_env)))
             };
             fe.borrow_mut().set_new_target(Value::Undefined);
+            fe.borrow_mut().async_generator_body = asynchronous;
             for (i, p) in params
                 .iter()
                 .enumerate()
@@ -2210,8 +2742,8 @@ fn make_generator_coroutine(
                 // Abandoned while suspended: the initiating `Drop` consumes
                 // this; it is never reported to the driver.
                 Err(VmErr::Abandon) => GenOutcome::Abandon,
-                Err(VmErr::Msg(m)) => GenOutcome::Failed(m),
-                Err(VmErr::RuntimeError(e)) => GenOutcome::Failed(e.message.clone()),
+                Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
+                Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
                 // A break/continue escaping the generator body is a runtime error.
                 Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => {
                     GenOutcome::Failed(format!("{}", e))
@@ -2223,15 +2755,35 @@ fn make_generator_coroutine(
 
 /// `Generator.prototype.next`: resumes the generator (starting it on the first
 /// call), and produces a `{ value, done }` result object.
-#[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
 pub(crate) fn generator_next(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    require_sync_generator(&this)?;
+    generator_next_driver(interp, this, args)
+}
+
+fn require_sync_generator(value: &Value) -> Result<(), VmErr> {
+    if let Value::Generator { inner } = value
+        && inner.borrow().async_state.is_none()
+    {
+        return Ok(());
+    }
+    Err(VmErr::Msg(
+        "TypeError: Method requires a synchronous generator receiver".into(),
+    ))
+}
+
+#[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
+pub(crate) fn generator_next_driver(
     interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let inner_rc = match &this {
         Value::Generator { inner } => inner.clone(),
-        _ => return Ok(iter_result(Value::Undefined, true)),
+        _ => return vm_err("TypeError: Generator next requires a generator receiver"),
     };
 
     // Without stack switching a running body cannot be suspended (see
@@ -2289,7 +2841,7 @@ pub(crate) fn generator_next(
             Some(value) => Ok(iter_result(value, false)),
             None => {
                 inner.done = true;
-                let returned = inner.return_value.clone().unwrap_or(Value::Undefined);
+                let returned = inner.return_value.take().unwrap_or(Value::Undefined);
                 Ok(iter_result(returned, true))
             }
         }
@@ -2305,8 +2857,7 @@ pub(crate) fn generator_next(
             let mut inner = inner_rc.borrow_mut();
 
             if inner.done {
-                let rv = inner.return_value.clone().unwrap_or(Value::Undefined);
-                return Ok(iter_result(rv, true));
+                return Ok(iter_result(Value::Undefined, true));
             }
 
             if !inner.started {
@@ -2325,7 +2876,13 @@ pub(crate) fn generator_next(
                     inner.args.clone(),
                     builtins_env,
                     interp.gen_depth + 1,
-                    super::Realm::of(interp),
+                    (
+                        inner.realm.clone(),
+                        inner
+                            .async_state
+                            .as_ref()
+                            .map(|state| state.suspension.clone()),
+                    ),
                 );
                 if inner.coroutine.is_none() {
                     // Stack allocation failed; report an exhausted generator.
@@ -2432,13 +2989,22 @@ fn run_buffered_generator(
 /// `Generator.prototype.throw`: raise a value at the suspension point, so a
 /// `try`/`catch` around the `yield` inside the body sees it.
 pub(crate) fn generator_throw(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    require_sync_generator(&this)?;
+    generator_throw_driver(interp, this, args)
+}
+
+pub(crate) fn generator_throw_driver(
     _interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let thrown = args.into_iter().next().unwrap_or(Value::Undefined);
     let Value::Generator { inner } = &this else {
-        return Err(VmErr::Throw(thrown));
+        return vm_err("TypeError: Generator throw requires a generator receiver");
     };
 
     // Nothing is suspended on a target without stack switching, and a
@@ -2505,22 +3071,70 @@ pub(crate) fn generator_throw(
 /// `Generator.prototype.return`: finish the generator, running any `finally`
 /// blocks around the suspension point, and report the given value.
 pub(crate) fn generator_return(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    require_sync_generator(&this)?;
+    generator_return_driver(interp, this, args)
+}
+
+pub(crate) fn generator_return_driver(
     _interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let value = args.into_iter().next().unwrap_or(Value::Undefined);
-    if let Value::Generator { inner } = &this {
-        #[cfg(stackful_coroutines)]
-        inner.borrow_mut().close();
-        #[cfg(not(stackful_coroutines))]
-        {
+    let Value::Generator { inner } = &this else {
+        return vm_err("TypeError: Generator return requires a generator receiver");
+    };
+    #[cfg(stackful_coroutines)]
+    {
+        let mut coroutine = {
             let mut state = inner.borrow_mut();
-            state.done = true;
-            state.buffered.clear();
+            if state.done || !state.started {
+                state.done = true;
+                return Ok(iter_result(value, true));
+            }
+            state
+                .coroutine
+                .take()
+                .ok_or_else(|| VmErr::Msg("TypeError: Generator is already running".into()))?
+        };
+        let owner = inner
+            .borrow()
+            .closure
+            .as_ref()
+            .and_then(Environment::find_global);
+        let _allocation_boundary = super::realm::AllocationRealm::enter(owner);
+        let outcome = coroutine.resume(GenResume::Return(value));
+        let mut state = inner.borrow_mut();
+        match outcome {
+            corosensei::CoroutineResult::Yield(value) => {
+                state.coroutine = Some(coroutine);
+                Ok(iter_result(value, false))
+            }
+            corosensei::CoroutineResult::Return(outcome) => {
+                state.done = true;
+                match outcome {
+                    GenOutcome::Returned(value) => {
+                        state.return_value = Some(value.clone());
+                        Ok(iter_result(value, true))
+                    }
+                    GenOutcome::Threw(value) => Err(VmErr::Throw(value)),
+                    GenOutcome::Failed(message) => Err(VmErr::Msg(message)),
+                    GenOutcome::Abandon => vm_err("Error: Generator was abandoned during return"),
+                }
+            }
         }
     }
-    Ok(iter_result(value, true))
+    #[cfg(not(stackful_coroutines))]
+    {
+        let mut state = inner.borrow_mut();
+        state.done = true;
+        state.buffered.clear();
+        Ok(iter_result(value, true))
+    }
 }
 
 /// Build an iterator result object `{ value, done }`.

@@ -290,6 +290,7 @@ pub(super) unsafe extern "C" fn api_set_named_property(
                 | Value::Function(_)
                 | Value::HostFunction { .. }
                 | Value::GlobalObject
+                | Value::RealmGlobal(_)
         ) {
             return Err(NAPI_OBJECT_EXPECTED);
         }
@@ -303,8 +304,8 @@ pub(super) unsafe extern "C" fn api_set_named_property(
             )?;
             Ok(())
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_set(&environment, &key, value)
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_set(&environment, &object, &key, value)
             } else {
                 object
                     .set_prop(key, value)
@@ -339,8 +340,8 @@ pub(super) unsafe extern "C" fn api_get_named_property(
                 vec![Value::String(crate::JsString::from_key(&key))],
             )?
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_get(&environment, &key)?
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_get(&environment, &object, &key)?
             } else {
                 object.get_prop(&key).unwrap_or(Value::Undefined)
             }
@@ -376,8 +377,8 @@ pub(super) unsafe extern "C" fn api_get_property(
                 vec![key],
             )?
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_get(&environment, &napi_property_key(&key)?)?
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_get(&environment, &object, &napi_property_key(&key)?)?
             } else {
                 napi_direct_get_property(&object, &key)?
             }
@@ -417,8 +418,8 @@ pub(super) unsafe extern "C" fn api_set_property(
             )?;
             Ok(())
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_set(&environment, &napi_property_key(&key)?, value)
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_set(&environment, &object, &napi_property_key(&key)?, value)
             } else {
                 napi_direct_set_property(&object, &key, value)
             }
@@ -455,8 +456,8 @@ pub(super) unsafe extern "C" fn api_has_property(
             };
             found
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_has(&environment, &napi_property_key(&key)?)?
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_has(&environment, &object, &napi_property_key(&key)?)?
             } else {
                 object.has_prop(&napi_property_key(&key)?)
             }
@@ -524,8 +525,8 @@ pub(super) fn napi_delete_property_value(
             return Err(NAPI_GENERIC_FAILURE);
         };
         Ok(deleted)
-    } else if matches!(object, Value::GlobalObject) {
-        napi_global_delete(environment, &napi_property_key(&key)?)
+    } else if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+        napi_global_delete(environment, &object, &napi_property_key(&key)?)
     } else {
         napi_direct_delete_property(&object, &key)
     }
@@ -570,8 +571,8 @@ pub(super) unsafe extern "C" fn api_has_own_property(
             };
             found
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_has_own(&environment, &napi_property_key(&key)?)?
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_has_own(&environment, &object, &napi_property_key(&key)?)?
             } else {
                 napi_direct_has_own_property(&object, &key)?
             }
@@ -610,8 +611,8 @@ pub(super) unsafe extern "C" fn api_has_named_property(
             };
             found
         } else {
-            if matches!(object, Value::GlobalObject) {
-                napi_global_has(&environment, &name)?
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
+                napi_global_has(&environment, &object, &name)?
             } else {
                 object.has_prop(&name)
             }
@@ -644,11 +645,11 @@ pub(super) unsafe extern "C" fn api_get_property_names(
                 Vec::new(),
             )?
         } else {
-            if matches!(object, Value::GlobalObject) {
+            if matches!(object, Value::GlobalObject | Value::RealmGlobal(_)) {
                 Value::checked_array(
-                    napi_global_scope(&environment)?
+                    napi_global_receiver(&environment, &object)?
                         .borrow()
-                        .all_keys()
+                        .global_property_keys()
                         .into_iter()
                         .filter(|key| !crate::interpreter::is_internal_key(key))
                         .map(|value| Value::String(value.into()))

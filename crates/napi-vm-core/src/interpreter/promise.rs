@@ -14,17 +14,13 @@ use crate::error::VmErr;
 use crate::value::{PromiseInner, PromiseState, Reaction, Value};
 
 fn is_callable(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-    ) || crate::interpreter::call::callable_slot(value, crate::interpreter::call::CALL_SLOT)
-        .is_some()
+    super::call::is_callable_value(value)
 }
 
 fn promise_error_reason(error: VmErr) -> Value {
     match error {
         VmErr::Throw(reason) => reason,
-        VmErr::RuntimeError(data) => crate::error::error_value_from_msg(&data.message),
+        VmErr::RuntimeError(data) => data.guest_value(),
         other => crate::error::error_value_from_msg(&other.to_string()),
     }
 }
@@ -42,6 +38,21 @@ fn claim_resolution(guard: &Value) -> bool {
 }
 
 impl Interpreter {
+    /// PromiseResolve(%Promise%, value), used by Await. Constructor access on
+    /// an existing promise is observable and may throw before suspension.
+    pub(crate) fn promise_resolve_intrinsic(&mut self, value: Value) -> Result<Value, VmErr> {
+        if value.as_promise().is_some() {
+            let constructor = self.get_prop_value_str(&value, "constructor")?;
+            let intrinsic = self.persistent_global.borrow().intrinsic("Promise");
+            if intrinsic.is_some_and(|intrinsic| super::strict_equals(&constructor, &intrinsic)) {
+                return Ok(value);
+            }
+        }
+        let promise = Value::pending_promise();
+        self.resolve_promise(&promise, value)?;
+        Ok(Value::Promise(promise))
+    }
+
     /// Settle `promise` with `value` as its *resolution*, which is not the
     /// same as fulfilling it: resolving with a promise or a thenable adopts
     /// that object's eventual state instead of fulfilling with the object.
@@ -85,16 +96,10 @@ impl Interpreter {
             return Ok(());
         }
 
-        if let Value::Promise(_) = &value {
-            let target = promise.clone();
-            self.adopt(&value, target)?;
-            return Ok(());
-        }
-
         // Thenable assimilation: any object with a callable `then` is treated
         // as a promise, which is how promises from other implementations
         // interoperate.
-        if matches!(value, Value::Object { .. }) {
+        if super::call::is_js_object(&value) {
             let then = match self.member(&value, "then") {
                 Ok(then) => then,
                 Err(error) => {
@@ -111,6 +116,8 @@ impl Interpreter {
                 self.jobs
                     .borrow_mut()
                     .push_microtask(Job::PromiseResolveThenable {
+                        realm: super::realm::value_realm(&then)
+                            .unwrap_or_else(|| self.persistent_global.clone()),
                         target: promise.clone(),
                         thenable: value,
                         then,
@@ -136,12 +143,6 @@ impl Interpreter {
             inner.resolution_locked = true;
         }
         settle(&self.jobs, promise, PromiseState::Rejected, reason);
-    }
-
-    /// Make `target` follow `source`'s eventual state.
-    fn adopt(&mut self, source: &Value, target: Rc<RefCell<PromiseInner>>) -> Result<(), VmErr> {
-        self.register(source, Value::Undefined, Value::Undefined, Some(target))?;
-        Ok(())
     }
 
     fn run_thenable_job(
@@ -178,27 +179,10 @@ impl Interpreter {
         promise: Rc<RefCell<PromiseInner>>,
     ) -> (Value, Value) {
         let carrier = Value::Promise(promise);
-        let resolve = Value::object(vec![
-            (TARGET_SLOT.to_string(), carrier.clone()),
-            (
-                crate::interpreter::call::CALL_SLOT.to_string(),
-                Value::NativeFunction {
-                    name: "resolve".into(),
-                    callable: executor_resolve,
-                },
-            ),
-        ]);
-        let reject = Value::object(vec![
-            (TARGET_SLOT.to_string(), carrier),
-            (
-                crate::interpreter::call::CALL_SLOT.to_string(),
-                Value::NativeFunction {
-                    name: "reject".into(),
-                    callable: executor_reject,
-                },
-            ),
-        ]);
-        (resolve, reject)
+        (
+            resolving_function(&carrier, None, executor_resolve),
+            resolving_function(&carrier, None, executor_reject),
+        )
     }
 
     fn thenable_settle_functions(
@@ -206,22 +190,9 @@ impl Interpreter {
         resolution_guard: Value,
     ) -> (Value, Value) {
         let carrier = Value::Promise(promise);
-        let make_resolver = |name: &str, callable| {
-            Value::object(vec![
-                (TARGET_SLOT.to_owned(), carrier.clone()),
-                (RESOLUTION_GUARD_SLOT.to_owned(), resolution_guard.clone()),
-                (
-                    crate::interpreter::call::CALL_SLOT.to_owned(),
-                    Value::NativeFunction {
-                        name: name.into(),
-                        callable,
-                    },
-                ),
-            ])
-        };
         (
-            make_resolver("resolve", thenable_resolve),
-            make_resolver("reject", thenable_reject),
+            resolving_function(&carrier, Some(&resolution_guard), thenable_resolve),
+            resolving_function(&carrier, Some(&resolution_guard), thenable_reject),
         )
     }
 
@@ -322,7 +293,7 @@ impl Interpreter {
                 self.reject_promise(&reaction.derived, reason);
             }
             Err(VmErr::RuntimeError(data)) => {
-                let reason = crate::error::error_value_from_msg(&data.message);
+                let reason = data.guest_value();
                 self.reject_promise(&reaction.derived, reason);
             }
             Err(other) => return Err(other),
@@ -376,11 +347,15 @@ impl Interpreter {
                 reaction,
             } => self.run_reaction(state, value, reaction),
             Job::PromiseResolveThenable {
+                realm,
                 target,
                 thenable,
                 then,
                 resolution_guard,
-            } => self.run_thenable_job(target, &thenable, &then, resolution_guard),
+            } => self.with_global_storage(realm.clone(), |vm| {
+                let _allocation = super::realm::AllocationRealm::enter(Some(realm));
+                vm.run_thenable_job(target, &thenable, &then, resolution_guard)
+            }),
             Job::Callback { callback, args } => self
                 .call_this(&callback, Value::Undefined, args)
                 .map(|_| ()),
@@ -483,6 +458,7 @@ impl Interpreter {
             {
                 return Ok(self.outcome(executed, YieldReason::TimeBudget));
             }
+            super::jobs::settle_notified_atomics_waiters(&self.jobs);
             let micro = self.jobs.borrow().has_microtasks();
             if !micro {
                 self.jobs.borrow_mut().checkpoint_pending = false;
@@ -746,6 +722,21 @@ impl Interpreter {
 /// Hidden slot carrying the promise a `resolve`/`reject` function settles.
 const TARGET_SLOT: &str = "__symbol_promise_target__";
 const RESOLUTION_GUARD_SLOT: &str = "__symbol_promise_resolution_guard__";
+
+fn resolving_function(
+    carrier: &Value,
+    guard: Option<&Value>,
+    callable: crate::builtins::NativeFn,
+) -> Value {
+    let mut slots = vec![(TARGET_SLOT.into(), carrier.clone())];
+    if let Some(guard) = guard {
+        slots.push((RESOLUTION_GUARD_SLOT.into(), guard.clone()));
+    }
+    let state = Value::object(slots);
+    let prototype = super::realm::allocation_global()
+        .and_then(|realm| crate::value::FunctionData::default_function_prototype(&realm));
+    crate::builtins::bound_native_method("", 1, callable, prototype, state)
+}
 
 fn target_of(this: &Value) -> Option<Rc<RefCell<PromiseInner>>> {
     this.get_prop(TARGET_SLOT)?.as_promise()

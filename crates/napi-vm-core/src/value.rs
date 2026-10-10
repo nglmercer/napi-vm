@@ -1,5 +1,6 @@
+mod shared;
 pub(crate) mod weak;
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+pub use shared::{SharedGrowError, SharedMemory, SharedWaitRegistration, SharedWaitResult};
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -208,11 +209,76 @@ pub struct ObjectMeta {
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
+    /// Presence of [[ErrorData]], independent of prototypes and realms.
+    pub(crate) error_object: bool,
     /// Lexical private field identities never enter ordinary property storage.
-    pub(crate) private_fields: std::collections::HashMap<u64, Value>,
+    pub(crate) private_elements: std::collections::HashMap<u64, PrivateElement>,
+    /// Intrinsic iterator/continuation state, invisible to property operations.
+    pub(crate) async_from_sync: Option<crate::interpreter::async_from_sync::Slots>,
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
     /// property cell so that value remains compact.
     pub(crate) host_function_id: Option<usize>,
+    /// The revoker's internal [[RevocableProxy]], invisible to property keys.
+    pub(crate) revocable_proxy: Option<Rc<ProxyData>>,
+}
+
+/// Private slots have lexical identities and explicit kinds. Callable fields
+/// are data; methods are read-only; accessors retain their original functions.
+#[derive(Debug, Clone)]
+pub(crate) enum PrivateElement {
+    Field(Value),
+    Method(Value),
+    Accessor {
+        get: Option<Value>,
+        set: Option<Value>,
+    },
+}
+
+impl PrivateElement {
+    pub(crate) fn values(&self) -> Vec<Value> {
+        match self {
+            Self::Field(value) | Self::Method(value) => vec![value.clone()],
+            Self::Accessor { get, set } => get.iter().chain(set.iter()).cloned().collect(),
+        }
+    }
+
+    pub(crate) fn into_values(self) -> Vec<Value> {
+        match self {
+            Self::Field(value) | Self::Method(value) => vec![value],
+            Self::Accessor { get, set } => get.into_iter().chain(set).collect(),
+        }
+    }
+
+    /// Combine the getter/setter declarations of one lexical private name.
+    pub(crate) fn define(
+        definitions: &mut Vec<(u64, Self)>,
+        id: u64,
+        element: Self,
+    ) -> Result<(), VmErr> {
+        if let Some((_, existing)) = definitions.iter_mut().find(|(key, _)| *key == id) {
+            if let (
+                Self::Accessor { get, set },
+                Self::Accessor {
+                    get: new_get,
+                    set: new_set,
+                },
+            ) = (existing, element)
+            {
+                if new_get.is_some() {
+                    *get = new_get;
+                }
+                if new_set.is_some() {
+                    *set = new_set;
+                }
+                return Ok(());
+            }
+            return Err(VmErr::Msg(
+                "TypeError: duplicate private element definition".into(),
+            ));
+        }
+        definitions.push((id, element));
+        Ok(())
+    }
 }
 
 // Prototype and realm edges form cycles. Debug output must not traverse them.
@@ -619,7 +685,15 @@ impl ArrayCell {
             out.extend(named.iter().map(|(_, v)| v.clone()));
         }
         if let Ok(meta) = self.meta.try_borrow() {
-            out.extend(meta.private_fields.values().cloned());
+            out.extend(
+                meta.private_elements
+                    .values()
+                    .flat_map(PrivateElement::values),
+            );
+            out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
+            if let Some(slots) = &meta.async_from_sync {
+                out.extend(slots.values());
+            }
             out.extend(meta.proto.as_deref().cloned());
             out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             out.extend(
@@ -647,7 +721,9 @@ impl ArrayCell {
         };
         elements.clear();
         named.clear();
-        meta.private_fields.clear();
+        meta.private_elements.clear();
+        meta.async_from_sync = None;
+        meta.revocable_proxy = None;
         meta.proto = None;
         meta.realm_global = None;
         true
@@ -740,7 +816,15 @@ impl ObjectCell {
             out.extend(slots.iter().map(|(_, v)| v.clone()));
         }
         if let Ok(meta) = self.meta.try_borrow() {
-            out.extend(meta.private_fields.values().cloned());
+            out.extend(
+                meta.private_elements
+                    .values()
+                    .flat_map(PrivateElement::values),
+            );
+            out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
+            if let Some(slots) = &meta.async_from_sync {
+                out.extend(slots.values());
+            }
             out.extend(meta.proto.as_deref().cloned());
             out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             if let Some(BoxedPrimitive::Symbol(symbol)) = &meta.boxed_primitive {
@@ -772,7 +856,9 @@ impl ObjectCell {
             *weak = weak::WeakStorage::None;
         }
         meta.symbol_keys.clear();
-        meta.private_fields.clear();
+        meta.private_elements.clear();
+        meta.async_from_sync = None;
+        meta.revocable_proxy = None;
         meta.proto = None;
         meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access
@@ -864,18 +950,16 @@ impl ObjectCell {
     /// the shape already knows means the push surprised the cache (or the
     /// shape lagged a bypass), so rebuild instead of forking a duplicate.
     pub(crate) fn note_key_added(&self, key: &str) {
-        let cached = self.shape.borrow().clone();
-        let Some(shape) = cached else {
+        let mut cached = self.shape.borrow_mut();
+        let Some(shape) = cached.as_mut() else {
             // Unbuilt shapes build lazily with the key already in place.
             return;
         };
         if shape.slot_of(key).is_some() {
             let slots = self.slots.borrow();
-            *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
-                slots.iter().map(|(k, _)| k.as_str()),
-            ));
+            *shape = crate::shape::Shape::rebuild(slots.iter().map(|(k, _)| k.as_str()));
         } else {
-            *self.shape.borrow_mut() = Some(shape.add(key));
+            crate::shape::Shape::append(shape, key);
         }
     }
 
@@ -1036,6 +1120,28 @@ impl FunctionData {
         properties
     }
 
+    pub(crate) fn properties_with_function_kind(
+        global: &Env,
+        asynchronous: bool,
+        generator: bool,
+    ) -> Rc<ObjectCell> {
+        let properties = Self::properties_with_default_prototype(global);
+        let kind = match (asynchronous, generator) {
+            (true, true) => "%AsyncGeneratorFunction%",
+            (true, false) => "%AsyncFunction%",
+            (false, true) => "%GeneratorFunction%",
+            _ => return properties,
+        };
+        if let Some(prototype) = global
+            .borrow()
+            .intrinsic(kind)
+            .and_then(|constructor| constructor.get_prop("prototype"))
+        {
+            properties.set_proto(Some(Rc::new(prototype)));
+        }
+        properties
+    }
+
     pub(crate) fn needs_arguments_object(&self) -> bool {
         if self.is_arrow
             || self
@@ -1069,6 +1175,31 @@ impl FunctionData {
             return;
         }
         let mut properties = self.properties.borrow_mut();
+        // Legacy ordinary non-strict functions may expose null caller and
+        // arguments properties. Other function kinds inherit the restricted
+        // accessors from Function.prototype.
+        if !self.strict
+            && self.is_constructor
+            && !self.is_arrow
+            && !self.is_async
+            && !self.is_generator
+            && self.native.is_none()
+            && self.bound.is_none()
+        {
+            for key in ["caller", "arguments"] {
+                if !properties.iter().any(|(name, _)| name == key) {
+                    properties.push((key.into(), Value::Null));
+                    self.properties.meta.borrow_mut().set_attrs(
+                        key,
+                        PropAttrs {
+                            writable: false,
+                            enumerable: false,
+                            configurable: false,
+                        },
+                    );
+                }
+            }
+        }
         if !properties.iter().any(|(key, _)| key == "length") {
             properties.push((
                 "length".to_string(),
@@ -1121,11 +1252,21 @@ impl FunctionData {
         if self.bound.is_some() {
             return Value::Undefined;
         }
-        if !self.is_constructor {
+        if !self.is_constructor && !self.is_generator {
             return Value::Undefined;
         }
-
-        let prototype = Value::object(vec![("constructor".to_string(), function.clone())]);
+        let owner = crate::interpreter::realm::value_realm(function);
+        let _allocation_realm = crate::interpreter::realm::AllocationRealm::enter(owner.clone());
+        let prototype = if self.is_generator {
+            Value::object_with_proto(
+                vec![],
+                owner
+                    .and_then(|global| Self::generator_default_prototype(&global, self.is_async))
+                    .map(Rc::new),
+            )
+        } else {
+            Value::object(vec![("constructor".to_string(), function.clone())])
+        };
         if let Value::Object { props } = &prototype {
             props.meta.borrow_mut().set_attrs(
                 "constructor",
@@ -1158,12 +1299,23 @@ impl FunctionData {
         );
         prototype
     }
+
+    pub(crate) fn generator_default_prototype(global: &Env, is_async: bool) -> Option<Value> {
+        let global = global.borrow();
+        let kind = if is_async {
+            "%AsyncGeneratorPrototype%"
+        } else {
+            "%GeneratorPrototype%"
+        };
+        global.intrinsic(kind)
+    }
 }
 
 /// Lazy state for a string iterator. The source is shared and the cursor is a
 /// UTF-8 byte offset, so `next()` creates only the one scalar value requested.
 #[derive(Debug, Clone)]
 pub struct StringIteratorData {
+    pub properties: Rc<ObjectCell>,
     pub source: crate::JsString,
     pub cursor: usize,
 }
@@ -1245,6 +1397,7 @@ pub struct Buffer(Rc<BufferData>);
 
 #[derive(Debug)]
 struct BufferData {
+    maximum_length: Option<usize>,
     storage: RefCell<BufferStorage>,
     properties: Rc<ObjectCell>,
 }
@@ -1259,6 +1412,7 @@ impl std::ops::Deref for BufferData {
 impl Buffer {
     pub fn owned(bytes: Vec<u8>) -> Self {
         Self(Rc::new(BufferData {
+            maximum_length: None,
             storage: RefCell::new(BufferStorage::Owned(bytes)),
             properties: Value::instance_properties(),
         }))
@@ -1266,6 +1420,50 @@ impl Buffer {
 
     pub fn zeroed(length: usize) -> Self {
         Self::owned(vec![0; length])
+    }
+
+    pub(crate) fn resizable(length: usize, maximum: usize) -> Option<Self> {
+        if length > maximum {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(maximum).ok()?;
+        bytes.resize(length, 0);
+        Some(Self(Rc::new(BufferData {
+            maximum_length: Some(maximum),
+            storage: RefCell::new(BufferStorage::Owned(bytes)),
+            properties: Value::instance_properties(),
+        })))
+    }
+
+    pub fn is_resizable(&self) -> bool {
+        self.0.maximum_length.is_some()
+    }
+    pub fn maximum_length(&self) -> usize {
+        if self.is_detached() {
+            0
+        } else {
+            self.0.maximum_length.unwrap_or_else(|| self.borrow().len())
+        }
+    }
+    pub fn resize(&self, length: usize) -> Result<(), VmErr> {
+        let maximum = self
+            .0
+            .maximum_length
+            .ok_or_else(|| VmErr::Msg("TypeError: ArrayBuffer is not resizable".into()))?;
+        let mut storage = self.0.borrow_mut();
+        let BufferStorage::Owned(bytes) = &mut *storage else {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot resize a detached ArrayBuffer".into(),
+            ));
+        };
+        if length > maximum {
+            return Err(VmErr::Msg(
+                "RangeError: Invalid ArrayBuffer resize length".into(),
+            ));
+        }
+        bytes.resize(length, 0);
+        Ok(())
     }
 
     /// Wrap a native-owned byte range without copying it.
@@ -1280,6 +1478,7 @@ impl Buffer {
             None => return None,
         };
         Some(Self(Rc::new(BufferData {
+            maximum_length: None,
             storage: RefCell::new(BufferStorage::External { data, length }),
             properties: Value::instance_properties(),
         })))
@@ -1329,15 +1528,8 @@ impl Buffer {
 /// and synchronization contract as external ArrayBuffers.
 #[derive(Debug)]
 enum SharedByteStorage {
-    Owned {
-        data: NonNull<u8>,
-        length: usize,
-        layout: Layout,
-    },
-    External {
-        data: NonNull<u8>,
-        length: usize,
-    },
+    Owned(SharedMemory),
+    External { data: NonNull<u8>, length: usize },
 }
 
 unsafe fn load_shared_byte(pointer: *mut u8) -> u8 {
@@ -1371,17 +1563,20 @@ unsafe fn store_shared_byte(pointer: *mut u8, value: u8) {
 impl SharedByteStorage {
     fn data(&self) -> NonNull<u8> {
         match self {
-            Self::Owned { data, .. } | Self::External { data, .. } => *data,
+            Self::Owned(memory) => memory.data(),
+            Self::External { data, .. } => *data,
         }
     }
 
     fn len(&self) -> usize {
         match self {
-            Self::Owned { length, .. } | Self::External { length, .. } => *length,
+            Self::Owned(memory) => memory.len(),
+            Self::External { length, .. } => *length,
         }
     }
 
     fn snapshot(&self) -> Vec<u8> {
+        let _access = self.access();
         (0..self.len())
             .map(|index| {
                 // SAFETY: the allocation covers `len` bytes and AtomicU8 has
@@ -1393,6 +1588,7 @@ impl SharedByteStorage {
     }
 
     fn read(&self, offset: usize, length: usize) -> Option<Vec<u8>> {
+        let _access = self.access();
         let end = offset.checked_add(length)?;
         if end > self.len() {
             return None;
@@ -1409,6 +1605,7 @@ impl SharedByteStorage {
     }
 
     fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+        let _access = self.access();
         let Some(end) = offset.checked_add(bytes.len()) else {
             return false;
         };
@@ -1424,12 +1621,11 @@ impl SharedByteStorage {
     }
 }
 
-impl Drop for SharedByteStorage {
-    fn drop(&mut self) {
-        if let Self::Owned { data, layout, .. } = self {
-            // SAFETY: this pointer and layout are the exact pair returned by
-            // `alloc_zeroed` in `SharedBuffer::zeroed`.
-            unsafe { dealloc(data.as_ptr(), *layout) };
+impl SharedByteStorage {
+    fn access(&self) -> Option<std::sync::MutexGuard<'_, ()>> {
+        match self {
+            Self::Owned(memory) => Some(memory.access()),
+            Self::External { .. } => None,
         }
     }
 }
@@ -1458,21 +1654,48 @@ pub enum SharedAtomicOp {
 
 impl SharedBuffer {
     pub fn zeroed(length: usize) -> Option<Self> {
-        // Pad the allocation so Atomics can address aligned 16/32/64-bit
-        // elements through the pointer returned by Node-API.
-        let allocation_length = length.max(1).checked_add(7)? & !7;
-        let layout = Layout::from_size_align(allocation_length, 8).ok()?;
-        // SAFETY: layout is non-zero and valid; the storage is deallocated by
-        // SharedByteStorage::drop.
-        let data = NonNull::new(unsafe { alloc_zeroed(layout) })?;
-        Some(Self(Rc::new(SharedArrayBufferData {
+        let memory = SharedMemory::zeroed(length)?;
+        Some(Self::from_shared_memory(memory))
+    }
+
+    pub fn zeroed_with_maximum(length: usize, maximum: Option<usize>) -> Option<Self> {
+        Some(Self::from_shared_memory(SharedMemory::zeroed_with_maximum(
+            length, maximum,
+        )?))
+    }
+
+    pub fn is_growable(&self) -> bool {
+        self.shared_memory()
+            .is_some_and(|memory| memory.is_growable())
+    }
+
+    pub fn maximum_length(&self) -> usize {
+        self.shared_memory()
+            .map_or_else(|| self.len(), |memory| memory.maximum_length())
+    }
+
+    pub fn grow(&self, length: usize) -> Result<(), shared::SharedGrowError> {
+        self.shared_memory()
+            .ok_or(shared::SharedGrowError::NotGrowable)?
+            .grow(length)
+    }
+
+    /// Create a realm-local SAB wrapper from an owned, thread-safe data block.
+    /// No guest properties, realm state or Interpreter crosses the boundary.
+    pub fn from_shared_memory(memory: SharedMemory) -> Self {
+        Self(Rc::new(SharedArrayBufferData {
             properties: Value::instance_properties(),
-            bytes: Rc::new(SharedByteStorage::Owned {
-                data,
-                length,
-                layout,
-            }),
-        })))
+            bytes: Rc::new(SharedByteStorage::Owned(memory)),
+        }))
+    }
+
+    /// Export only owned backing memory. Addon-owned external memory cannot
+    /// be transferred because its finalizer belongs to its original host.
+    pub fn shared_memory(&self) -> Option<SharedMemory> {
+        match &*self.0.bytes {
+            SharedByteStorage::Owned(memory) => Some(memory.clone()),
+            SharedByteStorage::External { .. } => None,
+        }
     }
 
     /// Wrap addon-owned bytes as a shared buffer without copying them.
@@ -1525,7 +1748,82 @@ impl SharedBuffer {
     /// Identity of the shared data block, which remains the same when a
     /// SharedArrayBuffer object is structured-cloned into another wrapper.
     pub fn wait_identity(&self) -> usize {
-        Rc::as_ptr(&self.0.bytes) as usize
+        match &*self.0.bytes {
+            SharedByteStorage::Owned(memory) => memory.identity(),
+            SharedByteStorage::External { .. } => Rc::as_ptr(&self.0.bytes) as usize,
+        }
+    }
+
+    /// Block only the calling owner thread, coordinating through native state.
+    pub fn wait(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+    ) -> Option<SharedWaitResult> {
+        self.atomic_pointer(offset, width)?;
+        let memory = self.shared_memory()?;
+        Some(memory.wait(
+            offset,
+            timeout_ms,
+            || self.atomic_load(offset, width) == Some(expected),
+            || false,
+        ))
+    }
+
+    pub fn wait_cancellable(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+        cancellation: &crate::CancellationToken,
+    ) -> Option<SharedWaitResult> {
+        self.atomic_pointer(offset, width)?;
+        let memory = self.shared_memory()?;
+        Some(memory.wait(
+            offset,
+            timeout_ms,
+            || self.atomic_load(offset, width) == Some(expected),
+            || cancellation.is_cancelled(),
+        ))
+    }
+
+    /// The interruption predicate runs only on the calling VM owner thread.
+    pub fn wait_interruptible(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+        interrupted: impl Fn() -> bool,
+    ) -> Option<SharedWaitResult> {
+        self.atomic_pointer(offset, width)?;
+        Some(self.shared_memory()?.wait(
+            offset,
+            timeout_ms,
+            || self.atomic_load(offset, width) == Some(expected),
+            interrupted,
+        ))
+    }
+
+    pub fn register_wait(
+        &self,
+        offset: usize,
+        width: usize,
+        expected: u64,
+        timeout_ms: f64,
+    ) -> Option<Result<SharedWaitRegistration, SharedWaitResult>> {
+        self.atomic_pointer(offset, width)?;
+        Some(self.shared_memory()?.register_wait(offset, timeout_ms, || {
+            self.atomic_load(offset, width) == Some(expected)
+        }))
+    }
+
+    pub fn notify(&self, offset: usize, count: usize) -> usize {
+        self.shared_memory()
+            .map_or(0, |memory| memory.notify(offset, count))
     }
 
     fn atomic_pointer(&self, offset: usize, width: usize) -> Option<*mut u8> {
@@ -1546,6 +1844,7 @@ impl SharedBuffer {
         target_has_atomic = "64"
     ))]
     pub fn atomic_load(&self, offset: usize, width: usize) -> Option<u64> {
+        let _access = self.0.bytes.access();
         let pointer = self.atomic_pointer(offset, width)?;
         // SAFETY: `atomic_pointer` checks bounds and alignment. The shared
         // allocation is initialized to zero and VM/native concurrent access
@@ -1578,6 +1877,7 @@ impl SharedBuffer {
         target_has_atomic = "64"
     ))]
     pub fn atomic_store(&self, offset: usize, width: usize, value: u64) -> bool {
+        let _access = self.0.bytes.access();
         let Some(pointer) = self.atomic_pointer(offset, width) else {
             return false;
         };
@@ -1619,6 +1919,7 @@ impl SharedBuffer {
         value: u64,
         replacement: u64,
     ) -> Option<u64> {
+        let _access = self.0.bytes.access();
         let pointer = self.atomic_pointer(offset, width)?;
         // SAFETY: `atomic_pointer` checks bounds and alignment. All concurrent
         // VM/native accesses to this shared allocation are atomic.
@@ -1850,6 +2151,8 @@ pub struct TypedArrayData {
     pub byte_offset: usize,
     /// Element count for a typed array; *byte* count for a `DataView`.
     pub length: usize,
+    /// An omitted length over growable backing follows its current extent.
+    pub length_tracking: bool,
     /// Node's `Buffer` subclasses `Uint8Array`, but keeps distinct prototype
     /// and coercion behavior. The shared storage shape represents both.
     pub is_buffer: bool,
@@ -1857,15 +2160,32 @@ pub struct TypedArrayData {
 
 impl TypedArrayData {
     pub fn effective_length(&self) -> usize {
-        if self.buffer.is_detached() {
+        if self.is_out_of_bounds() {
             0
+        } else if self.length_tracking {
+            self.buffer.len().saturating_sub(self.byte_offset) / self.kind.size()
         } else {
             self.length
         }
     }
 
-    pub fn effective_byte_offset(&self) -> usize {
+    pub fn is_out_of_bounds(&self) -> bool {
         if self.buffer.is_detached() {
+            return true;
+        }
+        let length = self.buffer.len();
+        if self.length_tracking {
+            self.byte_offset > length
+        } else {
+            self.length
+                .checked_mul(self.kind.size())
+                .and_then(|size| self.byte_offset.checked_add(size))
+                .is_none_or(|end| end > length)
+        }
+    }
+
+    pub fn effective_byte_offset(&self) -> usize {
+        if self.is_out_of_bounds() {
             0
         } else {
             self.byte_offset
@@ -1876,13 +2196,74 @@ impl TypedArrayData {
 /// Payload of `Value::Proxy`.
 #[derive(Debug)]
 pub struct ProxyData {
-    pub target: Value,
-    pub handler: Value,
+    slots: RefCell<Option<(Value, Value)>>,
+    /// Private elements belong to the Proxy itself, independently of its
+    /// target, traps, and revocation state. Allocate storage only when branded.
+    private_storage: RefCell<Option<Rc<ObjectCell>>>,
+    pub(crate) callable: bool,
+    pub(crate) constructible: bool,
+}
+
+impl ProxyData {
+    pub fn new(target: Value, handler: Value) -> Self {
+        let callable = crate::interpreter::call::is_callable_value(&target);
+        let constructible = crate::builtins::is_constructor(&target);
+        Self {
+            slots: RefCell::new(Some((target, handler))),
+            private_storage: RefCell::new(None),
+            callable,
+            constructible,
+        }
+    }
+
+    /// ValidateNonRevokedProxy. Both slots are captured before guest re-entry;
+    /// revocation during a trap getter does not alter this operation's slots.
+    pub fn snapshot(&self) -> Result<(Value, Value), VmErr> {
+        self.slots.borrow().clone().ok_or_else(|| {
+            VmErr::Msg("TypeError: Cannot perform operation on a revoked Proxy".into())
+        })
+    }
+
+    /// Non-observable host inspection. Guest internal methods use snapshot.
+    pub(crate) fn target_for_inspection(&self) -> Value {
+        self.slots
+            .borrow()
+            .as_ref()
+            .map_or(Value::Null, |(target, _)| target.clone())
+    }
+
+    pub(crate) fn revoke(&self) {
+        self.slots.borrow_mut().take();
+    }
+
+    fn private_properties(&self, create: bool) -> Option<Rc<ObjectCell>> {
+        let mut storage = self.private_storage.borrow_mut();
+        if create && storage.is_none() {
+            let mut properties = ObjectCell::new(Vec::new(), None);
+            // This is an internal slot container, not a guest allocation.
+            // Its values retain their own realms; a primitive private field
+            // must not keep the defining constructor's entire realm alive.
+            properties.meta.get_mut().realm_global = None;
+            *storage = Some(crate::heap::tracked(Rc::new(properties)));
+        }
+        storage.clone()
+    }
+
+    pub(crate) fn trace_children(&self) -> Option<Vec<Value>> {
+        let slots = self.slots.try_borrow().ok()?;
+        let storage = self.private_storage.try_borrow().ok()?;
+        let mut values = slots.as_ref().map_or_else(Vec::new, |(target, handler)| {
+            vec![target.clone(), handler.clone()]
+        });
+        values.extend(storage.iter().cloned().map(|props| Value::Object { props }));
+        Some(values)
+    }
 }
 
 /// Payload of `Value::Error`, boxed so the enum itself stays small.
 #[derive(Debug, Clone)]
 pub struct ErrorData {
+    pub properties: Rc<ObjectCell>,
     /// Clones of a guest error value must retain object identity, while two
     /// separately-created errors with the same fields remain distinct.
     pub identity: Rc<()>,
@@ -1900,6 +2281,7 @@ impl ErrorData {
     /// combinator-produced error takes, where there was no guest frame.
     pub fn new(name: &str, message: impl Into<crate::JsString>) -> Box<Self> {
         Box::new(Self {
+            properties: Value::instance_properties(),
             identity: Rc::new(()),
             name: name.into(),
             message: message.into(),
@@ -1915,6 +2297,7 @@ impl ErrorData {
         code: impl Into<crate::JsString>,
     ) -> Box<Self> {
         Box::new(Self {
+            properties: Value::instance_properties(),
             identity: Rc::new(()),
             message: message.into(),
             name: name.into(),
@@ -2090,11 +2473,9 @@ impl Default for PromiseInner {
 pub enum GenResume {
     /// A normal `next(v)`: `v` becomes the value of the `yield` expression.
     Next(Option<Value>),
-    /// The generator is being abandoned. The `yield` expression returns from
-    /// the body instead of producing a value, so the interpreter unwinds it
-    /// normally and guest `finally` blocks still run -- which is what
-    /// `for...of` + `break` does in JavaScript, via the implicit `return()`.
-    Return,
+    /// A return completion carrying the caller's value. Finally blocks can
+    /// suspend again or replace this completion before the body finishes.
+    Return(Value),
     /// `gen.throw(e)`, or an `await` whose promise rejected: the suspension
     /// point raises `e` instead of producing a value, so guest `try`/`catch`
     /// around it runs.
@@ -2208,6 +2589,7 @@ pub type GenCoroutine = corosensei::Coroutine<GenResume, Value, GenOutcome>;
 #[cfg(stackful_coroutines)]
 pub struct GenYielder {
     inner: *const corosensei::Yielder<GenResume, Value>,
+    suspension: Option<(Rc<std::cell::Cell<GenSuspension>>, GenSuspension)>,
     /// Pins this handle to one thread: a raw pointer is already `!Send`, and
     /// `PhantomData<*const ()>` makes that explicit and stable.
     _not_send: std::marker::PhantomData<*const ()>,
@@ -2223,6 +2605,7 @@ impl GenYielder {
     pub unsafe fn new(yielder: &corosensei::Yielder<GenResume, Value>) -> Self {
         Self {
             inner: yielder as *const _,
+            suspension: None,
             _not_send: std::marker::PhantomData,
         }
     }
@@ -2230,10 +2613,32 @@ impl GenYielder {
     /// Suspend the generator, handing `value` to the caller of `next()`, and
     /// report why it was resumed.
     pub fn suspend(&self, value: Value) -> GenResume {
+        if let Some((state, kind)) = &self.suspension {
+            state.set(*kind);
+        }
         // SAFETY: see the type-level proof. The referent outlives this handle
         // by construction, and this is the thread that created it.
         unsafe { (*self.inner).suspend(value) }
     }
+
+    /// # Safety
+    /// The same stack and owner-thread lifetime requirements as `new` apply.
+    pub(crate) unsafe fn with_suspension(
+        yielder: &corosensei::Yielder<GenResume, Value>,
+        state: Rc<std::cell::Cell<GenSuspension>>,
+        kind: GenSuspension,
+    ) -> Self {
+        // SAFETY: the caller guarantees the lifetime contract above.
+        let mut handle = unsafe { Self::new(yielder) };
+        handle.suspension = Some((state, kind));
+        handle
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GenSuspension {
+    Yield,
+    Await,
 }
 
 /// Mutable state shared across a generator's `next()` calls (behind an `Rc` so
@@ -2250,6 +2655,9 @@ impl GenYielder {
 /// closed. A coroutine keeps everything on one thread, so the question does not
 /// arise: there is no `Send` bound and no `unsafe` in this path.
 pub struct GeneratorInner {
+    pub(crate) realm: crate::interpreter::Realm,
+    pub(crate) async_state: Option<crate::interpreter::async_generator::AsyncGeneratorState>,
+    pub properties: Rc<ObjectCell>,
     /// Formal parameter initialization already ran at generator creation.
     pub parameters_initialized: bool,
     pub body: Rc<Vec<Statement>>,
@@ -2326,7 +2734,7 @@ impl GeneratorInner {
             .as_ref()
             .and_then(crate::interpreter::Environment::find_global);
         let _allocation_boundary = crate::interpreter::realm::AllocationRealm::enter(owner);
-        match coroutine.resume(GenResume::Return) {
+        match coroutine.resume(GenResume::Return(Value::Undefined)) {
             corosensei::CoroutineResult::Return(_) => {}
             corosensei::CoroutineResult::Yield(_) => {
                 // A `yield` inside the `finally` block: honouring it would
@@ -2381,6 +2789,9 @@ impl Value {
 
     pub(crate) fn exotic_properties(&self) -> Option<Rc<ObjectCell>> {
         Some(match self {
+            Self::Generator { inner } => inner.try_borrow().ok()?.properties.clone(),
+            Self::StringIterator { inner } => inner.try_borrow().ok()?.properties.clone(),
+            Self::Error(data) => data.properties.clone(),
             Self::Date(data) => data.properties.clone(),
             Self::RegExp(data) => data.properties.clone(),
             Self::TypedArray(data) | Self::DataView(data) => data.properties.clone(),
@@ -2394,6 +2805,10 @@ impl Value {
     pub(crate) fn property_cell(&self) -> Option<Rc<ObjectCell>> {
         match self {
             Self::Object { props } => Some(props.clone()),
+            Self::RealmGlobal(global) => global
+                .borrow()
+                .global_object()
+                .and_then(|object| object.property_cell()),
             Self::Class(class) => Some(class.statics.clone()),
             Self::Function(function) => Some(function.properties.clone()),
             Self::HostFunction { properties, .. } => Some(properties.clone()),
@@ -2401,31 +2816,63 @@ impl Value {
         }
     }
 
-    pub(crate) fn private_field(&self, id: u64) -> Result<Value, VmErr> {
+    pub(crate) fn is_error_object(&self) -> bool {
+        matches!(self, Self::Error(_))
+            || self
+                .property_cell()
+                .is_some_and(|properties| properties.meta.borrow().error_object)
+    }
+
+    fn private_property_cell(&self, create: bool) -> Option<Rc<ObjectCell>> {
+        match self {
+            Self::Proxy(proxy) => proxy.private_properties(create),
+            _ => self.property_cell(),
+        }
+    }
+
+    pub(crate) fn private_element(&self, id: u64) -> Result<PrivateElement, VmErr> {
         let value = if let Self::Array(array) = self {
-            array.meta.borrow().private_fields.get(&id).cloned()
+            array.meta.borrow().private_elements.get(&id).cloned()
         } else {
-            self.property_cell()
-                .and_then(|properties| properties.meta.borrow().private_fields.get(&id).cloned())
+            self.private_property_cell(false)
+                .and_then(|properties| properties.meta.borrow().private_elements.get(&id).cloned())
         };
         value.ok_or_else(|| {
             VmErr::Msg("TypeError: receiver does not contain the private field".into())
         })
     }
 
+    pub(crate) fn has_private_element(&self, id: u64) -> bool {
+        if let Self::Array(array) = self {
+            array.meta.borrow().private_elements.contains_key(&id)
+        } else {
+            self.private_property_cell(false).is_some_and(|properties| {
+                properties.meta.borrow().private_elements.contains_key(&id)
+            })
+        }
+    }
+
     pub(crate) fn initialize_private_field(&self, id: u64, value: Value) -> Result<(), VmErr> {
+        self.initialize_private_element(id, PrivateElement::Field(value))
+    }
+
+    pub(crate) fn initialize_private_element(
+        &self,
+        id: u64,
+        value: PrivateElement,
+    ) -> Result<(), VmErr> {
         let insert = |meta: &mut ObjectMeta| {
-            if meta.private_fields.contains_key(&id) {
+            if meta.private_elements.contains_key(&id) {
                 return Err(VmErr::Msg(
                     "TypeError: private field is already initialized".into(),
                 ));
             }
-            meta.private_fields.insert(id, value);
+            meta.private_elements.insert(id, value);
             Ok(())
         };
         if let Self::Array(array) = self {
             insert(&mut array.meta.borrow_mut())
-        } else if let Some(properties) = self.property_cell() {
+        } else if let Some(properties) = self.private_property_cell(true) {
             insert(&mut properties.meta.borrow_mut())
         } else {
             Err(VmErr::Msg(
@@ -2436,9 +2883,14 @@ impl Value {
 
     pub(crate) fn set_private_field(&self, id: u64, value: Value) -> Result<(), VmErr> {
         let update = |meta: &mut ObjectMeta| {
-            let Some(field) = meta.private_fields.get_mut(&id) else {
+            let Some(field) = meta.private_elements.get_mut(&id) else {
                 return Err(VmErr::Msg(
                     "TypeError: receiver does not contain the private field".into(),
+                ));
+            };
+            let PrivateElement::Field(field) = field else {
+                return Err(VmErr::Msg(
+                    "TypeError: private member is not a writable field".into(),
                 ));
             };
             *field = value;
@@ -2446,7 +2898,7 @@ impl Value {
         };
         if let Self::Array(array) = self {
             update(&mut array.meta.borrow_mut())
-        } else if let Some(properties) = self.property_cell() {
+        } else if let Some(properties) = self.private_property_cell(false) {
             update(&mut properties.meta.borrow_mut())
         } else {
             Err(VmErr::Msg(
@@ -2823,6 +3275,12 @@ impl Value {
         }
     }
 
+    /// Internal property descriptors are records: absent fields must remain
+    /// absent even when Object.prototype has guest-defined descriptor names.
+    pub(crate) fn descriptor_record(fields: Vec<(String, Value)>) -> Self {
+        Self::object_with_proto(fields, None)
+    }
+
     /// Insert or replace an own property while enforcing the object cap.
     pub fn set_prop(&self, key: String, val: Value) -> Result<(), VmErr> {
         if let Some(properties) = self.exotic_properties() {
@@ -2854,7 +3312,7 @@ impl Value {
         // A proxy without a `has` trap answers for its target. The trap
         // itself is applied by `bin_op`, which can call guest code.
         if let Value::Proxy(proxy) = self {
-            return proxy.target.has_prop(key);
+            return proxy.target_for_inspection().has_prop(key);
         }
         if let Value::Function(function) = self {
             if key == "prototype" {
@@ -3062,8 +3520,15 @@ impl Value {
             }
             Value::Proxy(data) => {
                 if let Some(data) = Rc::get_mut(data) {
-                    work.push(std::mem::replace(&mut data.target, Value::Undefined));
-                    work.push(std::mem::replace(&mut data.handler, Value::Undefined));
+                    if let Some((target, handler)) = data.slots.get_mut().take() {
+                        work.push(target);
+                        work.push(handler);
+                    }
+                    if let Some(properties) = data.private_storage.get_mut().take()
+                        && Rc::strong_count(&properties) == 1
+                    {
+                        drain_object_cell(&properties, work);
+                    }
                 }
             }
             Value::Promise(inner) => {
@@ -3148,7 +3613,15 @@ fn drain_object_cell(cell: &Rc<ObjectCell>, work: &mut Vec<Value>) {
 /// prototype stays alive elsewhere; its extra reference here is released.
 fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
     let taken = meta.try_borrow_mut().ok().and_then(|mut meta| {
-        work.extend(meta.private_fields.drain().map(|(_, value)| value));
+        work.extend(
+            meta.private_elements
+                .drain()
+                .flat_map(|(_, element)| element.into_values()),
+        );
+        work.extend(meta.revocable_proxy.take().map(Value::Proxy));
+        if let Some(slots) = meta.async_from_sync.take() {
+            work.extend(slots.values());
+        }
         meta.proto.take()
     });
     if let Some(link) = taken
@@ -3303,10 +3776,10 @@ mod drop_tests {
 
         let mut proxy = Value::Number(0.0);
         for _ in 0..DEPTH {
-            proxy = Value::Proxy(std::rc::Rc::new(ProxyData {
-                target: proxy,
-                handler: Value::object(vec![]),
-            }));
+            proxy = Value::Proxy(std::rc::Rc::new(ProxyData::new(
+                proxy,
+                Value::object(vec![]),
+            )));
         }
         drop(proxy);
     }

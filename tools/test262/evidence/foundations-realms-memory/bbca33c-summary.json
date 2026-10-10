@@ -1,0 +1,89 @@
+{
+  "source_commit": "bbca33c",
+  "scope": "Focused agents/realms/gc-weak; not a full-corpus result or phase completion",
+  "configuration": {
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "worker_jobs": 4,
+    "timeout_seconds": 5.0,
+    "engine_sha256": "2e8557a936914951147c05f0680cb7d72da3cf5007f8ca66b6e281c05c3ec0cf",
+    "groups": [
+      "agents",
+      "realms",
+      "gc-weak"
+    ],
+    "total": 2030
+  },
+  "counts": {
+    "pass": 1712,
+    "fail": 318,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "comparisons": {
+    "7c0a9ce": {
+      "new_passes": 0,
+      "lost_passes": 0
+    },
+    "phase2": {
+      "new_passes": 211,
+      "lost_passes": 0
+    }
+  },
+  "checks": {
+    "allfeatures-tests": {
+      "status": "passed",
+      "passed": 819,
+      "ignored": 4
+    },
+    "clippy": {
+      "status": "passed"
+    },
+    "fmt": {
+      "status": "passed"
+    },
+    "minimal-tests": {
+      "status": "passed",
+      "passed": 161,
+      "ignored": 0
+    },
+    "native-build": {
+      "status": "passed"
+    },
+    "node-tests": {
+      "status": "passed"
+    },
+    "release-build": {
+      "status": "passed"
+    },
+    "tooling-tests-followup": {
+      "status": "passed"
+    },
+    "tooling-tests": {
+      "status": "passed"
+    },
+    "wasm-tests": {
+      "status": "passed"
+    }
+  },
+  "driver_error_note": "The initial copy lacked executable permissions. Its preserved 1020 metadata error rows are a driver failure, not valid Test262 variant results and not comparable to the 2030-variant selection. Permissions were corrected before the successful rerun. c94ede0 now rejects invalid workers before corpus selection; ten tooling tests pass.",
+  "full_corpus_ast_bytecode_mismatches": "not measured",
+  "sha256": {
+    "bbca33c-focused.json.gz": "c52d9c92cbd742b621f5e50fb54871494cbc7fba1c6ca8e74032123798a1b262",
+    "7c0a9ce-baseline-focused-projection.json.gz": "9ed3e620c90d42ac8df6bc5747020a932dae4515f6f35f4129e98d1c8bf2076b",
+    "bbca33c-vs-7c0a9ce.json.gz": "96c1578b10d85a9546784d242054146924fd743c8f7fa770fb5f42d4d0b04c03",
+    "bbca33c-vs-phase2.json.gz": "28db0b71fc37bb7bd73e6da208cd5065b07400a67025a3511035c93303e32033",
+    "bbca33c-driver-error.json.gz": "12b46c7ca3411e1913d82500c037af4b46c44581aff56296a63daa1e129dcd3d",
+    "bbca33c-allfeatures-tests.log.gz": "c8db8775d94e9b3c939ea84d518965c812fb44361ddfc491ea85f1df79c56ff1",
+    "bbca33c-clippy.log.gz": "cd3259da4eebb931b7a6441a91eacf4542672a5b60e6daa16ba700eaf86058db",
+    "bbca33c-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "bbca33c-minimal-tests.log.gz": "b8a1eb7bee8a528422c8152d0611845db582fa972ebea9ac9c06af6e13b1ac18",
+    "bbca33c-native-build.log.gz": "c763e1ae02963652fb46c16783042564f0abeeb07d54a41ba7b02a2066d4189c",
+    "bbca33c-node-tests.log.gz": "fffd967158c7ad0c2e4386df972dc1798b9eedd4c60408e281bb156cdaa490f8",
+    "bbca33c-release-build.log.gz": "f1c19fd85b5690479ce1786b9cf04e72e6da1e19a7c8cf89ea343fac3cc1cbc0",
+    "bbca33c-tooling-tests-followup.log.gz": "89782056120d87b46d168a24a908f2c17bf936553480620dad96fddaf75efc78",
+    "bbca33c-tooling-tests.log.gz": "baed4e83e0f8a8f5aa8188937750bc51eef54373c2bc7f54cf60e7036bc48572",
+    "bbca33c-wasm-tests.log.gz": "8343280b87701aea696d6fdb414366c10d81e135c9efd5a177ccf240f0a43b41"
+  }
+}

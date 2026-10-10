@@ -82,6 +82,7 @@ fn encode(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, Vm
     let bytes = text.into_bytes();
     let length = bytes.len();
     Ok(Value::TypedArray(Rc::new(TypedArrayData {
+        length_tracking: false,
         properties: Value::instance_properties(),
         kind: TypedKind::Uint8,
         buffer: Buffer::owned(bytes).into(),
@@ -454,6 +455,7 @@ fn clone_value(
                 }
             };
             let cloned = Rc::new(TypedArrayData {
+                length_tracking: false,
                 properties: Value::instance_properties(),
                 kind: view.kind,
                 buffer: copied_backing,

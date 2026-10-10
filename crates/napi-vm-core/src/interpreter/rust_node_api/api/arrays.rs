@@ -91,6 +91,12 @@ pub(super) unsafe extern "C" fn api_get_prototype(
 }
 
 pub(super) fn napi_effective_prototype(environment: &NapiEnvironment, object: &Value) -> Result<Value, i32> {
+    if let Some(properties) = object.exotic_properties() {
+        let meta = properties.meta.borrow();
+        if !meta.uses_default_prototype {
+            return Ok(meta.proto.as_ref().map_or(Value::Null, |prototype| prototype.as_ref().clone()));
+        }
+    }
     let (prototype, uses_default_prototype, default_constructor) = match object {
         Value::Object { props } => {
             let meta = props.meta.borrow();
@@ -124,14 +130,15 @@ pub(super) fn napi_effective_prototype(environment: &NapiEnvironment, object: &V
             let meta = array.meta.borrow();
             (meta.proto.clone(), meta.uses_default_prototype, "Array")
         }
-        Value::Promise(_) => return napi_default_builtin_prototype(environment, "Promise"),
-        Value::Date(_) => return napi_default_builtin_prototype(environment, "Date"),
-        Value::RegExp(_) => return napi_default_builtin_prototype(environment, "RegExp"),
+        Value::Error(error) => return napi_value_builtin_prototype(environment, object, &error.name),
+        Value::Promise(_) => return napi_value_builtin_prototype(environment, object, "Promise"),
+        Value::Date(_) => return napi_value_builtin_prototype(environment, object, "Date"),
+        Value::RegExp(_) => return napi_value_builtin_prototype(environment, object, "RegExp"),
         Value::ArrayBuffer(_) => {
-            return napi_default_builtin_prototype(environment, "ArrayBuffer");
+            return napi_value_builtin_prototype(environment, object, "ArrayBuffer");
         }
         Value::SharedArrayBuffer(_) => {
-            return napi_default_builtin_prototype(environment, "SharedArrayBuffer");
+            return napi_value_builtin_prototype(environment, object, "SharedArrayBuffer");
         }
         Value::TypedArray(view) => {
             let constructor = if view.is_buffer {
@@ -139,9 +146,14 @@ pub(super) fn napi_effective_prototype(environment: &NapiEnvironment, object: &V
             } else {
                 view.kind.name()
             };
-            return napi_default_builtin_prototype(environment, constructor);
+            return napi_value_builtin_prototype(environment, object, constructor);
         }
-        Value::DataView(_) => return napi_default_builtin_prototype(environment, "DataView"),
+        Value::DataView(_) => return napi_value_builtin_prototype(environment, object, "DataView"),
+        Value::RealmGlobal(global) => {
+            return Ok(global.borrow().intrinsic("Object")
+                .and_then(|constructor| constructor.get_prop("prototype"))
+                .unwrap_or(Value::Null));
+        }
         Value::GlobalObject => return napi_default_object_prototype(environment),
         Value::NativeFunction { .. } => {
             return napi_default_function_prototype(environment);
@@ -155,7 +167,7 @@ pub(super) fn napi_effective_prototype(environment: &NapiEnvironment, object: &V
     if !uses_default_prototype {
         return Ok(Value::Null);
     }
-    let default_prototype = napi_default_builtin_prototype(environment, default_constructor)?;
+    let default_prototype = napi_value_builtin_prototype(environment, object, default_constructor)?;
     if crate::interpreter::strict_equals(object, &default_prototype) {
         if default_constructor == "Object" {
             return Ok(Value::Null);
@@ -373,6 +385,13 @@ pub(super) unsafe extern "C" fn api_post_finalizer(
         environment.last_error.set(napi_extended_error_info(status));
     }
     status
+}
+
+fn napi_value_builtin_prototype(environment: &NapiEnvironment, value: &Value, name: &str) -> Result<Value, i32> {
+    if let Some(realm) = crate::interpreter::realm::value_realm(value) {
+        return realm.borrow().intrinsic(name).and_then(|constructor| constructor.get_prop("prototype")).ok_or(NAPI_GENERIC_FAILURE);
+    }
+    napi_default_builtin_prototype(environment, name)
 }
 
 pub(super) fn napi_default_builtin_prototype(

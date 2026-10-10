@@ -33,18 +33,14 @@ pub(super) fn install(e: &mut Environment) {
 /// `BigInt(value)`. A number must be an exact integer — there is no rounding,
 /// since a silent one would defeat the point of the type.
 fn bigint_convert(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let value = match a.first() {
-        Some(Value::BigInt(existing)) => return Ok(Value::BigInt(existing.clone())),
-        Some(Value::Number(n)) => BigInt::from_f64(*n),
-        Some(Value::Bool(b)) => Ok(BigInt::from_i64(if *b { 1 } else { 0 })),
-        Some(Value::String(s)) => BigInt::parse(s),
-        None | Some(Value::Undefined) => {
-            Err("TypeError: Cannot convert undefined to a BigInt".into())
-        }
-        Some(Value::Null) => Err("TypeError: Cannot convert null to a BigInt".to_string()),
-        Some(other) => BigInt::parse(&interp.vs(other)?),
-    };
-    value.map(|v| Value::BigInt(Rc::new(v))).map_err(VmErr::Msg)
+    let primitive =
+        interp.coerce_object_to_primitive(a.first().unwrap_or(&Value::Undefined), "number")?;
+    if let Value::Number(number) = primitive {
+        return BigInt::from_f64(number)
+            .map(|value| Value::BigInt(Rc::new(value)))
+            .map_err(VmErr::Msg);
+    }
+    interp.ecmascript_to_bigint(&primitive)
 }
 
 fn bigint_construct(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {

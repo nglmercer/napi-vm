@@ -1,0 +1,81 @@
+{
+  "source_commit": "121d115e90f24cfd43192c59877feab5c0f91135",
+  "classification": "Exploratory full run: 14 lost passes block merge",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "7d920250ca290ae0168f8230fe85c079afb4a96dbac2281a8f0282cf167d1a1a",
+  "total": 102956,
+  "counts": {
+    "pass": 57941,
+    "fail": 45013,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 16548,
+  "lost_passes": 14,
+  "ast_bytecode_mismatches": "Full-corpus differential not measured",
+  "regressions": [
+    {
+      "test": "built-ins/Promise/all/iter-step-err-no-close.js",
+      "variant": "script"
+    },
+    {
+      "test": "built-ins/Promise/all/iter-step-err-no-close.js",
+      "variant": "strict"
+    },
+    {
+      "test": "built-ins/Promise/allSettled/iter-step-err-no-close.js",
+      "variant": "script"
+    },
+    {
+      "test": "built-ins/Promise/allSettled/iter-step-err-no-close.js",
+      "variant": "strict"
+    },
+    {
+      "test": "built-ins/Promise/create-resolving-functions-reject.js",
+      "variant": "script"
+    },
+    {
+      "test": "built-ins/Promise/create-resolving-functions-reject.js",
+      "variant": "strict"
+    },
+    {
+      "test": "built-ins/Promise/create-resolving-functions-resolve.js",
+      "variant": "script"
+    },
+    {
+      "test": "built-ins/Promise/create-resolving-functions-resolve.js",
+      "variant": "strict"
+    },
+    {
+      "test": "built-ins/Promise/race/iter-step-err-no-close.js",
+      "variant": "script"
+    },
+    {
+      "test": "built-ins/Promise/race/iter-step-err-no-close.js",
+      "variant": "strict"
+    },
+    {
+      "test": "language/statements/class/subclass/default-constructor-spread-override.js",
+      "variant": "script"
+    },
+    {
+      "test": "language/statements/class/subclass/default-constructor-spread-override.js",
+      "variant": "strict"
+    },
+    {
+      "test": "staging/sm/class/defaultConstructorDerivedSpread.js",
+      "variant": "script"
+    },
+    {
+      "test": "staging/sm/class/defaultConstructorDerivedSpread.js",
+      "variant": "strict"
+    }
+  ],
+  "archive_sha256": {
+    "121d115-exploratory-full.json.gz": "05106ebd27d9f216205367a3b426fb957699f4b41a6322b0dc9b4a29ff6c0b7d",
+    "121d115-exploratory-full-pr23-transitions.json.gz": "199e1fcd53de06d538956fe7ae14542dc3c70f7dff91cd520e8348aedbd272b3",
+    "121d115-exploratory-full-7c0a9ce-transitions.json.gz": "8164c2d906ff0a352499c22dc8d35670999b2bec4f6f554efbca88da39cd8047"
+  }
+}

@@ -621,6 +621,7 @@ pub(super) fn wire_to_guest_with_context(
                 ));
             }
             Ok(Value::TypedArray(Rc::new(TypedArrayData {
+                length_tracking: false,
                 properties: Value::instance_properties(),
                 kind,
                 buffer: Buffer::owned(bytes).into(),
@@ -645,6 +646,7 @@ pub(super) fn wire_to_guest_with_context(
                 ));
             }
             Ok(Value::DataView(Rc::new(TypedArrayData {
+                length_tracking: false,
                 properties: Value::instance_properties(),
                 kind: TypedKind::Uint8,
                 buffer: Buffer::owned(bytes).into(),

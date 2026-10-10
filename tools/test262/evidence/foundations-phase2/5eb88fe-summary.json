@@ -1,0 +1,24 @@
+{
+  "source": "5eb88fe",
+  "baseline": "09498f5 identical iteration-bindings selection",
+  "total": 4837,
+  "pass": 2232,
+  "fail": 2605,
+  "new_passes": 446,
+  "lost_passes": 4,
+  "harness_errors": 0,
+  "timeouts": 0,
+  "crashes": 0,
+  "required_checks": {
+    "workspace_passed": 759,
+    "workspace_ignored": 4,
+    "minimal_passed": 158,
+    "node_passed": 73,
+    "wasm_passed": 14,
+    "tooling_passed": 9,
+    "fmt": "passed",
+    "clippy": "passed"
+  },
+  "classification": "exploratory; four losses require parser repairs",
+  "full_corpus": "not measured for this revision"
+}

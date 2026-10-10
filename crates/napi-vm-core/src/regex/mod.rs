@@ -49,37 +49,80 @@ pub struct Regex {
 /// Index 0 is the whole match.
 pub type Captures = Vec<Option<(usize, usize)>>;
 
+/// Validate ECMAScript pattern grammar independently of matcher coverage.
+/// Literals and constructors use the same validator; parsing a literal does
+/// not execute or compile the engine's partial matcher implementation.
+pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<String, String> {
+    let mut seen = String::new();
+    for flag in flags.chars() {
+        if !"dgimsuvy".contains(flag) {
+            return Err(format!("Invalid regular expression flags: '{}'", flag));
+        }
+        if seen.contains(flag) {
+            return Err(format!("Duplicate regular expression flag: '{}'", flag));
+        }
+        seen.push(flag);
+    }
+    let unicode = flags.contains('u') || flags.contains('v');
+    let mut pattern = String::new();
+    for cp in source.code_points() {
+        let n = cp.code_point_at(0).unwrap();
+        if (0xD800..=0xDFFF).contains(&n) {
+            if unicode {
+                pattern.push_str(&format!("\\u{{{n:x}}}"));
+            } else {
+                pattern.push_str(&format!("\\u{n:04x}"));
+            }
+        } else if !unicode && n > 0xFFFF {
+            for u in cp.units() {
+                pattern.push_str(&format!("\\u{u:04x}"));
+            }
+        } else {
+            pattern.push(char::from_u32(n).unwrap());
+        }
+    }
+    // Bound recursive grammar before entering either parser. Brackets in
+    // ordinary classes are characters, while v-mode permits nested sets.
+    let mut groups = 0usize;
+    let mut classes = 0usize;
+    let mut escaped = false;
+    for character in pattern.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        match character {
+            '[' if classes == 0 || flags.contains('v') => classes += 1,
+            ']' => classes = classes.saturating_sub(1),
+            '(' if classes == 0 => groups += 1,
+            ')' if classes == 0 => groups = groups.saturating_sub(1),
+            _ => {}
+        }
+        if groups + classes > 128 {
+            return Err("Maximum regular expression nesting exceeded".into());
+        }
+    }
+    let allocator = oxc_allocator::Allocator::default();
+    oxc_regular_expression::LiteralParser::new(
+        &allocator,
+        &pattern,
+        Some(flags),
+        oxc_regular_expression::Options::default(),
+    )
+    .parse()
+    .map_err(|error| error.to_string())?;
+    Ok(pattern)
+}
+
 impl Regex {
     pub fn new(source: impl Into<crate::JsString>, flags: &str) -> Result<Self, String> {
         let source = source.into();
-        let mut seen = String::new();
-        for flag in flags.chars() {
-            if !"dgimsuvy".contains(flag) {
-                return Err(format!("Invalid regular expression flags: '{}'", flag));
-            }
-            if seen.contains(flag) {
-                return Err(format!("Duplicate regular expression flag: '{}'", flag));
-            }
-            seen.push(flag);
-        }
+        let pattern = validate_syntax(&source, flags)?;
         let unicode = flags.contains('u') || flags.contains('v');
-        let mut pattern = String::new();
-        for cp in source.code_points() {
-            let n = cp.code_point_at(0).unwrap();
-            if (0xD800..=0xDFFF).contains(&n) {
-                if unicode {
-                    pattern.push_str(&format!("\\u{{{n:x}}}"));
-                } else {
-                    pattern.push_str(&format!("\\u{n:04x}"));
-                }
-            } else if !unicode && n > 0xFFFF {
-                for u in cp.units() {
-                    pattern.push_str(&format!("\\u{u:04x}"));
-                }
-            } else {
-                pattern.push(char::from_u32(n).unwrap());
-            }
-        }
         let parsed = parse::Parser::new(&pattern, unicode).parse()?;
         Ok(Self {
             root: parsed.root,

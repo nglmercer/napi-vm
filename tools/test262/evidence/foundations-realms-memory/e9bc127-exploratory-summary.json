@@ -1,0 +1,47 @@
+{
+  "source_commit": "e9bc1275bd916291cd8a9aad5b6d5cc5709791d5",
+  "classification": "Exploratory: six lost passes block full validation and merge",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "25df067819415907bd3846b3f7d27f132f8881be45aade2697e66113dd755918",
+  "total": 9389,
+  "counts": {
+    "pass": 7230,
+    "fail": 2159,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 2029,
+  "lost_passes": 6,
+  "comparison": "Matching 7c0a9ce full-report projection; not a separate baseline rerun",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 856,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 198,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; see logs",
+  "full_corpus": "Not started because the focused regression gate failed",
+  "ast_bytecode_mismatches": "The new focused losses expose bytecode iterator cleanup differences; repository parity suite did not yet cover these fixtures",
+  "archive_sha256": {
+    "e9bc127-exploratory-focused.json.gz": "dcd12ca3529118b23c3e6013fc688a5ff511cc8fab825171cf20f944f1e1c51c",
+    "e9bc127-7c0a9ce-projection.json.gz": "9bf681cb1e44bd12cddd27c39f943ceb3e94685f0c5318a9eab92195c29050db",
+    "e9bc127-exploratory-transitions.json.gz": "2b4cf9262a8e7177c7f10d1d1e86c00d158333b3a82f14086c13ad5361ce7669",
+    "e9bc127-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "e9bc127-clippy.log.gz": "6a6fd6dd296a9979fb0edf3ab171588d4209fe871e58dcb76bec83e3a8dc607d",
+    "e9bc127-allfeatures-tests.log.gz": "32917eacc51492ca664ffaf580eb961f0514c2f4eb765a81f914ecb9c3e29cc4",
+    "e9bc127-minimal-tests.log.gz": "d1888184cc54c0c1a3bb4963d536defeb6298cd6f68354b630c49df864ae645f",
+    "e9bc127-native-build.log.gz": "a56eb975429bff7a34c70bc42db2890156bfec005df14ba6a20c9480d6684d53",
+    "e9bc127-node-tests.log.gz": "92d6c016170c316017eb618060dfa26f02d3c058d73c24f110a059d08cde82bb",
+    "e9bc127-wasm-tests.log.gz": "82150c3df62af2d73e0703466eb36c91bc535a7e886e53e9036a6b98641d9139",
+    "e9bc127-tooling-tests.log.gz": "f7f035258e6faeb2be34d07e7def4d4f785fb24aaef1f381884b8bf2d595b109",
+    "e9bc127-release-build.log.gz": "cc768216d4df6d34f69aacd050dfaf45b9182151e488a60a4cfc1de482e6dc84"
+  }
+}

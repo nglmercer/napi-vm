@@ -81,26 +81,36 @@ fn reflect_get(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 
 fn reflect_set(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    if let Some(Value::Object { props }) = a.first()
-        && props.meta.borrow().module_namespace
-    {
-        return Ok(Value::Bool(false));
-    }
-    interp.assign_member(&arg(&a, 0), &arg(&a, 1), arg(&a, 2))?;
-    Ok(Value::Bool(true))
+    let target = reflect_object_target(&a)?;
+    let receiver = a.get(3).cloned().unwrap_or_else(|| target.clone());
+    interp
+        .set_member_with_receiver(&target, &arg(&a, 1), arg(&a, 2), &receiver)
+        .map(Value::Bool)
 }
 
 fn reflect_has(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let key = interp.property_key(&arg(&a, 1))?;
-    Ok(Value::Bool(arg(&a, 0).has_prop(&key)))
+    let target = reflect_object_target(&a)?;
+    interp.has_property(&target, &arg(&a, 1)).map(Value::Bool)
+}
+
+fn reflect_object_target(arguments: &[Value]) -> Result<Value, VmErr> {
+    let target = arg(arguments, 0);
+    if !crate::interpreter::call::is_js_object(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect target must be an object".into(),
+        ));
+    }
+    Ok(target)
 }
 
 fn reflect_delete(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    interp.delete_member(&arg(&a, 0), &arg(&a, 1))
+    let target = reflect_object_target(&a)?;
+    interp.delete_member(&target, &arg(&a, 1))
 }
 
 fn reflect_own_keys(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    via_object(interp, "getOwnPropertyNames", a)
+    let target = reflect_object_target(&a)?;
+    Value::checked_array(interp.own_property_keys(&target)?)
 }
 
 fn reflect_define_property(
@@ -108,14 +118,12 @@ fn reflect_define_property(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    // `Reflect.defineProperty` reports failure rather than throwing.
-    let target = arg(&a, 0);
-    let key = interp.property_key(&arg(&a, 1))?;
-    match super::object::define_property(&target, &key, &arg(&a, 2)) {
-        Ok(()) => Ok(Value::Bool(true)),
-        Err(VmErr::Msg(_)) => Ok(Value::Bool(false)),
-        Err(other) => Err(other),
-    }
+    let target = reflect_object_target(&a)?;
+    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    let descriptor = super::object::to_property_descriptor(interp, &arg(&a, 2))?;
+    interp
+        .define_own_property(&target, &key, &descriptor)
+        .map(Value::Bool)
 }
 
 fn reflect_get_own_descriptor(
@@ -123,7 +131,10 @@ fn reflect_get_own_descriptor(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "getOwnPropertyDescriptor", a)
+    let target = reflect_object_target(&a)?;
+    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    super::object::descriptor_for_key_in(interp, &target, &key)
+        .map(super::object::from_property_descriptor)
 }
 
 fn reflect_get_prototype_of(
@@ -139,8 +150,16 @@ fn reflect_set_prototype_of(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "setPrototypeOf", a)?;
-    Ok(Value::Bool(true))
+    let target = reflect_object_target(&a)?;
+    let prototype = arg(&a, 1);
+    if !matches!(prototype, Value::Null) && !crate::interpreter::call::is_js_object(&prototype) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect prototype must be an object or null".into(),
+        ));
+    }
+    interp
+        .set_prototype_of(&target, &prototype)
+        .map(Value::Bool)
 }
 
 fn reflect_is_extensible(
@@ -148,7 +167,8 @@ fn reflect_is_extensible(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "isExtensible", a)
+    let target = reflect_object_target(&a)?;
+    interp.is_extensible(&target).map(Value::Bool)
 }
 
 fn reflect_prevent_extensions(
@@ -156,17 +176,19 @@ fn reflect_prevent_extensions(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    via_object(interp, "preventExtensions", a)?;
-    Ok(Value::Bool(true))
+    let target = reflect_object_target(&a)?;
+    interp.prevent_extensions(&target).map(Value::Bool)
 }
 
 fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let args = match &arg(&a, 2) {
-        Value::Array(items) => items.borrow().clone(),
-        Value::Undefined | Value::Null => Vec::new(),
-        other => interp.iterate(other)?,
-    };
-    interp.call_this(&arg(&a, 0), arg(&a, 1), args)
+    let target = arg(&a, 0);
+    if !crate::interpreter::is_callable_value(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Reflect.apply target must be callable".into(),
+        ));
+    }
+    let args = interp.argument_list_from_array_like(&arg(&a, 2))?;
+    interp.call_this(&target, arg(&a, 1), args)
 }
 
 fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -177,25 +199,6 @@ fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Resul
             "TypeError: Target and newTarget must be constructors".into(),
         ));
     }
-    let list = arg(&a, 1);
-    if !crate::interpreter::call::is_js_object(&list) {
-        return Err(VmErr::Msg(
-            "TypeError: Arguments list must be an object".into(),
-        ));
-    }
-    let length = interp.member(&list, "length")?;
-    let number = interp.ecmascript_to_number(&length)?;
-    let length = if number.is_nan() || number <= 0. {
-        0.
-    } else {
-        number.floor()
-    };
-    if length > crate::value::MAX_ARRAY_LEN as f64 {
-        return Err(crate::value::limit_err("Maximum argument count exceeded"));
-    }
-    let mut args = Vec::with_capacity(length as usize);
-    for index in 0..length as usize {
-        args.push(interp.member(&list, &index.to_string())?);
-    }
+    let args = interp.argument_list_from_array_like(&arg(&a, 1))?;
     interp.reflect_constructor(&target, args, new_target)
 }

@@ -44,6 +44,26 @@ pub(super) fn install(e: &mut Environment) {
         bound: None,
     }));
 
+    let thrower = super::native_method("", 0, throw_type_error, Some(prototype.clone()));
+    if let Value::Function(function) = &thrower {
+        let mut metadata = function.properties.meta.borrow_mut();
+        metadata.non_extensible = true;
+        for key in ["name", "length"] {
+            metadata.set_attrs(
+                key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+    }
+    for key in ["caller", "arguments"] {
+        super::object::install_intrinsic_accessor(&prototype, key, &thrower, &thrower, true);
+    }
+    e.install_intrinsic("%ThrowTypeError%", thrower);
+
     prototype
         .set_prop("constructor".to_string(), namespace.clone())
         .expect("Function.prototype constructor");
@@ -131,8 +151,90 @@ pub(super) fn install(e: &mut Environment) {
                 configurable: false,
             },
         );
-        props.set_proto(Some(Rc::new(prototype)));
+        props.set_proto(Some(Rc::new(prototype.clone())));
     }
+    for (name, callable) in [
+        ("AsyncFunction", new_async_function as super::NativeFn),
+        (
+            "GeneratorFunction",
+            new_generator_function as super::NativeFn,
+        ),
+        (
+            "AsyncGeneratorFunction",
+            new_async_generator_function as super::NativeFn,
+        ),
+    ] {
+        let constructor = Value::object_with_proto(
+            vec![
+                ("name".into(), Value::String(name.into())),
+                ("length".into(), Value::Number(1.0)),
+            ],
+            Some(Rc::new(namespace.clone())),
+        );
+        super::make_callable(&constructor, callable, None);
+        let kind_prototype = Value::object_with_proto(
+            vec![("constructor".into(), constructor.clone())],
+            Some(Rc::new(prototype.clone())),
+        );
+        constructor
+            .set_prop("prototype".into(), kind_prototype.clone())
+            .expect("function-kind prototype");
+        if let Value::Object { props } = &constructor {
+            for key in ["name", "length"] {
+                props.meta.borrow_mut().set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+            props.meta.borrow_mut().set_attrs(
+                "prototype",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+        if let Value::Object { props } = &kind_prototype {
+            props.meta.borrow_mut().set_attrs(
+                "constructor",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+            let Value::Symbol(ref symbol) = super::well_known("toStringTag").expect("toStringTag")
+            else {
+                unreachable!()
+            };
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            kind_prototype
+                .set_prop(key.clone(), Value::String(name.into()))
+                .expect("function kind tag");
+            let mut metadata = props.meta.borrow_mut();
+            metadata.set_symbol_key(&key, symbol.clone());
+            metadata.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        e.install_intrinsic(&format!("%{name}%"), constructor);
+    }
+}
+
+fn throw_type_error(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Err(VmErr::Msg(
+        "TypeError: restricted function or arguments property".into(),
+    ))
 }
 
 /// Methods shared by guest and native callable values.
@@ -166,28 +268,22 @@ fn function_bind(
         ));
     }
 
+    let prototype = interp.get_prototype_of(&target)?;
     let bound_this = args.first().cloned().unwrap_or(Value::Undefined);
     let new_arguments: Vec<Value> = args.into_iter().skip(1).collect();
+    let descriptor = super::object::descriptor_for_in(interp, &target, "length")?;
+    let mut target_length = 0.0;
+    if !matches!(descriptor, Value::Undefined)
+        && let Value::Number(length) = interp.get_prop_value_str(&target, "length")?
+    {
+        target_length = if length.is_nan() { 0.0 } else { length.trunc() };
+    }
+    let bound_length = (target_length - new_arguments.len() as f64).max(0.0);
     let target_name = interp.get_prop_value_str(&target, "name")?;
     let target_name = match &target_name {
         Value::String(name) => name.to_string(),
-        _ => match &target {
-            Value::Class(class) => class.name.clone(),
-            Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {
-                name.to_string()
-            }
-            _ => String::new(),
-        },
+        _ => String::new(),
     };
-    let target_length = interp
-        .get_prop_value_str(&target, "length")
-        .and_then(|length| interp.ecmascript_to_number(&length))?;
-    let target_length = if target_length.is_nan() {
-        0.0
-    } else {
-        target_length.trunc()
-    };
-    let bound_length = (target_length - new_arguments.len() as f64).max(0.0);
 
     let (bound_target, bound_this, mut bound_arguments) = match &target {
         Value::Function(function) => match &function.bound {
@@ -206,6 +302,7 @@ fn function_bind(
     bound_arguments.extend(new_arguments);
 
     let properties = FunctionData::properties_with_default_prototype(&interp.persistent_global);
+    properties.set_proto((!matches!(prototype, Value::Null)).then(|| Rc::new(prototype)));
     properties.borrow_mut().push((
         "name".into(),
         Value::String((format!("bound {target_name}")).into()),
@@ -262,7 +359,7 @@ fn is_callable(value: &Value) -> bool {
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_callable(&proxy.target),
+        Value::Proxy(proxy) => proxy.callable,
         Value::Object { .. } => {
             crate::interpreter::call::callable_slot(value, crate::interpreter::call::CALL_SLOT)
                 .is_some()
@@ -275,16 +372,8 @@ pub(crate) fn is_constructor(value: &Value) -> bool {
     match value {
         Value::Function(function) => function.is_constructor,
         Value::HostFunction { .. } | Value::Class(_) => true,
-        Value::Proxy(proxy) => is_constructor(&proxy.target),
-        Value::Object { .. } => {
-            crate::interpreter::call::callable_slot(value, crate::interpreter::call::CONSTRUCT_SLOT)
-                .is_some()
-                || crate::interpreter::call::callable_slot(
-                    value,
-                    crate::interpreter::call::CALL_SLOT,
-                )
-                .is_some()
-        }
+        Value::Proxy(proxy) => proxy.constructible,
+        Value::Object { .. } => crate::interpreter::call::construct_slot(value).is_some(),
         _ => false,
     }
 }
@@ -320,34 +409,53 @@ fn function_apply(
     target: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    if !crate::interpreter::is_callable_value(&target) {
+        return Err(VmErr::Msg(
+            "TypeError: Function.prototype.apply receiver must be callable".into(),
+        ));
+    }
     let receiver = args.first().cloned().unwrap_or(Value::Undefined);
     let array_like = args.get(1).cloned().unwrap_or(Value::Undefined);
-    let call_args = match &array_like {
-        Value::Undefined | Value::Null => Vec::new(),
-        Value::Array(items) => items.borrow().clone(),
-        other => {
-            let length_value = interp.get_prop_value_str(other, "length")?;
-            let length = interp.ecmascript_to_number(&length_value)?;
-            let length = if length.is_nan() || length <= 0.0 {
-                0
-            } else if !length.is_finite() || length.floor() > crate::value::MAX_ARRAY_LEN as f64 {
-                return Err(crate::value::limit_err("Maximum argument count exceeded"));
-            } else {
-                length.floor() as usize
-            };
-            let mut values = Vec::with_capacity(length.min(1024));
-            for index in 0..length {
-                values.push(
-                    interp.get_prop_value(other, &Value::String((index.to_string()).into()))?,
-                );
-            }
-            values
-        }
+    let call_args = if matches!(array_like, Value::Undefined | Value::Null) {
+        Vec::new()
+    } else {
+        interp.argument_list_from_array_like(&array_like)?
     };
     interp.call_this(&target, receiver, call_args)
 }
 
 fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    new_function_kind(interp, a, false, false)
+}
+
+fn new_async_function(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    new_function_kind(interp, args, true, false)
+}
+fn new_generator_function(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    new_function_kind(interp, args, false, true)
+}
+fn new_async_generator_function(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    new_function_kind(interp, args, true, true)
+}
+
+fn new_function_kind(
+    interp: &mut Interpreter,
+    a: Vec<Value>,
+    asynchronous: bool,
+    generator: bool,
+) -> Result<Value, VmErr> {
     let mut parameter_source = crate::JsString::default();
     for (index, value) in a.iter().take(a.len().saturating_sub(1)).enumerate() {
         if index != 0 {
@@ -362,18 +470,33 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
     // Parse each grammar component separately to prevent a parameter/body
     // string from escaping its delimiters, then parse together for strict
     // parameter/body early errors. Preserve original UTF-16 code units.
-    parse_dynamic_function(&parameter_source, &crate::JsString::default())?;
-    parse_dynamic_function(&crate::JsString::default(), &body_source)?;
-    let (params, body) = parse_dynamic_function(&parameter_source, &body_source)?;
+    parse_dynamic_function(
+        &parameter_source,
+        &crate::JsString::default(),
+        asynchronous,
+        generator,
+    )?;
+    parse_dynamic_function(
+        &crate::JsString::default(),
+        &body_source,
+        asynchronous,
+        generator,
+    )?;
+    let (params, body) =
+        parse_dynamic_function(&parameter_source, &body_source, asynchronous, generator)?;
 
-    let uses_arguments = crate::parser::stmts_reference(&body, "arguments");
+    let uses_arguments = crate::parser::stmts_need_arguments(&body);
     let needs_hoisting = body_needs_hoisting(&body);
     Ok(Value::Function(Rc::new(FunctionData {
         strict: crate::parser::use_strict(&body),
         native: None,
         identity: Rc::new(0),
         name: Some("anonymous".into()),
-        properties: FunctionData::properties_with_default_prototype(&interp.persistent_global),
+        properties: FunctionData::properties_with_function_kind(
+            &interp.persistent_global,
+            asynchronous,
+            generator,
+        ),
         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
         params: Rc::new(params.iter().map(|p| Rc::from(p.as_str())).collect()),
         body: Rc::new(body.to_vec()),
@@ -381,9 +504,9 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
         // must not capture bindings its source never named.
         closure: Some(crate::heap::capture_env(&interp.persistent_global)),
         is_arrow: false,
-        is_constructor: true,
-        is_async: false,
-        is_generator: false,
+        is_constructor: !asynchronous && !generator,
+        is_async: asynchronous,
+        is_generator: generator,
         uses_arguments,
         bytecode: None,
         needs_hoisting,
@@ -394,8 +517,15 @@ fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Val
 fn parse_dynamic_function(
     params: &crate::JsString,
     body: &crate::JsString,
+    asynchronous: bool,
+    generator: bool,
 ) -> Result<(Vec<String>, Vec<crate::parser::Statement>), VmErr> {
-    let mut source = crate::JsString::from("function anonymous(\n");
+    let mut source = crate::JsString::from(match (asynchronous, generator) {
+        (true, true) => "async function* anonymous(\n",
+        (true, false) => "async function anonymous(\n",
+        (false, true) => "function* anonymous(\n",
+        _ => "function anonymous(\n",
+    });
     source.push_str(params.clone());
     source.push_str("\n) {\n");
     source.push_str(body.clone());

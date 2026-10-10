@@ -1,0 +1,73 @@
+{
+  "source_commit": "b5ae20f",
+  "scope": "Focused agents/realms/gc-weak; not full-corpus or phase completion",
+  "configuration": {
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "worker_jobs": 4,
+    "timeout_seconds": 5.0,
+    "engine_sha256": "0541c111ceeff7d07ec1e3ddf894600074189b97d66205209c51ceccb48cc79b",
+    "groups": [
+      "agents",
+      "realms",
+      "gc-weak"
+    ],
+    "total": 2030
+  },
+  "counts": {
+    "pass": 1654,
+    "fail": 376,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 153,
+  "lost_passes": 0,
+  "checks": {
+    "allfeatures-tests": {
+      "status": "passed",
+      "passed": 806,
+      "ignored": 4
+    },
+    "clippy": {
+      "status": "passed"
+    },
+    "fmt": {
+      "status": "passed"
+    },
+    "minimal-tests": {
+      "status": "passed",
+      "passed": 158,
+      "ignored": 0
+    },
+    "native-build": {
+      "status": "passed"
+    },
+    "node-tests": {
+      "status": "passed"
+    },
+    "release-build": {
+      "status": "passed"
+    },
+    "tooling-tests": {
+      "status": "passed"
+    },
+    "wasm-tests": {
+      "status": "passed"
+    }
+  },
+  "full_corpus_ast_bytecode_mismatches": "not measured",
+  "sha256": {
+    "b5ae20f-focused.json.gz": "04b3257cecf596b6a0bc1d4a75f8fcee47913c83af6c42a788ac36e4c65a5de4",
+    "b5ae20f-transitions.json.gz": "90cc27012e07c0df8b5379366d585f0ef4e0a89fc241909c724b7c68df814530",
+    "b5ae20f-allfeatures-tests.log.gz": "270a5754bbb11b105d7ffc6127a397701de24b6a66740ee9131212868dd2d7c1",
+    "b5ae20f-clippy.log.gz": "59bf6ad273d03f231849c71db90ce479e785e2d6b9145f09d26925c39e18c81a",
+    "b5ae20f-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "b5ae20f-minimal-tests.log.gz": "9b201320d729531156f0f0d02daa5406f90f6205f6cc328d5fc343a9396c5e87",
+    "b5ae20f-native-build.log.gz": "e1104971f0bff15387b6378d802af214689723ff0bc4320663cfda665d778117",
+    "b5ae20f-node-tests.log.gz": "fe20b8968ab729838219576e7bfe87583f3093b887339803d8a39d560764ee84",
+    "b5ae20f-release-build.log.gz": "b5a790a4d4c3a459064e2c33ad4370bbdfdd5232e2ad2a74de4252341235738d",
+    "b5ae20f-tooling-tests.log.gz": "baed4e83e0f8a8f5aa8188937750bc51eef54373c2bc7f54cf60e7036bc48572",
+    "b5ae20f-wasm-tests.log.gz": "7c18e6a54bb5a66f634e238c5c1c48b0d3e9979bcba4e6afbdeb6b38b7bda8b2"
+  }
+}

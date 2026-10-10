@@ -43,6 +43,7 @@ pub enum Job {
     /// Invoke a thenable's `then` method in a PromiseResolveThenableJob, after
     /// the current JavaScript stack has finished.
     PromiseResolveThenable {
+        realm: super::Env,
         target: Rc<RefCell<PromiseInner>>,
         thenable: Value,
         then: Value,
@@ -99,11 +100,13 @@ impl Job {
                 Value::Promise(reaction.derived.clone()),
             ]),
             Job::PromiseResolveThenable {
+                realm,
                 target,
                 thenable,
                 then,
                 resolution_guard,
             } => out.extend([
+                Value::RealmGlobal(realm.clone()),
                 Value::Promise(target.clone()),
                 thenable.clone(),
                 then.clone(),
@@ -291,6 +294,8 @@ impl TimerQueue {
 }
 
 struct AtomicsWaiter {
+    native: Option<crate::value::SharedWaitRegistration>,
+    shared: Option<crate::value::SharedBuffer>,
     id: u64,
     promise: Rc<RefCell<PromiseInner>>,
 }
@@ -371,6 +376,9 @@ impl JobQueue {
         for waiters in self.atomics_waiters.values() {
             for waiter in waiters {
                 out.push(Value::Promise(waiter.promise.clone()));
+                if let Some(shared) = &waiter.shared {
+                    out.push(Value::SharedArrayBuffer(shared.clone()));
+                }
             }
         }
     }
@@ -503,8 +511,66 @@ impl JobQueue {
         self.atomics_waiters
             .entry(key)
             .or_default()
-            .push_back(AtomicsWaiter { id, promise });
+            .push_back(AtomicsWaiter {
+                id,
+                promise,
+                native: None,
+                shared: None,
+            });
         id
+    }
+
+    pub fn register_shared_atomics_waiter(
+        &mut self,
+        key: (usize, usize),
+        promise: Rc<RefCell<PromiseInner>>,
+        shared: crate::value::SharedBuffer,
+        native: Option<crate::value::SharedWaitRegistration>,
+    ) -> u64 {
+        let id = self.register_atomics_waiter(key, promise);
+        let waiter = self
+            .atomics_waiters
+            .get_mut(&key)
+            .expect("registered key")
+            .back_mut()
+            .expect("registered waiter");
+        // Native registrations retain the data block, not its guest wrapper
+        // or realm. External storage needs the wrapper for host lifetime.
+        waiter.shared = native.is_none().then_some(shared);
+        waiter.native = native;
+        id
+    }
+
+    fn remove_waiter(&mut self, key: (usize, usize), waiter_id: u64) -> Option<AtomicsWaiter> {
+        let waiters = self.atomics_waiters.get_mut(&key)?;
+        let index = waiters.iter().position(|waiter| waiter.id == waiter_id)?;
+        let waiter = waiters.remove(index)?;
+        if waiters.is_empty() {
+            self.atomics_waiters.remove(&key);
+        }
+        Some(waiter)
+    }
+
+    /// Native notifier threads only set signals. Guest promise settlement is
+    /// collected here and dispatched by the VM owner at a checkpoint.
+    pub(crate) fn take_notified_atomics_waiters(&mut self) -> Vec<Rc<RefCell<PromiseInner>>> {
+        let mut ready = Vec::new();
+        self.atomics_waiters.retain(|_, waiters| {
+            waiters.retain(|waiter| {
+                if waiter
+                    .native
+                    .as_ref()
+                    .is_some_and(|native| native.is_notified())
+                {
+                    ready.push(waiter.promise.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            !waiters.is_empty()
+        });
+        ready
     }
 
     /// Remove a registered waiter, typically when its timeout fires.
@@ -513,13 +579,8 @@ impl JobQueue {
         key: (usize, usize),
         waiter_id: u64,
     ) -> Option<Rc<RefCell<PromiseInner>>> {
-        let waiters = self.atomics_waiters.get_mut(&key)?;
-        let index = waiters.iter().position(|waiter| waiter.id == waiter_id)?;
-        let waiter = waiters.remove(index)?;
-        if waiters.is_empty() {
-            self.atomics_waiters.remove(&key);
-        }
-        Some(waiter.promise)
+        self.remove_waiter(key, waiter_id)
+            .map(|waiter| waiter.promise)
     }
 
     /// Take up to `count` pending waiters in FIFO order. Settled entries are
@@ -536,6 +597,10 @@ impl JobQueue {
         let mut retained = VecDeque::new();
         while let Some(waiter) = waiters.pop_front() {
             if waiter.promise.borrow().state != PromiseState::Pending {
+                continue;
+            }
+            if waiter.native.is_some() {
+                retained.push_back(waiter);
                 continue;
             }
             if selected.len() < count {
@@ -632,7 +697,8 @@ impl JobQueue {
         self.host_overflow.push_back(job);
         self.observe_depth();
     }
-    pub(crate) fn has_outstanding_work(&self) -> bool {
+    /// Includes pending native wait signals as well as runnable jobs.
+    pub fn has_outstanding_work(&self) -> bool {
         !self.is_empty() || !self.atomics_waiters.is_empty()
     }
 
@@ -676,13 +742,17 @@ pub fn settle(jobs: &Jobs, promise: &Rc<RefCell<PromiseInner>>, state: PromiseSt
 /// Complete a timed `Atomics.waitAsync` registration. If a notify already
 /// removed it, the timeout is stale and does nothing.
 pub fn settle_atomics_wait_timeout(jobs: &Jobs, key: (usize, usize), waiter_id: u64) {
-    let promise = jobs.borrow_mut().remove_atomics_waiter(key, waiter_id);
-    if let Some(promise) = promise {
+    let waiter = jobs.borrow_mut().remove_waiter(key, waiter_id);
+    if let Some(waiter) = waiter {
+        let notified = waiter
+            .native
+            .as_ref()
+            .is_some_and(|native| native.complete() == crate::value::SharedWaitResult::Ok);
         settle(
             jobs,
-            &promise,
+            &waiter.promise,
             PromiseState::Fulfilled,
-            Value::String("timed-out".into()),
+            Value::String(if notified { "ok" } else { "timed-out" }.into()),
         );
     }
 }
@@ -692,6 +762,18 @@ fn normalize_delay(delay: f64) -> f64 {
         delay
     } else {
         0.0
+    }
+}
+
+pub(crate) fn settle_notified_atomics_waiters(jobs: &Jobs) {
+    let ready = jobs.borrow_mut().take_notified_atomics_waiters();
+    for promise in ready {
+        settle(
+            jobs,
+            &promise,
+            PromiseState::Fulfilled,
+            Value::String("ok".into()),
+        );
     }
 }
 

@@ -5,15 +5,14 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::{
-    BindKind, Env, Environment, Interpreter, Lookup, SYMBOL_ITERATOR_SLOT,
-    block_needs_lexical_scope, body_needs_hoisting,
+    BindKind, Env, Environment, Interpreter, Lookup, block_needs_lexical_scope, body_needs_hoisting,
 };
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
-    AssignOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName, ObjectProp,
-    Statement, UnOp, VarKind, arrow_body_references, stmts_reference,
+    AssignOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp, MemberName,
+    ObjectProp, Statement, UnOp, VarKind, arrow_body_references,
 };
-use crate::value::{ClassData, FunctionData, ObjectCell, PropAttrs, Value};
+use crate::value::{ClassData, FunctionData, ObjectCell, PrivateElement, PropAttrs, Value};
 
 /// Convert parser-owned parameter names into interned `Rc<str>` so call-frame
 /// binding is a refcount bump, not a heap allocation.
@@ -49,6 +48,16 @@ fn class_accessor_kind(value: &Value) -> Option<&'static str> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum ClassStaticElement {
+    Field {
+        name: String,
+        private: bool,
+        init: Expr,
+    },
+    Block(Rc<Vec<Statement>>),
+}
+
 /// Evaluated class parts handed to [`Interpreter::assemble_class`]:
 /// the constructor plus gathered prototype/static members, with static
 /// blocks to run once the class value exists.
@@ -62,7 +71,31 @@ pub(crate) struct ClassAssembly {
     pub statics: Vec<(String, Value)>,
     pub static_attrs: Vec<(String, PropAttrs)>,
     pub static_has_accessors: bool,
-    pub static_blocks: Vec<Rc<Vec<Statement>>>,
+    pub static_elements: Vec<ClassStaticElement>,
+    pub private_scope: Env,
+    pub private_statics: Vec<(u64, PrivateElement)>,
+}
+
+/// Both class frontends register definitions here. Receiver branding and
+/// accessor combination do not depend on AST or bytecode representation.
+pub(crate) fn define_class_private_element(
+    scope: &Env,
+    statics: &mut Vec<(u64, PrivateElement)>,
+    name: &str,
+    is_static: bool,
+    element: PrivateElement,
+) -> Result<(), VmErr> {
+    let id = scope
+        .borrow()
+        .private_name(name)
+        .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not declared".into()))?;
+    if is_static {
+        PrivateElement::define(statics, id, element)
+    } else {
+        scope
+            .borrow_mut()
+            .define_private_instance_element(id, element)
+    }
 }
 
 pub(crate) fn insert_class_accessor(
@@ -182,21 +215,6 @@ pub(crate) fn push_call_arg(args: &mut Vec<Value>, value: Value) -> Result<(), V
 /// the callers directly; this only decides labeled ones.
 /// Close an iterator that a `for...of` is abandoning before exhaustion.
 ///
-/// Only generators need this today: their bodies may be suspended inside a
-/// `try`, and JavaScript runs those `finally` blocks when the loop exits
-/// early. Any other iterable is a plain object with no teardown to perform.
-#[cfg_attr(not(stackful_coroutines), expect(unused_variables))]
-pub(crate) fn close_iterator(iterator: &Value) {
-    #[cfg(stackful_coroutines)]
-    if let Value::Generator { inner } = iterator {
-        // A generator cannot be mid-`next()` here: this runs on the same
-        // thread that just returned from it, so the cell is free.
-        if let Ok(mut inner) = inner.try_borrow_mut() {
-            inner.close();
-        }
-    }
-}
-
 fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
     match (label, signal) {
         (Some(a), Some(b)) => a == b,
@@ -215,20 +233,33 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 pub(crate) const SUPER_PROTO: &str = "__super_proto__";
 
 impl Interpreter {
-    fn close_guest_iterator(&mut self, iterator: &Value, asynchronous: bool) -> Result<(), VmErr> {
-        if matches!(iterator, Value::Generator { .. }) {
-            close_iterator(iterator);
+    /// IteratorClose preserves an original throw, including errors raised by
+    /// retrieving return. Other abrupt completions may be replaced by close.
+    pub(crate) fn close_guest_iterator_for_abrupt(
+        &mut self,
+        iterator: &Value,
+        asynchronous: bool,
+        completion: &VmErr,
+    ) -> Result<(), VmErr> {
+        let result = self.close_guest_iterator(iterator, asynchronous);
+        if matches!(
+            completion,
+            VmErr::Throw(_) | VmErr::Msg(_) | VmErr::RuntimeError(_)
+        ) {
+            Ok(())
+        } else {
+            result
+        }
+    }
+
+    pub(crate) fn close_guest_iterator(
+        &mut self,
+        iterator: &Value,
+        asynchronous: bool,
+    ) -> Result<(), VmErr> {
+        let Some(method) = self.get_method(iterator, &Value::String("return".into()))? else {
             return Ok(());
-        }
-        let method = self.get_prop_value_str(iterator, "return")?;
-        if matches!(method, Value::Undefined | Value::Null) {
-            return Ok(());
-        }
-        if !super::call::is_callable_value(&method) {
-            return Err(VmErr::Msg(
-                "TypeError: iterator return must be callable".into(),
-            ));
-        }
+        };
         let mut result = self.call_this(&method, iterator.clone(), vec![])?;
         if asynchronous {
             result = self.perform_await(result)?;
@@ -239,6 +270,26 @@ impl Interpreter {
             ));
         }
         Ok(())
+    }
+
+    /// IteratorComplete/GetValue with observable property access. Completed
+    /// iterators do not read value; a missing done property means false.
+    pub(crate) fn iterator_result_fields(
+        &mut self,
+        result: &Value,
+    ) -> Result<(bool, Value), VmErr> {
+        if !super::call::is_js_object(result) {
+            return Err(VmErr::Msg(
+                "TypeError: Iterator result must be an object".into(),
+            ));
+        }
+        let done = self.member(result, "done")?.is_truthy();
+        let value = if done {
+            Value::Undefined
+        } else {
+            self.member(result, "value")?
+        };
+        Ok((done, value))
     }
 
     /// Resolve `super.<key>` — a lookup on the superclass prototype.
@@ -262,12 +313,19 @@ impl Interpreter {
     /// evaluated once, in definition order, when the class is defined.
     fn member_name(&mut self, name: &MemberName) -> Result<String, VmErr> {
         match name {
-            MemberName::Static(name) => Ok(name.clone()),
+            MemberName::Static(name) | MemberName::Private(name) => Ok(name.clone()),
             MemberName::Computed(expr) => {
                 let value = self.eval_expr(expr)?;
                 self.property_key(&value)
             }
         }
+    }
+
+    fn class_member_name(&mut self, scope: &Env, name: &MemberName) -> Result<String, VmErr> {
+        let saved = std::mem::replace(&mut self.global, scope.clone());
+        let result = self.member_name(name);
+        self.global = saved;
+        result
     }
 
     /// The prototype a class inherits from: the superclass's own, or a
@@ -297,6 +355,17 @@ impl Interpreter {
 
     /// The `super(...)` target for a derived constructor: the superclass's
     /// constructor, or a callable native heritage itself.
+    pub(crate) fn class_environment(parent: Env, name: &str) -> Env {
+        let scope = Rc::new(RefCell::new(Environment::child(parent)));
+        scope.borrow_mut().replace_strict(Some(true));
+        if !name.is_empty() {
+            scope
+                .borrow_mut()
+                .declare(name, Value::Uninitialized, BindKind::Const, false);
+        }
+        scope
+    }
+
     pub(crate) fn super_ctor_for(super_cls: &Option<Value>) -> Option<Value> {
         match super_cls {
             Some(Value::Class(_)) => super_cls.clone(),
@@ -333,7 +402,9 @@ impl Interpreter {
             mut statics,
             mut static_attrs,
             static_has_accessors,
-            static_blocks,
+            static_elements,
+            private_scope,
+            private_statics,
         } = asm;
         let prototype_has_accessors = proto_props.iter().any(|(key, value)| key.starts_with("__setter:") || matches!(value, Value::Function(function) if function.name.as_deref().is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))));
         let prototype = Value::object_with_proto(proto_props, super_proto);
@@ -403,17 +474,65 @@ impl Interpreter {
             }
         }
 
-        // The class binds its own name inside static blocks and
-        // method bodies, so `static { A.y = … }` can reach it.
-        for block in static_blocks {
+        for (id, element) in private_statics {
+            class_val.initialize_private_element(id, element)?;
+        }
+
+        if !name.is_empty() {
+            private_scope
+                .borrow_mut()
+                .declare(&name, class_val.clone(), BindKind::Const, true);
+        }
+        // Static methods/accessors are already installed. Fields and blocks
+        // initialize in source order after every computed name was evaluated.
+        for element in static_elements {
             let scope = Rc::new(RefCell::new(Environment::function_child(
-                self.global.clone(),
+                private_scope.clone(),
             )));
+            scope.borrow_mut().class_initializer = true;
             scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
-            scope.borrow_mut().set(&name, class_val.clone());
+            scope.borrow_mut().set_new_target(Value::Undefined);
+            if let Some(superclass) = &super_cls {
+                scope.borrow_mut().set(SUPER_PROTO, superclass.clone());
+            }
             let saved = std::mem::replace(&mut self.global, scope);
-            let result = self.run_program_body(&block);
+            let result = (|| {
+                self.execution.check()?;
+                match element {
+                    ClassStaticElement::Block(block) => self.run_program_body(&block).map(|_| ()),
+                    ClassStaticElement::Field {
+                        name,
+                        private,
+                        init,
+                    } => {
+                        let value = self.eval_expr(&init)?;
+                        if private {
+                            let id = self.global.borrow().private_name(&name).ok_or_else(|| {
+                                VmErr::Msg("TypeError: missing private field declaration".into())
+                            })?;
+                            class_val.initialize_private_field(id, value)
+                        } else {
+                            let descriptor = Value::descriptor_record(vec![
+                                ("value".into(), value),
+                                ("writable".into(), Value::Bool(true)),
+                                ("enumerable".into(), Value::Bool(true)),
+                                ("configurable".into(), Value::Bool(true)),
+                            ]);
+                            if !self.define_own_property(
+                                &class_val,
+                                &Value::String(crate::JsString::from_key(&name)),
+                                &descriptor,
+                            )? {
+                                return Err(VmErr::Msg(
+                                    "TypeError: Cannot define static field".into(),
+                                ));
+                            }
+                            Ok(())
+                        }
+                    }
+                }
+            })();
             self.global = saved;
             result?;
         }
@@ -426,31 +545,33 @@ impl Interpreter {
         superclass: Option<&Expr>,
         body: &[ClassMember],
     ) -> Result<Value, VmErr> {
-        let super_cls = if let Some(sc) = superclass {
-            Some(self.eval_expr(sc)?)
-        } else {
-            None
-        };
-        // Inheritance: the instance prototype chains to the superclass's
-        // prototype so inherited methods resolve.
-        let super_proto = self.super_proto_for(&super_cls)?;
-
-        // Methods, getters and setters close over a scope carrying the
-        // superclass prototype, so `super.method()` inside one can find it.
-        // The constructor gets `__super_ctor` separately, below.
-        let member_scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+        let member_scope = Self::class_environment(self.global.clone(), name);
+        let saved = std::mem::replace(&mut self.global, member_scope.clone());
+        let heritage = (|| {
+            let superclass = superclass.map(|expr| self.eval_expr(expr)).transpose()?;
+            let prototype = self.super_proto_for(&superclass)?;
+            Ok::<_, VmErr>((superclass, prototype))
+        })();
+        self.global = saved;
+        let (super_cls, super_proto) = heritage?;
+        member_scope
+            .borrow_mut()
+            .declare_private_declarations(crate::parser::class_private_declarations(body));
         for member in body {
             if let ClassMember::Field {
-                name: MemberName::Static(name),
+                name: MemberName::Private(name),
                 is_static: false,
                 ..
             } = member
-                && name.starts_with('#')
             {
                 member_scope.borrow_mut().declare_private_field(name);
             }
         }
         let member_closure = Self::member_closure_env(&member_scope, &super_proto);
+        let static_member_closure = Self::member_closure_env(
+            &member_scope,
+            &super_cls.as_ref().map(|value| Rc::new(value.clone())),
+        );
 
         // Gather the constructor, instance fields, and methods.
         let mut ctor_params: Vec<String> = Vec::new();
@@ -469,7 +590,8 @@ impl Interpreter {
             },
         )];
         let mut static_has_accessors = false;
-        let mut static_blocks: Vec<Vec<Statement>> = Vec::new();
+        let mut private_statics = Vec::new();
+        let mut static_elements = Vec::new();
 
         for member in body {
             match member {
@@ -481,7 +603,7 @@ impl Interpreter {
                     is_async,
                     is_generator,
                 } => {
-                    let mname = self.member_name(name)?;
+                    let mname = self.class_member_name(&member_scope, name)?;
                     // Only a written-out `constructor` is the constructor; a
                     // computed key that happens to evaluate to it stays an
                     // ordinary method.
@@ -491,23 +613,37 @@ impl Interpreter {
                         native: None,
                         identity: Rc::new(0),
                         name: Some(mname.as_str().into()),
-                        properties: FunctionData::properties_with_default_prototype(
+                        properties: FunctionData::properties_with_function_kind(
                             &self.persistent_global,
+                            *is_async,
+                            *is_generator,
                         ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(mp),
                         body: Rc::new(mb.clone()),
-                        closure: Some(crate::heap::capture_env(&member_closure)),
+                        closure: Some(crate::heap::capture_env(if *st {
+                            &static_member_closure
+                        } else {
+                            &member_closure
+                        })),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: *is_async,
                         is_generator: *is_generator,
-                        uses_arguments: stmts_reference(mb, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(mb),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(mb),
                         bound: None,
                     }));
-                    if *st {
+                    if matches!(name, MemberName::Private(_)) {
+                        define_class_private_element(
+                            &member_scope,
+                            &mut private_statics,
+                            &mname,
+                            *st,
+                            PrivateElement::Method(fn_val),
+                        )?;
+                    } else if *st {
                         statics.push((mname.clone(), fn_val));
                         static_attrs.push((
                             mname.clone(),
@@ -528,26 +664,25 @@ impl Interpreter {
                 // Static blocks are collected and run after the class
                 // exists, since they observe its statics and `this`.
                 ClassMember::StaticBlock { body } => {
-                    static_blocks.push(body.clone());
+                    static_elements.push(ClassStaticElement::Block(Rc::new(body.clone())));
                 }
                 ClassMember::Field {
                     name,
                     is_static: st,
                     init,
                 } => {
-                    let fname = self.member_name(name)?;
+                    let fname = self.class_member_name(&member_scope, name)?;
                     if *st {
-                        let init_val = match init {
-                            Some(e) => self.eval_expr(e)?,
-                            None => Value::Undefined,
-                        };
-                        statics.push((fname.clone(), init_val));
-                        static_attrs.push((fname.clone(), PropAttrs::default()));
+                        static_elements.push(ClassStaticElement::Field {
+                            name: fname,
+                            private: matches!(name, MemberName::Private(_)),
+                            init: init.clone().unwrap_or(Expr::Undefined),
+                        });
                     } else {
                         instance_fields.push((
                             fname.clone(),
                             init.clone(),
-                            matches!(name, MemberName::Computed(_)),
+                            !matches!(name, MemberName::Private(_)),
                         ));
                     }
                 }
@@ -556,7 +691,7 @@ impl Interpreter {
                     is_static: st,
                     body: gb,
                 } => {
-                    let gname = self.member_name(name)?;
+                    let gname = self.class_member_name(&member_scope, name)?;
                     let getter_fn = Value::Function(Rc::new(FunctionData {
                         strict: true,
                         native: None,
@@ -568,17 +703,32 @@ impl Interpreter {
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![]),
                         body: Rc::new(gb.clone()),
-                        closure: Some(crate::heap::capture_env(&member_closure)),
+                        closure: Some(crate::heap::capture_env(if *st {
+                            &static_member_closure
+                        } else {
+                            &member_closure
+                        })),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: false,
                         is_generator: false,
-                        uses_arguments: stmts_reference(gb, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(gb),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(gb),
                         bound: None,
                     }));
-                    if *st {
+                    if matches!(name, MemberName::Private(_)) {
+                        define_class_private_element(
+                            &member_scope,
+                            &mut private_statics,
+                            &gname,
+                            *st,
+                            PrivateElement::Accessor {
+                                get: Some(getter_fn),
+                                set: None,
+                            },
+                        )?;
+                    } else if *st {
                         insert_class_accessor(&mut statics, &gname, getter_fn);
                         static_attrs.push((
                             gname.clone(),
@@ -599,7 +749,7 @@ impl Interpreter {
                     is_static: st,
                     body: sb,
                 } => {
-                    let sname = self.member_name(name)?;
+                    let sname = self.class_member_name(&member_scope, name)?;
                     let setter_fn = Value::Function(Rc::new(FunctionData {
                         strict: true,
                         native: None,
@@ -611,17 +761,32 @@ impl Interpreter {
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(sb.clone()),
-                        closure: Some(crate::heap::capture_env(&member_closure)),
+                        closure: Some(crate::heap::capture_env(if *st {
+                            &static_member_closure
+                        } else {
+                            &member_closure
+                        })),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: false,
                         is_generator: false,
-                        uses_arguments: stmts_reference(sb, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(sb),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(sb),
                         bound: None,
                     }));
-                    if *st {
+                    if matches!(name, MemberName::Private(_)) {
+                        define_class_private_element(
+                            &member_scope,
+                            &mut private_statics,
+                            &sname,
+                            *st,
+                            PrivateElement::Accessor {
+                                get: None,
+                                set: Some(setter_fn),
+                            },
+                        )?;
+                    } else if *st {
                         insert_class_accessor(&mut statics, &sname, setter_fn);
                         static_attrs.push((
                             sname.clone(),
@@ -640,15 +805,12 @@ impl Interpreter {
         }
 
         // A derived class with no constructor of its own gets the implicit
-        // `constructor(...args) { super(...args); }`. Without it, extending a
+        // argument forwarding without guest iterator calls. Without it, extending a
         // class whose constructor does the work — `class E extends Error {}` —
         // produced an instance the superclass never initialized.
         if super_cls.is_some() && !has_own_constructor {
             ctor_params = vec!["...args".to_string()];
-            ctor_body = vec![Statement::Expr(Expr::Call {
-                callee: Box::new(Expr::Super),
-                args: vec![Expr::Spread(Box::new(Expr::Identifier("args".to_string())))],
-            })];
+            ctor_body = Vec::new();
         }
 
         // Store fields separately from the body so constructor entry/super
@@ -668,9 +830,13 @@ impl Interpreter {
         }
         let fields = full_ctor_body;
         let mut full_ctor_body = Vec::new();
-        if super_cls.is_some() || !fields.is_empty() {
+        if super_cls.is_some()
+            || !fields.is_empty()
+            || !member_scope.borrow().private_instance_elements().is_empty()
+        {
             full_ctor_body.push(Statement::ClassInitialization {
                 derived: super_cls.is_some(),
+                forward_rest: (super_cls.is_some() && !has_own_constructor).then(|| "args".into()),
                 fields,
             });
         }
@@ -704,7 +870,7 @@ impl Interpreter {
                     .map(|p| Rc::from(p.as_str()))
                     .collect(),
             ),
-            uses_arguments: stmts_reference(&full_ctor_body, "arguments"),
+            uses_arguments: crate::parser::stmts_need_arguments(&full_ctor_body),
             needs_hoisting: body_needs_hoisting(&full_ctor_body),
             body: Rc::new(full_ctor_body),
             closure: Some(crate::heap::capture_env(&ctor_closure)),
@@ -726,7 +892,9 @@ impl Interpreter {
             statics,
             static_attrs,
             static_has_accessors,
-            static_blocks: static_blocks.into_iter().map(Rc::new).collect(),
+            private_scope: member_scope,
+            private_statics,
+            static_elements,
         })
     }
 
@@ -905,8 +1073,48 @@ impl Interpreter {
 
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
+        self.eval_dynamic_import_with_options(specifier, None)
+    }
+
+    fn eval_dynamic_import_with_options(
+        &mut self,
+        specifier: Value,
+        options: Option<Value>,
+    ) -> Result<Value, VmErr> {
         let target = Value::pending_promise();
-        let converted = self.ecmascript_to_string(&specifier).and_then(|name| name.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into())));
+        let converted = (|| {
+            let name = self.ecmascript_to_string(&specifier)?.to_utf8().map_err(|_| VmErr::Msg("TypeError: module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into()))?;
+            if let Some(options) = options.filter(|value| !matches!(value, Value::Undefined)) {
+                if !super::call::is_js_object(&options) {
+                    return Err(VmErr::Msg(
+                        "TypeError: import options must be an object".into(),
+                    ));
+                }
+                let attributes = self.get_prop_value_str(&options, "with")?;
+                if !matches!(attributes, Value::Undefined) {
+                    if !super::call::is_js_object(&attributes) {
+                        return Err(VmErr::Msg(
+                            "TypeError: import attributes must be an object".into(),
+                        ));
+                    }
+                    let keys = crate::builtins::object::own_names_for(self, &attributes, true)?;
+                    for key in &keys {
+                        if !matches!(self.get_prop_value_str(&attributes, key)?, Value::String(_)) {
+                            return Err(VmErr::Msg(
+                                "TypeError: import attribute values must be strings".into(),
+                            ));
+                        }
+                    }
+                    if !keys.is_empty() {
+                        return Err(VmErr::Msg(
+                            "TypeError: import attributes are not supported by this module loader"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+            Ok(name)
+        })();
         match converted {
             Ok(specifier) => {
                 self.jobs
@@ -989,15 +1197,7 @@ impl Interpreter {
                                 // writes land on bindings that already carry
                                 // the right kind -- otherwise a destructured
                                 // `const` would be reassignable.
-                                for bound in crate::parser::pattern_names(pat) {
-                                    self.declare_binding(
-                                        &bound,
-                                        Value::Undefined,
-                                        bind_kind,
-                                        false,
-                                    )?;
-                                }
-                                self.destructure(pat, &v)?;
+                                self.initialize_pattern_binding(pat, &v, bind_kind)?;
                             }
                             None => {
                                 self.declare_binding(name, v.clone(), bind_kind, true)?;
@@ -1013,13 +1213,14 @@ impl Interpreter {
                 body,
                 is_async,
                 is_generator,
+                ..
             } => {
                 let scope = if self.global.borrow().is_eval_scope() {
                     Environment::variable_environment(&self.global)
                 } else {
                     self.global.clone()
                 };
-                self.set_binding_in(
+                self.declare_function_binding_in(
                     &scope,
                     name,
                     Value::Function(Rc::new(FunctionData {
@@ -1027,8 +1228,10 @@ impl Interpreter {
                         native: None,
                         identity: Rc::new(0),
                         name: Some(name.as_str().into()),
-                        properties: FunctionData::properties_with_default_prototype(
+                        properties: FunctionData::properties_with_function_kind(
                             &self.persistent_global,
+                            *is_async,
+                            *is_generator,
                         ),
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(params),
@@ -1038,7 +1241,7 @@ impl Interpreter {
                         is_constructor: !*is_async && !*is_generator,
                         is_async: *is_async,
                         is_generator: *is_generator,
-                        uses_arguments: stmts_reference(body, "arguments"),
+                        uses_arguments: crate::parser::stmts_need_arguments(body),
                         bytecode: None,
                         needs_hoisting: body_needs_hoisting(body),
                         bound: None,
@@ -1057,7 +1260,10 @@ impl Interpreter {
             }
             Statement::Return(e) => {
                 let v = match e {
-                    Some(ex) => self.eval_expr(ex)?,
+                    Some(ex) => {
+                        let value = self.eval_expr(ex)?;
+                        self.prepare_return_value(value)?
+                    }
                     None => Value::Undefined,
                 };
                 vm_ret(v)
@@ -1071,6 +1277,49 @@ impl Interpreter {
                 } else {
                     Ok(Value::Undefined)
                 }
+            }
+            Statement::ResourceForOf { name, iter, .. } => {
+                let mut environment = Environment::child(self.global.clone());
+                environment.declare(name, Value::Undefined, BindKind::Const, false);
+                let saved = std::mem::replace(&mut self.global, Rc::new(RefCell::new(environment)));
+                let source = self.eval_expr(iter);
+                self.global = saved;
+                source?;
+                vm_err("TypeError: resource disposal execution is not implemented")
+            }
+            Statement::ResourceDeclaration { declarations, .. } => {
+                // Initializers precede acquisition of a disposal method and
+                // can fail against the already-instantiated lexical TDZ.
+                if let Some(Statement::VarDecl {
+                    init: Some(init), ..
+                }) = declarations.first()
+                {
+                    self.eval_expr(init)?;
+                }
+                vm_err("TypeError: resource disposal execution is not implemented")
+            }
+            Statement::With { object, body } => {
+                let object = self.eval_expr(object)?;
+                if matches!(object, Value::Null | Value::Undefined) {
+                    return vm_err("TypeError: with object is null or undefined");
+                }
+                let object = if super::call::is_js_object(&object) {
+                    object
+                } else {
+                    let constructor = self
+                        .persistent_global
+                        .borrow()
+                        .intrinsic("Object")
+                        .expect("Object intrinsic");
+                    self.call_this(&constructor, Value::Undefined, vec![object])?
+                };
+                let mut environment = Environment::child(self.global.clone());
+                environment.with_object = Some(object);
+                let scope = Rc::new(RefCell::new(environment));
+                let saved = std::mem::replace(&mut self.global, scope);
+                let result = self.run_block(body);
+                self.global = saved;
+                result
             }
             Statement::While { test, body } => {
                 let body_needs_scope = block_needs_lexical_scope(body);
@@ -1126,125 +1375,17 @@ impl Interpreter {
                 self.pop_scope(outer);
                 result
             }
-            Statement::ForIn { name, obj, body } => {
-                let o = self.eval_expr(obj)?;
-                let ks = self.keys_with_proxy_trap(&o)?;
-                let body_needs_scope = block_needs_lexical_scope(body);
-                let mut r = Value::Undefined;
-                let label = self.active_label.take();
-                for k in ks {
-                    self.consume_loop()?;
-                    self.set_binding(name, Value::String((k).into()))?;
-                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                        Err(VmErr::Break(None)) => break,
-                        Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                        Err(VmErr::Continue(None)) => continue,
-                        Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
-                        other => r = other?,
-                    }
-                }
-                Ok(r)
+            Statement::ForIn { binding, obj, body } => {
+                self.with_loop_binding_scope(binding, |vm| vm.run_for_in(binding, obj, body))
             }
             Statement::ForOf {
-                name,
-                pattern,
+                binding,
                 iter,
                 body,
                 is_await,
-            } => {
-                let source = self.eval_expr(iter)?;
-                let body_needs_scope = block_needs_lexical_scope(body);
-                let iterator = if *is_await {
-                    self.async_iterator_for(&source)?
-                } else {
-                    self.iterator_for(&source)?
-                };
-                let next_fn = self.prop_str(&iterator, "next")?;
-                if matches!(next_fn, Value::Undefined) {
-                    return vm_err("iterator has no next() method");
-                }
-                let mut r = Value::Undefined;
-                let label = self.active_label.take();
-                // Leaving before the iterator reports `done` must close it, so
-                // a suspended generator runs its `finally` blocks. Tracked here
-                // and acted on at every exit, error paths included.
-                let mut exhausted = false;
-                loop {
-                    // Account for the iterator's next call as well as the
-                    // body iteration. This keeps custom/infinite iterators
-                    // budgeted without eagerly collecting their output.
-                    self.consume_loop()?;
-                    let mut result = self.call_this(&next_fn, iterator.clone(), vec![])?;
-                    // `for await` awaits the step object itself, which is what
-                    // lets an async iterator return a promise of `{value,
-                    // done}` rather than the object directly.
-                    if *is_await {
-                        result = self.perform_await(result)?;
-                    }
-                    let done = result
-                        .get_prop("done")
-                        .map(|v| v.is_truthy())
-                        .unwrap_or(true);
-                    if done {
-                        exhausted = true;
-                        break;
-                    }
-                    let mut value = result.get_prop("value").unwrap_or(Value::Undefined);
-                    // A sync iterator of promises is also valid input to
-                    // `for await`, so each value is awaited too.
-                    if *is_await {
-                        value = self.perform_await(value)?;
-                    }
-                    match pattern {
-                        Some(pattern) => {
-                            for bound in crate::parser::pattern_names(pattern) {
-                                self.declare_binding(
-                                    &bound,
-                                    Value::Undefined,
-                                    BindKind::Let,
-                                    false,
-                                )?;
-                            }
-                            if let Err(error) = self.destructure(pattern, &value) {
-                                // An abandon teardown runs no handlers — and
-                                // closing is a handler. Anything else closes.
-                                if !error.is_abandon() {
-                                    let _ = self.close_guest_iterator(&iterator, *is_await);
-                                }
-                                return Err(error);
-                            }
-                        }
-                        None => self.set_binding(name, value)?,
-                    }
-                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                        Err(VmErr::Break(None)) => break,
-                        Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                        Err(VmErr::Continue(None)) => continue,
-                        Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
-                        // `return`, `throw`, or a break/continue aimed at an
-                        // outer label also leaves the loop, and also closes.
-                        // An abandon teardown is the exception: it runs no
-                        // handlers, so it must not close either.
-                        Err(error) => {
-                            if !error.is_abandon() {
-                                let closed = self.close_guest_iterator(&iterator, *is_await);
-                                if matches!(
-                                    error,
-                                    VmErr::Ret(_) | VmErr::Break(_) | VmErr::Continue(_)
-                                ) {
-                                    closed?;
-                                }
-                            }
-                            return Err(error);
-                        }
-                        Ok(value) => r = value,
-                    }
-                }
-                if !exhausted {
-                    self.close_guest_iterator(&iterator, *is_await)?;
-                }
-                Ok(r)
-            }
+            } => self.with_loop_binding_scope(binding, |vm| {
+                vm.run_for_of(binding, iter, body, *is_await)
+            }),
             Statement::Block(s) => self.run_block(s),
             // A declarator group shares the enclosing scope: no new frame.
             Statement::Declarations(s) => self.run(s),
@@ -1303,7 +1444,7 @@ impl Interpreter {
                     // A located runtime error already carries the stack from
                     // where it was raised, which is deeper than here.
                     Err(VmErr::RuntimeError(re)) => {
-                        let value = crate::error::error_value_with_stack(&re.message, &re.stack);
+                        let value = re.guest_value();
                         self.run_catch(catch, value)
                     }
                     other => other,
@@ -1328,10 +1469,10 @@ impl Interpreter {
                 let v = self.eval_expr(e)?;
                 self.stmt_export_default(v)
             }
-            Statement::ExportNamed { specifiers, source } => {
-                self.stmt_export_named(specifiers, source.as_deref())
-            }
-            Statement::ExportAll { source, alias } => {
+            Statement::ExportNamed {
+                specifiers, source, ..
+            } => self.stmt_export_named(specifiers, source.as_deref()),
+            Statement::ExportAll { source, alias, .. } => {
                 self.stmt_export_all(source, alias.as_deref())
             }
             Statement::Import {
@@ -1339,6 +1480,7 @@ impl Interpreter {
                 default,
                 named,
                 namespace,
+                ..
             } => self.stmt_import(module, default.as_deref(), named, namespace.as_deref()),
             Statement::Empty => Ok(Value::Undefined),
         }
@@ -1350,23 +1492,39 @@ impl Interpreter {
     /// generator raises a catchable `RangeError` instead of hanging.
     pub(crate) fn drain_iterable(&mut self, source: &Value) -> Result<Vec<Value>, VmErr> {
         let iterator = self.iterator_for(source)?;
-        let next_fn = self.prop_str(&iterator, "next")?;
-        if matches!(next_fn, Value::Undefined) {
-            return Ok(Vec::new());
-        }
+        self.drain_iterator(&iterator)
+    }
+
+    pub(crate) fn drain_iterator(&mut self, iterator: &Value) -> Result<Vec<Value>, VmErr> {
+        let next_fn = self.member(iterator, "next")?;
         let mut out = Vec::new();
         loop {
             self.consume_loop()?;
             let step = self.call_this(&next_fn, iterator.clone(), vec![])?;
-            let done = step.get_prop("done").map(|v| v.is_truthy()).unwrap_or(true);
+            let (done, value) = self.iterator_result_fields(&step)?;
             if done {
                 return Ok(out);
             }
-            out.push(step.get_prop("value").unwrap_or(Value::Undefined));
+            out.push(value);
             if out.len() > crate::value::MAX_ARRAY_LEN {
                 return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
         }
+    }
+
+    /// Array and argument spread use the same iterator protocol in both tiers.
+    pub(crate) fn append_iterable(
+        &mut self,
+        output: &mut Vec<Value>,
+        source: &Value,
+        limit_message: &str,
+    ) -> Result<(), VmErr> {
+        let items = self.drain_iterable(source)?;
+        if output.len().saturating_add(items.len()) > crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err(limit_message));
+        }
+        output.extend(items);
+        Ok(())
     }
 
     /// Obtain an iterator for `for await (… of source)`.
@@ -1377,39 +1535,37 @@ impl Interpreter {
     fn async_iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
         let key = crate::builtins::well_known("asyncIterator")
             .unwrap_or(Value::String(("Symbol.asyncIterator".to_string()).into()));
-        let async_iter_fn = self.prop(source, &key)?;
-        if !matches!(async_iter_fn, Value::Undefined) {
-            return self.call_this(&async_iter_fn, source.clone(), vec![]);
+        if let Some(async_iter_fn) = self.get_method(source, &key)? {
+            let iterator = self.call_this(&async_iter_fn, source.clone(), vec![])?;
+            if !super::call::is_js_object(&iterator) {
+                return vm_err("TypeError: Async iterator method must return an object");
+            }
+            return Ok(iterator);
         }
-        self.iterator_for(source)
+        let iterator = self.iterator_for(source)?;
+        super::async_from_sync::create(self, iterator)
     }
 
     /// Obtain an iterator for `source`, following the `Symbol.iterator`
     /// protocol. Shared by `for...of` and `yield*`.
     pub(crate) fn iterator_for(&mut self, source: &Value) -> Result<Value, VmErr> {
-        if matches!(source, Value::String(_)) {
-            let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
-            return self.call_this(&iter_fn, source.clone(), vec![]);
+        let key = crate::builtins::well_known("iterator").expect("Symbol.iterator");
+        let Some(method) = self.get_method(source, &key)? else {
+            return vm_err("TypeError: Value has no callable Symbol.iterator");
+        };
+        self.iterator_from_method(source, &method)
+    }
+
+    pub(crate) fn iterator_from_method(
+        &mut self,
+        source: &Value,
+        method: &Value,
+    ) -> Result<Value, VmErr> {
+        let iterator = self.call_this(method, source.clone(), vec![])?;
+        if !super::call::is_js_object(&iterator) {
+            return vm_err("TypeError: Iterator method must return an object");
         }
-        match source {
-            // A generator is its own iterator.
-            Value::Generator { .. } => Ok(source.clone()),
-            Value::Array(_) => {
-                let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
-                self.call_this(&iter_fn, source.clone(), vec![])
-            }
-            Value::Object { .. } | Value::TypedArray(_) => {
-                let iter_fn = self.prop_str(source, SYMBOL_ITERATOR_SLOT)?;
-                if matches!(iter_fn, Value::Undefined) {
-                    return vm_err("object is not iterable (no Symbol.iterator)");
-                }
-                self.call_this(&iter_fn, source.clone(), vec![])
-            }
-            other => {
-                let rendered = self.vs(other).unwrap_or_else(|_| "value".to_string());
-                vm_err(format!("TypeError: {} is not iterable", rendered))
-            }
-        }
+        Ok(iterator)
     }
 
     /// The body of a C-style `for`, running inside the loop scope the caller
@@ -1587,6 +1743,258 @@ impl Interpreter {
         scope
     }
 
+    fn object_literal_callable(
+        &self,
+        name: &str,
+        params: &[String],
+        body: &[Statement],
+        is_async: bool,
+        is_generator: bool,
+    ) -> Value {
+        Value::Function(Rc::new(FunctionData {
+            strict: self.global.borrow().strict() || crate::parser::use_strict(body),
+            native: None,
+            identity: Rc::new(0),
+            name: Some(name.into()),
+            properties: FunctionData::properties_with_function_kind(
+                &self.persistent_global,
+                is_async,
+                is_generator,
+            ),
+            standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
+            params: intern_params(params),
+            body: Rc::new(body.to_vec()),
+            closure: Some(crate::heap::capture_env(&self.global)),
+            is_arrow: false,
+            is_constructor: false,
+            is_async,
+            is_generator,
+            uses_arguments: crate::parser::stmts_need_arguments(body),
+            bytecode: None,
+            needs_hoisting: body_needs_hoisting(body),
+            bound: None,
+        }))
+    }
+
+    fn reject_call_assignment_target(&mut self, target: &Expr) -> Result<(), VmErr> {
+        if matches!(
+            target.unparenthesized(),
+            Expr::Call { .. } | Expr::TaggedTemplate { .. }
+        ) {
+            self.eval_expr(target)?;
+            return Err(VmErr::Msg(
+                "ReferenceError: invalid assignment target".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn run_for_in(
+        &mut self,
+        binding: &ForBinding,
+        obj: &Expr,
+        body: &[Statement],
+    ) -> Result<Value, VmErr> {
+        if let ForBinding::Declaration {
+            pattern,
+            initializer: Some(value),
+            ..
+        } = binding
+        {
+            let value = self.eval_expr(value)?;
+            self.destructure(pattern, &value)?;
+        }
+        let o = self.eval_expr(obj)?;
+        let ks = self.keys_with_proxy_trap(&o)?;
+        let body_needs_scope = block_needs_lexical_scope(body);
+        let mut r = Value::Undefined;
+        let label = self.active_label.take();
+        for k in ks {
+            self.consume_loop()?;
+            self.enter_iteration_binding_scope(binding);
+            self.assign_iteration_binding(binding, &Value::String(k.into()))?;
+            match self.run_block_with_lexical_scope(body, body_needs_scope) {
+                Err(VmErr::Break(None)) => break,
+                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
+                Err(VmErr::Continue(None)) => continue,
+                Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
+                other => r = other?,
+            }
+        }
+        Ok(r)
+    }
+
+    fn run_for_of(
+        &mut self,
+        binding: &ForBinding,
+        iter: &Expr,
+        body: &[Statement],
+        is_await: bool,
+    ) -> Result<Value, VmErr> {
+        let source = self.eval_expr(iter)?;
+        let body_needs_scope = block_needs_lexical_scope(body);
+        let iterator = if is_await {
+            self.async_iterator_for(&source)?
+        } else {
+            self.iterator_for(&source)?
+        };
+        let next_fn = self.member(&iterator, "next")?;
+        if matches!(next_fn, Value::Undefined) {
+            return vm_err("TypeError: iterator has no next() method");
+        }
+        let mut r = Value::Undefined;
+        let label = self.active_label.take();
+        // Leaving before the iterator reports `done` must close it, so
+        // a suspended generator runs its `finally` blocks. Tracked here
+        // and acted on at every exit, error paths included.
+        let mut exhausted = false;
+        loop {
+            // Account for the iterator's next call as well as the
+            // body iteration. This keeps custom/infinite iterators
+            // budgeted without eagerly collecting their output.
+            self.consume_loop()?;
+            let mut result = self.call_this(&next_fn, iterator.clone(), vec![])?;
+            // `for await` awaits the step object itself, which is what
+            // lets an async iterator return a promise of `{value,
+            // done}` rather than the object directly.
+            if is_await {
+                result = self.perform_await(result)?;
+            }
+            let (done, value) = self.iterator_result_fields(&result)?;
+            if done {
+                exhausted = true;
+                break;
+            }
+            self.enter_iteration_binding_scope(binding);
+            if let Err(error) = self.assign_iteration_binding(binding, &value) {
+                if !error.is_abandon() {
+                    let _ = self.close_guest_iterator(&iterator, is_await);
+                }
+                return Err(error);
+            }
+            match self.run_block_with_lexical_scope(body, body_needs_scope) {
+                Err(VmErr::Break(None)) => break,
+                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
+                Err(VmErr::Continue(None)) => continue,
+                Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
+                // `return`, `throw`, or a break/continue aimed at an
+                // outer label also leaves the loop, and also closes.
+                // An abandon teardown is the exception: it runs no
+                // handlers, so it must not close either.
+                Err(error) => {
+                    if !error.is_abandon() {
+                        self.close_guest_iterator_for_abrupt(&iterator, is_await, &error)?;
+                    }
+                    return Err(error);
+                }
+                Ok(value) => r = value,
+            }
+        }
+        if !exhausted {
+            self.close_guest_iterator(&iterator, is_await)?;
+        }
+        Ok(r)
+    }
+
+    fn with_loop_binding_scope<R>(
+        &mut self,
+        binding: &ForBinding,
+        operation: impl FnOnce(&mut Self) -> Result<R, VmErr>,
+    ) -> Result<R, VmErr> {
+        if !matches!(
+            binding,
+            ForBinding::Declaration {
+                kind: VarKind::Let | VarKind::Const,
+                ..
+            }
+        ) {
+            return operation(self);
+        }
+        let outer = self.global.clone();
+        self.enter_iteration_binding_scope_from(binding, outer.clone());
+        let result = operation(self);
+        self.global = outer;
+        result
+    }
+
+    fn enter_iteration_binding_scope(&mut self, binding: &ForBinding) {
+        if matches!(
+            binding,
+            ForBinding::Declaration {
+                kind: VarKind::Let | VarKind::Const,
+                ..
+            }
+        ) {
+            let outer = self
+                .global
+                .borrow()
+                .parent_env()
+                .expect("loop lexical environment");
+            self.enter_iteration_binding_scope_from(binding, outer);
+        }
+    }
+
+    fn enter_iteration_binding_scope_from(&mut self, binding: &ForBinding, outer: Env) {
+        let ForBinding::Declaration { pattern, kind, .. } = binding else {
+            unreachable!()
+        };
+        let scope = Rc::new(RefCell::new(Environment::child(outer)));
+        let kind = if *kind == VarKind::Const {
+            BindKind::Const
+        } else {
+            BindKind::Let
+        };
+        for name in crate::parser::pattern_names(pattern) {
+            scope
+                .borrow_mut()
+                .declare(&name, Value::Undefined, kind, false);
+        }
+        self.global = scope;
+    }
+
+    fn assign_iteration_binding(
+        &mut self,
+        binding: &ForBinding,
+        value: &Value,
+    ) -> Result<Value, VmErr> {
+        match binding {
+            ForBinding::Assignment(target) => {
+                self.reject_call_assignment_target(target)?;
+                let pattern = crate::parser::expr_to_pattern(target)
+                    .ok_or_else(|| VmErr::Msg("Invalid iteration assignment target".into()))?;
+                self.destructure_assignment(&pattern, value)
+            }
+            ForBinding::Declaration {
+                pattern: crate::parser::Pattern::Ident(name),
+                kind: VarKind::Var,
+                ..
+            } => {
+                self.assign_or_set_binding(name, value.clone())?;
+                Ok(value.clone())
+            }
+            ForBinding::Declaration {
+                pattern: crate::parser::Pattern::Ident(name),
+                ..
+            } => {
+                self.set_binding(name, value.clone())?;
+                Ok(value.clone())
+            }
+            ForBinding::Declaration {
+                kind: VarKind::Var,
+                pattern,
+                ..
+            } => self.destructure_assignment(pattern, value),
+            ForBinding::Declaration { pattern, kind, .. } => {
+                let kind = if *kind == VarKind::Const {
+                    BindKind::Const
+                } else {
+                    BindKind::Let
+                };
+                self.initialize_pattern_binding(pattern, value, kind)
+            }
+        }
+    }
+
     fn eval_object_literal(&mut self, props: &[ObjectProp]) -> Result<Value, VmErr> {
         let mut object = Vec::new();
         let mut positions = HashMap::new();
@@ -1594,6 +2002,9 @@ impl Interpreter {
         let mut symbol_keys = Vec::new();
         for prop in props {
             match prop {
+                ObjectProp::CoverInitializedName { .. } => {
+                    return vm_err("invalid object literal cover grammar");
+                }
                 ObjectProp::Shorthand(name) => {
                     let value = self.global.borrow().get(name).unwrap_or(Value::Undefined);
                     insert_object_property(
@@ -1614,6 +2025,51 @@ impl Interpreter {
                         self.eval_expr(expression)?,
                         None,
                     );
+                }
+                ObjectProp::ComputedMethod {
+                    key,
+                    params,
+                    body,
+                    is_async,
+                    is_generator,
+                    is_getter,
+                    is_setter,
+                } => {
+                    let key_value = self.eval_expr(key)?;
+                    let property_key = self.proxy_property_key(&key_value)?;
+                    let key = self.property_key(&property_key)?;
+                    let accessor = if *is_getter {
+                        Some(ObjectAccessorKind::Getter)
+                    } else if *is_setter {
+                        Some(ObjectAccessorKind::Setter)
+                    } else {
+                        None
+                    };
+                    let function_name = if *is_getter {
+                        format!("get {key}")
+                    } else if *is_setter {
+                        format!("set {key}")
+                    } else {
+                        key.clone()
+                    };
+                    let function = self.object_literal_callable(
+                        &function_name,
+                        params,
+                        body,
+                        *is_async,
+                        *is_generator,
+                    );
+                    insert_object_property(
+                        &mut object,
+                        &mut positions,
+                        &mut accessors,
+                        key.clone(),
+                        function,
+                        accessor,
+                    );
+                    if let Value::Symbol(symbol) = &property_key {
+                        symbol_keys.push((key, symbol.clone()));
+                    }
                 }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     let key_value = self.eval_expr(key_expression)?;
@@ -1646,27 +2102,8 @@ impl Interpreter {
                     is_async,
                     is_generator,
                 } => {
-                    let function = Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(name.as_str().into()),
-                        properties: FunctionData::properties_with_default_prototype(
-                            &self.persistent_global,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: intern_params(params),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        is_arrow: false,
-                        is_constructor: false,
-                        is_async: *is_async,
-                        is_generator: *is_generator,
-                        uses_arguments: stmts_reference(body, "arguments"),
-                        bytecode: None,
-                        needs_hoisting: body_needs_hoisting(body),
-                        bound: None,
-                    }));
+                    let function =
+                        self.object_literal_callable(name, params, body, *is_async, *is_generator);
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -1677,27 +2114,13 @@ impl Interpreter {
                     );
                 }
                 ObjectProp::Getter { name, body } => {
-                    let function = Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(format!("get {name}").into()),
-                        properties: FunctionData::properties_with_default_prototype(
-                            &self.persistent_global,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: Rc::new(vec![]),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        needs_hoisting: body_needs_hoisting(body),
-                        is_arrow: false,
-                        is_constructor: false,
-                        is_async: false,
-                        is_generator: false,
-                        uses_arguments: stmts_reference(body, "arguments"),
-                        bytecode: None,
-                        bound: None,
-                    }));
+                    let function = self.object_literal_callable(
+                        &format!("get {name}"),
+                        &[],
+                        body,
+                        false,
+                        false,
+                    );
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -1708,27 +2131,13 @@ impl Interpreter {
                     );
                 }
                 ObjectProp::Setter { name, param, body } => {
-                    let function = Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(format!("set {name}").into()),
-                        properties: FunctionData::properties_with_default_prototype(
-                            &self.persistent_global,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: Rc::new(vec![Rc::from(param.as_str())]),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        needs_hoisting: body_needs_hoisting(body),
-                        is_arrow: false,
-                        is_constructor: false,
-                        is_async: false,
-                        is_generator: false,
-                        uses_arguments: stmts_reference(body, "arguments"),
-                        bytecode: None,
-                        bound: None,
-                    }));
+                    let function = self.object_literal_callable(
+                        &format!("set {name}"),
+                        std::slice::from_ref(param),
+                        body,
+                        false,
+                        false,
+                    );
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -1828,6 +2237,7 @@ impl Interpreter {
     pub(crate) fn eval_expr(&mut self, e: &Expr) -> Result<Value, VmErr> {
         self.consume_fuel(1)?;
         match e {
+            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => self.eval_expr(inner),
             Expr::Number(n) => Ok(Value::Number(*n)),
             Expr::String(s) | Expr::EscapedString(s) => {
                 if s.len() > crate::value::MAX_STRING_LEN {
@@ -1847,9 +2257,6 @@ impl Interpreter {
             },
             Expr::Undefined => Ok(Value::Undefined),
             Expr::Identifier(n) => {
-                if n == "undefined" {
-                    return Ok(Value::Undefined);
-                }
                 let scope = self.global.clone();
                 match self.lookup_binding_in(&scope, n)? {
                     Lookup::Value(v) => Ok(v),
@@ -1860,55 +2267,21 @@ impl Interpreter {
                         "ReferenceError: Cannot access '{}' before initialization",
                         n
                     )),
+                    Lookup::Missing if n == "undefined" => Ok(Value::Undefined),
                     Lookup::Missing => vm_err(format!("ReferenceError: {} is not defined", n)),
                 }
             }
-            Expr::Array(i) => {
+            Expr::Array { items: i, .. } => {
                 let mut v = Vec::new();
                 for x in i {
                     match x {
                         Expr::Spread(inner) => {
                             let inner_val = self.eval_expr(inner)?;
-                            match &inner_val {
-                                Value::Array(arr) => {
-                                    let items = arr.borrow();
-                                    if v.len().saturating_add(items.len())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum array length exceeded",
-                                        ));
-                                    }
-                                    v.extend(items.iter().cloned());
-                                }
-                                Value::String(s) => {
-                                    if v.len().saturating_add(s.code_points().count())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum array length exceeded",
-                                        ));
-                                    }
-                                    v.extend(s.code_points().map(Value::String))
-                                }
-                                // Anything else goes through the iterator
-                                // protocol — a generator, a typed array, an
-                                // object with `Symbol.iterator`. Silently
-                                // producing nothing here made `[...gen()]`
-                                // return an empty array, so a value that is
-                                // not iterable now says so.
-                                other => {
-                                    let items = self.drain_iterable(other)?;
-                                    if v.len().saturating_add(items.len())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum array length exceeded",
-                                        ));
-                                    }
-                                    v.extend(items);
-                                }
-                            }
+                            self.append_iterable(
+                                &mut v,
+                                &inner_val,
+                                "Maximum array length exceeded",
+                            )?;
                         }
                         _ => v.push(self.eval_expr(x)?),
                     }
@@ -1918,8 +2291,15 @@ impl Interpreter {
                 }
                 Value::checked_array(v)
             }
-            Expr::Object(props) => self.eval_object_literal(props),
+            Expr::Object { props, .. } => self.eval_object_literal(props),
             Expr::Binary { op, left, right } => {
+                if *op == crate::parser::BinOp::In
+                    && let Expr::Identifier(name) = left.as_ref()
+                    && name.starts_with('#')
+                {
+                    let receiver = self.eval_expr(right)?;
+                    return self.has_private_member(&receiver, name);
+                }
                 let l = self.eval_expr(left)?;
                 match op {
                     crate::parser::BinOp::And if !self.truthy(&l) => return Ok(l),
@@ -1946,13 +2326,14 @@ impl Interpreter {
                 // slot from the receiver rather than computing anything from
                 // the property it names.
                 if matches!(op, UnOp::Delete) {
-                    match operand.as_ref() {
+                    match operand.unparenthesized() {
                         Expr::Member {
                             object, property, ..
                         } => {
                             let obj = self.eval_expr(object)?;
                             let key = self.eval_expr(property)?;
-                            return self.delete_member(&obj, &key);
+                            let strict = self.global.borrow().strict();
+                            return self.delete_member_or_throw(&obj, &key, strict);
                         }
                         Expr::OptionalChain {
                             object, property, ..
@@ -1962,15 +2343,14 @@ impl Interpreter {
                                 return Ok(Value::Bool(true));
                             }
                             let key = self.eval_expr(property)?;
-                            return self.delete_member(&obj, &key);
+                            let strict = self.global.borrow().strict();
+                            return self.delete_member_or_throw(&obj, &key, strict);
                         }
-                        // `delete someBinding` is `false`: declared bindings
-                        // are not configurable. An unresolvable name is not a
-                        // reference at all, so it deletes vacuously — and does
-                        // not raise the `ReferenceError` that reading it would.
+                        // Resolve object and declarative bindings through the
+                        // shared environment operation used by both tiers.
                         Expr::Identifier(name) => {
-                            let bound = self.global.borrow().get(name).is_some();
-                            return Ok(Value::Bool(!bound));
+                            let scope = self.global.clone();
+                            return self.delete_binding_in(&scope, name);
                         }
                         // `delete 42`: not a reference, so nothing to remove.
                         other => {
@@ -1979,10 +2359,16 @@ impl Interpreter {
                         }
                     }
                 }
+                if matches!(op, UnOp::Inc | UnOp::Dec) {
+                    self.reject_call_assignment_target(operand)?;
+                }
                 if matches!(op, UnOp::Inc | UnOp::Dec)
-                    && matches!(operand.as_ref(), Expr::Identifier(_) | Expr::Member { .. })
+                    && matches!(
+                        operand.unparenthesized(),
+                        Expr::Identifier(_) | Expr::Member { .. }
+                    )
                 {
-                    match operand.as_ref() {
+                    match operand.unparenthesized() {
                         Expr::Identifier(n) => {
                             self.inc_global_binding(n, *op == UnOp::Inc, *prefix)
                         }
@@ -2022,11 +2408,22 @@ impl Interpreter {
                     }
                 } else if *op == UnOp::Typeof {
                     // `typeof` never throws, even on undeclared identifiers.
-                    let v = if let Expr::Identifier(n) = operand.as_ref() {
+                    let v = if let Expr::Identifier(n) = operand.unparenthesized() {
                         if n == "undefined" {
                             Value::Undefined
                         } else {
-                            self.global.borrow().get(n).unwrap_or(Value::Undefined)
+                            {
+                                let scope = self.global.clone();
+                                match self.lookup_binding_in(&scope, n)? {
+                                    Lookup::Value(value) => value,
+                                    Lookup::Missing => Value::Undefined,
+                                    Lookup::Uninitialized => {
+                                        return vm_err(format!(
+                                            "ReferenceError: Cannot access {n} before initialization"
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     } else {
                         self.eval_expr(operand)?
@@ -2041,7 +2438,7 @@ impl Interpreter {
                 // Direct eval is determined by syntax and the original intrinsic,
                 // not by a function's display name. Resolve before arguments.
                 let direct_eval =
-                    matches!(callee.as_ref(), Expr::Identifier(name) if name == "eval");
+                    matches!(callee.unparenthesized(), Expr::Identifier(name) if name == "eval");
                 let evaluated_eval = if direct_eval {
                     Some(self.eval_expr(callee)?)
                 } else {
@@ -2052,25 +2449,16 @@ impl Interpreter {
                     match x {
                         Expr::Spread(inner) => {
                             let inner_val = self.eval_expr(inner)?;
-                            match &inner_val {
-                                Value::Array(arr) => {
-                                    let items = arr.borrow();
-                                    if a.len().saturating_add(items.len())
-                                        > crate::value::MAX_ARRAY_LEN
-                                    {
-                                        return Err(crate::value::limit_err(
-                                            "Maximum argument count exceeded",
-                                        ));
-                                    }
-                                    a.extend(items.iter().cloned());
-                                }
-                                _ => push_call_arg(&mut a, inner_val)?,
-                            }
+                            self.append_iterable(
+                                &mut a,
+                                &inner_val,
+                                "Maximum argument count exceeded",
+                            )?;
                         }
                         _ => push_call_arg(&mut a, self.eval_expr(x)?)?,
                     }
                 }
-                match callee.as_ref() {
+                match callee.unparenthesized() {
                     // `super(...)` invokes the superclass constructor on the
                     // current `this`.
                     Expr::Super => {
@@ -2147,7 +2535,23 @@ impl Interpreter {
                         {
                             crate::builtins::eval_direct(self, a)
                         } else {
-                            self.call_this(&c, Value::Undefined, a)
+                            let scope = self.global.clone();
+                            let receiver = if let Expr::Identifier(name) = callee.unparenthesized()
+                            {
+                                // Global object records resolve property-backed names,
+                                // but only `with` records supply a call receiver.
+                                self.with_binding_object(&scope, name)?
+                                    .filter(|object| {
+                                        !matches!(
+                                            object,
+                                            Value::RealmGlobal(_) | Value::GlobalObject
+                                        )
+                                    })
+                                    .unwrap_or(Value::Undefined)
+                            } else {
+                                Value::Undefined
+                            };
+                            self.call_this(&c, receiver, a)
                         }
                     }
                 }
@@ -2204,13 +2608,14 @@ impl Interpreter {
             // `obj.x ||= expensive()` leaves a truthy `x` untouched and never
             // evaluates `expensive`.
             Expr::LogicalAssignment { target, op, value } => {
+                self.reject_call_assignment_target(target)?;
                 // Static member target: skip the key allocation on both the
                 // read and the conditional write.
                 if let Expr::Member {
                     object,
                     property,
                     computed,
-                } = target.as_ref()
+                } = target.unparenthesized()
                     && let Expr::String(key) = property.as_ref()
                 {
                     checked_static_key(key)?;
@@ -2239,7 +2644,7 @@ impl Interpreter {
                     }
                     return Ok(assigned);
                 }
-                let (receiver, key, current) = match target.as_ref() {
+                let (receiver, key, current) = match target.unparenthesized() {
                     Expr::Identifier(name) => {
                         let current = self.eval_expr(target)?;
                         let _ = name;
@@ -2271,7 +2676,7 @@ impl Interpreter {
                         self.assign_member(&receiver, &key, assigned.clone())?;
                     }
                     _ => {
-                        let Expr::Identifier(name) = target.as_ref() else {
+                        let Expr::Identifier(name) = target.unparenthesized() else {
                             unreachable!("checked above");
                         };
                         self.assign_or_set_binding(name, assigned.clone())?;
@@ -2280,8 +2685,9 @@ impl Interpreter {
                 Ok(assigned)
             }
             Expr::Assignment { target, op, value } => {
+                self.reject_call_assignment_target(target)?;
                 let v = self.eval_expr(value)?;
-                match target.as_ref() {
+                match target.unparenthesized() {
                     Expr::Identifier(n) => {
                         if op.bin_op().is_some() {
                             self.compound_assign_global(n, *op, v)
@@ -2327,10 +2733,12 @@ impl Interpreter {
                     // A destructuring *assignment*: `[a, b] = [b, a]`,
                     // `({ x } = o)`. Unlike a declaration it binds nothing
                     // new, so each name is assigned through the scope chain.
-                    Expr::Array(_) | Expr::Object(_) if matches!(op, AssignOp::Assign) => {
+                    Expr::Array { .. } | Expr::Object { .. } | Expr::LegacyLiteral(_)
+                        if matches!(op, AssignOp::Assign) =>
+                    {
                         let pattern = crate::parser::expr_to_pattern(target)
                             .ok_or_else(|| VmErr::Msg("Invalid assignment target".to_string()))?;
-                        self.destructure(&pattern, &v)?;
+                        self.destructure_assignment(&pattern, &v)?;
                         Ok(v)
                     }
                     _ => vm_err("Invalid assignment target"),
@@ -2354,17 +2762,7 @@ impl Interpreter {
                 name,
                 superclass,
                 body,
-            } => {
-                let scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-                let saved = std::mem::replace(&mut self.global, scope);
-                let built =
-                    self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body);
-                if let (Ok(value), Some(name)) = (&built, name) {
-                    self.global.borrow_mut().set(name, value.clone());
-                }
-                self.global = saved;
-                built
-            }
+            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body),
             Expr::ArrowFn {
                 params,
                 body,
@@ -2375,8 +2773,10 @@ impl Interpreter {
                 native: None,
                 identity: Rc::new(0),
                 name: None,
-                properties: FunctionData::properties_with_default_prototype(
+                properties: FunctionData::properties_with_function_kind(
                     &self.persistent_global,
+                    *is_async,
+                    false,
                 ),
                 standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                 params: intern_params(params),
@@ -2401,27 +2801,35 @@ impl Interpreter {
                 body,
                 is_async,
                 is_generator,
-            } => Ok(Value::Function(Rc::new(FunctionData {
-                strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                native: None,
-                identity: Rc::new(0),
-                name: name.as_deref().map(Rc::from),
-                properties: FunctionData::properties_with_default_prototype(
-                    &self.persistent_global,
-                ),
-                standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                params: intern_params(params),
-                body: Rc::new(body.clone()),
-                closure: Some(crate::heap::capture_env(&self.global)),
-                is_arrow: false,
-                is_constructor: !*is_async && !*is_generator,
-                is_async: *is_async,
-                is_generator: *is_generator,
-                uses_arguments: stmts_reference(body, "arguments"),
-                bytecode: None,
-                needs_hoisting: body_needs_hoisting(body),
-                bound: None,
-            }))),
+            } => {
+                let closure =
+                    Environment::named_function_scope(self.global.clone(), name.as_deref());
+                let function = Value::Function(Rc::new(FunctionData {
+                    strict: self.global.borrow().strict() || crate::parser::use_strict(body),
+                    native: None,
+                    identity: Rc::new(0),
+                    name: name.as_deref().map(Rc::from),
+                    properties: FunctionData::properties_with_function_kind(
+                        &self.persistent_global,
+                        *is_async,
+                        *is_generator,
+                    ),
+                    standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
+                    params: intern_params(params),
+                    body: Rc::new(body.clone()),
+                    closure: Some(crate::heap::capture_env(&closure)),
+                    is_arrow: false,
+                    is_constructor: !*is_async && !*is_generator,
+                    is_async: *is_async,
+                    is_generator: *is_generator,
+                    uses_arguments: crate::parser::stmts_need_arguments(body),
+                    bytecode: None,
+                    needs_hoisting: body_needs_hoisting(body),
+                    bound: None,
+                }));
+                Environment::initialize_function_name(&closure, name.as_deref(), &function);
+                Ok(function)
+            }
             Expr::New { callee, args } => {
                 let mut a = Vec::new();
                 for x in args {
@@ -2435,9 +2843,20 @@ impl Interpreter {
             // `import(specifier)`. Module registration is synchronous in this
             // VM, so the promise is already settled when it is handed back;
             // `await import(…)` and `.then(…)` both work.
-            Expr::DynamicImport(specifier) => {
+            Expr::DynamicImport {
+                specifier,
+                options,
+                phase,
+            } => {
+                if *phase != crate::parser::ImportPhase::Evaluation {
+                    return vm_err("TypeError: non-evaluation import phases are not implemented");
+                }
                 let specifier = self.eval_expr(specifier)?;
-                self.eval_dynamic_import(specifier)
+                let options = options
+                    .as_deref()
+                    .map(|expr| self.eval_expr(expr))
+                    .transpose()?;
+                self.eval_dynamic_import_with_options(specifier, options)
             }
             Expr::ImportMeta => self.eval_import_meta(),
             Expr::NewTarget => self
@@ -2453,7 +2872,7 @@ impl Interpreter {
                 raw,
                 exprs,
             } => {
-                let (this_val, tag_fn) = match tag.as_ref() {
+                let (this_val, tag_fn) = match tag.unparenthesized() {
                     // Preserve the receiver so `` obj.tag`…` `` sees `this`.
                     Expr::Member {
                         object, property, ..
@@ -2465,7 +2884,13 @@ impl Interpreter {
                     }
                     other => (Value::Undefined, self.eval_expr(other)?),
                 };
-                let strings = Value::array(cooked.iter().cloned().map(Value::String).collect());
+                let strings = Value::array(
+                    cooked
+                        .iter()
+                        .cloned()
+                        .map(|part| part.map(Value::String).unwrap_or(Value::Undefined))
+                        .collect(),
+                );
                 strings.set_prop(
                     "raw".to_string(),
                     Value::array(raw.iter().cloned().map(Value::String).collect()),
@@ -2514,6 +2939,12 @@ impl Interpreter {
                     Some(e) => self.eval_expr(e)?,
                     None => Value::Undefined,
                 };
+                #[cfg(stackful_coroutines)]
+                let v = if self.await_yielder.is_some() {
+                    self.perform_await(v)?
+                } else {
+                    v
+                };
                 // Where suspension is unavailable, the value goes to the
                 // buffer the driver drains, and the `yield` expression itself
                 // evaluates to `undefined`.
@@ -2537,7 +2968,10 @@ impl Interpreter {
                         // Closed (`gen.return()` / leaving `for...of` early):
                         // return from the body so the surrounding
                         // `try`/`finally` still runs on the way out.
-                        crate::value::GenResume::Return => vm_ret(Value::Undefined),
+                        crate::value::GenResume::Return(value) => {
+                            let value = self.prepare_return_value(value)?;
+                            vm_ret(value)
+                        }
                         // Abandoned while suspended: unwind with no guest
                         // handlers at all (see `VmErr::Abandon`).
                         crate::value::GenResume::Abandon => Err(VmErr::Abandon),
@@ -2551,22 +2985,68 @@ impl Interpreter {
                 // evaluates to `it`'s own return value. Values sent in with
                 // `next(v)` are forwarded to the delegate.
                 let source = self.eval_expr(inner)?;
-                let iterator = self.iterator_for(&source)?;
-                let next_fn = self.prop_str(&iterator, "next")?;
+                #[cfg(stackful_coroutines)]
+                let asynchronous = self.await_yielder.is_some();
+                #[cfg(not(stackful_coroutines))]
+                let asynchronous = false;
+                let iterator = if asynchronous {
+                    self.async_iterator_for(&source)?
+                } else {
+                    self.iterator_for(&source)?
+                };
+                let next_fn = self.member(&iterator, "next")?;
                 if matches!(next_fn, Value::Undefined) {
                     return vm_err("TypeError: yield* requires an iterable");
                 }
 
-                let mut sent = Value::Undefined;
+                let mut received = crate::value::GenResume::Next(Some(Value::Undefined));
                 loop {
                     self.consume_loop()?;
-                    let step = self.call_this(&next_fn, iterator.clone(), vec![sent])?;
-                    let done = step.get_prop("done").map(|v| v.is_truthy()).unwrap_or(true);
-                    let value = step.get_prop("value").unwrap_or(Value::Undefined);
-                    if done {
-                        // The delegate's return value is this expression's.
-                        return Ok(value);
+                    let returning = matches!(&received, crate::value::GenResume::Return(_));
+                    let (method, args) = match received {
+                        crate::value::GenResume::Next(value) => {
+                            (next_fn.clone(), vec![value.unwrap_or(Value::Undefined)])
+                        }
+                        crate::value::GenResume::Return(value) => {
+                            let method = self.iterator_method(&iterator, "return")?;
+                            let Some(method) = method else {
+                                return vm_ret(self.prepare_return_value(value)?);
+                            };
+                            (method, vec![value])
+                        }
+                        crate::value::GenResume::Throw(value) => {
+                            let method = self.iterator_method(&iterator, "throw")?;
+                            let Some(method) = method else {
+                                self.close_guest_iterator(&iterator, asynchronous)?;
+                                return vm_err("TypeError: Delegated iterator has no throw method");
+                            };
+                            (method, vec![value])
+                        }
+                        crate::value::GenResume::Abandon => return Err(VmErr::Abandon),
+                    };
+                    let step = self.call_this(&method, iterator.clone(), args)?;
+                    let step = if asynchronous {
+                        self.perform_await(step)?
+                    } else {
+                        step
+                    };
+                    if !super::call::is_js_object(&step) {
+                        return vm_err("TypeError: Iterator result must be an object");
                     }
+                    let done = self.member(&step, "done")?.is_truthy();
+                    let value = self.member(&step, "value")?;
+                    if done {
+                        return if returning {
+                            vm_ret(self.prepare_return_value(value)?)
+                        } else {
+                            Ok(value)
+                        };
+                    }
+                    let value = if asynchronous {
+                        self.perform_await(value)?
+                    } else {
+                        value
+                    };
 
                     // `yield*` re-yields into the same buffer.
                     #[cfg(not(stackful_coroutines))]
@@ -2579,38 +3059,23 @@ impl Interpreter {
                             }
                             sink.borrow_mut().push(value);
                         }
-                        sent = Value::Undefined;
+                        received = crate::value::GenResume::Next(None);
                     }
                     #[cfg(stackful_coroutines)]
                     match self.gen_yielder.as_ref() {
-                        Some(yielder) => match yielder.suspend(value) {
-                            crate::value::GenResume::Next(v) => {
-                                sent = v.unwrap_or(Value::Undefined);
-                            }
-                            crate::value::GenResume::Throw(reason) => {
-                                close_iterator(&iterator);
-                                return vm_throw(reason);
-                            }
-                            crate::value::GenResume::Return => {
-                                // The outer generator is being closed: close
-                                // the delegate too, then unwind.
-                                close_iterator(&iterator);
-                                return vm_ret(Value::Undefined);
-                            }
-                            crate::value::GenResume::Abandon => {
-                                // Abandoning the outer generator: do *not*
-                                // close the delegate (that would run its
-                                // handlers). It is a local; dropping it on
-                                // the way out abandons it in turn.
-                                return Err(VmErr::Abandon);
-                            }
-                        },
+                        Some(yielder) => received = yielder.suspend(value),
                         // Outside a generator body there is nobody to yield
                         // to; drain the iterator for its side effects.
-                        None => sent = Value::Undefined,
+                        None => received = crate::value::GenResume::Next(None),
                     }
                 }
             }
         }
+    }
+
+    /// GetMethod for iterator completion forwarding. Only nullish methods are
+    /// absent; getters and non-callable values must produce observable errors.
+    fn iterator_method(&mut self, iterator: &Value, name: &str) -> Result<Option<Value>, VmErr> {
+        self.get_method(iterator, &Value::String(name.into()))
     }
 }

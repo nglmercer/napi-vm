@@ -10,7 +10,7 @@ fn bounded_string(value: impl Into<JsString>) -> Result<Value, VmErr> {
     Value::checked_string(value)
 }
 fn arg_string(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<JsString, VmErr> {
-    interp.display_string(args.get(index).unwrap_or(&Value::Undefined))
+    interp.ecmascript_to_string(args.get(index).unwrap_or(&Value::Undefined))
 }
 fn position(
     interp: &mut Interpreter,
@@ -44,8 +44,15 @@ fn string_ctor(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<V
         Some(v) => bounded_string(interp.display_string(v)?),
     }
 }
-fn string_value_of(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    bounded_string(str_this(interp, &this)?)
+fn string_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    match &this {
+        Value::String(value) => bounded_string(value.clone()),
+        Value::Object { props } => match &props.meta.borrow().boxed_primitive {
+            Some(crate::value::BoxedPrimitive::String(value)) => bounded_string(value.clone()),
+            _ => Err(VmErr::Msg("TypeError: incompatible String receiver".into())),
+        },
+        _ => Err(VmErr::Msg("TypeError: incompatible String receiver".into())),
+    }
 }
 fn string_raw(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let template = args.first().cloned().unwrap_or(Value::Undefined);
@@ -368,7 +375,7 @@ fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, V
         return Value::checked_array(vec![]);
     }
     if let Some(re) = a.first().and_then(Value::as_regexp) {
-        return super::regexp::split_with_pattern(&s, &re, limit);
+        return super::regexp::split_with_pattern(i, &s, &re, limit);
     }
     if matches!(a.first(), None | Some(Value::Undefined)) {
         return Value::checked_array(vec![Value::String(s)]);

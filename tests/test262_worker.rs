@@ -32,6 +32,26 @@ fn worker_separates_parse_runtime_and_harness_errors() {
         "harness"
     );
 }
+
+#[test]
+fn contextual_early_errors_precede_harness_or_runtime_execution() {
+    for source in [
+        "function f(){await 1;}",
+        "class C{constructor(){}constructor(){}}",
+        "class C{#x;static #x;}",
+        "class C{m(){return this.#missing;}}",
+        "class C{get x(a){}}",
+        "class C{constructor(){super();}}",
+        "try{}catch(x){let x;}",
+    ] {
+        let report =
+            worker(json!({"source":source,"harness":"throw new Error('harness must not run');"}));
+        assert_eq!(report["phase"], "parse", "{source}: {report}");
+        assert_eq!(report["error_type"], "SyntaxError");
+    }
+    let report = worker(json!({"source":"export {missing};","module":true}));
+    assert_eq!(report["phase"], "parse");
+}
 #[test]
 fn worker_requires_exact_async_completion() {
     assert_eq!(
@@ -138,4 +158,174 @@ fn worker_create_realm_has_distinct_globals_and_intrinsics() {
         json!({"source": "var realm=$262.createRealm();if(realm.global===globalThis || realm.global.Object===Object) throw new Error('shared realm');realm.evalScript('var realmSecret=17;');if(realm.global.realmSecret!==17 || typeof realmSecret!=='undefined') throw new Error('leaked global');var evalScript=realm.evalScript;if(evalScript('this')!==realm.global) throw new Error('lost host realm');var nested=realm.createRealm();if(nested.global===realm.global || nested.global.Array===realm.global.Array) throw new Error('shared nested realm');"}),
     );
     assert_eq!(report["status"], "ok", "{report}");
+}
+
+#[test]
+fn worker_agents_share_memory_and_report_without_transferring_guest_state() {
+    let result = worker(json!({"source": r#"
+        var sab = new SharedArrayBuffer(16);
+        var view = new Int32Array(sab);
+        var source = `$262.agent.receiveBroadcast(function(sab, id) {
+            var view = new Int32Array(sab);
+            Atomics.add(view, 0, 1);
+            Atomics.store(view, id, id * 10);
+            $262.agent.report(id);
+            $262.agent.leaving();
+        });`;
+        $262.agent.start(source);
+        $262.agent.broadcast(sab, 1);
+        $262.agent.start(source);
+        $262.agent.broadcast(sab, 2);
+        var reports = [];
+        while (reports.length < 2) {
+            var report = $262.agent.getReport();
+            if (report !== null) reports.push(report);
+            else $262.agent.sleep(1);
+        }
+        if (Atomics.load(view, 0) !== 2 || view[1] !== 10 || view[2] !== 20)
+            throw new Error('shared memory or ids lost');
+        if (reports[0] !== '1' || reports[1] !== '2') throw new Error('report order');
+        if ($262.agent.getReport() !== null) throw new Error('empty report');
+    "#}));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
+#[test]
+fn worker_agents_wait_notify_and_shutdown_blocked_waits() {
+    let result = worker(json!({"source": r#"
+        var sab = new SharedArrayBuffer(8);
+        var view = new Int32Array(sab);
+        $262.agent.start(`$262.agent.receiveBroadcast(function(sab) {
+            var view = new Int32Array(sab);
+            Atomics.store(view, 1, 1);
+            $262.agent.report(Atomics.wait(view, 0, 0));
+            $262.agent.leaving();
+        });`);
+        $262.agent.broadcast(sab);
+        var count = 0;
+        while (count === 0) {
+            count = Atomics.notify(view, 0, 1);
+            if (count === 0) $262.agent.sleep(1);
+        }
+        var report = null;
+        while (report === null) {
+            report = $262.agent.getReport();
+            if (report === null) $262.agent.sleep(1);
+        }
+        if (report !== 'ok') throw new Error('notification lost');
+        $262.agent.start(`$262.agent.receiveBroadcast(function(sab) {
+            Atomics.wait(new Int32Array(sab), 0, 0);
+        });`);
+        $262.agent.broadcast(sab);
+        $262.agent.shutdown();
+    "#}));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
+#[test]
+fn worker_propagates_agent_errors_and_preserves_report_utf16() {
+    let error = worker(json!({"source": r#"
+        $262.agent.start("throw new TypeError('worker failure')");
+        $262.agent.sleep(50);
+        $262.agent.getReport();
+    "#}));
+    assert_eq!(error["status"], "error", "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("worker failure")
+    );
+    let result = worker(json!({"source": r#"
+        $262.agent.start("$262.agent.report('\\ud800'); $262.agent.leaving();");
+        var report = null;
+        while (report === null) {
+            report = $262.agent.getReport();
+            if (report === null) $262.agent.sleep(1);
+        }
+        if (report.length !== 1 || report.charCodeAt(0) !== 0xd800) throw new Error('UTF16');
+    "#}));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
+#[test]
+fn worker_async_waits_settle_on_owner_after_foreign_notifications() {
+    let result = worker(json!({"asynchronous":true,"source": r#"
+        var sab = new SharedArrayBuffer(8);
+        var view = new Int32Array(sab);
+        var waiter = Atomics.waitAsync(view, 0, 0, 2000);
+        waiter.value.then(function(result) {
+            if (result !== 'ok') $DONE(new Error('notification was lost'));
+            else $DONE();
+        });
+        $262.agent.start(`$262.agent.receiveBroadcast(function(sab, id) {
+            if (id !== 9007199254740993n) throw new Error('BigInt broadcast id');
+            Atomics.notify(new Int32Array(sab), 0, 1);
+            $262.agent.leaving();
+        });`);
+        $262.agent.broadcast(sab, 9007199254740993n);
+    "#}));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
+#[test]
+fn worker_agent_blocking_permission_is_explicit() {
+    let result = worker(json!({"can_block":false,"source": r#"
+        var view = new Int32Array(new SharedArrayBuffer(4));
+        var throws = 0;
+        try { Atomics.wait(view, 0, 1, 0); } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            throws++;
+        }
+        if (throws !== 1) throw new Error('CanBlock was ignored');
+    "#}));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
+#[test]
+fn worker_gc_keeps_registered_agent_callbacks_and_their_closures_alive() {
+    let result = worker(json!({"source": r#"
+        var sab = new SharedArrayBuffer(4);
+        $262.agent.start(`
+            (function() {
+                var cycle = { value: 42 }; cycle.self = cycle;
+                $262.agent.receiveBroadcast(function() {
+                    $262.agent.report(cycle.self.value);
+                    $262.agent.leaving();
+                });
+            })();
+            $262.gc();
+        `);
+        $262.agent.broadcast(sab);
+        var report = null;
+        while (report === null) {
+            report = $262.agent.getReport();
+            if (report === null) $262.agent.sleep(1);
+        }
+        if (report !== '42') throw new Error('agent callback root was lost');
+    "#}));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
+#[test]
+fn worker_agents_parse_source_with_script_goal() {
+    let result = worker(json!({"source": r#"
+        $262.agent.start('export const value = 1;');
+        $262.agent.sleep(30);
+        $262.agent.getReport();
+    "#}));
+    assert_eq!(result["status"], "error", "{result}");
+    assert!(
+        result["message"].as_str().unwrap().contains("module"),
+        "{result}"
+    );
+}
+
+#[test]
+fn conformance_host_timers_use_the_owner_queue_and_can_be_cancelled() {
+    let result = worker(json!({
+        "source":"var start=Date.now();var cancelled=setTimeout(()=>{throw new Error('cancelled timer ran');},1);clearTimeout(cancelled);setTimeout((value)=>{if(value!==7||Date.now()-start<10)throw new Error('timer fired incorrectly');$DONE();},20,7);",
+        "asynchronous":true
+    }));
+    assert_eq!(result["status"], "ok", "{result}");
 }

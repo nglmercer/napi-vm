@@ -1,0 +1,108 @@
+{
+  "source_commit": "c82f61725831b9a94d02b468663596984378007d",
+  "classification": "RegExp realm state and shared dictionary layouts; completed full pinned corpus",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 952,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Complete realm/internal-operation dependencies, class computed Symbol/key conversion, dynamic home-object super lookup, private-write bytecode fallback and complete corpus evidence",
+  "archive_sha256": {
+    "c82f617-allfeatures-tests.log.gz": "00cec7cc45e7346c6120b87831b74e954547fe51abc8fed6681ab0540f992c51",
+    "c82f617-clippy.log.gz": "b03a4c90f0d3148e5a1b91ea1d299701193dd90a1ada4cf3f7a1a0f185200cf4",
+    "c82f617-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "c82f617-minimal-tests.log.gz": "2f08a81b5443e5a6dea0de77ed1dd239c3e297394b7763113758e2cd0254c635",
+    "c82f617-native-build.log.gz": "2ff6fb4defe675ffb7cee0b099fd7fa2b6dfe7326010c2ed282db902d9cd070f",
+    "c82f617-node-tests.log.gz": "72c3ed436a06f3b7ae3575f13d6c23cc2032da07e37f57d11e903f16523ddaca",
+    "c82f617-release-build.log.gz": "ad99a033dee5a1f4183500765de2b2245d01bdb2b0eee7a956863f38a1a9b4da",
+    "c82f617-tooling-tests.log.gz": "c54775ca8526f0ffa72015cf3534243168df578ca98d5e691c45b12d6f43781e",
+    "c82f617-wasm-tests.log.gz": "c25389971171ef5fc3d1d7bdb90a45912431c42550966f64284e1d8d2c22f838",
+    "c82f617-focused-5868d51-projection.json.gz": "1b87db443dbbd1d6d9ba1e9f093dec3dc9dcf765881ec2b0cb08a396810dee15",
+    "c82f617-focused-7c0a9ce-projection.json.gz": "11c28f35d1f2df70a7795de67239b7804ff97935ae2cead514236c18eb602c94",
+    "c82f617-focused-transitions.json.gz": "3641ddc8c8908e940074595aaaae3b1f9a42341526fc42230b98318eadbb98cc",
+    "c82f617-focused.json.gz": "43209e6c716e8b703df7910690260b4754a58f84afdd8f5d87c1742101e2a628",
+    "c82f617-focused-5868d51-transitions.json.gz": "a8241ba592f3ab3aaa5bd086f1492a7c4d2e40ba96a31867ab98d8ddcf95b9c2",
+    "c82f617-focused.jsonl.gz": "dcddf6c677da2d8a5b0a763992f139226a4f1007ed1b460c6401a4810c05eb8b",
+    "c82f617-full-7c0a9ce-transitions.json.gz": "1fe77c91b7216be0e1062b841e32ad2cfa0ecc71cdb9f42f38a4f85448d08f93",
+    "c82f617-full-6456b53-transitions.json.gz": "ca9705a901208892691f977e767c8f5dba6e98863acd1208a26b144722a34b30",
+    "c82f617-full.jsonl.gz": "c42967a133f6877467799e43ee6b9501168b8f68ccc955013ebae47ca9bcbc2f",
+    "c82f617-full-5868d51-transitions.json.gz": "0993f5e7a4ce7f01ebeef07544911b612163aa9e6c125e5e2286fd8c7f0bc13e",
+    "c82f617-full.json.gz": "f2a5ee5190d554bd3b14a55d76b651967b565b45eb7ea8d51af57a43e48d9612",
+    "c82f617-full-pr23-transitions.json.gz": "793772990ae52d222a294b945f7e42130c0ec2cc718e8e05d54eddfb03e1c900"
+  },
+  "worker_sha256": "d4b6e2cbebdeec92f668f7dadc76e284b9a27250721daf6ec94e79c15cbe93a6",
+  "focused": {
+    "total": 37581,
+    "current_counts": {
+      "pass": 29053,
+      "fail": 8528,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 48,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent 5868d51 full report"
+  },
+  "full": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 63673,
+      "fail": 39281,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 22266,
+    "lost_passes": 0,
+    "baseline": "PR #23"
+  },
+  "full_recent": {
+    "new_passes": 50,
+    "lost_passes": 0
+  },
+  "timeouts": [
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "script"
+    },
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "strict"
+    }
+  ]
+}

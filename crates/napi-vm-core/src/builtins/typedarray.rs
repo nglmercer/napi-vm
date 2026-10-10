@@ -35,6 +35,50 @@ pub(super) fn install(e: &mut Environment) {
         .and_then(|object| object.get_prop("prototype"))
         .map(Rc::new);
 
+    for name in ["ArrayBuffer", "SharedArrayBuffer"] {
+        let constructor = e.get(name).expect("buffer constructor");
+        constructor
+            .set_prop("length".into(), Value::Number(1.0))
+            .expect("constructor length");
+        if let Value::Object { props } = &constructor {
+            props.meta.borrow_mut().set_attrs(
+                "length",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        let key = super::well_known("species").expect("Symbol.species");
+        super::object::define_property(
+            &constructor,
+            &match &key {
+                Value::Symbol(symbol) => crate::interpreter::symbol_slot_key(symbol),
+                _ => unreachable!(),
+            },
+            &Value::descriptor_record(vec![
+                (
+                    "get".into(),
+                    super::native_method(
+                        "get [Symbol.species]",
+                        0,
+                        buffer_species,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .expect("buffer species getter");
+        if let (Value::Object { props }, Value::Symbol(symbol)) = (&constructor, &key) {
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            props
+                .meta
+                .borrow_mut()
+                .set_symbol_key(&slot, symbol.clone());
+        }
+    }
     if let Some(namespace) = e.get("ArrayBuffer") {
         namespace
             .set_prop(
@@ -42,43 +86,198 @@ pub(super) fn install(e: &mut Environment) {
                 super::nf("isView", array_buffer_is_view),
             )
             .expect("built-in ArrayBuffer property");
-        super::make_callable(&namespace, new_array_buffer, None);
+        super::make_callable(&namespace, super::require_new, Some(new_array_buffer));
         let prototype = make_prototype(
             object_prototype.clone(),
             namespace.clone(),
-            [("slice", super::nf("slice", array_buffer_slice))],
+            [
+                (
+                    "slice",
+                    super::native_method(
+                        "slice",
+                        2,
+                        array_buffer_slice,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                ),
+                (
+                    "resize",
+                    super::native_method(
+                        "resize",
+                        1,
+                        array_buffer_resize,
+                        e.get("Function")
+                            .and_then(|function| function.get_prop("prototype")),
+                    ),
+                ),
+            ],
         );
+        for (name, getter) in [
+            ("byteLength", array_byte_length as super::NativeFn),
+            ("maxByteLength", array_maximum_length),
+            ("resizable", array_resizable),
+            ("detached", array_detached),
+        ] {
+            prototype
+                .set_prop(
+                    name.into(),
+                    super::native_method(
+                        &format!("get {name}"),
+                        0,
+                        getter,
+                        e.get("Function")
+                            .and_then(|function| function.get_prop("prototype")),
+                    ),
+                )
+                .expect("buffer getter");
+            if let Value::Object { props } = &prototype {
+                let mut meta = props.meta.borrow_mut();
+                meta.has_accessors = true;
+                meta.set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
     if let Some(namespace) = e.get("SharedArrayBuffer") {
-        super::make_callable(&namespace, new_shared_array_buffer, None);
+        super::make_callable(
+            &namespace,
+            super::require_new,
+            Some(new_shared_array_buffer),
+        );
         let prototype = make_prototype(
             object_prototype.clone(),
             namespace.clone(),
-            [("slice", super::nf("slice", shared_array_buffer_slice))],
+            [
+                (
+                    "slice",
+                    super::native_method(
+                        "slice",
+                        2,
+                        shared_array_buffer_slice,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                ),
+                (
+                    "grow",
+                    super::native_method(
+                        "grow",
+                        1,
+                        shared_array_buffer_grow,
+                        e.get("Function")
+                            .and_then(|function| function.get_prop("prototype")),
+                    ),
+                ),
+            ],
         );
+        for (name, getter) in [
+            ("byteLength", shared_byte_length as super::NativeFn),
+            ("maxByteLength", shared_maximum_length),
+            ("growable", shared_growable),
+        ] {
+            prototype
+                .set_prop(
+                    name.into(),
+                    super::native_method(
+                        &format!("get {name}"),
+                        0,
+                        getter,
+                        e.get("Function")
+                            .and_then(|function| function.get_prop("prototype")),
+                    ),
+                )
+                .expect("shared buffer getter");
+            if let Value::Object { props } = &prototype {
+                let mut meta = props.meta.borrow_mut();
+                meta.has_accessors = true;
+                meta.set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            prototype
+                .set_prop(slot.clone(), Value::String("SharedArrayBuffer".into()))
+                .expect("buffer tag");
+            if let Value::Object { props } = &prototype {
+                let mut meta = props.meta.borrow_mut();
+                meta.set_symbol_key(&slot, symbol.clone());
+                meta.set_attrs(
+                    &slot,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
     if let Some(namespace) = e.get("Atomics") {
-        for (name, method) in [
-            ("isLockFree", atomics_is_lock_free as _),
-            ("load", atomics_load as _),
-            ("store", atomics_store as _),
-            ("add", atomics_add as _),
-            ("sub", atomics_sub as _),
-            ("and", atomics_and as _),
-            ("or", atomics_or as _),
-            ("xor", atomics_xor as _),
-            ("exchange", atomics_exchange as _),
-            ("compareExchange", atomics_compare_exchange as _),
-            ("wait", atomics_wait as _),
-            ("waitAsync", atomics_wait_async as _),
-            ("notify", atomics_notify as _),
+        let function_prototype = e
+            .get("Function")
+            .and_then(|constructor| constructor.get_prop("prototype"));
+        for (name, length, method) in [
+            ("isLockFree", 1, atomics_is_lock_free as _),
+            ("pause", 0, atomics_pause as _),
+            ("load", 2, atomics_load as _),
+            ("store", 3, atomics_store as _),
+            ("add", 3, atomics_add as _),
+            ("sub", 3, atomics_sub as _),
+            ("and", 3, atomics_and as _),
+            ("or", 3, atomics_or as _),
+            ("xor", 3, atomics_xor as _),
+            ("exchange", 3, atomics_exchange as _),
+            ("compareExchange", 4, atomics_compare_exchange as _),
+            ("wait", 4, atomics_wait as _),
+            ("waitAsync", 4, atomics_wait_async as _),
+            ("notify", 3, atomics_notify as _),
         ] {
             namespace
-                .set_prop(name.to_string(), super::nf(name, method))
+                .set_prop(
+                    name.to_string(),
+                    super::native_method(name, length, method, function_prototype.clone()),
+                )
                 .expect("built-in Atomics property");
+            if let Value::Object { props } = &namespace {
+                props.meta.borrow_mut().set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
         }
+    }
+    if let Some(Value::Object { props }) = &e.get("Atomics")
+        && let Some(Value::Symbol(symbol)) = &super::well_known("toStringTag")
+    {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        props
+            .borrow_mut()
+            .push((key.clone(), Value::String("Atomics".into())));
+        props.meta.borrow_mut().set_attrs(
+            &key,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
     }
     if let Some(namespace) = e.get("DataView") {
         super::make_callable(&namespace, new_data_view, None);
@@ -117,6 +316,31 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
+    let species = super::well_known("species").expect("Symbol.species");
+    if let Value::Symbol(symbol) = &species {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        super::object::define_property(
+            &abstract_constructor,
+            &key,
+            &Value::descriptor_record(vec![
+                (
+                    "get".into(),
+                    super::native_method(
+                        "get [Symbol.species]",
+                        0,
+                        buffer_species,
+                        e.get("Function")
+                            .and_then(|function| function.get_prop("prototype")),
+                    ),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .expect("TypedArray species getter");
+        if let Value::Object { props } = &abstract_constructor {
+            props.meta.borrow_mut().set_symbol_key(&key, symbol.clone());
+        }
+    }
     typed_array_prototype
         .set_prop("constructor".into(), abstract_constructor.clone())
         .expect("typed-array prototype constructor");
@@ -132,10 +356,26 @@ pub(super) fn install(e: &mut Environment) {
     for (name, kind) in KINDS {
         // The constructors are not in the pre-seeded global list, so declare
         // them here with their element size as a static.
-        let namespace = Value::object(vec![(
-            "BYTES_PER_ELEMENT".to_string(),
-            Value::Number(kind.size() as f64),
-        )]);
+        let namespace = Value::object(vec![
+            ("name".into(), Value::String((*name).into())),
+            ("length".into(), Value::Number(3.0)),
+            (
+                "BYTES_PER_ELEMENT".into(),
+                Value::Number(kind.size() as f64),
+            ),
+        ]);
+        if let Value::Object { props } = &namespace {
+            for property in ["name", "length"] {
+                props.meta.borrow_mut().set_attrs(
+                    property,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
         namespace
             .set_prop("of".to_string(), super::nf("of", typed_of))
             .expect("built-in typed-array property");
@@ -265,7 +505,10 @@ fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
     if let Some(Value::Symbol(ref symbol)) = super::well_known("iterator") {
         let slot = crate::interpreter::symbol_slot_key(symbol);
         prototype
-            .set_prop(slot.clone(), typed_prototype_method("values"))
+            .set_prop(
+                slot.clone(),
+                prototype.get_prop("values").expect("typed-array values"),
+            )
             .expect("typed-array iterator method");
         if let Value::Object { props } = &prototype {
             props
@@ -413,7 +656,92 @@ fn constructor_index(interp: &mut Interpreter, value: Option<&Value>) -> Result<
 
 fn new_array_buffer(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let length = constructor_index(interp, a.first())?;
-    Ok(Value::ArrayBuffer(new_buffer(length)?))
+    let maximum = buffer_maximum_option(interp, a.get(1))?;
+    if maximum.is_some_and(|maximum| maximum < length) {
+        return Err(range_err("Invalid ArrayBuffer maximum length"));
+    }
+    let prototype = buffer_constructor_prototype(interp, "ArrayBuffer")?;
+    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_ARRAY_LEN * 8) {
+        return Err(range_err("Invalid buffer maximum length"));
+    }
+    let buffer = match maximum {
+        Some(maximum) => Buffer::resizable(length, maximum)
+            .ok_or_else(|| range_err("Invalid ArrayBuffer length"))?,
+        None => new_buffer(length)?,
+    };
+    let value = Value::ArrayBuffer(buffer);
+    value
+        .property_cell()
+        .expect("ArrayBuffer properties")
+        .set_proto(prototype);
+    Ok(value)
+}
+
+fn buffer_constructor_prototype(
+    interp: &mut Interpreter,
+    name: &str,
+) -> Result<Option<Rc<Value>>, VmErr> {
+    let constructor = interp
+        .new_target_stack
+        .last()
+        .cloned()
+        .or_else(|| interp.persistent_global.borrow().intrinsic(name))
+        .ok_or_else(|| VmErr::Msg("TypeError: buffer constructor is unavailable".into()))?;
+    interp.constructor_prototype(&constructor, name)
+}
+
+fn buffer_maximum_option(
+    interp: &mut Interpreter,
+    options: Option<&Value>,
+) -> Result<Option<usize>, VmErr> {
+    let Some(options) = options.filter(|value| crate::interpreter::call::is_js_object(value))
+    else {
+        return Ok(None);
+    };
+    let maximum = interp.get_prop_value_str(options, "maxByteLength")?;
+    if matches!(maximum, Value::Undefined) {
+        return Ok(None);
+    }
+    let maximum = constructor_index(interp, Some(&maximum))?;
+    Ok(Some(maximum))
+}
+
+fn require_array_buffer(this: &Value) -> Result<&Buffer, VmErr> {
+    match this {
+        Value::ArrayBuffer(buffer) => Ok(buffer),
+        _ => Err(VmErr::Msg(
+            "TypeError: incompatible ArrayBuffer receiver".into(),
+        )),
+    }
+}
+fn array_byte_length(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(
+        require_array_buffer(&this)?.borrow().len() as f64
+    ))
+}
+fn array_maximum_length(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(
+        require_array_buffer(&this)?.maximum_length() as f64
+    ))
+}
+fn array_resizable(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Bool(require_array_buffer(&this)?.is_resizable()))
+}
+fn array_detached(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Bool(require_array_buffer(&this)?.is_detached()))
+}
+fn array_buffer_resize(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let buffer = require_array_buffer(&this)?;
+    if !buffer.is_resizable() {
+        return Err(VmErr::Msg("TypeError: ArrayBuffer is not resizable".into()));
+    }
+    let length = constructor_index(interp, args.first())?;
+    buffer.resize(length)?;
+    Ok(Value::Undefined)
 }
 
 fn new_shared_array_buffer(
@@ -422,12 +750,88 @@ fn new_shared_array_buffer(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let length = constructor_index(interp, a.first())?;
+    let maximum = buffer_maximum_option(interp, a.get(1))?;
+    if maximum.is_some_and(|maximum| maximum < length) {
+        return Err(range_err("Invalid shared array buffer maximum length"));
+    }
+    let prototype = buffer_constructor_prototype(interp, "SharedArrayBuffer")?;
     if length > crate::value::MAX_ARRAY_LEN * 8 {
         return Err(range_err("Invalid shared array buffer length"));
     }
-    let buffer = SharedBuffer::zeroed(length)
+    if maximum.is_some_and(|maximum| maximum > crate::value::MAX_ARRAY_LEN * 8) {
+        return Err(range_err("Invalid shared array buffer maximum length"));
+    }
+    let buffer = SharedBuffer::zeroed_with_maximum(length, maximum)
         .ok_or_else(|| range_err("Invalid shared array buffer length"))?;
-    Ok(Value::SharedArrayBuffer(buffer))
+    let value = Value::SharedArrayBuffer(buffer);
+    value
+        .property_cell()
+        .expect("SharedArrayBuffer properties")
+        .set_proto(prototype);
+    Ok(value)
+}
+
+fn require_shared(this: &Value) -> Result<&SharedBuffer, VmErr> {
+    match this {
+        Value::SharedArrayBuffer(buffer) => Ok(buffer),
+        _ => Err(VmErr::Msg(
+            "TypeError: incompatible SharedArrayBuffer receiver".into(),
+        )),
+    }
+}
+fn shared_byte_length(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(require_shared(&this)?.len() as f64))
+}
+fn shared_maximum_length(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(require_shared(&this)?.maximum_length() as f64))
+}
+fn shared_growable(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Bool(require_shared(&this)?.is_growable()))
+}
+
+fn shared_array_buffer_grow(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Value::SharedArrayBuffer(buffer) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: incompatible SharedArrayBuffer grow receiver".into(),
+        ));
+    };
+    if !buffer.is_growable() {
+        return Err(VmErr::Msg(
+            "TypeError: SharedArrayBuffer is not growable".into(),
+        ));
+    }
+    let length = constructor_index(interp, args.first())?;
+    buffer.grow(length).map_err(|error| match error {
+        crate::value::SharedGrowError::NotGrowable => {
+            VmErr::Msg("TypeError: SharedArrayBuffer is not growable".into())
+        }
+        crate::value::SharedGrowError::InvalidLength => {
+            range_err("Invalid shared array buffer growth length")
+        }
+    })?;
+    Ok(Value::Undefined)
+}
+
+/// A scheduling hint, never a wait or a guest-budget refill. Validation does
+/// not coerce the optional iteration number or invoke guest callbacks.
+fn atomics_pause(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    if let Some(value) = args.first()
+        && !matches!(value, Value::Undefined)
+        && !matches!(value, Value::Number(number) if number.is_finite() && *number >= 0.0 && number.fract() == 0.0)
+    {
+        return Err(VmErr::Msg(
+            "TypeError: Atomics.pause iteration number must be a nonnegative integer Number".into(),
+        ));
+    }
+    interp.check_execution_interrupt()?;
+    std::hint::spin_loop();
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::yield_now();
+    Ok(Value::Undefined)
 }
 
 fn atomics_is_lock_free(
@@ -443,7 +847,7 @@ fn atomics_is_lock_free(
             "TypeError: cannot convert value to a lock-free size".into(),
         ));
     }
-    let size = interp.tn(value).trunc();
+    let size = interp.ecmascript_to_number(value)?.trunc();
     let size = if size.is_finite() && size >= 0.0 {
         size as usize
     } else {
@@ -493,30 +897,32 @@ fn atomics_compare_exchange(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
     atomics(i, &a, AtomicsMethod::CompareExchange)
 }
 
-/// `Atomics.wait` can only block the current agent. napi-vm does not yet have
-/// guest worker agents, so report the unsupported blocking case clearly while
-/// still handling the specification's immediate `not-equal` and zero-timeout
-/// results. Async waits are backed by the VM's ordinary job/timer queues.
 fn atomics_wait(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
-    let expected = atomics_argument_bits(
-        interp,
-        kind,
-        args.get(2)
-            .ok_or_else(|| VmErr::Msg("TypeError: Atomics expected value is required".into()))?,
-    )?;
+    let (kind, shared, offset) = atomics_wait_location(interp, &args, true)?;
+    let shared = shared.expect("shared wait location");
+    let expected = atomics_argument_bits(interp, kind, args.get(2).unwrap_or(&Value::Undefined))?;
     let timeout = atomics_timeout(interp, &args, 3)?;
-    let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
-        VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
-    })?;
-    if observed != expected {
-        return Ok(Value::String("not-equal".into()));
+    if !interp.can_block() {
+        return Err(VmErr::Msg("TypeError: This agent cannot suspend".into()));
     }
-    if timeout == 0.0 {
-        return Ok(Value::String("timed-out".into()));
-    }
-    Err(VmErr::Msg(
-        "TypeError: Atomics.wait requires worker-agent support; use Atomics.waitAsync".into(),
+    let result = shared
+        .wait_interruptible(offset, kind.size(), expected, timeout, || {
+            interp.check_execution_interrupt().is_err()
+        })
+        .ok_or_else(|| {
+            VmErr::Msg("TypeError: blocking wait is unavailable for this backing store".into())
+        })?;
+    Ok(Value::String(
+        match result {
+            crate::value::SharedWaitResult::Cancelled => {
+                interp.check_execution_interrupt()?;
+                return Err(VmErr::Msg("Error: Guest execution interrupted".into()));
+            }
+            crate::value::SharedWaitResult::NotEqual => "not-equal",
+            crate::value::SharedWaitResult::TimedOut => "timed-out",
+            crate::value::SharedWaitResult::Ok => "ok",
+        }
+        .into(),
     ))
 }
 
@@ -525,29 +931,48 @@ fn atomics_wait_async(
     _: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
-    let expected = atomics_argument_bits(
-        interp,
-        kind,
-        args.get(2)
-            .ok_or_else(|| VmErr::Msg("TypeError: Atomics expected value is required".into()))?,
-    )?;
+    let (kind, shared, offset) = atomics_wait_location(interp, &args, true)?;
+    let shared = shared.expect("shared wait location");
+    let expected = atomics_argument_bits(interp, kind, args.get(2).unwrap_or(&Value::Undefined))?;
     let timeout = atomics_timeout(interp, &args, 3)?;
-    let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
-        VmErr::Msg("TypeError: atomic access is unaligned or unavailable on this target".into())
-    })?;
-    if observed != expected {
-        return Ok(atomics_wait_result(
-            false,
-            Value::String("not-equal".into()),
-        ));
-    }
-    if timeout == 0.0 {
-        return Ok(atomics_wait_result(
-            false,
-            Value::String("timed-out".into()),
-        ));
-    }
+    let native = match shared.register_wait(offset, kind.size(), expected, timeout) {
+        Some(Ok(native)) => {
+            native.set_owner_wake(&interp.owner_wake_signal());
+            Some(native)
+        }
+        Some(Err(result)) => {
+            return Ok(atomics_wait_result(
+                false,
+                Value::String(
+                    match result {
+                        crate::value::SharedWaitResult::NotEqual => "not-equal",
+                        _ => "timed-out",
+                    }
+                    .into(),
+                ),
+            ));
+        }
+        None => {
+            let observed = shared.atomic_load(offset, kind.size()).ok_or_else(|| {
+                VmErr::Msg(
+                    "TypeError: atomic access is unaligned or unavailable on this target".into(),
+                )
+            })?;
+            if observed != expected {
+                return Ok(atomics_wait_result(
+                    false,
+                    Value::String("not-equal".into()),
+                ));
+            }
+            if timeout == 0.0 {
+                return Ok(atomics_wait_result(
+                    false,
+                    Value::String("timed-out".into()),
+                ));
+            }
+            None
+        }
+    };
 
     if timeout.is_finite() {
         interp.jobs.borrow().check_timer_capacity()?;
@@ -555,10 +980,12 @@ fn atomics_wait_async(
 
     let promise = Value::pending_promise();
     let key = (shared.wait_identity(), offset);
-    let waiter_id = interp
-        .jobs
-        .borrow_mut()
-        .register_atomics_waiter(key, promise.clone());
+    let waiter_id = interp.jobs.borrow_mut().register_shared_atomics_waiter(
+        key,
+        promise.clone(),
+        shared.clone(),
+        native,
+    );
     if timeout.is_finite() {
         interp.jobs.borrow_mut().push_timer_job(
             timeout,
@@ -569,7 +996,7 @@ fn atomics_wait_async(
 }
 
 fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let (kind, shared, offset) = atomics_wait_location(interp, &args)?;
+    let (kind, shared, offset) = atomics_wait_location(interp, &args, false)?;
     let count = match args.get(2) {
         None | Some(Value::Undefined) => usize::MAX,
         Some(Value::BigInt(_) | Value::Symbol(_)) => {
@@ -578,7 +1005,7 @@ fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
             ));
         }
         Some(value) => {
-            let count = interp.tn(value);
+            let count = interp.ecmascript_to_number(value)?;
             if count.is_nan() || count <= 0.0 {
                 0
             } else if count.is_infinite() || count >= usize::MAX as f64 {
@@ -589,11 +1016,14 @@ fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
         }
     };
     let _ = kind;
+    let Some(shared) = shared else {
+        return Ok(Value::Number(0.0));
+    };
     let waiters = interp
         .jobs
         .borrow_mut()
         .take_atomics_waiters((shared.wait_identity(), offset), count);
-    let notified = waiters.len();
+    let notified = waiters.len() + shared.notify(offset, count.saturating_sub(waiters.len()));
     for promise in waiters {
         crate::interpreter::jobs::settle(
             &interp.jobs,
@@ -602,6 +1032,7 @@ fn atomics_notify(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
             Value::String("ok".into()),
         );
     }
+    crate::interpreter::jobs::settle_notified_atomics_waiters(&interp.jobs);
     Ok(Value::Number(notified as f64))
 }
 
@@ -615,7 +1046,8 @@ fn atomics_wait_result(async_: bool, value: Value) -> Value {
 fn atomics_wait_location(
     interp: &mut Interpreter,
     args: &[Value],
-) -> Result<(TypedKind, SharedBuffer, usize), VmErr> {
+    require_shared: bool,
+) -> Result<(TypedKind, Option<SharedBuffer>, usize), VmErr> {
     let Some(Value::TypedArray(view)) = args.first() else {
         return Err(VmErr::Msg(
             "TypeError: Atomics wait requires an Int32Array or BigInt64Array".into(),
@@ -626,31 +1058,29 @@ fn atomics_wait_location(
             "TypeError: Atomics wait requires an Int32Array or BigInt64Array".into(),
         ));
     }
-    let BufferBacking::Shared(shared) = &view.buffer else {
-        return Err(VmErr::Msg(
-            "TypeError: Atomics wait requires a SharedArrayBuffer".into(),
-        ));
+    let shared = match &view.buffer {
+        BufferBacking::Shared(shared) => Some(shared.clone()),
+        _ if require_shared || view.is_out_of_bounds() => {
+            return Err(VmErr::Msg(
+                "TypeError: Atomics wait requires a SharedArrayBuffer".into(),
+            ));
+        }
+        _ => None,
     };
-    let index_value = args
-        .get(1)
-        .ok_or_else(|| VmErr::Msg("TypeError: Atomics index is required".into()))?;
-    if matches!(index_value, Value::BigInt(_) | Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: cannot convert value to an Atomics index".into(),
-        ));
-    }
-    let index = interp.tn(index_value).trunc();
-    if !index.is_finite() || index < 0.0 || index >= view.effective_length() as f64 {
+    let length = view.effective_length();
+    let index = constructor_index(interp, args.get(1))?;
+    if index >= length {
         return Err(range_err("Atomics index is outside the typed array"));
     }
+
     let offset = view
         .effective_byte_offset()
-        .checked_add(index as usize * view.kind.size())
+        .checked_add(index * view.kind.size())
         .ok_or_else(|| range_err("Atomics index is outside the typed array"))?;
-    Ok((view.kind, shared.clone(), offset))
+    Ok((view.kind, shared, offset))
 }
 
-fn atomics_timeout(interp: &Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
+fn atomics_timeout(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
     let Some(value) = args.get(index) else {
         return Ok(f64::INFINITY);
     };
@@ -662,7 +1092,7 @@ fn atomics_timeout(interp: &Interpreter, args: &[Value], index: usize) -> Result
             "TypeError: cannot convert value to an Atomics timeout".into(),
         ));
     }
-    let timeout = interp.tn(value);
+    let timeout = interp.ecmascript_to_number(value)?;
     if timeout.is_nan() {
         Ok(f64::INFINITY)
     } else if timeout <= 0.0 {
@@ -697,20 +1127,12 @@ fn atomics(
             "TypeError: Atomics requires an integer typed array".into(),
         ));
     }
-    let index_value = args
-        .get(1)
-        .ok_or_else(|| VmErr::Msg("TypeError: Atomics index is required".into()))?;
-    if matches!(index_value, Value::BigInt(_) | Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: cannot convert value to an Atomics index".into(),
-        ));
+    if view.is_out_of_bounds() {
+        return Err(VmErr::Msg("TypeError: Detached buffer".into()));
     }
-    let index = interp.tn(index_value).trunc();
-    if !index.is_finite() || index < 0.0 {
-        return Err(range_err("Atomics index is outside the typed array"));
-    }
-    let index = index as usize;
-    if index >= view.effective_length() {
+    let length = view.effective_length();
+    let index = constructor_index(interp, args.get(1))?;
+    if index >= length {
         return Err(range_err("Atomics index is outside the typed array"));
     }
     let width = view.kind.size();
@@ -718,35 +1140,24 @@ fn atomics(
     let result = match method {
         AtomicsMethod::Load => atomics_load_bits(&view.buffer, offset, width),
         AtomicsMethod::Store => {
-            let value = atomics_argument_bits(
+            let converted = atomics_coerce_argument(
                 interp,
                 view.kind,
-                args.get(2).ok_or_else(|| {
-                    VmErr::Msg("TypeError: Atomics store value is required".into())
-                })?,
+                args.get(2).unwrap_or(&Value::Undefined),
             )?;
+            let value = atomics_argument_bits(interp, view.kind, &converted)?;
             if !atomics_store_bits(&view.buffer, offset, width, value) {
                 return Err(VmErr::Msg(
                     "TypeError: atomic access is unaligned or unavailable on this target".into(),
                 ));
             }
-            return Ok(atomics_value(view.kind, value));
+            return Ok(converted);
         }
         operation => {
-            let value = atomics_argument_bits(
-                interp,
-                view.kind,
-                args.get(2)
-                    .ok_or_else(|| VmErr::Msg("TypeError: Atomics value is required".into()))?,
-            )?;
+            let value =
+                atomics_argument_bits(interp, view.kind, args.get(2).unwrap_or(&Value::Undefined))?;
             let replacement = if matches!(operation, AtomicsMethod::CompareExchange) {
-                atomics_argument_bits(
-                    interp,
-                    view.kind,
-                    args.get(3).ok_or_else(|| {
-                        VmErr::Msg("TypeError: Atomics replacement value is required".into())
-                    })?,
-                )?
+                atomics_argument_bits(interp, view.kind, args.get(3).unwrap_or(&Value::Undefined))?
             } else {
                 0
             };
@@ -828,36 +1239,35 @@ fn atomics_rmw_bits(
     Some(previous)
 }
 
+fn atomics_coerce_argument(
+    interp: &mut Interpreter,
+    kind: TypedKind,
+    value: &Value,
+) -> Result<Value, VmErr> {
+    if matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64) {
+        interp.ecmascript_to_bigint(value)
+    } else {
+        Ok(Value::Number(crate::value::to_integer_or_infinity(
+            interp.ecmascript_to_number(value)?,
+        )))
+    }
+}
+
 fn atomics_argument_bits(
-    interp: &Interpreter,
+    interp: &mut Interpreter,
     kind: TypedKind,
     value: &Value,
 ) -> Result<u64, VmErr> {
-    if matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64) {
-        let bigint = match value {
-            Value::BigInt(value) => value.as_ref().clone(),
-            Value::Bool(false) => crate::bigint::BigInt::zero(),
-            Value::Bool(true) => crate::bigint::BigInt::from_i64(1),
-            Value::String(value) => crate::bigint::BigInt::parse(value)
-                .map_err(|_| VmErr::Msg("SyntaxError: invalid BigInt value".into()))?,
-            _ => {
-                return Err(VmErr::Msg(
-                    "TypeError: Atomics BigInt typed arrays require a BigInt value".into(),
-                ));
-            }
-        };
-        let wrapped = bigint.as_n_bit(64, false).map_err(VmErr::Msg)?;
-        return wrapped
+    let converted = atomics_coerce_argument(interp, kind, value)?;
+    if let Value::BigInt(bigint) = &converted {
+        return bigint
+            .as_n_bit(64, false)
+            .map_err(VmErr::Msg)?
             .to_decimal()
             .parse()
             .map_err(|_| VmErr::Msg("RangeError: invalid Atomics BigInt value".into()));
     }
-    if matches!(value, Value::BigInt(_) | Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: cannot convert value to an Atomics Number element".into(),
-        ));
-    }
-    let bits = to_int(interp.tn(value)) as u32 as u64;
+    let bits = to_int(converted.to_number()) as u32 as u64;
     let width = kind.size();
     Ok(if width == 4 {
         bits
@@ -899,11 +1309,8 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
     match a.first() {
         None | Some(Value::Undefined) => Ok(typed(kind, new_buffer(0)?, 0, 0)),
         Some(Value::Number(n)) => {
-            if !n.is_finite() || *n < 0.0 || n.fract() != 0.0 {
-                return Err(range_err("Invalid typed array length"));
-            }
-            let length = *n as usize;
-            Ok(typed(kind, new_buffer(length * size)?, 0, length))
+            let length = constructor_index(interp, Some(&Value::Number(*n)))?;
+            allocate_typed(kind, length)
         }
         Some(Value::ArrayBuffer(buffer)) => {
             if buffer.is_detached() {
@@ -912,7 +1319,7 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
                         .to_string(),
                 ));
             }
-            let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0);
+            let byte_offset = constructor_index(interp, a.get(1))? as f64;
             if !byte_offset.is_finite() || byte_offset < 0.0 {
                 return Err(range_err("Invalid typed array offset"));
             }
@@ -923,15 +1330,36 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
             }
             let length = match a.get(2) {
                 Some(Value::Undefined) | None => (available - byte_offset) / size,
-                Some(v) => v.to_number().max(0.0) as usize,
+                Some(v) => constructor_index(interp, Some(v))?,
             };
-            if byte_offset + length * size > available {
+            if length
+                .checked_mul(size)
+                .and_then(|length| byte_offset.checked_add(length))
+                .is_none_or(|end| end > available)
+            {
                 return Err(range_err("Invalid typed array length"));
             }
-            Ok(typed(kind, buffer.clone(), byte_offset, length))
+            let length_tracking = buffer.is_resizable()
+                && a.get(2)
+                    .is_none_or(|length| matches!(length, Value::Undefined));
+            if !length_tracking
+                && a.get(2)
+                    .is_none_or(|length| matches!(length, Value::Undefined))
+                && !(available - byte_offset).is_multiple_of(size)
+            {
+                return Err(range_err("Invalid typed array buffer length"));
+            }
+            Ok(typed_with_tracking(
+                kind,
+                buffer.clone().into(),
+                byte_offset,
+                length,
+                false,
+                length_tracking,
+            ))
         }
         Some(Value::SharedArrayBuffer(buffer)) => {
-            let byte_offset = a.get(1).map(|v| v.to_number()).unwrap_or(0.0);
+            let byte_offset = constructor_index(interp, a.get(1))? as f64;
             if !byte_offset.is_finite() || byte_offset < 0.0 {
                 return Err(range_err("Invalid typed array offset"));
             }
@@ -942,32 +1370,150 @@ fn new_typed_array(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
             }
             let length = match a.get(2) {
                 Some(Value::Undefined) | None => (available - byte_offset) / size,
-                Some(v) => v.to_number().max(0.0) as usize,
+                Some(v) => constructor_index(interp, Some(v))?,
             };
-            if byte_offset + length * size > available {
+            if length
+                .checked_mul(size)
+                .and_then(|length| byte_offset.checked_add(length))
+                .is_none_or(|end| end > available)
+            {
                 return Err(range_err("Invalid typed array length"));
             }
-            Ok(typed(kind, buffer.clone(), byte_offset, length))
-        }
-        // A typed array or any iterable copies element-wise.
-        Some(source) => {
-            let items = match source {
-                Value::Symbol(_) | Value::BigInt(_) => {
-                    return Err(VmErr::Msg("TypeError: Invalid typed array length".into()));
-                }
-                Value::TypedArray(view) => read_all(view),
-                other => interp.iterate(other)?,
-            };
-            let view = typed(kind, new_buffer(items.len() * size)?, 0, items.len());
-            let Value::TypedArray(data) = &view else {
-                unreachable!("typed() returns a typed array");
-            };
-            for (index, item) in items.iter().enumerate() {
-                write_element(data, index, item)?;
+            let length_tracking = buffer.is_growable()
+                && a.get(2)
+                    .is_none_or(|length| matches!(length, Value::Undefined));
+            if !length_tracking
+                && a.get(2)
+                    .is_none_or(|length| matches!(length, Value::Undefined))
+                && !(available - byte_offset).is_multiple_of(size)
+            {
+                return Err(range_err("Invalid typed array buffer length"));
             }
-            Ok(view)
+            Ok(typed_with_tracking(
+                kind,
+                buffer.clone().into(),
+                byte_offset,
+                length,
+                false,
+                length_tracking,
+            ))
+        }
+        Some(source) if !crate::interpreter::call::is_js_object(source) => {
+            let length = constructor_index(interp, Some(source))?;
+            allocate_typed(kind, length)
+        }
+        Some(Value::TypedArray(source)) => {
+            if source.is_out_of_bounds() || is_bigint_kind(source.kind) != is_bigint_kind(kind) {
+                return Err(VmErr::Msg(
+                    "TypeError: incompatible typed array source".into(),
+                ));
+            }
+            typed_from_items(interp, kind, read_all(source))
+        }
+        Some(source) => {
+            let key = super::well_known("iterator").expect("Symbol.iterator");
+            if let Some(method) = interp.get_method(source, &key)? {
+                let iterator = interp.iterator_from_method(source, &method)?;
+                let items = interp.drain_iterator(&iterator)?;
+                return typed_from_items(interp, kind, items);
+            }
+            let length = interp.member(source, "length")?;
+            let number = interp.ecmascript_to_number(&length)?;
+            let length = if number.is_nan() || number <= 0.0 {
+                0.0
+            } else {
+                number.floor()
+            };
+            if length > crate::value::MAX_ARRAY_LEN as f64 {
+                return Err(range_err("Invalid typed array length"));
+            }
+            let result = allocate_typed(kind, length as usize)?;
+            let Value::TypedArray(view) = &result else {
+                unreachable!()
+            };
+            for index in 0..length as usize {
+                interp.check_execution()?;
+                let value = interp.member(source, &index.to_string())?;
+                write_element_in(interp, view, index, &value)?;
+            }
+            Ok(result)
         }
     }
+}
+
+fn is_bigint_kind(kind: TypedKind) -> bool {
+    matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64)
+}
+
+fn allocate_typed(kind: TypedKind, length: usize) -> Result<Value, VmErr> {
+    let bytes = length
+        .checked_mul(kind.size())
+        .ok_or_else(|| range_err("Invalid typed array length"))?;
+    Ok(typed(kind, new_buffer(bytes)?, 0, length))
+}
+
+fn typed_from_items(
+    interp: &mut Interpreter,
+    kind: TypedKind,
+    items: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let result = allocate_typed(kind, items.len())?;
+    let Value::TypedArray(view) = &result else {
+        unreachable!()
+    };
+    for (index, value) in items.iter().enumerate() {
+        write_element_in(interp, view, index, value)?;
+    }
+    Ok(result)
+}
+
+pub(crate) fn write_element_in(
+    interp: &mut Interpreter,
+    view: &Rc<TypedArrayData>,
+    index: usize,
+    value: &Value,
+) -> Result<(), VmErr> {
+    let converted = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(value)?
+    } else {
+        Value::Number(interp.ecmascript_to_number(value)?)
+    };
+    write_element(view, index, &converted)
+}
+
+/// CanonicalNumericIndexString excludes ordinary numeric-looking names.
+pub(crate) fn canonical_numeric_index(key: &str) -> Option<f64> {
+    if key == "-0" {
+        return Some(-0.0);
+    }
+    let number = key.parse::<f64>().ok()?;
+    (crate::format::ecmascript_number_string(number) == key).then_some(number)
+}
+
+pub(crate) fn valid_integer_index(view: &TypedArrayData, index: f64) -> bool {
+    index.is_finite()
+        && index >= 0.0
+        && !(index == 0.0 && index.is_sign_negative())
+        && index.fract() == 0.0
+        && index < view.effective_length() as f64
+}
+
+/// Conversion precedes validation when the receiver is the typed array itself.
+pub(crate) fn set_integer_index_in(
+    interp: &mut Interpreter,
+    view: &Rc<TypedArrayData>,
+    index: f64,
+    value: &Value,
+) -> Result<(), VmErr> {
+    let converted = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(value)?
+    } else {
+        Value::Number(interp.ecmascript_to_number(value)?)
+    };
+    if valid_integer_index(view, index) {
+        write_element(view, index as usize, &converted)?;
+    }
+    Ok(())
 }
 
 fn typed(
@@ -986,55 +1532,154 @@ pub(crate) fn typed_with_buffer(
     length: usize,
     is_buffer: bool,
 ) -> Value {
+    typed_with_tracking(kind, buffer.into(), byte_offset, length, is_buffer, false)
+}
+
+fn typed_with_tracking(
+    kind: TypedKind,
+    buffer: BufferBacking,
+    byte_offset: usize,
+    length: usize,
+    is_buffer: bool,
+    length_tracking: bool,
+) -> Value {
     Value::TypedArray(Rc::new(TypedArrayData {
+        length_tracking,
         properties: Value::instance_properties(),
         kind,
-        buffer: buffer.into(),
+        buffer,
         byte_offset,
         length,
         is_buffer,
     }))
 }
 
-fn typed_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    new_typed_array(interp, this, vec![Value::array(a)])
+/// TypedArrayCreate validates the actual constructor result before any
+/// element writes. Static factories and species allocation share this path.
+fn typed_array_create(
+    interp: &mut Interpreter,
+    constructor: &Value,
+    arguments: Vec<Value>,
+    minimum_length: Option<usize>,
+) -> Result<Value, VmErr> {
+    if !super::is_constructor(constructor) {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray constructor must be constructible".into(),
+        ));
+    }
+    let result = interp.ctor(constructor, arguments)?;
+    let view = require(&result)?;
+    if view.is_out_of_bounds()
+        || minimum_length.is_some_and(|minimum| view.effective_length() < minimum)
+    {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray constructor returned an invalid or short view".into(),
+        ));
+    }
+    Ok(result)
 }
 
-fn typed_from(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let source = a.first().cloned().unwrap_or(Value::Undefined);
-    let items = match &source {
-        Value::TypedArray(view) => read_all(view),
-        Value::Object { .. } => {
-            // An array-like: read `length` and the index properties.
-            let length = interp.member(&source, "length")?.to_number();
-            let length = if length.is_finite() && length > 0.0 {
-                (length as usize).min(crate::value::MAX_ARRAY_LEN)
-            } else {
-                0
-            };
-            let mut out = Vec::with_capacity(length.min(1024));
-            for index in 0..length {
-                out.push(interp.member(&source, &index.to_string())?);
-            }
-            out
-        }
-        other => interp.iterate(other)?,
+fn typed_species_create(
+    interp: &mut Interpreter,
+    original: &Value,
+    arguments: Vec<Value>,
+    minimum_length: Option<usize>,
+) -> Result<Value, VmErr> {
+    let source = require(original)?;
+    let constructor = interp.species_constructor(original, source.kind.name())?;
+    let result = typed_array_create(interp, &constructor, arguments, minimum_length)?;
+    if is_bigint_kind(source.kind) != is_bigint_kind(require(&result)?.kind) {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray species has a different content type".into(),
+        ));
+    }
+    Ok(result)
+}
+
+fn typed_of(
+    interp: &mut Interpreter,
+    constructor: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let length = arguments.len();
+    let result = typed_array_create(
+        interp,
+        &constructor,
+        vec![Value::Number(length as f64)],
+        Some(length),
+    )?;
+    let view = require(&result)?;
+    for (index, value) in arguments.iter().enumerate() {
+        write_element_in(interp, &view, index, value)?;
+    }
+    Ok(result)
+}
+
+fn typed_from(
+    interp: &mut Interpreter,
+    constructor: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    if !super::is_constructor(&constructor) {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray.from receiver must be a constructor".into(),
+        ));
+    }
+    let mapper = arguments
+        .get(1)
+        .filter(|value| !matches!(value, Value::Undefined))
+        .cloned();
+    if mapper
+        .as_ref()
+        .is_some_and(|mapper| !crate::interpreter::call::is_callable_value(mapper))
+    {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray.from mapper must be callable".into(),
+        ));
+    }
+    let receiver = arguments.get(2).cloned().unwrap_or(Value::Undefined);
+    let source = arguments.first().cloned().unwrap_or(Value::Undefined);
+    let method = interp.get_method(
+        &source,
+        &super::well_known("iterator").expect("Symbol.iterator"),
+    )?;
+    let items = if let Some(method) = method {
+        let iterator = interp.iterator_from_method(&source, &method)?;
+        Some(interp.drain_iterator(&iterator)?)
+    } else {
+        None
     };
-    let mapped = match a.get(1) {
-        Some(mapper) if !matches!(mapper, Value::Undefined | Value::Null) => {
-            let mut out = Vec::with_capacity(items.len());
-            for (index, item) in items.into_iter().enumerate() {
-                out.push(interp.call_this(
-                    mapper,
-                    Value::Undefined,
-                    vec![item, Value::Number(index as f64)],
-                )?);
-            }
-            out
-        }
-        _ => items,
+    let length = if let Some(items) = &items {
+        items.len()
+    } else {
+        super::array::array_like_length(interp, &source)?
     };
-    new_typed_array(interp, this, vec![Value::array(mapped)])
+    let result = typed_array_create(
+        interp,
+        &constructor,
+        vec![Value::Number(length as f64)],
+        Some(length),
+    )?;
+    let view = require(&result)?;
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = if let Some(items) = &items {
+            items[index].clone()
+        } else {
+            interp.get_prop_value_str(&source, &index.to_string())?
+        };
+        let value = if let Some(mapper) = &mapper {
+            interp.call_this(
+                mapper,
+                receiver.clone(),
+                vec![value, Value::Number(index as f64)],
+            )?
+        } else {
+            value
+        };
+        write_element_in(interp, &view, index, &value)?;
+    }
+    Ok(result)
 }
 
 // --- Element access ---------------------------------------------------------
@@ -1151,9 +1796,8 @@ fn require(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
 
 /// Run an `Array.prototype` method over a copy of the elements.
 ///
-/// The methods that produce a new collection return a plain array here rather
-/// than a typed one. That differs from the specification for `map`, `filter`
-/// and `slice`; it is the honest report of what this implementation does.
+/// Legacy non-allocating delegates still share Array iteration over a copy.
+/// Allocating methods use TypedArrayCreate and species helpers below.
 fn typed_delegate_named(
     interp: &mut Interpreter,
     this: Value,
@@ -1178,8 +1822,77 @@ macro_rules! typed_delegate_method {
     };
 }
 
-typed_delegate_method!(typed_map, "map");
-typed_delegate_method!(typed_filter, "filter");
+fn validated_typed_source(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
+    let view = require(this)?;
+    if view.is_out_of_bounds() {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray is detached or out of bounds".into(),
+        ));
+    }
+    Ok(view)
+}
+
+fn typed_map(interp: &mut Interpreter, this: Value, arguments: Vec<Value>) -> Result<Value, VmErr> {
+    let source = validated_typed_source(&this)?;
+    let length = source.effective_length();
+    let callback = super::array::callback(&arguments)?;
+    let receiver = arguments.get(1).cloned().unwrap_or(Value::Undefined);
+    let result = typed_species_create(
+        interp,
+        &this,
+        vec![Value::Number(length as f64)],
+        Some(length),
+    )?;
+    let destination = require(&result)?;
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = read_element(&source, index).unwrap_or(Value::Undefined);
+        let mapped = interp.call_this(
+            &callback,
+            receiver.clone(),
+            vec![value, Value::Number(index as f64), this.clone()],
+        )?;
+        write_element_in(interp, &destination, index, &mapped)?;
+    }
+    Ok(result)
+}
+
+fn typed_filter(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = validated_typed_source(&this)?;
+    let length = source.effective_length();
+    let callback = super::array::callback(&arguments)?;
+    let receiver = arguments.get(1).cloned().unwrap_or(Value::Undefined);
+    let mut kept = Vec::new();
+    for index in 0..length {
+        interp.consume_loop()?;
+        let value = read_element(&source, index).unwrap_or(Value::Undefined);
+        if interp
+            .call_this(
+                &callback,
+                receiver.clone(),
+                vec![value.clone(), Value::Number(index as f64), this.clone()],
+            )?
+            .is_truthy()
+        {
+            kept.push(value);
+        }
+    }
+    let result = typed_species_create(
+        interp,
+        &this,
+        vec![Value::Number(kept.len() as f64)],
+        Some(kept.len()),
+    )?;
+    let destination = require(&result)?;
+    for (index, value) in kept.iter().enumerate() {
+        write_element_in(interp, &destination, index, value)?;
+    }
+    Ok(result)
+}
 typed_delegate_method!(typed_for_each, "forEach");
 typed_delegate_method!(typed_reduce, "reduce");
 typed_delegate_method!(typed_some, "some");
@@ -1191,9 +1904,24 @@ typed_delegate_method!(typed_last_index_of, "lastIndexOf");
 typed_delegate_method!(typed_includes, "includes");
 typed_delegate_method!(typed_reverse, "reverse");
 typed_delegate_method!(typed_sort, "sort");
-typed_delegate_method!(typed_keys, "keys");
-typed_delegate_method!(typed_values, "values");
-typed_delegate_method!(typed_entries, "entries");
+fn typed_iterator(this: Value, kind: &str) -> Result<Value, VmErr> {
+    let view = require(&this)?;
+    if view.is_out_of_bounds() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot iterate a detached typed array".into(),
+        ));
+    }
+    crate::interpreter::array_iter_with_kind(this, kind)
+}
+fn typed_keys(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    typed_iterator(this, "keys")
+}
+fn typed_values(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    typed_iterator(this, "values")
+}
+fn typed_entries(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    typed_iterator(this, "entries")
+}
 
 fn typed_prototype_method(name: &str) -> Value {
     let callable: super::NativeFn = match name {
@@ -1275,7 +2003,7 @@ fn typed_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
         return Err(range_err("Source is too large"));
     }
     for (index, item) in items.iter().enumerate() {
-        write_element(&view, offset + index, item)?;
+        write_element_in(interp, &view, offset + index, item)?;
     }
     Ok(Value::Undefined)
 }
@@ -1304,36 +2032,97 @@ fn window(length: usize, a: &[Value]) -> (usize, usize) {
     (start, end)
 }
 
-/// `subarray`: a *view* over the same buffer, so writes are shared.
-fn typed_subarray(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let (start, end) = window(view.effective_length(), &a);
-    Ok(typed_with_buffer(
-        view.kind,
-        view.buffer.clone(),
-        view.effective_byte_offset() + start * view.kind.size(),
-        end - start,
-        view.is_buffer,
-    ))
+fn window_in(
+    interp: &mut Interpreter,
+    length: usize,
+    arguments: &[Value],
+) -> Result<(usize, usize), VmErr> {
+    let start = super::array::relative_index(
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let end = match arguments.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => super::array::relative_index(interp.ecmascript_to_number(value)?, length),
+    };
+    Ok((start, end.max(start)))
 }
 
-/// `slice`: a *copy*, so writes are not shared.
-fn typed_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let (start, end) = window(view.effective_length(), &a);
-    let size = view.kind.size();
-    let copy = new_buffer((end - start) * size)?;
-    let from = view.effective_byte_offset() + start * size;
-    let to = view.effective_byte_offset() + end * size;
-    if let Some(source) = view.buffer.read(from, to - from) {
-        copy.borrow_mut().copy_from_slice(&source);
+/// subarray passes the original backing wrapper and offset to the species
+/// constructor, omitting length when the source's view tracks buffer growth.
+fn typed_subarray(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = require(&this)?;
+    let (start, end) = window_in(interp, source.effective_length(), &arguments)?;
+    let mut constructor_arguments = vec![
+        source.buffer.to_value(),
+        Value::Number((source.byte_offset + start * source.kind.size()) as f64),
+    ];
+    if !source.length_tracking
+        || arguments
+            .get(1)
+            .is_some_and(|end| !matches!(end, Value::Undefined))
+    {
+        constructor_arguments.push(Value::Number((end - start) as f64));
     }
-    Ok(typed(view.kind, copy, 0, end - start))
+    typed_species_create(interp, &this, constructor_arguments, None)
 }
 
-fn typed_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn typed_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = validated_typed_source(&this)?;
+    let (start, end) = window_in(interp, source.effective_length(), &arguments)?;
+    let count = end - start;
+    let result = typed_species_create(
+        interp,
+        &this,
+        vec![Value::Number(count as f64)],
+        Some(count),
+    )?;
+    if count == 0 {
+        return Ok(result);
+    }
+    if source.is_out_of_bounds() {
+        return Err(VmErr::Msg(
+            "TypeError: TypedArray source became detached or out of bounds".into(),
+        ));
+    }
+    let destination = require(&result)?;
+    let count = count.min(source.effective_length().saturating_sub(start));
+    if source.kind == destination.kind {
+        let bytes = source
+            .buffer
+            .read(
+                source.byte_offset + start * source.kind.size(),
+                count * source.kind.size(),
+            )
+            .ok_or_else(|| VmErr::Msg("TypeError: TypedArray source became detached".into()))?;
+        destination.buffer.write(destination.byte_offset, &bytes);
+    } else {
+        let values = (start..start + count)
+            .map(|index| read_element(&source, index).unwrap_or(Value::Undefined))
+            .collect::<Vec<_>>();
+        for (index, value) in values.iter().enumerate() {
+            write_element_in(interp, &destination, index, value)?;
+        }
+    }
+    Ok(result)
+}
+
+fn typed_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
-    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    let input = a.first().cloned().unwrap_or(Value::Undefined);
+    let value = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(&input)?
+    } else {
+        Value::Number(interp.ecmascript_to_number(&input)?)
+    };
     let (start, end) = window(view.effective_length(), &a[1.min(a.len())..]);
     for index in start..end {
         write_element(&view, index, &value)?;
@@ -1346,6 +2135,9 @@ fn typed_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, 
 pub fn array_buffer_member(buffer: &Buffer, key: &str) -> Option<Value> {
     Some(match key {
         "byteLength" => Value::Number(buffer.borrow().len() as f64),
+        "maxByteLength" => Value::Number(buffer.maximum_length() as f64),
+        "resizable" => Value::Bool(buffer.is_resizable()),
+        "detached" => Value::Bool(buffer.is_detached()),
         _ => return None,
     })
 }
@@ -1353,46 +2145,106 @@ pub fn array_buffer_member(buffer: &Buffer, key: &str) -> Option<Value> {
 pub fn shared_array_buffer_member(buffer: &SharedBuffer, key: &str) -> Option<Value> {
     Some(match key {
         "byteLength" => Value::Number(buffer.len() as f64),
+        "maxByteLength" => Value::Number(buffer.maximum_length() as f64),
+        "growable" => Value::Bool(buffer.is_growable()),
         _ => return None,
     })
 }
 
-fn array_buffer_slice(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::ArrayBuffer(buffer) = &this else {
-        return Err(VmErr::Msg("TypeError: not an ArrayBuffer".to_string()));
-    };
-    if buffer.is_detached() {
-        return Err(VmErr::Msg(
-            "TypeError: Cannot slice a detached ArrayBuffer".to_string(),
-        ));
-    }
-    let length = buffer.borrow().len();
-    let (start, end) = window(length, &a);
-    let copy = new_buffer(end - start)?;
-    copy.borrow_mut()
-        .copy_from_slice(&buffer.borrow()[start..end]);
-    Ok(Value::ArrayBuffer(copy))
+fn buffer_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(this)
+}
+
+fn array_buffer_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    buffer_slice(interp, this, args, false)
 }
 
 fn shared_array_buffer_slice(
-    _: &mut Interpreter,
+    interp: &mut Interpreter,
     this: Value,
-    a: Vec<Value>,
+    args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let Value::SharedArrayBuffer(buffer) = &this else {
-        return Err(VmErr::Msg("TypeError: not a SharedArrayBuffer".to_string()));
-    };
-    let (start, end) = window(buffer.len(), &a);
-    let copy = SharedBuffer::zeroed(end - start)
-        .ok_or_else(|| range_err("Invalid shared array buffer length"))?;
-    let bytes = buffer
-        .read(start, end - start)
-        .ok_or_else(|| range_err("Invalid shared array buffer range"))?;
-    copy.write(0, &bytes);
-    Ok(Value::SharedArrayBuffer(copy))
+    buffer_slice(interp, this, args, true)
 }
 
-// --- DataView ---------------------------------------------------------------
+fn buffer_slice(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    shared: bool,
+) -> Result<Value, VmErr> {
+    let source: BufferBacking = match (&this, shared) {
+        (Value::ArrayBuffer(buffer), false) => buffer.clone().into(),
+        (Value::SharedArrayBuffer(buffer), true) => buffer.clone().into(),
+        _ => {
+            return Err(VmErr::Msg(
+                "TypeError: incompatible buffer slice receiver".into(),
+            ));
+        }
+    };
+    if source.is_detached() {
+        return Err(VmErr::Msg("TypeError: detached buffer".into()));
+    }
+    let length = source.len();
+    let relative = |number: f64| {
+        let integer = crate::value::to_integer_or_infinity(number);
+        if integer < 0.0 {
+            (length as f64 + integer).max(0.0) as usize
+        } else {
+            integer.min(length as f64) as usize
+        }
+    };
+    let start = relative(interp.ecmascript_to_number(args.first().unwrap_or(&Value::Undefined))?);
+    let end = match args.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative(interp.ecmascript_to_number(value)?),
+    };
+    let count = end.saturating_sub(start);
+    let name = if shared {
+        "SharedArrayBuffer"
+    } else {
+        "ArrayBuffer"
+    };
+    let constructor = interp.species_constructor(&this, name)?;
+    let result = interp.ctor(&constructor, vec![Value::Number(count as f64)])?;
+    let destination: BufferBacking = match (&result, shared) {
+        (Value::ArrayBuffer(buffer), false) => buffer.clone().into(),
+        (Value::SharedArrayBuffer(buffer), true) => buffer.clone().into(),
+        _ => {
+            return Err(VmErr::Msg(
+                "TypeError: species returned an incompatible buffer".into(),
+            ));
+        }
+    };
+    let same = match (&source, &destination) {
+        (BufferBacking::Shared(a), BufferBacking::Shared(b)) => {
+            a.wait_identity() == b.wait_identity()
+        }
+        _ => source.identity() == destination.identity(),
+    };
+    if same || destination.is_detached() || destination.len() < count {
+        return Err(VmErr::Msg("TypeError: invalid species buffer".into()));
+    }
+    if source.is_detached() {
+        return Err(VmErr::Msg(
+            "TypeError: source buffer detached during slice".into(),
+        ));
+    }
+    let count = count.min(source.len().saturating_sub(start));
+    if count > 0 {
+        let bytes = source.read(start, count).expect("validated source range");
+        if !destination.write(0, &bytes) {
+            return Err(VmErr::Msg(
+                "TypeError: species buffer changed during slice".into(),
+            ));
+        }
+    }
+    Ok(result)
+}
 
 fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let Some(value @ (Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_))) = a.first() else {
@@ -1425,7 +2277,14 @@ fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
     {
         return Err(range_err("Invalid DataView length"));
     }
+    let length_tracking = match &backing {
+        BufferBacking::Array(buffer) => buffer.is_resizable(),
+        BufferBacking::Shared(buffer) => buffer.is_growable(),
+    } && a
+        .get(2)
+        .is_none_or(|length| matches!(length, Value::Undefined));
     Ok(Value::DataView(Rc::new(TypedArrayData {
+        length_tracking,
         properties: Value::instance_properties(),
         kind: TypedKind::Uint8,
         buffer: backing,
@@ -1453,7 +2312,7 @@ fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<Typed
     let Value::DataView(view) = this else {
         return Err(VmErr::Msg("TypeError: not a DataView".to_string()));
     };
-    if view.buffer.is_detached() {
+    if view.is_out_of_bounds() {
         return Err(VmErr::Msg(
             "TypeError: Cannot access a DataView backed by a detached ArrayBuffer".to_string(),
         ));
@@ -1467,6 +2326,7 @@ fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<Typed
         return Err(range_err("Offset is outside the DataView"));
     }
     Ok(Rc::new(TypedArrayData {
+        length_tracking: false,
         properties: Value::instance_properties(),
         kind,
         buffer: view.buffer.clone(),

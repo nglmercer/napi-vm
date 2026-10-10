@@ -731,6 +731,7 @@ impl Builder<'_> {
                 default,
                 named,
                 namespace,
+                ..
             } => {
                 let exports = self.module_exports(module);
                 if let Some(name) = default {
@@ -786,13 +787,16 @@ impl Builder<'_> {
                     self.statements(body, env);
                 }
             }
-            Statement::While { body, .. } | Statement::DoWhile { body, .. } => {
-                self.statements(body, env)
+            Statement::With { body, .. }
+            | Statement::ResourceDeclaration {
+                declarations: body, ..
             }
+            | Statement::While { body, .. }
+            | Statement::DoWhile { body, .. } => self.statements(body, env),
             Statement::For { body, .. } => self.statements(body, env),
-            Statement::ForIn { body, .. } | Statement::ForOf { body, .. } => {
-                self.statements(body, env)
-            }
+            Statement::ForIn { body, .. }
+            | Statement::ForOf { body, .. }
+            | Statement::ResourceForOf { body, .. } => self.statements(body, env),
             Statement::Try {
                 body,
                 catch,
@@ -800,13 +804,17 @@ impl Builder<'_> {
             } => {
                 self.statements(body, env);
                 if let Some((name, body)) = catch {
-                    self.bindings.insert(
-                        name.clone(),
-                        Binding {
-                            kind: "parameter".into(),
-                            ty: Type::Any,
-                        },
-                    );
+                    if let Some(pattern) = name {
+                        for name in crate::parser::pattern_names(pattern) {
+                            self.bindings.insert(
+                                name,
+                                Binding {
+                                    kind: "parameter".into(),
+                                    ty: Type::Any,
+                                },
+                            );
+                        }
+                    }
                     self.statements(body, env);
                 }
                 if let Some(body) = finally {
@@ -817,7 +825,9 @@ impl Builder<'_> {
                 let ty = self.expr(value, env);
                 self.exports.insert("default".into(), ty);
             }
-            Statement::ExportNamed { specifiers, source } => {
+            Statement::ExportNamed {
+                specifiers, source, ..
+            } => {
                 let source_exports = source.as_deref().map(|module| self.module_exports(module));
                 for (local, exported) in specifiers {
                     let ty = source_exports
@@ -908,12 +918,13 @@ impl Builder<'_> {
 
     fn expr(&mut self, expr: &Expr, env: &mut HashMap<String, Type>) -> Type {
         match expr {
+            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => self.expr(inner, env),
             Expr::Number(_) => Type::Number,
             Expr::String(_) | Expr::EscapedString(_) | Expr::Template { .. } => Type::String,
             // A tag can return anything, so its call site is unconstrained.
             Expr::TaggedTemplate { .. } => Type::Unknown,
             // `import(…)` resolves to a namespace object.
-            Expr::DynamicImport(_) => Type::Unknown,
+            Expr::DynamicImport { .. } => Type::Unknown,
             Expr::ClassExpr { .. } => Type::Unknown,
             Expr::Regex(_, _) | Expr::BigIntLiteral(_) => Type::Unknown,
             // A logical assignment evaluates to either operand.
@@ -937,10 +948,13 @@ impl Builder<'_> {
                 })
                 .or_else(|| catalog::builtin_global_type(name).map(Type::from_builtin))
                 .unwrap_or(Type::Unknown),
-            Expr::Object(props) => {
+            Expr::Object { props, .. } => {
                 let mut fields = BTreeMap::new();
                 for prop in props {
                     match prop {
+                        ObjectProp::CoverInitializedName { name, initializer } => {
+                            fields.insert(name.clone(), self.expr(initializer, env));
+                        }
                         ObjectProp::Shorthand(name) => {
                             fields.insert(name.clone(), Type::Any);
                         }
@@ -978,12 +992,14 @@ impl Builder<'_> {
                                 },
                             );
                         }
-                        ObjectProp::Computed(_, _) | ObjectProp::Spread(_) => {}
+                        ObjectProp::Computed(_, _)
+                        | ObjectProp::ComputedMethod { .. }
+                        | ObjectProp::Spread(_) => {}
                     }
                 }
                 Type::Object(fields)
             }
-            Expr::Array(items) => Type::Array(Box::new(
+            Expr::Array { items, .. } => Type::Array(Box::new(
                 items
                     .first()
                     .map(|item| self.expr(item, env))
@@ -1130,7 +1146,7 @@ impl Builder<'_> {
         for member in members {
             match member {
                 ClassMember::Method {
-                    name: MemberName::Static(member_name),
+                    name: MemberName::Static(member_name) | MemberName::Private(member_name),
                     is_static,
                     params,
                     body,
@@ -1145,7 +1161,7 @@ impl Builder<'_> {
                 }
                 // Computed names contribute no static type entry.
                 ClassMember::Method {
-                    name: MemberName::Static(member_name),
+                    name: MemberName::Static(member_name) | MemberName::Private(member_name),
                     is_static,
                     params,
                     body,
@@ -1163,7 +1179,7 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Field {
-                    name: MemberName::Static(field_name),
+                    name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     init,
                 } if !is_static => {
@@ -1175,14 +1191,14 @@ impl Builder<'_> {
                     );
                 }
                 ClassMember::Getter {
-                    name: MemberName::Static(field_name),
+                    name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     body,
                 } if !is_static => {
                     fields.insert(field_name.clone(), self.function_result(&[], body, outer));
                 }
                 ClassMember::Setter {
-                    name: MemberName::Static(field_name),
+                    name: MemberName::Static(field_name) | MemberName::Private(field_name),
                     is_static,
                     param,
                     body,
@@ -1228,11 +1244,16 @@ impl Builder<'_> {
                 }
                 Statement::Block(body)
                 | Statement::Declarations(body)
+                | Statement::With { body, .. }
+                | Statement::ResourceDeclaration {
+                    declarations: body, ..
+                }
                 | Statement::While { body, .. }
                 | Statement::DoWhile { body, .. }
                 | Statement::For { body, .. }
                 | Statement::ForIn { body, .. }
-                | Statement::ForOf { body, .. } => {
+                | Statement::ForOf { body, .. }
+                | Statement::ResourceForOf { body, .. } => {
                     self.collect_instance_fields(body, env, fields);
                 }
                 _ => self.statement(statement, env),

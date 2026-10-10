@@ -1,0 +1,82 @@
+{
+  "source_commit": "287bddc69636ba3f5a6fe64bda1b3abb6892feda",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "b23ab2db41a33d7cfd220331b3934c693b7223bb0cfcfd04ce4166eab016f3d8",
+  "classification": "Expanded classes/host focus and complete pinned corpus; shared Proxy storage root correction",
+  "total": 33063,
+  "counts": {
+    "pass": 25751,
+    "fail": 7312,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 4910,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 926,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 15, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Typed private methods/accessors/static elements, complete realm/internal-operation audit, and full AST/bytecode corpus parity remain pending",
+  "archive_sha256": {
+    "287bddc-release-build.log.gz": "877b7359b3dd1cf5e7f2157dcbaa962804e97fa6db4810208f839bdde7706e1d",
+    "287bddc-tooling-tests.log.gz": "ad781c83338312f53048e610749ae35abeb332bac69406c0c6222971a6ac90e4",
+    "287bddc-wasm-tests.log.gz": "34e32e1b1b9072e3d4347070b08688e2234902d224b6b271d5dfb5b127e9194b",
+    "287bddc-node-tests.log.gz": "fe537ba63fafdb0290783fb715ca1c29d74d668618a4020b836a9943408cbd70",
+    "287bddc-native-build.log.gz": "b4cd9bd92b88abdb7c4817e335578b4bc9a31a3238ee28e83d28e0fb459d0d3e",
+    "287bddc-minimal-tests.log.gz": "801f827be5787f7a84c20711bb3a2aa6bd6ff8a52f4880b34e5f9592a4c592e3",
+    "287bddc-allfeatures-tests.log.gz": "9481c927c97a7da1544939169bb1f5e2306b7a2039a0696ef278be53ed95a86e",
+    "287bddc-clippy.log.gz": "a65dd33be39884c4cb1a06b8d6a4c00a853c8cbfb94c63965657534f1bc54101",
+    "287bddc-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "287bddc-focused.json.gz": "19317c7417dba7531ad4b5274006e1e69db73187c3ef29efb0d46a46aa4e8923",
+    "287bddc-focused.jsonl.gz": "6bb5063c75c7c58058570c9a8bbcb45175c9e629fdad0151b3c560f37bd289c5",
+    "287bddc-focused-transitions.json.gz": "8aa4926305aa4d7e7f91692541b27b11dd4384cb88505969dee55bea315fa4be",
+    "287bddc-focused-7c0a9ce-projection.json.gz": "70d93f17462d7bf998aaacdd8d5b8ba11a2b15650e786c8d54b274c594613937",
+    "287bddc-full-pr23-transitions.json.gz": "aac945414b2f891741f0f86d4ebcd212b162c501fe0534933c12b5212d8fb3b0",
+    "287bddc-full-7c0a9ce-transitions.json.gz": "cd5eb42ef1ad120f3be096cc5bf953644bc484233f58da23343aed800726c112",
+    "287bddc-full.jsonl.gz": "125385a268f47f2c2ead12041465b4dc8ee3c174bc1af6bbbe5a69248edeca72",
+    "287bddc-full.json.gz": "345f24674422f3686e4f1d53505b686981e3f742b3e49c2e60c525455a35e2b3",
+    "287bddc-full-6456b53-transitions.json.gz": "ba0f31a42dd09acb2b4264dd184b17d2bc12dc6a769b845c4760651c3aae14df",
+    "287bddc-focused-6456b53-projection.json.gz": "fd32866dc7d8452c4c37c7fcc364ee075ed4d27dd966230d9b81c142bb9d04e9",
+    "287bddc-focused-6456b53-transitions.json.gz": "572f48f361b4653cf3b59d0cdc98c37360b670aa3d1a3c8d97b14d7c363d7a27"
+  },
+  "full_corpus": {
+    "total": 102956,
+    "counts": {
+      "pass": 62671,
+      "fail": 40283,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "engine_sha256": "b23ab2db41a33d7cfd220331b3934c693b7223bb0cfcfd04ce4166eab016f3d8",
+    "worker_jobs": 4,
+    "timeout_seconds": 5.0,
+    "skip_features": [],
+    "new_passes": 21264,
+    "lost_passes": 0,
+    "baseline": "PR #23: 41,407 / 102,956",
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "timeouts": [
+      "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "staging/sm/regress/regress-1507322-deep-weakmap.js"
+    ]
+  }
+}

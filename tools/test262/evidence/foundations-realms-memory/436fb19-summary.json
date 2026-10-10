@@ -1,0 +1,53 @@
+{
+  "source_commit": "436fb198711349ed7124ecff8c107525f30a14cb",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "5df64bb825c90cb632d174bea62aa5086f63ce0586a0591491d09126da63b36c",
+  "classification": "Expanded class/host/realm/GC focused validation; subsequent private-storage realm-edge correction is not measured by this worker",
+  "total": 33063,
+  "counts": {
+    "pass": 25751,
+    "fail": 7312,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 4910,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 925,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 15, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Private methods/accessors/static branding, typed descriptors, full-corpus parity and independent final full validation remain open",
+  "archive_sha256": {
+    "436fb19-release-build.log.gz": "461de0b8ca6717fa1ce4e5fb8f8205b8c7d4d7082a7db39ada9f7d8796f794df",
+    "436fb19-tooling-tests.log.gz": "3b9006623fd7e2c6b519a98824a39d670418601461c0deb31a9c9638f7fa05b1",
+    "436fb19-wasm-tests.log.gz": "c8faceb3a8b3a915fe4c5b098ad5c5c6012ee6479235fea4720c85fd68d146c6",
+    "436fb19-node-tests.log.gz": "18aaa3870707eec01657e59fe2f99b04e7435fb435454eefbd04c4e582e402d1",
+    "436fb19-native-build.log.gz": "f556c23c71d7a8e914a329568c5815e2b4d6945a27205c0db2dffeb190a95456",
+    "436fb19-minimal-tests.log.gz": "db14e0b143206ed71ace376af9096f01a74657021dd6f68223c9dae240eaaf2a",
+    "436fb19-allfeatures-tests.log.gz": "d67976c252edae02db7b92cac1a4cfdfa4cef6b54aedeb2b6d422188da117cc2",
+    "436fb19-clippy.log.gz": "ff747d8f5642cf5dd0b6243e5538832f8c8ac70ec540fc56b4936c5cded6a07d",
+    "436fb19-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "436fb19-focused.json.gz": "644567c9392403a37f49b4f321f448fc7fe8c8ae60da9ec6603aa90264002361",
+    "436fb19-focused.jsonl.gz": "6f711375ed626bae470aa54ae393296fd460f5fc4a854c0bd0f2f7aaa95bdcf4",
+    "436fb19-focused-transitions.json.gz": "7a423ec7c7f01654a1665ab2e1e1dde5605c0ba332d4e1b1382ddb32ee974cdf",
+    "436fb19-focused-7c0a9ce-projection.json.gz": "70d93f17462d7bf998aaacdd8d5b8ba11a2b15650e786c8d54b274c594613937",
+    "436fb19-6456b53-projection.json.gz": "fd32866dc7d8452c4c37c7fcc364ee075ed4d27dd966230d9b81c142bb9d04e9",
+    "436fb19-6456b53-transitions.json.gz": "d63517d1d750cfa301bbeb05e96d593ad02b2b68248538ac6feb486f34f226d3"
+  },
+  "recent_baseline": "Matching projection of independent 6456b53 full report",
+  "recent_new_passes": 327,
+  "recent_lost_passes": 0
+}

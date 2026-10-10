@@ -1,0 +1,23 @@
+{
+  "source": "d8afb76",
+  "baseline": "754ed80 full selection subset",
+  "total": 28799,
+  "pass": 14110,
+  "fail": 14689,
+  "new_passes": 248,
+  "lost_passes": 0,
+  "harness_errors": 0,
+  "timeouts": 0,
+  "crashes": 0,
+  "required_checks": {
+    "workspace_passed": 753,
+    "workspace_ignored": 4,
+    "minimal_passed": 158,
+    "node_passed": 73,
+    "wasm_passed": 14,
+    "tooling_passed": 9,
+    "fmt": "passed",
+    "clippy": "passed"
+  },
+  "full_corpus": "not measured for this revision"
+}

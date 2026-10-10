@@ -1,0 +1,144 @@
+{
+  "status": "Phase 1 agent/shared-memory continuation; requested Phases 1\u20134 remain incomplete; draft only",
+  "source_commit": "1a8162a112428a7375baa2657b92ac312cc563d7",
+  "baseline_source_commit": "fc4c8758104b5175ac39ee88722c6e24c07f0d8e",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "feature_skips": [],
+    "runtime_capabilities": "disabled"
+  },
+  "worker_sha256": "7c572cffae742ab4d231bcb5acc22fd934a6a03d1a9780f28e5b473ad4ca0cdb",
+  "baseline_worker_sha256": "fd62118a62b0856659b887c0a97a9d2ff6480ac4afa282e9c32e0ef892c6c2b2",
+  "total": 102956,
+  "counts": {
+    "pass": 41742,
+    "fail": 61152,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 60
+  },
+  "pass_percentage": 40.54353315979642,
+  "baseline_counts": {
+    "pass": 41407,
+    "fail": 61263,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 284
+  },
+  "new_passes": 335,
+  "lost_passes": 0,
+  "first_baseline_counts": {
+    "pass": 41409,
+    "fail": 61261,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 284
+  },
+  "first_comparison": {
+    "new_passes": 335,
+    "lost_passes": 2,
+    "explanation": "Both variants of language/expressions/dynamic-import/await-import-evaluation.js spin for 100 ms. The first baseline under competing builds passed; idle baseline and head exhaust unchanged fuel. Both full baseline reports are retained."
+  },
+  "focused": {
+    "groups": [
+      "agents",
+      "realms",
+      "gc-weak"
+    ],
+    "total": 2030,
+    "counts": {
+      "pass": 1435,
+      "fail": 595,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 332,
+    "lost_passes": 0
+  },
+  "ast_bytecode": {
+    "fixtures": 2,
+    "mismatches": 0,
+    "verified_bytecode_tier_asserted": true,
+    "full_corpus_differential": "not measured; Phase 4 pending"
+  },
+  "checks": {
+    "cargo fmt --check": "pass",
+    "cargo clippy --workspace --all-targets --all-features -- -D warnings": "pass",
+    "cargo test --workspace --all-features": {
+      "passed": 728,
+      "failed": 0,
+      "ignored": 4
+    },
+    "cargo test --no-default-features": {
+      "passed": 156,
+      "failed": 0,
+      "ignored": 0
+    },
+    "npm run test:node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "npm run test:wasm": {
+      "passed": 14,
+      "failed": 0
+    },
+    "Test262 tooling": {
+      "passed": 9,
+      "failed": 0
+    },
+    "checkpoint_worker_smoke": {
+      "variants": 14,
+      "status_transitions": 0
+    }
+  },
+  "non_passing_phases": {
+    "runtime": 53666,
+    "parse": 7440,
+    "harness": 60,
+    "resolution": 46,
+    "timeout": 2
+  },
+  "remaining_harness_errors": {
+    "missing EvalError": 46,
+    "staging Set harness parse errors": 14
+  },
+  "timeouts": [
+    "staging/sm/regress/regress-1507322-deep-weakmap.js:script",
+    "staging/sm/regress/regress-1507322-deep-weakmap.js:strict"
+  ],
+  "outside_foundation_failure_clusters": {
+    "built-ins/Temporal": 9210,
+    "intl402/Temporal": 4058
+  },
+  "outstanding_gates": [
+    "Phase 1 realm/intrinsic/prototype/error ownership and GC/finalization audit; primary/child global identity",
+    "Phase 2 grammar contexts, early errors, declaration conflicts",
+    "Phase 3 global environments, lexical private elements and ordering, descriptors, Proxy invariants and exotics",
+    "Phase 4 compiler/verifier/VM/differential/focused parity coverage; AST fallback retained"
+  ],
+  "reports": {
+    "baseline-final-full.json.gz": {
+      "compressed_sha256": "45489d6c603531bda1c4fe2525d3d6b6f22cd63de1ce6d14e0759d3913d06d81",
+      "uncompressed_sha256": "caf8e602c7d56db158e3461f40fbecf3213318ae95b5b950168550021e48c25d"
+    },
+    "baseline-first-full.json.gz": {
+      "compressed_sha256": "196935d6bc8f740471236e2d8ecc4908cb1bd112e1c55b2c91e92bc68544df2b",
+      "uncompressed_sha256": "b993141a9d12f8f684ebd3695d966db1b491c7c7a597b0e1bf59b7f5ee8cae91"
+    },
+    "current-full.json.gz": {
+      "compressed_sha256": "fa68fbcd1135f34e46cbaeb57f6c3897a95f7ef5dbc4af2720ce2adad934bc08",
+      "uncompressed_sha256": "d56def1d35818c67651026f3562e0be8c304befd5d395b5985d3e2f0b52e82e7"
+    }
+  }
+}

@@ -35,10 +35,10 @@ use std::rc::Rc;
 
 use crate::interpreter::{block_needs_lexical_scope, produces_completion_value};
 use crate::parser::{
-    AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForInit, LogicalAssignOp, MemberName,
-    ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind, arrow_body_references,
-    collect_var_names, expr_captures_identifier, pattern_names, statements_capture_identifier,
-    stmts_reference,
+    AssignOp, BinOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp,
+    MemberName, ObjectProp, Pattern, PatternKey, Statement, SwitchCase, UnOp, VarKind,
+    arrow_body_references, collect_var_names, expr_captures_identifier, pattern_names,
+    statements_capture_identifier,
 };
 
 use super::constants::{
@@ -165,6 +165,7 @@ impl<T> std::ops::Deref for SharedSlice<'_, T> {
 /// A function definition to compile, borrowed from the parsed unit.
 #[derive(Clone)]
 struct FuncDef<'a> {
+    named_expression: bool,
     name: Option<String>,
     params: SharedSlice<'a, String>,
     body: FuncBody<'a>,
@@ -253,7 +254,7 @@ impl<'a> PatternView<'a> {
                 private: !computed
                     && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
             },
-            Expr::Array(v) => Self::Array(
+            Expr::Array { items: v, .. } => Self::Array(
                 v.iter()
                     .map(|e| match e {
                         Expr::Spread(v) => Some(Self::Rest(Box::new(Self::from_expr(v)?))),
@@ -262,7 +263,7 @@ impl<'a> PatternView<'a> {
                     })
                     .collect::<Option<_>>()?,
             ),
-            Expr::Object(v) => Self::Object(
+            Expr::Object { props: v, .. } => Self::Object(
                 v.iter()
                     .map(|p| {
                         Some(match p {
@@ -303,6 +304,7 @@ struct OwnedCtor<'a> {
 /// the template's `ctor_computed_keys` holding the definition-time key.
 enum FieldKey {
     Static(String),
+    Private(String),
     Computed(usize),
 }
 
@@ -317,6 +319,9 @@ struct Scope {
     /// the environment chain. Never populated on the function scope, which
     /// boxes through `captured` instead.
     boxed: HashSet<String>,
+    /// Whether this compile scope owns a runtime environment, including an
+    /// empty lexical iteration head.
+    runtime: bool,
 }
 
 /// Break/continue patch lists for one breakable context under compilation
@@ -412,6 +417,7 @@ impl<'a> Compiler<'a> {
                 bindings: HashMap::new(),
                 global: true,
                 boxed: HashSet::new(),
+                runtime: false,
             }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
@@ -443,6 +449,7 @@ impl<'a> Compiler<'a> {
                 bindings: HashMap::new(),
                 global: false,
                 boxed: HashSet::new(),
+                runtime: false,
             }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
@@ -624,11 +631,16 @@ impl<'a> Compiler<'a> {
     /// block bindings live in the pushed environment instead of slots.
     /// Scopes with no boxed names emit nothing and unwind nothing.
     fn push_scope(&mut self, boxed: HashSet<String>) {
-        let tracked = !boxed.is_empty();
+        self.push_scope_with_runtime(boxed, false);
+    }
+
+    fn push_scope_with_runtime(&mut self, boxed: HashSet<String>, force_runtime: bool) {
+        let tracked = force_runtime || !boxed.is_empty();
         self.scopes.push(Scope {
             bindings: HashMap::new(),
             global: false,
             boxed,
+            runtime: tracked,
         });
         if tracked {
             self.emit(Instr::PushScope);
@@ -644,7 +656,7 @@ impl<'a> Compiler<'a> {
             .scopes
             .pop()
             .ok_or(Decline::Func("scope stack underflow"))?;
-        if scope.boxed.is_empty() {
+        if !scope.runtime {
             return Ok(());
         }
         self.emit(Instr::PopScope);
@@ -868,11 +880,9 @@ fn boxed_for_head_names(
 fn block_loop_heads(stmts: &[Statement], out: &mut Vec<String>) {
     for stmt in stmts {
         match stmt {
-            Statement::ForIn { name, .. } => out.push(name.clone()),
-            Statement::ForOf { name, pattern, .. } => match pattern {
-                Some(pattern) => out.extend(pattern_names(pattern)),
-                None => out.push(name.clone()),
-            },
+            Statement::ForIn { binding, .. } | Statement::ForOf { binding, .. } => {
+                out.extend(binding.declared_names())
+            }
             Statement::Declarations(inner) => block_loop_heads(inner, out),
             _ => {}
         }
@@ -902,6 +912,7 @@ fn block_fn_decls<'a>(stmts: &'a [Statement], out: &mut Vec<FnDeclRef<'a>>) {
                 body,
                 is_async,
                 is_generator,
+                ..
             } => {
                 out.push(FnDeclRef {
                     name,
@@ -938,8 +949,12 @@ impl<'a> Compiler<'a> {
     fn hoist_top(&mut self, stmts: &'a [Statement]) -> Result<(), Decline> {
         let mut vars = Vec::new();
         collect_var_names(stmts, &mut vars);
+        let lexical_names = crate::parser::top_lexical_names(stmts);
         let mut seen = HashSet::new();
         for name in vars {
+            if lexical_names.contains(&name) {
+                continue;
+            }
             if seen.insert(name.clone()) {
                 let index = self.intern_string(&name)?;
                 self.emit(Instr::HoistVarGlobal { name: index });
@@ -964,6 +979,7 @@ impl<'a> Compiler<'a> {
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
             let value = self.defer_function(FuncDef {
+                named_expression: false,
                 name: Some(decl.name.to_string()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
@@ -976,6 +992,7 @@ impl<'a> Compiler<'a> {
             self.emit(Instr::InitGlobal {
                 name: index,
                 src: value,
+                function: true,
             });
         }
         Ok(())
@@ -1014,6 +1031,7 @@ impl<'a> Compiler<'a> {
         for decl in fns {
             let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
             let value = self.defer_function(FuncDef {
+                named_expression: false,
                 name: Some(decl.name.to_string()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
@@ -1029,6 +1047,7 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::InitGlobal {
                     name: index,
                     src: value,
+                    function: true,
                 });
             } else {
                 self.emit(Instr::InitLocal { slot, src: value });
@@ -1069,6 +1088,7 @@ impl<'a> Compiler<'a> {
         block_fn_decls(stmts, &mut fns);
         for decl in fns {
             let value = self.defer_function(FuncDef {
+                named_expression: false,
                 name: Some(decl.name.to_string()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
@@ -1082,6 +1102,7 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::InitGlobal {
                     name: index,
                     src: value,
+                    function: true,
                 });
                 continue;
             }
@@ -1124,6 +1145,7 @@ impl<'a> Compiler<'a> {
                 )
             });
         Ok(BytecodeFunction {
+            named_expression: false,
             strict: false,
             name,
             code,
@@ -1289,6 +1311,7 @@ impl<'a> Compiler<'a> {
         self.finish_functions()?;
         let mut code =
             self.build_function(name.clone(), parameter_count, *is_arrow, *is_constructor)?;
+        code.named_expression = def.named_expression;
         code.strict = matches!(body, FuncBody::Stmts(stmts) if crate::parser::use_strict(stmts));
         Ok(code)
     }
@@ -1359,8 +1382,10 @@ impl<'a> Compiler<'a> {
                 body,
                 is_async,
                 is_generator,
+                ..
             } => {
                 let value = self.defer_function(FuncDef {
+                    named_expression: false,
                     name: Some(name.clone()),
                     params: SharedSlice::Borrowed(params),
                     body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -1376,6 +1401,7 @@ impl<'a> Compiler<'a> {
                         self.emit(Instr::InitGlobal {
                             name: index,
                             src: value,
+                            function: true,
                         });
                     }
                 }
@@ -1395,6 +1421,10 @@ impl<'a> Compiler<'a> {
             }
             Statement::Block(stmts) => self.compile_scoped_block(stmts),
             Statement::If { test, then, else_ } => self.compile_if(test, then, else_.as_deref()),
+            Statement::ResourceForOf { .. } | Statement::ResourceDeclaration { .. } => {
+                Err(Decline::Func("resource disposal execution"))
+            }
+            Statement::With { .. } => Err(Decline::Func("with object environment")),
             Statement::While { test, body } => self.compile_while(test, body),
             Statement::DoWhile { test, body } => self.compile_do_while(test, body),
             Statement::For {
@@ -1479,19 +1509,40 @@ impl<'a> Compiler<'a> {
                         self.emit(Instr::InitGlobal {
                             name: index,
                             src: value,
+                            function: false,
                         });
                     }
                 }
                 self.load_undefined()
             }
-            Statement::ForIn { name, obj, body } => self.compile_for_in(name, obj, body),
+            Statement::ForIn {
+                binding:
+                    ForBinding::Declaration {
+                        pattern: Pattern::Ident(name),
+                        initializer: None,
+                        kind,
+                    },
+                obj,
+                body,
+            } => self.compile_for_in(name, kind, obj, body),
+            Statement::ForIn { .. } => Err(Decline::Func("for-in binding form")),
             Statement::ForOf {
-                name,
-                pattern,
+                binding:
+                    ForBinding::Declaration {
+                        pattern,
+                        initializer: None,
+                        kind,
+                    },
                 iter,
                 body,
                 is_await,
-            } => self.compile_for_of(name, pattern, iter, body, *is_await),
+            } => match pattern {
+                Pattern::Ident(name) => {
+                    self.compile_for_of(name, None, kind, iter, body, *is_await)
+                }
+                _ => self.compile_for_of("", Some(pattern), kind, iter, body, *is_await),
+            },
+            Statement::ForOf { .. } => Err(Decline::Func("for-of assignment head")),
             Statement::Labeled { label, body } => self.compile_labeled(label, body),
             Statement::LabeledBreak(label) => {
                 let depth = match self
@@ -1555,7 +1606,11 @@ impl<'a> Compiler<'a> {
                 default,
                 named,
                 namespace,
+                attributes,
             } => {
+                if !attributes.is_empty() {
+                    return Err(Decline::Func("import attributes"));
+                }
                 // Imports bind into the running scope, which a block-level
                 // import would leak out of (the VM has no block frames).
                 let bound = default
@@ -1578,7 +1633,14 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::ExportDefault { src });
                 self.load_undefined()
             }
-            Statement::ExportNamed { specifiers, source } => {
+            Statement::ExportNamed {
+                specifiers,
+                source,
+                attributes,
+            } => {
+                if !attributes.is_empty() {
+                    return Err(Decline::Func("export attributes"));
+                }
                 // Local exports publish scope cells; slots are invisible to
                 // them, so only environment-bound lists compile.
                 if source.is_none() {
@@ -1593,7 +1655,14 @@ impl<'a> Compiler<'a> {
                 self.emit(Instr::ExportNamed { tmpl });
                 self.load_undefined()
             }
-            Statement::ExportAll { source, alias } => {
+            Statement::ExportAll {
+                source,
+                alias,
+                attributes,
+            } => {
+                if !attributes.is_empty() {
+                    return Err(Decline::Func("export attributes"));
+                }
                 let tmpl = self.push_const(Constant::ExportAllTemplate(ExportAllTemplate {
                     source: source.clone(),
                     alias: alias.clone(),
@@ -1647,7 +1716,11 @@ impl<'a> Compiler<'a> {
             }
             (DestructureMode::Decl { .. }, Binding::Global) => {
                 let index = self.intern_string(name)?;
-                self.emit(Instr::InitGlobal { name: index, src });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src,
+                    function: false,
+                });
             }
         }
         Ok(())
@@ -1843,8 +1916,37 @@ impl<'a> Compiler<'a> {
         superclass: Option<&'a Expr>,
         body: &'a [ClassMember],
     ) -> Result<Reg, Decline> {
+        // Heritage, computed names and method closures share one class scope.
+        let mut boxed = HashSet::new();
+        if !name.is_empty() {
+            boxed.insert(name.to_owned());
+        }
+        self.push_scope_with_runtime(boxed, true);
+        let name_constant = if name.is_empty() {
+            None
+        } else {
+            Some(self.intern_string(name)?)
+        };
+        *self.code.last_mut().expect("class scope was emitted") = Instr::ClassScope {
+            name: name_constant,
+        };
         let snapshot = self.live_block_names();
         let superclass = superclass.map(|expr| self.compile_expr(expr)).transpose()?;
+        let super_proto = if let Some(superclass) = superclass {
+            let dst = self.alloc_reg()?;
+            self.emit(Instr::ClassHeritage { dst, superclass });
+            Some(dst)
+        } else {
+            None
+        };
+        let private_declarations = crate::parser::class_private_declarations(body);
+        let names = self.push_const(Constant::StringList(
+            private_declarations
+                .iter()
+                .map(|name| name.as_str().into())
+                .collect(),
+        ))?;
+        self.emit(Instr::ClassPrivateEnvironment { names });
 
         let mut members = Vec::new();
         let mut blocks = Vec::new();
@@ -1880,7 +1982,9 @@ impl<'a> Compiler<'a> {
                         continue;
                     }
                     let display = match &template {
-                        ClassNameTemplate::Static(key) => Some(key.clone()),
+                        ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
+                            Some(key.clone())
+                        }
                         // The builder names computed members once the key
                         // value is known.
                         ClassNameTemplate::Computed(_) => None,
@@ -1891,6 +1995,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(params),
                             body: FuncBody::Stmts(SharedSlice::Borrowed(method_body)),
@@ -1905,7 +2010,6 @@ impl<'a> Compiler<'a> {
                         is_static: *st,
                         name: template,
                         func: Some(u16::MAX),
-                        value: None,
                     });
                 }
                 ClassMember::Field {
@@ -1915,24 +2019,16 @@ impl<'a> Compiler<'a> {
                 } => {
                     let template = self.compile_member_name(field_name)?;
                     if *st {
-                        let value = match init {
-                            Some(expr) => self.compile_expr(expr)?,
-                            None => self.load_undefined()?,
-                        };
-                        members.push(ClassMemberTemplate {
-                            kind: ClassMemberKind::Field,
-                            is_static: true,
+                        blocks.push(super::constants::ClassStaticTemplate::Field {
                             name: template,
-                            func: None,
-                            value: Some(value),
+                            init: init.clone().unwrap_or(Expr::Undefined),
                         });
                     } else {
-                        if let ClassNameTemplate::Static(name) = &template
-                            && name.starts_with('#')
-                        {
+                        if let ClassNameTemplate::Private(name) = &template {
                             private_fields.push(name.clone());
                         }
                         let key = match template {
+                            ClassNameTemplate::Private(key) => FieldKey::Private(key),
                             ClassNameTemplate::Static(key) => FieldKey::Static(key),
                             ClassNameTemplate::Computed(reg) => {
                                 let index = ctor_computed_keys.len();
@@ -1950,7 +2046,9 @@ impl<'a> Compiler<'a> {
                 } => {
                     let template = self.compile_member_name(member_name)?;
                     let display = match &template {
-                        ClassNameTemplate::Static(key) => Some(format!("get {key}")),
+                        ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
+                            Some(format!("get {key}"))
+                        }
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
@@ -1959,6 +2057,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(&[]),
                             body: FuncBody::Stmts(SharedSlice::Borrowed(getter_body)),
@@ -1973,7 +2072,6 @@ impl<'a> Compiler<'a> {
                         is_static: *st,
                         name: template,
                         func: Some(u16::MAX),
-                        value: None,
                     });
                 }
                 ClassMember::Setter {
@@ -1984,7 +2082,9 @@ impl<'a> Compiler<'a> {
                 } => {
                     let template = self.compile_member_name(member_name)?;
                     let display = match &template {
-                        ClassNameTemplate::Static(key) => Some(format!("set {key}")),
+                        ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
+                            Some(format!("set {key}"))
+                        }
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
@@ -1993,6 +2093,7 @@ impl<'a> Compiler<'a> {
                             index: members.len(),
                         },
                         FuncDef {
+                            named_expression: false,
                             name: display,
                             params: SharedSlice::Borrowed(std::slice::from_ref(param)),
                             body: FuncBody::Stmts(SharedSlice::Borrowed(setter_body)),
@@ -2007,7 +2108,6 @@ impl<'a> Compiler<'a> {
                         is_static: *st,
                         name: template,
                         func: Some(u16::MAX),
-                        value: None,
                     });
                 }
                 ClassMember::StaticBlock { body: block_body } => {
@@ -2015,10 +2115,11 @@ impl<'a> Compiler<'a> {
                     // hands their bodies to assembly, like the evaluator.
                     // They read this scope's `arguments`, so a mention seeds
                     // it (over-approximating, like hoisting).
-                    if stmts_reference(block_body, "arguments") {
+                    if crate::parser::stmts_need_arguments(block_body) {
                         self.captures_arguments = true;
                     }
                     let ast = build_ast_function(&FuncDef {
+                        named_expression: false,
                         name: None,
                         params: SharedSlice::Borrowed(&[]),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(block_body)),
@@ -2027,17 +2128,41 @@ impl<'a> Compiler<'a> {
                         is_generator: false,
                         is_constructor: false,
                     });
-                    blocks.push(self.push_const(Constant::AstFunction(ast))?);
+                    blocks.push(super::constants::ClassStaticTemplate::Block(
+                        self.push_const(Constant::AstFunction(ast))?,
+                    ));
                 }
             }
         }
 
-        let (ctor_params, ctor_body) =
-            Self::class_ctor_body(superclass.is_some(), ctor, &instance_fields);
+        let (ctor_params, ctor_body) = Self::class_ctor_body(
+            superclass.is_some(),
+            ctor,
+            &instance_fields,
+            body.iter().any(|m| {
+                matches!(
+                    m,
+                    ClassMember::Method {
+                        name: MemberName::Private(_),
+                        is_static: false,
+                        ..
+                    } | ClassMember::Getter {
+                        name: MemberName::Private(_),
+                        is_static: false,
+                        ..
+                    } | ClassMember::Setter {
+                        name: MemberName::Private(_),
+                        is_static: false,
+                        ..
+                    }
+                )
+            }),
+        );
         let ctor_length = crate::parser::formal_parameter_length(&ctor_params, &ctor_body);
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
             FuncDef {
+                named_expression: false,
                 // The evaluator names the constructor after the class.
                 name: Some(name.to_string()),
                 params: ctor_params,
@@ -2051,9 +2176,11 @@ impl<'a> Compiler<'a> {
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
             private_fields,
+            private_declarations,
             name: name.to_string(),
             expr_name,
             superclass,
+            super_proto,
             ctor_func: u16::MAX,
             ctor_length,
             ctor_computed_keys,
@@ -2062,6 +2189,7 @@ impl<'a> Compiler<'a> {
         }))?;
         let dst = self.alloc_reg()?;
         self.emit(Instr::BuildClass { dst, tmpl });
+        self.pop_scope()?;
         for (mut patch, def) in deferred {
             match &mut patch {
                 PatchTarget::ClassCtor { tmpl: slot }
@@ -2082,6 +2210,7 @@ impl<'a> Compiler<'a> {
     /// definition time rather than at first use.
     fn compile_member_name(&mut self, name: &'a MemberName) -> Result<ClassNameTemplate, Decline> {
         match name {
+            MemberName::Private(key) => Ok(ClassNameTemplate::Private(key.clone())),
             MemberName::Static(key) => Ok(ClassNameTemplate::Static(key.clone())),
             MemberName::Computed(expr) => {
                 let src = self.compile_expr(expr)?;
@@ -2094,14 +2223,16 @@ impl<'a> Compiler<'a> {
 
     /// The constructor's parameter list and body: the written one with
     /// instance fields desugared ahead of it, the implicit derived
-    /// `constructor(...args) { super(...args); }`, or the empty default.
+    /// Implicit constructors forward arguments through shared constructor entry.
     /// Owned bodies promote to the compilation lifetime, like converted
     /// destructuring patterns.
     fn class_ctor_body(
         is_derived: bool,
         ctor: Option<OwnedCtor<'a>>,
         instance_fields: &[(FieldKey, Option<&'a Expr>)],
+        has_private_instance_elements: bool,
     ) -> (SharedSlice<'a, String>, SharedSlice<'a, Statement>) {
+        let implicit_derived = is_derived && ctor.is_none();
         let (params, body) = match ctor {
             Some(own) => (
                 SharedSlice::Borrowed(own.params),
@@ -2109,17 +2240,15 @@ impl<'a> Compiler<'a> {
             ),
             None if is_derived => (
                 SharedSlice::Owned(Rc::from(vec!["...args".to_string()])),
-                SharedSlice::Owned(Rc::from(vec![Statement::Expr(Expr::Call {
-                    callee: Box::new(Expr::Super),
-                    args: vec![Expr::Spread(Box::new(Expr::Identifier("args".to_string())))],
-                })])),
+                SharedSlice::Borrowed(&[]),
             ),
             None => (SharedSlice::Borrowed(&[]), SharedSlice::Borrowed(&[])),
         };
         let mut full = Vec::with_capacity(instance_fields.len() + body.len());
         for (key, init) in instance_fields {
             let (property, computed) = match key {
-                FieldKey::Static(field) => (Expr::String(crate::JsString::from_key(field)), false),
+                FieldKey::Static(field) => (Expr::String(crate::JsString::from_key(field)), true),
+                FieldKey::Private(field) => (Expr::String(crate::JsString::from_key(field)), false),
                 // Evaluated at class definition time; the builder binds the
                 // value into the constructor's scope under this key.
                 FieldKey::Computed(index) => (Expr::Identifier(class_key_name(*index)), true),
@@ -2136,9 +2265,10 @@ impl<'a> Compiler<'a> {
         }
         let fields = full;
         let mut full = Vec::new();
-        if is_derived || !fields.is_empty() {
+        if is_derived || !fields.is_empty() || has_private_instance_elements {
             full.push(Statement::ClassInitialization {
                 derived: is_derived,
+                forward_rest: implicit_derived.then(|| "args".into()),
                 fields,
             });
         }
@@ -2202,7 +2332,11 @@ impl<'a> Compiler<'a> {
                     None => self.load_undefined()?,
                 };
                 let index = self.intern_string(name)?;
-                self.emit(Instr::InitGlobal { name: index, src });
+                self.emit(Instr::InitGlobal {
+                    name: index,
+                    src,
+                    function: false,
+                });
             }
         }
         self.load_undefined()
@@ -2282,7 +2416,10 @@ impl<'a> Compiler<'a> {
                 } => (*finally, *close_iter),
             };
             if let Some(iter) = close_iter {
-                self.emit(Instr::CloseIterator { src: iter });
+                self.emit(Instr::CloseIterator {
+                    src: iter,
+                    unwind: false,
+                });
             }
             if let Some(body) = finally {
                 // The inline copy runs outside its own region: compile it
@@ -2314,9 +2451,12 @@ impl<'a> Compiler<'a> {
     fn compile_try(
         &mut self,
         body: &'a [Statement],
-        catch: &'a Option<(String, Vec<Statement>)>,
+        catch: &'a Option<(Option<Pattern>, Vec<Statement>)>,
         finally: &'a Option<Vec<Statement>>,
     ) -> Result<Reg, Decline> {
+        if matches!(catch, Some((Some(pattern), _)) if !matches!(pattern, Pattern::Ident(_))) {
+            return Err(Decline::Func("catch binding pattern"));
+        }
         let value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
         self.emit(Instr::Mov {
@@ -2363,19 +2503,30 @@ impl<'a> Compiler<'a> {
         let catch_pad = self.here();
         if let Some((param, catch_body)) = catch {
             let mut boxed = boxed_block_names(catch_body);
-            if statements_capture_identifier(catch_body, param) {
-                boxed.insert(param.clone());
+            let param = match param {
+                Some(Pattern::Ident(name)) => Some(name.as_str()),
+                None => None,
+                _ => unreachable!("catch pattern declined before emission"),
+            };
+            if let Some(param) = param
+                && statements_capture_identifier(catch_body, param)
+            {
+                boxed.insert(param.to_owned());
             }
             self.push_scope(boxed);
-            if self.is_boxed_here(param) {
-                let index = self.intern_string(param)?;
-                self.emit(Instr::InitGlobal {
-                    name: index,
-                    src: err,
-                });
-            } else {
-                let slot = self.declare_slot(param, SlotKind::Var)?;
-                self.emit(Instr::InitLocal { slot, src: err });
+            if let Some(param) = param {
+                if self.is_boxed_here(param) {
+                    let index = self.intern_string(param)?;
+                    self.emit(Instr::DefineGlobal {
+                        name: index,
+                        src: err,
+                        kind: SlotKind::Catch,
+                        initialized: true,
+                    });
+                } else {
+                    let slot = self.declare_slot(param, SlotKind::Catch)?;
+                    self.emit(Instr::InitLocal { slot, src: err });
+                }
             }
             self.hoist_block(catch_body)?;
             let catch_value = self.compile_block(catch_body)?;
@@ -2463,10 +2614,36 @@ impl<'a> Compiler<'a> {
         Ok(value)
     }
 
-    /// Prepare a `for-in`/`for-of` head name. The parser erases the head
-    /// kind, and the evaluator assigns (never re-declares) per iteration:
-    /// top level writes the global binding, function bodies reuse or
-    /// create the function-scope slot, nested blocks shadow it fresh.
+    /// Lexical iteration heads use a boxed TDZ environment, replaced before
+    /// each binding initialization so closures retain their iteration's cell.
+    fn define_iteration_head(&mut self, names: &[String], kind: &VarKind) -> Result<(), Decline> {
+        for name in names {
+            let index = self.intern_string(name)?;
+            let undef = self.load_undefined()?;
+            self.emit(Instr::DefineGlobal {
+                name: index,
+                src: undef,
+                kind: if *kind == VarKind::Const {
+                    SlotKind::Const
+                } else {
+                    SlotKind::Let
+                },
+                initialized: false,
+            });
+        }
+        Ok(())
+    }
+
+    fn reset_iteration_head(&mut self, names: &[String], kind: &VarKind) -> Result<(), Decline> {
+        if *kind != VarKind::Var {
+            self.emit(Instr::PopScope);
+            self.emit(Instr::PushScope);
+            self.define_iteration_head(names, kind)?;
+        }
+        Ok(())
+    }
+
+    /// Resolve a head after its lexical scope has been prepared.
     fn prepare_for_head(&mut self, name: &str) -> Result<ForHead, Decline> {
         if self.top_level {
             return Ok(ForHead::Global(self.intern_string(name)?));
@@ -2491,10 +2668,20 @@ impl<'a> Compiler<'a> {
 
     /// One head write per iteration: an unchecked initialize, matching the
     /// evaluator's kind- and zone-ignoring head assignment.
-    fn bind_for_head(&mut self, head: &ForHead, src: Reg) {
+    fn bind_for_head(&mut self, head: &ForHead, src: Reg, kind: &VarKind) {
         match head {
             ForHead::Slot(slot) => self.emit(Instr::InitLocal { slot: *slot, src }),
-            ForHead::Global(name) => self.emit(Instr::InitGlobal { name: *name, src }),
+            ForHead::Global(name) => {
+                if *kind == VarKind::Var {
+                    self.emit(Instr::StoreGlobal { name: *name, src });
+                } else {
+                    self.emit(Instr::InitGlobal {
+                        name: *name,
+                        src,
+                        function: false,
+                    });
+                }
+            }
         }
     }
 
@@ -2503,9 +2690,15 @@ impl<'a> Compiler<'a> {
     fn compile_for_in(
         &mut self,
         name: &'a str,
+        kind: &VarKind,
         obj: &'a Expr,
         body: &'a [Statement],
     ) -> Result<Reg, Decline> {
+        let names = vec![name.to_string()];
+        if *kind != VarKind::Var {
+            self.push_scope_with_runtime(names.iter().cloned().collect(), true);
+            self.define_iteration_head(&names, kind)?;
+        }
         let head = self.prepare_for_head(name)?;
         let source = self.compile_expr(obj)?;
         let keys = self.alloc_reg()?;
@@ -2556,7 +2749,8 @@ impl<'a> Compiler<'a> {
             obj: keys,
             key: idx,
         });
-        self.bind_for_head(&head, key);
+        self.reset_iteration_head(&names, kind)?;
+        self.bind_for_head(&head, key, kind);
         let body_value = self.compile_scoped_block(body)?;
         self.emit(Instr::Mov {
             dst: loop_value,
@@ -2584,6 +2778,9 @@ impl<'a> Compiler<'a> {
         let end = self.here();
         self.patch_jump(end_jump, end)?;
         self.finish_loop(ctx, increment, end)?;
+        if *kind != VarKind::Var {
+            self.pop_scope()?;
+        }
         Ok(loop_value)
     }
 
@@ -2594,13 +2791,22 @@ impl<'a> Compiler<'a> {
     fn compile_for_of(
         &mut self,
         name: &'a str,
-        pattern: &'a Option<Box<Pattern>>,
+        pattern: Option<&'a Pattern>,
+        kind: &VarKind,
         iter: &'a Expr,
         body: &'a [Statement],
         is_await: bool,
     ) -> Result<Reg, Decline> {
         if is_await {
             return Err(Decline::Func("async needs Phase G"));
+        }
+        let names = match pattern {
+            Some(pattern) => pattern_names(pattern),
+            None => vec![name.to_string()],
+        };
+        if *kind != VarKind::Var {
+            self.push_scope_with_runtime(names.iter().cloned().collect(), true);
+            self.define_iteration_head(&names, kind)?;
         }
         // Heads prepare before the iterable evaluates, like declarations.
         let head = match pattern {
@@ -2629,10 +2835,6 @@ impl<'a> Compiler<'a> {
             src: undef,
         });
         let scratch = self.alloc_reg()?;
-        let unwind_pad = self.emit_jump(|target| Instr::PushFinally {
-            target,
-            dst: scratch,
-        });
         self.unwind.push(UnwindCtx::Handler {
             finally: None,
             close_iter: Some(iterator),
@@ -2653,13 +2855,22 @@ impl<'a> Compiler<'a> {
             next,
         });
         let exhausted = self.emit_jump(|target| Instr::JumpIfTrue { src: done, target });
+        // IteratorStep/IteratorValue failures do not close the iterator.
+        // Protect only binding initialization and the body of each iteration.
+        let unwind_pad = self.emit_jump(|target| Instr::PushFinally {
+            target,
+            dst: scratch,
+        });
+        self.reset_iteration_head(&names, kind)?;
         match (&head, pattern) {
-            (Some(head), None) => self.bind_for_head(head, yielded),
+            (Some(head), None) => self.bind_for_head(head, yielded, kind),
             (None, Some(pattern)) => {
                 self.compile_destructure(
                     pattern,
                     yielded,
-                    DestructureMode::Decl { is_var: false },
+                    DestructureMode::Decl {
+                        is_var: *kind == VarKind::Var,
+                    },
                 )?;
             }
             _ => return Err(Decline::Func("bad for-of head")),
@@ -2669,6 +2880,8 @@ impl<'a> Compiler<'a> {
             dst: loop_value,
             src: body_value,
         });
+        let continue_pad = self.here();
+        self.emit(Instr::PopHandler);
         self.emit(Instr::Jump {
             target: addr_target(top)?,
         });
@@ -2680,24 +2893,32 @@ impl<'a> Compiler<'a> {
             .pop()
             .ok_or(Decline::Func("unwind stack underflow"))?;
         let drained = self.here();
-        self.emit(Instr::PopHandler);
         let end_jump = self.emit_jump(|target| Instr::Jump { target });
         let close_pad = self.here();
-        self.emit(Instr::CloseIterator { src: iterator });
+        self.emit(Instr::CloseIterator {
+            src: iterator,
+            unwind: false,
+        });
         self.emit(Instr::PopHandler);
         let over_pad = self.emit_jump(|target| Instr::Jump { target });
         self.patch_jump(unwind_pad, self.here())?;
-        self.emit(Instr::CloseIterator { src: iterator });
+        self.emit(Instr::CloseIterator {
+            src: iterator,
+            unwind: true,
+        });
         self.emit(Instr::Rethrow);
         let end = self.here();
         self.patch_jump(exhausted, drained)?;
         self.patch_jump(end_jump, end)?;
         self.patch_jump(over_pad, end)?;
         for addr in ctx.continues {
-            self.patch_jump(addr, top)?;
+            self.patch_jump(addr, continue_pad)?;
         }
         for addr in ctx.breaks {
             self.patch_jump(addr, close_pad)?;
+        }
+        if *kind != VarKind::Var {
+            self.pop_scope()?;
         }
         Ok(loop_value)
     }
@@ -2951,6 +3172,7 @@ impl<'a> Compiler<'a> {
             self.emit(Instr::InitGlobal {
                 name: index,
                 src: tmp,
+                function: false,
             });
         }
         Ok(())
@@ -3002,7 +3224,11 @@ impl<'a> Compiler<'a> {
                             Some(value) => self.compile_expr(value)?,
                             None => self.load_undefined()?,
                         };
-                        self.emit(Instr::InitGlobal { name: index, src });
+                        self.emit(Instr::InitGlobal {
+                            name: index,
+                            src,
+                            function: false,
+                        });
                         continue;
                     }
                     let slot = self.declare_slot(name, slot_kind)?;
@@ -3097,6 +3323,7 @@ impl<'a> Compiler<'a> {
             return Err(Decline::Func("private field writes"));
         }
         match expr {
+            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => self.compile_expr(inner),
             Expr::Number(value) => {
                 let index = self.intern_number(*value)?;
                 self.load_const(index)
@@ -3119,7 +3346,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Undefined => self.load_undefined(),
             Expr::Identifier(name) => self.compile_identifier(name),
-            Expr::Array(items) => self.compile_array(items),
+            Expr::Array { items, .. } => self.compile_array(items),
             Expr::Binary { op, left, right } => self.compile_binary(*op, left, right),
             Expr::Unary {
                 op,
@@ -3187,6 +3414,7 @@ impl<'a> Compiler<'a> {
                     ExprOrBlock::Expr(expr) => FuncBody::Expr(expr),
                 };
                 self.defer_function(FuncDef {
+                    named_expression: false,
                     name: None,
                     params: SharedSlice::Borrowed(params),
                     body,
@@ -3203,6 +3431,7 @@ impl<'a> Compiler<'a> {
                 is_async,
                 is_generator,
             } => self.defer_function(FuncDef {
+                named_expression: name.is_some(),
                 name: name.clone(),
                 params: SharedSlice::Borrowed(params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3240,7 +3469,7 @@ impl<'a> Compiler<'a> {
             }
             Expr::Template { quasis, exprs } => self.compile_template(quasis, exprs),
             Expr::This => self.compile_this(),
-            Expr::Object(props) => self.compile_object(props),
+            Expr::Object { props, .. } => self.compile_object(props),
             Expr::ClassExpr {
                 name,
                 superclass,
@@ -3259,7 +3488,17 @@ impl<'a> Compiler<'a> {
             } => self.compile_tagged(tag, cooked, raw, exprs),
             Expr::Super => self.raise_bare_super(),
             Expr::Spread(inner) => self.compile_expr(inner),
-            Expr::DynamicImport(specifier) => {
+            Expr::DynamicImport {
+                specifier,
+                options,
+                phase,
+            } => {
+                if options.is_some() {
+                    return Err(Decline::Func("dynamic import options"));
+                }
+                if *phase != crate::parser::ImportPhase::Evaluation {
+                    return Err(Decline::Func("non-evaluation import phases"));
+                }
                 let src = self.compile_expr(specifier)?;
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::DynamicImport { dst, src });
@@ -3305,15 +3544,12 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Identifier reads. `undefined` is always the value, even when shadowed
-    /// — the evaluator special-cases it before any lookup. `arguments` in a
+    /// Identifier reads resolve lexical bindings, including shadowed `undefined`.
+    /// `arguments` in a
     /// real function needs the arguments object (per-function fallback); in
     /// an arrow it captures the enclosing one through the chain (seeded by
     /// the defining non-arrow function).
     fn compile_identifier(&mut self, name: &str) -> Result<Reg, Decline> {
-        if name == "undefined" {
-            return self.load_undefined();
-        }
         if name == "arguments" && !self.top_level {
             if self.is_arrow() {
                 self.captures_arguments = true;
@@ -3337,6 +3573,9 @@ impl<'a> Compiler<'a> {
         for prop in props {
             match prop {
                 // Shorthand reads tolerate missing and dead bindings.
+                ObjectProp::CoverInitializedName { .. } => {
+                    return Err(Decline::Func("object assignment default"));
+                }
                 ObjectProp::Shorthand(name) => {
                     let val = self.alloc_reg()?;
                     match self.resolve(name)? {
@@ -3366,6 +3605,9 @@ impl<'a> Compiler<'a> {
                         val,
                         kind: PropKind::Data,
                     });
+                }
+                ObjectProp::ComputedMethod { .. } => {
+                    return Err(Decline::Func("computed object method"));
                 }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     match key_expression {
@@ -3418,6 +3660,7 @@ impl<'a> Compiler<'a> {
                     is_generator,
                 } => {
                     let val = self.defer_function(FuncDef {
+                        named_expression: false,
                         name: Some(name.clone()),
                         params: SharedSlice::Borrowed(params),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3436,6 +3679,7 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::Getter { name, body } => {
                     let val = self.defer_function(FuncDef {
+                        named_expression: false,
                         name: Some(format!("get {name}")),
                         params: SharedSlice::Borrowed(&[]),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3453,6 +3697,7 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let val = self.defer_function(FuncDef {
+                        named_expression: false,
                         name: Some(format!("set {name}")),
                         params: SharedSlice::Borrowed(std::slice::from_ref(param)),
                         body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
@@ -3528,6 +3773,16 @@ impl<'a> Compiler<'a> {
         left: &'a Expr,
         right: &'a Expr,
     ) -> Result<Reg, Decline> {
+        if op == BinOp::In
+            && let Expr::Identifier(name) = left
+            && name.starts_with('#')
+        {
+            let obj = self.compile_expr(right)?;
+            let name = self.intern_string(name)?;
+            let dst = self.alloc_reg()?;
+            self.emit(Instr::PrivateIn { dst, obj, name });
+            return Ok(dst);
+        }
         match op {
             BinOp::And | BinOp::Or | BinOp::Nullish => {
                 let lhs = self.compile_expr(left)?;
@@ -3564,6 +3819,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_unary(&mut self, op: UnOp, operand: &'a Expr, prefix: bool) -> Result<Reg, Decline> {
+        let operand = operand.unparenthesized();
         match op {
             UnOp::Inc | UnOp::Dec => self.compile_inc_dec(op, operand, prefix),
             UnOp::Delete => self.compile_delete(operand),
@@ -3693,16 +3949,6 @@ impl<'a> Compiler<'a> {
     /// still reads as `undefined` rather than throwing, like the evaluator.
     fn compile_typeof(&mut self, operand: &'a Expr) -> Result<Reg, Decline> {
         if let Expr::Identifier(name) = operand {
-            if name == "undefined" {
-                let src = self.load_undefined()?;
-                let dst = self.alloc_reg()?;
-                self.emit(Instr::Unary {
-                    dst,
-                    op: UnOp::Typeof,
-                    src,
-                });
-                return Ok(dst);
-            }
             let dst = self.alloc_reg()?;
             match self.resolve(name)? {
                 Binding::Slot(slot) => self.emit(Instr::TypeofLocal { dst, slot }),
@@ -3729,10 +3975,11 @@ impl<'a> Compiler<'a> {
     fn compile_tagged(
         &mut self,
         tag: &'a Expr,
-        cooked: &'a [crate::JsString],
+        cooked: &'a [Option<crate::JsString>],
         raw: &'a [crate::JsString],
         exprs: &'a [Expr],
     ) -> Result<Reg, Decline> {
+        let tag = tag.unparenthesized();
         let (callee, receiver) = match tag {
             Expr::Member {
                 object, property, ..
@@ -3761,7 +4008,11 @@ impl<'a> Compiler<'a> {
         };
         let mut template = Vec::with_capacity(cooked.len());
         for part in cooked {
-            let index = self.push_const(Constant::String(part.clone()))?;
+            let constant = part
+                .as_ref()
+                .map(|part| Constant::String(part.clone()))
+                .unwrap_or(Constant::Undefined);
+            let index = self.push_const(constant)?;
             let reg = self.load_const(index)?;
             template.push(SpreadEntry { spread: false, reg });
         }
@@ -3855,6 +4106,7 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
+        let callee = callee.unparenthesized();
         let direct_eval = matches!(callee, Expr::Identifier(name) if name == "eval");
         if direct_eval && (!self.top_level || self.scopes.len() != 1) {
             // Dynamic access must see every lexical binding, including locals
@@ -4117,6 +4369,7 @@ impl<'a> Compiler<'a> {
         op: AssignOp,
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
+        let target = target.unparenthesized();
         let rhs = self.compile_expr(value)?;
         match target {
             Expr::Identifier(name) => {
@@ -4178,7 +4431,7 @@ impl<'a> Compiler<'a> {
                     Ok(dst)
                 }
             }
-            Expr::Array(_) | Expr::Object(_) => {
+            Expr::Array { .. } | Expr::Object { .. } => {
                 // Only plain `=` destructures; anything else (or an
                 // unconvertible target) fails at runtime on the AST tier.
                 if op != AssignOp::Assign {
@@ -4200,6 +4453,7 @@ impl<'a> Compiler<'a> {
         op: LogicalAssignOp,
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
+        let target = target.unparenthesized();
         // Read the current value, skip the write when it already decides.
         let join = self.alloc_reg()?;
         let end_jump = match target {
@@ -4397,9 +4651,10 @@ fn build_ast_function(def: &FuncDef<'_>) -> Rc<AstFunction> {
     let uses_arguments = if def.is_arrow {
         arrow_body_references(&ExprOrBlock::Block(body.clone()), "arguments")
     } else {
-        stmts_reference(&body, "arguments")
+        crate::parser::stmts_need_arguments(&body)
     };
     Rc::new(AstFunction {
+        named_expression: def.named_expression,
         name: def.name.clone(),
         params: def.params.to_vec(),
         body: Rc::new(body),
@@ -4523,13 +4778,13 @@ mod tests {
             reason("function g() { const f = () => arguments; return f; }"),
             "compiled"
         );
-        // A head inside an unscoped block nested in a pushed one declares
-        // in the outer scope without boxing, so capturing it declines.
+        // A lexical iteration head has its own boxed scope even inside
+        // surrounding blocks that need no runtime environment.
         assert_eq!(
             reason(
                 "function g(o) { let r = []; { let z = 1; { for (let k in o) { r.push(() => k + z); } } } return r; }"
             ),
-            "block-scope capture needs Phase G"
+            "compiled"
         );
     }
 

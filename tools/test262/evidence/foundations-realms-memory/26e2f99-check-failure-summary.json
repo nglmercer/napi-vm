@@ -1,0 +1,38 @@
+{
+  "source_commit": "26e2f997377bbce4515938e3c9904d78df762da8",
+  "classification": "Intermediate WASM fixture isolation failure; no focused or full Test262 run performed for this source",
+  "checks": {
+    "fmt": "pass",
+    "clippy": "pass",
+    "workspace_tests": {
+      "passed": 913,
+      "ignored": 4
+    },
+    "minimal_tests": {
+      "passed": 203
+    },
+    "native_build": "pass",
+    "node_tests": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm_tests": {
+      "passed": 12,
+      "failed": 2
+    },
+    "tooling_tests": "not run after WASM failure",
+    "release_build": "not run after WASM failure"
+  },
+  "cause": "Independent WASM fixtures shared persistent global lexical names, and one generator fixture redeclared const it across script executions. The proper global environment rejects these redeclarations.",
+  "follow_up_source": "bcbe2fc",
+  "follow_up": "Fresh VM per independent fixture; block scopes for independent generator iterators; added persistent lexical declaration test. No VM semantics relaxed and no tests skipped.",
+  "archive_sha256": {
+    "26e2f99-wasm-tests.log.gz": "12548433d73536363daf92b5b7d629a9066884aebaeee3bd420b21ee14652e95",
+    "26e2f99-node-tests.log.gz": "3b9180e52c64f321a55b9084f8e52b500466be2f3cdeb180194c9f9d58060393",
+    "26e2f99-native-build.log.gz": "49a6ebdfe5cc70040dcc7cae4760c69f1efc03f641503710c872cdb1a9c9d3f0",
+    "26e2f99-minimal-tests.log.gz": "e9a9285e915d561b071492dab7170867743add425e9efdfbfdeea8cac5b7e45f",
+    "26e2f99-allfeatures-tests.log.gz": "b9e843f1d668b92c685f57dd1300716148a2fbb66a88f1c7e12420807f4496e4",
+    "26e2f99-clippy.log.gz": "b2b3e59b4cc13f7297eba708182dcbf1e27f68e51f204cbba7f914e0ccaca221",
+    "26e2f99-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+  }
+}

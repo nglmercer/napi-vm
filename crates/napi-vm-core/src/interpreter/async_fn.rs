@@ -45,7 +45,7 @@ impl std::fmt::Debug for AsyncTask {
 #[cfg(stackful_coroutines)]
 impl AsyncTask {
     /// Whether this task's suspended coroutine holds values the tracer
-    /// cannot see. The result promise is traced in its own right.
+    /// cannot see. The tracer separately follows this task's result promise.
     pub(crate) fn suspends_values(&self) -> bool {
         self.coroutine.is_some()
     }
@@ -61,6 +61,17 @@ impl AsyncTask {
 }
 
 impl Interpreter {
+    /// Async-generator Return evaluates Await inside the body, so rejection
+    /// remains catchable by its try/catch/finally. Ordinary nested functions
+    /// have their own return context and must not inherit this behavior.
+    pub(crate) fn prepare_return_value(&mut self, value: Value) -> Result<Value, VmErr> {
+        let asynchronous = self.global.borrow().awaits_return_value();
+        if asynchronous {
+            self.perform_await(value)
+        } else {
+            Ok(value)
+        }
+    }
     /// Evaluate `await value`.
     ///
     /// Inside an async body this suspends; at the top level (where there is no
@@ -76,6 +87,8 @@ impl Interpreter {
             return bridge.await_host(id);
         }
 
+        let value = self.promise_resolve_intrinsic(value)?;
+
         #[cfg(stackful_coroutines)]
         if let Some(yielder) = self.await_yielder.as_ref() {
             // Suspend, handing the awaited value to the driver. It resumes us
@@ -84,19 +97,12 @@ impl Interpreter {
                 GenResume::Next(v) => Ok(v.unwrap_or(Value::Undefined)),
                 GenResume::Throw(reason) => Err(VmErr::Throw(reason)),
                 // The task was abandoned; unwind the body so `finally` runs.
-                GenResume::Return => Err(VmErr::Ret(Value::Undefined)),
+                GenResume::Return(value) => Err(VmErr::Ret(value)),
                 // Dropped while suspended: unwind with no guest handlers.
                 GenResume::Abandon => Err(VmErr::Abandon),
             };
         }
 
-        let value = if value.as_promise().is_some() {
-            value
-        } else {
-            let wrapper = Value::pending_promise();
-            self.resolve_promise(&wrapper, value)?;
-            Value::Promise(wrapper)
-        };
         self.await_synchronously(value)
     }
 
@@ -256,8 +262,8 @@ fn spawn_body(
             Err(VmErr::Throw(v)) => GenOutcome::Threw(v),
             // Abandoned while suspended: the initiating `Drop` consumes this.
             Err(VmErr::Abandon) => GenOutcome::Abandon,
-            Err(VmErr::Msg(m)) => GenOutcome::Failed(m),
-            Err(VmErr::RuntimeError(e)) => GenOutcome::Failed(e.message.clone()),
+            Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
+            Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
             Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => GenOutcome::Failed(format!("{}", e)),
         }
     });
@@ -433,4 +439,35 @@ fn resume_with_throw(
         )?;
     }
     Ok(Value::Undefined)
+}
+
+#[cfg(all(test, stackful_coroutines))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completed_task_retains_its_result_across_collection() {
+        let mut interp = Interpreter::with_builtins();
+        let result = Value::pending_promise();
+        result.borrow_mut().state = PromiseState::Fulfilled;
+        result.borrow_mut().value = Value::object(vec![("alive".into(), Value::Number(42.0))]);
+        let task = crate::heap::tracked(Rc::new(RefCell::new(AsyncTask {
+            execution: interp.execution.clone(),
+            counted: false,
+            owner: None,
+            coroutine: None,
+            result,
+        })));
+        interp
+            .set_global_checked("retainedTask", Value::AsyncTask(task.clone()))
+            .unwrap();
+
+        let stats = interp.collect_cycles();
+        assert_eq!(stats.skipped, None);
+        let result = task.borrow().result_promise();
+        assert_eq!(result.borrow().state, PromiseState::Fulfilled);
+        let value = result.borrow().value.clone();
+        let alive = value.get_prop("alive").unwrap();
+        assert!(matches!(alive, Value::Number(42.0)), "got {alive:?}");
+    }
 }

@@ -1,0 +1,75 @@
+{
+  "source_commit": "388bd73",
+  "status": "exploratory; regression target fails",
+  "configuration": {
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "worker_jobs": 4,
+    "timeout_seconds": 5.0,
+    "engine_sha256": "2b2a946e2b4e587d3387ac39d0ab7f3d3a2b3e9b51888cf39775b13c265b1f07",
+    "total": 102956
+  },
+  "counts": {
+    "pass": 52527,
+    "fail": 50427,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "versus_phase2": {
+    "new_passes": 1911,
+    "lost_passes": 310
+  },
+  "versus_pr23": {
+    "new_passes": 11310,
+    "lost_passes": 190
+  },
+  "checks": {
+    "allfeatures-tests": {
+      "status": "passed",
+      "passed": 808,
+      "ignored": 4
+    },
+    "clippy": {
+      "status": "passed"
+    },
+    "fmt": {
+      "status": "passed"
+    },
+    "minimal-tests": {
+      "status": "passed",
+      "passed": 158,
+      "ignored": 0
+    },
+    "native-build": {
+      "status": "passed"
+    },
+    "node-tests": {
+      "status": "passed"
+    },
+    "release-build": {
+      "status": "passed"
+    },
+    "tooling-tests": {
+      "status": "passed"
+    },
+    "wasm-tests": {
+      "status": "passed"
+    }
+  },
+  "full_corpus_ast_bytecode_mismatches": "not measured",
+  "sha256": {
+    "388bd73-exploratory-full.json.gz": "c6983a9ee997ac6072acbc3c7ab258da5c2fb2c74f03e61e950b5bd3c800c691",
+    "388bd73-exploratory-vs-phase2.json.gz": "cd6109ce837f5bd4cde6f948603fb1dfcbed782abb38157660eec3d487c2d0d4",
+    "388bd73-exploratory-vs-pr23.json.gz": "6f45b22cb11f3edb144bfed457350cd9a180f5f7d96320f1c9895f4c0fc0bafa",
+    "388bd73-allfeatures-tests.log.gz": "2fe6397f8cc0e423d50380c0b822dbd417bc884941a9575bc88cd2f06690032d",
+    "388bd73-clippy.log.gz": "2d1174dca21df75d71d2f09afb072e25024f42a9551e252cd5c37452d0430b36",
+    "388bd73-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "388bd73-minimal-tests.log.gz": "cf83a08ec151ed692a19684992206e9d9c32b656212ff9f91c7bc0a217b571c1",
+    "388bd73-native-build.log.gz": "8e9e3fc11c8db375632b53b042c14720a0f9a1ca4f80ed9ba6f687a0b79763b1",
+    "388bd73-node-tests.log.gz": "0e227196b1a123e4610e85cf7f996a53e39bc7f1d182bc2e40ac4cff8203752e",
+    "388bd73-release-build.log.gz": "97b38c910f891fead0d19c8a61ba47ebf4bf5bc5f48f31f1922e8b8111ab01bc",
+    "388bd73-tooling-tests.log.gz": "6121f0221086913a4222cd717b389ce7914a81b4fb3d8dc67db5aa1bdd749807",
+    "388bd73-wasm-tests.log.gz": "8c4b92e43fade815cb68188441c8d5bbd227ecb7517586aa62853db2b7c23540"
+  }
+}

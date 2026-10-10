@@ -1,0 +1,48 @@
+{
+  "source_commit": "0577fc2f7238bd96160141469e8bee6c6517f280",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "ccbc78ac0d0a12a32dbc781db9bbe291bf9c9d5b529c11d65c588eef622498e7",
+  "classification": "Focused regression gate passed; full run pending",
+  "total": 5267,
+  "counts": {
+    "pass": 4796,
+    "fail": 471,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 1282,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 884,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 14, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Realm-global/private dependencies and Proxy DefineOwnProperty remain; full-corpus tier mismatch measurement pending",
+  "archive_sha256": {
+    "0577fc2-release-build.log.gz": "a113ccad7cd3b0d95facd39ff11f6ed7eda221a41eab923f4205ef1f97de0ed7",
+    "0577fc2-tooling-tests.log.gz": "f15a1d04a20a4cc5142b5deb5fdfa63a614c2ef6ea41a15b39e6b4c77b555bb1",
+    "0577fc2-wasm-tests.log.gz": "7e2a3537d6530cffa1de1e7231e3be1373cb4ac2f4abfc8369af1ee27568858c",
+    "0577fc2-node-tests.log.gz": "5dc89dd3b5567324d7422fee2284069ecb87b8ae31c7a0e9e3666546e9e3d303",
+    "0577fc2-native-build.log.gz": "a91dd4b3088a6d252294436bc17295c0d37b412060364ba5b62aa5e122c99e2a",
+    "0577fc2-minimal-tests.log.gz": "ca2e9df0e23ae9f291c3f6486f7a9b35821f332d5123ea514e12540e47ca0f08",
+    "0577fc2-allfeatures-tests.log.gz": "2200c2536efb2496653ccbd35b8a79b542f288c151d46a0e0cffa6c3b29a0baf",
+    "0577fc2-clippy.log.gz": "b12dcb002389cc42106c4524a6921dcbed74ca7c1729dec9d8702515c312f040",
+    "0577fc2-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "0577fc2-focused.json.gz": "331c1bb3ee8482d07a35203c86cccb730da8c726de02b07fafdc5e5f3643c290",
+    "0577fc2-focused.jsonl.gz": "2304dca9e73e8beff3b0ac58f236cf3de6a965bceb53095e2ba65495b81a138b",
+    "0577fc2-focused-transitions.json.gz": "454b22b86a458e4270e676a5c013910de3b2bdd1c23e5d34ff38c376a74848a6",
+    "0577fc2-focused-7c0a9ce-projection.json.gz": "5129962d2b3864eea895aa1a38da973ec64d7c84b18443464f56faa4712b3aee"
+  }
+}

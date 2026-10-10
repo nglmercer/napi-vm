@@ -70,7 +70,7 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
-    let proto_descriptor = Value::object(vec![
+    let proto_descriptor = Value::descriptor_record(vec![
         ("get".into(), nf("get __proto__", object_get_prototype)),
         ("set".into(), nf("set __proto__", object_set_prototype)),
         ("enumerable".into(), Value::Bool(false)),
@@ -96,6 +96,7 @@ pub(super) fn install(e: &mut Environment) {
         ("entries", object_entries),
         ("assign", object_assign),
         ("getOwnPropertyNames", object_get_own_property_names),
+        ("getOwnPropertySymbols", object_get_own_property_symbols),
         ("create", object_create),
         ("defineProperty", object_define_property),
         ("defineProperties", object_define_properties),
@@ -137,7 +138,40 @@ fn type_err(msg: &str) -> VmErr {
 /// symbol slots. `enumerable_only` applies the `enumerable` attribute.
 fn own_names(v: &Value, enumerable_only: bool) -> Vec<String> {
     match v {
-        Value::Object { props } => own_object_names(props, enumerable_only),
+        Value::Object { props } => {
+            let string = match props.meta.borrow().boxed_primitive.as_ref() {
+                Some(BoxedPrimitive::String(string)) => Some(string.clone()),
+                _ => None,
+            };
+            let mut names = Vec::new();
+            if let Some(string) = string {
+                names.extend((0..string.len()).map(|index| index.to_string()));
+                if !enumerable_only {
+                    names.push("length".into());
+                }
+            }
+            names.extend(own_object_names(props, enumerable_only));
+            names
+        }
+        Value::RegExp(data) => {
+            let mut names = Vec::new();
+            if !enumerable_only {
+                names.push("lastIndex".into());
+            }
+            names.extend(
+                own_object_names(&data.properties, enumerable_only)
+                    .into_iter()
+                    .filter(|name| name != "lastIndex"),
+            );
+            names
+        }
+        Value::TypedArray(view) => {
+            let mut names: Vec<_> = (0..view.effective_length())
+                .map(|index| index.to_string())
+                .collect();
+            names.extend(own_object_names(&view.properties, enumerable_only));
+            names
+        }
         Value::Class(class) => own_object_names(&class.statics, enumerable_only),
         Value::Function(function) => {
             function.ensure_name_length_properties();
@@ -184,7 +218,7 @@ fn own_object_names(props: &Rc<ObjectCell>, enumerable_only: bool) -> Vec<String
         .collect()
 }
 
-fn own_names_for(
+pub(crate) fn own_names_for(
     interp: &mut Interpreter,
     value: &Value,
     enumerable_only: bool,
@@ -204,11 +238,62 @@ fn own_names_for(
             .collect());
     }
     if matches!(value, Value::Proxy(_)) {
-        // The current Proxy model exposes ownKeys as a string array. Native
-        // addon proxies return the host object's enumerable own keys here.
-        return interp.keys_with_proxy_trap(value);
+        let mut names = Vec::new();
+        for key in interp.own_property_keys(value)? {
+            if let Value::String(name) = &key {
+                if enumerable_only {
+                    let descriptor = descriptor_for_key_in(interp, value, &key)?;
+                    if !descriptor
+                        .get_prop("enumerable")
+                        .is_some_and(|value| value.is_truthy())
+                    {
+                        continue;
+                    }
+                }
+                names.push(name.to_key());
+            }
+        }
+        return Ok(names);
     }
     Ok(own_names(value, enumerable_only))
+}
+
+/// Ordinary [[OwnPropertyKeys]], including the indexed exotic keys and
+/// symbols stored separately from string slots.
+pub(crate) fn ordinary_own_property_keys(
+    interp: &Interpreter,
+    value: &Value,
+) -> Result<Vec<Value>, VmErr> {
+    let mut names = if let Some(global) = interp.global_scope_of(value) {
+        global.borrow().global_property_keys()
+    } else {
+        own_names(value, false)
+    };
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|name| seen.insert(name.clone()));
+    // Integer index keys precede other strings; the sort is stable for the
+    // remaining strings, which retain their creation order.
+    names.sort_by_key(|name| crate::value::array_index(name).map_or((1, 0), |index| (0, index)));
+    let mut keys: Vec<Value> = names
+        .into_iter()
+        .map(|name| Value::String(crate::JsString::from_key(&name)))
+        .collect();
+    if let Value::Array(array) = value {
+        for (slot, symbol) in array.symbol_keys.borrow().iter() {
+            if array.named_prop(slot).is_some() {
+                keys.push(Value::Symbol(symbol.clone()));
+            }
+        }
+    } else if let Some(properties) = cell(value) {
+        let meta = properties.meta.borrow();
+        let slots = properties.borrow();
+        for (slot, symbol) in &meta.symbol_keys {
+            if slots.iter().any(|(name, _)| name == slot) {
+                keys.push(Value::Symbol(symbol.clone()));
+            }
+        }
+    }
+    Ok(keys)
 }
 
 /// Read an own property slot without walking the prototype chain and without
@@ -232,11 +317,30 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
         }
         return array.named_prop(key);
     }
-    cell(v)?
-        .borrow()
-        .iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, value)| value.deref_binding())
+    if let Value::Object { props } = v
+        && let Some(BoxedPrimitive::String(string)) = &props.meta.borrow().boxed_primitive
+    {
+        if key == "length" {
+            return Some(Value::Number(string.len() as f64));
+        }
+        if let Some(index) = crate::value::array_index(key) {
+            return crate::value::str_char_at(string, index);
+        }
+    }
+    if let Value::RegExp(data) = v
+        && key == "lastIndex"
+    {
+        return data
+            .properties
+            .own_value(key)
+            .or_else(|| Some(Value::Number(data.last_index.get() as f64)));
+    }
+    if let Value::TypedArray(view) = v
+        && let Some(index) = crate::value::array_index(key)
+    {
+        return crate::builtins::read_element(view, index);
+    }
+    cell(v)?.own_value(key).map(|value| value.deref_binding())
 }
 
 /// Is this slot an accessor stored under the `get …` / `set …` naming that the
@@ -279,6 +383,40 @@ fn name_callable(value: &Value, name: &str) -> Option<Value> {
         Value::HostFunction { .. } => value.host_function_named(name)?,
         _ => return None,
     })
+}
+
+/// Install a trusted intrinsic accessor using the same callable identity
+/// representation as ordinary descriptor definitions.
+pub(crate) fn install_intrinsic_accessor(
+    target: &Value,
+    key: &str,
+    getter: &Value,
+    setter: &Value,
+    configurable: bool,
+) {
+    let properties = target
+        .property_cell()
+        .expect("intrinsic accessor property cell");
+    let getter =
+        name_callable(getter, &format!("get {key}")).expect("intrinsic getter is callable");
+    let setter =
+        name_callable(setter, &format!("set {key}")).expect("intrinsic setter is callable");
+    target
+        .set_prop(key.into(), getter)
+        .expect("intrinsic getter slot");
+    target
+        .set_prop(format!("__setter:{key}__"), setter)
+        .expect("intrinsic setter slot");
+    let mut metadata = properties.meta.borrow_mut();
+    metadata.has_accessors = true;
+    metadata.set_attrs(
+        key,
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable,
+        },
+    );
 }
 
 // --- Enumeration ------------------------------------------------------------
@@ -337,7 +475,7 @@ fn object_get_own_property_names(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
+    let v = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
     let names = match v {
         Value::GlobalObject => interp.global_keys(),
         ref other => own_names_for(interp, other, false)?,
@@ -346,6 +484,21 @@ fn object_get_own_property_names(
         names
             .into_iter()
             .map(|value| Value::String(crate::JsString::from_key(&value)))
+            .collect(),
+    )
+}
+
+fn object_get_own_property_symbols(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let target = to_object_receiver(&args.first().cloned().unwrap_or(Value::Undefined))?;
+    Value::checked_array(
+        interp
+            .own_property_keys(&target)?
+            .into_iter()
+            .filter(|key| matches!(key, Value::Symbol(_)))
             .collect(),
     )
 }
@@ -381,17 +534,12 @@ fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
 }
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if matches!(v, Value::Undefined | Value::Null) {
-        return Err(type_err("Cannot convert undefined or null to object"));
-    }
-    let key = interp.property_key(a.get(1).unwrap_or(&Value::Undefined))?;
-    let found = if let Some(global) = interp.global_scope_of(&v) {
-        global.borrow().global_property(&key).is_some()
-    } else {
-        object_property_attributes(&v, &key).is_some()
-    };
-    Ok(Value::Bool(found))
+    let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.proxy_property_key(a.get(1).unwrap_or(&Value::Undefined))?;
+    Ok(Value::Bool(!matches!(
+        descriptor_for_key_in(interp, &target, &key)?,
+        Value::Undefined
+    )))
 }
 
 fn object_has_own_property(
@@ -399,11 +547,12 @@ fn object_has_own_property(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    object_has_own(
-        interp,
-        Value::Undefined,
-        vec![this, args.first().cloned().unwrap_or(Value::Undefined)],
-    )
+    let key = interp.proxy_property_key(args.first().unwrap_or(&Value::Undefined))?;
+    let target = to_object_receiver(&this)?;
+    Ok(Value::Bool(!matches!(
+        descriptor_for_key_in(interp, &target, &key)?,
+        Value::Undefined
+    )))
 }
 
 fn is_ecmascript_object(value: &Value) -> bool {
@@ -431,7 +580,7 @@ fn is_ecmascript_object(value: &Value) -> bool {
     )
 }
 
-fn to_object_receiver(value: &Value) -> Result<Value, VmErr> {
+pub(crate) fn to_object_receiver(value: &Value) -> Result<Value, VmErr> {
     let value = value.deref_binding();
     if matches!(value, Value::Undefined | Value::Null) {
         return Err(type_err("Cannot convert undefined or null to object"));
@@ -581,6 +730,7 @@ fn object_to_string_tag(value: &Value) -> String {
         Value::Symbol(_) => "Symbol".into(),
         Value::BigInt(_) => "BigInt".into(),
         Value::Object { .. } if crate::interpreter::is_callable_value(value) => "Function".into(),
+        Value::Object { .. } if value.is_error_object() => "Error".into(),
         Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
             Some(BoxedPrimitive::Bool(_)) => "Boolean".into(),
             Some(BoxedPrimitive::Number(_)) => "Number".into(),
@@ -709,7 +859,7 @@ fn object_define_accessor(
     if !is_getter && is_callable(&existing_getter) {
         fields.push(("get".into(), existing_getter));
     }
-    define_property(&target, &key, &Value::object(fields))?;
+    define_property(&target, &key, &Value::descriptor_record(fields))?;
     if let Some(symbol) = symbol {
         if let Value::Array(array) = &target {
             array.set_symbol_key(&key, symbol);
@@ -783,66 +933,32 @@ fn object_set_prototype(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = this.deref_binding();
-    if !is_ecmascript_object(&target) || args.is_empty() {
-        return Ok(Value::Undefined);
+    if matches!(target, Value::Null | Value::Undefined) {
+        return Err(type_err("Cannot convert undefined or null to object"));
     }
-    let requested = match args[0].deref_binding() {
-        Value::Null => None,
-        value if is_ecmascript_object(&value) => Some(Rc::new(value)),
-        _ => return Ok(Value::Undefined),
+    let Some(requested) = args.first() else {
+        return Ok(Value::Undefined);
     };
-    if !matches!(
-        &target,
-        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_)
-    ) {
-        return Ok(Value::Undefined);
-    }
-    if !object_is_extensible_value(&target)
-        && !crate::interpreter::strict_equals(
-            &interp
-                .prototype_of(&target)
-                .map_or(Value::Null, |prototype| prototype.as_ref().clone()),
-            &requested
-                .as_ref()
-                .map_or(Value::Null, |prototype| prototype.as_ref().clone()),
-        )
+    if (!matches!(requested, Value::Null) && !is_ecmascript_object(requested))
+        || !is_ecmascript_object(&target)
     {
         return Ok(Value::Undefined);
     }
-    let mut current = requested
-        .clone()
-        .map(|prototype| prototype.as_ref().clone());
-    for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-        let Some(prototype) = current else { break };
-        if crate::interpreter::strict_equals(&target, &prototype) {
-            return Ok(Value::Undefined);
-        }
-        current = interp
-            .prototype_of(&prototype)
-            .map(|prototype| prototype.as_ref().clone());
-    }
-    match &target {
-        Value::Object { props } => props.set_proto(requested),
-        Value::Array(array) => array.set_proto(requested),
-        Value::Function(function) => function.properties.set_proto(requested),
-        Value::Class(class) => class.statics.set_proto(requested),
-        _ => {}
+    if !interp.set_prototype_of(&target, requested)? {
+        return Err(type_err("Cannot set object prototype"));
     }
     Ok(Value::Undefined)
 }
 
-fn object_is_extensible_value(value: &Value) -> bool {
-    if let Value::Array(array) = value {
-        return !array.meta.borrow().non_extensible;
-    }
-    cell(value).is_some_and(|properties| !properties.meta.borrow().non_extensible)
-}
-
-fn object_is(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_is(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let x = a.first().cloned().unwrap_or(Value::Undefined);
     let y = a.get(1).cloned().unwrap_or(Value::Undefined);
     // `Object.is` differs from `===` exactly at NaN and signed zero.
-    let same = match (&x, &y) {
+    Ok(Value::Bool(same_value(&x, &y)))
+}
+
+pub(crate) fn same_value(x: &Value, y: &Value) -> bool {
+    match (x, y) {
         (Value::Number(a), Value::Number(b)) => {
             if a.is_nan() && b.is_nan() {
                 true
@@ -852,9 +968,8 @@ fn object_is(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value,
                 a == b
             }
         }
-        _ => interp.seq(&x, &y),
-    };
-    Ok(Value::Bool(same))
+        _ => crate::interpreter::strict_equals(x, y),
+    }
 }
 
 // --- Prototypes -------------------------------------------------------------
@@ -868,32 +983,40 @@ fn object_get_prototype_of(
     interp.get_prototype_of(&v)
 }
 
-fn object_set_prototype_of(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    let proto = a.get(1).cloned().unwrap_or(Value::Null);
-    let proto = proto_arg(&proto)?;
-    if let Value::Array(array) = &v {
-        array.set_proto(proto);
-    } else if let Some(c) = cell(&v) {
-        c.set_proto(proto);
+fn object_set_prototype_of(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    let prototype = a.get(1).cloned().unwrap_or(Value::Undefined);
+    if matches!(value, Value::Null | Value::Undefined) {
+        return Err(type_err("Cannot convert undefined or null to object"));
     }
-    Ok(v)
+    if !matches!(prototype, Value::Null) && !crate::interpreter::call::is_js_object(&prototype) {
+        return Err(type_err("Object prototype may only be an Object or null"));
+    }
+    if crate::interpreter::call::is_js_object(&value)
+        && !interp.set_prototype_of(&value, &prototype)?
+    {
+        return Err(type_err("Cannot set object prototype"));
+    }
+    Ok(value)
 }
 
-/// Validate and wrap the prototype argument shared by `create` and
-/// `setPrototypeOf`: an object, or `null` for a null prototype.
+/// Object.create accepts every object kind, including Proxy and realm globals.
 fn proto_arg(proto: &Value) -> Result<Option<Rc<Value>>, VmErr> {
-    match proto {
-        Value::Null | Value::Uninitialized | Value::Undefined => Ok(None),
-        Value::Object { .. } | Value::Array(_) | Value::Function(_) | Value::Class(_) => {
-            Ok(Some(Rc::new(proto.clone())))
-        }
-        _ => Err(type_err("Object prototype may only be an Object or null")),
+    if matches!(proto, Value::Null) {
+        Ok(None)
+    } else if crate::interpreter::call::is_js_object(proto) {
+        Ok(Some(Rc::new(proto.clone())))
+    } else {
+        Err(type_err("Object prototype may only be an Object or null"))
     }
 }
 
 fn object_create(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let proto = a.first().cloned().unwrap_or(Value::Null);
+    let proto = a.first().cloned().unwrap_or(Value::Undefined);
     let created = Value::object_with_proto(vec![], proto_arg(&proto)?);
     if let Some(descriptors) = a.get(1)
         && !matches!(descriptors, Value::Undefined | Value::Null)
@@ -911,26 +1034,14 @@ fn object_define_property(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    if cell(&target).is_none() && !matches!(target, Value::Array(_)) {
+    if !crate::interpreter::call::is_js_object(&target) {
         return Err(type_err("Object.defineProperty called on non-object"));
     }
-    let raw_key = a.get(1).cloned().unwrap_or(Value::Undefined);
-    let symbol = match &raw_key {
-        Value::Symbol(symbol) => Some(symbol.clone()),
-        _ => None,
-    };
-    let key = interp.property_key(&raw_key)?;
-    let descriptor = a.get(2).cloned().unwrap_or(Value::Undefined);
-    define_property(&target, &key, &descriptor)?;
-    if let Some(symbol) = symbol {
-        match &target {
-            Value::Array(array) => array.set_symbol_key(&key, symbol),
-            _ => {
-                if let Some(object) = cell(&target) {
-                    object.meta.borrow_mut().set_symbol_key(&key, symbol);
-                }
-            }
-        }
+    let key = interp.proxy_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let descriptor =
+        to_property_descriptor(interp, &a.get(2).cloned().unwrap_or(Value::Undefined))?;
+    if !interp.define_own_property(&target, &key, &descriptor)? {
+        return Err(type_err("Cannot define property"));
     }
     Ok(target)
 }
@@ -1087,46 +1198,8 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     // ValidateAndApplyPropertyDescriptor for a non-configurable property:
     // same value, same attributes, same kind — except `writable` may narrow
     // from `true` to `false`, which is what class transpiler output relies on.
-    if existing && !old_attributes.configurable {
-        if attrs.configurable
-            || attrs.enumerable != old_attributes.enumerable
-            || old_is_accessor != new_is_accessor
-        {
-            return Err(type_err(&format!("Cannot redefine property: {key}")));
-        }
-        if old_is_data
-            && !old_attributes.writable
-            && (attrs.writable
-                || value.as_ref().is_some_and(|new_value| {
-                    old_value.as_ref().is_some_and(|old_value| {
-                        !crate::interpreter::strict_equals(old_value, new_value)
-                    })
-                }))
-        {
-            return Err(type_err(&format!("Cannot redefine property: {key}")));
-        }
-        if old_is_accessor {
-            let old_getter = (old_accessor_kind == Some("get"))
-                .then(|| old_value.as_ref().cloned())
-                .flatten()
-                .unwrap_or(Value::Undefined);
-            let old_setter = if old_accessor_kind == Some("set") {
-                old_value.clone()
-            } else {
-                own_slot(target, &format!("__setter:{}__", key))
-            };
-            if getter
-                .as_ref()
-                .is_some_and(|new| !crate::interpreter::strict_equals(&old_getter, new))
-                || setter.as_ref().is_some_and(|new| {
-                    old_setter
-                        .as_ref()
-                        .is_none_or(|old| !crate::interpreter::strict_equals(old, new))
-                })
-            {
-                return Err(type_err(&format!("Cannot redefine property: {key}")));
-            }
-        }
+    if existing && !compatible_descriptor(&descriptor_for(target, key), descriptor) {
+        return Err(type_err(&format!("Cannot redefine property: {key}")));
     }
     if !existing && c.meta.borrow().non_extensible {
         return Err(type_err(&format!(
@@ -1330,6 +1403,11 @@ fn define_array_property(
         if let Some(length) = requested_length {
             array.set_length(length);
             if array.borrow().len() != length {
+                if !requested_writable {
+                    let mut attributes = array.meta.borrow().attrs_of("length");
+                    attributes.writable = false;
+                    array.meta.borrow_mut().set_attrs("length", attributes);
+                }
                 return Err(type_err("Cannot remove a non-configurable array element"));
             }
         }
@@ -1372,46 +1450,18 @@ fn define_array_property(
             .unwrap_or(existing && old_attributes.configurable),
     };
 
-    if existing && !old_attributes.configurable {
-        if attributes.configurable
-            || attributes.enumerable != old_attributes.enumerable
-            || old_is_accessor != new_is_accessor
-        {
-            return Err(type_err(&format!("Cannot redefine property: {key}")));
-        }
-        if old_is_data
-            && !old_attributes.writable
-            && (attributes.writable
-                || value.as_ref().is_some_and(|new_value| {
-                    old_value.as_ref().is_some_and(|old_value| {
-                        !crate::interpreter::strict_equals(old_value, new_value)
-                    })
-                }))
-        {
-            return Err(type_err(&format!("Cannot redefine property: {key}")));
-        }
-        if old_is_accessor {
-            let old_getter = (old_accessor_kind == Some("get"))
-                .then(|| old_value.as_ref().cloned())
-                .flatten()
-                .unwrap_or(Value::Undefined);
-            let old_setter = if old_accessor_kind == Some("set") {
-                old_value.clone()
-            } else {
-                array.named_prop(&format!("__setter:{}__", key))
-            };
-            if getter
-                .as_ref()
-                .is_some_and(|new| !crate::interpreter::strict_equals(&old_getter, new))
-                || setter.as_ref().is_some_and(|new| {
-                    old_setter
-                        .as_ref()
-                        .is_none_or(|old| !crate::interpreter::strict_equals(old, new))
-                })
-            {
-                return Err(type_err(&format!("Cannot redefine property: {key}")));
-            }
-        }
+    if existing
+        && !compatible_descriptor(
+            &descriptor_for_array_value(
+                array,
+                key,
+                old_value.clone().unwrap_or(Value::Undefined),
+                old_attributes,
+            ),
+            descriptor,
+        )
+    {
+        return Err(type_err(&format!("Cannot redefine property: {key}")));
     }
     if !existing && array.meta.borrow().non_extensible {
         return Err(type_err(&format!(
@@ -1474,9 +1524,9 @@ fn object_get_own_descriptor(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let key = interp.property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
-    descriptor_for_in(interp, &target, &key)
+    let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.proxy_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    descriptor_for_key_in(interp, &target, &key).map(from_property_descriptor)
 }
 
 fn object_get_own_descriptors(
@@ -1489,46 +1539,171 @@ fn object_get_own_descriptors(
     for key in own_names_for(interp, &target, false)? {
         let descriptor = descriptor_for_in(interp, &target, &key)?;
         if !matches!(descriptor, Value::Undefined) {
-            props.push((key, descriptor));
+            props.push((key, from_property_descriptor(descriptor)));
         }
     }
     Value::checked_object(props)
 }
 
+/// FromPropertyDescriptor creates an ordinary object only when a descriptor
+/// escapes to guest code; internal operations keep prototype-free records.
+pub(crate) fn from_property_descriptor(descriptor: Value) -> Value {
+    match descriptor {
+        Value::Object { ref props } => Value::object(props.borrow().clone()),
+        other => other,
+    }
+}
+
 /// Build the descriptor object for one own property, or `undefined` when the
 /// property does not exist.
-fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Result<Value, VmErr> {
+/// ToPropertyDescriptor preserves missing fields and performs observable reads
+/// once, in specification order. All public and Proxy descriptor operations
+/// consume this same normalized representation.
+pub(crate) fn to_property_descriptor(
+    interp: &mut Interpreter,
+    result: &Value,
+) -> Result<Value, VmErr> {
+    if !is_ecmascript_object(result) {
+        return Err(type_err("Property description must be an object"));
+    }
+    let mut fields = Vec::new();
+    for name in [
+        "enumerable",
+        "configurable",
+        "value",
+        "writable",
+        "get",
+        "set",
+    ] {
+        if interp.has_property(result, &Value::String(name.into()))? {
+            let mut value = interp.get_prop_value_str(result, name)?;
+            if matches!(name, "enumerable" | "configurable" | "writable") {
+                value = Value::Bool(value.is_truthy());
+            }
+            if matches!(name, "get" | "set")
+                && !matches!(value, Value::Undefined)
+                && !is_callable(&value)
+            {
+                return Err(type_err("Property descriptor accessor must be callable"));
+            }
+            fields.push((name.into(), value));
+        }
+    }
+    let accessor = fields
+        .iter()
+        .any(|(name, _)| name == "get" || name == "set");
+    if accessor
+        && fields
+            .iter()
+            .any(|(name, _)| name == "value" || name == "writable")
+    {
+        return Err(type_err("Invalid property descriptor"));
+    }
+    Ok(Value::descriptor_record(fields))
+}
+
+/// IsCompatiblePropertyDescriptor over the shared normalized descriptor model.
+/// Missing fields preserve current attributes; values and accessors use SameValue.
+pub(crate) fn compatible_descriptor(current: &Value, descriptor: &Value) -> bool {
+    if matches!(current, Value::Undefined)
+        || current
+            .get_prop("configurable")
+            .is_some_and(|value| value.is_truthy())
+    {
+        return true;
+    }
+    if descriptor
+        .get_prop("configurable")
+        .is_some_and(|value| value.is_truthy())
+        || descriptor.get_prop("enumerable").is_some_and(|value| {
+            value.is_truthy()
+                != current
+                    .get_prop("enumerable")
+                    .is_some_and(|value| value.is_truthy())
+        })
+    {
+        return false;
+    }
+    let data = descriptor.get_prop("value").is_some() || descriptor.get_prop("writable").is_some();
+    let accessor = descriptor.get_prop("get").is_some() || descriptor.get_prop("set").is_some();
+    if !data && !accessor {
+        return true;
+    }
+    let current_data =
+        current.get_prop("value").is_some() || current.get_prop("writable").is_some();
+    if data != current_data {
+        return false;
+    }
+    if data {
+        if !current
+            .get_prop("writable")
+            .is_some_and(|value| value.is_truthy())
+        {
+            if descriptor
+                .get_prop("writable")
+                .is_some_and(|value| value.is_truthy())
+            {
+                return false;
+            }
+            if let Some(value) = descriptor.get_prop("value") {
+                return same_value(
+                    &current.get_prop("value").unwrap_or(Value::Undefined),
+                    &value,
+                );
+            }
+        }
+    } else {
+        for name in ["get", "set"] {
+            if let Some(value) = descriptor.get_prop(name)
+                && !same_value(&current.get_prop(name).unwrap_or(Value::Undefined), &value)
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+pub(crate) fn descriptor_for_in(
+    interp: &mut Interpreter,
+    target: &Value,
+    key: &str,
+) -> Result<Value, VmErr> {
+    descriptor_for_key_in(
+        interp,
+        target,
+        &Value::String(crate::JsString::from_key(key)),
+    )
+}
+
+pub(crate) fn descriptor_for_key_in(
+    interp: &mut Interpreter,
+    target: &Value,
+    property_key: &Value,
+) -> Result<Value, VmErr> {
+    let key_storage = interp.property_key(property_key)?;
+    let key = key_storage.as_str();
     if let Value::Proxy(proxy) = target {
-        let handler = proxy.handler.clone();
-        let target = proxy.target.clone();
+        let (target, handler) = proxy.snapshot()?;
         let trap = interp.get_prop_value_str(&handler, "getOwnPropertyDescriptor")?;
         if matches!(trap, Value::Undefined | Value::Null) {
-            return descriptor_for_in(interp, &target, key);
+            return descriptor_for_key_in(interp, &target, property_key);
         }
-        if !is_callable(&trap) {
+        if !crate::interpreter::is_callable_value(&trap) {
             return Err(type_err(
                 "Proxy getOwnPropertyDescriptor trap must be callable",
             ));
         }
-        let result = interp.call_this(
-            &trap,
-            handler,
-            vec![
-                target.clone(),
-                Value::String(crate::JsString::from_key(key)),
-            ],
-        )?;
+        let result =
+            interp.call_this(&trap, handler, vec![target.clone(), property_key.clone()])?;
         if !matches!(result, Value::Undefined) && !is_ecmascript_object(&result) {
             return Err(type_err(
                 "Proxy descriptor trap must return an object or undefined",
             ));
         }
-        let previous = descriptor_for_in(interp, &target, key)?;
+        let previous = descriptor_for_key_in(interp, &target, property_key)?;
         let exists = !matches!(previous, Value::Undefined);
-        let extensible = match &target {
-            Value::GlobalObject | Value::RealmGlobal(_) => true,
-            _ => object_is_extensible_value(&target),
-        };
+        let extensible = interp.is_extensible(&target)?;
         let configurable = previous
             .get_prop("configurable")
             .is_some_and(|v| v.is_truthy());
@@ -1538,31 +1713,11 @@ fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Res
             }
             return Ok(Value::Undefined);
         }
-        // ToPropertyDescriptor reads inherited fields and invokes getters in
-        // specification order. Never expose the handler's raw descriptor.
-        let mut fields = Vec::new();
-        for name in [
-            "enumerable",
-            "configurable",
-            "value",
-            "writable",
-            "get",
-            "set",
-        ] {
-            if interp.has_property(&result, &Value::String(name.into()))? {
-                let mut value = interp.get_prop_value_str(&result, name)?;
-                if matches!(name, "enumerable" | "configurable" | "writable") {
-                    value = Value::Bool(value.is_truthy());
-                }
-                if matches!(name, "get" | "set")
-                    && !matches!(value, Value::Undefined)
-                    && !is_callable(&value)
-                {
-                    return Err(type_err("Property descriptor accessor must be callable"));
-                }
-                fields.push((name.into(), value));
-            }
-        }
+        let normalized = to_property_descriptor(interp, &result)?;
+        let Value::Object { ref props } = normalized else {
+            unreachable!("normalized descriptor");
+        };
+        let mut fields = props.borrow().clone();
         // CompletePropertyDescriptor preserves accessor fields even when
         // both are undefined. Ordinary storage cannot represent that case
         // solely by the callable name of its property slot.
@@ -1585,20 +1740,16 @@ fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Res
                 fields.push((name.into(), value));
             }
         }
-        let descriptor = Value::object(fields);
+        let descriptor = Value::descriptor_record(fields);
         // Validate descriptor shape without changing the target or returning
         // a reconstructed accessor whose callable name was rewritten.
-        let scratch = Value::object(vec![]);
-        define_property(&scratch, key, &descriptor)?;
         if !exists && !extensible {
             return Err(type_err(
                 "Proxy cannot add a property to a non-extensible target",
             ));
         }
-        if exists {
-            let scratch = Value::object(vec![]);
-            define_property(&scratch, key, &previous)?;
-            define_property(&scratch, key, &descriptor)?;
+        if exists && !compatible_descriptor(&previous, &descriptor) {
+            return Err(type_err("Proxy descriptor is incompatible with the target"));
         }
         if !descriptor
             .get_prop("configurable")
@@ -1620,18 +1771,11 @@ fn descriptor_for_in(interp: &mut Interpreter, target: &Value, key: &str) -> Res
         return Ok(descriptor);
     }
     if let Some(global) = interp.global_scope_of(target) {
-        return Ok(global
+        let object = global
             .borrow()
-            .global_property(key)
-            .map(|(value, attrs)| {
-                Value::object(vec![
-                    ("value".into(), value),
-                    ("writable".into(), Value::Bool(attrs.writable)),
-                    ("enumerable".into(), Value::Bool(attrs.enumerable)),
-                    ("configurable".into(), Value::Bool(attrs.configurable)),
-                ])
-            })
-            .unwrap_or(Value::Undefined));
+            .global_object()
+            .expect("realm object record");
+        return Ok(descriptor_for(&object, key));
     }
     Ok(descriptor_for(target, key))
 }
@@ -1650,7 +1794,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
         }
         if key == "length" {
             let attrs = array.meta.borrow().attrs_of("length");
-            return Value::object(vec![
+            return Value::descriptor_record(vec![
                 ("value".to_string(), Value::Number(items.len() as f64)),
                 ("writable".to_string(), Value::Bool(attrs.writable)),
                 ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
@@ -1670,18 +1814,33 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     let Some(value) = own_slot(target, key) else {
         return Value::Undefined;
     };
-    let attrs = c.meta.borrow().attrs_of(key);
+    let attrs =
+        object_property_attributes(target, key).unwrap_or_else(|| c.meta.borrow().attrs_of(key));
     let mut fields = Vec::new();
-    match accessor_kind(key, &value) {
-        Some("get") => {
-            fields.push(("get".to_string(), value));
-            let setter =
-                own_slot(target, &format!("__setter:{}__", key)).unwrap_or(Value::Undefined);
+    match c
+        .meta
+        .borrow()
+        .has_accessors
+        .then(|| accessor_kind(key, &value))
+        .flatten()
+    {
+        Some("get" | "set") => {
+            let slots = c.borrow();
+            let getter = slots
+                .iter()
+                .find(|(name, value)| name == key && accessor_kind(key, value) == Some("get"))
+                .map(|(_, value)| value.clone())
+                .unwrap_or(Value::Undefined);
+            let companion = format!("__setter:{key}__");
+            let setter = slots
+                .iter()
+                .find(|(name, value)| {
+                    (name == key || name == &companion) && accessor_kind(key, value) == Some("set")
+                })
+                .map(|(_, value)| value.clone())
+                .unwrap_or(Value::Undefined);
+            fields.push(("get".to_string(), getter));
             fields.push(("set".to_string(), setter));
-        }
-        Some("set") => {
-            fields.push(("get".to_string(), Value::Undefined));
-            fields.push(("set".to_string(), value));
         }
         _ => {
             fields.push(("value".to_string(), value));
@@ -1690,7 +1849,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     }
     fields.push(("enumerable".to_string(), Value::Bool(attrs.enumerable)));
     fields.push(("configurable".to_string(), Value::Bool(attrs.configurable)));
-    Value::object(fields)
+    Value::descriptor_record(fields)
 }
 
 fn descriptor_for_array_value(
@@ -1700,7 +1859,7 @@ fn descriptor_for_array_value(
     attrs: PropAttrs,
 ) -> Value {
     match accessor_kind(key, &value) {
-        Some("get") => Value::object(vec![
+        Some("get") => Value::descriptor_record(vec![
             ("get".to_string(), value),
             (
                 "set".to_string(),
@@ -1711,13 +1870,13 @@ fn descriptor_for_array_value(
             ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
             ("configurable".to_string(), Value::Bool(attrs.configurable)),
         ]),
-        Some("set") => Value::object(vec![
+        Some("set") => Value::descriptor_record(vec![
             ("get".to_string(), Value::Undefined),
             ("set".to_string(), value),
             ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
             ("configurable".to_string(), Value::Bool(attrs.configurable)),
         ]),
-        _ => Value::object(vec![
+        _ => Value::descriptor_record(vec![
             ("value".to_string(), value),
             ("writable".to_string(), Value::Bool(attrs.writable)),
             ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
@@ -1790,19 +1949,20 @@ fn object_is_sealed(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
     let v = a.first().cloned().unwrap_or(Value::Undefined);
     Ok(Value::Bool(locked(&v, false)))
 }
-fn object_prevent_extensions(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if let Value::Array(array) = &v {
-        array.meta.borrow_mut().non_extensible = true;
-    } else if let Some(c) = cell(&v) {
-        c.meta.borrow_mut().non_extensible = true;
+fn object_prevent_extensions(
+    interp: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    if crate::interpreter::call::is_js_object(&value) && !interp.prevent_extensions(&value)? {
+        return Err(type_err("Cannot prevent extensions"));
     }
-    Ok(v)
+    Ok(value)
 }
-fn object_is_extensible(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(Value::Bool(match &v {
-        Value::Array(array) => !array.meta.borrow().non_extensible,
-        _ => cell(&v).is_some_and(|c| !c.meta.borrow().non_extensible),
-    }))
+fn object_is_extensible(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    Ok(Value::Bool(
+        crate::interpreter::call::is_js_object(&value) && interp.is_extensible(&value)?,
+    ))
 }
