@@ -1,6 +1,6 @@
 {
   "source_commit": "c82f61725831b9a94d02b468663596984378007d",
-  "classification": "RegExp realm state and shared dictionary layouts; focused evidence, full pending",
+  "classification": "RegExp realm state and shared dictionary layouts; completed full pinned corpus",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -54,7 +54,13 @@
     "c82f617-focused-transitions.json.gz": "3641ddc8c8908e940074595aaaae3b1f9a42341526fc42230b98318eadbb98cc",
     "c82f617-focused.json.gz": "43209e6c716e8b703df7910690260b4754a58f84afdd8f5d87c1742101e2a628",
     "c82f617-focused-5868d51-transitions.json.gz": "a8241ba592f3ab3aaa5bd086f1492a7c4d2e40ba96a31867ab98d8ddcf95b9c2",
-    "c82f617-focused.jsonl.gz": "dcddf6c677da2d8a5b0a763992f139226a4f1007ed1b460c6401a4810c05eb8b"
+    "c82f617-focused.jsonl.gz": "dcddf6c677da2d8a5b0a763992f139226a4f1007ed1b460c6401a4810c05eb8b",
+    "c82f617-full-7c0a9ce-transitions.json.gz": "1fe77c91b7216be0e1062b841e32ad2cfa0ecc71cdb9f42f38a4f85448d08f93",
+    "c82f617-full-6456b53-transitions.json.gz": "ca9705a901208892691f977e767c8f5dba6e98863acd1208a26b144722a34b30",
+    "c82f617-full.jsonl.gz": "c42967a133f6877467799e43ee6b9501168b8f68ccc955013ebae47ca9bcbc2f",
+    "c82f617-full-5868d51-transitions.json.gz": "0993f5e7a4ce7f01ebeef07544911b612163aa9e6c125e5e2286fd8c7f0bc13e",
+    "c82f617-full.json.gz": "f2a5ee5190d554bd3b14a55d76b651967b565b45eb7ea8d51af57a43e48d9612",
+    "c82f617-full-pr23-transitions.json.gz": "793772990ae52d222a294b945f7e42130c0ec2cc718e8e05d54eddfb03e1c900"
   },
   "worker_sha256": "d4b6e2cbebdeec92f668f7dadc76e284b9a27250721daf6ec94e79c15cbe93a6",
   "focused": {
@@ -70,5 +76,33 @@
     "new_passes": 48,
     "lost_passes": 0,
     "baseline": "Matching projection from independent 5868d51 full report"
-  }
+  },
+  "full": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 63673,
+      "fail": 39281,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 22266,
+    "lost_passes": 0,
+    "baseline": "PR #23"
+  },
+  "full_recent": {
+    "new_passes": 50,
+    "lost_passes": 0
+  },
+  "timeouts": [
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "script"
+    },
+    {
+      "test": "staging/sm/regress/regress-1507322-deep-weakmap.js",
+      "variant": "strict"
+    }
+  ]
 }

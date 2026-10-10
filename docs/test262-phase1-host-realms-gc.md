@@ -1,7 +1,7 @@
 # Phase 1 host, realms, and GC audit
 
 This audit records the staged implementation in draft PR #24. The latest
-completed full measurement is `5868d51`: 63,623/102,956 passed, with 22,216
+completed full measurement is `c82f617`: 63,673/102,956 passed, with 22,266
 new passes and zero lost passes against PR #23. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
 Phase 1 realm case complete. It does not classify all remaining conformance
@@ -423,3 +423,25 @@ failures and zero timeouts, crashes, harness errors or skips. Against the matchi
 timeout passed at unchanged limits. The focused gate permits a new full pinned
 corpus run, which is running; it does not replace the latest completed 5868d51
 full result. Exact focused reports, checkpoints and comparisons are archived.
+
+
+## Completed full validation: c82f617
+
+The complete pinned corpus passed 63,673/102,956 variants, with 39,281
+failures, two timeouts, zero harness errors, zero crashes and zero skips.
+Against PR #23: 22,266 new passes and zero lost passes. Against the previous
+5868d51 full run: 50 new passes and zero losses. Both timeouts remain the
+script/strict deep-WeakMap staging test. The two additional passes beyond the
+focus are the staging RegExp legacy-match regression variants.
+
+Configuration: revision 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81,
+workers four, timeout five seconds, fuel 1,000,000, loop budget 100,000,
+maximum call depth 128 and maximum jobs 10,000. Source identity, immutable
+worker checksum, reports, checkpoints, comparisons, archive digests and required
+check logs are recorded in tools/test262/evidence/foundations-realms-memory/c82f617*.
+
+This validates the realm-owned RegExp state and dictionary-layout follow-up;
+it does not close all Phase 1–3 dependencies. Observable computed class-key
+conversion and Symbol retention, dynamic home-object super lookup, complete
+realm/internal-operation coverage and remaining bytecode fallback are still
+open. Full-corpus AST/bytecode mismatches remain unmeasured. The PR remains a draft.
