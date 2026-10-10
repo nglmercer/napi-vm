@@ -1,7 +1,8 @@
 # Phase 1 host, realms, and GC audit
 
 This audit records the staged implementation in draft PR #24. The latest
-validated semantic source is `b28ddd0`; its full-corpus run completed with regressions. It records implemented
+completed full measurement is `b28ddd0`, which exposed regressions. The b0dc280
+follow-up passed required checks and the expanded focused regression gate. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
 Phase 1 realm case complete. It does not classify all remaining conformance
 failures as outside the foundation work.
@@ -277,3 +278,43 @@ and zero skips, harness errors, timeouts, or crashes. Against the matching 6456b
 full projection: 309 new passes and zero losses. All 38 variants in the 19 files
 containing the preceding full run's regressions passed under the original limits.
 These focused results measure the immutable b0dc280 worker, not subsequent edits.
+
+
+## Proxy private-field roots and receivers (436fb19)
+
+Proxy receivers now have lazily allocated private storage belonging to the Proxy,
+separate from the target and handler. Shared private-field get/set/initialization
+operations use it without invoking traps or checking revocation. Revocation removes
+target/handler references while retaining the Proxy's own private values.
+
+The collector traces a real edge to the private storage cell, including on revoked
+Proxies. Iterative destruction drains private values even after revocation, so
+10,000-element private-field chains do not recurse on the native stack. GC tests
+cover live private values, dead cycles, wrong/duplicate brands, escaped foreign
+constructors and allocation realms. Compiler/verifier/VM/differential fixtures
+cover stamping, updates, revoked receivers and duplicate initialization. Existing
+instance-field identities and constructor environments remain intact.
+
+This closes Proxy receiver storage/root coverage for the existing private-field
+foundation. Private methods/accessors/static elements still require the unified
+lexical identity and branding model; this section does not claim their completion.
+
+
+The 436fb19 required checks passed: formatting, strict workspace/all-target/all-feature
+Clippy, 925 workspace tests (four pre-existing ignored), 203 minimal-feature tests,
+73 Node tests, 15 WASM tests and ten runner/tooling tests. The subsequent frozen
+worker corpus results must be recorded separately from the earlier b0dc280 focus.
+
+
+The expanded class/host selection for the frozen 436fb19 worker passed
+25,751/33,063 variants, with 7,312 failures and zero skips, harness errors,
+timeouts or crashes. Against the matching 6456b53 full projection: 327 new passes
+and zero losses. Exact logs, checkpoints, comparisons and worker digests are
+archived under foundations-realms-memory.
+
+A subsequent root audit removes the hidden storage cell's incidental allocation
+realm edge. Stored guest values retain their own realms through their existing
+metadata; a primitive private value does not retain an otherwise dead foreign
+constructor realm. The WeakRef fixture proves that the foreign constructor can
+be collected while the stamped Proxy stays alive. This correction needs its own
+required checks and frozen-worker validation.
