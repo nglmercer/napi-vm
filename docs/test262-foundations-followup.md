@@ -178,6 +178,11 @@ their well-formed Unicode early error. Named imports share one parser; `from`, `
 and list separators are mandatory, and quoted names require local aliases in both
 ordinary and default-plus-named forms. AST/bytecode consume the same helpers.
 The combined core suite passes 655 tests; later frozen validation is still required.
+The first required workspace check for 80afd97 found the plugin preflight loader
+still expecting UTF-8 AST strings. That failure is retained. The corrected loader
+decodes requests at its host-resolution boundary and rejects unsupported strings
+as load errors, preserving UTF-16 syntax acceptance and avoiding path aliases.
+Strict workspace Clippy now passes; the corrected source requires fresh full checks.
 
 Source 421fd6d passed all required checks and its fresh full syntax audit. Exact
 logs/digests are retained; focused/full execution was explicitly deferred to the
