@@ -224,3 +224,14 @@ available without N-API and invokes it after an agent worker's VM and host
 callback roots drop. A native worker lifecycle test verifies that callback
 and realm cycles leave no tracked heap cells. This does not establish full
 Phase 1 completion or whole-corpus regression clearance.
+
+Source `32a469b` passes formatting, strict workspace Clippy, 989 workspace
+tests (four existing ignored), 205 minimal-feature tests, 73 Node tests,
+15 WASM tests and 12 tooling tests. Its full source audit rejects all 8,659
+parse-negative variants and retains the same 154 valid proposal/depth-limit
+rejections, with no newly rejected valid variants. All 532 contextual-binding
+cases match Node; an additional 1,144-case function/class/context probe also
+finds no syntax differences. The probe script, syntax reports, required-check
+logs and checksums are archived. These are syntax comparisons, not execution
+or AST/bytecode parity measurements. Expanded focused and full runtime
+validation remain pending for this source.

@@ -1,0 +1,88 @@
+{
+  "source_commit": "32a469b39a62f4b96d37af97d1b3c33c2120c730",
+  "classification": "Agent owner heap cleanup, shared contextual import bindings and UTF-16 module requests; execution validation pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 989,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 205,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 12,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "32a469b-allfeatures-tests.log.gz": "9300c197251bc4a34d48a8c1fc62645da9d4412b027c44e2fec3dc78734b9173",
+    "32a469b-clippy.log.gz": "ebb275a102389b53d526644a81bedaf549778392c21ba2870e0f413c22e4bccf",
+    "32a469b-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "32a469b-minimal-tests.log.gz": "af429824a330ebe7123f723148b93c2ea1eeec116aae78dcffe983b49117095a",
+    "32a469b-native-build.log.gz": "f7f714e89ae84932dcdb110f14879f378191eae4a98c83e6fd476cce685847e8",
+    "32a469b-node-tests.log.gz": "1db9674d793cc3099fe2e28229da984c897398c9713b83d31e45548fd9435297",
+    "32a469b-release-build.log.gz": "e7ca0c8d4e46a492a388f2760f6b303217a9d3f92d92652da4a41eaf99339a1f",
+    "32a469b-tooling-tests.log.gz": "47c3b5d1efc532ccca0bb002d5138c9b15090fd4d51a6681254d79a03764f196",
+    "32a469b-wasm-tests.log.gz": "070049c95879b18b5fd8c618edc25038c2fc25e90d7366fa0c0bb794058ccf64",
+    "32a469b-syntax.json.gz": "d9493f401a6420286ecd0f4a6a73740fb388fcb0696f60bd3a4967c3e0ea4c7e",
+    "32a469b-syntax.log.gz": "4dce0765803c57e3e4ace41f606bbb0cddb01b4df7d7a8fde220a08c3fb0d85d",
+    "32a469b-contextual.json.gz": "93efbd087d6c13cf6966d03a7f98b0a31156cb3221944e84ef37fc792e3eb9d2",
+    "32a469b-contextual.log.gz": "f81b0d8bab4b565b0c4386637f5f4ef1d3cc1b64de2a702d3b5f842fb184feff",
+    "32a469b-context-probe.py.gz": "5f0de95b4b491080268ba454b667113dcc090524517859157159b0187a266f1e",
+    "32a469b-context-probe.json.gz": "c997f5ca25be90a1ea984543dd40e5a645c233a3ceb654ff39b235036b98b87a"
+  },
+  "worker_sha256": "06b04d5d9ab917980c0d3ed7e9416f845a3242433a594c062c2ec6084a58e73b",
+  "syntax": {
+    "domain": "source syntax only",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "source_commit": "32a469b39a62f4b96d37af97d1b3c33c2120c730",
+    "engine_sha256": "345c8fb8594c97700874ec7f6c01d60561d429cf6f2daca4c436371d2165ed4b",
+    "total": 102956,
+    "counts": {
+      "parse_negative": 8659,
+      "accepted_invalid": 0,
+      "requires_acceptance": 94297,
+      "rejected_valid": 154
+    },
+    "limitations": [
+      "No harness or guest execution; acceptance is not a Test262 execution pass."
+    ]
+  },
+  "contextual_reference": {
+    "cases": 532,
+    "mismatches": 0,
+    "reference": "Node v24.19.0",
+    "domain": "syntax only"
+  },
+  "supplemental_context_probe": {
+    "cases": 1144,
+    "mismatches": 0,
+    "domain": "syntax only",
+    "script_archive": "32a469b-context-probe.py.gz"
+  }
+}
