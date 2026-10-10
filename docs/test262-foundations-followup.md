@@ -384,3 +384,20 @@ semantics remain open dependencies. Full-corpus AST/bytecode mismatches are
 unmeasured; targeted differential fixtures pass. The source syntax audit alone
 does not certify every static-semantics rule or classify all remaining failures
 as outside Phase 1–3.
+
+## Final merge preparation validation
+
+Source `5666d58` passes fmt, strict workspace/all-targets/all-features Clippy,
+TypeScript and workflow lint, and generated-binding checks. Rust passes 1,004
+workspace tests (four existing ignored) and 205 minimal-feature tests. The
+runtime-enabled addon passes all 1,450 Bun tests and 76 Node tests. The default
+addon passes 1,418 Bun tests and 68 Node tests, with respectively 32 and eight
+explicit optional-runtime skips. WASM passes 15 tests and Test262 tooling passes
+12 tests.
+
+The existing immutable Test262 repeat was independently recounted and compared
+against merged PR #24: 2,535 new passes and zero lost passes. The corpus was not
+rerun for these host-adapter/runtime fixes; shipping core and worker source are
+unchanged, apart from a test-only quota fixture. Known conformance gaps above
+remain open. Final logs, counts, hashes and the comparison are retained in
+[`merge-readiness-5666d58-summary.json`](../tools/test262/evidence/foundations-followup/merge-readiness-5666d58-summary.json).
