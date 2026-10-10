@@ -1,7 +1,7 @@
 # Phase 1 host, realms, and GC audit
 
 This audit records the staged implementation in draft PR #24. The latest
-validated semantic source is `b28ddd0`; its full-corpus run is in progress. It records implemented
+validated semantic source is `b28ddd0`; its full-corpus run completed with regressions. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
 Phase 1 realm case complete. It does not classify all remaining conformance
 failures as outside the foundation work.
@@ -234,10 +234,16 @@ full-report projection: 279 new passes and zero lost passes. Against 7c0a9ce:
 the failed runs and checks are archived alongside the successful evidence.
 
 The 236aafc full run was interrupted by an environment restart. Its incomplete
-checkpoint is archived without claiming full totals. The fresh b28ddd0 full run
-uses the pinned revision and required limits. Until it finishes, the latest valid
-full-corpus measurement remains 6456b53: 62,107/102,956, zero lost passes against
-PR #23, zero crashes/harness errors/skips, and two deep-WeakMap timeouts. Full-corpus
-AST/bytecode mismatch counts remain unmeasured. Known private-element, accessor
-storage, and Proxy/exotic dependencies remain open, so this is not a merge-ready
-Phase 1 completion claim.
+checkpoint is archived without claiming full totals. The b28ddd0 full run completed
+with the pinned revision and required limits: 62,596/102,956 passed, 40,347 failed,
+13 timed out, and zero skips, harness errors, or crashes. Against PR #23 there are
+21,210 new passes and 21 lost passes; against 6456b53 there are 522 new and 33 lost.
+The complete reports, checkpoints, and comparisons are archived. This result is
+not a passing regression gate. The losses identify callable global data being
+mistaken for getters, boxed-string enumeration, property-update null-check order,
+inherited exotic accessor receiver validation, and enumeration/shape performance.
+These require regression fixes and a new independent full run.
+
+Full-corpus AST/bytecode mismatch counts remain unmeasured. Known private-element,
+accessor storage, and Proxy/exotic dependencies remain open, so this is not a
+merge-ready Phase 1 completion claim.
