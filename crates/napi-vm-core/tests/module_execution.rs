@@ -419,3 +419,32 @@ fn malformed_utf16_module_requests_fail_at_linking_without_aliasing_paths() {
     vm.load_module("valid").unwrap();
     number(&mut vm, "effects", 1.);
 }
+
+#[test]
+fn contextual_default_import_bindings_link_and_evaluate_without_renaming() {
+    let mut vm = Interpreter::with_builtins();
+    source(&mut vm, "dep", "export default 42;");
+    for name in [
+        "from",
+        "as",
+        "of",
+        "get",
+        "set",
+        "async",
+        "constructor",
+        "undefined",
+    ] {
+        let module = format!("contextual-{name}");
+        source(
+            &mut vm,
+            &module,
+            &format!("import {name} from 'dep';export const answer={name};"),
+        );
+        vm.load_module(&module).unwrap();
+        number(
+            &mut vm,
+            &format!("import {{answer}} from '{module}';answer;"),
+            42.,
+        );
+    }
+}

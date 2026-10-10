@@ -194,3 +194,28 @@ rejected, zero accepted-invalid variants and the same 154 proposal/depth-limit
 rejections. Its execution was explicitly deferred to this combined Phase 1/2
 source. These results are archived under foundations-followup/421fd6d* and do not
 measure the later UTF-16/import changes.
+
+### Contextual default import bindings
+
+An additional differential source audit compares 532 contextual binding cases
+against Node across Script, strict Script and Module goals. Source cac9c3a agrees
+on 524 cases and incorrectly rejects eight contextual default import bindings.
+The default-import position now uses the existing BindingIdentifier parser, as
+namespace/named imports and other declarations do. Positive and reserved-name
+regressions include from, as, of, get, set, async, constructor and undefined;
+module execution verifies the actual imported bindings. The combined core suite
+passes 657 tests. The prior eight mismatches are retained as evidence, not waived.
+
+The reproducible syntax-only tool checks complete ordered outcomes, rejects
+missing/duplicate/invalid rows and requires a working Node module parser:
+
+```sh
+python3 tools/test262/audit_contextual_bindings.py \
+  --engine artifacts/test262/engines/syntax-audit-SOURCE \
+  --source-commit FULL_SOURCE_COMMIT \
+  --output artifacts/test262/contextual-SOURCE.json
+```
+
+It does not execute harnesses or replace full-corpus AST/bytecode differential
+measurement. All twelve runner/tooling tests pass. The later frozen source must
+repeat this comparison, the pinned audit and execution gates.

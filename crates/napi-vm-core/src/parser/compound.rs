@@ -449,9 +449,8 @@ impl Parser {
 
     pub(super) fn import(&mut self) -> Option<Statement> {
         self.adv();
-        let def = if let Token::Identifier(n) | Token::EscapedIdentifier(n) = self.cur() {
-            let nm = n.clone();
-            self.adv();
+        let def = if self.cur().identifier_name().is_some() {
+            let nm = self.ident()?;
             if self.eat(&Token::Comma) {
                 if self.eat(&Token::LBrace) {
                     let nd = self.named_imports()?;

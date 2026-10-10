@@ -1625,3 +1625,38 @@ fn imports_require_from_as_and_specifier_separators() {
         );
     }
 }
+
+#[test]
+fn default_import_bindings_use_the_common_contextual_identifier_grammar() {
+    for name in [
+        "from",
+        "as",
+        "of",
+        "get",
+        "set",
+        "async",
+        "constructor",
+        "undefined",
+    ] {
+        for clause in [
+            format!("{name}"),
+            format!("{name},{{value as binding}}"),
+            format!("{name},* as namespace"),
+        ] {
+            let source = format!("import {clause} from 'module';");
+            assert!(
+                parses(&source, ParseGoal::Module),
+                "rejected contextual import binding: {source}"
+            );
+        }
+    }
+    for name in [
+        "await", "yield", "static", "let", "class", "if", "true", "null",
+    ] {
+        let source = format!("import {name} from 'module';");
+        assert!(
+            !parses(&source, ParseGoal::Module),
+            "accepted reserved import binding: {source}"
+        );
+    }
+}

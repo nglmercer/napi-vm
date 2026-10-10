@@ -189,6 +189,23 @@ logs/digests are retained; focused/full execution was explicitly deferred to the
 combined Phase 1/2 source after review found these additional parser gaps. No
 execution corpus result is claimed for 421fd6d.
 
+## Contextual default import follow-up
+
+Manual review plus a 532-case Node syntax differential found eight valid contextual
+default import bindings rejected by cac9c3a. Default imports now use the existing
+BindingIdentifier parser rather than accepting only plain identifier tokens.
+Tests cover the eight contextual names, default-plus-named/namespace forms,
+reserved bindings and actual module evaluation. The combined core suite passes
+657 tests. The reproducible syntax differential and outcome-completeness tooling
+have twelve passing tests. Its results are distinct from execution tier parity.
+
+Source cac9c3a passed all required checks: 986 workspace tests (four existing
+ignored), 204 minimal-feature tests, 73 Node tests, 15 WASM tests, ten tooling
+tests, formatting and strict Clippy. Its pinned source audit still has zero
+accepted-invalid variants and 154 proposal/depth-limit rejections. Its full/focused
+execution was deferred to the contextual grammar correction; no execution result
+is claimed for cac9c3a. All logs and supplemental mismatches are archived.
+
 ## Remaining work
 
 Complete descriptor/internal-operation coverage remains open, including replacing
