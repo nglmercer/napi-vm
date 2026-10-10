@@ -298,3 +298,37 @@ per realm, with the standard method lengths and property attributes. Existing
 generic construction/mapper helpers are reused. Five focused realm tests and
 forced AST/bytecode parity pass, including a SAB-backed subclass. New required
 checks and focused/full execution are pending for this source.
+
+Source `be8ebf3` passes all required checks: fmt, strict workspace/all-targets/
+all-features Clippy, 1,003 workspace tests (four existing ignored), 205
+minimal-feature tests, 73 Node tests, 15 WASM tests and 12 tooling tests.
+The fresh source audit rejects all 8,659 parse-negative variants, retains
+154 previously classified proposal/depth-limit rejections, and matches the
+532-case contextual-binding Node comparison. The focus passes 47,017/60,040,
+with 44 new passes and zero losses against matching `193998b` variants;
+there are no crashes, timeouts, harness errors or skips in that focus.
+Both shared-memory TypedArray `from_realms.js` variants now pass.
+
+The first full run passes 66,207/102,956, with one lost pass caused by a new
+five-second timeout in the script variant of `staging/sm/Proxy/ownkeys-linear.js`.
+That failed regression gate is preserved. Both old and current workers pass
+both variants in isolated runs; eight timing probes take 2.48–3.23 seconds.
+The complete repeat, using the same immutable worker and required configuration,
+passes 66,208/102,956, with 36,746 failures, two known deep-WeakMap timeouts,
+and zero crashes, harness errors or skips. It gains 24,801 passes and loses
+none against PR #23; it gains 57 and loses none against `193998b`.
+All 8,659 parse-negative execution-phase/error classifications pass.
+Original and repeat reports, diagnostic timings, transitions, source audits,
+required-check logs and archive digests are retained in `be8ebf3-summary.json`.
+No isolated outcome is substituted into either full report.
+
+This remains a draft foundation implementation. Phase 1–2 completion is not
+claimed: conservative GC barriers for opaque suspended continuations and
+remaining realm/internal-operation dependencies still require work. Missing
+RegExp symbol algorithms and iterator helpers must be distinguished from
+working constructor-realm ownership. Descriptor/accessor storage, array literal
+elisions, class definition ordering and general reference/optional-chain
+semantics remain open dependencies. Full-corpus AST/bytecode mismatches are
+unmeasured; targeted differential fixtures pass. The source syntax audit alone
+does not certify every static-semantics rule or classify all remaining failures
+as outside Phase 1–3.
