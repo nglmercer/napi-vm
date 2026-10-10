@@ -1,7 +1,7 @@
 # Phase 1 host, realms, and GC audit
 
 This audit records the staged implementation in draft PR #24. The latest
-completed full measurement is `287bddc`: 62,671/102,956 passed, with 21,264
+completed full measurement is `5868d51`: 63,623/102,956 passed, with 22,216
 new passes and zero lost passes against PR #23. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
 Phase 1 realm case complete. It does not classify all remaining conformance
@@ -359,3 +359,13 @@ The frozen 5868d51 expanded selection passed 26,649/33,063 variants, with
 matching 287bddc full projection: 898 new passes, zero losses. This passed the
 regression gate for a new complete pinned corpus run. The full run must be
 reported independently when completed; these focused results do not replace it.
+
+
+The complete pinned 5868d51 run passed 63,623/102,956 variants: 39,331 failures,
+two timeouts, zero harness errors, zero crashes and zero skips. Compared with
+PR #23: 22,216 new passes, zero lost passes. Compared with 287bddc: 952 new
+passes, zero losses. Both timeouts are the existing script/strict deep-WeakMap
+staging test. Exact reports, checkpoints, comparisons and digests are archived.
+Full-corpus AST/bytecode mismatches remain unmeasured; the shared helpers and
+selected differential fixtures do not substitute for that measurement. Remaining
+realm/internal-operation dependencies still prevent declaring Phases 1–3 complete.
