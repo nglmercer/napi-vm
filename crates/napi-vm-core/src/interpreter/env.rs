@@ -324,6 +324,8 @@ impl Environment {
                 .extend(environment.private_declarations.iter().cloned());
             if !found_this && environment.own_binding("this").is_some() {
                 found_this = true;
+                context.super_property |=
+                    environment.own_binding(super::eval::HOME_OBJECT).is_some();
                 let mut closure = environment.parent.clone();
                 let mut derived = false;
                 while let Some(parent) = closure {
@@ -331,9 +333,11 @@ impl Environment {
                     if parent.own_binding("this").is_some() {
                         break;
                     }
-                    derived |= parent.own_binding("__super_ctor").is_some();
+                    derived |= parent
+                        .own_binding(super::eval::SUPER_CONSTRUCTOR_HOME)
+                        .is_some();
                     context.super_property |=
-                        parent.own_binding(super::eval::SUPER_PROTO).is_some();
+                        parent.own_binding(super::eval::HOME_OBJECT).is_some();
                     closure = parent.parent.clone();
                 }
                 context.super_call = environment.constructor_this.is_some() && derived;
@@ -1439,4 +1443,41 @@ pub struct Module {
     /// without colliding. Kept here so a re-entered module (a cycle, or a
     /// second `import`) continues in the scope it started in.
     pub scope: Option<Env>,
+}
+
+#[cfg(test)]
+mod global_quota_tests {
+    use super::*;
+    use crate::Interpreter;
+
+    #[test]
+    fn guest_global_growth_is_bounded_and_updates_and_deletes_preserve_quota() {
+        let mut vm = Interpreter::with_builtins();
+        assert_eq!(
+            vm.persistent_global.borrow().global_limit,
+            Some(MAX_GLOBAL_BINDINGS)
+        );
+        // Exercise the production quota branch with a small fixture; filling
+        // the hard limit through guest descriptors is quadratic setup work.
+        {
+            let mut global = vm.persistent_global.borrow_mut();
+            let occupied =
+                global.vars.len() + global.global_environment.as_ref().unwrap().user_names.len();
+            global.global_limit = Some(occupied + 8);
+        }
+        assert!(matches!(
+            vm.eval_source("try { for(let i=0;i<16;i++)globalThis['guest_'+i]=i; } catch(e) { e instanceof RangeError && e.message==='Maximum global binding count exceeded'; }"),
+            Ok(Value::Bool(true))
+        ));
+        assert!(vm.global_value("guest_7").is_some());
+        assert!(vm.global_value("guest_8").is_none());
+        assert!(matches!(
+            vm.eval_source("globalThis.guest_0=42; guest_0;"),
+            Ok(Value::Number(42.))
+        ));
+        assert!(matches!(
+            vm.eval_source("delete globalThis.guest_0; globalThis.replacement=42; replacement;"),
+            Ok(Value::Number(42.))
+        ));
+    }
 }

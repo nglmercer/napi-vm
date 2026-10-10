@@ -385,3 +385,66 @@ fn dynamic_import_uses_abstract_to_string_and_rejects_coercion_errors() {
         Ok(Value::Bool(true))
     ));
 }
+
+#[test]
+fn malformed_utf16_module_requests_fail_at_linking_without_aliasing_paths() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var effects=0;").unwrap();
+    source(&mut vm, "\u{fffd}", "effects++;export const value=42;");
+    for (index, declaration) in [
+        r"import '\uD800';",
+        r"import {value} from '\uD800';",
+        r"export * from '\uD800';",
+        r"export * as ns from '\uD800';",
+        r"export {value} from '\uD800';",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let name = format!("request{index}");
+        source(&mut vm, &name, &format!("effects++;{declaration}"));
+        let error = vm.link_module(&name).unwrap_err();
+        assert!(
+            error.to_string().contains("TypeError")
+                && error.to_string().contains("UTF-8 host loader"),
+            "{declaration}: {error}"
+        );
+        number(&mut vm, "effects", 0.);
+    }
+    source(
+        &mut vm,
+        "valid",
+        "import {value} from '\u{fffd}';export {value};",
+    );
+    vm.load_module("valid").unwrap();
+    number(&mut vm, "effects", 1.);
+}
+
+#[test]
+fn contextual_default_import_bindings_link_and_evaluate_without_renaming() {
+    let mut vm = Interpreter::with_builtins();
+    source(&mut vm, "dep", "export default 42;");
+    for name in [
+        "from",
+        "as",
+        "of",
+        "get",
+        "set",
+        "async",
+        "constructor",
+        "undefined",
+    ] {
+        let module = format!("contextual-{name}");
+        source(
+            &mut vm,
+            &module,
+            &format!("import {name} from 'dep';export const answer={name};"),
+        );
+        vm.load_module(&module).unwrap();
+        number(
+            &mut vm,
+            &format!("import {{answer}} from '{module}';answer;"),
+            42.,
+        );
+    }
+}

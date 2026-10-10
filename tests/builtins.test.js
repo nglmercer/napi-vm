@@ -18,15 +18,6 @@ test("Math constants", () => {
   expect(runCode("Math.SQRT2;")).toContain("1.414");
 });
 
-test("console exists as object", () => {
-  expect(runCode("typeof console;")).toBe("object");
-});
-
-test("console has log member", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof console.log;")).toBe("function");
-});
-
 test("JSON exists", () => {
   expect(runCode("typeof JSON;")).toBe("object");
 });
@@ -94,84 +85,10 @@ test("Reflect exists with members", () => {
   expect(vm.run("'has' in Reflect;")).toBe("true");
 });
 
-test("Intl exists with members", () => {
+test("unsupported Intl formatters are absent", () => {
   const vm = new Vm();
-  expect(vm.run("'DateTimeFormat' in Intl;")).toBe("true");
-  expect(vm.run("'NumberFormat' in Intl;")).toBe("true");
-});
-
-test("process exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'env' in process;")).toBe("true");
-  expect(vm.run("'argv' in process;")).toBe("true");
-  expect(vm.run("'cwd' in process;")).toBe("true");
-  expect(vm.run("'pid' in process;")).toBe("true");
-  expect(vm.run("'platform' in process;")).toBe("true");
-  expect(vm.run("'version' in process;")).toBe("true");
-});
-
-test("Buffer exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'alloc' in Buffer;")).toBe("true");
-  expect(vm.run("'from' in Buffer;")).toBe("true");
-  expect(vm.run("'concat' in Buffer;")).toBe("true");
-  expect(vm.run("'isBuffer' in Buffer;")).toBe("true");
-});
-
-test("crypto exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'getRandomValues' in crypto;")).toBe("true");
-  expect(vm.run("'randomUUID' in crypto;")).toBe("true");
-  expect(vm.run("'subtle' in crypto;")).toBe("true");
-});
-
-test("navigator exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'userAgent' in navigator;")).toBe("true");
-  expect(vm.run("'language' in navigator;")).toBe("true");
-  expect(vm.run("'platform' in navigator;")).toBe("true");
-});
-
-test("performance exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'now' in performance;")).toBe("true");
-});
-
-test("location exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'href' in location;")).toBe("true");
-  expect(vm.run("'protocol' in location;")).toBe("true");
-  expect(vm.run("'host' in location;")).toBe("true");
-  expect(vm.run("'pathname' in location;")).toBe("true");
-});
-
-test("localStorage exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'getItem' in localStorage;")).toBe("true");
-  expect(vm.run("'setItem' in localStorage;")).toBe("true");
-  expect(vm.run("'removeItem' in localStorage;")).toBe("true");
-  expect(vm.run("'clear' in localStorage;")).toBe("true");
-});
-
-test("URL exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'createObjectURL' in URL;")).toBe("true");
-  expect(vm.run("'revokeObjectURL' in URL;")).toBe("true");
-});
-
-test("WebSocket exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'CONNECTING' in WebSocket;")).toBe("true");
-  expect(vm.run("'OPEN' in WebSocket;")).toBe("true");
-  expect(vm.run("'CLOSING' in WebSocket;")).toBe("true");
-  expect(vm.run("'CLOSED' in WebSocket;")).toBe("true");
-});
-
-test("Response exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'json' in Response;")).toBe("true");
-  expect(vm.run("'text' in Response;")).toBe("true");
-  expect(vm.run("'redirect' in Response;")).toBe("true");
+  expect(vm.run("'DateTimeFormat' in Intl;")).toBe("false");
+  expect(vm.run("'NumberFormat' in Intl;")).toBe("false");
 });
 
 test("ArrayBuffer exists with isView", () => {
@@ -185,21 +102,8 @@ test("BigInt exists with members", () => {
   expect(vm.run("'asUintN' in BigInt;")).toBe("true");
 });
 
-test("module.exports exists", () => {
-  const vm = new Vm();
-  expect(vm.run("'exports' in module;")).toBe("true");
-});
-
-test("history exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'pushState' in history;")).toBe("true");
-  expect(vm.run("'replaceState' in history;")).toBe("true");
-  expect(vm.run("'back' in history;")).toBe("true");
-  expect(vm.run("'forward' in history;")).toBe("true");
-});
-
-test("screen exists with members", () => {
-  const vm = new Vm();
-  expect(vm.run("'width' in screen;")).toBe("true");
-  expect(vm.run("'height' in screen;")).toBe("true");
-});
+for (const name of ["console", "process", "Buffer", "crypto", "navigator", "performance", "location", "localStorage", "URL", "WebSocket", "Response", "module", "history", "screen"]) {
+  test(`${name} is absent from the default engine`, () => {
+    expect(runCode(`typeof ${name};`)).toBe("undefined");
+  });
+}

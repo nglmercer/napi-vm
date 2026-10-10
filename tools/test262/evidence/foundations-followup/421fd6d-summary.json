@@ -1,0 +1,67 @@
+{
+  "source_commit": "421fd6daa63fb0fbde0183fe9ee7d711ce536039",
+  "classification": "Phase 1 abstract Iterator and array-native method ownership; required checks passed",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 980,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "421fd6d-allfeatures-tests.log.gz": "8e480d196a2781b12d2afb0055479edb0e774312ff8c3b5a93772404053234da",
+    "421fd6d-clippy.log.gz": "b43867c3e9a6f4688003d6cc089eff0765ce89205fe16fc9678c29d957592118",
+    "421fd6d-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "421fd6d-minimal-tests.log.gz": "882a4dcffc05a269e32dae3c6b6d3ff677029e4c0094eee302b418b9b41e9c6d",
+    "421fd6d-native-build.log.gz": "83dfa5acddc21278d74263dbd651e59a28477126ab9889c67aeced89d83fb6a5",
+    "421fd6d-node-tests.log.gz": "95d8e94b0a551c3c30b24322062b48ac5f29a26efcb4454939e631c62597a728",
+    "421fd6d-release-build.log.gz": "4c06a2fd2ec3a54a9544ceefbaadfa3fdced6419ae4b52b8d8ceffde64623088",
+    "421fd6d-tooling-tests.log.gz": "303067a8b48da8c84f103d1818a82836a1848c3ba812beecdb05530ba734a815",
+    "421fd6d-wasm-tests.log.gz": "b4c8dcb9cbbb4e26277532d7a2de23c05bccf2c4fdc23626152ea69f3d9658f4",
+    "421fd6d-syntax.json.gz": "494e02cc104fc4ed26cc84f36127e342967b26d98ea8f1cda83753e5ffc711b0"
+  },
+  "worker_sha256": "af8e3dd1420cdc24077c2b8548bccd658a4f350e5ad64269c8bfc8c68c5943ae",
+  "execution_deferred": "Focused/full execution deferred to the combined Phase 1/2 source fixing UTF-16 module requests and import grammar. No execution corpus result is claimed for 421fd6d.",
+  "syntax_audit": {
+    "source_commit": "421fd6daa63fb0fbde0183fe9ee7d711ce536039",
+    "engine_sha256": "6c73f413001bc73df98824466ad6093080e876eaa394b41b59735fde5ea8ad70",
+    "total": 102956,
+    "counts": {
+      "parse_negative": 8659,
+      "accepted_invalid": 0,
+      "requires_acceptance": 94297,
+      "rejected_valid": 154
+    }
+  }
+}

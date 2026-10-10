@@ -313,10 +313,8 @@ export default {
     let requireThrew = false;
     try { require("node:fs"); } catch (error) { requireThrew = true; }
     return {
-      // The VM ships inert stubs for these; they are empty objects, never
-      // Node's real bindings.
-      requireStub: JSON.stringify(require),
-      processStub: JSON.stringify(process),
+      requireType: typeof require,
+      processType: typeof process,
       requireThrew: requireThrew,
       bun: typeof Bun,
       deno: typeof Deno,
@@ -327,8 +325,8 @@ export default {
 `,
   });
   expect(makeHost().load(dir).loadResult).toEqual({
-    requireStub: "{}",
-    processStub: "{}",
+    requireType: "undefined",
+    processType: "undefined",
     requireThrew: true,
     bun: "undefined",
     deno: "undefined",

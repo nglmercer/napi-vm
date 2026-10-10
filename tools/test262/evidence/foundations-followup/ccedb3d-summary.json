@@ -1,0 +1,74 @@
+{
+  "source_commit": "ccedb3df5015aabb8eac5f6d4c2f036e34e38225",
+  "classification": "Shared computed key reads, String coercion and literal prototype semantics; focused evidence, full pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 971,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "ccedb3d-allfeatures-tests.log.gz": "da7eb3ab9317e7ae41060d0f6f83c30d6804aaa68c94499c0d1e2cc7f4cf60e3",
+    "ccedb3d-clippy.log.gz": "38cd191c7c6d10f88d339bb807f6dd54718492c1af8cfa91bb9012499b3ed154",
+    "ccedb3d-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "ccedb3d-minimal-tests.log.gz": "cbfe1473cac788a103166f6bf42204c11e9b397926619fe2729d60c4931fe015",
+    "ccedb3d-native-build.log.gz": "09db752330ff755fed0e3e02c688c52838822f408fde87f7a5a18e47c30d4421",
+    "ccedb3d-node-tests.log.gz": "5f680ec953835c95f755ac463350acfa7d645eef5718d22dc1bb41fc609d58ab",
+    "ccedb3d-release-build.log.gz": "44fa7ef0d42315f98023ec7b16f1b16a9fd224f54678a86271872eda6f0d4fcf",
+    "ccedb3d-tooling-tests.log.gz": "ad781c83338312f53048e610749ae35abeb332bac69406c0c6222971a6ac90e4",
+    "ccedb3d-wasm-tests.log.gz": "d0ad05bacbb1fabe08d9fe39cc055064ab7151e2e6f7a7b7bde3e0164e03a01c",
+    "ccedb3d-focused-transitions.json.gz": "5da6b9bcefaf33f9a8f8b0cd317e84ad0353832459e7aaf3a5711940d982cda1",
+    "ccedb3d-focused-c82f617-projection.json.gz": "69e605eb38b3db288b69840eccff42f2aa8fb63826fde58bd83249b574b3fb78",
+    "ccedb3d-focused-7c0a9ce-projection.json.gz": "afa38e17b85fda79b0248cc0387b32313694534d16d79cb744cacb8052893c54",
+    "ccedb3d-focused.jsonl.gz": "cf639ad5cfaa0a2868fc1e8029c9e3f3eea33666d9adecfec88d334011270448",
+    "ccedb3d-focused-c82f617-transitions.json.gz": "06513de37d76ca127c5c7737593569f19b34278a6f893bb3bb3943db87d61ced",
+    "ccedb3d-focused.json.gz": "2c419c562ce00acccd4ab04668338cb9b465c1195fc99b43235489fd9bc1dd00"
+  },
+  "worker_sha256": "4e8877170e2e70ada0e6df21a98aa6466d47c4cde58bc7d6cfcdb626292fb44a",
+  "focused": {
+    "total": 44330,
+    "current_counts": {
+      "pass": 36223,
+      "fail": 8107,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 1935,
+    "lost_passes": 8,
+    "baseline": "Matching projection from independent c82f617 full report"
+  }
+}

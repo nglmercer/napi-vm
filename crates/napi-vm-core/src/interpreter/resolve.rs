@@ -639,7 +639,7 @@ impl Interpreter {
         allow(dead_code)
     )]
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
-        let trap_key = self.proxy_property_key(key)?;
+        let trap_key = self.ecmascript_to_property_key(key)?;
         let property = self.property_key(&trap_key)?;
         let mut current = object.clone();
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
@@ -732,7 +732,19 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
-        self.with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, p, receiver))
+        // Canonical keys need no conversion and retain the shared lookup's
+        // diagnostic behavior. Check exotic-key receivers before conversion.
+        if matches!(p, Value::String(_) | Value::Symbol(_)) {
+            return self
+                .with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, p, receiver));
+        }
+        if matches!(o, Value::Null | Value::Undefined) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot read properties of null or undefined".into(),
+            ));
+        }
+        let key = self.ecmascript_to_property_key(p)?;
+        self.with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, &key, receiver))
     }
 
     fn get_prop_value_with_receiver_inner(
@@ -768,7 +780,7 @@ impl Interpreter {
         if let Some(proxy) = o.as_proxy() {
             let (target, handler) = proxy.snapshot()?;
             if let Some(trap) = self.proxy_trap(&handler, "get")? {
-                let key = self.proxy_property_key(p)?;
+                let key = self.ecmascript_to_property_key(p)?;
 
                 let result = self.call_this(
                     &trap,
@@ -800,7 +812,7 @@ impl Interpreter {
             _ if !self.seq(o, receiver) => o.exotic_properties(),
             _ => None,
         } {
-            let key = self.proxy_property_key(p)?;
+            let key = self.ecmascript_to_property_key(p)?;
             let slot = self.property_key(&key)?;
             let inherited = {
                 let own = props.borrow().iter().any(|(name, _)| name == &slot);
@@ -834,7 +846,8 @@ impl Interpreter {
             };
             // String keys delegate to `get_prop_value_str`; only exotic keys
             // reach this coercion.
-            Ok(name == self.property_key(p)?)
+            Ok(name == self.property_key(p)?
+                || matches!(p, Value::Symbol(_)) && name == self.property_function_name(p)?)
         };
         let is_getter = name_matches("get ")?;
         let is_setter_only = !is_getter && name_matches("set ")?;
@@ -911,7 +924,7 @@ impl Interpreter {
             let (target, handler) = proxy.snapshot()?;
             if let Some(trap) = self.proxy_trap(&handler, "get")? {
                 let trap_key = Value::String(crate::JsString::from_key(key));
-                let trap_key = self.proxy_property_key(&trap_key)?;
+                let trap_key = self.ecmascript_to_property_key(&trap_key)?;
 
                 let result = self.call_this(
                     &trap,
@@ -1906,6 +1919,11 @@ pub(crate) fn array_iter_with_kind(
     source: super::Value,
     kind: &str,
 ) -> Result<super::Value, crate::error::VmErr> {
+    if matches!(source, super::Value::Null | super::Value::Undefined) {
+        return Err(crate::error::VmErr::Msg(
+            "TypeError: Cannot create an array iterator from null or undefined".into(),
+        ));
+    }
     let iterator = super::Value::object(vec![
         ("__items__".into(), source),
         ("__cursor__".into(), super::Value::Number(0.0)),

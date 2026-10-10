@@ -75,7 +75,7 @@ fn reflect_get(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
             "TypeError: Reflect.get target must be an object".into(),
         ));
     }
-    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    let key = interp.ecmascript_to_property_key(&arg(&a, 1))?;
     let receiver = a.get(2).cloned().unwrap_or_else(|| target.clone());
     interp.get_prop_value_with_receiver(&target, &key, &receiver)
 }
@@ -119,7 +119,7 @@ fn reflect_define_property(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = reflect_object_target(&a)?;
-    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    let key = interp.ecmascript_to_property_key(&arg(&a, 1))?;
     let descriptor = super::object::to_property_descriptor(interp, &arg(&a, 2))?;
     interp
         .define_own_property(&target, &key, &descriptor)
@@ -132,7 +132,7 @@ fn reflect_get_own_descriptor(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = reflect_object_target(&a)?;
-    let key = interp.proxy_property_key(&arg(&a, 1))?;
+    let key = interp.ecmascript_to_property_key(&arg(&a, 1))?;
     super::object::descriptor_for_key_in(interp, &target, &key)
         .map(super::object::from_property_descriptor)
 }

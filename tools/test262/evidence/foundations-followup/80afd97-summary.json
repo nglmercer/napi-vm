@@ -1,0 +1,13 @@
+{
+  "source_commit": "80afd97d72179a2508a99a0190ef3054e74ad3c0",
+  "classification": "Required workspace Clippy gate blocked by plugin loader still expecting UTF-8 AST strings; core suite passed 655 tests",
+  "checks": {
+    "fmt": "passed",
+    "clippy": "failed: plugin loader AST type mismatch"
+  },
+  "archive_sha256": {
+    "80afd97-clippy.log.gz": "f85249f365f6730e2d2ef3781153f34460dbf98def35aad95227e26414943b12",
+    "80afd97-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+  },
+  "corpus": "Not run for this source; gate failure preserved."
+}

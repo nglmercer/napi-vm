@@ -811,6 +811,17 @@ fn run_loop(
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
                 }
+                Instr::ExpandSpread { dst, src } => {
+                    let source = frame.registers[src as usize].clone_for_execution();
+                    let values = interp.drain_iterable(&source)?;
+                    frame.registers[dst as usize] = Value::checked_array(values)?;
+                }
+                Instr::ConstructSpread { dst, callee, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let arguments = spread_argv(interp, frame, &template)?;
+                    let constructor = frame.registers[callee as usize].clone_for_execution();
+                    frame.registers[dst as usize] = interp.ctor(&constructor, arguments)?;
+                }
                 Instr::CallSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
                     let argv = spread_argv(interp, frame, &template)?;
@@ -1015,25 +1026,82 @@ fn run_loop(
                 },
                 Instr::SuperMember { dst, key } => {
                     let scope = current_scope(interp, frame);
-                    let proto = scope.borrow().get(crate::interpreter::SUPER_PROTO);
-                    let Some(proto) = proto else {
-                        return Err(VmErr::Msg(
-                            "'super' used outside a derived class".to_string(),
-                        ));
-                    };
                     let key = frame.registers[key as usize].clone_for_execution();
-                    let receiver = interp.resolve_this(&scope)?;
+                    let (base, receiver, key) = interp.super_reference(&scope, &key)?;
                     frame.registers[dst as usize] =
-                        interp.get_prop_value_with_receiver(&proto, &key, &receiver)?;
+                        interp.get_prop_value_with_receiver(&base, &key, &receiver)?;
                 }
-                Instr::SuperCall { dst, args, argc } => {
+                Instr::SuperReference {
+                    base,
+                    receiver,
+                    key,
+                    src,
+                } => {
+                    let source = frame.registers[src as usize].clone_for_execution();
+                    let reference =
+                        interp.super_reference(&current_scope(interp, frame), &source)?;
+                    frame.registers[base as usize] = reference.0;
+                    frame.registers[receiver as usize] = reference.1;
+                    frame.registers[key as usize] = reference.2;
+                }
+                Instr::GetPropertyWithReceiver {
+                    dst,
+                    base,
+                    receiver,
+                    key,
+                } => {
+                    frame.registers[dst as usize] = interp.get_prop_value_with_receiver(
+                        &frame.registers[base as usize],
+                        &frame.registers[key as usize],
+                        &frame.registers[receiver as usize],
+                    )?;
+                }
+                Instr::SetPropertyWithReceiver {
+                    base,
+                    receiver,
+                    key,
+                    value,
+                } => {
+                    interp.assign_property_with_receiver(
+                        &frame.registers[base as usize],
+                        &frame.registers[key as usize],
+                        frame.registers[value as usize].clone_for_execution(),
+                        &frame.registers[receiver as usize],
+                        current_scope(interp, frame).borrow().strict(),
+                    )?;
+                }
+                Instr::NumericUpdate {
+                    previous,
+                    updated,
+                    src,
+                    increment,
+                } => {
+                    let result =
+                        interp.numeric_update(&frame.registers[src as usize], increment)?;
+                    frame.registers[previous as usize] = result.0;
+                    frame.registers[updated as usize] = result.1;
+                }
+                Instr::SuperConstructor { dst } => {
+                    frame.registers[dst as usize] =
+                        interp.super_constructor(&current_scope(interp, frame))?;
+                }
+                Instr::SuperCall {
+                    dst,
+                    callee,
+                    args,
+                    argc,
+                } => {
+                    let target = frame.registers[callee as usize].clone_for_execution();
                     let argv = take_range(frame, args, argc)?;
-                    frame.registers[dst as usize] = super_call(interp, frame, argv)?;
+                    frame.registers[dst as usize] =
+                        interp.invoke_ctor(&target, Value::Undefined, argv)?;
                 }
-                Instr::SuperCallSpread { dst, tmpl } => {
+                Instr::SuperCallSpread { dst, callee, tmpl } => {
+                    let target = frame.registers[callee as usize].clone_for_execution();
                     let template = spread_template(frame, tmpl)?;
                     let argv = spread_argv(interp, frame, &template)?;
-                    frame.registers[dst as usize] = super_call(interp, frame, argv)?;
+                    frame.registers[dst as usize] =
+                        interp.invoke_ctor(&target, Value::Undefined, argv)?;
                 }
                 Instr::Raise { msg } => {
                     let message = const_string(frame.function, msg)?.to_string();
@@ -1049,8 +1117,7 @@ fn run_loop(
                 }
                 Instr::PropertyKey { dst, src } => {
                     let key = frame.registers[src as usize].clone_for_execution();
-                    let key = interp.property_key(&key)?;
-                    frame.registers[dst as usize] = Value::String(crate::JsString::from_key(&key));
+                    frame.registers[dst as usize] = interp.ecmascript_to_property_key(&key)?;
                 }
                 Instr::ClassScope { name } => {
                     let name = name
@@ -1109,7 +1176,7 @@ fn run_loop(
                         Constant::ExportNamedTemplate(template) => template.clone(),
                         _ => return Err(internal("bad export template")),
                     };
-                    interp.stmt_export_named(&template.specifiers, template.source.as_deref())?;
+                    interp.stmt_export_named(&template.specifiers, template.source.as_ref())?;
                 }
                 Instr::ExportAll { tmpl } => {
                     let template = match &frame.function.constants[tmpl as usize] {
@@ -1274,7 +1341,9 @@ fn build_class_from_template(
     template: &super::constants::ClassTemplate,
 ) -> Result<Value, VmErr> {
     use super::constants::{ClassMemberKind, ClassNameTemplate};
-    use crate::interpreter::{ClassAssembly, define_class_private_element, insert_class_accessor};
+    use crate::interpreter::{
+        ClassAssembly, define_class_private_element, insert_class_accessor, insert_class_method,
+    };
     use crate::value::PrivateElement;
 
     let member_scope = current_scope(interp, frame);
@@ -1285,14 +1354,15 @@ fn build_class_from_template(
         let value = frame.registers[reg as usize].clone_for_execution();
         (!matches!(value, Value::Undefined)).then(|| Rc::new(value))
     });
-    let member_closure = Interpreter::member_closure_env(&member_scope, &super_proto);
+    let member_closure = Interpreter::member_closure_env(&member_scope);
     member_closure.borrow_mut().replace_strict(Some(true));
 
     let mut private_statics = Vec::new();
-    let static_closure =
-        Interpreter::member_closure_env(&member_scope, &super_cls.clone().map(Rc::new));
+    let static_closure = Interpreter::member_closure_env(&member_scope);
     static_closure.borrow_mut().replace_strict(Some(true));
     let mut proto_props = Vec::new();
+    let mut proto_keys = Vec::new();
+    let mut static_keys = Vec::new();
     let mut statics = vec![(
         "name".to_string(),
         Value::String((template.name.clone()).into()),
@@ -1307,19 +1377,28 @@ fn build_class_from_template(
     )];
     let mut static_has_accessors = false;
     for member in &template.members {
-        let computed;
-        let key = match &member.name {
-            ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => name.clone(),
+        let property = match &member.name {
+            ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => {
+                Value::String(crate::JsString::from_key(name))
+            }
             ClassNameTemplate::Computed(reg) => {
-                computed = frame.registers[*reg as usize].clone_for_execution();
-                interp.property_key(&computed)?
+                frame.registers[*reg as usize].clone_for_execution()
             }
         };
+        let key = interp.property_key(&property)?;
+        let display_name = interp.property_function_name(&property)?;
+        if !matches!(member.name, ClassNameTemplate::Private(_)) {
+            if member.is_static {
+                static_keys.push(property);
+            } else {
+                proto_keys.push(property);
+            }
+        }
         // Computed names are known only now; static ones were set when
         // each function compiled.
         let display = |prefix: &str| match &member.name {
             ClassNameTemplate::Static(_) | ClassNameTemplate::Private(_) => None,
-            ClassNameTemplate::Computed(_) => Some(Rc::from(format!("{prefix}{key}"))),
+            ClassNameTemplate::Computed(_) => Some(Rc::from(format!("{prefix}{display_name}"))),
         };
         let closure = if member.is_static {
             static_closure.clone()
@@ -1341,7 +1420,7 @@ fn build_class_from_template(
                         PrivateElement::Method(fn_val),
                     )?;
                 } else if member.is_static {
-                    statics.push((key.clone(), fn_val));
+                    insert_class_method(&mut statics, key.clone(), fn_val);
                     static_attrs.push((
                         key,
                         PropAttrs {
@@ -1351,7 +1430,7 @@ fn build_class_from_template(
                         },
                     ));
                 } else {
-                    proto_props.push((key, fn_val));
+                    insert_class_method(&mut proto_props, key, fn_val);
                 }
             }
             ClassMemberKind::Getter | ClassMemberKind::Setter => {
@@ -1401,23 +1480,20 @@ fn build_class_from_template(
         }
     }
 
-    let super_ctor_value = Interpreter::super_ctor_for(&super_cls);
-    let ctor_closure = match (&super_ctor_value, template.ctor_computed_keys.is_empty()) {
-        (None, true) => member_closure.clone(),
-        _ => {
-            let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
-            if let Some(target) = super_ctor_value {
-                env.borrow_mut().set("__super_ctor", target);
-            }
-            for (index, reg) in template.ctor_computed_keys.iter().enumerate() {
-                let key = frame.registers[*reg as usize].clone_for_execution();
-                env.borrow_mut()
-                    .set(&super::constants::class_key_name(index), key);
-            }
-            env
-        }
-    };
-    let constructor = class_function(interp, frame, template.ctor_func, ctor_closure, None)?;
+    let ctor_closure = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
+    for (index, reg) in template.ctor_computed_keys.iter().enumerate() {
+        let key = frame.registers[*reg as usize].clone_for_execution();
+        ctor_closure
+            .borrow_mut()
+            .set(&super::constants::class_key_name(index), key);
+    }
+    let constructor = class_function(
+        interp,
+        frame,
+        template.ctor_func,
+        ctor_closure.clone(),
+        None,
+    )?;
     let mut static_elements = Vec::with_capacity(template.blocks.len());
     for block in &template.blocks {
         match block {
@@ -1431,10 +1507,14 @@ fn build_class_from_template(
             }
             super::constants::ClassStaticTemplate::Field { name, init } => {
                 let (key, private) = match name {
-                    ClassNameTemplate::Static(name) => (name.clone(), false),
-                    ClassNameTemplate::Private(name) => (name.clone(), true),
+                    ClassNameTemplate::Static(name) => {
+                        (Value::String(crate::JsString::from_key(name)), false)
+                    }
+                    ClassNameTemplate::Private(name) => {
+                        (Value::String(crate::JsString::from_key(name)), true)
+                    }
                     ClassNameTemplate::Computed(reg) => {
-                        (interp.property_key(&frame.registers[*reg as usize])?, false)
+                        (frame.registers[*reg as usize].clone_for_execution(), false)
                     }
                 };
                 static_elements.push(crate::interpreter::ClassStaticElement::Field {
@@ -1452,34 +1532,19 @@ fn build_class_from_template(
         constructor,
         constructor_length: template.ctor_length,
         proto_props,
+        proto_keys,
+        static_keys,
         statics,
         static_attrs,
         static_has_accessors,
         static_elements,
         private_scope: member_scope,
+        instance_home: member_closure,
+        static_home: static_closure,
+        constructor_home: ctor_closure,
         private_statics,
     })?;
     Ok(class_val)
-}
-
-/// `super(...)`: invoke the superclass constructor on the current `this`.
-fn super_call(
-    interp: &mut Interpreter,
-    frame: &CallFrame,
-    argv: Vec<Value>,
-) -> Result<Value, VmErr> {
-    let current = current_scope(interp, frame);
-    let scope = current.borrow();
-    let this_val = if frame.function.is_arrow {
-        scope.get("this").unwrap_or(Value::Undefined)
-    } else {
-        frame.this_value.clone()
-    };
-    let super_ctor = scope
-        .get("__super_ctor")
-        .ok_or_else(|| VmErr::Msg("super used outside a derived class".to_string()))?;
-    drop(scope);
-    interp.invoke_ctor(&super_ctor, this_val, argv)
 }
 
 /// Clone one verified operand range out of the register file.
@@ -1512,12 +1577,16 @@ fn build_object(
     frame: &CallFrame,
     template: &[PropEntry],
 ) -> Result<Value, VmErr> {
+    let home = Interpreter::member_closure_env(&current_scope(interp, frame));
     let mut object = Vec::new();
     let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
     let mut accessors = HashMap::new();
     let mut symbol_keys = Vec::new();
+    let mut prototype = None;
     for entry in template {
-        if entry.kind == PropKind::Spread {
+        if entry.kind == PropKind::Prototype {
+            prototype = Some(frame.registers[entry.val as usize].clone_for_execution());
+        } else if entry.kind == PropKind::Spread {
             let src = frame.registers[entry.val as usize].clone_for_execution();
             interp.for_each_spread_entry(&src, |key, value| {
                 insert_object_property(
@@ -1538,23 +1607,31 @@ fn build_object(
                 KeySrc::Const(index) => const_string(frame.function, index)?.to_string(),
                 KeySrc::Reg(reg) => match &frame.registers[reg as usize] {
                     Value::String(s) => s.to_key(),
-                    Value::Number(n) => n.to_string(),
+                    Value::Number(n) => crate::format::ecmascript_number_string(*n),
                     Value::Symbol(s) => {
                         let key = symbol_slot_key(s);
                         symbol_keys.push((key.clone(), s.clone()));
                         key
                     }
-                    // The compiler skips evaluating the value for these;
-                    // hitting one here means a hand-built unit.
-                    _ => continue,
+                    _ => return Err(internal("object template key was not normalized")),
                 },
             };
             let value = frame.registers[entry.val as usize].clone_for_execution();
+            let value = if matches!(
+                entry.kind,
+                PropKind::Method | PropKind::Getter | PropKind::Setter
+            ) {
+                Interpreter::object_method_with_home(&value, &home)
+            } else {
+                value
+            };
             let kind = match entry.kind {
-                PropKind::Data => None,
+                PropKind::Data | PropKind::Method => None,
                 PropKind::Getter => Some(ObjectAccessorKind::Getter),
                 PropKind::Setter => Some(ObjectAccessorKind::Setter),
-                PropKind::Spread => return Err(internal("misrouted spread entry")),
+                PropKind::Spread | PropKind::Prototype => {
+                    return Err(internal("misrouted object template entry"));
+                }
             };
             insert_object_property(
                 &mut object,
@@ -1579,6 +1656,10 @@ fn build_object(
             meta.set_symbol_key(&key, symbol);
         }
     }
+    if let Some(prototype) = prototype {
+        interp.initialize_literal_prototype(&result, &prototype)?;
+    }
+    Interpreter::initialize_object_home(&home, &result);
     Ok(result)
 }
 
@@ -1598,7 +1679,14 @@ fn spread_argv(
     let mut argv = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if entry.spread {
+        if entry.prepared {
+            let Value::Array(values) = &value else {
+                return Err(internal("spread snapshot is not an array"));
+            };
+            for value in values.borrow().iter() {
+                push_call_arg(&mut argv, value.clone())?;
+            }
+        } else if entry.spread {
             interp.append_iterable(&mut argv, &value, "Maximum argument count exceeded")?;
         } else {
             push_call_arg(&mut argv, value)?;
@@ -1616,7 +1704,16 @@ fn spread_array(
     let mut items = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if entry.spread {
+        if entry.prepared {
+            let Value::Array(values) = &value else {
+                return Err(internal("spread snapshot is not an array"));
+            };
+            let values = values.borrow();
+            if items.len().saturating_add(values.len()) > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            }
+            items.extend(values.iter().cloned());
+        } else if entry.spread {
             interp.append_iterable(&mut items, &value, "Maximum array length exceeded")?;
         } else {
             items.push(value);

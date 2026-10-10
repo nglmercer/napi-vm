@@ -1865,3 +1865,148 @@ fn inherited_exotic_accessors_validate_the_original_receiver() {
         "var object=Object.create(new Int32Array(1));var caught;try{object.buffer;}catch(e){caught=e;}caught instanceof TypeError;",
     );
 }
+
+#[test]
+fn abstract_iterator_constructor_uses_existing_realm_intrinsics() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    drop(child);
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()))===Iterator.prototype&&Object.getPrototypeOf(Iterator)===Function.prototype;",
+    );
+    truth(
+        &mut vm,
+        "var failures=0;try{Iterator();}catch(e){if(e instanceof TypeError)failures++;}try{new Iterator();}catch(e){if(e instanceof TypeError)failures++;}failures===2;",
+    );
+    truth(
+        &mut vm,
+        "class Derived extends Iterator{}var value=new Derived();Object.getPrototypeOf(value)===Derived.prototype&&value instanceof Iterator;",
+    );
+    truth(
+        &mut vm,
+        "var target=new other.Function();target.prototype=undefined;var value=Reflect.construct(Iterator,[],target);Object.getPrototypeOf(value)===other.Iterator.prototype;",
+    );
+    vm.collect_cycles();
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(value)===other.Iterator.prototype&&other.Iterator.prototype!==Iterator.prototype;",
+    );
+    truth(
+        &mut vm,
+        "var caught;try{other.Iterator();}catch(e){caught=e;}caught instanceof other.TypeError;",
+    );
+}
+
+#[test]
+fn iterator_intrinsic_accessors_keep_their_home_realm_and_receiver_operations() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    drop(child);
+    truth(
+        &mut vm,
+        "var d=Object.getOwnPropertyDescriptor(other.Iterator.prototype,'constructor');d.get.call(null)===other.Iterator&&Object.getPrototypeOf(d.get)===other.Function.prototype&&d.get.length===0&&d.set.length===1;",
+    );
+    truth(
+        &mut vm,
+        "other.Iterator=function Replacement(){};d.get.call()!==other.Iterator;",
+    );
+    truth(
+        &mut vm,
+        "d.get.call()===Object.getPrototypeOf(Object.getPrototypeOf(other.Array.prototype.values.call([]))).constructor;",
+    );
+    truth(
+        &mut vm,
+        "var d=Object.getOwnPropertyDescriptor(Iterator.prototype,'constructor');var object=Object.create(Iterator.prototype);Object.freeze(Iterator.prototype);d.set.call(object,42);Object.getOwnPropertyDescriptor(object,'constructor').value===42&&Iterator.prototype.constructor===Iterator;",
+    );
+    truth(
+        &mut vm,
+        "var d=Object.getOwnPropertyDescriptor(Iterator.prototype,Symbol.toStringTag);var object={};d.set.call(object,'custom');object[Symbol.toStringTag]==='custom'&&d.get.call()==='Iterator'&&d.get.name==='get [Symbol.toStringTag]';",
+    );
+    truth(
+        &mut vm,
+        "var errors=0;for(var receiver of [null,undefined,true,Iterator.prototype]){try{d.set.call(receiver,'bad');}catch(e){if(e instanceof TypeError)errors++;}}errors===4;",
+    );
+}
+
+#[test]
+fn escaped_array_methods_retain_allocation_and_error_realms_after_gc() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    vm.set_global_checked(
+        "values",
+        child.eval_source("Array.prototype.values").unwrap(),
+    )
+    .unwrap();
+    drop(child);
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(values)===other.Function.prototype&&values===other.Array.prototype[Symbol.iterator];",
+    );
+    truth(
+        &mut vm,
+        "var iterator=values.call([42]);Object.getPrototypeOf(Object.getPrototypeOf(iterator))===other.Iterator.prototype&&iterator.next().value===42;",
+    );
+    truth(
+        &mut vm,
+        "var failures=0;for(var name of ['values','keys','entries']){for(var receiver of [null,undefined]){try{other.Array.prototype[name].call(receiver);}catch(e){if(e instanceof other.TypeError)failures++;}}}failures===6;",
+    );
+}
+
+#[test]
+fn typed_array_static_methods_are_shared_inherited_and_realm_owned() {
+    let mut vm = Interpreter::with_builtins();
+    let child = vm.create_realm();
+    vm.set_global_checked("other", child.realm_global_object())
+        .unwrap();
+    drop(child);
+    assert!(vm.collect_cycles().skipped.is_none());
+    truth(
+        &mut vm,
+        r#"
+        var T=Object.getPrototypeOf(Int8Array);var U=Object.getPrototypeOf(other.Int8Array);
+        var d=Object.getOwnPropertyDescriptor(T,'from');
+        !Object.hasOwn(Int8Array,'from') && !Object.hasOwn(Uint8Array,'of') &&
+        Int8Array.from===Uint8Array.from && T.from===Int8Array.from &&
+        T.of===Float64Array.of && T.from!==U.from &&
+        T.from.length===3 && T.of.length===0 &&
+        d.writable && !d.enumerable && d.configurable &&
+        Object.getPrototypeOf(U.from)===other.Function.prototype;
+    "#,
+    );
+    truth(
+        &mut vm,
+        r#"
+        var from=other.Int8Array.from;
+        var a=from.call(Uint8Array,[1,2]);var b=Uint8Array.from.call(other.Int8Array,[3,4]);
+        var errors=0;try{from.call({},[]);}catch(e){if(e instanceof other.TypeError)errors++;}
+        a instanceof Uint8Array && b instanceof other.Int8Array && errors===1;
+    "#,
+    );
+}
+
+#[test]
+fn shared_typed_array_subclasses_inherit_generic_static_construction() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        r#"
+        var T=Object.getPrototypeOf(Int8Array);
+        class Shared extends T {
+            constructor(length) {
+                return Reflect.construct(Int8Array,[new SharedArrayBuffer(length)],new.target);
+            }
+        }
+        var a=Shared.from([1,2,3]);var b=Shared.of(4,5);
+        a instanceof Shared && a.buffer instanceof SharedArrayBuffer && a[2]===3 &&
+        b instanceof Shared && b[0]===4 && b[1]===5;
+    "#,
+    );
+}

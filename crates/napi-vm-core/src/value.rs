@@ -194,6 +194,8 @@ pub struct ObjectMeta {
     /// Cleared by `Object.preventExtensions`/`seal`/`freeze`: no new own
     /// properties may be added.
     pub non_extensible: bool,
+    /// Immutable-prototype exotics accept only their existing prototype.
+    pub(crate) immutable_prototype: bool,
     /// Module namespaces reject property writes while retaining live cells.
     pub module_namespace: bool,
     /// Whether `defineProperty` ever installed a getter/setter pair on this
@@ -290,6 +292,7 @@ impl std::fmt::Debug for ObjectMeta {
             .field("attrs", &self.attrs)
             .field("symbol_keys", &self.symbol_keys)
             .field("non_extensible", &self.non_extensible)
+            .field("immutable_prototype", &self.immutable_prototype)
             .field("module_namespace", &self.module_namespace)
             .field("has_accessors", &self.has_accessors)
             .field("boxed_primitive", &self.boxed_primitive)

@@ -1,116 +1,21 @@
 import { test, expect } from "bun:test";
 import { Vm, runCode } from "../index.js";
+import { runtimeFixture } from "./runtime-fixture.mjs";
 
-test("no access to real require", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof require;")).toBe("object");
+// The core exposes ECMAScript intrinsics, never inert placeholders for host APIs.
+for (const name of ["require", "process", "window", "self", "fetch", "setTimeout", "setInterval", "queueMicrotask", "console", "Worker", "SharedWorker", "__dirname", "__filename", "GPU", "GPUDevice", "GPUBuffer", "ReadableStream", "WritableStream", "TransformStream", "ServiceWorker", "ServiceWorkerContainer", "ServiceWorkerRegistration", "Event", "EventTarget", "CustomEvent", "AbortController", "TextEncoder", "TextDecoder", "Blob", "File", "FormData", "structuredClone", "indexedDB", "caches", "sessionStorage"]) {
+  test(`${name} is absent before runtime or host installation`, () => {
+    expect(runCode(`typeof ${name};`)).toBe("undefined");
+  });
+}
+
+test("globalThis is the guest global object", () => {
+  expect(runCode("typeof globalThis;")).toBe("object");
 });
 
-test("no access to real process", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof process;")).toBe("object");
-});
-
-test("globalThis is sandboxed object", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof globalThis;")).toBe("object");
-});
-
-test("window is sandboxed object", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof window;")).toBe("object");
-});
-
-test("self is sandboxed object", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof self;")).toBe("object");
-});
-
-test("fetch is absent until granted as a capability", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof fetch;")).toBe("undefined");
-});
-
-test("setTimeout schedules without a clock", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof setTimeout;")).toBe("function");
-  // The callback runs on the VM's own queue, after every microtask. There is
-  // no wall clock in the sandbox, so the delay only orders timers against
-  // each other.
-  expect(vm.run("let out = 'no'; setTimeout(() => { out = 'ran'; }, 1000); out;")).toBe("no");
-  expect(
-    vm.run("let out = []; setTimeout(() => out.push('b'), 10); setTimeout(() => out.push('a'), 1); await 0; out.join();"),
-  ).toBe("");
-});
-
-test("setInterval is the same scheduler as setTimeout", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof setInterval;")).toBe("function");
-});
-
-test("eval is sandboxed object", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof eval;")).toBe("object");
-});
-
-test("Worker is sandboxed object", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof Worker;")).toBe("object");
-});
-
-test("SharedWorker is sandboxed object", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof SharedWorker;")).toBe("object");
-});
-
-test("no filesystem access", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof __dirname;")).toBe("object");
-  expect(vm.run("typeof __filename;")).toBe("object");
-});
-
-test("GPU APIs are sandboxed objects", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof GPU;")).toBe("object");
-  expect(vm.run("typeof GPUDevice;")).toBe("object");
-  expect(vm.run("typeof GPUBuffer;")).toBe("object");
-});
-
-test("Web Streams are sandboxed objects", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof ReadableStream;")).toBe("object");
-  expect(vm.run("typeof WritableStream;")).toBe("object");
-  expect(vm.run("typeof TransformStream;")).toBe("object");
-});
-
-test("ServiceWorker APIs are sandboxed", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof ServiceWorker;")).toBe("object");
-  expect(vm.run("typeof ServiceWorkerContainer;")).toBe("object");
-  expect(vm.run("typeof ServiceWorkerRegistration;")).toBe("object");
-});
-
-test("DOM APIs are sandboxed objects", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof Event;")).toBe("object");
-  expect(vm.run("typeof EventTarget;")).toBe("object");
-  expect(vm.run("typeof CustomEvent;")).toBe("object");
-  expect(vm.run("typeof AbortController;")).toBe("object");
-});
-
-test("TextEncoder/TextDecoder are pure transforms", () => {
-  const vm = new Vm();
-  // Encoding and decoding are pure transforms, so they are implemented
-  // rather than stubbed; they reach nothing outside the sandbox.
-  expect(vm.run("typeof TextEncoder;")).toBe("function");
-  expect(vm.run("typeof TextDecoder;")).toBe("function");
-});
-
-test("Blob/File/FormData sandboxed", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof Blob;")).toBe("object");
-  expect(vm.run("typeof File;")).toBe("object");
-  expect(vm.run("typeof FormData;")).toBe("object");
+test("eval executes inside the guest realm", () => {
+  expect(runCode("typeof eval;")).toBe("function");
+  expect(runCode("eval('typeof process');")).toBe("undefined");
 });
 
 test("vm instances are isolated", () => {
@@ -139,9 +44,9 @@ test("cannot escape sandbox via the Function constructor", () => {
   // `Function` compiles source, but into *this* interpreter: the classic
   // escape works by reaching a host realm, and there is none to reach.
   expect(vm.run("typeof Function;")).toBe("function");
-  expect(vm.run("typeof new Function('return this')();")).toBe("undefined");
+  expect(vm.run("typeof new Function('return this')();")).toBe("object");
   expect(vm.run("new Function('return typeof Deno')();")).toBe("undefined");
-  expect(vm.run("new Function('return typeof globalThis.process.mainModule')();")).toBe(
+  expect(vm.run("new Function('return typeof globalThis.process')();")).toBe(
     "undefined",
   );
   // Constructor chains resolve to guest intrinsics. Dynamic source still
@@ -164,37 +69,13 @@ test("Proxy intercepts guest objects only", () => {
   expect(vm.run("new Proxy({ a: 1 }, {}).a;")).toBe("1");
 });
 
-test("structuredClone is a pure deep copy, not host reach", () => {
-  const vm = new Vm();
-  // It copies values the guest already holds; it reaches nothing.
-  expect(vm.run("typeof structuredClone;")).toBe("function");
-  expect(vm.run("structuredClone({ a: 1 }).a;")).toBe("1");
+const webRuntime = runtimeFixture({ webApis: true });
+webRuntime.test("explicit structuredClone copies guest values without host reach", () => {
+  expect(webRuntime.run("structuredClone({ a: 1 }).a;")).toBe("1");
+  expect(webRuntime.run("typeof process;")).toBe("undefined");
 });
 
-test("queueMicrotask runs on the VM's own queue", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof queueMicrotask;")).toBe("function");
-  expect(
-    vm.run("let out = []; queueMicrotask(() => out.push('later')); out.push('now'); await 0; out.join();"),
-  ).toBe("now,later");
-});
-
-test("indexedDB is sandboxed", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof indexedDB;")).toBe("object");
-  expect(vm.run("'open' in indexedDB;")).toBe("true");
-});
-
-test("caches is sandboxed", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof caches;")).toBe("object");
-  expect(vm.run("'open' in caches;")).toBe("true");
-  expect(vm.run("'has' in caches;")).toBe("true");
-});
-
-test("sessionStorage is sandboxed", () => {
-  const vm = new Vm();
-  expect(vm.run("typeof sessionStorage;")).toBe("object");
-  expect(vm.run("'getItem' in sessionStorage;")).toBe("true");
-  expect(vm.run("'setItem' in sessionStorage;")).toBe("true");
+const timersRuntime = runtimeFixture({ timers: true, clock: "virtual" });
+timersRuntime.test("explicit queueMicrotask runs on the owner's queue", () => {
+  expect(timersRuntime.run("var out=[]; queueMicrotask(() => out.push('later')); out.push('now'); await 0; out.join();")).toBe("now,later");
 });

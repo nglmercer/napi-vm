@@ -1,8 +1,11 @@
-import { test, expect } from "bun:test";
+import { runtimeFixture } from "../runtime-fixture.mjs";
+import { expect } from "bun:test";
 import { deepStrictEqual } from "node:assert";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDifferentialFixture } from "./run.mjs";
+
+const { test } = runtimeFixture({ console: true, timers: true });
 
 const testDir = fileURLToPath(new URL(".", import.meta.url));
 

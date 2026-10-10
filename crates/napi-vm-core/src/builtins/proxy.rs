@@ -271,17 +271,6 @@ impl Interpreter {
         self.get_method(handler, &Value::String(name.into()))
     }
 
-    /// Convert a property operand to its internal PropertyKey while retaining
-    /// symbols for proxy traps. The trap receives the original symbol value,
-    /// rather than a string description of it.
-    pub(crate) fn proxy_property_key(&mut self, key: &Value) -> Result<Value, VmErr> {
-        let primitive = self.coerce_object_to_primitive(key, "string")?;
-        match primitive {
-            Value::Symbol(_) => Ok(primitive),
-            _ => self.ecmascript_to_string(&primitive).map(Value::String),
-        }
-    }
-
     pub(crate) fn is_extensible(&mut self, value: &Value) -> Result<bool, VmErr> {
         if matches!(value, Value::GlobalObject) {
             return self.is_extensible(&self.realm_global_object());
@@ -371,7 +360,11 @@ impl Interpreter {
         if crate::interpreter::strict_equals(&old, requested) {
             return Ok(true);
         }
-        if !self.is_extensible(value)? {
+        if value
+            .property_cell()
+            .is_some_and(|properties| properties.meta.borrow().immutable_prototype)
+            || !self.is_extensible(value)?
+        {
             return Ok(false);
         }
         let mut current = requested.clone();

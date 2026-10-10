@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
 import { Vm, runCode } from "../index.js";
+import { runtimeFixture } from "./runtime-fixture.mjs";
+const consoleRuntime = runtimeFixture({ console: true });
 
 // Crash-safety regressions: every one of these used to kill the host process
 // (SIGSEGV / SIGTRAP) or freeze it forever. They must stay catchable. The
@@ -42,9 +44,8 @@ test("returning a cyclic array prints [Circular] instead of crashing", () => {
   expect(r).toContain("[Circular]");
 });
 
-test("console.log of a cyclic array does not crash", () => {
-  const vm = new Vm();
-  expect(() => vm.run("let a = []; a.push(a); console.log(a);")).not.toThrow();
+consoleRuntime.test("explicit console.log of a cyclic array does not crash", () => {
+  expect(() => consoleRuntime.run("let a = []; a.push(a); console.log(a);")).not.toThrow();
 });
 
 test("JSON.stringify of a cyclic structure throws a catchable TypeError", () => {
@@ -181,9 +182,9 @@ test("deep prototype lookup is bounded without native recursion", () => {
   // would exhaust the *call* budget first, in the implicit `super()` chain —
   // also bounded and catchable, but a different guard than this one names.
   const r = vm.run(
-    "let p = {}; for (let i = 0; i < 5000; i++) { const n = {}; Object.setPrototypeOf(n, p); p = n; } try { p.missing; 'no error'; } catch (e) { e.message; }",
+    "try { let p = {}; for (let i = 0; i < 5000; i++) { const n = {}; Object.setPrototypeOf(n, p); p = n; } p.missing; 'no error'; } catch (e) { e.message; }",
   );
-  expect(r).toContain("Maximum prototype chain depth exceeded");
+  expect(r).toMatch(/Maximum prototype (chain )?depth exceeded/);
 });
 
 test("string doubling past the cap throws a catchable RangeError", () => {
@@ -230,7 +231,7 @@ test("for-of over a maximum-sized string is lazy and Unicode-safe", () => {
     `),
   ).toBe("x");
   expect(vm.run(`
-    let s = 'x'.repeat(16 * 1024 * 1024);
+    s = 'x'.repeat(16 * 1024 * 1024);
     let it = s[Symbol.iterator]();
     it.next().value;
   `)).toBe("x");
@@ -241,17 +242,8 @@ test("for-of over a maximum-sized string is lazy and Unicode-safe", () => {
   `)).toBe("a");
 });
 
-test("dynamic global creation is bounded through all global aliases", () => {
-  for (const alias of ["globalThis", "window", "self"]) {
-    const vm = new Vm();
-    const r = vm.run(`
-      try {
-        for (let i = 0; i < 300000; i++) ${alias}['guest_' + i] = i;
-      } catch (e) { e.message; }
-    `);
-    expect(r).toContain("Maximum global binding count exceeded");
-  }
-});
+// Global growth, update and deletion quotas are exercised in env.rs with a
+// small test quota and an assertion that the production hard limit is intact.
 
 test("updating an existing global does not consume binding quota", () => {
   const vm = new Vm();

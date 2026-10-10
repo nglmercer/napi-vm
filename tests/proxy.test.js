@@ -93,7 +93,8 @@ test("property traps preserve symbol keys", () => {
 });
 
 test("the ownKeys trap answers Object.keys", () => {
-  expect(runCode("Object.keys(new Proxy({ a: 1 }, { ownKeys: () => ['x'] })).join();")).toBe("x");
+  expect(runCode("Object.keys(new Proxy({ a: 1 }, { ownKeys: () => ['x'] })).join();")).toBe("");
+  expect(runCode("Object.keys(new Proxy({ a: 1 }, { ownKeys: () => ['x'], getOwnPropertyDescriptor: () => ({ value: 1, enumerable: true, configurable: true }) })).join();")).toBe("x");
 });
 
 test("the apply trap intercepts calls", () => {

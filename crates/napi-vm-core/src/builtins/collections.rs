@@ -214,7 +214,6 @@ impl CollectionContext {
 }
 
 /// Called only after this arena's final interpreter has been dropped.
-#[cfg(feature = "napi")]
 pub(crate) fn clear_collection_cache() {
     PROTOTYPES.with(|protos| {
         for (_, _, pin) in protos.borrow_mut().drain(..) {
@@ -840,12 +839,14 @@ pub fn describe_collection(value: &Value) -> Option<String> {
     Some(format!("{}({})", kind.tag(), entries.borrow().len()))
 }
 
-#[cfg(all(test, feature = "napi"))]
+#[cfg(test)]
 mod lifecycle_tests {
     use super::*;
     #[test]
     fn final_owner_collection_releases_cached_intrinsic_pins() {
+        #[cfg(feature = "napi")]
         let mut context = crate::runtime::OwnerContext::default();
+        #[cfg(feature = "napi")]
         let _lease = context.enter();
         let vm = Interpreter::with_builtins();
         {

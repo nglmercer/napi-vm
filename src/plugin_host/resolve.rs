@@ -351,15 +351,19 @@ pub(super) fn static_module_specifiers(source: &str) -> Result<Vec<String>, Plug
     })?;
     let mut modules = Vec::new();
     for statement in statements.iter() {
-        match statement {
-            Statement::Import { module, .. } | Statement::ExportAll { source: module, .. } => {
-                modules.push(module.clone());
-            }
-            Statement::ExportNamed {
+        let request = match statement {
+            Statement::Import { module, .. }
+            | Statement::ExportAll { source: module, .. }
+            | Statement::ExportNamed {
                 source: Some(module),
                 ..
-            } => modules.push(module.clone()),
-            _ => {}
+            } => Some(module),
+            _ => None,
+        };
+        if let Some(request) = request {
+            modules.push(request.to_utf8().map_err(|_| PluginHostError::Load(
+                "guest module resolution failed: specifier is unsupported by the UTF-8 host loader".into(),
+            ))?);
         }
     }
     Ok(modules)
@@ -424,4 +428,31 @@ pub(super) fn module_id(root: &Path, path: &Path, name: &str) -> Result<String, 
         .collect::<Vec<_>>()
         .join("/");
     Ok(format!("./plugin:{name}/{relative}"))
+}
+
+#[cfg(test)]
+mod module_request_tests {
+    use super::static_module_specifiers;
+
+    #[test]
+    fn plugin_loader_rejects_unsupported_module_strings_after_parsing() {
+        for declaration in [
+            r"import '\uD800';",
+            r"export * from '\uDC00';",
+            r"export {value} from '\uD800';",
+        ] {
+            let error = static_module_specifiers(declaration)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("resolution failed") && error.contains("UTF-8 host loader"),
+                "{declaration}: {error}"
+            );
+            assert!(!error.contains("parse failed"), "{error}");
+        }
+        assert_eq!(
+            static_module_specifiers("import '\u{fffd}';").unwrap(),
+            vec!["\u{fffd}".to_string()]
+        );
+    }
 }

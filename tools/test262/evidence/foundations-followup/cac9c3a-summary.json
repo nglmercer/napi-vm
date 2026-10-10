@@ -1,0 +1,74 @@
+{
+  "source_commit": "cac9c3a9dc9d5ad751c21bc54f1b6448720f08ed",
+  "classification": "Combined iterator realm ownership and UTF-16/import grammar; required checks passed",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 986,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 204,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "cac9c3a-allfeatures-tests.log.gz": "4ada22944fc1ae3ae6e74613fee65f7a99300088df16f3664a902c89d597fc33",
+    "cac9c3a-clippy.log.gz": "1f6c9998b363642d1f72a6316fd5e23d4a8e23908af8ff04cc2b9b4bcb064e2c",
+    "cac9c3a-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "cac9c3a-minimal-tests.log.gz": "e010b99e1dfc02f0599f7575449af8715f0983433ec4d8790bfc9fbe5dbee03d",
+    "cac9c3a-native-build.log.gz": "6f4a6665ebb6242a4cec0621cc885c3531cf87330ae3f222ae622417a8790f33",
+    "cac9c3a-node-tests.log.gz": "1182f9144d81e2d1b331843d4df74a538bc3e0d4c4a95f73ca63e333eb534719",
+    "cac9c3a-release-build.log.gz": "3a0ac079267044f39e28a2437af362be310b5efd50ed8e0d4e853433fdb1f53f",
+    "cac9c3a-tooling-tests.log.gz": "f1bc88cda33511ca46c69515c7e7da41de73b54e1f9f634999e9e2faf66a6391",
+    "cac9c3a-wasm-tests.log.gz": "0668140675a8c039a53377d3923a5f053800d5962879b112d794b6aabde9a943",
+    "cac9c3a-syntax.json.gz": "e5a5bbc8c4705bf9f58ba0fea3f0fa7eafc673b5ec1ca8bdba6d48288406d5e5",
+    "cac9c3a-contextual-reference.json.gz": "df70f49386639ac8d6561f23d9951ec7799d51e336597b21ab5f4680110c5d24"
+  },
+  "worker_sha256": "312fcf911585669c05f5e34572fedce489fbe4aa859392a9110a24113f44b83f",
+  "execution_deferred": "Execution deferred to contextual-default-import grammar correction; no focused/full execution result is claimed for cac9c3a.",
+  "syntax_audit": {
+    "source_commit": "cac9c3a9dc9d5ad751c21bc54f1b6448720f08ed",
+    "engine_sha256": "57a7530b35bdbaea3fad405eb0c1be39d8f8f36d6ec58ae5204acce146843e3b",
+    "total": 102956,
+    "counts": {
+      "parse_negative": 8659,
+      "accepted_invalid": 0,
+      "requires_acceptance": 94297,
+      "rejected_valid": 154
+    }
+  },
+  "supplemental_syntax": {
+    "cases": 532,
+    "mismatches": 8,
+    "reference": "v24.19.0",
+    "description": "Default import contextual binding acceptance gaps; full outcomes retained."
+  }
+}

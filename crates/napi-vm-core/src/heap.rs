@@ -896,7 +896,6 @@ pub(crate) fn allocation_debt() -> usize {
     HEAP.with(|h| h.borrow().allocation_debt)
 }
 /// Collect only after an interpreter and its host-owned result have been dropped.
-#[cfg(feature = "napi")]
 #[doc(hidden)]
 pub fn collect_after_interpreter_drop() -> HeapStats {
     if HEAP.with(|heap| heap.borrow().interps.is_empty()) {

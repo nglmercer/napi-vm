@@ -316,6 +316,34 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
+    // Concrete constructors and user subclasses inherit the same methods
+    // from their realm's %TypedArray%; their receiver selects construction.
+    for (name, length, callable) in [
+        ("from", 3, typed_from as super::NativeFn),
+        ("of", 0, typed_of as super::NativeFn),
+    ] {
+        abstract_constructor
+            .set_prop(
+                name.into(),
+                super::native_method(
+                    name,
+                    length,
+                    callable,
+                    e.get("Function")
+                        .and_then(|function| function.get_prop("prototype")),
+                ),
+            )
+            .expect("TypedArray static method");
+        if let Value::Object { props } = &abstract_constructor {
+            props.meta.borrow_mut().set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+        }
+    }
     let species = super::well_known("species").expect("Symbol.species");
     if let Value::Symbol(symbol) = &species {
         let key = crate::interpreter::symbol_slot_key(symbol);
@@ -376,12 +404,6 @@ pub(super) fn install(e: &mut Environment) {
                 );
             }
         }
-        namespace
-            .set_prop("of".to_string(), super::nf("of", typed_of))
-            .expect("built-in typed-array property");
-        namespace
-            .set_prop("from".to_string(), super::nf("from", typed_from))
-            .expect("built-in typed-array property");
         namespace
             .set_prop(
                 KIND_SLOT.to_string(),

@@ -4,6 +4,7 @@ import { nodePlatform } from "../../../plugins/node.ts";
 
 const source = await Bun.file(process.argv[2]).text();
 const vm = new Vm();
+vm.enableRuntime({ console: true, timers: true });
 const loader = new GuestPackageLoader(vm, { platform: nodePlatform(), compilerMode: "none" });
 await loader.loadPackage("valibot");
 const validation = vm.validateModule(source);

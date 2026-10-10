@@ -213,7 +213,9 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             namespace,
             ..
         } => {
-            scope.modules.push(module.clone());
+            if let Ok(module) = module.to_utf8() {
+                scope.modules.push(module);
+            }
             if let Some(d) = default {
                 push(scope, d, CompletionKind::Variable, None);
             }
@@ -223,7 +225,9 @@ fn walk_stmt(s: &Statement, scope: &mut Scope, runtime_handlers: &HashMap<String
             if let Some(ns) = namespace {
                 push(scope, ns, CompletionKind::Module, None);
                 scope.namespaces.push(ns.clone());
-                scope.namespace_to_module.push((ns.clone(), module.clone()));
+                if let Ok(module) = module.to_utf8() {
+                    scope.namespace_to_module.push((ns.clone(), module));
+                }
             }
         }
         // Expressions, returns, throws, breaks, exports introduce no names.

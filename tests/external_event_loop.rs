@@ -64,8 +64,9 @@ fn tokio_current_thread_loop_delivers_host_callbacks_and_keeps_ticking() {
             callback,
             notifications: RefCell::new(receiver),
         }));
+        let (ready_sender, ready_receiver) = mpsc::channel();
         let producer = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(40));
+            ready_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
             sender.send("native-event".to_string()).unwrap();
         });
 
@@ -76,6 +77,9 @@ fn tokio_current_thread_loop_delivers_host_callbacks_and_keeps_ticking() {
             for _ in 0..30 {
                 interval.tick().await;
                 tick_count.set(tick_count.get() + 1);
+                if tick_count.get() == 3 {
+                    ready_sender.send(()).unwrap();
+                }
             }
         });
         let deadline = Instant::now() + Duration::from_secs(2);

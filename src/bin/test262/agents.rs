@@ -232,7 +232,7 @@ fn start(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmEr
                     .push(error.to_string());
             }
             worker_leaving.store(true, Ordering::Release);
-            CONTEXT.with(|slot| *slot.borrow_mut() = None);
+            finish_worker_owner();
         })
         .map_err(|error| VmErr::Msg(format!("Error: Cannot start agent: {error}")))?;
     state.workers.push(Worker {
@@ -246,6 +246,13 @@ fn start(vm: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmEr
         .recv()
         .map_err(|_| VmErr::Msg("Error: Agent failed to initialize".into()))?;
     Ok(Value::Undefined)
+}
+
+/// The worker VM has already dropped. Release host callback pins before the
+/// final collection, while this owner thread and its heap are still alive.
+fn finish_worker_owner() {
+    CONTEXT.with(|slot| *slot.borrow_mut() = None);
+    let _ = napi_vm::heap::collect_after_interpreter_drop();
 }
 
 fn run_worker(
@@ -505,6 +512,31 @@ fn monotonic_now(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worker_exit_releases_callback_and_realm_cycles() {
+        std::thread::spawn(|| {
+            let session = Session::new();
+            let mut vm = Interpreter::with_builtins();
+            vm.eval_source(
+                "var cycle = {}; cycle.self = cycle; function callback() { return cycle; }",
+            )
+            .unwrap();
+            let callback = vm.global.borrow().get("callback").unwrap();
+            context(|context| {
+                context.callback_root = Some(napi_vm::heap::add_root(callback.clone()));
+                context.callback = Some(callback);
+                Ok(())
+            })
+            .unwrap();
+            drop(vm);
+            finish_worker_owner();
+            assert_eq!(napi_vm::heap::counters().tracked, 0);
+            drop(session);
+        })
+        .join()
+        .unwrap();
+    }
 
     #[test]
     fn report_coercion_runs_before_taking_the_shared_queue_lock() {

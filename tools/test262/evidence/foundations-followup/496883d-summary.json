@@ -1,0 +1,15 @@
+{
+  "source_commit": "496883d92c83de10caa186d6a76aac31b58b3330",
+  "classification": "Failed workspace-test gate; no worker frozen or corpus run",
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": "aborted in parity test debug formatter after object prototype change"
+  },
+  "cause": "Legacy object fixture returned Object.prototype; canonical debug formatting recursed through its constructor/prototype cycle. Corrective fixture compares guest-visible prototype and own-property assertions.",
+  "archive_sha256": {
+    "496883d-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "496883d-clippy.log.gz": "e28a0a6381790d175daa5f8d0ae3eccf613bc755c274a2dd6c449c6eebcf5ad7",
+    "496883d-allfeatures-tests.log.gz": "b7c111aa75a2df95a9f537dde7dfa90ecb3153096379bc2f42c5aab9f20e35f9"
+  }
+}

@@ -742,6 +742,12 @@ impl<'a> Compiler<'a> {
 }
 
 #[derive(Clone, Copy)]
+enum CallArgs {
+    Range { start: Reg, argc: u16 },
+    Spread { tmpl: u16 },
+}
+
+#[derive(Clone, Copy)]
 enum Binding {
     Slot(Slot),
     Global,
@@ -1758,8 +1764,14 @@ impl<'a> Compiler<'a> {
                     return Err(Decline::Func("private destructuring writes"));
                 }
                 if matches!(object, Expr::Super) {
-                    // The reference fails before the property evaluates.
-                    return self.raise_bare_super().map(|_| ());
+                    let (base, receiver, key) = self.compile_super_reference(property)?;
+                    self.emit(Instr::SetPropertyWithReceiver {
+                        base,
+                        receiver,
+                        key,
+                        value: val,
+                    });
+                    return Ok(());
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -1816,6 +1828,7 @@ impl<'a> Compiler<'a> {
                             .iter()
                             .map(|reg| SpreadEntry {
                                 spread: false,
+                                prepared: false,
                                 reg: *reg,
                             })
                             .collect();
@@ -3441,30 +3454,20 @@ impl<'a> Compiler<'a> {
                 is_constructor: !is_async && !is_generator,
             }),
             Expr::New { callee, args } => {
-                // Spread in `new` is transparent (evaluates to one argument),
-                // like the evaluator — unlike call spread, which declines.
-                let mut compiled = Vec::with_capacity(args.len());
-                for arg in args {
-                    match arg {
-                        Expr::Spread(inner) => compiled.push(self.compile_expr(inner)?),
-                        _ => compiled.push(self.compile_expr(arg)?),
+                let callee = self.compile_expr(callee)?;
+                let arguments = self.compile_call_arguments(args)?;
+                let dst = self.alloc_reg()?;
+                match arguments {
+                    CallArgs::Range { start, argc } => self.emit(Instr::Construct {
+                        dst,
+                        callee,
+                        args: start,
+                        argc,
+                    }),
+                    CallArgs::Spread { tmpl } => {
+                        self.emit(Instr::ConstructSpread { dst, callee, tmpl })
                     }
                 }
-                let start = self.alloc_regs(compiled.len())?;
-                for (i, reg) in compiled.iter().enumerate() {
-                    self.emit(Instr::Mov {
-                        dst: start + i as u16,
-                        src: *reg,
-                    });
-                }
-                let callee = self.compile_expr(callee)?;
-                let dst = self.alloc_reg()?;
-                self.emit(Instr::Construct {
-                    dst,
-                    callee,
-                    args: start,
-                    argc: compiled.len() as u16,
-                });
                 Ok(dst)
             }
             Expr::Template { quasis, exprs } => self.compile_template(quasis, exprs),
@@ -3599,11 +3602,16 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::KeyValue(key, expression) => {
                     let val = self.compile_expr(expression)?;
+                    let kind = if key == "__proto__" {
+                        PropKind::Prototype
+                    } else {
+                        PropKind::Data
+                    };
                     let key = self.intern_string(key)?;
                     template.push(PropEntry {
                         key: Some(KeySrc::Const(key)),
                         val,
-                        kind: PropKind::Data,
+                        kind,
                     });
                 }
                 ObjectProp::ComputedMethod { .. } => {
@@ -3623,7 +3631,8 @@ impl<'a> Compiler<'a> {
                         }
                         Expr::Number(key) => {
                             let val = self.compile_expr(value_expression)?;
-                            let key = self.intern_string(&key.to_string())?;
+                            let key =
+                                self.intern_string(&crate::format::ecmascript_number_string(*key))?;
                             template.push(PropEntry {
                                 key: Some(KeySrc::Const(key)),
                                 val,
@@ -3633,22 +3642,16 @@ impl<'a> Compiler<'a> {
                         _ => {
                             let key = self.compile_expr(key_expression)?;
                             let normalized = self.alloc_reg()?;
-                            self.emit(Instr::NormalKey {
+                            self.emit(Instr::PropertyKey {
                                 dst: normalized,
                                 src: key,
                             });
-                            // Bad keys skip the value evaluation entirely.
-                            let end = self.emit_jump(|target| Instr::JumpIfNullish {
-                                src: normalized,
-                                target,
-                            });
                             let val = self.compile_expr(value_expression)?;
                             template.push(PropEntry {
-                                key: Some(KeySrc::Reg(key)),
+                                key: Some(KeySrc::Reg(normalized)),
                                 val,
                                 kind: PropKind::Data,
                             });
-                            self.patch_jump(end, self.here())?;
                         }
                     }
                 }
@@ -3674,7 +3677,7 @@ impl<'a> Compiler<'a> {
                     template.push(PropEntry {
                         key: Some(KeySrc::Const(key)),
                         val,
-                        kind: PropKind::Data,
+                        kind: PropKind::Method,
                     });
                 }
                 ObjectProp::Getter { name, body } => {
@@ -3735,12 +3738,22 @@ impl<'a> Compiler<'a> {
             for item in items {
                 match item {
                     Expr::Spread(inner) => {
-                        let reg = self.compile_expr(inner)?;
-                        template.push(SpreadEntry { spread: true, reg });
+                        let src = self.compile_expr(inner)?;
+                        let reg = self.alloc_reg()?;
+                        self.emit(Instr::ExpandSpread { dst: reg, src });
+                        template.push(SpreadEntry {
+                            spread: true,
+                            prepared: true,
+                            reg,
+                        });
                     }
                     _ => {
                         let reg = self.compile_expr(item)?;
-                        template.push(SpreadEntry { spread: false, reg });
+                        template.push(SpreadEntry {
+                            spread: false,
+                            prepared: false,
+                            reg,
+                        });
                     }
                 }
             }
@@ -3833,12 +3846,55 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn compile_super_reference(&mut self, property: &'a Expr) -> Result<(Reg, Reg, Reg), Decline> {
+        let src = self.compile_expr(property)?;
+        let base = self.alloc_reg()?;
+        let receiver = self.alloc_reg()?;
+        let key = self.alloc_reg()?;
+        self.emit(Instr::SuperReference {
+            base,
+            receiver,
+            key,
+            src,
+        });
+        Ok((base, receiver, key))
+    }
+
     fn compile_inc_dec(
         &mut self,
         op: UnOp,
         operand: &'a Expr,
         prefix: bool,
     ) -> Result<Reg, Decline> {
+        if let Expr::Member {
+            object, property, ..
+        } = operand.unparenthesized()
+            && matches!(object.as_ref(), Expr::Super)
+        {
+            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let src = self.alloc_reg()?;
+            self.emit(Instr::GetPropertyWithReceiver {
+                dst: src,
+                base,
+                receiver,
+                key,
+            });
+            let previous = self.alloc_reg()?;
+            let updated = self.alloc_reg()?;
+            self.emit(Instr::NumericUpdate {
+                previous,
+                updated,
+                src,
+                increment: op == UnOp::Inc,
+            });
+            self.emit(Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value: updated,
+            });
+            return Ok(if prefix { updated } else { previous });
+        }
         let delta = if op == UnOp::Inc { 1 } else { -1 };
         match operand {
             Expr::Identifier(name) => {
@@ -3898,7 +3954,11 @@ impl<'a> Compiler<'a> {
                 object, property, ..
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return self.raise_bare_super();
+                    self.compile_super_reference(property)?;
+                    let msg =
+                        self.intern_string("ReferenceError: Cannot delete a super property")?;
+                    self.emit(Instr::Raise { msg });
+                    return self.load_undefined();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -4014,7 +4074,11 @@ impl<'a> Compiler<'a> {
                 .unwrap_or(Constant::Undefined);
             let index = self.push_const(constant)?;
             let reg = self.load_const(index)?;
-            template.push(SpreadEntry { spread: false, reg });
+            template.push(SpreadEntry {
+                spread: false,
+                prepared: false,
+                reg,
+            });
         }
         let mut values = Vec::with_capacity(exprs.len());
         for expr in exprs {
@@ -4027,7 +4091,11 @@ impl<'a> Compiler<'a> {
         for part in raw {
             let index = self.push_const(Constant::String(part.clone()))?;
             let reg = self.load_const(index)?;
-            raw_template.push(SpreadEntry { spread: false, reg });
+            raw_template.push(SpreadEntry {
+                spread: false,
+                prepared: false,
+                reg,
+            });
         }
         let tmpl = self.push_const(Constant::SpreadTemplate(raw_template))?;
         let raw_parts = self.alloc_reg()?;
@@ -4105,234 +4173,178 @@ impl<'a> Compiler<'a> {
         self.alloc_reg()
     }
 
+    fn compile_call_reference(
+        &mut self,
+        callee: &'a Expr,
+        ends: &mut Vec<usize>,
+    ) -> Result<(Reg, Option<Reg>), Decline> {
+        match callee.unparenthesized() {
+            Expr::Member {
+                object,
+                property,
+                computed,
+            } => {
+                if matches!(object.as_ref(), Expr::Super) {
+                    let key = self.compile_expr(property)?;
+                    let function = self.alloc_reg()?;
+                    self.emit(Instr::SuperMember { dst: function, key });
+                    return Ok((function, Some(self.compile_this()?)));
+                }
+                let receiver = self.compile_expr(object)?;
+                let key = self.compile_expr(property)?;
+                let function = self.alloc_reg()?;
+                self.emit(Instr::GetProp {
+                    private: !computed && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
+                    cache: 0,
+                    dst: function,
+                    obj: receiver,
+                    key,
+                });
+                Ok((function, Some(receiver)))
+            }
+            Expr::OptionalChain {
+                object, property, ..
+            } => {
+                if matches!(property.as_ref(), Expr::Undefined) {
+                    let reference = self.compile_call_reference(object, ends)?;
+                    ends.push(self.emit_jump(|target| Instr::JumpIfNullish {
+                        src: reference.0,
+                        target,
+                    }));
+                    return Ok(reference);
+                }
+                let receiver = self.compile_expr(object)?;
+                ends.push(self.emit_jump(|target| Instr::JumpIfNullish {
+                    src: receiver,
+                    target,
+                }));
+                let key = self.compile_expr(property)?;
+                let function = self.alloc_reg()?;
+                self.emit(Instr::GetProp {
+                    private: false,
+                    cache: 0,
+                    dst: function,
+                    obj: receiver,
+                    key,
+                });
+                Ok((function, Some(receiver)))
+            }
+            other => Ok((self.compile_expr(other)?, None)),
+        }
+    }
+
+    /// Spread iterators run at their argument position, before later arguments.
+    fn compile_call_arguments(&mut self, args: &'a [Expr]) -> Result<CallArgs, Decline> {
+        if args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
+            let mut template = Vec::with_capacity(args.len());
+            for arg in args {
+                let (reg, spread) = if let Expr::Spread(inner) = arg {
+                    let src = self.compile_expr(inner)?;
+                    let dst = self.alloc_reg()?;
+                    self.emit(Instr::ExpandSpread { dst, src });
+                    (dst, true)
+                } else {
+                    (self.compile_expr(arg)?, false)
+                };
+                template.push(SpreadEntry {
+                    spread,
+                    prepared: spread,
+                    reg,
+                });
+            }
+            Ok(CallArgs::Spread {
+                tmpl: self.push_const(Constant::SpreadTemplate(template))?,
+            })
+        } else {
+            let start = self.alloc_regs(args.len())?;
+            for (index, arg) in args.iter().enumerate() {
+                let src = self.compile_expr(arg)?;
+                self.emit(Instr::Mov {
+                    dst: start + index as u16,
+                    src,
+                });
+            }
+            Ok(CallArgs::Range {
+                start,
+                argc: args.len() as u16,
+            })
+        }
+    }
+
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
         let callee = callee.unparenthesized();
         let direct_eval = matches!(callee, Expr::Identifier(name) if name == "eval");
         if direct_eval && (!self.top_level || self.scopes.len() != 1) {
-            // Dynamic access must see every lexical binding, including locals
-            // normally held only in registers. Keep the AST path until frames
-            // can materialize the complete environment for direct eval.
             return Err(Decline::Func("direct eval requires a lexical environment"));
         }
-        let evaluated_eval = if direct_eval {
-            Some(self.compile_expr(callee)?)
+        // Only optional calls need a default result on the short-circuit
+        // branch. Avoid an extra charged instruction on ordinary calls.
+        let dst = if matches!(callee, Expr::OptionalChain { .. }) {
+            self.load_undefined()?
         } else {
-            None
+            self.alloc_reg()?
         };
-        // The callee shape is syntactic, so classify before emitting: method
-        // calls keep their receiver, chains join on nullish, `super`
-        // declines.
-        enum Callee<'x> {
-            Method,
-            Plain,
-            Chain {
-                object: &'x Expr,
-                property: &'x Expr,
-            },
-            Super,
-            SuperMember {
-                property: &'x Expr,
-            },
-        }
-        let kind = match callee {
-            Expr::Member {
-                object, property, ..
-            } if matches!(object.as_ref(), Expr::Super) => Callee::SuperMember { property },
-            Expr::Member { .. } => Callee::Method,
-            Expr::OptionalChain {
-                object, property, ..
-            } => Callee::Chain { object, property },
-            Expr::Super => Callee::Super,
-            _ => Callee::Plain,
-        };
-        // Arguments evaluate before the callee, like the evaluator — even
-        // for chains, whose short-circuit skips only the property and the
-        // call itself.
-        enum CallArgs {
-            Range { start: Reg, argc: u16 },
-            Spread { tmpl: u16 },
-        }
-        let call_args = if args.iter().any(|arg| matches!(arg, Expr::Spread(_))) {
-            let mut template = Vec::with_capacity(args.len());
-            for arg in args {
-                match arg {
-                    Expr::Spread(inner) => {
-                        let reg = self.compile_expr(inner)?;
-                        template.push(SpreadEntry { spread: true, reg });
-                    }
-                    _ => {
-                        let reg = self.compile_expr(arg)?;
-                        template.push(SpreadEntry { spread: false, reg });
-                    }
-                }
-            }
-            let tmpl = self.push_const(Constant::SpreadTemplate(template))?;
-            CallArgs::Spread { tmpl }
+        let mut ends = Vec::new();
+        let is_super = matches!(callee, Expr::Super);
+        let (function, receiver) = if is_super {
+            let function = self.alloc_reg()?;
+            self.emit(Instr::SuperConstructor { dst: function });
+            (function, None)
         } else {
-            let start = self.alloc_regs(args.len())?;
-            for (i, arg) in args.iter().enumerate() {
-                let reg = self.compile_expr(arg)?;
-                self.emit(Instr::Mov {
-                    dst: start + i as u16,
-                    src: reg,
-                });
-            }
-            CallArgs::Range {
-                start,
-                argc: args.len() as u16,
-            }
+            self.compile_call_reference(callee, &mut ends)?
         };
-        let dst = self.alloc_reg()?;
-        match kind {
-            Callee::Method => {
-                let Expr::Member {
-                    object,
-                    property,
-                    computed,
-                } = callee
-                else {
-                    return Err(Decline::Func("callee shape changed"));
-                };
-                let obj = self.compile_expr(object)?;
-                let key = self.compile_expr(property)?;
-                let callee = self.alloc_reg()?;
-                self.emit(Instr::GetProp {
-                    private: !computed && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
-                    cache: 0,
-                    dst: callee,
-                    obj,
-                    key,
-                });
-                match call_args {
-                    CallArgs::Range { start, argc } => {
-                        self.emit(Instr::CallMethod {
-                            dst,
-                            callee,
-                            this: obj,
-                            args: start,
-                            argc,
-                        });
-                    }
-                    CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::MethodSpread {
-                            dst,
-                            callee,
-                            this: obj,
-                            tmpl,
-                        });
-                    }
-                }
-            }
-            Callee::Plain => {
-                let callee = match evaluated_eval {
-                    Some(reg) => reg,
-                    None => self.compile_expr(callee)?,
-                };
-                match call_args {
-                    CallArgs::Range { start, argc } => {
-                        self.emit(if direct_eval {
-                            Instr::DirectEval {
-                                dst,
-                                callee,
-                                args: start,
-                                argc,
-                            }
-                        } else {
-                            Instr::Call {
-                                dst,
-                                callee,
-                                args: start,
-                                argc,
-                            }
-                        });
-                    }
-                    CallArgs::Spread { tmpl } => {
-                        self.emit(if direct_eval {
-                            Instr::DirectEvalSpread { dst, callee, tmpl }
-                        } else {
-                            Instr::CallSpread { dst, callee, tmpl }
-                        });
-                    }
-                }
-            }
-            Callee::Super => match call_args {
-                CallArgs::Range { start, argc } => {
-                    self.emit(Instr::SuperCall {
-                        dst,
-                        args: start,
-                        argc,
-                    });
-                }
-                CallArgs::Spread { tmpl } => {
-                    self.emit(Instr::SuperCallSpread { dst, tmpl });
-                }
+        let arguments = self.compile_call_arguments(args)?;
+        let instruction = match (arguments, receiver) {
+            (CallArgs::Range { start, argc }, _) if is_super => Instr::SuperCall {
+                dst,
+                callee: function,
+                args: start,
+                argc,
             },
-            Callee::SuperMember { property } => {
-                let key = self.compile_expr(property)?;
-                let callee = self.alloc_reg()?;
-                self.emit(Instr::SuperMember { dst: callee, key });
-                let this = self.compile_this()?;
-                match call_args {
-                    CallArgs::Range { start, argc } => {
-                        self.emit(Instr::CallMethod {
-                            dst,
-                            callee,
-                            this,
-                            args: start,
-                            argc,
-                        });
-                    }
-                    CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::MethodSpread {
-                            dst,
-                            callee,
-                            this,
-                            tmpl,
-                        });
-                    }
-                }
-            }
-            Callee::Chain { object, property } => {
-                let obj = self.compile_expr(object)?;
-                let undef = self.load_undefined()?;
-                self.emit(Instr::Mov { dst, src: undef });
-                let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
-                // An `Undefined` property marks an optional call `obj?.(args)`.
-                let callee = if matches!(property, Expr::Undefined) {
-                    obj
-                } else {
-                    let key = self.compile_expr(property)?;
-                    let callee = self.alloc_reg()?;
-                    self.emit(Instr::GetProp {
-                        private: false,
-                        cache: 0,
-                        dst: callee,
-                        obj,
-                        key,
-                    });
-                    callee
-                };
-                match call_args {
-                    CallArgs::Range { start, argc } => {
-                        self.emit(Instr::CallMethod {
-                            dst,
-                            callee,
-                            this: obj,
-                            args: start,
-                            argc,
-                        });
-                    }
-                    CallArgs::Spread { tmpl } => {
-                        self.emit(Instr::MethodSpread {
-                            dst,
-                            callee,
-                            this: obj,
-                            tmpl,
-                        });
-                    }
-                }
-                self.patch_jump(end, self.here())?;
-            }
+            (CallArgs::Spread { tmpl }, _) if is_super => Instr::SuperCallSpread {
+                dst,
+                callee: function,
+                tmpl,
+            },
+            (CallArgs::Range { start, argc }, Some(this)) => Instr::CallMethod {
+                dst,
+                callee: function,
+                this,
+                args: start,
+                argc,
+            },
+            (CallArgs::Spread { tmpl }, Some(this)) => Instr::MethodSpread {
+                dst,
+                callee: function,
+                this,
+                tmpl,
+            },
+            (CallArgs::Range { start, argc }, None) if direct_eval => Instr::DirectEval {
+                dst,
+                callee: function,
+                args: start,
+                argc,
+            },
+            (CallArgs::Spread { tmpl }, None) if direct_eval => Instr::DirectEvalSpread {
+                dst,
+                callee: function,
+                tmpl,
+            },
+            (CallArgs::Range { start, argc }, None) => Instr::Call {
+                dst,
+                callee: function,
+                args: start,
+                argc,
+            },
+            (CallArgs::Spread { tmpl }, None) => Instr::CallSpread {
+                dst,
+                callee: function,
+                tmpl,
+            },
+        };
+        self.emit(instruction);
+        for end in ends {
+            self.patch_jump(end, self.here())?;
         }
         Ok(dst)
     }
@@ -4370,6 +4382,45 @@ impl<'a> Compiler<'a> {
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
         let target = target.unparenthesized();
+        if let Expr::Member {
+            object, property, ..
+        } = target
+            && matches!(object.as_ref(), Expr::Super)
+        {
+            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let current = if op.bin_op().is_some() {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::GetPropertyWithReceiver {
+                    dst,
+                    base,
+                    receiver,
+                    key,
+                });
+                Some(dst)
+            } else {
+                None
+            };
+            let rhs = self.compile_expr(value)?;
+            let value = if let Some(op) = op.bin_op() {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::Binary {
+                    dst,
+                    op,
+                    lhs: current.expect("compound value"),
+                    rhs,
+                });
+                dst
+            } else {
+                rhs
+            };
+            self.emit(Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value,
+            });
+            return Ok(value);
+        }
         let rhs = self.compile_expr(value)?;
         match target {
             Expr::Identifier(name) => {
@@ -4456,6 +4507,38 @@ impl<'a> Compiler<'a> {
         let target = target.unparenthesized();
         // Read the current value, skip the write when it already decides.
         let join = self.alloc_reg()?;
+        if let Expr::Member {
+            object, property, ..
+        } = target.unparenthesized()
+            && matches!(object.as_ref(), Expr::Super)
+        {
+            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let current = self.alloc_reg()?;
+            self.emit(Instr::GetPropertyWithReceiver {
+                dst: current,
+                base,
+                receiver,
+                key,
+            });
+            self.emit(Instr::Mov {
+                dst: join,
+                src: current,
+            });
+            let end = self.logical_skip_jump(op, current)?;
+            let value = self.compile_expr(value)?;
+            self.emit(Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value,
+            });
+            self.emit(Instr::Mov {
+                dst: join,
+                src: value,
+            });
+            self.patch_jump(end, self.here())?;
+            return Ok(join);
+        }
         let end_jump = match target {
             Expr::Identifier(name) => {
                 let current = self.compile_identifier(name)?;
@@ -4872,5 +4955,63 @@ mod tests {
         // has no intermediate self-scope), so self-reference compiles too.
         compile("(function bar(){ return typeof bar; })();")
             .expect("self-referencing expression must compile");
+    }
+    #[test]
+    fn class_super_writes_compile_to_receiver_operations_without_method_fallback() {
+        let statements = crate::parser::parse_cached("class A{get x(){return 1;}set x(v){}}class B extends A{method(){super.x+=2;return super.x++;}}").unwrap();
+        let module = compile_program(&statements).unwrap();
+        let method = module.main.constants.iter().find_map(|constant| {
+            let Constant::ClassTemplate(template) = constant else { return None; };
+            let member = template.members.iter().find(|member| matches!(&member.name, ClassNameTemplate::Static(name) if name == "method"))?;
+            match &module.main.constants[member.func.unwrap() as usize] {
+                Constant::Function(function) => Some(function),
+                _ => panic!("super writes must not use method fallback"),
+            }
+        }).expect("compiled method");
+        assert!(
+            method
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::SuperReference { .. }))
+        );
+        assert!(
+            method
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::SetPropertyWithReceiver { .. }))
+        );
+        assert!(
+            method
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::NumericUpdate { .. }))
+        );
+    }
+    #[test]
+    fn constructor_spread_and_iterator_snapshots_compile_without_fallback() {
+        let module = compile("function C(a,b){this.value=a+b;}new C(...[35],7);").unwrap();
+        assert!(
+            module
+                .main
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::ConstructSpread { .. }))
+        );
+        assert!(
+            module
+                .main
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::ExpandSpread { .. }))
+        );
+        assert!(module.main.constants.iter().any(|constant| matches!(constant, Constant::SpreadTemplate(entries) if entries.iter().any(|entry| entry.spread && entry.prepared))));
+    }
+    #[test]
+    fn module_templates_preserve_utf16_requests_for_link_time_validation() {
+        let module = compile(r"import '\uD800';export * from '\uDC00';")
+            .expect("valid ModuleSpecifier strings");
+        crate::bytecode::verify::verify_module(&module).expect("UTF-16 module templates verify");
+        assert!(module.main.constants.iter().any(|constant| matches!(constant, Constant::ImportTemplate(template) if template.module.units()==[0xd800])));
+        assert!(module.main.constants.iter().any(|constant| matches!(constant, Constant::ExportAllTemplate(template) if template.source.units()==[0xdc00])));
     }
 }
