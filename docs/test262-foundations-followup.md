@@ -93,7 +93,7 @@ workspace gate is archived: the legacy prototype fixture's debug formatter
 recursed through Object.prototype's constructor cycle. The corrected fixture
 asserts guest-visible prototype and property behavior.
 
-## Call references, spread and internal-operation corrections (validation pending)
+## Call references, spread and internal-operation corrections
 
 AST and bytecode capture ordinary/optional callees and their receivers before
 arguments. Nullish calls skip argument evaluation, optional method calls retain
@@ -108,6 +108,12 @@ String/Symbol keys retain existing shared lookup diagnostics. Immutable-prototyp
 metadata is applied to each realm's Object.prototype; the common SetPrototypeOf
 operation accepts its current prototype and rejects other prototypes. Proxy
 forwarding and Object/Reflect use that same operation.
+
+Source 05d590c passed 378 core unit tests and every required check: 975 workspace
+tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
+tests, ten tooling tests, formatting and strict Clippy. Exact check logs and the
+immutable worker digest are archived under foundations-followup/05d590c*.
+The expanded focused corpus is running before the full pinned corpus.
 
 ## Remaining work
 

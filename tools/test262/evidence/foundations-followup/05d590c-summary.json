@@ -1,0 +1,54 @@
+{
+  "source_commit": "05d590cc5331fa4229373cdf244db76d9afcca8e",
+  "classification": "Shared call references, ordered spread, key receiver validation and immutable prototypes; focused/full validation pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 975,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "05d590c-allfeatures-tests.log.gz": "2f4b380006f5df4d845dba7df673a63fc2c8d6e0a214ea1c33e2806f11e56225",
+    "05d590c-clippy.log.gz": "9f71768856eefccb4f5345358216ed9f98a2baca40cdc35e887712add167878d",
+    "05d590c-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "05d590c-minimal-tests.log.gz": "5275ca78dcd57eedbc1a5c4e68dd70b73fc299d0e93c86a84e960629d55a0245",
+    "05d590c-native-build.log.gz": "f6e2f68518c814362376a1d2f2859dda703d312f4cd8f3d9506320565c894d02",
+    "05d590c-node-tests.log.gz": "c6638fafbc7df99ff91ae0d439f049b118afdce773226bbdd7e3e5496a69ad5d",
+    "05d590c-release-build.log.gz": "7d0ebf20c0e9501d62ad42a6aafdde33a0ea3f8ab366f8e4c13156a7125ce1c4",
+    "05d590c-tooling-tests.log.gz": "e2254ee0a06b73bd3bd3a2af9282e345fc3c0eb72ad84e7e268942ddc2e018bf",
+    "05d590c-wasm-tests.log.gz": "70ff4a9ba420bab5fd119fc388a72933d68ba7ee2e36a87c4c6b9c6669829cae"
+  },
+  "worker_sha256": "d37b675377eee6a1ae5fbcdc8162e253d32a94d2cc644587e3846f14b6a56030"
+}
