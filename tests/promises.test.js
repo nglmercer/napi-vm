@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
 import { runCode } from "../index.js";
+import { runtimeFixture } from "./runtime-fixture.mjs";
+const timerRuntime = runtimeFixture({ timers: true, clock: "virtual" });
 import { hasTrueSuspension } from "./suspension.mjs";
 
 // ---------------------------------------------------------------------------
@@ -44,15 +46,15 @@ test("chained thens run in order", () => {
   ).toBe("1,3,2");
 });
 
-test("queueMicrotask defers", () => {
+timerRuntime.test("queueMicrotask defers", () => {
   expect(
-    runCode("let o = []; queueMicrotask(() => o.push('later')); o.push('now'); await 0; o.join();"),
+    timerRuntime.run("let o = []; queueMicrotask(() => o.push('later')); o.push('now'); await 0; o.join();"),
   ).toBe("now,later");
 });
 
-test("timers run after every microtask", () => {
+timerRuntime.test("timers run after every microtask", () => {
   expect(
-    runCode(
+    timerRuntime.run(
       "let o = []; setTimeout(() => o.push('t'), 0); Promise.resolve().then(() => o.push('m')); o.push('s'); await 0; o.join();",
     ),
   ).toBe("s,m");
@@ -250,8 +252,8 @@ test("await inside a loop accumulates", () => {
   ).toBe("6");
 });
 
-test("await resolves a timer-backed promise", () => {
-  expect(runCode("await new Promise((res) => setTimeout(() => res(9), 5));")).toBe("9");
+timerRuntime.test("await resolves a timer-backed promise", () => {
+  expect(runtimeFixture({ timers: true }).run("await new Promise((res) => setTimeout(() => res(9), 5));")).toBe("9");
 });
 
 // --- Async arrows and methods -----------------------------------------------

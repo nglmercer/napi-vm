@@ -713,6 +713,17 @@ impl VM {
                             outcome = Err(napi::Error::from_reason(error.to_string()));
                             break;
                         }
+                        if runtime
+                            .interp
+                            .global_value(global)
+                            .and_then(|value| value.host_function_id())
+                            != Some(*id)
+                        {
+                            outcome = Err(napi::Error::from_reason(format!(
+                                "TypeError: Cannot install host module binding '{global}'"
+                            )));
+                            break;
+                        }
                     }
                 }
 
@@ -723,7 +734,7 @@ impl VM {
                     // the old one. Its return value is the same snapshot as
                     // `prior_module`, which the rollback below already holds.
                     let _displaced = runtime.interp.begin_module(&name);
-                    let result = execute_source(&mut runtime.interp, &source);
+                    let result = execute_module_source(&mut runtime.interp, &name, &source);
                     runtime.interp.commit_module();
                     outcome = result
                         .map(|_| ())
@@ -743,16 +754,12 @@ impl VM {
                             }
                         }
                     }
-                    match prior_module {
-                        Some(module) => runtime
-                            .interp
-                            .modules
-                            .borrow_mut()
-                            .insert(name.clone(), module),
-                        None => runtime.interp.modules.borrow_mut().remove(&name),
-                    };
+                    runtime.interp.restore_module(&name, prior_module);
                     match prior_source {
-                        Some(source) => runtime.modules.insert(name.clone(), source),
+                        Some(source) => {
+                            runtime.interp.define_module_shared(&name, source.clone());
+                            runtime.modules.insert(name.clone(), source)
+                        }
                         None => runtime.modules.remove(&name),
                     };
                     for id in new_ids {
@@ -781,7 +788,9 @@ impl VM {
                 runtime
                     .host_module_globals
                     .insert(name.clone(), created.clone());
-                runtime.modules.insert(name, source.into());
+                let source: Arc<str> = source.into();
+                runtime.interp.define_module_shared(&name, source.clone());
+                runtime.modules.insert(name, source);
                 Ok(created)
             })?;
 
@@ -1296,16 +1305,6 @@ fn execute_module_source(
     );
     interp.take_scope(outer);
     result
-}
-
-pub(super) fn execute_source(interp: &mut Interpreter, source: &str) -> Result<Value, VmErr> {
-    interp.eval_source_with_options(
-        source,
-        crate::interpreter::EvaluationOptions {
-            resume_pending_checkpoint: true,
-            ..Default::default()
-        },
-    )
 }
 
 pub(super) fn execute_source_utf16(

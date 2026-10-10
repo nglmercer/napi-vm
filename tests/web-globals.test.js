@@ -1,11 +1,12 @@
-import { test, expect } from "bun:test";
-import { Vm, runCode } from "../index.js";
+import { expect } from "bun:test";
+import { Vm } from "../index.js";
+import { runtimeFixture } from "./runtime-fixture.mjs";
+const { test, run: runCode } = runtimeFixture({ webApis: true });
 
 // ---------------------------------------------------------------------------
 // The web-platform globals that are pure computation, and therefore need no
-// capability grant: `TextEncoder`/`TextDecoder`, `URLSearchParams` and
-// `structuredClone`. The ones that reach outside the sandbox stay inert — see
-// the sandbox suite.
+// external permission grant: `TextEncoder`/`TextDecoder`, `URLSearchParams` and
+// `structuredClone`. They still require explicit runtime installation.
 // ---------------------------------------------------------------------------
 
 test("the pure globals are callable", () => {
@@ -139,6 +140,6 @@ test("network APIs remain unavailable or inert before capabilities are granted",
   // These need a capability the host grants explicitly; they are deliberately
   // not ambient.
   expect(vm.run("typeof fetch;")).toBe("undefined");
-  expect(vm.run("typeof Request;")).toBe("object");
-  expect(vm.run("typeof WebSocket;")).toBe("object");
+  expect(vm.run("typeof Request;")).toBe("undefined");
+  expect(vm.run("typeof WebSocket;")).toBe("undefined");
 });

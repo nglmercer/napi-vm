@@ -97,18 +97,18 @@ test("builtins", () => {
   expect(runCode("typeof null;")).toBe("object");
 });
 
-test("web APIs exist", () => {
+test("host Web APIs are absent from the default engine", () => {
   const vm = new Vm();
   // Network I/O is exposed through a granted capability, not ambiently.
   expect(vm.run("typeof fetch;")).toBe("undefined");
-  expect(vm.run("typeof WebSocket;")).toBe("object");
-  expect(vm.run("typeof URL;")).toBe("object");
+  expect(vm.run("typeof WebSocket;")).toBe("undefined");
+  expect(vm.run("typeof URL;")).toBe("undefined");
   // `Map` and `Set` are real constructors, so they report as functions.
   expect(vm.run("typeof Map;")).toBe("function");
   expect(vm.run("typeof Set;")).toBe("function");
   // `Promise` is a real constructor, so it reports as a function.
   expect(vm.run("typeof Promise;")).toBe("function");
-  expect(vm.run("typeof console;")).toBe("object");
+  expect(vm.run("typeof console;")).toBe("undefined");
   expect(vm.run("typeof Math;")).toBe("object");
   expect(vm.run("typeof JSON;")).toBe("object");
   expect(vm.run("typeof Date;")).toBe("function");
@@ -119,11 +119,11 @@ test("web APIs exist", () => {
   expect(vm.run("typeof ArrayBuffer;")).toBe("function");
   expect(vm.run("typeof Uint8Array;")).toBe("function");
   expect(vm.run("typeof DataView;")).toBe("function");
-  expect(vm.run("typeof crypto;")).toBe("object");
-  expect(vm.run("typeof navigator;")).toBe("object");
-  expect(vm.run("typeof self;")).toBe("object");
+  expect(vm.run("typeof crypto;")).toBe("undefined");
+  expect(vm.run("typeof navigator;")).toBe("undefined");
+  expect(vm.run("typeof self;")).toBe("undefined");
   expect(vm.run("typeof globalThis;")).toBe("object");
-  expect(vm.run("typeof window;")).toBe("object");
+  expect(vm.run("typeof window;")).toBe("undefined");
 });
 
 test("comparison operators", () => {
@@ -152,7 +152,7 @@ test("string operations", () => {
 test("sandboxed - no host access", () => {
   const vm = new Vm();
   // Should not have access to Node.js globals
-  expect(vm.run("typeof require;")).toBe("object"); // defined as empty object
-  expect(vm.run("typeof process;")).toBe("object"); // defined as empty object
+  expect(vm.run("typeof require;")).toBe("undefined");
+  expect(vm.run("typeof process;")).toBe("undefined");
   expect(vm.run("typeof globalThis;")).toBe("object"); // sandboxed global
 });

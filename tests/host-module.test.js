@@ -1,12 +1,22 @@
-import { test, expect } from "bun:test";
+import { test, expect, afterEach } from "bun:test";
 import { Vm } from "../index.js";
+
+const vms = [];
+function createVm() {
+  const vm = new Vm();
+  vms.push(vm);
+  return vm;
+}
+afterEach(() => {
+  for (const vm of vms.splice(0)) vm.dispose();
+});
 
 // `registerHostModule` is the generic form of `exposeFunction` +
 // `registerModule`: the core bridges the functions and generates the wrapper
 // module; what the functions do stays entirely on the host side.
 
 test("registerHostModule exposes host functions as module exports", () => {
-  const vm = new Vm();
+  const vm = createVm();
   vm.registerHostModule("demo", {
     hello: (name) => `hi ${name}`,
     add: (a, b) => a + b,
@@ -20,7 +30,7 @@ test("registerHostModule exposes host functions as module exports", () => {
 });
 
 test("registerHostModule returns the globals it created", () => {
-  const vm = new Vm();
+  const vm = createVm();
   const globals = vm.registerHostModule("fs-test", { readText: () => "x" });
   // `:` is hex-encoded so two module names can never share a prefix.
   expect(globals).toEqual(["__hostmod_fs_2dtest_readText"]);
@@ -28,7 +38,7 @@ test("registerHostModule returns the globals it created", () => {
 });
 
 test("removeModule revokes the module's bridge globals", () => {
-  const vm = new Vm();
+  const vm = createVm();
   const globals = vm.registerHostModule("demo", { ping: () => "pong" });
   expect(vm.hasModule("demo")).toBe(true);
   expect(vm.listModules()).toContain("demo");
@@ -40,7 +50,7 @@ test("removeModule revokes the module's bridge globals", () => {
 });
 
 test("module names that differ only in punctuation get separate namespaces", () => {
-  const vm = new Vm();
+  const vm = createVm();
   const first = vm.registerHostModule("a:b", { who: () => "colon" });
   const second = vm.registerHostModule("a/b", { who: () => "slash" });
   expect(first).not.toEqual(second);
@@ -56,7 +66,7 @@ test("module names that differ only in punctuation get separate namespaces", () 
 });
 
 test("re-registering with fewer exports revokes the dropped bridge global", () => {
-  const vm = new Vm();
+  const vm = createVm();
   const before = vm.registerHostModule("fs-test", {
     read: () => "r",
     write: () => "w",
@@ -80,7 +90,7 @@ test("re-registering with fewer exports revokes the dropped bridge global", () =
 });
 
 test("a failed re-registration leaves the previous exports intact", () => {
-  const vm = new Vm();
+  const vm = createVm();
   const before = vm.registerHostModule("demo", { ping: () => "pong" });
   expect(() =>
     vm.registerHostModule("demo", { ping: () => "pong", bad: 1 }),
@@ -93,7 +103,7 @@ test("a failed re-registration leaves the previous exports intact", () => {
 });
 
 test("exports receive every argument and can return objects", () => {
-  const vm = new Vm();
+  const vm = createVm();
   vm.registerHostModule("demo", {
     collect: (...args) => ({ count: args.length, args }),
   });
@@ -105,7 +115,7 @@ test("exports receive every argument and can return objects", () => {
 });
 
 test("a host error thrown by an export is catchable in the guest", () => {
-  const vm = new Vm();
+  const vm = createVm();
   vm.registerHostModule("demo", {
     boom: () => {
       throw new Error("PermissionDenied: nope");
@@ -117,7 +127,7 @@ test("a host error thrown by an export is catchable in the guest", () => {
 });
 
 test("options.async marks exports the guest can await", async () => {
-  const vm = new Vm();
+  const vm = createVm();
   vm.registerHostModule(
     "net",
     { fetchText: async (url) => `body-of:${url}` },
@@ -131,7 +141,7 @@ test("options.async marks exports the guest can await", async () => {
 });
 
 test("re-registering a host module replaces the previous exports", () => {
-  const vm = new Vm();
+  const vm = createVm();
   vm.registerHostModule("demo", { value: () => 1 });
   vm.registerHostModule("demo", { value: () => 2 });
   vm.registerModule("app", `import { value } from "demo";
@@ -140,21 +150,21 @@ test("re-registering a host module replaces the previous exports", () => {
 });
 
 test("an empty exports object is rejected", () => {
-  const vm = new Vm();
+  const vm = createVm();
   expect(() => vm.registerHostModule("demo", {})).toThrow(
     /must export at least one function/,
   );
 });
 
 test("non-function exports are rejected", () => {
-  const vm = new Vm();
+  const vm = createVm();
   expect(() => vm.registerHostModule("demo", { a: 1 })).toThrow(
     /export 'a' must be a function/,
   );
 });
 
 test("export names that are not identifiers are rejected", () => {
-  const vm = new Vm();
+  const vm = createVm();
   expect(() => vm.registerHostModule("demo", { "a-b": () => 1 })).toThrow(
     /is not a usable export name/,
   );
@@ -169,7 +179,7 @@ test("export names that are not identifiers are rejected", () => {
 test("registering a host module does not leak host globals into the guest", () => {
   // The bridge globals exist by design; the point is that the *host* object
   // itself never crosses over.
-  const vm = new Vm();
+  const vm = createVm();
   const host = { secret: "s3cret", ping: () => "pong" };
   expect(() => vm.registerHostModule("demo", host)).toThrow(
     /export 'secret' must be a function/,
@@ -177,31 +187,26 @@ test("registering a host module does not leak host globals into the guest", () =
 });
 
 test("options.async naming a missing export is rejected", () => {
-  const vm = new Vm();
+  const vm = createVm();
   expect(() =>
     vm.registerHostModule("demo", { ping: () => "pong" }, { async: ["pong"] }),
   ).toThrow(/options.async names 'pong', which is not an export/);
 });
 
 test("a failure after a binding was replaced rolls that binding back", () => {
-  // Exhausting the global-binding quota makes installing a *new* global fail
+  // Preventing extension makes installing a *new* global fail
   // while replacing an existing one still succeeds — a failure that lands
   // after `read` has already been swapped for its replacement.
-  const vm = new Vm();
+  const vm = createVm();
   vm.setLoopLimit(5_000_000);
   const [readGlobal] = vm.registerHostModule("cap", { read: () => "old" });
   expect(vm.run(`${readGlobal}();`)).toBe("old");
 
-  vm.run(`let n = 0;
-    let done = false;
-    while (!done) {
-      try { globalThis["__fill" + n] = 1; n = n + 1; }
-      catch (error) { done = true; }
-    }`);
+  vm.run("Object.preventExtensions(globalThis);");
 
   expect(() =>
     vm.registerHostModule("cap", { read: () => "new", anotherExport: () => "x" }),
-  ).toThrow(/Maximum global binding count exceeded/);
+  ).toThrow(/Cannot install host module binding/);
 
   // The old function is restored *and* still callable: its bridge handle was
   // never retired, because the swap did not commit.
@@ -210,7 +215,7 @@ test("a failure after a binding was replaced rolls that binding back", () => {
 });
 
 test("keyword export names are rejected, not compiled into broken source", () => {
-  const vm = new Vm();
+  const vm = createVm();
   // Each of these lexes as a keyword, so `export function <name>` would be
   // ungrammatical. They pass a naive ASCII-identifier shape check, which is
   // why validation is derived from the lexer instead of a hand-kept list.

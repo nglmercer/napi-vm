@@ -93,13 +93,13 @@ test("array equality is by reference (always false)", () => {
   expect(runCode("const a = [1]; const b = [1]; a === b;")).toBe("false");
 });
 
-test("function toString representation", () => {
-  expect(runCode("function foo() {} '' + foo;")).toContain("function");
+test("function string coercion observes an own toString", () => {
+  expect(runCode("function foo() {} foo.toString = () => 'custom function'; '' + foo;")).toBe("custom function");
 });
 
-test("native function toString representation", () => {
+test("native functions expose the Function object tag", () => {
   const vm = new Vm();
-  expect(vm.run("'' + console;")).toContain("[object Object]");
+  expect(vm.run("Object.prototype.toString.call(Math.abs);")).toBe("[object Function]");
 });
 
 test("number formatting: integers", () => {

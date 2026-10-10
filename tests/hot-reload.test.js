@@ -167,11 +167,12 @@ test("removeGlobal + re-expose avoids stale references (hot-reload pattern)", ()
   expect(vm.run("getGen();")).toBe("2");
 });
 
-test("globalThis writes shadow builtins without mutating the builtin frame", () => {
+test("globalThis writes and removes the realm's own builtin property", () => {
   const vm = new Vm();
   expect(vm.run("globalThis.Math = 123; Math;")).toBe("123");
   expect(vm.removeGlobal("Math")).toBe(true);
-  expect(vm.run("typeof Math;")).toBe("object");
+  expect(vm.run("typeof Math;")).toBe("undefined");
+  expect(new Vm().run("typeof Math;")).toBe("object");
 });
 
 test("VmIpc is available while a module is evaluated", async () => {

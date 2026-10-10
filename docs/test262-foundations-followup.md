@@ -6,6 +6,58 @@ zero lost passes against PR #23, zero crashes/harness errors and two existing
 script/strict deep-WeakMap timeouts. Merging PR #24 did not close every foundation
 dependency.
 
+## Merge scope
+
+This PR is an incremental follow-up to PR #24. Its acceptance gate is unchanged
+execution limits and fallback, passing required build/test checks, and no lost
+Test262 passes against the merged baseline. It does not require completion of
+all four conformance phases. The complete pinned repeat for `be8ebf3` meets the
+runtime regression gate: 2,535 new passes and zero lost passes against `c82f617`,
+with the same two deep-WeakMap timeouts and no crashes or harness errors.
+
+The implementation at the archived head `f1dd8e9` is identical to `be8ebf3`; the intervening
+commit only archives evidence and updates this document. All 39 archive digests
+and gzip streams were verified, and the full repeat was independently recounted
+and compared by exact variant identity against the merged baseline.
+
+Remaining descriptor/accessor storage, array elisions, class definition ordering,
+general references/optional chains, realm and builtin coverage, suspended
+continuation GC barriers, and full-corpus execution-tier comparison remain
+follow-up work. They are outside this incremental merge scope. The 36,746 failing
+variants remain visible; this scope does not classify them as outside Phases 1–3
+or claim complete ECMAScript conformance. AST fallback remains enabled.
+
+## Merge preparation fixes
+
+`registerHostModule` now evaluates its generated wrapper with the shared module
+entry point and retains its source for subsequent linking. Re-registration drops
+removed exports; failed registration restores callback values and module source.
+A rejected global definition (for example, a non-extensible global object) is
+reported instead of silently publishing a wrapper for an unavailable binding.
+Node and Bun fixtures cover successful linking, async calls, revocation and a
+failure after an existing callback has already been replaced.
+
+The optional runtime marks `URLSearchParams.size` as an accessor so shared
+property lookup invokes it. Legacy Bun fixtures now assert the documented default
+engine boundary: host APIs and browser placeholders are absent until explicitly
+installed. Optional runtime cases check feature availability and run with explicit
+console, timer or Web installation. Proxy key enumeration still requires an
+enumerable property descriptor, and deleting a replaced builtin removes that
+realm's property. Function string coercion tests observe an explicit `toString`
+override rather than claiming the missing source-text algorithm is implemented.
+
+The event-loop fixture waits for ticker progress before delivering its host event,
+avoiding a wall-clock race under build load. Global quota coverage moves to a Rust
+unit fixture with a small internal test quota and an assertion that the production
+hard limit is unchanged; growth, updating existing bindings and reclaiming deleted
+bindings are all checked. Host-module rollback uses a non-extensible global object
+to force a failure after replacement without quadratic quota-filling setup.
+
+These preparation fixes leave the Test262 worker's ECMAScript implementation,
+configuration and fallback unchanged. The archived full repeat remains the corpus
+evidence for that implementation; adapter/runtime behavior is checked separately
+by the fresh Node, Bun, Rust and WASM gates. Complete phase coverage remains open.
+
 ## Shared key and class semantics
 
 ToPropertyKey is a single owner-thread helper, shared by class key conversion,
@@ -322,7 +374,7 @@ Original and repeat reports, diagnostic timings, transitions, source audits,
 required-check logs and archive digests are retained in `be8ebf3-summary.json`.
 No isolated outcome is substituted into either full report.
 
-This remains a draft foundation implementation. Phase 1–2 completion is not
+This is an incremental foundation implementation. Phase 1–2 completion is not
 claimed: conservative GC barriers for opaque suspended continuations and
 remaining realm/internal-operation dependencies still require work. Missing
 RegExp symbol algorithms and iterator helpers must be distinguished from

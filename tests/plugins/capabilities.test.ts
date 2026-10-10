@@ -104,11 +104,9 @@ test("timers is removable", () => {
   expect(() => vm.run("import { performance } from 'node:perf_hooks'; performance.now();")).toThrow();
 });
 
-test("the VM's own timers stay clock-free without the capability", () => {
+test("timers are absent without explicit installation", () => {
   const vm = new Vm();
-  // `setTimeout` is always available and always ordered without a clock; the
-  // capability is about *observing* time, not scheduling.
-  expect(vm.run("typeof setTimeout;")).toBe("function");
+  expect(vm.run("typeof setTimeout;")).toBe("undefined");
   expect(() => vm.run("import { performance } from 'node:perf_hooks'; performance.now();")).toThrow();
 });
 

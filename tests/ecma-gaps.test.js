@@ -1,6 +1,8 @@
 import { test, expect } from "bun:test";
 import { runCode, Vm } from "../index.js";
 import { hasTrueSuspension } from "./suspension.mjs";
+import { runtimeFixture } from "./runtime-fixture.mjs";
+const consoleRuntime = runtimeFixture({ console: true });
 
 // ---------------------------------------------------------------------------
 // ECMAScript conformance suite.
@@ -445,12 +447,12 @@ test("Date.now returns a number", () => {
 
 // --- Standard library: console ----------------------------------------------
 
-test("console.log is callable and returns undefined", () => {
-  expect(runCode("console.log('hello');")).toBe("undefined");
+consoleRuntime.test("explicit runtime console.log is callable and returns undefined", () => {
+  expect(consoleRuntime.run("console.log('hello');")).toBe("undefined");
 });
 
-test("console.error is callable", () => {
-  expect(runCode("console.error('boom');")).toBe("undefined");
+consoleRuntime.test("explicit runtime console.error is callable", () => {
+  expect(consoleRuntime.run("console.error('boom');")).toBe("undefined");
 });
 
 // --- Standard library: Error ------------------------------------------------

@@ -183,6 +183,9 @@ fn new_search_params(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Resul
         params.set_prop(name.to_string(), super::nf(name, *callable))?;
     }
     params.set_prop("size".to_string(), super::nf("get size", params_size))?;
+    if let Value::Object { props } = &params {
+        props.meta.borrow_mut().has_accessors = true;
+    }
     params.set_prop(
         crate::interpreter::SYMBOL_ITERATOR_SLOT.to_string(),
         super::nf("[Symbol.iterator]", params_entries),
