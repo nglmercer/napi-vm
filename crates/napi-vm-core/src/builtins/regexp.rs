@@ -10,9 +10,192 @@ use crate::interpreter::{Environment, Interpreter};
 use crate::regex::{Captures, Regex};
 use crate::value::{RegExpData, Value};
 
+#[derive(Default)]
+pub(crate) struct LegacyState {
+    input: crate::JsString,
+    matched_input: crate::JsString,
+    last_match: Option<(usize, usize)>,
+    last_paren: Option<(usize, usize)>,
+    left_context: Option<(usize, usize)>,
+    right_context: Option<(usize, usize)>,
+    captures: [Option<(usize, usize)>; 9],
+    invalidated: bool,
+    input_unavailable: bool,
+}
+
+fn legacy_state(interp: &Interpreter, receiver: &Value) -> Result<Rc<RefCell<LegacyState>>, VmErr> {
+    let realm = interp.persistent_global.borrow();
+    let constructor = realm
+        .intrinsic("RegExp")
+        .ok_or_else(|| VmErr::Msg("TypeError: RegExp intrinsic is unavailable".into()))?;
+    if !crate::interpreter::strict_equals(receiver, &constructor) {
+        return Err(VmErr::Msg(
+            "TypeError: incompatible legacy RegExp receiver".into(),
+        ));
+    }
+    realm
+        .regexp_legacy_state()
+        .ok_or_else(|| VmErr::Msg("TypeError: RegExp match state is unavailable".into()))
+}
+
+fn legacy_get(interp: &Interpreter, receiver: &Value, name: &str) -> Result<Value, VmErr> {
+    let state = legacy_state(interp, receiver)?;
+    let state = state.borrow();
+    if name == "input" && !state.input_unavailable {
+        return Ok(Value::String(state.input.clone()));
+    }
+    if state.invalidated {
+        return Err(VmErr::Msg(
+            "TypeError: legacy RegExp match state is invalidated".into(),
+        ));
+    }
+    let range = match name {
+        "lastMatch" => state.last_match,
+        "lastParen" => state.last_paren,
+        "leftContext" => state.left_context,
+        "rightContext" => state.right_context,
+        _ => state.captures[name.as_bytes()[1] as usize - b'1' as usize],
+    };
+    Ok(Value::String(
+        range
+            .map(|(start, end)| state.matched_input.slice(start, end))
+            .unwrap_or_default(),
+    ))
+}
+
+macro_rules! legacy_getters {
+    ($(($function:ident, $name:literal)),* $(,)?) => {
+        $(fn $function(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+            legacy_get(interp, &this, $name)
+        })*
+    };
+}
+legacy_getters!(
+    (legacy_input, "input"),
+    (legacy_last_match, "lastMatch"),
+    (legacy_last_paren, "lastParen"),
+    (legacy_left_context, "leftContext"),
+    (legacy_right_context, "rightContext"),
+    (legacy_capture_1, "$1"),
+    (legacy_capture_2, "$2"),
+    (legacy_capture_3, "$3"),
+    (legacy_capture_4, "$4"),
+    (legacy_capture_5, "$5"),
+    (legacy_capture_6, "$6"),
+    (legacy_capture_7, "$7"),
+    (legacy_capture_8, "$8"),
+    (legacy_capture_9, "$9"),
+);
+
+fn legacy_set_input(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let state = legacy_state(interp, &this)?;
+    let input = interp.ecmascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
+    let mut state = state.borrow_mut();
+    state.input = input;
+    state.input_unavailable = false;
+    Ok(Value::Undefined)
+}
+
+/// Only the executing realm's own regular expressions update its legacy state.
+/// The state contains strings, so it adds no guest object or cross-thread roots.
+fn update_legacy(
+    interp: &Interpreter,
+    data: &RegExpData,
+    input: &crate::JsString,
+    caps: &Captures,
+) {
+    if data
+        .properties
+        .meta
+        .borrow()
+        .realm_global
+        .as_ref()
+        .is_some_and(|realm| !Rc::ptr_eq(realm, &interp.persistent_global))
+    {
+        return;
+    }
+    let Some(state) = interp.persistent_global.borrow().regexp_legacy_state() else {
+        return;
+    };
+    let mut state = state.borrow_mut();
+    if !data.legacy_enabled.get() {
+        *state = LegacyState {
+            invalidated: true,
+            input_unavailable: true,
+            ..LegacyState::default()
+        };
+        return;
+    }
+    state.invalidated = false;
+    state.input_unavailable = false;
+    let (start, end) = caps[0].unwrap_or((0, 0));
+    state.input = input.clone();
+    state.matched_input = input.clone();
+    state.last_match = caps[0];
+    state.last_paren = caps.last().copied().flatten().filter(|_| caps.len() > 1);
+    state.left_context = Some((0, start));
+    state.right_context = Some((end, input.len()));
+    for (index, value) in state.captures.iter_mut().enumerate() {
+        *value = caps.get(index + 1).copied().flatten();
+    }
+}
+
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("RegExp") {
+        e.regexp_legacy = Some(Rc::new(RefCell::new(LegacyState::default())));
         super::make_callable(&namespace, regexp_construct, None);
+        for (names, getter) in [
+            (&["input", "$_"][..], legacy_input as super::NativeFn),
+            (&["lastMatch", "$&"][..], legacy_last_match),
+            (&["lastParen", "$+"][..], legacy_last_paren),
+            (&["leftContext", "$`"][..], legacy_left_context),
+            (&["rightContext", "$'"][..], legacy_right_context),
+            (&["$1"][..], legacy_capture_1),
+            (&["$2"][..], legacy_capture_2),
+            (&["$3"][..], legacy_capture_3),
+            (&["$4"][..], legacy_capture_4),
+            (&["$5"][..], legacy_capture_5),
+            (&["$6"][..], legacy_capture_6),
+            (&["$7"][..], legacy_capture_7),
+            (&["$8"][..], legacy_capture_8),
+            (&["$9"][..], legacy_capture_9),
+        ] {
+            for name in names {
+                let mut descriptor = vec![
+                    (
+                        "get".into(),
+                        super::native_method(
+                            &format!("get {name}"),
+                            0,
+                            getter,
+                            e.get("Function").and_then(|f| f.get_prop("prototype")),
+                        ),
+                    ),
+                    ("configurable".into(), Value::Bool(true)),
+                ];
+                if names[0] == "input" {
+                    descriptor.push((
+                        "set".into(),
+                        super::native_method(
+                            &format!("set {name}"),
+                            1,
+                            legacy_set_input,
+                            e.get("Function").and_then(|f| f.get_prop("prototype")),
+                        ),
+                    ));
+                }
+                super::object::define_property(
+                    &namespace,
+                    name,
+                    &Value::descriptor_record(descriptor),
+                )
+                .expect("RegExp legacy accessor");
+            }
+        }
 
         let object_prototype = e
             .get("Object")
@@ -80,7 +263,11 @@ fn regexp_attribute(interp: &mut Interpreter, this: Value, name: &str) -> Result
             _ => regexp_member(data, name).expect("RegExp attribute"),
         });
     }
-    let constructor = interp.member(&interp.realm_global_object(), "RegExp")?;
+    let constructor = interp
+        .persistent_global
+        .borrow()
+        .intrinsic("RegExp")
+        .ok_or_else(|| VmErr::Msg("TypeError: RegExp intrinsic is unavailable".into()))?;
     let prototype = interp.member(&constructor, "prototype")?;
     if crate::interpreter::strict_equals(&this, &prototype) {
         return Ok(if name == "source" {
@@ -214,7 +401,11 @@ fn match_result(
 }
 
 /// Run one search, honouring and updating `lastIndex` for a `g`/`y` pattern.
-fn exec(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Option<Captures>, VmErr> {
+fn exec(
+    interp: &Interpreter,
+    data: &Rc<RegExpData>,
+    input: &crate::JsString,
+) -> Result<Option<Captures>, VmErr> {
     let stateful = data.regex.borrow().global || data.regex.borrow().sticky;
     let start = if stateful { data.last_index.get() } else { 0 };
     if start > input.len() {
@@ -228,6 +419,7 @@ fn exec(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Option<Capture
         .map_err(|e| VmErr::Msg(e.to_string()))?;
     match &found {
         Some(caps) => {
+            update_legacy(interp, data, input, caps);
             if stateful {
                 let end = caps[0].map(|(_, e)| e).unwrap_or(start);
                 // An empty match must still advance, or a `g` loop never ends.
@@ -254,7 +446,7 @@ fn regexp_exec(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
         ));
     };
     let subject = subject_chars(interp, a.first())?;
-    match exec(&data, &subject)? {
+    match exec(interp, &data, &subject)? {
         Some(caps) => match_result(&data, &subject, &caps),
         None => Ok(Value::Null),
     }
@@ -267,7 +459,7 @@ fn regexp_test(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
         ));
     };
     let subject = subject_chars(interp, a.first())?;
-    Ok(Value::Bool(exec(&data, &subject)?.is_some()))
+    Ok(Value::Bool(exec(interp, &data, &subject)?.is_some()))
 }
 
 fn subject_chars(interp: &Interpreter, value: Option<&Value>) -> Result<crate::JsString, VmErr> {
@@ -285,7 +477,11 @@ fn as_pattern(value: Option<&Value>) -> Option<Rc<RegExpData>> {
 }
 
 /// Every match of a global pattern, or just the first for a non-global one.
-fn all_matches(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Vec<Captures>, VmErr> {
+fn all_matches(
+    interp: &Interpreter,
+    data: &Rc<RegExpData>,
+    input: &crate::JsString,
+) -> Result<Vec<Captures>, VmErr> {
     let mut out = Vec::new();
     let mut at = 0usize;
     loop {
@@ -295,6 +491,7 @@ fn all_matches(data: &Rc<RegExpData>, input: &crate::JsString) -> Result<Vec<Cap
             .find_at(input.units(), at)
             .map_err(|e| VmErr::Msg(e.to_string()))?;
         let Some(caps) = found else { break };
+        update_legacy(interp, data, input, &caps);
         let (start, end) = caps[0].unwrap_or((at, at));
         out.push(caps);
         if !data.regex.borrow().global {
@@ -330,7 +527,7 @@ pub fn string_match(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
     };
     if data.regex.borrow().global {
         data.last_index.set(0);
-        let matches = all_matches(&data, &input)?;
+        let matches = all_matches(interp, &data, &input)?;
         if matches.is_empty() {
             return Ok(Value::Null);
         }
@@ -345,7 +542,7 @@ pub fn string_match(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
             .collect();
         return Value::checked_array(items);
     }
-    match exec(&data, &input)? {
+    match exec(interp, &data, &input)? {
         Some(caps) => match_result(&data, &input, &caps),
         None => Ok(Value::Null),
     }
@@ -371,7 +568,7 @@ pub fn string_match_all(
             "TypeError: matchAll must be called with a global RegExp".to_string(),
         ));
     }
-    let matches = all_matches(&data, &input)?;
+    let matches = all_matches(interp, &data, &input)?;
     let items = matches
         .iter()
         .map(|caps| match_result(&data, &input, caps))
@@ -399,6 +596,9 @@ pub fn string_search(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Re
         .borrow()
         .find_at(input.units(), 0)
         .map_err(|e| VmErr::Msg(e.to_string()))?;
+    if let Some(caps) = &found {
+        update_legacy(interp, &data, &input, caps);
+    }
     Ok(Value::Number(match found {
         Some(caps) => caps[0].map(|(start, _)| start as f64).unwrap_or(-1.0),
         None => -1.0,
@@ -505,7 +705,7 @@ pub fn replace_with_pattern(
     all: bool,
 ) -> Result<Value, VmErr> {
     let matches = if all || data.regex.borrow().global {
-        all_matches(data, input)?
+        all_matches(interp, data, input)?
     } else {
         data.regex
             .borrow()
@@ -514,6 +714,11 @@ pub fn replace_with_pattern(
             .into_iter()
             .collect()
     };
+    if !(all || data.regex.borrow().global)
+        && let Some(caps) = matches.first()
+    {
+        update_legacy(interp, data, input, caps);
+    }
     let callable = matches!(
         replacement,
         Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
@@ -562,6 +767,7 @@ pub fn replace_with_pattern(
 /// `str.split(pattern, limit)` where the separator is a regular expression.
 /// Capture groups in the separator are spliced into the result.
 pub fn split_with_pattern(
+    interp: &Interpreter,
     input: &crate::JsString,
     data: &Rc<RegExpData>,
     limit: usize,
@@ -576,6 +782,7 @@ pub fn split_with_pattern(
             .find_at(input.units(), at)
             .map_err(|e| VmErr::Msg(e.to_string()))?;
         let Some(caps) = found else { break };
+        update_legacy(interp, data, input, &caps);
         let (start, end) = caps[0].unwrap_or((at, at));
         // An empty match at the cursor would split into empty strings forever.
         if end == start && start == cursor {

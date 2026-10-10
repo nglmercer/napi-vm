@@ -369,3 +369,25 @@ staging test. Exact reports, checkpoints, comparisons and digests are archived.
 Full-corpus AST/bytecode mismatches remain unmeasured; the shared helpers and
 selected differential fixtures do not substitute for that measurement. Remaining
 realm/internal-operation dependencies still prevent declaring Phases 1–3 complete.
+
+
+## Realm-owned RegExp legacy state (subsequent implementation)
+
+The intrinsic RegExp constructor has real legacy accessor descriptors for input,
+captures and match context, including aliases. Native accessors validate their
+receiver against the owning realm's cached intrinsic constructor, so replacing a
+global constructor does not change branding. Each realm owns independent state
+in its root environment. Matches from another realm do not update that state.
+Subclass matches invalidate legacy slots; setting input restores only input.
+
+The shared matching helpers update one input and capture/context ranges. This
+preserves UTF-16 indices without repeatedly copying large context strings in a
+global match. State contains strings and ranges, not guest objects or callbacks,
+and is released with its owning environment. Input setters use the shared
+observable string conversion after receiver validation. The semantics follow the
+[legacy RegExp proposal](https://github.com/tc39/proposal-regexp-legacy-features#abstract-operations).
+
+Targeted checks passed: six runtime/realm/GC tests and 363 core unit tests,
+including forced AST/bytecode differential fixtures. Required repository checks
+and focused/full pinned corpus validation must be recorded separately for this
+implementation; the latest completed full measurement above remains 5868d51.

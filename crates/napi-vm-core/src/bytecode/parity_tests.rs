@@ -1481,3 +1481,15 @@ fn class_private_methods_accessors_and_static_order_share_semantics() {
         check(source, true);
     }
 }
+
+#[test]
+fn legacy_regexp_state_and_descriptors_match_in_both_tiers() {
+    for source in [
+        "/(a)(b)/.exec('xabz');RegExp.$1==='a'&&RegExp.lastMatch==='ab'&&RegExp.leftContext==='x'&&RegExp.rightContext==='z';",
+        "var caught;try{Reflect.get(RegExp,'lastMatch',{});}catch(e){caught=e;}caught instanceof TypeError;",
+        "var calls=0;RegExp.input={toString(){calls++;return 'input';}};RegExp.input==='input'&&calls===1;",
+        "class Derived extends RegExp{}new Derived('a').test('a');RegExp.input='restored';var caught;try{RegExp.lastMatch;}catch(e){caught=e;}RegExp.input==='restored'&&caught instanceof TypeError;",
+    ] {
+        check(source, true);
+    }
+}

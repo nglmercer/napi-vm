@@ -375,7 +375,7 @@ fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, V
         return Value::checked_array(vec![]);
     }
     if let Some(re) = a.first().and_then(Value::as_regexp) {
-        return super::regexp::split_with_pattern(&s, &re, limit);
+        return super::regexp::split_with_pattern(i, &s, &re, limit);
     }
     if matches!(a.first(), None | Some(Value::Undefined)) {
         return Value::checked_array(vec![Value::String(s)]);

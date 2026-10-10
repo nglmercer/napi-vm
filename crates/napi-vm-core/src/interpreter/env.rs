@@ -287,6 +287,7 @@ pub struct Environment {
     parameter_scope: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
     intrinsics: HashMap<String, Value>,
+    pub(crate) regexp_legacy: Option<Rc<RefCell<crate::builtins::regexp::LegacyState>>>,
 }
 
 impl std::fmt::Debug for Environment {
@@ -427,6 +428,16 @@ impl Environment {
 
     pub(crate) fn constructor_fields(&self) -> Rc<Vec<crate::parser::Statement>> {
         self.constructor_fields.clone().unwrap_or_default()
+    }
+
+    pub(crate) fn regexp_legacy_state(
+        &self,
+    ) -> Option<Rc<RefCell<crate::builtins::regexp::LegacyState>>> {
+        self.regexp_legacy.clone().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.borrow().regexp_legacy_state())
+        })
     }
 
     pub(crate) fn snapshot_intrinsics(&mut self) {
@@ -681,6 +692,7 @@ impl Environment {
             with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            regexp_legacy: None,
         }
     }
 
@@ -707,6 +719,7 @@ impl Environment {
             with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            regexp_legacy: None,
         }
     }
 
@@ -737,6 +750,7 @@ impl Environment {
             with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            regexp_legacy: None,
         }
     }
 
@@ -778,6 +792,7 @@ impl Environment {
             with_object: None,
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
+            regexp_legacy: None,
         }
     }
 
@@ -1345,6 +1360,7 @@ impl Environment {
         self.with_object = None;
         self.property_attributes.clear();
         self.intrinsics.clear();
+        self.regexp_legacy = None;
         self.new_target = None;
         self.constructor_this = None;
         self.constructor_fields = None;
