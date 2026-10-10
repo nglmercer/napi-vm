@@ -639,7 +639,7 @@ impl Interpreter {
         allow(dead_code)
     )]
     pub(crate) fn has_property(&mut self, object: &Value, key: &Value) -> Result<bool, VmErr> {
-        let trap_key = self.to_property_key(key)?;
+        let trap_key = self.ecmascript_to_property_key(key)?;
         let property = self.property_key(&trap_key)?;
         let mut current = object.clone();
         for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
@@ -768,7 +768,7 @@ impl Interpreter {
         if let Some(proxy) = o.as_proxy() {
             let (target, handler) = proxy.snapshot()?;
             if let Some(trap) = self.proxy_trap(&handler, "get")? {
-                let key = self.to_property_key(p)?;
+                let key = self.ecmascript_to_property_key(p)?;
 
                 let result = self.call_this(
                     &trap,
@@ -800,7 +800,7 @@ impl Interpreter {
             _ if !self.seq(o, receiver) => o.exotic_properties(),
             _ => None,
         } {
-            let key = self.to_property_key(p)?;
+            let key = self.ecmascript_to_property_key(p)?;
             let slot = self.property_key(&key)?;
             let inherited = {
                 let own = props.borrow().iter().any(|(name, _)| name == &slot);
@@ -912,7 +912,7 @@ impl Interpreter {
             let (target, handler) = proxy.snapshot()?;
             if let Some(trap) = self.proxy_trap(&handler, "get")? {
                 let trap_key = Value::String(crate::JsString::from_key(key));
-                let trap_key = self.to_property_key(&trap_key)?;
+                let trap_key = self.ecmascript_to_property_key(&trap_key)?;
 
                 let result = self.call_this(
                     &trap,

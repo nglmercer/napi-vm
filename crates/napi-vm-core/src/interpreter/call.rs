@@ -575,7 +575,7 @@ impl Interpreter {
     }
 
     pub(crate) fn delete_member(&mut self, obj: &Value, key: &Value) -> Result<Value, VmErr> {
-        let key = self.to_property_key(key)?;
+        let key = self.ecmascript_to_property_key(key)?;
         self.delete_member_key(obj, &key, 0)
     }
 
@@ -792,7 +792,7 @@ impl Interpreter {
 
     /// ECMAScript ToPropertyKey preserves Symbol identity after observable
     /// ToPrimitive with the string hint. Slot encoding is a separate step.
-    pub(crate) fn to_property_key(&mut self, key: &Value) -> Result<Value, VmErr> {
+    pub(crate) fn ecmascript_to_property_key(&mut self, key: &Value) -> Result<Value, VmErr> {
         let primitive = self.coerce_object_to_primitive(key, "string")?;
         if matches!(primitive, Value::Symbol(_)) {
             Ok(primitive)
@@ -1116,7 +1116,7 @@ impl Interpreter {
         value: Value,
         receiver: &Value,
     ) -> Result<bool, VmErr> {
-        let key = self.to_property_key(property)?;
+        let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
         let mut current = if matches!(target, Value::GlobalObject) {
             self.realm_global_object()
@@ -1738,7 +1738,7 @@ impl Interpreter {
                 "TypeError: Cannot update a property of null or undefined".into(),
             ));
         }
-        let key = self.to_property_key(prop)?;
+        let key = self.ecmascript_to_property_key(prop)?;
         let name = self.property_key(&key)?;
         if let Some(cell) = obj.property_cell()
             && let Some(index) = cell.own_index(&name)

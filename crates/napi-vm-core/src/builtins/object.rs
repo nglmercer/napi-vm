@@ -559,7 +559,7 @@ fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
-    let key = interp.to_property_key(a.get(1).unwrap_or(&Value::Undefined))?;
+    let key = interp.ecmascript_to_property_key(a.get(1).unwrap_or(&Value::Undefined))?;
     Ok(Value::Bool(!matches!(
         descriptor_for_key_in(interp, &target, &key)?,
         Value::Undefined
@@ -571,7 +571,7 @@ fn object_has_own_property(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let key = interp.to_property_key(args.first().unwrap_or(&Value::Undefined))?;
+    let key = interp.ecmascript_to_property_key(args.first().unwrap_or(&Value::Undefined))?;
     let target = to_object_receiver(&this)?;
     Ok(Value::Bool(!matches!(
         descriptor_for_key_in(interp, &target, &key)?,
@@ -1061,7 +1061,7 @@ fn object_define_property(
     if !crate::interpreter::call::is_js_object(&target) {
         return Err(type_err("Object.defineProperty called on non-object"));
     }
-    let key = interp.to_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.ecmascript_to_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
     let descriptor =
         to_property_descriptor(interp, &a.get(2).cloned().unwrap_or(Value::Undefined))?;
     if !interp.define_own_property(&target, &key, &descriptor)? {
@@ -1549,7 +1549,7 @@ fn object_get_own_descriptor(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
-    let key = interp.to_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.ecmascript_to_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
     descriptor_for_key_in(interp, &target, &key).map(from_property_descriptor)
 }
 

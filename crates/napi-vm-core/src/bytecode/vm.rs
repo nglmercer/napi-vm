@@ -1106,7 +1106,7 @@ fn run_loop(
                 }
                 Instr::PropertyKey { dst, src } => {
                     let key = frame.registers[src as usize].clone_for_execution();
-                    frame.registers[dst as usize] = interp.to_property_key(&key)?;
+                    frame.registers[dst as usize] = interp.ecmascript_to_property_key(&key)?;
                 }
                 Instr::ClassScope { name } => {
                     let name = name

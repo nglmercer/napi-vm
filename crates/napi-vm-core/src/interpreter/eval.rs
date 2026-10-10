@@ -318,7 +318,7 @@ impl Interpreter {
         key: &Value,
     ) -> Result<(Value, Value, Value), VmErr> {
         let receiver = self.resolve_this(scope)?;
-        let key = self.to_property_key(key)?;
+        let key = self.ecmascript_to_property_key(key)?;
         let home = scope
             .borrow()
             .get(HOME_OBJECT)
@@ -367,13 +367,10 @@ impl Interpreter {
                 | Expr::ClassExpr { name: None, .. }
         ) {
             let name = self.property_function_name(key)?;
-            match &value {
-                Value::Function(function) => {
-                    let mut function = function.as_ref().clone();
-                    function.name = Some(Rc::from(name));
-                    return Ok(Value::Function(Rc::new(function)));
-                }
-                _ => {}
+            if let Value::Function(function) = &value {
+                let mut function = function.as_ref().clone();
+                function.name = Some(Rc::from(name));
+                return Ok(Value::Function(Rc::new(function)));
             }
         }
         Ok(value)
@@ -387,7 +384,7 @@ impl Interpreter {
             }
             MemberName::Computed(expr) => {
                 let value = self.eval_expr(expr)?;
-                self.to_property_key(&value)
+                self.ecmascript_to_property_key(&value)
             }
         })();
         self.global = saved;
@@ -2224,7 +2221,7 @@ impl Interpreter {
                     is_setter,
                 } => {
                     let key_value = self.eval_expr(key)?;
-                    let property_key = self.to_property_key(&key_value)?;
+                    let property_key = self.ecmascript_to_property_key(&key_value)?;
                     let key = self.property_key(&property_key)?;
                     let accessor = if *is_getter {
                         Some(ObjectAccessorKind::Getter)
@@ -2263,7 +2260,7 @@ impl Interpreter {
                 }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     let key_value = self.eval_expr(key_expression)?;
-                    let key_value = self.to_property_key(&key_value)?;
+                    let key_value = self.ecmascript_to_property_key(&key_value)?;
                     let symbol = match &key_value {
                         Value::Symbol(symbol) => Some(symbol.clone()),
                         _ => None,
