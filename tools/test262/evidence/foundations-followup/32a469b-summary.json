@@ -1,6 +1,6 @@
 {
   "source_commit": "32a469b39a62f4b96d37af97d1b3c33c2120c730",
-  "classification": "Agent owner heap cleanup, shared contextual import grammar and realm-owned iterator allocation; focused evidence, full pending",
+  "classification": "Agent owner heap cleanup, shared contextual import grammar and realm-owned iterator allocation; completed full pinned corpus",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -60,7 +60,14 @@
     "32a469b-focused-c82f617-transitions.json.gz": "2716812c1b045e15a5c1d1a69f6b40cd95a1a172301f378f3c8e765e2525459c",
     "32a469b-focused-transitions.json.gz": "db033d9384ebc75a7bd2870ccd65a9fa7f28ad55f8e325d23eaaeee4c1b3f54f",
     "32a469b-focused.jsonl.gz": "acc4838f8bd66bdc17c374d5097bdda120fb8c959eb828ecc1e79e51e5dcd2f8",
-    "32a469b-focused-7c0a9ce-projection.json.gz": "783b96afed60178b71dc9a48bc87b2e979591fa5afdede46d9b3458961398af7"
+    "32a469b-focused-7c0a9ce-projection.json.gz": "783b96afed60178b71dc9a48bc87b2e979591fa5afdede46d9b3458961398af7",
+    "32a469b-full-7c0a9ce-transitions.json.gz": "685c65f262a0b5afe90e1f196ddf773774a3c9747a876c5e31c377002011613a",
+    "32a469b-full.json.gz": "920f1c4d66e83bee377c1f8273cd4c0b51eb6affcef27a40587b5a64cc9f667d",
+    "32a469b-full.jsonl.gz": "e46cb8306084926038255b754317b1cd24d66334e079ff5695682b200114a661",
+    "32a469b-full-c82f617-transitions.json.gz": "9fbc0cccdd4de6b38cbf0de9cb88952251ae17650f543f390fc894c98cd27bc5",
+    "32a469b-full-6456b53-transitions.json.gz": "052059026667fe3cc34e8a2c28b946468cca12a54115dd8eb886b2be9c210dc1",
+    "32a469b-full-pr23-transitions.json.gz": "66c00338eadb518a33d29dba36a6ec0c99f92e6940f98d4395bf6d62dfb94eec",
+    "32a469b-phase-classification.json.gz": "0ebbcd3e8d9eab3b20a4d8bf2b7ce4c25ce37b0cf388af6b8fc003acf52314d5"
   },
   "worker_sha256": "06b04d5d9ab917980c0d3ed7e9416f845a3242433a594c062c2ec6084a58e73b",
   "syntax": {
@@ -104,5 +111,27 @@
     "new_passes": 2228,
     "lost_passes": 0,
     "baseline": "Matching projection from independent c82f617 full report"
+  },
+  "full": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 66035,
+      "fail": 36919,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 24628,
+    "lost_passes": 0,
+    "baseline": "PR #23"
+  },
+  "full_recent": {
+    "new_passes": 2362,
+    "lost_passes": 0
+  },
+  "phase_classification": {
+    "parse_negative_variants": 8659,
+    "nonpasses": 0
   }
 }

@@ -242,3 +242,14 @@ and 12,939 failures. Compared with the matching merged-PR-24 projection
 errors and skips are all zero. Exact focused reports/checkpoints/transitions
 are archived. The full pinned execution is running separately; the focus
 does not establish a full-corpus result or Phase 1/2 completion.
+
+The complete pinned `32a469b` run finishes at 66,035/102,956 passes, with
+36,919 failures, two timeouts and zero crashes, harness errors or skips.
+Against PR #23 it gains 24,628 passes and loses none; against merged PR #24
+(`c82f617`) it gains 2,362 and loses none. Both timeouts remain the script
+and strict variants of `staging/sm/regress/regress-1507322-deep-weakmap.js`.
+All 8,659 parse-negative variants pass execution-phase/error classification.
+Exact full reports, checkpoints, transitions, phase audit and digests are
+archived. Full-corpus AST/bytecode differential remains unmeasured. This
+result does not close remaining realm/internal-operation dependencies,
+including the JSON replacer/Proxy realm failures; the PR stays a draft.
