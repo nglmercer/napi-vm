@@ -1,0 +1,65 @@
+{
+  "source_commit": "b0dc2801cce21b045b6a95d02755df7c27573c24",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "67d907c027b39541a3e893ebc444a6207e57b7b82ecdca071005d34a4b881060",
+  "classification": "Expanded focused validation after full-run regression corrections; not a full-corpus completion claim",
+  "total": 16389,
+  "counts": {
+    "pass": 14203,
+    "fail": 2186,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 2326,
+  "lost_passes": 0,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 921,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 15, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Private methods/accessors/static branding, typed descriptors, remaining internal operations and full-corpus AST/bytecode measurement remain open",
+  "archive_sha256": {
+    "b0dc280-release-build.log.gz": "d58b332f326d86b29fdf145865f573f148b0841346b241aef6d6387372029108",
+    "b0dc280-tooling-tests.log.gz": "1334beb64bfaaf4d90ca9fac8e2011a0c1d7053c3e97efa38c34eef194aa79dc",
+    "b0dc280-wasm-tests.log.gz": "89f536095ee0295e89e17b09eb00814dc8a3ba1a8b624a999a4ad6bc136f8a27",
+    "b0dc280-node-tests.log.gz": "863073e558a2db2d700d218ca9b09ddbc898f41557a5f92c7b46ad3a7a49aa8a",
+    "b0dc280-native-build.log.gz": "b11e3492aea82ab55fd03bbaf60f953622a838c081b09587a4b9a30591de8e51",
+    "b0dc280-minimal-tests.log.gz": "d7fb7ddf65ec725d1d0bf9e7fcaa6e4877aae13eeb76dd8a7160e9f279d8cc26",
+    "b0dc280-allfeatures-tests.log.gz": "62726422519a107383c065864e3e71497287f0b29ef01ee707e053b49027631e",
+    "b0dc280-clippy.log.gz": "696555bc7bf80e3f516c36184b7664483d5d2f900cea0283bb41b08e9ab657b0",
+    "b0dc280-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "b0dc280-focused.json.gz": "bff19a101029ff2b0b14e4af0c051dbb20cf79a57987010e7dd76ce1b9552bcf",
+    "b0dc280-focused.jsonl.gz": "1bcb53423816223b70089515b25b44c226e779a6083c2201b79754aaefc8f02b",
+    "b0dc280-focused-transitions.json.gz": "724928fcc7b20f7933bb56c0b1e875d0e317d0b0d41a2191e879756e4f778a44",
+    "b0dc280-focused-7c0a9ce-projection.json.gz": "5d0efd99e57f0702b243e255623af079a69d9596d5a89d13da48ba76794fa417",
+    "b0dc280-regressions.json.gz": "c8781ac9da9f0cfda15c9e30d8bc7571a26b3a443dc44c2c6919304d60c64b4c",
+    "b0dc280-regressions.log.gz": "79c6788503e10014eb320bce04a890bcc22dd66cf19fab3c33fcbd2044652ab6",
+    "b0dc280-6456b53-projection.json.gz": "e509aaae34fd6b4e28b8c2f1642fbd0091a9ea6eae2ad68ce4c24318738e3ac6",
+    "b0dc280-6456b53-transitions.json.gz": "7196c672d8e21fe0a1589b5a9fa099f0317246f3910af6417c93fc682d68f5f1"
+  },
+  "recent_baseline_comparison": 309,
+  "recent_baseline_lost_passes": 0,
+  "recent_baseline": "Matching projection of independent 6456b53 full report",
+  "regression_selection": {
+    "files": 19,
+    "variants": 38,
+    "pass": 38,
+    "fail": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0,
+    "purpose": "Contains every formerly passing variant from the b28ddd0 full comparison"
+  }
+}

@@ -247,3 +247,33 @@ These require regression fixes and a new independent full run.
 Full-corpus AST/bytecode mismatch counts remain unmeasured. Known private-element,
 accessor storage, and Proxy/exotic dependencies remain open, so this is not a
 merge-ready Phase 1 completion claim.
+
+
+## Full-run regression corrections (b0dc280)
+
+The follow-up preserves callable data in global records rather than invoking it
+because its function name resembles a getter. Intrinsic Symbol/Map/Set accessors
+carry accessor metadata. Property updates require a coercible base after evaluating
+the reference operands and before converting the key. For-in enumeration uses the
+shared own-key/descriptor layer, including boxed-string virtual indices.
+
+Missing inherited exotic properties preserve the original receiver when invoking
+prototype accessors. Direct buffer/view reads retain the existing tracking and
+out-of-bounds behavior. Proxy ownKeys required-key checks reuse the identity set
+already used for duplicate rejection. Large shape rebuilds use a flat layout and
+stop retaining every large prefix, preserving small-object canonical shapes.
+
+Compiler/verifier/VM and AST/bytecode differential fixtures cover the shared
+reference operations; realm regressions also cover poisoned function prototypes,
+boxed-string keys, and inherited buffer/view accessor brand checks. The required
+checks passed: 921 workspace tests (four existing ignored), 203 minimal tests,
+73 Node tests, 15 WASM tests, ten runner tests, formatting, and strict Clippy.
+These checks do not replace a new focused/full corpus regression gate or complete
+the remaining private-element and descriptor model work.
+
+
+The expanded b0dc280 focused run passed 14,203/16,389 variants with 2,186 failures
+and zero skips, harness errors, timeouts, or crashes. Against the matching 6456b53
+full projection: 309 new passes and zero losses. All 38 variants in the 19 files
+containing the preceding full run's regressions passed under the original limits.
+These focused results measure the immutable b0dc280 worker, not subsequent edits.
