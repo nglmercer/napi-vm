@@ -1,0 +1,54 @@
+{
+  "source_commit": "bcbe2fc358332c9cf3e2097f559d63daa9daba4c",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "2cda80d93c4fc03b2c6fd0472c2d71edba72656ecef2cbad18447951448fcc30",
+  "classification": "Intermediate global-record focused run; 33 lost passes vs 7c0a9ce and 47 vs 6456b53 block the full run",
+  "total": 14662,
+  "counts": {
+    "pass": 12931,
+    "fail": 1731,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "new_passes": 2276,
+  "lost_passes": 33,
+  "baseline": "Matching projection from independent 7c0a9ce full report",
+  "checks": {
+    "allfeatures-tests": {
+      "passed": 913,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal-tests": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  "other_required_checks": "All passed; Node 73, WASM 15, tooling 10",
+  "ast_bytecode_mismatches": "Full corpus not measured",
+  "remaining_gaps": "Empty lexical loop scopes, configurable eval declaration checks, and prototype-poisoned internal descriptor records are being corrected; private/descriptor ownership dependencies remain open.",
+  "archive_sha256": {
+    "bcbe2fc-release-build.log.gz": "b10583109d699e1d8c3bb9f58058df670dd5f7e01521b731d7c33bd75926ff2a",
+    "bcbe2fc-tooling-tests.log.gz": "a1ce2dc9bfc5cb662a58cb35322082aeb7e65d932dfea536987932772fac540c",
+    "bcbe2fc-wasm-tests.log.gz": "c55eb26b86761a750250c08e14a89ff75dbf86fa75b6a4d4e7cbf45f212290c6",
+    "bcbe2fc-node-tests.log.gz": "3b9180e52c64f321a55b9084f8e52b500466be2f3cdeb180194c9f9d58060393",
+    "bcbe2fc-native-build.log.gz": "49a6ebdfe5cc70040dcc7cae4760c69f1efc03f641503710c872cdb1a9c9d3f0",
+    "bcbe2fc-minimal-tests.log.gz": "e9a9285e915d561b071492dab7170867743add425e9efdfbfdeea8cac5b7e45f",
+    "bcbe2fc-allfeatures-tests.log.gz": "b9e843f1d668b92c685f57dd1300716148a2fbb66a88f1c7e12420807f4496e4",
+    "bcbe2fc-clippy.log.gz": "b2b3e59b4cc13f7297eba708182dcbf1e27f68e51f204cbba7f914e0ccaca221",
+    "bcbe2fc-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "bcbe2fc-focused.json.gz": "476d330f29ff70baf9d5eb6018bdc7a2f4e689816bd9cb1f8ff31863addedc71",
+    "bcbe2fc-focused.jsonl.gz": "43b7a7e518b93eaf2fd0d841bfac50041b8518cc02615e82c5dde8f1f8d76918",
+    "bcbe2fc-focused-transitions.json.gz": "be1ca5244a4677fa35ce0e5f63672a0d35ef06ad94c5c7b052a63c24ad4ed914",
+    "bcbe2fc-focused-7c0a9ce-projection.json.gz": "062340eb66da03b527a41f3296a907e0febf683a8fd73ce26309f6de5d1c681d",
+    "bcbe2fc-focused-6456b53-projection.json.gz": "052599176011de1ca9ea6bfa14b6b49877d01f0119ab798addceb7c1cc073cfe",
+    "bcbe2fc-focused-6456b53-transitions.json.gz": "daee91afe59f4a64e41a46a123b9f72ce81cb65789c17f3de5809fdf4ebc9cad"
+  },
+  "recent_baseline": "Matching projection from independent 6456b53 full report",
+  "recent_new_passes": 279,
+  "recent_lost_passes": 47,
+  "required_check_sources": "Rust and Node checks ran on 26e2f99; bcbe2fc changes only WASM fixtures, whose 15 tests were rerun. Rust/Node source trees are identical."
+}

@@ -1,6 +1,7 @@
 # Phase 1 host, realms, and GC audit
 
-This audit accompanies source `372c20b` in draft PR #24. It records implemented
+This audit records the staged implementation in draft PR #24. The latest
+validated semantic source is `b28ddd0`; its full-corpus run is in progress. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
 Phase 1 realm case complete. It does not classify all remaining conformance
 failures as outside the foundation work.
@@ -193,3 +194,50 @@ resumption, and all earlier failed gates remain archived. These results close th
 reported regressions, not the remaining realm-global/private/descriptor/Proxy
 foundation dependencies. Phase 1 is still open and full-corpus AST/bytecode
 measurement is outstanding.
+
+## Realm-global records and descriptor follow-up: b28ddd0
+
+Primary and child realms now share a GlobalEnvironment with an ordinary object
+record and an independent declarative record. Global object properties use the
+same descriptor, symbol-key, prototype, extensibility, accessor, and Proxy paths
+as ordinary objects. Lexical declarations remain off the global object. Reads and
+writes retain the realm-global receiver; bare global calls retain their required
+undefined receiver. The object record is an actual traced GC edge, with its
+realm-owner back-edge traced through ordinary object metadata.
+
+Script, eval, and bytecode global declaration paths share preflight checks and
+var/function binding helpers. Configurable properties created by eval can coexist
+with later lexical bindings, as required by the pinned corpus. Protected script
+properties still reject conflicting declarations. Host UTF-16 names and explicit
+removal preserve the existing N-API contract.
+
+Lexical for-in/of heads have a TDZ environment for the RHS and a fresh environment
+per iteration, including empty binding patterns. Compiler scopes now track whether
+they own a runtime environment separately from whether they contain boxed names.
+Compiler, verifier, VM, and AST/bytecode differential fixtures cover these paths.
+
+Internal descriptor records have no prototype. Guest-defined properties named
+get, set, value, or writable on Object.prototype cannot alter internal records.
+Object/Reflect descriptor results and Proxy defineProperty trap arguments still
+receive ordinary descriptor objects. This closes record normalization pollution;
+it does not finish the remaining accessor-storage/private-element dependencies.
+
+Validation: formatting and strict Clippy passed; workspace tests passed 916 with
+4 pre-existing ignored tests; minimal tests passed 203; Node passed 73; WASM passed
+15; runner/tooling passed 10. The frozen worker SHA-256 is
+`b02073c11eee38cbe361cf52cf95ef444790095d9ab3388acbfdd4251e9942b8`.
+
+The expanded focused selection passed 12,978/14,662 variants, with 1,684 failures
+and zero skips, harness errors, timeouts, or crashes. Against the matching 6456b53
+full-report projection: 279 new passes and zero lost passes. Against 7c0a9ce:
+2,290 new passes and zero lost passes. All 47 intermediate losses were recovered;
+the failed runs and checks are archived alongside the successful evidence.
+
+The 236aafc full run was interrupted by an environment restart. Its incomplete
+checkpoint is archived without claiming full totals. The fresh b28ddd0 full run
+uses the pinned revision and required limits. Until it finishes, the latest valid
+full-corpus measurement remains 6456b53: 62,107/102,956, zero lost passes against
+PR #23, zero crashes/harness errors/skips, and two deep-WeakMap timeouts. Full-corpus
+AST/bytecode mismatch counts remain unmeasured. Known private-element, accessor
+storage, and Proxy/exotic dependencies remain open, so this is not a merge-ready
+Phase 1 completion claim.

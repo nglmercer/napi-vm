@@ -1,0 +1,37 @@
+{
+  "source_commit": "8c41d46ae25292c5f2c191df55aa0223364c7a4a",
+  "classification": "Intermediate required-check failure; no focused or full Test262 run performed for this source",
+  "checks": {
+    "fmt": "pass",
+    "clippy": "pass",
+    "workspace_tests": {
+      "passed": 911,
+      "ignored": 4
+    },
+    "minimal_tests": {
+      "passed": 203
+    },
+    "native_build": "pass",
+    "node_tests": {
+      "passed": 70,
+      "failed": 3
+    },
+    "wasm_tests": "not run after Node failure",
+    "tooling_tests": "not run after Node failure",
+    "release_build": "not run after Node failure"
+  },
+  "regressions": [
+    "UTF-16 names were encoded twice when converted to property keys",
+    "Host removal still targeted only lexical storage",
+    "Saved host result test exceeded its 2-second execution deadline after global property operations began allocating descriptors"
+  ],
+  "follow_up_source": "26e2f99",
+  "archive_sha256": {
+    "8c41d46-node-tests.log.gz": "e7892f434e7d263df6676a5477ce7c22a9f068f4cfe613612bd1be45cec47573",
+    "8c41d46-native-build.log.gz": "ea48fe2b59ce16c6a0e5ea4c2c4f8d3b82164867a72570aa38904b5b700dda59",
+    "8c41d46-minimal-tests.log.gz": "8c07c85095cb0854b3014ce6ebadb451f49e368cbd25b957505ef856b240c7e0",
+    "8c41d46-allfeatures-tests.log.gz": "8dbc01a0203a9aa7418071ad93d2a03c43b1455321952bb561c0aa429fed0d32",
+    "8c41d46-clippy.log.gz": "3af26f3b70ffe45315cf3c0f3032c47d95eb0668efae48506a170f62bba23233",
+    "8c41d46-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec"
+  }
+}
