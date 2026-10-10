@@ -1916,8 +1916,37 @@ impl<'a> Compiler<'a> {
         superclass: Option<&'a Expr>,
         body: &'a [ClassMember],
     ) -> Result<Reg, Decline> {
+        // Heritage, computed names and method closures share one class scope.
+        let mut boxed = HashSet::new();
+        if !name.is_empty() {
+            boxed.insert(name.to_owned());
+        }
+        self.push_scope_with_runtime(boxed, true);
+        let name_constant = if name.is_empty() {
+            None
+        } else {
+            Some(self.intern_string(name)?)
+        };
+        *self.code.last_mut().expect("class scope was emitted") = Instr::ClassScope {
+            name: name_constant,
+        };
         let snapshot = self.live_block_names();
         let superclass = superclass.map(|expr| self.compile_expr(expr)).transpose()?;
+        let super_proto = if let Some(superclass) = superclass {
+            let dst = self.alloc_reg()?;
+            self.emit(Instr::ClassHeritage { dst, superclass });
+            Some(dst)
+        } else {
+            None
+        };
+        let private_declarations = crate::parser::class_private_declarations(body);
+        let names = self.push_const(Constant::StringList(
+            private_declarations
+                .iter()
+                .map(|name| name.as_str().into())
+                .collect(),
+        ))?;
+        self.emit(Instr::ClassPrivateEnvironment { names });
 
         let mut members = Vec::new();
         let mut blocks = Vec::new();
@@ -1953,7 +1982,9 @@ impl<'a> Compiler<'a> {
                         continue;
                     }
                     let display = match &template {
-                        ClassNameTemplate::Static(key) => Some(key.clone()),
+                        ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
+                            Some(key.clone())
+                        }
                         // The builder names computed members once the key
                         // value is known.
                         ClassNameTemplate::Computed(_) => None,
@@ -1979,7 +2010,6 @@ impl<'a> Compiler<'a> {
                         is_static: *st,
                         name: template,
                         func: Some(u16::MAX),
-                        value: None,
                     });
                 }
                 ClassMember::Field {
@@ -1989,29 +2019,16 @@ impl<'a> Compiler<'a> {
                 } => {
                     let template = self.compile_member_name(field_name)?;
                     if *st {
-                        let value = match init {
-                            Some(expr) => self.compile_expr(expr)?,
-                            None => self.load_undefined()?,
-                        };
-                        members.push(ClassMemberTemplate {
-                            kind: ClassMemberKind::Field,
-                            is_static: true,
+                        blocks.push(super::constants::ClassStaticTemplate::Field {
                             name: template,
-                            func: None,
-                            value: Some(value),
+                            init: init.clone().unwrap_or(Expr::Undefined),
                         });
                     } else {
-                        if let ClassNameTemplate::Static(name) = &template
-                            && matches!(field_name, MemberName::Private(_))
-                        {
+                        if let ClassNameTemplate::Private(name) = &template {
                             private_fields.push(name.clone());
                         }
                         let key = match template {
-                            ClassNameTemplate::Static(key)
-                                if matches!(field_name, MemberName::Private(_)) =>
-                            {
-                                FieldKey::Private(key)
-                            }
+                            ClassNameTemplate::Private(key) => FieldKey::Private(key),
                             ClassNameTemplate::Static(key) => FieldKey::Static(key),
                             ClassNameTemplate::Computed(reg) => {
                                 let index = ctor_computed_keys.len();
@@ -2029,7 +2046,9 @@ impl<'a> Compiler<'a> {
                 } => {
                     let template = self.compile_member_name(member_name)?;
                     let display = match &template {
-                        ClassNameTemplate::Static(key) => Some(format!("get {key}")),
+                        ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
+                            Some(format!("get {key}"))
+                        }
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
@@ -2053,7 +2072,6 @@ impl<'a> Compiler<'a> {
                         is_static: *st,
                         name: template,
                         func: Some(u16::MAX),
-                        value: None,
                     });
                 }
                 ClassMember::Setter {
@@ -2064,7 +2082,9 @@ impl<'a> Compiler<'a> {
                 } => {
                     let template = self.compile_member_name(member_name)?;
                     let display = match &template {
-                        ClassNameTemplate::Static(key) => Some(format!("set {key}")),
+                        ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
+                            Some(format!("set {key}"))
+                        }
                         ClassNameTemplate::Computed(_) => None,
                     };
                     deferred.push((
@@ -2088,7 +2108,6 @@ impl<'a> Compiler<'a> {
                         is_static: *st,
                         name: template,
                         func: Some(u16::MAX),
-                        value: None,
                     });
                 }
                 ClassMember::StaticBlock { body: block_body } => {
@@ -2109,13 +2128,36 @@ impl<'a> Compiler<'a> {
                         is_generator: false,
                         is_constructor: false,
                     });
-                    blocks.push(self.push_const(Constant::AstFunction(ast))?);
+                    blocks.push(super::constants::ClassStaticTemplate::Block(
+                        self.push_const(Constant::AstFunction(ast))?,
+                    ));
                 }
             }
         }
 
-        let (ctor_params, ctor_body) =
-            Self::class_ctor_body(superclass.is_some(), ctor, &instance_fields);
+        let (ctor_params, ctor_body) = Self::class_ctor_body(
+            superclass.is_some(),
+            ctor,
+            &instance_fields,
+            body.iter().any(|m| {
+                matches!(
+                    m,
+                    ClassMember::Method {
+                        name: MemberName::Private(_),
+                        is_static: false,
+                        ..
+                    } | ClassMember::Getter {
+                        name: MemberName::Private(_),
+                        is_static: false,
+                        ..
+                    } | ClassMember::Setter {
+                        name: MemberName::Private(_),
+                        is_static: false,
+                        ..
+                    }
+                )
+            }),
+        );
         let ctor_length = crate::parser::formal_parameter_length(&ctor_params, &ctor_body);
         deferred.push((
             PatchTarget::ClassCtor { tmpl: u16::MAX },
@@ -2134,10 +2176,11 @@ impl<'a> Compiler<'a> {
 
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
             private_fields,
-            private_declarations: crate::parser::class_private_declarations(body),
+            private_declarations,
             name: name.to_string(),
             expr_name,
             superclass,
+            super_proto,
             ctor_func: u16::MAX,
             ctor_length,
             ctor_computed_keys,
@@ -2146,6 +2189,7 @@ impl<'a> Compiler<'a> {
         }))?;
         let dst = self.alloc_reg()?;
         self.emit(Instr::BuildClass { dst, tmpl });
+        self.pop_scope()?;
         for (mut patch, def) in deferred {
             match &mut patch {
                 PatchTarget::ClassCtor { tmpl: slot }
@@ -2166,9 +2210,8 @@ impl<'a> Compiler<'a> {
     /// definition time rather than at first use.
     fn compile_member_name(&mut self, name: &'a MemberName) -> Result<ClassNameTemplate, Decline> {
         match name {
-            MemberName::Static(key) | MemberName::Private(key) => {
-                Ok(ClassNameTemplate::Static(key.clone()))
-            }
+            MemberName::Private(key) => Ok(ClassNameTemplate::Private(key.clone())),
+            MemberName::Static(key) => Ok(ClassNameTemplate::Static(key.clone())),
             MemberName::Computed(expr) => {
                 let src = self.compile_expr(expr)?;
                 let dst = self.alloc_reg()?;
@@ -2187,6 +2230,7 @@ impl<'a> Compiler<'a> {
         is_derived: bool,
         ctor: Option<OwnedCtor<'a>>,
         instance_fields: &[(FieldKey, Option<&'a Expr>)],
+        has_private_instance_elements: bool,
     ) -> (SharedSlice<'a, String>, SharedSlice<'a, Statement>) {
         let implicit_derived = is_derived && ctor.is_none();
         let (params, body) = match ctor {
@@ -2221,7 +2265,7 @@ impl<'a> Compiler<'a> {
         }
         let fields = full;
         let mut full = Vec::new();
-        if is_derived || !fields.is_empty() {
+        if is_derived || !fields.is_empty() || has_private_instance_elements {
             full.push(Statement::ClassInitialization {
                 derived: is_derived,
                 forward_rest: implicit_derived.then(|| "args".into()),
@@ -3729,6 +3773,16 @@ impl<'a> Compiler<'a> {
         left: &'a Expr,
         right: &'a Expr,
     ) -> Result<Reg, Decline> {
+        if op == BinOp::In
+            && let Expr::Identifier(name) = left
+            && name.starts_with('#')
+        {
+            let obj = self.compile_expr(right)?;
+            let name = self.intern_string(name)?;
+            let dst = self.alloc_reg()?;
+            self.emit(Instr::PrivateIn { dst, obj, name });
+            return Ok(dst);
+        }
         match op {
             BinOp::And | BinOp::Or | BinOp::Nullish => {
                 let lhs = self.compile_expr(left)?;

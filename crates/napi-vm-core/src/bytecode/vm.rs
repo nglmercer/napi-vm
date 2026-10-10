@@ -716,8 +716,11 @@ fn run_loop(
                 } => {
                     if private {
                         let name = interp.property_key(&frame.registers[key as usize])?;
-                        frame.registers[dst as usize] =
-                            interp.get_private_member(&frame.registers[obj as usize], &name)?;
+                        frame.registers[dst as usize] = interp.get_private_member_in(
+                            &current_scope(interp, frame),
+                            &frame.registers[obj as usize],
+                            &name,
+                        )?;
                         return Ok(());
                     }
                     let value = get_prop_cached(
@@ -1049,6 +1052,42 @@ fn run_loop(
                     let key = interp.property_key(&key)?;
                     frame.registers[dst as usize] = Value::String(crate::JsString::from_key(&key));
                 }
+                Instr::ClassScope { name } => {
+                    let name = name
+                        .map(|name| const_string(frame.function, name))
+                        .transpose()?
+                        .unwrap_or("");
+                    frame.scopes.push(Interpreter::class_environment(
+                        current_scope(interp, frame),
+                        name,
+                    ));
+                }
+                Instr::ClassPrivateEnvironment { names } => {
+                    let names: Vec<String> = match &frame.function.constants[names as usize] {
+                        Constant::StringList(names) => {
+                            names.iter().map(|name| name.to_string()).collect()
+                        }
+                        _ => return Err(internal("bad private declaration list")),
+                    };
+                    current_scope(interp, frame)
+                        .borrow_mut()
+                        .declare_private_declarations(names);
+                }
+                Instr::ClassHeritage { dst, superclass } => {
+                    let superclass = frame.registers[superclass as usize].clone_for_execution();
+                    frame.registers[dst as usize] = interp
+                        .super_proto_for(&Some(superclass))?
+                        .map(|proto| proto.as_ref().clone_for_execution())
+                        .unwrap_or(Value::Undefined);
+                }
+                Instr::PrivateIn { dst, obj, name } => {
+                    let name = const_string(frame.function, name)?;
+                    frame.registers[dst as usize] = interp.has_private_member_in(
+                        &current_scope(interp, frame),
+                        &frame.registers[obj as usize],
+                        name,
+                    )?;
+                }
                 Instr::Import { tmpl } => {
                     let template = match &frame.function.constants[tmpl as usize] {
                         Constant::ImportTemplate(template) => template.clone(),
@@ -1235,27 +1274,24 @@ fn build_class_from_template(
     template: &super::constants::ClassTemplate,
 ) -> Result<Value, VmErr> {
     use super::constants::{ClassMemberKind, ClassNameTemplate};
-    use crate::interpreter::{ClassAssembly, insert_class_accessor};
+    use crate::interpreter::{ClassAssembly, define_class_private_element, insert_class_accessor};
+    use crate::value::PrivateElement;
 
-    let current = current_scope(interp, frame);
-    let def_scope = match &template.expr_name {
-        Some(_) => Rc::new(RefCell::new(Environment::child(current))),
-        None => current,
-    };
+    let member_scope = current_scope(interp, frame);
     let super_cls = template
         .superclass
         .map(|reg| frame.registers[reg as usize].clone_for_execution());
-    let super_proto = interp.super_proto_for(&super_cls)?;
-    let member_scope = Rc::new(RefCell::new(Environment::child(def_scope.clone())));
-    member_scope
-        .borrow_mut()
-        .declare_private_declarations(template.private_declarations.clone());
-    for name in &template.private_fields {
-        member_scope.borrow_mut().declare_private_field(name);
-    }
+    let super_proto = template.super_proto.and_then(|reg| {
+        let value = frame.registers[reg as usize].clone_for_execution();
+        (!matches!(value, Value::Undefined)).then(|| Rc::new(value))
+    });
     let member_closure = Interpreter::member_closure_env(&member_scope, &super_proto);
     member_closure.borrow_mut().replace_strict(Some(true));
 
+    let mut private_statics = Vec::new();
+    let static_closure =
+        Interpreter::member_closure_env(&member_scope, &super_cls.clone().map(Rc::new));
+    static_closure.borrow_mut().replace_strict(Some(true));
     let mut proto_props = Vec::new();
     let mut statics = vec![(
         "name".to_string(),
@@ -1273,7 +1309,7 @@ fn build_class_from_template(
     for member in &template.members {
         let computed;
         let key = match &member.name {
-            ClassNameTemplate::Static(name) => name.clone(),
+            ClassNameTemplate::Static(name) | ClassNameTemplate::Private(name) => name.clone(),
             ClassNameTemplate::Computed(reg) => {
                 computed = frame.registers[*reg as usize].clone_for_execution();
                 interp.property_key(&computed)?
@@ -1282,17 +1318,29 @@ fn build_class_from_template(
         // Computed names are known only now; static ones were set when
         // each function compiled.
         let display = |prefix: &str| match &member.name {
-            ClassNameTemplate::Static(_) => None,
+            ClassNameTemplate::Static(_) | ClassNameTemplate::Private(_) => None,
             ClassNameTemplate::Computed(_) => Some(Rc::from(format!("{prefix}{key}"))),
+        };
+        let closure = if member.is_static {
+            static_closure.clone()
+        } else {
+            member_closure.clone()
         };
         match member.kind {
             ClassMemberKind::Method => {
                 let func = member
                     .func
                     .ok_or_else(|| internal("method without function"))?;
-                let fn_val =
-                    class_function(interp, frame, func, member_closure.clone(), display(""))?;
-                if member.is_static {
+                let fn_val = class_function(interp, frame, func, closure.clone(), display(""))?;
+                if matches!(member.name, ClassNameTemplate::Private(_)) {
+                    define_class_private_element(
+                        &member_scope,
+                        &mut private_statics,
+                        &key,
+                        member.is_static,
+                        PrivateElement::Method(fn_val),
+                    )?;
+                } else if member.is_static {
                     statics.push((key.clone(), fn_val));
                     static_attrs.push((
                         key,
@@ -1315,9 +1363,27 @@ fn build_class_from_template(
                 } else {
                     "set "
                 };
-                let fn_val =
-                    class_function(interp, frame, func, member_closure.clone(), display(prefix))?;
-                if member.is_static {
+                let fn_val = class_function(interp, frame, func, closure, display(prefix))?;
+                if matches!(member.name, ClassNameTemplate::Private(_)) {
+                    let element = if member.kind == ClassMemberKind::Getter {
+                        PrivateElement::Accessor {
+                            get: Some(fn_val),
+                            set: None,
+                        }
+                    } else {
+                        PrivateElement::Accessor {
+                            get: None,
+                            set: Some(fn_val),
+                        }
+                    };
+                    define_class_private_element(
+                        &member_scope,
+                        &mut private_statics,
+                        &key,
+                        member.is_static,
+                        element,
+                    )?;
+                } else if member.is_static {
                     insert_class_accessor(&mut statics, &key, fn_val);
                     static_attrs.push((
                         key,
@@ -1331,14 +1397,6 @@ fn build_class_from_template(
                 } else {
                     insert_class_accessor(&mut proto_props, &key, fn_val);
                 }
-            }
-            ClassMemberKind::Field => {
-                let reg = member
-                    .value
-                    .ok_or_else(|| internal("field without value"))?;
-                let value = frame.registers[reg as usize].clone_for_execution();
-                statics.push((key.clone(), value));
-                static_attrs.push((key, PropAttrs::default()));
             }
         }
     }
@@ -1360,11 +1418,31 @@ fn build_class_from_template(
         }
     };
     let constructor = class_function(interp, frame, template.ctor_func, ctor_closure, None)?;
-    let mut static_blocks = Vec::with_capacity(template.blocks.len());
+    let mut static_elements = Vec::with_capacity(template.blocks.len());
     for block in &template.blocks {
-        match frame.function.constants.get(*block as usize) {
-            Some(Constant::AstFunction(ast)) => static_blocks.push(ast.body.clone()),
-            _ => return Err(internal("bad class static block")),
+        match block {
+            super::constants::ClassStaticTemplate::Block(index) => {
+                match frame.function.constants.get(*index as usize) {
+                    Some(Constant::AstFunction(ast)) => static_elements.push(
+                        crate::interpreter::ClassStaticElement::Block(ast.body.clone()),
+                    ),
+                    _ => return Err(internal("bad class static block")),
+                }
+            }
+            super::constants::ClassStaticTemplate::Field { name, init } => {
+                let (key, private) = match name {
+                    ClassNameTemplate::Static(name) => (name.clone(), false),
+                    ClassNameTemplate::Private(name) => (name.clone(), true),
+                    ClassNameTemplate::Computed(reg) => {
+                        (interp.property_key(&frame.registers[*reg as usize])?, false)
+                    }
+                };
+                static_elements.push(crate::interpreter::ClassStaticElement::Field {
+                    name: key,
+                    private,
+                    init: init.clone(),
+                });
+            }
         }
     }
     let class_val = interp.assemble_class(ClassAssembly {
@@ -1377,11 +1455,10 @@ fn build_class_from_template(
         statics,
         static_attrs,
         static_has_accessors,
-        static_blocks,
+        static_elements,
+        private_scope: member_scope,
+        private_statics,
     })?;
-    if let Some(name) = &template.expr_name {
-        def_scope.borrow_mut().set(name, class_val.clone());
-    }
     Ok(class_val)
 }
 

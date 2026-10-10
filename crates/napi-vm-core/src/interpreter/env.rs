@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use crate::value::{MAX_GLOBAL_BINDINGS, ObjectCell, PropAttrs, Value, limit_err};
+use crate::value::{MAX_GLOBAL_BINDINGS, ObjectCell, PrivateElement, PropAttrs, Value, limit_err};
 
 pub type Env = Rc<RefCell<Environment>>;
 
@@ -279,6 +279,7 @@ pub struct Environment {
     constructor_fields: Option<Rc<Vec<crate::parser::Statement>>>,
     private_names: HashMap<String, u64>,
     private_declarations: HashSet<String>,
+    private_instance_elements: Option<Vec<(u64, PrivateElement)>>,
     strict: Option<bool>,
     variable_scope: bool,
     pub(crate) async_generator_body: bool,
@@ -342,7 +343,11 @@ impl Environment {
     }
 
     pub(crate) fn declare_private_declarations(&mut self, names: impl IntoIterator<Item = String>) {
-        self.private_declarations.extend(names);
+        self.private_instance_elements = Some(Vec::new());
+        for name in names {
+            self.declare_private_field(&name);
+            self.private_declarations.insert(name);
+        }
     }
 
     pub(crate) fn declare_private_field(&mut self, name: &str) {
@@ -361,6 +366,28 @@ impl Environment {
                 .and_then(|parent| parent.borrow().private_name(name))
         })
     }
+    pub(crate) fn define_private_instance_element(
+        &mut self,
+        id: u64,
+        element: PrivateElement,
+    ) -> Result<(), crate::error::VmErr> {
+        PrivateElement::define(
+            self.private_instance_elements
+                .as_mut()
+                .expect("class private environment"),
+            id,
+            element,
+        )
+    }
+
+    pub(crate) fn private_instance_elements(&self) -> Vec<(u64, PrivateElement)> {
+        self.private_instance_elements.clone().unwrap_or_else(|| {
+            self.parent.as_ref().map_or_else(Vec::new, |parent| {
+                parent.borrow().private_instance_elements()
+            })
+        })
+    }
+
     pub(crate) fn enter_constructor(&mut self, derived: bool, fields: &[crate::parser::Statement]) {
         self.constructor_this = Some(if derived { None } else { self.get("this") });
         self.constructor_fields = Some(Rc::new(fields.to_vec()));
@@ -643,6 +670,7 @@ impl Environment {
             class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
+            private_instance_elements: None,
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
@@ -668,6 +696,7 @@ impl Environment {
             class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
+            private_instance_elements: None,
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
@@ -697,6 +726,7 @@ impl Environment {
             class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
+            private_instance_elements: None,
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
@@ -737,6 +767,7 @@ impl Environment {
             class_initializer: false,
             constructor_this: None,
             constructor_fields: None,
+            private_instance_elements: None,
             private_names: HashMap::new(),
             private_declarations: HashSet::new(),
             strict: None,
@@ -1291,6 +1322,12 @@ impl Environment {
         values.extend(self.new_target.iter().cloned());
         values.extend(self.constructor_this.iter().flatten().cloned());
         values.extend(self.intrinsics.values().cloned());
+        values.extend(
+            self.private_instance_elements
+                .iter()
+                .flatten()
+                .flat_map(|(_, element)| element.values()),
+        );
         values
     }
 
@@ -1311,6 +1348,7 @@ impl Environment {
         self.new_target = None;
         self.constructor_this = None;
         self.constructor_fields = None;
+        self.private_instance_elements = None;
         self.parent = None;
         self.module_realm = None;
     }
@@ -1327,6 +1365,13 @@ impl Environment {
                     work.extend(env.new_target.take());
                     work.extend(env.constructor_this.take().flatten());
                     work.extend(env.intrinsics.drain().map(|(_, value)| value));
+                    work.extend(
+                        env.private_instance_elements
+                            .take()
+                            .into_iter()
+                            .flatten()
+                            .flat_map(|(_, element)| element.into_values()),
+                    );
                     cur = env.parent.take();
                 }
                 Err(_) => break,

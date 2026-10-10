@@ -12,7 +12,7 @@ use crate::parser::{
     AssignOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp, MemberName,
     ObjectProp, Statement, UnOp, VarKind, arrow_body_references,
 };
-use crate::value::{ClassData, FunctionData, ObjectCell, PropAttrs, Value};
+use crate::value::{ClassData, FunctionData, ObjectCell, PrivateElement, PropAttrs, Value};
 
 /// Convert parser-owned parameter names into interned `Rc<str>` so call-frame
 /// binding is a refcount bump, not a heap allocation.
@@ -48,6 +48,16 @@ fn class_accessor_kind(value: &Value) -> Option<&'static str> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum ClassStaticElement {
+    Field {
+        name: String,
+        private: bool,
+        init: Expr,
+    },
+    Block(Rc<Vec<Statement>>),
+}
+
 /// Evaluated class parts handed to [`Interpreter::assemble_class`]:
 /// the constructor plus gathered prototype/static members, with static
 /// blocks to run once the class value exists.
@@ -61,7 +71,31 @@ pub(crate) struct ClassAssembly {
     pub statics: Vec<(String, Value)>,
     pub static_attrs: Vec<(String, PropAttrs)>,
     pub static_has_accessors: bool,
-    pub static_blocks: Vec<Rc<Vec<Statement>>>,
+    pub static_elements: Vec<ClassStaticElement>,
+    pub private_scope: Env,
+    pub private_statics: Vec<(u64, PrivateElement)>,
+}
+
+/// Both class frontends register definitions here. Receiver branding and
+/// accessor combination do not depend on AST or bytecode representation.
+pub(crate) fn define_class_private_element(
+    scope: &Env,
+    statics: &mut Vec<(u64, PrivateElement)>,
+    name: &str,
+    is_static: bool,
+    element: PrivateElement,
+) -> Result<(), VmErr> {
+    let id = scope
+        .borrow()
+        .private_name(name)
+        .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not declared".into()))?;
+    if is_static {
+        PrivateElement::define(statics, id, element)
+    } else {
+        scope
+            .borrow_mut()
+            .define_private_instance_element(id, element)
+    }
 }
 
 pub(crate) fn insert_class_accessor(
@@ -287,6 +321,13 @@ impl Interpreter {
         }
     }
 
+    fn class_member_name(&mut self, scope: &Env, name: &MemberName) -> Result<String, VmErr> {
+        let saved = std::mem::replace(&mut self.global, scope.clone());
+        let result = self.member_name(name);
+        self.global = saved;
+        result
+    }
+
     /// The prototype a class inherits from: the superclass's own, or a
     /// native constructor's `.prototype` property when that is an object.
     /// Shared with the bytecode class builder, which evaluates the
@@ -314,6 +355,17 @@ impl Interpreter {
 
     /// The `super(...)` target for a derived constructor: the superclass's
     /// constructor, or a callable native heritage itself.
+    pub(crate) fn class_environment(parent: Env, name: &str) -> Env {
+        let scope = Rc::new(RefCell::new(Environment::child(parent)));
+        scope.borrow_mut().replace_strict(Some(true));
+        if !name.is_empty() {
+            scope
+                .borrow_mut()
+                .declare(name, Value::Uninitialized, BindKind::Const, false);
+        }
+        scope
+    }
+
     pub(crate) fn super_ctor_for(super_cls: &Option<Value>) -> Option<Value> {
         match super_cls {
             Some(Value::Class(_)) => super_cls.clone(),
@@ -350,7 +402,9 @@ impl Interpreter {
             mut statics,
             mut static_attrs,
             static_has_accessors,
-            static_blocks,
+            static_elements,
+            private_scope,
+            private_statics,
         } = asm;
         let prototype_has_accessors = proto_props.iter().any(|(key, value)| key.starts_with("__setter:") || matches!(value, Value::Function(function) if function.name.as_deref().is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))));
         let prototype = Value::object_with_proto(proto_props, super_proto);
@@ -420,18 +474,65 @@ impl Interpreter {
             }
         }
 
-        // The class binds its own name inside static blocks and
-        // method bodies, so `static { A.y = … }` can reach it.
-        for block in static_blocks {
+        for (id, element) in private_statics {
+            class_val.initialize_private_element(id, element)?;
+        }
+
+        if !name.is_empty() {
+            private_scope
+                .borrow_mut()
+                .declare(&name, class_val.clone(), BindKind::Const, true);
+        }
+        // Static methods/accessors are already installed. Fields and blocks
+        // initialize in source order after every computed name was evaluated.
+        for element in static_elements {
             let scope = Rc::new(RefCell::new(Environment::function_child(
-                self.global.clone(),
+                private_scope.clone(),
             )));
             scope.borrow_mut().class_initializer = true;
             scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
-            scope.borrow_mut().set(&name, class_val.clone());
+            scope.borrow_mut().set_new_target(Value::Undefined);
+            if let Some(superclass) = &super_cls {
+                scope.borrow_mut().set(SUPER_PROTO, superclass.clone());
+            }
             let saved = std::mem::replace(&mut self.global, scope);
-            let result = self.run_program_body(&block);
+            let result = (|| {
+                self.execution.check()?;
+                match element {
+                    ClassStaticElement::Block(block) => self.run_program_body(&block).map(|_| ()),
+                    ClassStaticElement::Field {
+                        name,
+                        private,
+                        init,
+                    } => {
+                        let value = self.eval_expr(&init)?;
+                        if private {
+                            let id = self.global.borrow().private_name(&name).ok_or_else(|| {
+                                VmErr::Msg("TypeError: missing private field declaration".into())
+                            })?;
+                            class_val.initialize_private_field(id, value)
+                        } else {
+                            let descriptor = Value::descriptor_record(vec![
+                                ("value".into(), value),
+                                ("writable".into(), Value::Bool(true)),
+                                ("enumerable".into(), Value::Bool(true)),
+                                ("configurable".into(), Value::Bool(true)),
+                            ]);
+                            if !self.define_own_property(
+                                &class_val,
+                                &Value::String(crate::JsString::from_key(&name)),
+                                &descriptor,
+                            )? {
+                                return Err(VmErr::Msg(
+                                    "TypeError: Cannot define static field".into(),
+                                ));
+                            }
+                            Ok(())
+                        }
+                    }
+                }
+            })();
             self.global = saved;
             result?;
         }
@@ -444,19 +545,15 @@ impl Interpreter {
         superclass: Option<&Expr>,
         body: &[ClassMember],
     ) -> Result<Value, VmErr> {
-        let super_cls = if let Some(sc) = superclass {
-            Some(self.eval_expr(sc)?)
-        } else {
-            None
-        };
-        // Inheritance: the instance prototype chains to the superclass's
-        // prototype so inherited methods resolve.
-        let super_proto = self.super_proto_for(&super_cls)?;
-
-        // Methods, getters and setters close over a scope carrying the
-        // superclass prototype, so `super.method()` inside one can find it.
-        // The constructor gets `__super_ctor` separately, below.
-        let member_scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
+        let member_scope = Self::class_environment(self.global.clone(), name);
+        let saved = std::mem::replace(&mut self.global, member_scope.clone());
+        let heritage = (|| {
+            let superclass = superclass.map(|expr| self.eval_expr(expr)).transpose()?;
+            let prototype = self.super_proto_for(&superclass)?;
+            Ok::<_, VmErr>((superclass, prototype))
+        })();
+        self.global = saved;
+        let (super_cls, super_proto) = heritage?;
         member_scope
             .borrow_mut()
             .declare_private_declarations(crate::parser::class_private_declarations(body));
@@ -471,6 +568,10 @@ impl Interpreter {
             }
         }
         let member_closure = Self::member_closure_env(&member_scope, &super_proto);
+        let static_member_closure = Self::member_closure_env(
+            &member_scope,
+            &super_cls.as_ref().map(|value| Rc::new(value.clone())),
+        );
 
         // Gather the constructor, instance fields, and methods.
         let mut ctor_params: Vec<String> = Vec::new();
@@ -489,7 +590,8 @@ impl Interpreter {
             },
         )];
         let mut static_has_accessors = false;
-        let mut static_blocks: Vec<Vec<Statement>> = Vec::new();
+        let mut private_statics = Vec::new();
+        let mut static_elements = Vec::new();
 
         for member in body {
             match member {
@@ -501,7 +603,7 @@ impl Interpreter {
                     is_async,
                     is_generator,
                 } => {
-                    let mname = self.member_name(name)?;
+                    let mname = self.class_member_name(&member_scope, name)?;
                     // Only a written-out `constructor` is the constructor; a
                     // computed key that happens to evaluate to it stays an
                     // ordinary method.
@@ -519,7 +621,11 @@ impl Interpreter {
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: intern_params(mp),
                         body: Rc::new(mb.clone()),
-                        closure: Some(crate::heap::capture_env(&member_closure)),
+                        closure: Some(crate::heap::capture_env(if *st {
+                            &static_member_closure
+                        } else {
+                            &member_closure
+                        })),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: *is_async,
@@ -529,7 +635,15 @@ impl Interpreter {
                         needs_hoisting: body_needs_hoisting(mb),
                         bound: None,
                     }));
-                    if *st {
+                    if matches!(name, MemberName::Private(_)) {
+                        define_class_private_element(
+                            &member_scope,
+                            &mut private_statics,
+                            &mname,
+                            *st,
+                            PrivateElement::Method(fn_val),
+                        )?;
+                    } else if *st {
                         statics.push((mname.clone(), fn_val));
                         static_attrs.push((
                             mname.clone(),
@@ -550,28 +664,20 @@ impl Interpreter {
                 // Static blocks are collected and run after the class
                 // exists, since they observe its statics and `this`.
                 ClassMember::StaticBlock { body } => {
-                    static_blocks.push(body.clone());
+                    static_elements.push(ClassStaticElement::Block(Rc::new(body.clone())));
                 }
                 ClassMember::Field {
                     name,
                     is_static: st,
                     init,
                 } => {
-                    let fname = self.member_name(name)?;
+                    let fname = self.class_member_name(&member_scope, name)?;
                     if *st {
-                        let init_val = match init {
-                            Some(e) => {
-                                let scope = self.global.clone();
-                                let saved = scope.borrow().class_initializer;
-                                scope.borrow_mut().class_initializer = true;
-                                let result = self.eval_expr(e);
-                                scope.borrow_mut().class_initializer = saved;
-                                result?
-                            }
-                            None => Value::Undefined,
-                        };
-                        statics.push((fname.clone(), init_val));
-                        static_attrs.push((fname.clone(), PropAttrs::default()));
+                        static_elements.push(ClassStaticElement::Field {
+                            name: fname,
+                            private: matches!(name, MemberName::Private(_)),
+                            init: init.clone().unwrap_or(Expr::Undefined),
+                        });
                     } else {
                         instance_fields.push((
                             fname.clone(),
@@ -585,7 +691,7 @@ impl Interpreter {
                     is_static: st,
                     body: gb,
                 } => {
-                    let gname = self.member_name(name)?;
+                    let gname = self.class_member_name(&member_scope, name)?;
                     let getter_fn = Value::Function(Rc::new(FunctionData {
                         strict: true,
                         native: None,
@@ -597,7 +703,11 @@ impl Interpreter {
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![]),
                         body: Rc::new(gb.clone()),
-                        closure: Some(crate::heap::capture_env(&member_closure)),
+                        closure: Some(crate::heap::capture_env(if *st {
+                            &static_member_closure
+                        } else {
+                            &member_closure
+                        })),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: false,
@@ -607,7 +717,18 @@ impl Interpreter {
                         needs_hoisting: body_needs_hoisting(gb),
                         bound: None,
                     }));
-                    if *st {
+                    if matches!(name, MemberName::Private(_)) {
+                        define_class_private_element(
+                            &member_scope,
+                            &mut private_statics,
+                            &gname,
+                            *st,
+                            PrivateElement::Accessor {
+                                get: Some(getter_fn),
+                                set: None,
+                            },
+                        )?;
+                    } else if *st {
                         insert_class_accessor(&mut statics, &gname, getter_fn);
                         static_attrs.push((
                             gname.clone(),
@@ -628,7 +749,7 @@ impl Interpreter {
                     is_static: st,
                     body: sb,
                 } => {
-                    let sname = self.member_name(name)?;
+                    let sname = self.class_member_name(&member_scope, name)?;
                     let setter_fn = Value::Function(Rc::new(FunctionData {
                         strict: true,
                         native: None,
@@ -640,7 +761,11 @@ impl Interpreter {
                         standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
                         params: Rc::new(vec![Rc::from(param.as_str())]),
                         body: Rc::new(sb.clone()),
-                        closure: Some(crate::heap::capture_env(&member_closure)),
+                        closure: Some(crate::heap::capture_env(if *st {
+                            &static_member_closure
+                        } else {
+                            &member_closure
+                        })),
                         is_arrow: false,
                         is_constructor: false,
                         is_async: false,
@@ -650,7 +775,18 @@ impl Interpreter {
                         needs_hoisting: body_needs_hoisting(sb),
                         bound: None,
                     }));
-                    if *st {
+                    if matches!(name, MemberName::Private(_)) {
+                        define_class_private_element(
+                            &member_scope,
+                            &mut private_statics,
+                            &sname,
+                            *st,
+                            PrivateElement::Accessor {
+                                get: None,
+                                set: Some(setter_fn),
+                            },
+                        )?;
+                    } else if *st {
                         insert_class_accessor(&mut statics, &sname, setter_fn);
                         static_attrs.push((
                             sname.clone(),
@@ -694,7 +830,10 @@ impl Interpreter {
         }
         let fields = full_ctor_body;
         let mut full_ctor_body = Vec::new();
-        if super_cls.is_some() || !fields.is_empty() {
+        if super_cls.is_some()
+            || !fields.is_empty()
+            || !member_scope.borrow().private_instance_elements().is_empty()
+        {
             full_ctor_body.push(Statement::ClassInitialization {
                 derived: super_cls.is_some(),
                 forward_rest: (super_cls.is_some() && !has_own_constructor).then(|| "args".into()),
@@ -753,7 +892,9 @@ impl Interpreter {
             statics,
             static_attrs,
             static_has_accessors,
-            static_blocks: static_blocks.into_iter().map(Rc::new).collect(),
+            private_scope: member_scope,
+            private_statics,
+            static_elements,
         })
     }
 
@@ -2152,6 +2293,13 @@ impl Interpreter {
             }
             Expr::Object { props, .. } => self.eval_object_literal(props),
             Expr::Binary { op, left, right } => {
+                if *op == crate::parser::BinOp::In
+                    && let Expr::Identifier(name) = left.as_ref()
+                    && name.starts_with('#')
+                {
+                    let receiver = self.eval_expr(right)?;
+                    return self.has_private_member(&receiver, name);
+                }
                 let l = self.eval_expr(left)?;
                 match op {
                     crate::parser::BinOp::And if !self.truthy(&l) => return Ok(l),
@@ -2614,17 +2762,7 @@ impl Interpreter {
                 name,
                 superclass,
                 body,
-            } => {
-                let scope = Rc::new(RefCell::new(Environment::child(self.global.clone())));
-                let saved = std::mem::replace(&mut self.global, scope);
-                let built =
-                    self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body);
-                if let (Ok(value), Some(name)) = (&built, name) {
-                    self.global.borrow_mut().set(name, value.clone());
-                }
-                self.global = saved;
-                built
-            }
+            } => self.build_class(name.as_deref().unwrap_or(""), superclass.as_deref(), body),
             Expr::ArrowFn {
                 params,
                 body,

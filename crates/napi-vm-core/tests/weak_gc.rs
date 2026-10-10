@@ -379,3 +379,37 @@ fn primitive_proxy_private_fields_do_not_root_the_defining_constructor_realm() {
     assert!(stats.skipped.is_none(), "{stats:?}");
     yes(&mut vm, "constructorRef.deref()===undefined;");
 }
+
+#[test]
+fn private_method_and_accessor_definitions_trace_values_and_release_cycles() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var C=class{#method(){return 42;}get #access(){return this.#method;}method(){return this.#access;}};var instance=new C();var method=instance.method();method.instance=instance;var instanceRef=new WeakRef(instance);var methodRef=new WeakRef(method);instance=undefined;method=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(
+        &mut vm,
+        "methodRef.deref().instance===instanceRef.deref()&&methodRef.deref()()===42;",
+    );
+    run(&mut vm, "C=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(
+        &mut vm,
+        "instanceRef.deref()===undefined&&methodRef.deref()===undefined;",
+    );
+}
+
+#[test]
+fn private_static_method_values_are_traced_and_collect_with_the_class() {
+    let mut vm = Interpreter::with_builtins();
+    run(
+        &mut vm,
+        "var C=class{static #method(){return 42;}static read(){return this.#method;}};var method=C.read();method.owner=C;var ref=new WeakRef(method);method=undefined;",
+    );
+    assert!(vm.collect_cycles().skipped.is_none());
+    yes(&mut vm, "C.read()===ref.deref()&&C.read()()===42;");
+    run(&mut vm, "C=undefined;");
+    assert!(vm.collect_cycles().collected > 0);
+    yes(&mut vm, "ref.deref()===undefined;");
+}

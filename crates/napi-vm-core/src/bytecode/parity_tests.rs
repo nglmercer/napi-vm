@@ -1453,3 +1453,31 @@ fn proxy_private_field_stamping_uses_shared_brand_storage_in_both_tiers() {
         check(source, true);
     }
 }
+
+#[test]
+fn private_field_brand_checks_use_lexical_slots_in_both_tiers() {
+    for source in [
+        "class A{#x;static has(o){return #x in o;}}var a=new A();A.has(a)&&!A.has({})&&!A.has(Object.create(a));",
+        "class A{#x;static has(o){return #x in o;}}var caught;try{A.has(1);}catch(e){caught=e;}caught instanceof TypeError;",
+        "class Identity{constructor(o){return o;}}class A extends Identity{#x;static has(o){return #x in o;}}var p=Proxy.revocable({},{});p.revoke();new A(p.proxy);A.has(p.proxy);",
+        "class A{#x;static has(o){return #x in o;}}class B{#x;static has(o){return #x in o;}}var a=new A();A.has(a)&&!B.has(a);",
+        "var calls=0;class A{#x;static has(){return #x in (++calls,new A());}}A.has()&&calls===1;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn class_private_methods_accessors_and_static_order_share_semantics() {
+    for source in [
+        "class A{#value=this.#method();#method(){return 42;}read(){return this.#value;}}new A().read();",
+        "class A{#method(){}static has(o){return #method in o;}write(){this.#method=1;}}var a=new A();var caught;try{a.write();}catch(e){caught=e;}A.has(a)&&caught instanceof TypeError;",
+        "class A{#value=1;get #access(){return this.#value;}set #access(v){this.#value=v;}read(){return this.#access;}write(v){this.#access=v;}}var a=new A();a.write(42);a.read();",
+        "class A{static #field=1;static #method(){return this.#field;}static get #access(){return this.#method();}static set #access(v){this.#field=v;}static read(){return this.#access;}static write(v){this.#access=v;}}A.write(42);A.read();",
+        "var order='';class A{static x=(order+='a',1);static{order+='b';}static #y=(order+='c',this.x+1);static{order+='d';}static read(){return this.#y;}}order==='abcd'&&A.read()===2;",
+        "function make(v){class A{static x=v;static #y=v+1;static read(){return this.#y;}}return A;}var A=make(41);A.x===41&&A.read()===42;",
+        "class Base{static value=41;}class A extends Base{static x=super.value+1;static read(){return super.value;}}A.x===42&&A.read()===41;",
+    ] {
+        check(source, true);
+    }
+}

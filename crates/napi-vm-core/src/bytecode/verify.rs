@@ -706,6 +706,23 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
+            Instr::ClassScope { name } => {
+                if let Some(name) = name {
+                    self.check_const_is(address, *name, "string")?;
+                }
+            }
+            Instr::ClassPrivateEnvironment { names } => {
+                self.check_const_is(address, *names, "string-list")?
+            }
+            Instr::ClassHeritage { dst, superclass } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *superclass)?;
+            }
+            Instr::PrivateIn { dst, obj, name } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *obj)?;
+                self.check_const_is(address, *name, "string")?;
+            }
             Instr::Import { tmpl } => {
                 self.check_const_is(address, *tmpl, "import-template")?;
             }
@@ -753,6 +770,9 @@ impl Checker<'_> {
         if let Some(reg) = template.superclass {
             self.check_reg(address, reg)?;
         }
+        if let Some(reg) = template.super_proto {
+            self.check_reg(address, reg)?;
+        }
         for reg in &template.ctor_computed_keys {
             self.check_reg(address, *reg)?;
         }
@@ -764,12 +784,18 @@ impl Checker<'_> {
             if let Some(func) = member.func {
                 self.check_func_const(address, func)?;
             }
-            if let Some(reg) = member.value {
-                self.check_reg(address, reg)?;
-            }
         }
         for block in &template.blocks {
-            self.check_const_is(address, *block, "ast-function")?;
+            match block {
+                super::constants::ClassStaticTemplate::Block(index) => {
+                    self.check_const_is(address, *index, "ast-function")?
+                }
+                super::constants::ClassStaticTemplate::Field {
+                    name: ClassNameTemplate::Computed(reg),
+                    ..
+                } => self.check_reg(address, *reg)?,
+                super::constants::ClassStaticTemplate::Field { .. } => {}
+            }
         }
         Ok(())
     }
@@ -837,5 +863,20 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn private_brand_instruction_rejects_invalid_operands() {
+        let original = compile("1");
+        for (dst, obj, name) in [
+            (original.register_count, 0, 0),
+            (0, original.register_count, 0),
+            (0, 0, u16::MAX),
+            (0, 0, 0),
+        ] {
+            let mut unit = original.clone();
+            unit.code[0] = Instr::PrivateIn { dst, obj, name };
+            assert!(verify_function(&unit).is_err());
+        }
     }
 }

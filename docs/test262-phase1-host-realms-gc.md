@@ -325,3 +325,28 @@ passes remain passing. Full-corpus AST/bytecode mismatches are not measured.
 Exact checks, checkpoints, comparisons and worker hashes are archived alongside
 the previous results. These measurements apply to 287bddc, before the subsequent
 typed private-element implementation.
+
+
+## Typed private elements and class initialization (subsequent implementation)
+
+The private slots now contain a field, method, or accessor pair under a fresh
+lexical identity. Instance methods/accessors are branded before fields; static
+methods/accessors are branded before ordered static fields and blocks. Reads,
+writes and `#name in object` share helpers and never invoke Proxy traps. Method
+writes and missing accessor halves throw TypeError. The collector traces methods,
+accessor functions and their class environments and releases dead cycles.
+
+Class heritage, computed names and method closures share one strict class
+scope. Its internal constant name remains uninitialized while evaluating heritage
+and names, then is initialized before static fields/blocks. Both frontends use
+shared class assembly and field initialization. The bytecode frontend has explicit
+class-scope, private-environment, heritage and private-brand instructions, and
+keeps AST field/block evaluation through the shared helper.
+
+Targeted checks passed: 362 core unit tests, 11 private-element tests and 21 GC
+tests. Differential fixtures require successful compilation and verification,
+then compare actual bytecode execution with AST execution. The required repository
+checks and new corpus validation are separate gates; the 287bddc full result
+above does not measure this later implementation. Computed Symbol retention,
+observable class-key conversion, dynamic home-object super lookup and complete
+internal-operation/realm coverage remain open dependencies.

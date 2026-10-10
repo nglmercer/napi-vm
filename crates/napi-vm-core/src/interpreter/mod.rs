@@ -39,8 +39,9 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 pub(crate) use eval::{
-    ClassAssembly, ObjectAccessorKind, SUPER_PROTO, insert_class_accessor, insert_object_property,
-    intern_params, push_call_arg,
+    ClassAssembly, ClassStaticElement, ObjectAccessorKind, SUPER_PROTO,
+    define_class_private_element, insert_class_accessor, insert_object_property, intern_params,
+    push_call_arg,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_addon::{
@@ -1759,22 +1760,60 @@ impl Interpreter {
         }
     }
 
+    pub(crate) fn has_private_member(
+        &mut self,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        self.has_private_member_in(&self.global.clone(), receiver, name)
+    }
+
+    pub(crate) fn has_private_member_in(
+        &mut self,
+        scope: &Env,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        if !call::is_js_object(receiver) {
+            return Err(VmErr::Msg(
+                "TypeError: private brand check requires an object".into(),
+            ));
+        }
+        let id = scope
+            .borrow()
+            .private_name(name)
+            .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;
+        Ok(Value::Bool(receiver.has_private_element(id)))
+    }
+
     pub(crate) fn get_private_member(
         &mut self,
         receiver: &Value,
         name: &str,
     ) -> Result<Value, VmErr> {
-        let id = self.global.borrow().private_name(name);
-        if let Some(id) = id {
-            return receiver.private_field(id);
+        self.get_private_member_in(&self.global.clone(), receiver, name)
+    }
+
+    pub(crate) fn get_private_member_in(
+        &mut self,
+        scope: &Env,
+        receiver: &Value,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        let id = scope
+            .borrow()
+            .private_name(name)
+            .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;
+        match receiver.private_element(id)? {
+            crate::value::PrivateElement::Field(value)
+            | crate::value::PrivateElement::Method(value) => Ok(value),
+            crate::value::PrivateElement::Accessor {
+                get: Some(getter), ..
+            } => self.call_this(&getter, receiver.clone(), Vec::new()),
+            crate::value::PrivateElement::Accessor { get: None, .. } => Err(VmErr::Msg(
+                "TypeError: private accessor has no getter".into(),
+            )),
         }
-        // Private methods/accessors still use their legacy class slots.
-        if !self.has_property(receiver, &Value::String(crate::JsString::from_key(name)))? {
-            return Err(VmErr::Msg(
-                "TypeError: receiver does not contain the private member".into(),
-            ));
-        }
-        self.get_prop_value_str(receiver, name)
     }
 
     pub(crate) fn set_private_member(
@@ -1783,10 +1822,25 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        if let Some(id) = self.global.borrow().private_name(name) {
-            return receiver.set_private_field(id, value);
+        let id = self
+            .global
+            .borrow()
+            .private_name(name)
+            .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;
+        match receiver.private_element(id)? {
+            crate::value::PrivateElement::Field(_) => receiver.set_private_field(id, value),
+            crate::value::PrivateElement::Method(_) => Err(VmErr::Msg(
+                "TypeError: private method is not writable".into(),
+            )),
+            crate::value::PrivateElement::Accessor {
+                set: Some(setter), ..
+            } => self
+                .call_this(&setter, receiver.clone(), vec![value])
+                .map(|_| ()),
+            crate::value::PrivateElement::Accessor { set: None, .. } => Err(VmErr::Msg(
+                "TypeError: private accessor has no setter".into(),
+            )),
         }
-        self.assign_member_str(receiver, name, value)
     }
 
     /// Initialize fields in their defining lexical scope. DefineField creates
@@ -1804,10 +1858,15 @@ impl Interpreter {
                     .unwrap_or_else(|| self.persistent_global.clone()),
             )
         };
-        if fields.is_empty() {
+        let definitions = defining.borrow().private_instance_elements();
+        if fields.is_empty() && definitions.is_empty() {
             return Ok(());
         }
         let receiver = self.resolve_this(constructor_scope)?;
+        for (id, element) in definitions {
+            self.execution.check()?;
+            receiver.initialize_private_element(id, element)?;
+        }
         let field_scope = Rc::new(RefCell::new(Environment::function_child(defining)));
         field_scope.borrow_mut().set("this", receiver.clone());
         field_scope.borrow_mut().class_initializer = true;

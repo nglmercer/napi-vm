@@ -496,6 +496,25 @@ pub enum Instr {
         dst: Reg,
         src: Reg,
     },
+    /// Enter the strict lexical class environment before heritage evaluation.
+    ClassScope {
+        name: Option<u16>,
+    },
+    /// Declare fresh lexical private identities after evaluating heritage.
+    ClassPrivateEnvironment {
+        names: u16,
+    },
+    /// Read and validate the superclass prototype before evaluating member names.
+    ClassHeritage {
+        dst: Reg,
+        superclass: Reg,
+    },
+    /// Test the lexical private name without invoking object or Proxy hooks.
+    PrivateIn {
+        dst: Reg,
+        obj: Reg,
+        name: u16,
+    },
     /// Run the `import` statement in `constants[tmpl]`: resolve and
     /// evaluate the module, then bind its exports as live cells.
     Import {
@@ -615,6 +634,10 @@ pub enum Opcode {
     Raise,
     BuildClass,
     PropertyKey,
+    PrivateIn,
+    ClassScope,
+    ClassPrivateEnvironment,
+    ClassHeritage,
     Import,
     ExportDefault,
     ExportNamed,
@@ -705,6 +728,10 @@ impl Instr {
             Instr::Raise { .. } => Opcode::Raise,
             Instr::BuildClass { .. } => Opcode::BuildClass,
             Instr::PropertyKey { .. } => Opcode::PropertyKey,
+            Instr::PrivateIn { .. } => Opcode::PrivateIn,
+            Instr::ClassScope { .. } => Opcode::ClassScope,
+            Instr::ClassPrivateEnvironment { .. } => Opcode::ClassPrivateEnvironment,
+            Instr::ClassHeritage { .. } => Opcode::ClassHeritage,
             Instr::Import { .. } => Opcode::Import,
             Instr::ExportDefault { .. } => Opcode::ExportDefault,
             Instr::ExportNamed { .. } => Opcode::ExportNamed,
@@ -954,6 +981,12 @@ impl fmt::Display for Instr {
             Instr::Raise { msg } => write!(f, "RAISE c{msg}"),
             Instr::BuildClass { dst, tmpl } => write!(f, "BUILD_CLASS r{dst}, c{tmpl}"),
             Instr::PropertyKey { dst, src } => write!(f, "PROPERTY_KEY r{dst}, r{src}"),
+            Instr::PrivateIn { dst, obj, name } => write!(f, "PRIVATE_IN r{dst}, r{obj}, c{name}"),
+            Instr::ClassScope { name } => write!(f, "CLASS_SCOPE {name:?}"),
+            Instr::ClassPrivateEnvironment { names } => write!(f, "CLASS_PRIVATE_ENV c{names}"),
+            Instr::ClassHeritage { dst, superclass } => {
+                write!(f, "CLASS_HERITAGE r{dst}, r{superclass}")
+            }
             Instr::Import { tmpl } => write!(f, "IMPORT c{tmpl}"),
             Instr::ExportDefault { src } => write!(f, "EXPORT_DEFAULT r{src}"),
             Instr::ExportNamed { tmpl } => write!(f, "EXPORT_NAMED c{tmpl}"),

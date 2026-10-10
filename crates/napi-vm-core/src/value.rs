@@ -212,7 +212,7 @@ pub struct ObjectMeta {
     /// Presence of [[ErrorData]], independent of prototypes and realms.
     pub(crate) error_object: bool,
     /// Lexical private field identities never enter ordinary property storage.
-    pub(crate) private_fields: std::collections::HashMap<u64, Value>,
+    pub(crate) private_elements: std::collections::HashMap<u64, PrivateElement>,
     /// Intrinsic iterator/continuation state, invisible to property operations.
     pub(crate) async_from_sync: Option<crate::interpreter::async_from_sync::Slots>,
     /// Host bridge identity for a `Value::HostFunction`. Kept in the shared
@@ -220,6 +220,65 @@ pub struct ObjectMeta {
     pub(crate) host_function_id: Option<usize>,
     /// The revoker's internal [[RevocableProxy]], invisible to property keys.
     pub(crate) revocable_proxy: Option<Rc<ProxyData>>,
+}
+
+/// Private slots have lexical identities and explicit kinds. Callable fields
+/// are data; methods are read-only; accessors retain their original functions.
+#[derive(Debug, Clone)]
+pub(crate) enum PrivateElement {
+    Field(Value),
+    Method(Value),
+    Accessor {
+        get: Option<Value>,
+        set: Option<Value>,
+    },
+}
+
+impl PrivateElement {
+    pub(crate) fn values(&self) -> Vec<Value> {
+        match self {
+            Self::Field(value) | Self::Method(value) => vec![value.clone()],
+            Self::Accessor { get, set } => get.iter().chain(set.iter()).cloned().collect(),
+        }
+    }
+
+    pub(crate) fn into_values(self) -> Vec<Value> {
+        match self {
+            Self::Field(value) | Self::Method(value) => vec![value],
+            Self::Accessor { get, set } => get.into_iter().chain(set).collect(),
+        }
+    }
+
+    /// Combine the getter/setter declarations of one lexical private name.
+    pub(crate) fn define(
+        definitions: &mut Vec<(u64, Self)>,
+        id: u64,
+        element: Self,
+    ) -> Result<(), VmErr> {
+        if let Some((_, existing)) = definitions.iter_mut().find(|(key, _)| *key == id) {
+            if let (
+                Self::Accessor { get, set },
+                Self::Accessor {
+                    get: new_get,
+                    set: new_set,
+                },
+            ) = (existing, element)
+            {
+                if new_get.is_some() {
+                    *get = new_get;
+                }
+                if new_set.is_some() {
+                    *set = new_set;
+                }
+                return Ok(());
+            }
+            return Err(VmErr::Msg(
+                "TypeError: duplicate private element definition".into(),
+            ));
+        }
+        definitions.push((id, element));
+        Ok(())
+    }
 }
 
 // Prototype and realm edges form cycles. Debug output must not traverse them.
@@ -626,7 +685,11 @@ impl ArrayCell {
             out.extend(named.iter().map(|(_, v)| v.clone()));
         }
         if let Ok(meta) = self.meta.try_borrow() {
-            out.extend(meta.private_fields.values().cloned());
+            out.extend(
+                meta.private_elements
+                    .values()
+                    .flat_map(PrivateElement::values),
+            );
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.async_from_sync {
                 out.extend(slots.values());
@@ -658,7 +721,7 @@ impl ArrayCell {
         };
         elements.clear();
         named.clear();
-        meta.private_fields.clear();
+        meta.private_elements.clear();
         meta.async_from_sync = None;
         meta.revocable_proxy = None;
         meta.proto = None;
@@ -753,7 +816,11 @@ impl ObjectCell {
             out.extend(slots.iter().map(|(_, v)| v.clone()));
         }
         if let Ok(meta) = self.meta.try_borrow() {
-            out.extend(meta.private_fields.values().cloned());
+            out.extend(
+                meta.private_elements
+                    .values()
+                    .flat_map(PrivateElement::values),
+            );
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.async_from_sync {
                 out.extend(slots.values());
@@ -789,7 +856,7 @@ impl ObjectCell {
             *weak = weak::WeakStorage::None;
         }
         meta.symbol_keys.clear();
-        meta.private_fields.clear();
+        meta.private_elements.clear();
         meta.async_from_sync = None;
         meta.revocable_proxy = None;
         meta.proto = None;
@@ -2765,26 +2832,44 @@ impl Value {
         }
     }
 
-    pub(crate) fn private_field(&self, id: u64) -> Result<Value, VmErr> {
+    pub(crate) fn private_element(&self, id: u64) -> Result<PrivateElement, VmErr> {
         let value = if let Self::Array(array) = self {
-            array.meta.borrow().private_fields.get(&id).cloned()
+            array.meta.borrow().private_elements.get(&id).cloned()
         } else {
             self.private_property_cell(false)
-                .and_then(|properties| properties.meta.borrow().private_fields.get(&id).cloned())
+                .and_then(|properties| properties.meta.borrow().private_elements.get(&id).cloned())
         };
         value.ok_or_else(|| {
             VmErr::Msg("TypeError: receiver does not contain the private field".into())
         })
     }
 
+    pub(crate) fn has_private_element(&self, id: u64) -> bool {
+        if let Self::Array(array) = self {
+            array.meta.borrow().private_elements.contains_key(&id)
+        } else {
+            self.private_property_cell(false).is_some_and(|properties| {
+                properties.meta.borrow().private_elements.contains_key(&id)
+            })
+        }
+    }
+
     pub(crate) fn initialize_private_field(&self, id: u64, value: Value) -> Result<(), VmErr> {
+        self.initialize_private_element(id, PrivateElement::Field(value))
+    }
+
+    pub(crate) fn initialize_private_element(
+        &self,
+        id: u64,
+        value: PrivateElement,
+    ) -> Result<(), VmErr> {
         let insert = |meta: &mut ObjectMeta| {
-            if meta.private_fields.contains_key(&id) {
+            if meta.private_elements.contains_key(&id) {
                 return Err(VmErr::Msg(
                     "TypeError: private field is already initialized".into(),
                 ));
             }
-            meta.private_fields.insert(id, value);
+            meta.private_elements.insert(id, value);
             Ok(())
         };
         if let Self::Array(array) = self {
@@ -2800,9 +2885,14 @@ impl Value {
 
     pub(crate) fn set_private_field(&self, id: u64, value: Value) -> Result<(), VmErr> {
         let update = |meta: &mut ObjectMeta| {
-            let Some(field) = meta.private_fields.get_mut(&id) else {
+            let Some(field) = meta.private_elements.get_mut(&id) else {
                 return Err(VmErr::Msg(
                     "TypeError: receiver does not contain the private field".into(),
+                ));
+            };
+            let PrivateElement::Field(field) = field else {
+                return Err(VmErr::Msg(
+                    "TypeError: private member is not a writable field".into(),
                 ));
             };
             *field = value;
@@ -3525,7 +3615,11 @@ fn drain_object_cell(cell: &Rc<ObjectCell>, work: &mut Vec<Value>) {
 /// prototype stays alive elsewhere; its extra reference here is released.
 fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
     let taken = meta.try_borrow_mut().ok().and_then(|mut meta| {
-        work.extend(meta.private_fields.drain().map(|(_, value)| value));
+        work.extend(
+            meta.private_elements
+                .drain()
+                .flat_map(|(_, element)| element.into_values()),
+        );
         work.extend(meta.revocable_proxy.take().map(Value::Proxy));
         if let Some(slots) = meta.async_from_sync.take() {
             work.extend(slots.values());
