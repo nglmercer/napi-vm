@@ -411,4 +411,7 @@ fresh shape id so existing inline caches miss and verify their slots. This is
 shared ObjectCell behavior, independent of the declaration or builtin using it.
 Tests cover stable dictionary storage, shared-layout isolation, cache invalidation
 and AST/bytecode property-read/key-order parity. All 366 core unit tests passed.
-Required repository checks and a new frozen-worker corpus gate are still required.
+The c82f617 required checks passed: formatting, strict Clippy, 952 workspace
+tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
+tests and ten runner/tooling tests. Frozen-worker focused/full validation is
+running separately; the latest valid complete measurement remains 5868d51.
