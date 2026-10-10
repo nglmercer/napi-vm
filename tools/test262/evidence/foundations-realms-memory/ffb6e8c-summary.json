@@ -1,0 +1,53 @@
+{
+  "source_commit": "ffb6e8c4c35e5bf14b3756437fdf2cff35dbebe1",
+  "classification": "Realm-owned RegExp legacy state; conformance validation pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 949,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Complete realm/internal-operation dependencies, class computed Symbol/key conversion, dynamic home-object super lookup, private-write bytecode fallback and complete corpus evidence",
+  "archive_sha256": {
+    "ffb6e8c-tooling-tests.log.gz": "c1271afb84ed196e9ee8db069b5f3fcf64ac74fac6c5d7f39944ccf1cdc07a00",
+    "ffb6e8c-wasm-tests.log.gz": "09c63dc6207cacb5d40147774955e13123171e69855acbc3af20e6bfb09efaa8",
+    "ffb6e8c-node-tests.log.gz": "f9a533211bf5aaf52c71221f71226fe6fbcf24125fe20c2ee29c676d761ed865",
+    "ffb6e8c-native-build.log.gz": "cf21088c4e0538ec83108394de7ad900b1bbfffeef4ae0e1d43b8adb8e728c42",
+    "ffb6e8c-minimal-tests.log.gz": "50af6b8d9cbcd6375ed503a34c8d44915ef90878284690d5022ea2fad33292ef",
+    "ffb6e8c-allfeatures-tests.log.gz": "0419c66a1922cae861c0c660faa00a65db2ffcd3c5961a5ad8e785d1e1bf2e35",
+    "ffb6e8c-clippy.log.gz": "b4d0dd2480a93cb38a51338464aa824271fab26b1c6e0a57d39f859bd4186a91",
+    "ffb6e8c-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "ffb6e8c-release-build.log.gz": "6b2dd1f96cbc1788167727fc6348190c5278c853f1b79dc0e786c99cb2df3edb"
+  },
+  "worker_sha256": "70733a16f06cb0f530166e5c3f788b54ca7cbe93e46b30fe88e4fced1a4bbd91"
+}

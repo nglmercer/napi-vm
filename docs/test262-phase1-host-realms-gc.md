@@ -388,6 +388,7 @@ observable string conversion after receiver validation. The semantics follow the
 [legacy RegExp proposal](https://github.com/tc39/proposal-regexp-legacy-features#abstract-operations).
 
 Targeted checks passed: six runtime/realm/GC tests and 363 core unit tests,
-including forced AST/bytecode differential fixtures. Required repository checks
-and focused/full pinned corpus validation must be recorded separately for this
-implementation; the latest completed full measurement above remains 5868d51.
+including forced AST/bytecode differential fixtures. The ffb6e8c required checks passed: formatting, strict Clippy, 949 workspace
+tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
+tests and ten runner/tooling tests. Focused/full pinned corpus validation must
+be recorded separately; the latest completed full measurement remains 5868d51.
