@@ -507,7 +507,8 @@ fn global_is_finite(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 
 #[cfg(feature = "napi")]
-pub(crate) use collections::{CollectionContext, clear_collection_cache};
+pub(crate) use collections::CollectionContext;
+pub(crate) use collections::clear_collection_cache;
 #[cfg(feature = "napi")]
 pub(crate) use symbol::SymbolContext;
 

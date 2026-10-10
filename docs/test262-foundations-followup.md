@@ -216,3 +216,11 @@ restrictions, and the remaining realm/builtin dependencies. Private-write and
 other unsupported bytecode bodies retain fallback. Full-corpus AST/bytecode
 mismatches are not measured yet. This follow-up does not classify all remaining
 Test262 failures as outside Phases 1–3 and is not a completion/merge-readiness claim.
+
+The contextual-import source `9753d69` failed strict Clippy because a new
+grammar test used an unnecessary `format!`; its failed check log is retained
+in the evidence directory. The follow-up also makes final-owner collection
+available without N-API and invokes it after an agent worker's VM and host
+callback roots drop. A native worker lifecycle test verifies that callback
+and realm cycles leave no tracked heap cells. This does not establish full
+Phase 1 completion or whole-corpus regression clearance.

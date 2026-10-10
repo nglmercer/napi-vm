@@ -1639,7 +1639,7 @@ fn default_import_bindings_use_the_common_contextual_identifier_grammar() {
         "undefined",
     ] {
         for clause in [
-            format!("{name}"),
+            name.to_string(),
             format!("{name},{{value as binding}}"),
             format!("{name},* as namespace"),
         ] {
