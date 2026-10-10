@@ -159,6 +159,8 @@ pub struct ExportAllTemplate {
 #[derive(Debug, Clone, Copy)]
 pub struct SpreadEntry {
     pub spread: bool,
+    /// A private dense snapshot produced by ExpandSpread; no second iteration.
+    pub prepared: bool,
     pub reg: Reg,
 }
 

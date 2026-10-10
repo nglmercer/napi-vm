@@ -811,6 +811,17 @@ fn run_loop(
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.ctor(&callee, argv)?;
                 }
+                Instr::ExpandSpread { dst, src } => {
+                    let source = frame.registers[src as usize].clone_for_execution();
+                    let values = interp.drain_iterable(&source)?;
+                    frame.registers[dst as usize] = Value::checked_array(values)?;
+                }
+                Instr::ConstructSpread { dst, callee, tmpl } => {
+                    let template = spread_template(frame, tmpl)?;
+                    let arguments = spread_argv(interp, frame, &template)?;
+                    let constructor = frame.registers[callee as usize].clone_for_execution();
+                    frame.registers[dst as usize] = interp.ctor(&constructor, arguments)?;
+                }
                 Instr::CallSpread { dst, callee, tmpl } => {
                     let template = spread_template(frame, tmpl)?;
                     let argv = spread_argv(interp, frame, &template)?;
@@ -1668,7 +1679,14 @@ fn spread_argv(
     let mut argv = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if entry.spread {
+        if entry.prepared {
+            let Value::Array(values) = &value else {
+                return Err(internal("spread snapshot is not an array"));
+            };
+            for value in values.borrow().iter() {
+                push_call_arg(&mut argv, value.clone())?;
+            }
+        } else if entry.spread {
             interp.append_iterable(&mut argv, &value, "Maximum argument count exceeded")?;
         } else {
             push_call_arg(&mut argv, value)?;
@@ -1686,7 +1704,16 @@ fn spread_array(
     let mut items = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if entry.spread {
+        if entry.prepared {
+            let Value::Array(values) = &value else {
+                return Err(internal("spread snapshot is not an array"));
+            };
+            let values = values.borrow();
+            if items.len().saturating_add(values.len()) > crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            }
+            items.extend(values.iter().cloned());
+        } else if entry.spread {
             interp.append_iterable(&mut items, &value, "Maximum array length exceeded")?;
         } else {
             items.push(value);

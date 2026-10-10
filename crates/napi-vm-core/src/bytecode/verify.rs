@@ -590,7 +590,7 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *ast, "ast-function")?;
             }
-            Instr::NormalKey { dst, src } => {
+            Instr::ExpandSpread { dst, src } | Instr::NormalKey { dst, src } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
@@ -616,6 +616,7 @@ impl Checker<'_> {
                 self.check_slot(address, *slot)?;
             }
             Instr::DirectEvalSpread { dst, callee, tmpl }
+            | Instr::ConstructSpread { dst, callee, tmpl }
             | Instr::CallSpread { dst, callee, tmpl } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
@@ -1031,6 +1032,36 @@ mod tests {
             },
         ];
         for instruction in instructions {
+            let mut unit = original.clone();
+            unit.code[0] = instruction;
+            assert!(verify_function(&unit).is_err());
+        }
+    }
+    #[test]
+    fn spread_operations_reject_invalid_registers_and_templates() {
+        let statements = crate::parser::parse_cached("function C(){}new C(...[1]);").unwrap();
+        let module = crate::bytecode::compile_program(&statements).unwrap();
+        let original = module.main.as_ref();
+        let bad = original.register_count;
+        for instruction in [
+            Instr::ExpandSpread { dst: bad, src: 0 },
+            Instr::ExpandSpread { dst: 0, src: bad },
+            Instr::ConstructSpread {
+                dst: bad,
+                callee: 0,
+                tmpl: 0,
+            },
+            Instr::ConstructSpread {
+                dst: 0,
+                callee: bad,
+                tmpl: 0,
+            },
+            Instr::ConstructSpread {
+                dst: 0,
+                callee: 0,
+                tmpl: u16::MAX,
+            },
+        ] {
             let mut unit = original.clone();
             unit.code[0] = instruction;
             assert!(verify_function(&unit).is_err());

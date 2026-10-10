@@ -732,6 +732,17 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        // Canonical keys need no conversion and retain the shared lookup's
+        // diagnostic behavior. Check exotic-key receivers before conversion.
+        if matches!(p, Value::String(_) | Value::Symbol(_)) {
+            return self
+                .with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, p, receiver));
+        }
+        if matches!(o, Value::Null | Value::Undefined) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot read properties of null or undefined".into(),
+            ));
+        }
         let key = self.ecmascript_to_property_key(p)?;
         self.with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, &key, receiver))
     }

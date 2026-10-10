@@ -48,6 +48,7 @@ pub(super) fn install(e: &mut Environment) {
     ]);
     if let Value::Object { props } = &prototype {
         let mut metadata = props.meta.borrow_mut();
+        metadata.immutable_prototype = true;
         for key in [
             "constructor",
             "__defineGetter__",

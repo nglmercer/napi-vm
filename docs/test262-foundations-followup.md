@@ -81,18 +81,40 @@ string-hint conversion, resolving the function-key regression at its shared
 conversion boundary. All 52 bytecode parity tests pass. Source ccedb3d passed all required checks:
 971 workspace tests (four existing ignored), 203 minimal-feature tests, 73 Node
 tests, 15 WASM tests, ten tooling tests, formatting and strict Clippy. Its frozen
-worker is running the expanded focused corpus, including String conversion.
-The intermediate full run is deferred while call-reference ordering is addressed;
+worker completed the expanded focused corpus, including String conversion:
+36,223/44,330 passes, 1,935 new passes and eight lost passes against c82f617,
+with no crashes, timeouts, harness errors or skips. All 48 earlier function-key
+losses recovered; the remaining losses exposed null receiver/coercion ordering
+and the immutable-prototype internal operation. The failed gate is archived.
+The intermediate full run was blocked while these dependencies and call-reference
+ordering are addressed;
 the final source still requires the full pinned corpus. The failed 496883d
 workspace gate is archived: the legacy prototype fixture's debug formatter
 recursed through Object.prototype's constructor cycle. The corrected fixture
 asserts guest-visible prototype and property behavior.
 
+## Call references, spread and internal-operation corrections (validation pending)
+
+AST and bytecode capture ordinary/optional callees and their receivers before
+arguments. Nullish calls skip argument evaluation, optional method calls retain
+their receiver, and direct eval retains intrinsic identity checks. Constructor
+expressions run before arguments; constructor spread follows the shared iterator
+protocol. Bytecode snapshots each spread at its argument/array-element position,
+retains the snapshot in ordinary traced registers and avoids iterating it twice.
+Compiler, verifier and forced differential fixtures cover the new operations.
+
+Reads reject null/undefined receivers before observable key coercion. Canonical
+String/Symbol keys retain existing shared lookup diagnostics. Immutable-prototype
+metadata is applied to each realm's Object.prototype; the common SetPrototypeOf
+operation accepts its current prototype and rejects other prototypes. Proxy
+forwarding and Object/Reflect use that same operation.
+
 ## Remaining work
 
 Complete descriptor/internal-operation coverage remains open, including replacing
 accessor-role recognition through callable names with typed property storage,
-ordinary/optional call reference ordering, remaining class definition-order
+remaining assignment/update reference coercion and optional-chain propagation,
+remaining class definition-order
 restrictions, and the remaining realm/builtin dependencies. Private-write and
 other unsupported bytecode bodies retain fallback. Full-corpus AST/bytecode
 mismatches are not measured yet. This follow-up does not classify all remaining

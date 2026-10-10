@@ -298,6 +298,16 @@ pub enum Instr {
         args: Reg,
         argc: u16,
     },
+    ConstructSpread {
+        dst: Reg,
+        callee: Reg,
+        tmpl: u16,
+    },
+    /// Evaluate the iterator now and retain its values in a private dense array.
+    ExpandSpread {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst = {}`: a fresh ordinary object. Superseded by [`Instr::BuildObject`]
     /// (single-shot construction needs no live intermediate); retained as
     /// valid IR, never emitted.
@@ -633,6 +643,8 @@ pub enum Opcode {
     CallMethod,
     Template,
     Construct,
+    ConstructSpread,
+    ExpandSpread,
     NewObject,
     SetOwnProp,
     NewArray,
@@ -732,6 +744,8 @@ impl Instr {
             Instr::CallMethod { .. } => Opcode::CallMethod,
             Instr::Template { .. } => Opcode::Template,
             Instr::Construct { .. } => Opcode::Construct,
+            Instr::ConstructSpread { .. } => Opcode::ConstructSpread,
+            Instr::ExpandSpread { .. } => Opcode::ExpandSpread,
             Instr::NewObject { .. } => Opcode::NewObject,
             Instr::SetOwnProp { .. } => Opcode::SetOwnProp,
             Instr::NewArray { .. } => Opcode::NewArray,
@@ -796,7 +810,7 @@ impl Instr {
             | Opcode::CallMethod
             | Opcode::CallSpread
             | Opcode::MethodSpread => 5,
-            Opcode::Construct => 8,
+            Opcode::Construct | Opcode::ConstructSpread => 8,
             Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject | Opcode::BuildArray => 10,
             Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
             Opcode::Mov
@@ -954,6 +968,10 @@ impl fmt::Display for Instr {
             } => {
                 write!(f, "CONSTRUCT r{dst}, r{callee}, r{args}..r{args}+{argc}")
             }
+            Instr::ConstructSpread { dst, callee, tmpl } => {
+                write!(f, "CONSTRUCT_SPREAD r{dst}, r{callee}, c{tmpl}")
+            }
+            Instr::ExpandSpread { dst, src } => write!(f, "EXPAND_SPREAD r{dst}, r{src}"),
             Instr::NewObject { dst } => write!(f, "NEW_OBJECT r{dst}"),
             Instr::SetOwnProp { obj, key, val } => match key {
                 KeySrc::Const(c) => write!(f, "SET_OWN_PROP r{obj}, c{c}, r{val}"),

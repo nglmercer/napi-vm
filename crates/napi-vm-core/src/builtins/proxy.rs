@@ -360,7 +360,11 @@ impl Interpreter {
         if crate::interpreter::strict_equals(&old, requested) {
             return Ok(true);
         }
-        if !self.is_extensible(value)? {
+        if value
+            .property_cell()
+            .is_some_and(|properties| properties.meta.borrow().immutable_prototype)
+            || !self.is_extensible(value)?
+        {
             return Ok(false);
         }
         let mut current = requested.clone();

@@ -1598,3 +1598,45 @@ fn object_literal_prototypes_and_computed_keys_share_semantics() {
         );
     }
 }
+
+#[test]
+fn call_references_optional_receivers_and_argument_order_share_semantics() {
+    for source in [
+        "var log='';var object={value:'receiver',get method(){log+='get';return function(x){return this.value+x;};}};object.method(log+='argument')==='receivergetargument'&&log==='getargument';",
+        "function old(){return 42;}function other(){return 7;}var f=old;f(f=other)===42&&f()===7;",
+        "var calls=0;var object={get method(){throw 42;}};var caught;try{object.method(calls++);}catch(e){caught=e;}caught===42&&calls===0;",
+        "var calls=0;var object=null;object?.method(calls++)===undefined&&calls===0;",
+        "var calls=0;var f=null;f?.(calls++)===undefined&&calls===0;",
+        "var object={value:42,method(){return this.value;}};object.method?.()===42;",
+        "var calls=0;var object={method:null};object.method?.(calls++)===undefined&&calls===0;",
+        "var object={value:42,method(){return this.value;}};object?.method?.()===42;",
+        "var calls=0;var object=null;object?.method?.(calls++)===undefined&&calls===0;",
+        "function C(){this.value=42;}function Other(){this.value=7;}var holder={C:C};new holder.C(holder.C=Other).value===42;",
+        "var log='';function f(a,b){return a+b;}var source={};source[Symbol.iterator]=function(){log+='iterator';var count=0;return {next(){log+='next';return count++===0?{value:35,done:false}:{done:true};}};};f(...source,(log+='tail',7))===42&&log==='iteratornextnexttail';",
+        "var log='';function C(a,b){this.value=a+b;}var source={};source[Symbol.iterator]=function(){log+='iterator';var count=0;return {next(){log+='next';return count++===0?{value:35,done:false}:{done:true};}};};new C(...source,(log+='tail',7)).value===42&&log==='iteratornextnexttail';",
+        "var log='';var source={};source[Symbol.iterator]=function(){log+='iterator';var count=0;return {next(){log+='next';return count++===0?{value:35,done:false}:{done:true};}};};var array=[...source,(log+='tail',7)];array[0]+array[1]===42&&log==='iteratornextnexttail';",
+        "var calls=0;var source={};source[Symbol.iterator]=function(){throw 42;};var caught;try{function f(){}f(...source,calls++);}catch(e){caught=e;}caught===42&&calls===0;",
+        "var calls=0;var object={method:7};var caught;try{object.method(calls++);}catch(e){caught=e;}caught instanceof TypeError&&calls===1;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "AST result for {source}"
+        );
+    }
+}
+
+#[test]
+fn null_receiver_checks_and_immutable_prototypes_share_internal_operations() {
+    for source in [
+        "var calls=0;var key={toString(){calls++;throw 42;}};var caught;try{null[key];}catch(e){caught=e;}caught instanceof TypeError&&calls===0;",
+        "var prototype=Object.prototype;var other={__proto__:null};Reflect.setPrototypeOf(prototype,null)&&!Reflect.setPrototypeOf(prototype,other)&&Object.getPrototypeOf(prototype)===null;",
+        "var caught;try{Object.setPrototypeOf(Object.prototype,{__proto__:null});}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "AST result for {source}"
+        );
+    }
+}
