@@ -296,7 +296,7 @@ fn objects() {
     check("let k = 'dyn'; let o = {[k]: 7}; o.dyn", true);
     check("let k = 8; let o = {[k]: 1}; o['8']", true);
     check("let s = Symbol('x'); let o = {[s]: 9}; o[s]", true);
-    // Bad computed keys skip the value evaluation entirely.
+    // Primitive and ordinary-object keys normalize before value evaluation.
     check(
         "let ran = false; let o = {[{}]: (ran = true, 1)}; ran",
         true,
@@ -348,8 +348,13 @@ fn objects() {
         "let o = {a: 1, ...{a: 2, b: 3}, a: 4}; [o.a, o.b].join(',')",
         true,
     );
-    // `__proto__` is ordinary data: no prototype switching.
-    check("let o = {__proto__: 5}; o.__proto__", true);
+    // Primitive prototype setters leave the default prototype and no own key.
+    // Compare guest-visible primitives: dumping Object.prototype recursively
+    // would traverse its constructor/prototype cycle in the test formatter.
+    check(
+        "let o = {__proto__: 5}; Object.getPrototypeOf(o)===Object.prototype&&!Object.hasOwn(o,'__proto__')",
+        true,
+    );
     // Methods close over slots like any nested function.
     check(
         "function mk(){ let n = 0; return {inc(){ n += 1; return n; }}; } \
