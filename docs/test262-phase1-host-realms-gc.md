@@ -1,8 +1,8 @@
 # Phase 1 host, realms, and GC audit
 
 This audit records the staged implementation in draft PR #24. The latest
-completed full measurement is `b28ddd0`, which exposed regressions. The b0dc280
-follow-up passed required checks and the expanded focused regression gate. It records implemented
+completed full measurement is `287bddc`: 62,671/102,956 passed, with 21,264
+new passes and zero lost passes against PR #23. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
 Phase 1 realm case complete. It does not classify all remaining conformance
 failures as outside the foundation work.
@@ -316,5 +316,12 @@ A subsequent root audit removes the hidden storage cell's incidental allocation
 realm edge. Stored guest values retain their own realms through their existing
 metadata; a primitive private value does not retain an otherwise dead foreign
 constructor realm. The WeakRef fixture proves that the foreign constructor can
-be collected while the stamped Proxy stays alive. This correction needs its own
-required checks and frozen-worker validation.
+be collected while the stamped Proxy stays alive. The 287bddc correction passed every required check (926 workspace tests, 203
+minimal-feature tests, 73 Node tests, 15 WASM tests and ten tooling tests). Its
+expanded focus passed 25,751/33,063 variants with zero losses, timeouts, crashes
+or harness errors. The full pinned corpus passed 62,671/102,956: 40,283 failures,
+two timeouts, zero crashes, zero harness errors and zero skips. All baseline
+passes remain passing. Full-corpus AST/bytecode mismatches are not measured.
+Exact checks, checkpoints, comparisons and worker hashes are archived alongside
+the previous results. These measurements apply to 287bddc, before the subsequent
+typed private-element implementation.
