@@ -85,9 +85,30 @@ pub(crate) fn own_intrinsics(global: &Env) {
     let mut seen = HashSet::new();
     let mut native_methods = HashMap::new();
     let function_prototype = crate::value::FunctionData::default_function_prototype(global);
+    // Ordinary and array storage share conversion and alias identity.
+    let mut own_native_slot = |slot: &mut Value| {
+        if let Value::NativeFunction { name, callable } = slot {
+            let id = Rc::as_ptr(name) as *const () as usize;
+            let method = native_methods.entry(id).or_insert_with(|| {
+                let method =
+                    crate::builtins::native_method(name, 0, *callable, function_prototype.clone());
+                if let Value::Function(function) = &method {
+                    function.properties.meta.borrow_mut().realm_global = Some(global.clone());
+                }
+                method
+            });
+            *slot = method.clone();
+        }
+    };
     while let Some(value) = work.pop() {
         if let Value::Array(array) = &value {
             if seen.insert(Rc::as_ptr(array) as usize) {
+                for slot in array.borrow_mut().iter_mut() {
+                    own_native_slot(slot);
+                }
+                for (_, slot) in array.named.borrow_mut().iter_mut() {
+                    own_native_slot(slot);
+                }
                 work.extend(array.trace_children());
                 array.meta.borrow_mut().realm_global = Some(global.clone());
             }
@@ -105,22 +126,7 @@ pub(crate) fn own_intrinsics(global: &Env) {
         // Bootstrap native slots become ordinary realm-owned function objects.
         // Preserve aliases through the native value's shared identity token.
         for (_, slot) in cell.borrow_mut().iter_mut() {
-            if let Value::NativeFunction { name, callable } = slot {
-                let id = Rc::as_ptr(name) as *const () as usize;
-                let method = native_methods.entry(id).or_insert_with(|| {
-                    let method = crate::builtins::native_method(
-                        name,
-                        0,
-                        *callable,
-                        function_prototype.clone(),
-                    );
-                    if let Value::Function(function) = &method {
-                        function.properties.meta.borrow_mut().realm_global = Some(global.clone());
-                    }
-                    method
-                });
-                *slot = method.clone();
-            }
+            own_native_slot(slot);
         }
         // Read children before introducing the realm back-edge.
         work.extend(cell.trace_children());

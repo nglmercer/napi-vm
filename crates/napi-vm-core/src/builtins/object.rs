@@ -422,10 +422,19 @@ pub(crate) fn install_intrinsic_accessor(
     let properties = target
         .property_cell()
         .expect("intrinsic accessor property cell");
+    let display = properties.meta.borrow().symbol_key(key).map_or_else(
+        || key.to_string(),
+        |symbol| {
+            symbol
+                .description
+                .as_ref()
+                .map_or_else(String::new, |description| format!("[{description}]"))
+        },
+    );
     let getter =
-        name_callable(getter, &format!("get {key}")).expect("intrinsic getter is callable");
+        name_callable(getter, &format!("get {display}")).expect("intrinsic getter is callable");
     let setter =
-        name_callable(setter, &format!("set {key}")).expect("intrinsic setter is callable");
+        name_callable(setter, &format!("set {display}")).expect("intrinsic setter is callable");
     target
         .set_prop(key.into(), getter)
         .expect("intrinsic getter slot");

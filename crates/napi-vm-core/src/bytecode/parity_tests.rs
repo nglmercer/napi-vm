@@ -1656,3 +1656,19 @@ fn compound_members_convert_property_keys_once_in_both_tiers() {
         ));
     }
 }
+
+#[test]
+fn abstract_iterator_and_intrinsic_accessors_share_execution_tiers() {
+    for source in [
+        "class Derived extends Iterator{}var object=new Derived();Object.getPrototypeOf(object)===Derived.prototype&&object instanceof Iterator;",
+        "var errors=0;try{Iterator();}catch(e){if(e instanceof TypeError)errors++;}try{new Iterator();}catch(e){if(e instanceof TypeError)errors++;}errors===2;",
+        "var d=Object.getOwnPropertyDescriptor(Iterator.prototype,'constructor');var object=Object.create(Iterator.prototype);d.set.call(object,42);object.constructor===42&&d.get.call()===Iterator;",
+        "var d=Object.getOwnPropertyDescriptor(Iterator.prototype,Symbol.toStringTag);var object={};d.set.call(object,'custom');object[Symbol.toStringTag]==='custom'&&d.get.call()==='Iterator';",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}

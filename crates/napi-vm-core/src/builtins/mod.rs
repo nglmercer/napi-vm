@@ -4,6 +4,7 @@ mod collections;
 mod date;
 mod error;
 mod function;
+mod iterator;
 pub(crate) mod json;
 mod math;
 mod number;
@@ -164,6 +165,7 @@ pub fn setup_builtins(env: &Env) {
         }
     }
     crate::interpreter::resolve::install_iterator_intrinsics(&mut e);
+    iterator::install(&mut e);
     e.snapshot_intrinsics();
 }
 

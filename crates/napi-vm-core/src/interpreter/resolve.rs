@@ -1919,6 +1919,11 @@ pub(crate) fn array_iter_with_kind(
     source: super::Value,
     kind: &str,
 ) -> Result<super::Value, crate::error::VmErr> {
+    if matches!(source, super::Value::Null | super::Value::Undefined) {
+        return Err(crate::error::VmErr::Msg(
+            "TypeError: Cannot create an array iterator from null or undefined".into(),
+        ));
+    }
     let iterator = super::Value::object(vec![
         ("__items__".into(), source),
         ("__cursor__".into(), super::Value::Number(0.0)),

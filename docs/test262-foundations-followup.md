@@ -139,6 +139,35 @@ gate. Follow-up shared compound-property logic captures the canonical property
 key once for both its read and write; forced AST/bytecode tests cover all eleven
 compound operators. New required checks and pinned validation are required.
 
+## Phase 1 iterator ownership follow-up
+
+Source 5d07a46 passes all required checks: formatting, strict Clippy, 976 workspace
+tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
+tests and ten tooling tests. Its expanded independent focus includes all compound
+assignment variants: 43,035/53,520 passes, 1,995 new and zero lost passes against
+c82f617; zero crashes, harness errors, timeouts and skips. Exact evidence is
+archived under foundations-followup/5d07a46*. Its full run was explicitly deferred
+to the subsequent iterator/realm source; no full result is claimed for 5d07a46.
+
+Each realm now installs the abstract Iterator constructor on its existing
+%IteratorPrototype%, using shared constructor/newTarget prototype fallback.
+Constructor and Symbol.toStringTag accessors retain their home intrinsic and
+implement receiver checks and own-property creation through the common property
+operations. Primitive call and direct construction reject; subclasses construct.
+Symbol accessor names use symbol descriptions in trusted intrinsic installation.
+
+Bootstrap conversion of native methods now covers array elements and named
+properties through the same helper as ordinary object cells. Aliases retain
+identity, escaped functions retain their realm through existing property metadata,
+and array iterators allocate in the method's realm. Nullish array-iterator receivers
+reject in that realm. No additional GC representation or scheduler is introduced.
+Tests cover escaped methods after GC, foreign prototypes/errors, replacing globals,
+subclass construction, accessor setters and AST/bytecode behavior. Full validation
+of this later source is required before declaring these changes regression-free.
+Iterator helper algorithms, broader descriptor dependencies and other builtin
+algorithms remain explicit gaps; installing the abstract constructor does not
+claim those algorithms are implemented.
+
 ## Remaining work
 
 Complete descriptor/internal-operation coverage remains open, including replacing

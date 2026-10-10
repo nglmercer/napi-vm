@@ -1,0 +1,75 @@
+{
+  "source_commit": "5d07a46",
+  "classification": "Shared compound member-key conversion; required checks and expanded focused regression gate passed",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 976,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Phase 1 realm/internal-operation dependencies, Phase 3 typed descriptors and class ordering, remaining reference semantics and Phase 4 parity.",
+  "archive_sha256": {
+    "5d07a46-allfeatures-tests.log.gz": "0162ee9afc6268449d067751c62593ca20dbed8071794d2d391b7ba26d7b0f33",
+    "5d07a46-clippy.log.gz": "25e87ff77c597e1e1c16155aa233f1eb92c29cf148e96b5edad00d3b07a6004e",
+    "5d07a46-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "5d07a46-minimal-tests.log.gz": "baf66ee786adc678f67dc43a0cf2e4db6c5ca71e772e91f51e495daa7f9aea54",
+    "5d07a46-native-build.log.gz": "8117bcedfdc757bc8b175e358183cf03abc5f324fb7a7841793c5af23483ea42",
+    "5d07a46-node-tests.log.gz": "32cf37385bba8c412bd71bc1368392b43d3f808067ddd3859ae92177661d1fec",
+    "5d07a46-release-build.log.gz": "396e06641937593ce9132380587f428658ac8efc62bc306ac8203e588a9feb85",
+    "5d07a46-tooling-tests.log.gz": "058a3ef68c6a397f47ed066fbc6672db67b83884cbf6e53ee16afcf7c30d2901",
+    "5d07a46-wasm-tests.log.gz": "fce84eed3e0ce633ab853639a5ba81331a81eb3fb6d7226df757e76689b5054b",
+    "5d07a46-focused-transitions.json.gz": "370c05cf033791431902e5f3f8449eafb7a41b2c77fc20bbe4bcbf758c81d24f",
+    "5d07a46-focused.json.gz": "f3623db4800d43013fa121c54155fa171df02f2a8d9788e8063f3730ee57e37e",
+    "5d07a46-focused-7c0a9ce-projection.json.gz": "4df7857bbf964a24b5f3e691619536bc679b517ef72921fe9e46a2f863868228",
+    "5d07a46-focused.jsonl.gz": "6aeb2317486d2ba80b30dc14b5120f7e75d7b175d2f1dc41d91a5d49869e54a0",
+    "5d07a46-focused-c82f617-projection.json.gz": "f8ca6ee2588e9af21025c4b329984d044140205aadd7e7ba6c94df764cee9aa9",
+    "5d07a46-focused-c82f617-transitions.json.gz": "9069e3a2dfd13c3cb0b9e374b158a9907ddea0a73419cf650a849735a1810fca"
+  },
+  "worker_sha256": "08ba190afccce84f982c8ca7c700be4ff89857dde5bf5ec2af78681e8175ab66",
+  "focused": {
+    "total": 53520,
+    "current_counts": {
+      "pass": 43035,
+      "fail": 10485,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 1995,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent c82f617 full report"
+  },
+  "full_deferred": "Full validation deferred to the next frozen Phase 1 iterator/realm source; no full result is claimed for this source."
+}
