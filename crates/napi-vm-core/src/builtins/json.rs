@@ -20,29 +20,35 @@ pub(super) fn install(e: &mut Environment) {
 /// both directions enforce the same bound.
 pub(crate) const MAX_JSON_DEPTH: usize = 512;
 
-fn json_stringify(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    if matches!(v, Value::Undefined) {
-        return Ok(Value::Undefined);
-    }
-    let mut out = String::new();
-    // Path-based visited set (Rc pointer identity) so cyclic structures
-    // throw a catchable TypeError — matching `JSON.stringify` in V8 —
-    // instead of recursing until the native stack overflows.
-    let mut visited: std::collections::HashSet<*const ()> = std::collections::HashSet::new();
-    json_serialize(interp, &v, &mut out, &mut visited, 0)?;
-
-    // The third argument indents the output: a number of spaces, or a literal
-    // string. Re-indenting the compact form keeps one serializer.
-    let indent: crate::JsString = match a.get(2) {
-        Some(Value::Number(n)) if *n >= 1.0 => " ".repeat((*n as usize).min(10)).into(),
-        Some(Value::String(s)) => s.slice(0, s.len().min(10)),
+fn json_stringify(
+    interp: &mut Interpreter,
+    _: Value,
+    arguments: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = arguments.first().cloned().unwrap_or(Value::Undefined);
+    let replacer = arguments.get(1).cloned().unwrap_or(Value::Undefined);
+    let mut state = Serialization::new(interp, &replacer)?;
+    let mut space = arguments.get(2).cloned().unwrap_or(Value::Undefined);
+    space = match boxed(&space) {
+        Some(BoxedPrimitive::Number(_)) => Value::Number(interp.ecmascript_to_number(&space)?),
+        Some(BoxedPrimitive::String(_)) => Value::String(json_string(interp, &space)?),
+        _ => space,
+    };
+    let indent: crate::JsString = match &space {
+        Value::Number(number) if *number >= 1.0 => " ".repeat((*number as usize).min(10)).into(),
+        Value::String(text) => text.slice(0, text.len().min(10)),
         _ => crate::JsString::default(),
     };
-    if indent.is_empty() {
-        return Ok(Value::String((out).into()));
+    let holder = Value::checked_object(vec![(String::new(), value)])?;
+    let mut out = String::new();
+    if !state.serialize(interp, &holder, &crate::JsString::default(), &mut out)? {
+        return Ok(Value::Undefined);
     }
-    Value::checked_string(reindent(&out, &indent)?)
+    if indent.is_empty() {
+        Value::checked_string(out)
+    } else {
+        Value::checked_string(reindent(&out, &indent)?)
+    }
 }
 
 /// Expand compact JSON onto indented lines.
@@ -139,185 +145,280 @@ fn append_json_char(out: &mut String, value: char) -> Result<(), VmErr> {
     Ok(())
 }
 
-fn json_serialize(
-    interp: &mut Interpreter,
-    v: &Value,
-    out: &mut String,
-    visited: &mut std::collections::HashSet<*const ()>,
-    depth: usize,
-) -> Result<(), VmErr> {
-    if depth > MAX_JSON_DEPTH {
-        return Err(VmErr::Msg(
-            "RangeError: Maximum JSON depth exceeded".to_string(),
+struct Serialization {
+    replacer: Option<Value>,
+    property_list: Option<std::rc::Rc<Vec<crate::JsString>>>,
+    stack: Vec<Value>,
+}
+
+enum SerializedProperty {
+    Absent,
+    Written,
+    Object(Value),
+}
+
+enum SerializationFrame {
+    Array {
+        value: Value,
+        length: usize,
+        index: usize,
+    },
+    Object {
+        value: Value,
+        keys: std::rc::Rc<Vec<crate::JsString>>,
+        index: usize,
+        first: bool,
+    },
+}
+
+fn json_length(interp: &mut Interpreter, object: &Value) -> Result<usize, VmErr> {
+    let length = interp.get_prop_value_str(object, "length")?;
+    let number = interp.ecmascript_to_number(&length)?;
+    if number.is_nan() || number <= 0.0 {
+        return Ok(0);
+    }
+    if number > crate::value::MAX_ARRAY_LEN as f64 {
+        return Err(crate::value::limit_err(
+            "Maximum JSON array length exceeded",
         ));
     }
-    match v {
-        Value::Null | Value::Undefined => append_json_str(out, "null")?,
-        Value::Bool(b) => append_json_str(out, if *b { "true" } else { "false" })?,
-        Value::Number(n) => {
-            let text = if n.is_nan() || n.is_infinite() {
-                "null".to_string()
-            } else if n.fract() == 0.0 && n.abs() < 1e15 {
-                format!("{n:.0}")
-            } else {
-                n.to_string()
-            };
-            append_json_str(out, &text)?;
-        }
-        Value::String(s) => {
-            append_json_char(out, '"')?;
-            escape_json(s, out)?;
-            append_json_char(out, '"')?;
-        }
-        Value::TypedArray(view) if view.is_buffer => {
-            let to_json = interp.member(v, "toJSON")?;
-            if crate::interpreter::call::is_callable_value(&to_json) {
-                let converted = interp.call_this(&to_json, v.clone(), Vec::new())?;
-                return json_serialize(interp, &converted, out, visited, depth + 1);
+    Ok(number.trunc() as usize)
+}
+
+fn boxed(value: &Value) -> Option<BoxedPrimitive> {
+    value
+        .property_cell()
+        .and_then(|cell| cell.meta.borrow().boxed_primitive.clone())
+}
+
+fn json_string(interp: &mut Interpreter, value: &Value) -> Result<crate::JsString, VmErr> {
+    interp.ecmascript_to_string(value)
+}
+
+impl Serialization {
+    fn new(interp: &mut Interpreter, replacer: &Value) -> Result<Self, VmErr> {
+        let mut state = Self {
+            replacer: None,
+            property_list: None,
+            stack: Vec::new(),
+        };
+        if crate::interpreter::call::is_callable_value(replacer) {
+            state.replacer = Some(replacer.clone());
+        } else if super::array::is_array(replacer)? {
+            let length = json_length(interp, replacer)?;
+            let mut keys = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for index in 0..length {
+                let item = interp.get_prop_value_str(replacer, &index.to_string())?;
+                if matches!(item, Value::String(_) | Value::Number(_))
+                    || matches!(
+                        boxed(&item),
+                        Some(BoxedPrimitive::String(_) | BoxedPrimitive::Number(_))
+                    )
+                {
+                    let key = json_string(interp, &item)?;
+                    if seen.insert(key.units().to_vec()) {
+                        keys.push(key);
+                    }
+                }
             }
-            json_serialize_typed_array(interp, view, out, visited, depth)?;
+            state.property_list = Some(std::rc::Rc::new(keys));
         }
-        Value::TypedArray(view) => {
-            json_serialize_typed_array(interp, view, out, visited, depth)?;
+        Ok(state)
+    }
+
+    fn property(
+        &mut self,
+        interp: &mut Interpreter,
+        holder: &Value,
+        key: &crate::JsString,
+        out: &mut String,
+        depth: usize,
+    ) -> Result<SerializedProperty, VmErr> {
+        if depth > MAX_JSON_DEPTH {
+            return Err(VmErr::Msg("RangeError: Maximum JSON depth exceeded".into()));
         }
-        Value::ArrayBuffer(_) | Value::SharedArrayBuffer(_) | Value::DataView(_) => {
-            append_json_str(out, "{}")?;
+        let mut value = interp.get_prop_value(holder, &Value::String(key.clone()))?;
+        if crate::interpreter::call::is_js_object(&value) || matches!(value, Value::BigInt(_)) {
+            let to_json = interp.get_prop_value_str(&value, "toJSON")?;
+            if crate::interpreter::call::is_callable_value(&to_json) {
+                value =
+                    interp.call_this(&to_json, value.clone(), vec![Value::String(key.clone())])?;
+            }
         }
-        Value::Array(items) => {
-            let ptr = std::rc::Rc::as_ptr(items) as *const ();
-            if !visited.insert(ptr) {
+        if let Some(replacer) = &self.replacer {
+            value = interp.call_this(
+                replacer,
+                holder.clone(),
+                vec![Value::String(key.clone()), value],
+            )?;
+        }
+        value = match boxed(&value) {
+            Some(BoxedPrimitive::Number(_)) => Value::Number(interp.ecmascript_to_number(&value)?),
+            Some(BoxedPrimitive::String(_)) => Value::String(json_string(interp, &value)?),
+            Some(BoxedPrimitive::Bool(value)) => Value::Bool(value),
+            Some(BoxedPrimitive::BigInt(value)) => Value::BigInt(value),
+            _ => value,
+        };
+        match &value {
+            Value::Null => append_json_str(out, "null")?,
+            Value::Bool(value) => append_json_str(out, if *value { "true" } else { "false" })?,
+            Value::Number(value) => {
+                if value.is_finite() {
+                    append_json_str(out, &crate::format::ecmascript_number_string(*value))?;
+                } else {
+                    append_json_str(out, "null")?;
+                }
+            }
+            Value::String(value) => {
+                append_json_char(out, '"')?;
+                escape_json(value, out)?;
+                append_json_char(out, '"')?;
+            }
+            Value::BigInt(_) => {
                 return Err(VmErr::Msg(
-                    "TypeError: Converting circular structure to JSON".to_string(),
+                    "TypeError: Do not know how to serialize a BigInt".into(),
                 ));
             }
+            _ if !crate::interpreter::call::is_js_object(&value)
+                || crate::interpreter::call::is_callable_value(&value) =>
+            {
+                return Ok(SerializedProperty::Absent);
+            }
+            _ => return Ok(SerializedProperty::Object(value)),
+        }
+        Ok(SerializedProperty::Written)
+    }
+
+    fn open(
+        &mut self,
+        interp: &mut Interpreter,
+        value: Value,
+        out: &mut String,
+    ) -> Result<SerializationFrame, VmErr> {
+        if self
+            .stack
+            .iter()
+            .any(|item| crate::interpreter::strict_equals(item, &value))
+        {
+            return Err(VmErr::Msg(
+                "TypeError: Converting circular structure to JSON".into(),
+            ));
+        }
+        self.stack.push(value.clone());
+        if super::array::is_array(&value)? {
+            let length = json_length(interp, &value)?;
             append_json_char(out, '[')?;
-            let items = items.borrow();
-            for (i, it) in items.iter().enumerate() {
-                if i > 0 {
-                    append_json_char(out, ',')?;
-                }
-                json_serialize(interp, it, out, visited, depth + 1)?;
-            }
-            append_json_char(out, ']')?;
-            visited.remove(&ptr);
-        }
-        // A `Date` serializes as its ISO string, which is what its `toJSON`
-        // returns.
-        Value::Date(ms) => {
-            append_json_char(out, '"')?;
-            escape_json(crate::builtins::iso_string(ms.get()), out)?;
-            append_json_char(out, '"')?;
-        }
-        // A proxy serializes as its target. Routing this through the `get`
-        // trap would need the interpreter, which the serializer does not have.
-        Value::Proxy(proxy) => {
-            let target = proxy.snapshot()?.0;
-            return json_serialize(interp, &target, out, visited, depth);
-        }
-        Value::Object { props, .. } => {
-            let to_json = interp.member(v, "toJSON")?;
-            if crate::interpreter::call::is_callable_value(&to_json) {
-                let converted = interp.call_this(&to_json, v.clone(), Vec::new())?;
-                return json_serialize(interp, &converted, out, visited, depth + 1);
-            }
-            match props.meta.borrow().boxed_primitive.clone() {
-                Some(BoxedPrimitive::Bool(value)) => {
-                    return json_serialize(interp, &Value::Bool(value), out, visited, depth + 1);
-                }
-                Some(BoxedPrimitive::Number(value)) => {
-                    return json_serialize(interp, &Value::Number(value), out, visited, depth + 1);
-                }
-                Some(BoxedPrimitive::String(value)) => {
-                    return json_serialize(interp, &Value::String(value), out, visited, depth + 1);
-                }
-                Some(BoxedPrimitive::BigInt(_)) => {
-                    return Err(VmErr::Msg(
-                        "TypeError: Do not know how to serialize a BigInt".into(),
-                    ));
-                }
-                Some(BoxedPrimitive::Symbol(_)) | None => {}
-            }
-            json_serialize_object(interp, v, props, out, visited, depth)?;
-        }
-        _ => append_json_str(out, "null")?,
-    }
-    Ok(())
-}
-
-fn json_serialize_object(
-    interp: &mut Interpreter,
-    value: &Value,
-    props: &std::rc::Rc<crate::value::ObjectCell>,
-    out: &mut String,
-    visited: &mut std::collections::HashSet<*const ()>,
-    depth: usize,
-) -> Result<(), VmErr> {
-    let ptr = std::rc::Rc::as_ptr(props) as *const ();
-    if !visited.insert(ptr) {
-        return Err(VmErr::Msg(
-            "TypeError: Converting circular structure to JSON".to_string(),
-        ));
-    }
-    append_json_char(out, '{')?;
-    let meta = props.meta.borrow();
-    // `JSON.stringify` walks own enumerable string keys only, skipping the
-    // VM's internal slots. Snapshot before getters execute guest code.
-    let entries: Vec<(String, Value)> = props
-        .borrow()
-        .iter()
-        .filter(|(key, _)| {
-            !crate::interpreter::is_internal_key(key) && meta.attrs_of(key).enumerable
-        })
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
-    drop(meta);
-    let mut first = true;
-    for (key, slot) in entries {
-        let is_getter = matches!(&slot, Value::Function(function)
-        if function.name.as_ref().is_some_and(|name| {
-            name.strip_prefix("get ").is_some_and(|rest| rest == key)
-        }));
-        let property = if is_getter {
-            interp.member(value, &key)?
+            Ok(SerializationFrame::Array {
+                value,
+                length,
+                index: 0,
+            })
         } else {
-            slot.deref_binding()
-        };
-        if matches!(property, Value::Undefined) {
-            continue;
+            let keys = if let Some(keys) = &self.property_list {
+                keys.clone()
+            } else {
+                let mut keys = Vec::new();
+                for key in interp.own_property_keys(&value)? {
+                    if let Value::String(name) = &key {
+                        let descriptor =
+                            super::object::descriptor_for_key_in(interp, &value, &key)?;
+                        if descriptor
+                            .get_prop("enumerable")
+                            .is_some_and(|value| value.is_truthy())
+                        {
+                            keys.push(name.clone());
+                        }
+                    }
+                }
+                std::rc::Rc::new(keys)
+            };
+            append_json_char(out, '{')?;
+            Ok(SerializationFrame::Object {
+                value,
+                keys,
+                index: 0,
+                first: true,
+            })
         }
-        if !first {
-            append_json_char(out, ',')?;
-        }
-        first = false;
-        append_json_char(out, '"')?;
-        escape_json(crate::JsString::from_key(&key), out)?;
-        append_json_str(out, "\":")?;
-        json_serialize(interp, &property, out, visited, depth + 1)?;
     }
-    append_json_char(out, '}')?;
-    visited.remove(&ptr);
-    Ok(())
-}
 
-fn json_serialize_typed_array(
-    interp: &mut Interpreter,
-    view: &std::rc::Rc<crate::value::TypedArrayData>,
-    out: &mut String,
-    visited: &mut std::collections::HashSet<*const ()>,
-    depth: usize,
-) -> Result<(), VmErr> {
-    append_json_char(out, '{')?;
-    for index in 0..view.effective_length() {
-        if index > 0 {
-            append_json_char(out, ',')?;
+    /// Keep traversal state on the heap: the JSON depth limit must remain a
+    /// catchable guest error even on small owner-thread stacks.
+    fn serialize(
+        &mut self,
+        interp: &mut Interpreter,
+        holder: &Value,
+        key: &crate::JsString,
+        out: &mut String,
+    ) -> Result<bool, VmErr> {
+        let mut frames = match self.property(interp, holder, key, out, 0)? {
+            SerializedProperty::Absent => return Ok(false),
+            SerializedProperty::Written => return Ok(true),
+            SerializedProperty::Object(value) => vec![self.open(interp, value, out)?],
+        };
+        while let Some(frame) = frames.last_mut() {
+            let (holder, key, array, checkpoint) = match frame {
+                SerializationFrame::Array {
+                    value,
+                    length,
+                    index,
+                } => {
+                    if *index == *length {
+                        append_json_char(out, ']')?;
+                        frames.pop();
+                        self.stack.pop();
+                        continue;
+                    }
+                    if *index != 0 {
+                        append_json_char(out, ',')?;
+                    }
+                    let key = index.to_string().into();
+                    *index += 1;
+                    (value.clone(), key, true, 0)
+                }
+                SerializationFrame::Object {
+                    value,
+                    keys,
+                    index,
+                    first,
+                } => {
+                    if *index == keys.len() {
+                        append_json_char(out, '}')?;
+                        frames.pop();
+                        self.stack.pop();
+                        continue;
+                    }
+                    let key = keys[*index].clone();
+                    *index += 1;
+                    let checkpoint = out.len();
+                    if !*first {
+                        append_json_char(out, ',')?;
+                    }
+                    append_json_char(out, '"')?;
+                    escape_json(&key, out)?;
+                    append_json_str(out, "\":")?;
+                    (value.clone(), key, false, checkpoint)
+                }
+            };
+            let property = self.property(interp, &holder, &key, out, frames.len())?;
+            if matches!(property, SerializedProperty::Absent) {
+                if array {
+                    append_json_str(out, "null")?;
+                } else {
+                    out.truncate(checkpoint);
+                }
+                continue;
+            }
+            if let Some(SerializationFrame::Object { first, .. }) = frames.last_mut() {
+                *first = false;
+            }
+            if let SerializedProperty::Object(value) = property {
+                frames.push(self.open(interp, value, out)?);
+            }
         }
-        append_json_char(out, '"')?;
-        append_json_str(out, &index.to_string())?;
-        append_json_str(out, "\":")?;
-        let value = crate::builtins::read_element(view, index).unwrap_or(Value::Undefined);
-        json_serialize(interp, &value, out, visited, depth + 1)?;
+        Ok(true)
     }
-    append_json_char(out, '}')
 }
 
 fn escape_json(s: impl Into<crate::JsString>, out: &mut String) -> Result<(), VmErr> {

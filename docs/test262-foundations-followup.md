@@ -253,3 +253,20 @@ Exact full reports, checkpoints, transitions, phase audit and digests are
 archived. Full-corpus AST/bytecode differential remains unmeasured. This
 result does not close remaining realm/internal-operation dependencies,
 including the JSON replacer/Proxy realm failures; the PR stays a draft.
+
+The next realm dependency uses one iterative JSON serializer, shared by
+native calls from AST and bytecode. Replacer functions and property lists,
+`toJSON`, boxed values, spacing, live property reads, descriptor enumeration,
+Proxy behavior and UTF-16 keys now use shared operations. `Array.isArray`
+and serialization share the existing iterative Proxy-target operation.
+Explicit frames preserve the depth limit as a catchable error and share
+property-list storage rather than cloning it at each nesting level.
+Ten semantic tests cover callback order, root replacement, inherited
+properties, proxies, cycles, exotic properties, depth limits and borrowed
+foreign JSON holder/error realms after GC; strict Clippy passes. Forced
+AST/bytecode fixtures exercise the same native helper without removing fallback.
+The recursive draft's stack-overflow probe and lint failure are retained as
+development evidence; they are corrected before runtime source freezing.
+The pre-existing array-literal elision gap remains open. Required checks and
+JSON-expanded focused/full Test262 must be measured on the new source;
+`32a469b` full results do not validate this serializer.

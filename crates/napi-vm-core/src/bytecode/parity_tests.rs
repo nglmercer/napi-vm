@@ -1684,3 +1684,19 @@ fn utf16_module_requests_reach_shared_loader_validation_in_both_tiers() {
         );
     }
 }
+
+#[test]
+fn json_stringification_uses_shared_semantics_in_both_execution_tiers() {
+    for source in [
+        r#"var input={a:1,b:2};JSON.stringify(input,function(k,v){return k==='b'?undefined:v;})==='{"a":1}';"#,
+        r#"JSON.stringify({a:1,b:2},['b','a','b'])==='{"b":2,"a":1}';"#,
+        r#"var p=new Proxy({a:1},{get(t,k){return k==='a'?42:Reflect.get(t,k);}});JSON.stringify(p)==='{"a":42}';"#,
+        r#"var p=Proxy.revocable([],{});p.revoke();var ok=false;try{JSON.stringify({},p.proxy);}catch(e){ok=e instanceof TypeError;}ok;"#,
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "{source}"
+        );
+    }
+}
