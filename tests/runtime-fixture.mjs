@@ -8,7 +8,7 @@ export function runtimeFixture(options) {
     probe.enableRuntime(options);
     available = true;
   } catch (error) {
-    if (!/Cargo feature/.test(error.message)) throw error;
+    if (!/Cargo feature|^Web globals require runtime-web$/.test(error.message)) throw error;
   } finally {
     probe.dispose();
   }
