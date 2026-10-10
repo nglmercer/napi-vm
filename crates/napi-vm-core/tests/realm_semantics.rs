@@ -1809,3 +1809,59 @@ fn internal_descriptor_records_do_not_inherit_guest_descriptor_fields() {
         "var obj={};Object.prototype.get=function(){return 'ok';};var attrs=(function(){return arguments;})();Object.defineProperty(obj,'x',attrs);obj.x==='ok';",
     );
 }
+
+#[test]
+fn global_callable_data_is_not_invoked_as_an_accessor() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var calls=0; var f=Object.getOwnPropertyDescriptor({get f(){calls++;}},'f').get; var d=Object.getOwnPropertyDescriptor(globalThis,'f'); typeof f==='function'&&d.value===f&&d.writable&&calls===0;",
+    );
+    truth(
+        &mut vm,
+        "Object.defineProperty(f,'prototype',{get(){throw new Error('poison');}}); var caught;try{f[Symbol.hasInstance]({});}catch(e){caught=e;}caught.message==='poison'&&calls===0;",
+    );
+}
+
+#[test]
+fn property_updates_require_object_before_key_coercion() {
+    for source in ["++base[key]", "base[key]++", "--base[key]", "base[key]--"] {
+        let mut vm = Interpreter::with_builtins();
+        truth(
+            &mut vm,
+            &format!(
+                "var count=0;var key={{toString(){{count++;throw new Error('key');}}}};var caught;var base=null;try{{{source};}}catch(e){{caught=e;}}caught instanceof TypeError&&count===0;"
+            ),
+        );
+    }
+}
+
+#[test]
+fn boxed_string_enumeration_includes_virtual_indices() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var s=new String('abc');var names=[];for(var key in s){if(s.hasOwnProperty(key))names.push(key);}names.join(',')==='0,1,2'&&Object.keys(s).join(',')===names.join(',');",
+    );
+}
+
+#[test]
+fn inherited_exotic_accessors_validate_the_original_receiver() {
+    let mut vm = Interpreter::with_builtins();
+    for prototype in [
+        "new ArrayBuffer(1)",
+        "new SharedArrayBuffer(1)",
+        "new Int32Array(1)",
+    ] {
+        truth(
+            &mut vm,
+            &format!(
+                "var object=Object.create({prototype});var caught;try{{object.byteLength;}}catch(e){{caught=e;}}caught instanceof TypeError;"
+            ),
+        );
+    }
+    truth(
+        &mut vm,
+        "var object=Object.create(new Int32Array(1));var caught;try{object.buffer;}catch(e){caught=e;}caught instanceof TypeError;",
+    );
+}

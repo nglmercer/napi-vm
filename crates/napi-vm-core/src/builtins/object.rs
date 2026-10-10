@@ -340,11 +340,7 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
     {
         return crate::builtins::read_element(view, index);
     }
-    cell(v)?
-        .borrow()
-        .iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, value)| value.deref_binding())
+    cell(v)?.own_value(key).map(|value| value.deref_binding())
 }
 
 /// Is this slot an accessor stored under the `get …` / `set …` naming that the
@@ -1821,7 +1817,13 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     let attrs =
         object_property_attributes(target, key).unwrap_or_else(|| c.meta.borrow().attrs_of(key));
     let mut fields = Vec::new();
-    match accessor_kind(key, &value) {
+    match c
+        .meta
+        .borrow()
+        .has_accessors
+        .then(|| accessor_kind(key, &value))
+        .flatten()
+    {
         Some("get" | "set") => {
             let slots = c.borrow();
             let getter = slots

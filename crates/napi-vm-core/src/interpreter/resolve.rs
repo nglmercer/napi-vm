@@ -795,7 +795,11 @@ impl Interpreter {
                 key
             )));
         }
-        if let Value::Object { props } = o {
+        if let Some(props) = match o {
+            Value::Object { props } => Some(props.clone()),
+            _ if !self.seq(o, receiver) => o.exotic_properties(),
+            _ => None,
+        } {
             let key = self.proxy_property_key(p)?;
             let slot = self.property_key(&key)?;
             let inherited = {
@@ -931,7 +935,11 @@ impl Interpreter {
         }
         // Ordinary [[Get]] delegates missing own properties to the prototype's
         // internal operation, retaining the original receiver for accessors.
-        if let Value::Object { props } = o {
+        if let Some(props) = match o {
+            Value::Object { props } => Some(props.clone()),
+            _ if !self.seq(o, receiver) => o.exotic_properties(),
+            _ => None,
+        } {
             let inherited = {
                 let own = props.borrow().iter().any(|(name, _)| name == key);
                 if own { None } else { props.proto() }
@@ -950,6 +958,14 @@ impl Interpreter {
             }
         }
         let v = self.prop_str(o, key)?;
+        // The global object record stores variable values as data. Callable
+        // names are not sufficient to turn an ordinary binding into a getter.
+        if let Some(cell) = o.property_cell()
+            && cell.own_index(key).is_some()
+            && !cell.meta.borrow().has_accessors
+        {
+            return Ok(v);
+        }
         let accessor_name = match &v {
             Value::Function(function) => function.name.as_deref(),
             Value::NativeFunction { name, .. } | Value::HostFunction { name, .. } => {

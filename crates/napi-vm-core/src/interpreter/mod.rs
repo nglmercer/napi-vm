@@ -2791,9 +2791,12 @@ impl Interpreter {
                 && !descriptor
                     .get_prop("configurable")
                     .is_some_and(|value| value.is_truthy());
-            if (protected || !extensible)
-                && !keys.iter().any(|candidate| strict_equals(candidate, key))
-            {
+            let identity = match key {
+                Value::String(name) => (false, name.to_key()),
+                Value::Symbol(symbol) => (true, symbol.id.to_string()),
+                _ => unreachable!("own property key"),
+            };
+            if (protected || !extensible) && !seen.contains(&identity) {
                 return Err(VmErr::Msg(
                     "TypeError: Proxy ownKeys omitted a required target key".into(),
                 ));
@@ -2809,7 +2812,7 @@ impl Interpreter {
 
     pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
         if !matches!(value, Value::Proxy(_)) {
-            return Ok(self.keys(value));
+            return crate::builtins::object::own_names_for(self, value, true);
         }
         let mut names = Vec::new();
         for key in self.own_property_keys(value)? {

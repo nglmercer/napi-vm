@@ -127,7 +127,11 @@ impl Shape {
         let key: Rc<str> = Rc::from(key);
         keys.push(key.clone());
         let child = Self::fresh(keys);
-        self.transitions.borrow_mut().insert(key, child.clone());
+        // Dictionary-sized layouts must not retain every prefix's full key
+        // vector and index. Keep canonical transitions for small objects.
+        if self.keys.len() < 128 {
+            self.transitions.borrow_mut().insert(key, child.clone());
+        }
         child
     }
 
@@ -145,6 +149,10 @@ impl Shape {
     /// here: `{a, c}` built directly and `{a, b, c}` minus `b` land on the
     /// same node.
     pub fn rebuild<'a>(keys: impl Iterator<Item = &'a str>) -> Rc<Shape> {
+        let keys: Vec<_> = keys.collect();
+        if keys.len() > 128 {
+            return Self::fresh(keys.into_iter().map(Rc::from).collect());
+        }
         let mut shape = Self::root();
         for key in keys {
             // Skip repeats so a duplicated slot vector still maps each key

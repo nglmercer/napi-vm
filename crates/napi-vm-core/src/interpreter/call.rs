@@ -1663,6 +1663,13 @@ impl Interpreter {
         // An own writable Number data slot cannot invoke guest conversion or
         // prototype setters. Update it directly through the same property cell,
         // preserving descriptors and avoiding temporary descriptor objects.
+        // RequireObjectCoercible precedes ToPropertyKey after evaluating the
+        // member expression. A key object's coercion must not run on null.
+        if matches!(obj, Value::Null | Value::Undefined) {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot update a property of null or undefined".into(),
+            ));
+        }
         let key = self.proxy_property_key(prop)?;
         let name = self.property_key(&key)?;
         if let Some(cell) = obj.property_cell()

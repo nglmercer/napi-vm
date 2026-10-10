@@ -93,6 +93,7 @@ pub(super) fn install(e: &mut Environment) {
         )
         .expect("Symbol.prototype.description");
     if let Value::Object { props } = &prototype {
+        props.meta.borrow_mut().has_accessors = true;
         props.meta.borrow_mut().set_attrs(
             "description",
             crate::value::PropAttrs {

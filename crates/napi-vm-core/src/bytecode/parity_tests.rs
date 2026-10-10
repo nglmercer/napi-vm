@@ -1429,3 +1429,16 @@ fn empty_lexical_iteration_patterns_own_and_unwind_runtime_scopes() {
         check(source, true);
     }
 }
+
+#[test]
+fn global_callable_data_and_update_reference_order_match_both_tiers() {
+    for source in [
+        "var calls=0;var f=Object.getOwnPropertyDescriptor({get f(){calls++;}},'f').get;typeof f==='function'&&calls===0&&Object.getOwnPropertyDescriptor(globalThis,'f').value===f;",
+        "var count=0;var key={toString(){count++;throw 1;}};var caught;try{++null[key];}catch(e){caught=e;}caught instanceof TypeError&&count===0;",
+        "var count=0;var key={toString(){count++;throw 1;}};var caught;try{null[key]--;}catch(e){caught=e;}caught instanceof TypeError&&count===0;",
+        "var names=[];for(var key in new String('abc')){names.push(key);}names.join(',');",
+        "var object=Object.create(new Int32Array(1));var caught;try{object.buffer;}catch(e){caught=e;}caught instanceof TypeError;",
+    ] {
+        check(source, true);
+    }
+}

@@ -251,7 +251,14 @@ fn build_prototype(kind: Kind, function_prototype: Option<Value>) -> Result<Valu
     // construction time. The `get ` name prefix is what the property resolver
     // recognizes as an accessor.
     if !matches!(kind, Kind::WeakMap | Kind::WeakSet) {
-        proto.set_prop("size".to_string(), super::nf("get size", size_getter))?;
+        super::object::define_property(
+            &proto,
+            "size",
+            &Value::descriptor_record(vec![
+                ("get".into(), super::nf("get size", size_getter)),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )?;
         let iterator = proto
             .get_prop(if kind == Kind::Map {
                 "entries"
