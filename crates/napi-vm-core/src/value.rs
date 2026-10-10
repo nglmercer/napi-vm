@@ -3161,6 +3161,12 @@ impl Value {
         }
     }
 
+    /// Internal property descriptors are records: absent fields must remain
+    /// absent even when Object.prototype has guest-defined descriptor names.
+    pub(crate) fn descriptor_record(fields: Vec<(String, Value)>) -> Self {
+        Self::object_with_proto(fields, None)
+    }
+
     /// Insert or replace an own property while enforcing the object cap.
     pub fn set_prop(&self, key: String, val: Value) -> Result<(), VmErr> {
         if let Some(properties) = self.exotic_properties() {

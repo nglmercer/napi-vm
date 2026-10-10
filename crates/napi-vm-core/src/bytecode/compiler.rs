@@ -319,6 +319,9 @@ struct Scope {
     /// the environment chain. Never populated on the function scope, which
     /// boxes through `captured` instead.
     boxed: HashSet<String>,
+    /// Whether this compile scope owns a runtime environment, including an
+    /// empty lexical iteration head.
+    runtime: bool,
 }
 
 /// Break/continue patch lists for one breakable context under compilation
@@ -414,6 +417,7 @@ impl<'a> Compiler<'a> {
                 bindings: HashMap::new(),
                 global: true,
                 boxed: HashSet::new(),
+                runtime: false,
             }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
@@ -445,6 +449,7 @@ impl<'a> Compiler<'a> {
                 bindings: HashMap::new(),
                 global: false,
                 boxed: HashSet::new(),
+                runtime: false,
             }],
             loops: Vec::new(),
             pending_labels: Vec::new(),
@@ -626,11 +631,16 @@ impl<'a> Compiler<'a> {
     /// block bindings live in the pushed environment instead of slots.
     /// Scopes with no boxed names emit nothing and unwind nothing.
     fn push_scope(&mut self, boxed: HashSet<String>) {
-        let tracked = !boxed.is_empty();
+        self.push_scope_with_runtime(boxed, false);
+    }
+
+    fn push_scope_with_runtime(&mut self, boxed: HashSet<String>, force_runtime: bool) {
+        let tracked = force_runtime || !boxed.is_empty();
         self.scopes.push(Scope {
             bindings: HashMap::new(),
             global: false,
             boxed,
+            runtime: tracked,
         });
         if tracked {
             self.emit(Instr::PushScope);
@@ -646,7 +656,7 @@ impl<'a> Compiler<'a> {
             .scopes
             .pop()
             .ok_or(Decline::Func("scope stack underflow"))?;
-        if scope.boxed.is_empty() {
+        if !scope.runtime {
             return Ok(());
         }
         self.emit(Instr::PopScope);
@@ -2642,7 +2652,7 @@ impl<'a> Compiler<'a> {
     ) -> Result<Reg, Decline> {
         let names = vec![name.to_string()];
         if *kind != VarKind::Var {
-            self.push_scope(names.iter().cloned().collect());
+            self.push_scope_with_runtime(names.iter().cloned().collect(), true);
             self.define_iteration_head(&names, kind)?;
         }
         let head = self.prepare_for_head(name)?;
@@ -2751,7 +2761,7 @@ impl<'a> Compiler<'a> {
             None => vec![name.to_string()],
         };
         if *kind != VarKind::Var {
-            self.push_scope(names.iter().cloned().collect());
+            self.push_scope_with_runtime(names.iter().cloned().collect(), true);
             self.define_iteration_head(&names, kind)?;
         }
         // Heads prepare before the iterable evaluates, like declarations.

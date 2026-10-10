@@ -53,7 +53,7 @@ pub(super) fn install(e: &mut Environment) {
             super::object::define_property(
                 &prototype,
                 name,
-                &Value::object(vec![
+                &Value::descriptor_record(vec![
                     (
                         "get".into(),
                         super::native_method(

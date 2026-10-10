@@ -848,7 +848,7 @@ impl Interpreter {
         self.define_own_property(
             &Value::Array(array.clone()),
             &Value::String("length".into()),
-            &Value::object(vec![("value".into(), value.clone())]),
+            &Value::descriptor_record(vec![("value".into(), value.clone())]),
         )
     }
 
@@ -1161,7 +1161,7 @@ impl Interpreter {
             {
                 return Ok(false);
             }
-            return self.define_own_property(receiver, &key, &Value::object(fields));
+            return self.define_own_property(receiver, &key, &Value::descriptor_record(fields));
         }
         Err(crate::value::limit_err("Maximum prototype depth exceeded"))
     }

@@ -57,7 +57,7 @@ pub(super) fn install(e: &mut Environment) {
                 Value::Symbol(symbol) => crate::interpreter::symbol_slot_key(symbol),
                 _ => unreachable!(),
             },
-            &Value::object(vec![
+            &Value::descriptor_record(vec![
                 (
                     "get".into(),
                     super::native_method(
@@ -322,7 +322,7 @@ pub(super) fn install(e: &mut Environment) {
         super::object::define_property(
             &abstract_constructor,
             &key,
-            &Value::object(vec![
+            &Value::descriptor_record(vec![
                 (
                     "get".into(),
                     super::native_method(

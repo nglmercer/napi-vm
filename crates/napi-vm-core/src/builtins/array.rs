@@ -84,7 +84,7 @@ pub(super) fn install(e: &mut Environment) {
             super::object::define_property(
                 &a,
                 &slot,
-                &Value::object(vec![
+                &Value::descriptor_record(vec![
                     (
                         "get".into(),
                         super::native_method(
@@ -729,7 +729,7 @@ fn create_array_result_element(
     index: usize,
     value: Value,
 ) -> Result<(), VmErr> {
-    let descriptor = Value::object(vec![
+    let descriptor = Value::descriptor_record(vec![
         ("value".into(), value),
         ("writable".into(), Value::Bool(true)),
         ("enumerable".into(), Value::Bool(true)),

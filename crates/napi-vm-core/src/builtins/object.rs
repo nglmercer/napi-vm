@@ -70,7 +70,7 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
-    let proto_descriptor = Value::object(vec![
+    let proto_descriptor = Value::descriptor_record(vec![
         ("get".into(), nf("get __proto__", object_get_prototype)),
         ("set".into(), nf("set __proto__", object_set_prototype)),
         ("enumerable".into(), Value::Bool(false)),
@@ -863,7 +863,7 @@ fn object_define_accessor(
     if !is_getter && is_callable(&existing_getter) {
         fields.push(("get".into(), existing_getter));
     }
-    define_property(&target, &key, &Value::object(fields))?;
+    define_property(&target, &key, &Value::descriptor_record(fields))?;
     if let Some(symbol) = symbol {
         if let Value::Array(array) = &target {
             array.set_symbol_key(&key, symbol);
@@ -1530,7 +1530,7 @@ fn object_get_own_descriptor(
 ) -> Result<Value, VmErr> {
     let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
     let key = interp.proxy_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
-    descriptor_for_key_in(interp, &target, &key)
+    descriptor_for_key_in(interp, &target, &key).map(from_property_descriptor)
 }
 
 fn object_get_own_descriptors(
@@ -1543,10 +1543,19 @@ fn object_get_own_descriptors(
     for key in own_names_for(interp, &target, false)? {
         let descriptor = descriptor_for_in(interp, &target, &key)?;
         if !matches!(descriptor, Value::Undefined) {
-            props.push((key, descriptor));
+            props.push((key, from_property_descriptor(descriptor)));
         }
     }
     Value::checked_object(props)
+}
+
+/// FromPropertyDescriptor creates an ordinary object only when a descriptor
+/// escapes to guest code; internal operations keep prototype-free records.
+pub(crate) fn from_property_descriptor(descriptor: Value) -> Value {
+    match descriptor {
+        Value::Object { ref props } => Value::object(props.borrow().clone()),
+        other => other,
+    }
 }
 
 /// Build the descriptor object for one own property, or `undefined` when the
@@ -1594,7 +1603,7 @@ pub(crate) fn to_property_descriptor(
     {
         return Err(type_err("Invalid property descriptor"));
     }
-    Ok(Value::object(fields))
+    Ok(Value::descriptor_record(fields))
 }
 
 /// IsCompatiblePropertyDescriptor over the shared normalized descriptor model.
@@ -1735,7 +1744,7 @@ pub(crate) fn descriptor_for_key_in(
                 fields.push((name.into(), value));
             }
         }
-        let descriptor = Value::object(fields);
+        let descriptor = Value::descriptor_record(fields);
         // Validate descriptor shape without changing the target or returning
         // a reconstructed accessor whose callable name was rewritten.
         if !exists && !extensible {
@@ -1789,7 +1798,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
         }
         if key == "length" {
             let attrs = array.meta.borrow().attrs_of("length");
-            return Value::object(vec![
+            return Value::descriptor_record(vec![
                 ("value".to_string(), Value::Number(items.len() as f64)),
                 ("writable".to_string(), Value::Bool(attrs.writable)),
                 ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
@@ -1838,7 +1847,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
     }
     fields.push(("enumerable".to_string(), Value::Bool(attrs.enumerable)));
     fields.push(("configurable".to_string(), Value::Bool(attrs.configurable)));
-    Value::object(fields)
+    Value::descriptor_record(fields)
 }
 
 fn descriptor_for_array_value(
@@ -1848,7 +1857,7 @@ fn descriptor_for_array_value(
     attrs: PropAttrs,
 ) -> Value {
     match accessor_kind(key, &value) {
-        Some("get") => Value::object(vec![
+        Some("get") => Value::descriptor_record(vec![
             ("get".to_string(), value),
             (
                 "set".to_string(),
@@ -1859,13 +1868,13 @@ fn descriptor_for_array_value(
             ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
             ("configurable".to_string(), Value::Bool(attrs.configurable)),
         ]),
-        Some("set") => Value::object(vec![
+        Some("set") => Value::descriptor_record(vec![
             ("get".to_string(), Value::Undefined),
             ("set".to_string(), value),
             ("enumerable".to_string(), Value::Bool(attrs.enumerable)),
             ("configurable".to_string(), Value::Bool(attrs.configurable)),
         ]),
-        _ => Value::object(vec![
+        _ => Value::descriptor_record(vec![
             ("value".to_string(), value),
             ("writable".to_string(), Value::Bool(attrs.writable)),
             ("enumerable".to_string(), Value::Bool(attrs.enumerable)),

@@ -1414,3 +1414,18 @@ fn property_update_fast_paths_preserve_observable_operations() {
         check(source, true);
     }
 }
+
+#[test]
+fn empty_lexical_iteration_patterns_own_and_unwind_runtime_scopes() {
+    for source in [
+        "var n=0;for(let [] of [[],[]]){n++;}n",
+        "var n=0;for(const {} of [{},{}]){n++;}n",
+        "var n=0;for(let [[]] of [[[]],[[]]]){n++;}n",
+        "try{for(let {} of [null]){}}catch(e){e instanceof TypeError;}",
+        "try{for(const {} of [undefined]){}}catch(e){e instanceof TypeError;}",
+        "var n=0;for(let [] of [[],[]]){if(++n===1)continue;break;}n",
+        "var n=0;for(const [] of [[],[]]){try{n++;}finally{}}n",
+    ] {
+        check(source, true);
+    }
+}

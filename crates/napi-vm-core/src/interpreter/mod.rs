@@ -1833,7 +1833,7 @@ impl Interpreter {
                     receiver.initialize_private_field(id, value)?;
                     continue;
                 }
-                let descriptor = Value::object(vec![
+                let descriptor = Value::descriptor_record(vec![
                     ("value".into(), value),
                     ("writable".into(), Value::Bool(true)),
                     ("enumerable".into(), Value::Bool(true)),
@@ -2000,7 +2000,6 @@ impl Interpreter {
             let scope = variable_scope.borrow();
             for name in &lexical {
                 if scope.own_lexical_binding(name)
-                    || scope.has_var_declaration(name)
                     || scope
                         .global_property(name)
                         .is_some_and(|(_, attrs)| !attrs.configurable)
@@ -2086,7 +2085,7 @@ impl Interpreter {
                 ),
             ]);
         }
-        if !self.define_own_property(&target, &key, &Value::object(fields))? {
+        if !self.define_own_property(&target, &key, &Value::descriptor_record(fields))? {
             return Err(VmErr::Msg(format!(
                 "TypeError: Cannot declare global function '{name}'"
             )));

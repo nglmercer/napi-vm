@@ -134,6 +134,7 @@ fn reflect_get_own_descriptor(
     let target = reflect_object_target(&a)?;
     let key = interp.proxy_property_key(&arg(&a, 1))?;
     super::object::descriptor_for_key_in(interp, &target, &key)
+        .map(super::object::from_property_descriptor)
 }
 
 fn reflect_get_prototype_of(

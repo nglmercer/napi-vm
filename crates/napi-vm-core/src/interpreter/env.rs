@@ -486,7 +486,7 @@ impl Environment {
         self.vars.get(name).is_some()
     }
 
-    pub(crate) fn has_var_declaration(&self, name: &str) -> bool {
+    pub fn has_var_declaration(&self, name: &str) -> bool {
         self.global_environment
             .as_ref()
             .is_some_and(|record| record.var_names.contains(name))
@@ -926,8 +926,21 @@ impl Environment {
         }
         self.check_global_quota(n)?;
         if self.global_environment.is_some() && kind != BindKind::Var {
+            // Object and lexical records are distinct storage even when their
+            // keys match; a new lexical binding consumes its own quota slot.
+            if self.vars.get(n).is_none()
+                && self.global_limit.is_some_and(|limit| {
+                    self.vars.len()
+                        + self
+                            .global_environment
+                            .as_ref()
+                            .map_or(0, |record| record.user_names.len())
+                        >= limit
+                })
+            {
+                return Err(limit_err("Maximum global binding count exceeded"));
+            }
             let conflict = self.vars.get(n).is_some_and(|binding| binding.initialized)
-                || self.has_var_declaration(n)
                 || self
                     .global_property(n)
                     .is_some_and(|(_, attrs)| !attrs.configurable);

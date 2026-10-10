@@ -21,7 +21,7 @@ pub(super) fn install(e: &mut Environment) {
         super::object::define_property(
             &namespace,
             "revocable",
-            &Value::object(vec![
+            &Value::descriptor_record(vec![
                 (
                     "value".into(),
                     super::native_method("revocable", 2, proxy_revocable, prototype),
@@ -191,7 +191,7 @@ impl Interpreter {
                 .find(|(name, _)| name == "value")
                 .expect("descriptor value");
             *value = length;
-            converted = Value::object(fields);
+            converted = Value::descriptor_record(fields);
             &converted
         } else {
             descriptor

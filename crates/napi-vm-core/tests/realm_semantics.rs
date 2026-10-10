@@ -1684,7 +1684,24 @@ fn global_var_metadata_distinguishes_properties_from_declarations_in_both_tiers(
         run(&mut vm, "let objectOnly=2;").unwrap();
         truth(&mut vm, "objectOnly===2&&globalThis.objectOnly===1;");
         run(&mut vm, "globalThis.declaredObject=1;var declaredObject;").unwrap();
+        assert!(
+            vm.persistent_global
+                .borrow()
+                .has_var_declaration("declaredObject")
+        );
         assert!(run(&mut vm, "let declaredObject;").is_err());
+        run(&mut vm, "globalThis.preexistingObject=1;").unwrap();
+        run(&mut vm, "var preexistingObject;").unwrap();
+        assert!(
+            vm.persistent_global
+                .borrow()
+                .has_var_declaration("preexistingObject")
+        );
+        run(&mut vm, "let preexistingObject=2;").unwrap();
+        truth(
+            &mut vm,
+            "preexistingObject===2&&globalThis.preexistingObject===1;",
+        );
         run(
             &mut vm,
             "eval('var deletableEval=1;function deletableFunction(){return 2;}');",
@@ -1760,4 +1777,35 @@ fn global_host_names_preserve_utf16_keys_and_removal_releases_the_record() {
     assert!(vm.global_value(&key).is_none());
     truth(&mut vm, "!Object.hasOwn(globalThis,'\\ud800');");
     assert!(!vm.persistent_global.borrow_mut().remove(&key));
+}
+
+#[test]
+fn eval_created_configurable_properties_allow_later_global_lexicals() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("eval('var evalVariable=1;function evalFunction(){return 2;}');")
+        .unwrap();
+    vm.eval_source("let evalVariable=3;const evalFunction=4;")
+        .unwrap();
+    truth(
+        &mut vm,
+        "evalVariable===3&&evalFunction===4&&globalThis.evalVariable===1&&globalThis.evalFunction()===2;",
+    );
+}
+
+#[test]
+fn internal_descriptor_records_do_not_inherit_guest_descriptor_fields() {
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var data='data',obj={};Object.prototype.set=function(v){data=v;};Object.defineProperty(obj,'x',Math);obj.x='override';data==='override';",
+    );
+    truth(
+        &mut vm,
+        "Object.getPrototypeOf(Object.getOwnPropertyDescriptor(obj,'x'))===Object.prototype&&Object.getPrototypeOf(Reflect.getOwnPropertyDescriptor(obj,'x'))===Object.prototype;",
+    );
+    let mut vm = Interpreter::with_builtins();
+    truth(
+        &mut vm,
+        "var obj={};Object.prototype.get=function(){return 'ok';};var attrs=(function(){return arguments;})();Object.defineProperty(obj,'x',attrs);obj.x==='ok';",
+    );
 }
