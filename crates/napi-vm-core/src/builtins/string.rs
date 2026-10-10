@@ -41,7 +41,10 @@ fn string_ctor(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<V
     match args.first() {
         None => bounded_string(JsString::default()),
         Some(Value::Symbol(s)) => bounded_string(s.to_display()),
-        Some(v) => bounded_string(interp.display_string(v)?),
+        Some(v) => {
+            let primitive = interp.coerce_object_to_primitive(v, "string")?;
+            bounded_string(interp.to_js_string(&primitive)?)
+        }
     }
 }
 fn string_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

@@ -1571,8 +1571,11 @@ fn build_object(
     let mut positions: HashMap<String, Vec<usize>> = HashMap::new();
     let mut accessors = HashMap::new();
     let mut symbol_keys = Vec::new();
+    let mut prototype = None;
     for entry in template {
-        if entry.kind == PropKind::Spread {
+        if entry.kind == PropKind::Prototype {
+            prototype = Some(frame.registers[entry.val as usize].clone_for_execution());
+        } else if entry.kind == PropKind::Spread {
             let src = frame.registers[entry.val as usize].clone_for_execution();
             interp.for_each_spread_entry(&src, |key, value| {
                 insert_object_property(
@@ -1593,15 +1596,13 @@ fn build_object(
                 KeySrc::Const(index) => const_string(frame.function, index)?.to_string(),
                 KeySrc::Reg(reg) => match &frame.registers[reg as usize] {
                     Value::String(s) => s.to_key(),
-                    Value::Number(n) => n.to_string(),
+                    Value::Number(n) => crate::format::ecmascript_number_string(*n),
                     Value::Symbol(s) => {
                         let key = symbol_slot_key(s);
                         symbol_keys.push((key.clone(), s.clone()));
                         key
                     }
-                    // The compiler skips evaluating the value for these;
-                    // hitting one here means a hand-built unit.
-                    _ => continue,
+                    _ => return Err(internal("object template key was not normalized")),
                 },
             };
             let value = frame.registers[entry.val as usize].clone_for_execution();
@@ -1617,7 +1618,9 @@ fn build_object(
                 PropKind::Data | PropKind::Method => None,
                 PropKind::Getter => Some(ObjectAccessorKind::Getter),
                 PropKind::Setter => Some(ObjectAccessorKind::Setter),
-                PropKind::Spread => return Err(internal("misrouted spread entry")),
+                PropKind::Spread | PropKind::Prototype => {
+                    return Err(internal("misrouted object template entry"));
+                }
             };
             insert_object_property(
                 &mut object,
@@ -1641,6 +1644,9 @@ fn build_object(
         for (key, symbol) in symbol_keys {
             meta.set_symbol_key(&key, symbol);
         }
+    }
+    if let Some(prototype) = prototype {
+        interp.initialize_literal_prototype(&result, &prototype)?;
     }
     Interpreter::initialize_object_home(&home, &result);
     Ok(result)

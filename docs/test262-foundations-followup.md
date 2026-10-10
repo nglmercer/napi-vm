@@ -63,8 +63,22 @@ Source 7a71cca passed all required checks: formatting, strict Clippy, 970 worksp
 tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
 tests and ten Test262 tooling tests. Check logs and the immutable worker checksum
 are archived under tools/test262/evidence/foundations-followup/7a71cca*. Its
-expanded focused/full pinned corpus validation is running separately. Previous
-measurements do not validate these changes.
+expanded focused run completed: 34,782/42,569 passes, 1,881 new passes and 48
+lost passes against the matching merged baseline, with zero crashes, timeouts or
+harness errors. Function-valued computed keys exposed inconsistent conversion
+in member reads and String construction. The regression gate blocked the full
+run; the unsuccessful evidence is retained. Follow-up corrections and their
+validation are pending. Previous measurements do not validate these changes.
+
+## Object-literal follow-up (validation pending)
+
+The uncomputed colon form `__proto__: value` now sets the literal prototype
+through the shared internal operation; primitives are ignored. Computed keys,
+shorthand and methods remain ordinary properties. Bytecode uses the result of
+ToPropertyKey rather than the original register, and static numeric keys use
+ECMAScript number formatting. Member reads and String construction use observable
+string-hint conversion, resolving the function-key regression at its shared
+conversion boundary. AST/bytecode fixtures cover these paths.
 
 ## Remaining work
 

@@ -446,6 +446,23 @@ impl Interpreter {
         home.borrow_mut().set(HOME_OBJECT, object.clone());
     }
 
+    /// PropertyDefinitionEvaluation's prototype setter ignores primitives and
+    /// delegates actual prototype changes to the shared internal operation.
+    pub(crate) fn initialize_literal_prototype(
+        &mut self,
+        object: &Value,
+        prototype: &Value,
+    ) -> Result<(), VmErr> {
+        if (matches!(prototype, Value::Null) || super::call::is_js_object(prototype))
+            && !self.set_prototype_of(object, prototype)?
+        {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot set object literal prototype".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Each method group gets a home-object environment, including base
     /// classes. Assembly initializes the home once the object exists.
     pub(crate) fn member_closure_env(global: &Env) -> Env {
@@ -2185,6 +2202,7 @@ impl Interpreter {
         let mut positions = HashMap::new();
         let mut accessors = HashMap::new();
         let mut symbol_keys = Vec::new();
+        let mut prototype = None;
         for prop in props {
             match prop {
                 ObjectProp::CoverInitializedName { .. } => {
@@ -2200,6 +2218,9 @@ impl Interpreter {
                         value,
                         None,
                     );
+                }
+                ObjectProp::KeyValue(key, expression) if key == "__proto__" => {
+                    prototype = Some(self.eval_expr(expression)?);
                 }
                 ObjectProp::KeyValue(key, expression) => {
                     insert_object_property(
@@ -2372,7 +2393,10 @@ impl Interpreter {
                 meta.set_symbol_key(&key, symbol);
             }
         }
-        home.borrow_mut().set(HOME_OBJECT, result.clone());
+        if let Some(prototype) = prototype {
+            self.initialize_literal_prototype(&result, &prototype)?;
+        }
+        Self::initialize_object_home(&home, &result);
         Ok(result)
     }
 

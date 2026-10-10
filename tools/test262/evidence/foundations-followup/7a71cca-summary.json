@@ -1,6 +1,6 @@
 {
   "source_commit": "7a71ccacaf6a6ba098fa41db21227231c52d6e77",
-  "classification": "Shared class keys and lexical super/home references; focused/full validation pending",
+  "classification": "Class keys, home objects and shared super references; focused evidence, full pending",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -48,7 +48,27 @@
     "7a71cca-node-tests.log.gz": "f49931b4135898299c6003850515d4e23992a7998f5de239e68dbd66dd5db7dc",
     "7a71cca-release-build.log.gz": "66c960d2bde9bd6e90d43e999abf96edf4dd21cd50553b92abded972f823a205",
     "7a71cca-tooling-tests.log.gz": "2e011beca3d77a4724e8524b9929c8feb697b9e078013d0dedf9171791527e3a",
-    "7a71cca-wasm-tests.log.gz": "52cd7419f6a86366285d35896c00345b1bc39470912bed94e60e6a13efbfa9b5"
+    "7a71cca-wasm-tests.log.gz": "52cd7419f6a86366285d35896c00345b1bc39470912bed94e60e6a13efbfa9b5",
+    "7a71cca-focused.jsonl.gz": "5546081bb4c8ee719373899180e81bc5b37d87dd11f95af299ccc7478e869e56",
+    "7a71cca-focused-transitions.json.gz": "dc7172496c1505f3e38eddca393acc5a5be3e2720d47c7ef50fe4d35b2a5c564",
+    "7a71cca-focused-c82f617-projection.json.gz": "f7b478d11ae756b5b8f578e28cd4ec300dfb83c061f4c6aa1b08364074dd9570",
+    "7a71cca-focused-c82f617-transitions.json.gz": "af16090bf932d3fe449efc87fc2ea69f42687ee2b2b448f8f6dc0953aeab4d69",
+    "7a71cca-focused-7c0a9ce-projection.json.gz": "39e33da2d138031c1785d0f437fd2785d852a665ab2c8e642d37bb2ddc2728bc",
+    "7a71cca-focused.json.gz": "8fea3dcab793c5c804069b63a29d7e6f060b9da63b9e6e7c8ddfd2ef682083af"
   },
-  "worker_sha256": "1e0559676c2cc02caf9b22254a19a61a1149f03d97f515b7d766fa7a70fa2d05"
+  "worker_sha256": "1e0559676c2cc02caf9b22254a19a61a1149f03d97f515b7d766fa7a70fa2d05",
+  "focused": {
+    "total": 42569,
+    "current_counts": {
+      "pass": 34782,
+      "fail": 7787,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 1881,
+    "lost_passes": 48,
+    "baseline": "Matching projection from independent c82f617 full report"
+  }
 }

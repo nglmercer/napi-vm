@@ -732,7 +732,8 @@ impl Interpreter {
         p: &Value,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
-        self.with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, p, receiver))
+        let key = self.ecmascript_to_property_key(p)?;
+        self.with_property_get(|vm| vm.get_prop_value_with_receiver_inner(o, &key, receiver))
     }
 
     fn get_prop_value_with_receiver_inner(

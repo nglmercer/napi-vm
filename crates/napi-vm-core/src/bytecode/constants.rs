@@ -180,6 +180,8 @@ pub struct PropEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropKind {
     Data,
+    /// The uncomputed colon form sets the literal prototype, not an own key.
+    Prototype,
     Method,
     Getter,
     Setter,

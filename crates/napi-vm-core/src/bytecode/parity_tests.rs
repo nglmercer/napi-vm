@@ -1571,3 +1571,25 @@ fn super_destructuring_tags_and_delete_keep_tier_parity() {
         ));
     }
 }
+
+#[test]
+fn object_literal_prototypes_and_computed_keys_share_semantics() {
+    for source in [
+        "var parent={value:42};var o={__proto__:parent,method(){return super.value;}};Object.getPrototypeOf(o)===parent&&o.method()===42&&!Object.hasOwn(o,'__proto__');",
+        "var o={'__proto__':null};Object.getPrototypeOf(o)===null&&!Object.hasOwn(o,'__proto__');",
+        "var o={__proto__:7};Object.getPrototypeOf(o)===Object.prototype&&!Object.hasOwn(o,'__proto__');",
+        "var parent={value:42};var o={__proto__:parent,['__proto__']:7};Object.getPrototypeOf(o)===parent&&Object.hasOwn(o,'__proto__')&&o.__proto__===7;",
+        "var __proto__=42;var o={__proto__};Object.getPrototypeOf(o)===Object.prototype&&Object.hasOwn(o,'__proto__')&&o.__proto__===42;",
+        "var log='';var key={toString(){log+='key';return 'x';}};var o={[key]:(log+='value',42)};log==='keyvalue'&&o.x===42;",
+        "class A{[function(){}](){return 42;}}var a=new A();a[function(){}]()===42&&a[String(function(){})]()===42;",
+        "var calls=0;var key={toString(){calls++;return 'x';}};var o={x:42};o[key]===42&&calls===1;",
+        "var symbol=Symbol('x');var calls=0;var key={};key[Symbol.toPrimitive]=function(hint){calls++;return symbol;};var o={[key]:42};calls===1&&o[symbol]===42&&Reflect.ownKeys(o)[0]===symbol;",
+        "var o={[null]:1,[true]:2,[1e21]:3};o.null===1&&o.true===2&&o['1e+21']===3;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "AST result for {source}"
+        );
+    }
+}

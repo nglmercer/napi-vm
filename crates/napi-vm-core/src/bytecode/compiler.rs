@@ -3605,11 +3605,16 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::KeyValue(key, expression) => {
                     let val = self.compile_expr(expression)?;
+                    let kind = if key == "__proto__" {
+                        PropKind::Prototype
+                    } else {
+                        PropKind::Data
+                    };
                     let key = self.intern_string(key)?;
                     template.push(PropEntry {
                         key: Some(KeySrc::Const(key)),
                         val,
-                        kind: PropKind::Data,
+                        kind,
                     });
                 }
                 ObjectProp::ComputedMethod { .. } => {
@@ -3629,7 +3634,8 @@ impl<'a> Compiler<'a> {
                         }
                         Expr::Number(key) => {
                             let val = self.compile_expr(value_expression)?;
-                            let key = self.intern_string(&key.to_string())?;
+                            let key =
+                                self.intern_string(&crate::format::ecmascript_number_string(*key))?;
                             template.push(PropEntry {
                                 key: Some(KeySrc::Const(key)),
                                 val,
@@ -3645,7 +3651,7 @@ impl<'a> Compiler<'a> {
                             });
                             let val = self.compile_expr(value_expression)?;
                             template.push(PropEntry {
-                                key: Some(KeySrc::Reg(key)),
+                                key: Some(KeySrc::Reg(normalized)),
                                 val,
                                 kind: PropKind::Data,
                             });
