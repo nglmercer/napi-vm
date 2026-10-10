@@ -2132,6 +2132,9 @@ impl TypedArrayData {
 #[derive(Debug)]
 pub struct ProxyData {
     slots: RefCell<Option<(Value, Value)>>,
+    /// Private elements belong to the Proxy itself, independently of its
+    /// target, traps, and revocation state. Allocate storage only when branded.
+    private_storage: RefCell<Option<Rc<ObjectCell>>>,
     pub(crate) callable: bool,
     pub(crate) constructible: bool,
 }
@@ -2142,6 +2145,7 @@ impl ProxyData {
         let constructible = crate::builtins::is_constructor(&target);
         Self {
             slots: RefCell::new(Some((target, handler))),
+            private_storage: RefCell::new(None),
             callable,
             constructible,
         }
@@ -2167,12 +2171,25 @@ impl ProxyData {
         self.slots.borrow_mut().take();
     }
 
+    fn private_properties(&self, create: bool) -> Option<Rc<ObjectCell>> {
+        let mut storage = self.private_storage.borrow_mut();
+        if create && storage.is_none() {
+            *storage = Some(crate::heap::tracked(Rc::new(ObjectCell::new(
+                Vec::new(),
+                None,
+            ))));
+        }
+        storage.clone()
+    }
+
     pub(crate) fn trace_children(&self) -> Option<Vec<Value>> {
-        self.slots.try_borrow().ok().map(|slots| {
-            slots.as_ref().map_or_else(Vec::new, |(target, handler)| {
-                vec![target.clone(), handler.clone()]
-            })
-        })
+        let slots = self.slots.try_borrow().ok()?;
+        let storage = self.private_storage.try_borrow().ok()?;
+        let mut values = slots.as_ref().map_or_else(Vec::new, |(target, handler)| {
+            vec![target.clone(), handler.clone()]
+        });
+        values.extend(storage.iter().cloned().map(|props| Value::Object { props }));
+        Some(values)
     }
 }
 
@@ -2739,11 +2756,18 @@ impl Value {
                 .is_some_and(|properties| properties.meta.borrow().error_object)
     }
 
+    fn private_property_cell(&self, create: bool) -> Option<Rc<ObjectCell>> {
+        match self {
+            Self::Proxy(proxy) => proxy.private_properties(create),
+            _ => self.property_cell(),
+        }
+    }
+
     pub(crate) fn private_field(&self, id: u64) -> Result<Value, VmErr> {
         let value = if let Self::Array(array) = self {
             array.meta.borrow().private_fields.get(&id).cloned()
         } else {
-            self.property_cell()
+            self.private_property_cell(false)
                 .and_then(|properties| properties.meta.borrow().private_fields.get(&id).cloned())
         };
         value.ok_or_else(|| {
@@ -2763,7 +2787,7 @@ impl Value {
         };
         if let Self::Array(array) = self {
             insert(&mut array.meta.borrow_mut())
-        } else if let Some(properties) = self.property_cell() {
+        } else if let Some(properties) = self.private_property_cell(true) {
             insert(&mut properties.meta.borrow_mut())
         } else {
             Err(VmErr::Msg(
@@ -2784,7 +2808,7 @@ impl Value {
         };
         if let Self::Array(array) = self {
             update(&mut array.meta.borrow_mut())
-        } else if let Some(properties) = self.property_cell() {
+        } else if let Some(properties) = self.private_property_cell(false) {
             update(&mut properties.meta.borrow_mut())
         } else {
             Err(VmErr::Msg(
@@ -3405,11 +3429,16 @@ impl Value {
                 }
             }
             Value::Proxy(data) => {
-                if let Some(data) = Rc::get_mut(data)
-                    && let Some((target, handler)) = data.slots.get_mut().take()
-                {
-                    work.push(target);
-                    work.push(handler);
+                if let Some(data) = Rc::get_mut(data) {
+                    if let Some((target, handler)) = data.slots.get_mut().take() {
+                        work.push(target);
+                        work.push(handler);
+                    }
+                    if let Some(properties) = data.private_storage.get_mut().take()
+                        && Rc::strong_count(&properties) == 1
+                    {
+                        drain_object_cell(&properties, work);
+                    }
                 }
             }
             Value::Promise(inner) => {

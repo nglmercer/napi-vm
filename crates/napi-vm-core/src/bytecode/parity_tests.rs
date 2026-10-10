@@ -1442,3 +1442,14 @@ fn global_callable_data_and_update_reference_order_match_both_tiers() {
         check(source, true);
     }
 }
+
+#[test]
+fn proxy_private_field_stamping_uses_shared_brand_storage_in_both_tiers() {
+    for source in [
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=42;static read(object){return object.#value;}static write(object,value){object.#value=value;}}var target={};var traps=0;var proxy=new Proxy(target,{get(){traps++;throw 1;},set(){traps++;throw 2;}});new Stamp(proxy);Stamp.write(proxy,7);Stamp.read(proxy)===7&&traps===0;",
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=42;static read(object){return object.#value;}}var pair=Proxy.revocable({},{});pair.revoke();new Stamp(pair.proxy);Stamp.read(pair.proxy);",
+        "class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=42;}var proxy=new Proxy({},{});new Stamp(proxy);new Stamp(proxy);",
+    ] {
+        check(source, true);
+    }
+}
