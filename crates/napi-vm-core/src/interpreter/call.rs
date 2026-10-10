@@ -370,6 +370,19 @@ impl Interpreter {
                 property,
                 private,
             } => {
+                if matches!(object.as_ref(), crate::parser::Expr::Super) {
+                    let key = self.eval_expr(property)?;
+                    let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
+                    let strict = self.global.borrow().strict();
+                    self.assign_property_with_receiver(
+                        &base,
+                        &key,
+                        val.clone(),
+                        &receiver,
+                        strict,
+                    )?;
+                    return Ok(val.clone());
+                }
                 let receiver = self.eval_expr(object)?;
                 let key = self.eval_expr(property)?;
                 if *private {
@@ -562,7 +575,7 @@ impl Interpreter {
     }
 
     pub(crate) fn delete_member(&mut self, obj: &Value, key: &Value) -> Result<Value, VmErr> {
-        let key = self.proxy_property_key(key)?;
+        let key = self.to_property_key(key)?;
         self.delete_member_key(obj, &key, 0)
     }
 
@@ -777,6 +790,27 @@ impl Interpreter {
         }
     }
 
+    /// ECMAScript ToPropertyKey preserves Symbol identity after observable
+    /// ToPrimitive with the string hint. Slot encoding is a separate step.
+    pub(crate) fn to_property_key(&mut self, key: &Value) -> Result<Value, VmErr> {
+        let primitive = self.coerce_object_to_primitive(key, "string")?;
+        if matches!(primitive, Value::Symbol(_)) {
+            Ok(primitive)
+        } else {
+            self.to_js_string(&primitive).map(Value::String)
+        }
+    }
+
+    pub(crate) fn property_function_name(&self, key: &Value) -> Result<String, VmErr> {
+        match key {
+            Value::Symbol(symbol) => Ok(symbol
+                .description
+                .as_ref()
+                .map_or_else(String::new, |description| format!("[{description}]"))),
+            _ => self.property_key(key),
+        }
+    }
+
     /// Coerce a value used in a computed member expression to the slot name
     /// the object stores it under.
     pub(crate) fn property_key(&self, key: &Value) -> Result<String, VmErr> {
@@ -795,6 +829,40 @@ impl Interpreter {
             )));
         }
         Ok(())
+    }
+
+    pub(crate) fn assign_property_with_receiver(
+        &mut self,
+        base: &Value,
+        key: &Value,
+        value: Value,
+        receiver: &Value,
+        throw: bool,
+    ) -> Result<(), VmErr> {
+        let accepted = self.set_member_with_receiver(base, key, value, receiver)?;
+        self.finish_property_write(accepted, &self.property_key(key)?, throw)
+    }
+
+    pub(crate) fn numeric_update(
+        &mut self,
+        value: &Value,
+        increment: bool,
+    ) -> Result<(Value, Value), VmErr> {
+        let primitive = self.coerce_object_to_primitive(value, "number")?;
+        let number = if matches!(primitive, Value::BigInt(_)) {
+            primitive
+        } else {
+            Value::Number(self.ecmascript_to_number(&primitive)?)
+        };
+        let updated = self.un_op(
+            if increment {
+                crate::parser::UnOp::Inc
+            } else {
+                crate::parser::UnOp::Dec
+            },
+            &number,
+        )?;
+        Ok((number, updated))
     }
 
     pub(crate) fn assign_member_str(
@@ -1048,7 +1116,7 @@ impl Interpreter {
         value: Value,
         receiver: &Value,
     ) -> Result<bool, VmErr> {
-        let key = self.proxy_property_key(property)?;
+        let key = self.to_property_key(property)?;
         let slot = self.property_key(&key)?;
         let mut current = if matches!(target, Value::GlobalObject) {
             self.realm_global_object()
@@ -1670,7 +1738,7 @@ impl Interpreter {
                 "TypeError: Cannot update a property of null or undefined".into(),
             ));
         }
-        let key = self.proxy_property_key(prop)?;
+        let key = self.to_property_key(prop)?;
         let name = self.property_key(&key)?;
         if let Some(cell) = obj.property_cell()
             && let Some(index) = cell.own_index(&name)

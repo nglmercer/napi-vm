@@ -1501,3 +1501,73 @@ fn dictionary_growth_preserves_property_reads_and_key_order_in_both_tiers() {
         true,
     );
 }
+
+#[test]
+fn class_property_keys_preserve_symbols_and_observable_conversion_in_both_tiers() {
+    for source in [
+        "var log='';var key={};key[Symbol.toPrimitive]=function(hint){log+=hint;return 'method';};class A{[key](){return 42;}[log+='next'](){}}log==='stringnext'&&new A().method()===42;",
+        "var key=Symbol('member');class A{[key](){return 42;}static [key](){return 7;}}var a=new A();a[key]()===42&&A[key]()===7&&Object.getOwnPropertySymbols(A.prototype)[0]===key&&Object.getOwnPropertySymbols(A)[0]===key&&a[key].name==='[member]';",
+        "var key=Symbol('field');var calls=0;var converted={toString(){calls++;return key;}};class A{[converted]=42;static [converted]=7;}var a=new A();calls===2&&a[key]===42&&A[key]===7&&Reflect.ownKeys(a)[0]===key;",
+        "var key=Symbol();class A{get [key](){return 42;}set [key](v){this.value=v;}}var a=new A();a[key]=7;var d=Object.getOwnPropertyDescriptor(A.prototype,key);a[key]===42&&a.value===7&&d.get.name==='get '&&d.set.name==='set ';",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn super_reads_follow_home_object_prototypes_in_both_tiers() {
+    for source in [
+        "class A{method(){return super.value;}}Object.setPrototypeOf(A.prototype,{value:42});var a=new A();var method=a.method;method.call({value:7})===42;",
+        "class A{method(){return 1;}}class B extends A{method(){return super.method();}static method(){return super.value;}}Object.setPrototypeOf(B.prototype,{method(){return this.value;}});Object.setPrototypeOf(B,{value:7});var b=new B();b.value=42;b.method()===42&&B.method()===7;",
+        "class A{method(){return ()=>super.value;}}Object.setPrototypeOf(A.prototype,{value:42});var f=new A().method();Object.setPrototypeOf(A.prototype,{value:7});f()===7;",
+        "class A{constructor(){this.value=1;}}class B extends A{}function Other(){this.value=42;}Object.setPrototypeOf(B,Other);new B().value===42;",
+    ] {
+        check(source, true);
+    }
+}
+
+#[test]
+fn super_references_writes_calls_and_object_home_objects_share_semantics() {
+    for source in [
+        "var object={method(){return ()=>super.value;}};Object.setPrototypeOf(object,{value:42});var f=object.method();Object.setPrototypeOf(object,{value:7});f()===7;",
+        "class A{get x(){return this.value;}set x(v){this.value=v;}}class B extends A{write(){return super.x=42;}update(){return super.x++;}compound(){return super.x+=2;}}var b=new B();b.value=1;b.write()===42&&b.update()===42&&b.compound()===45&&b.value===45;",
+        "class A{get x(){return this.value;}set x(v){this.value=v;}}class B extends A{update(){return super.x++;}logical(){return super.x??=42n;}}var b=new B();b.value=1n;b.update()===1n&&b.value===2n&&b.logical()===2n;",
+        "class A{constructor(){this.value=1;}}function Other(){this.value=42;}class B extends A{constructor(){super(Object.setPrototypeOf(B,Other));}}new B().value===1;",
+        "var log='';class A{}class B extends A{method(){return super.method(log+='argument');}}Object.setPrototypeOf(B.prototype,{get method(){log+='get';return function(v){return this.value+v;};}});var b=new B();b.value='receiver';b.method()==='receivergetargument'&&log==='getargument';",
+        "var log='';class A{set x(v){log+='old';this.value=v;}}class B extends A{write(){super.x=(Object.setPrototypeOf(B.prototype,{set x(v){log+='new';}}),42);}}var b=new B();b.write();log==='old'&&b.value===42;",
+    ] {
+        check(source, true);
+        assert!(
+            matches!(run_ast_with_modules(source, &[]), Ok(Value::Bool(true))),
+            "AST result for {source}"
+        );
+    }
+}
+
+#[test]
+fn class_member_attributes_and_field_names_share_semantics() {
+    for source in [
+        "class A{method(){return 1;}method(){return 42;}get value(){return 1;}value(){return 7;}}var a=new A();var d=Object.getOwnPropertyDescriptor(A.prototype,'method');a.method()===42&&a.value()===7&&!d.enumerable&&d.writable&&d.configurable&&Object.keys(A.prototype).length===0;",
+        "var key=Symbol('named');class A{[key]=()=>42;static field=function(){};value=class{static inferred=this.name;};}var a=new A();a[key].name==='[named]'&&A.field.name==='field'&&a.value.name==='value'&&a.value.inferred==='value';",
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}
+
+#[test]
+fn super_destructuring_tags_and_delete_keep_tier_parity() {
+    for source in [
+        "class A{set x(v){this.value=v;}tag(parts,v){return this.value+v;}}class B extends A{assign(){[super.x]=[42];}tagged(){return super.tag`value${7}`;}}var b=new B();b.assign();b.value===42&&b.tagged()===49;",
+        "var calls=0;var key={toString(){calls++;return 'x';}};class A{method(){return delete super[key];}}var caught;try{new A().method();}catch(e){caught=e;}calls===1&&caught instanceof ReferenceError;",
+    ] {
+        check(source, true);
+        assert!(matches!(
+            run_ast_with_modules(source, &[]),
+            Ok(Value::Bool(true))
+        ));
+    }
+}

@@ -168,8 +168,7 @@ pub struct SpreadEntry {
 #[derive(Debug, Clone)]
 pub struct PropEntry {
     /// Static keys name a string constant; computed keys name the register
-    /// holding the *original* key value (`undefined` there skips the
-    /// property, like the evaluator). `None` for spreads.
+    /// holding the converted String or Symbol key. `None` for spreads.
     pub key: Option<KeySrc>,
     /// The value register (data/accessor/method function) or the spread
     /// source.
@@ -181,6 +180,7 @@ pub struct PropEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropKind {
     Data,
+    Method,
     Getter,
     Setter,
     Spread,

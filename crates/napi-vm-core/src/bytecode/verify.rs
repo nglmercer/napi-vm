@@ -687,11 +687,59 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *key)?;
             }
-            Instr::SuperCall { dst, args, argc } => {
+            Instr::SuperReference {
+                base,
+                receiver,
+                key,
+                src,
+            } => {
+                for reg in [base, receiver, key, src] {
+                    self.check_reg(address, *reg)?;
+                }
+            }
+            Instr::GetPropertyWithReceiver {
+                dst,
+                base,
+                receiver,
+                key,
+            } => {
+                for reg in [dst, base, receiver, key] {
+                    self.check_reg(address, *reg)?;
+                }
+            }
+            Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value,
+            } => {
+                for reg in [base, receiver, key, value] {
+                    self.check_reg(address, *reg)?;
+                }
+            }
+            Instr::NumericUpdate {
+                previous,
+                updated,
+                src,
+                ..
+            } => {
+                for reg in [previous, updated, src] {
+                    self.check_reg(address, *reg)?;
+                }
+            }
+            Instr::SuperConstructor { dst } => self.check_reg(address, *dst)?,
+            Instr::SuperCall {
+                dst,
+                callee,
+                args,
+                argc,
+            } => {
+                self.check_reg(address, *callee)?;
                 self.check_reg(address, *dst)?;
                 self.check_range(address, *args, *argc)?;
             }
-            Instr::SuperCallSpread { dst, tmpl } => {
+            Instr::SuperCallSpread { dst, callee, tmpl } => {
+                self.check_reg(address, *callee)?;
                 self.check_reg(address, *dst)?;
                 self.check_spread_template(address, *tmpl)?;
             }
@@ -876,6 +924,115 @@ mod tests {
         ] {
             let mut unit = original.clone();
             unit.code[0] = Instr::PrivateIn { dst, obj, name };
+            assert!(verify_function(&unit).is_err());
+        }
+    }
+    #[test]
+    fn receiver_operations_reject_every_out_of_range_register() {
+        let original = compile("1");
+        let bad = original.register_count;
+        let instructions = [
+            Instr::SuperReference {
+                base: bad,
+                receiver: 0,
+                key: 0,
+                src: 0,
+            },
+            Instr::SuperReference {
+                base: 0,
+                receiver: bad,
+                key: 0,
+                src: 0,
+            },
+            Instr::SuperReference {
+                base: 0,
+                receiver: 0,
+                key: bad,
+                src: 0,
+            },
+            Instr::SuperReference {
+                base: 0,
+                receiver: 0,
+                key: 0,
+                src: bad,
+            },
+            Instr::GetPropertyWithReceiver {
+                dst: bad,
+                base: 0,
+                receiver: 0,
+                key: 0,
+            },
+            Instr::GetPropertyWithReceiver {
+                dst: 0,
+                base: bad,
+                receiver: 0,
+                key: 0,
+            },
+            Instr::GetPropertyWithReceiver {
+                dst: 0,
+                base: 0,
+                receiver: bad,
+                key: 0,
+            },
+            Instr::GetPropertyWithReceiver {
+                dst: 0,
+                base: 0,
+                receiver: 0,
+                key: bad,
+            },
+            Instr::SetPropertyWithReceiver {
+                base: bad,
+                receiver: 0,
+                key: 0,
+                value: 0,
+            },
+            Instr::SetPropertyWithReceiver {
+                base: 0,
+                receiver: bad,
+                key: 0,
+                value: 0,
+            },
+            Instr::SetPropertyWithReceiver {
+                base: 0,
+                receiver: 0,
+                key: bad,
+                value: 0,
+            },
+            Instr::SetPropertyWithReceiver {
+                base: 0,
+                receiver: 0,
+                key: 0,
+                value: bad,
+            },
+            Instr::NumericUpdate {
+                previous: bad,
+                updated: 0,
+                src: 0,
+                increment: true,
+            },
+            Instr::NumericUpdate {
+                previous: 0,
+                updated: bad,
+                src: 0,
+                increment: true,
+            },
+            Instr::NumericUpdate {
+                previous: 0,
+                updated: 0,
+                src: bad,
+                increment: true,
+            },
+            Instr::SuperConstructor { dst: bad },
+            Instr::SuperCall {
+                dst: 0,
+                callee: bad,
+                args: 0,
+                argc: 0,
+            },
+        ];
+        for instruction in instructions {
+            let mut unit = original.clone();
+            unit.code[0] = instruction;
             assert!(verify_function(&unit).is_err());
         }
     }

@@ -51,7 +51,7 @@ fn class_accessor_kind(value: &Value) -> Option<&'static str> {
 #[derive(Debug, Clone)]
 pub(crate) enum ClassStaticElement {
     Field {
-        name: String,
+        name: Value,
         private: bool,
         init: Expr,
     },
@@ -68,11 +68,16 @@ pub(crate) struct ClassAssembly {
     pub constructor: Value,
     pub constructor_length: usize,
     pub proto_props: Vec<(String, Value)>,
+    pub proto_keys: Vec<Value>,
+    pub static_keys: Vec<Value>,
     pub statics: Vec<(String, Value)>,
     pub static_attrs: Vec<(String, PropAttrs)>,
     pub static_has_accessors: bool,
     pub static_elements: Vec<ClassStaticElement>,
     pub private_scope: Env,
+    pub instance_home: Env,
+    pub static_home: Env,
+    pub constructor_home: Env,
     pub private_statics: Vec<(u64, PrivateElement)>,
 }
 
@@ -96,6 +101,20 @@ pub(crate) fn define_class_private_element(
             .borrow_mut()
             .define_private_instance_element(id, element)
     }
+}
+
+pub(crate) fn insert_class_method(
+    properties: &mut Vec<(String, Value)>,
+    key: String,
+    value: Value,
+) {
+    if let Some((_, existing)) = properties.iter_mut().find(|(name, _)| name == &key) {
+        *existing = value;
+    } else {
+        properties.push((key.clone(), value));
+    }
+    let companion = format!("__setter:{key}__");
+    properties.retain(|(name, _)| name != &companion);
 }
 
 pub(crate) fn insert_class_accessor(
@@ -228,9 +247,10 @@ fn label_matches(label: &Option<String>, signal: &Option<String>) -> bool {
 /// The grammar cannot tell `[a, b]` apart from a pattern until the `=` is
 /// reached, so the parser produces a literal and this converts it. Anything
 /// that is not a valid target yields `None`, which the caller reports.
-/// Scope slot holding the superclass prototype inside a class member, so
-/// `super.method()` can resolve without the AST carrying a class link.
-pub(crate) const SUPER_PROTO: &str = "__super_proto__";
+/// Lexical home objects are guest-inaccessible environment slots. Their
+/// prototypes are read at use time, rather than captured during definition.
+pub(crate) const HOME_OBJECT: &str = "__home object__";
+pub(crate) const SUPER_CONSTRUCTOR_HOME: &str = "__super constructor home__";
 
 impl Interpreter {
     /// IteratorClose preserves an original throw, including errors raised by
@@ -292,15 +312,31 @@ impl Interpreter {
         Ok((done, value))
     }
 
-    /// Resolve `super.<key>` — a lookup on the superclass prototype.
-    fn super_member(&mut self, key: &Value) -> Result<Value, VmErr> {
-        let proto = self
-            .global
+    pub(crate) fn super_reference(
+        &mut self,
+        scope: &Env,
+        key: &Value,
+    ) -> Result<(Value, Value, Value), VmErr> {
+        let receiver = self.resolve_this(scope)?;
+        let key = self.to_property_key(key)?;
+        let home = scope
             .borrow()
-            .get(SUPER_PROTO)
-            .ok_or_else(|| VmErr::Msg("'super' used outside a derived class".to_string()))?;
-        let receiver = self.resolve_this(&self.global)?;
-        self.get_prop_value_with_receiver(&proto, key, &receiver)
+            .get(HOME_OBJECT)
+            .ok_or_else(|| VmErr::Msg("ReferenceError: missing super home object".into()))?;
+        let base = self.get_prototype_of(&home)?;
+        Ok((base, receiver, key))
+    }
+
+    pub(crate) fn super_constructor(&mut self, scope: &Env) -> Result<Value, VmErr> {
+        let home = scope.borrow().get(SUPER_CONSTRUCTOR_HOME).ok_or_else(|| {
+            VmErr::Msg("ReferenceError: super() outside a derived constructor".into())
+        })?;
+        self.get_prototype_of(&home)
+    }
+
+    fn super_member(&mut self, key: &Value) -> Result<Value, VmErr> {
+        let (base, receiver, key) = self.super_reference(&self.global.clone(), key)?;
+        self.get_prop_value_with_receiver(&base, &key, &receiver)
     }
 
     /// Build a class value from its parts: prototype methods and accessors,
@@ -309,21 +345,51 @@ impl Interpreter {
     ///
     /// Shared by the declaration and the class *expression*, which differ
     /// only in whether the result is bound to a name.
-    /// Resolve a class member name: static names as written, computed keys
-    /// evaluated once, in definition order, when the class is defined.
-    fn member_name(&mut self, name: &MemberName) -> Result<String, VmErr> {
-        match name {
-            MemberName::Static(name) | MemberName::Private(name) => Ok(name.clone()),
-            MemberName::Computed(expr) => {
-                let value = self.eval_expr(expr)?;
-                self.property_key(&value)
+    pub(crate) fn evaluate_class_field(
+        &mut self,
+        initializer: &Expr,
+        key: &Value,
+    ) -> Result<Value, VmErr> {
+        if let Expr::ClassExpr {
+            name: None,
+            superclass,
+            body,
+        } = initializer.unparenthesized()
+        {
+            let name = self.property_function_name(key)?;
+            return self.build_class_with_name("", &name, superclass.as_deref(), body);
+        }
+        let value = self.eval_expr(initializer)?;
+        if matches!(
+            initializer.unparenthesized(),
+            Expr::FnExpr { name: None, .. }
+                | Expr::ArrowFn { .. }
+                | Expr::ClassExpr { name: None, .. }
+        ) {
+            let name = self.property_function_name(key)?;
+            match &value {
+                Value::Function(function) => {
+                    let mut function = function.as_ref().clone();
+                    function.name = Some(Rc::from(name));
+                    return Ok(Value::Function(Rc::new(function)));
+                }
+                _ => {}
             }
         }
+        Ok(value)
     }
 
-    fn class_member_name(&mut self, scope: &Env, name: &MemberName) -> Result<String, VmErr> {
+    fn class_member_name(&mut self, scope: &Env, name: &MemberName) -> Result<Value, VmErr> {
         let saved = std::mem::replace(&mut self.global, scope.clone());
-        let result = self.member_name(name);
+        let result = (|| match name {
+            MemberName::Static(name) | MemberName::Private(name) => {
+                Ok(Value::String(crate::JsString::from_key(name)))
+            }
+            MemberName::Computed(expr) => {
+                let value = self.eval_expr(expr)?;
+                self.to_property_key(&value)
+            }
+        })();
         self.global = saved;
         result
     }
@@ -336,21 +402,24 @@ impl Interpreter {
         &mut self,
         super_cls: &Option<Value>,
     ) -> Result<Option<Rc<Value>>, VmErr> {
-        match super_cls {
-            Some(Value::Class(c)) => Ok(Some(c.prototype.clone())),
-            Some(other) => {
-                // Native constructors (`Map`, `Set`, `Array`, ...) expose
-                // `.prototype` as an ordinary property; inherit from it like
-                // a class heritage would.
-                match self.get_prop_value_str(other, "prototype") {
-                    Ok(proto @ (Value::Object { .. } | Value::Array(_))) => {
-                        Ok(Some(Rc::new(proto)))
-                    }
-                    _ => Ok(None),
-                }
-            }
-            None => Ok(None),
+        let Some(superclass) = super_cls else {
+            return Ok(None);
+        };
+        if matches!(superclass, Value::Null) {
+            return Ok(Some(Rc::new(Value::Null)));
         }
+        if !crate::builtins::is_constructor(superclass) {
+            return Err(VmErr::Msg(
+                "TypeError: class heritage is not a constructor or null".into(),
+            ));
+        }
+        let prototype = self.get_prop_value_str(superclass, "prototype")?;
+        if !matches!(prototype, Value::Null) && !super::call::is_js_object(&prototype) {
+            return Err(VmErr::Msg(
+                "TypeError: superclass prototype must be an object or null".into(),
+            ));
+        }
+        Ok(Some(Rc::new(prototype)))
     }
 
     /// The `super(...)` target for a derived constructor: the superclass's
@@ -366,25 +435,24 @@ impl Interpreter {
         scope
     }
 
-    pub(crate) fn super_ctor_for(super_cls: &Option<Value>) -> Option<Value> {
-        match super_cls {
-            Some(Value::Class(_)) => super_cls.clone(),
-            Some(other) if super::call::is_callable_value(other) => Some(other.clone()),
-            _ => None,
+    pub(crate) fn object_method_with_home(value: &Value, home: &Env) -> Value {
+        if let Value::Function(function) = value {
+            let mut function = function.as_ref().clone();
+            function.closure = Some(crate::heap::capture_env(home));
+            Value::Function(Rc::new(function))
+        } else {
+            value.clone()
         }
     }
 
-    /// The scope methods close over: the definition scope, extended with
-    /// the superclass prototype when there is one.
-    pub(crate) fn member_closure_env(global: &Env, proto: &Option<Rc<Value>>) -> Env {
-        match proto {
-            Some(proto) => {
-                let env = Rc::new(RefCell::new(Environment::child(global.clone())));
-                env.borrow_mut().set(SUPER_PROTO, proto.as_ref().clone());
-                env
-            }
-            None => global.clone(),
-        }
+    pub(crate) fn initialize_object_home(home: &Env, object: &Value) {
+        home.borrow_mut().set(HOME_OBJECT, object.clone());
+    }
+
+    /// Each method group gets a home-object environment, including base
+    /// classes. Assembly initializes the home once the object exists.
+    pub(crate) fn member_closure_env(global: &Env) -> Env {
+        Rc::new(RefCell::new(Environment::child(global.clone())))
     }
 
     /// Assemble a class value from evaluated parts: the constructor and
@@ -399,19 +467,52 @@ impl Interpreter {
             constructor,
             constructor_length,
             proto_props,
+            proto_keys,
+            static_keys,
             mut statics,
             mut static_attrs,
             static_has_accessors,
             static_elements,
             private_scope,
+            instance_home,
+            static_home,
+            constructor_home,
             private_statics,
         } = asm;
+        let has_constructor_member = proto_props.iter().any(|(key, _)| key == "constructor");
         let prototype_has_accessors = proto_props.iter().any(|(key, value)| key.starts_with("__setter:") || matches!(value, Value::Function(function) if function.name.as_deref().is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))));
+        let super_proto = if super_cls.is_none() && super_proto.is_none() {
+            self.persistent_global
+                .borrow()
+                .intrinsic("Object")
+                .and_then(|object| object.get_prop("prototype"))
+                .map(Rc::new)
+        } else {
+            super_proto
+        };
         let prototype = Value::object_with_proto(proto_props, super_proto);
         if let Value::Object { props } = &prototype {
-            props.meta.borrow_mut().has_accessors = prototype_has_accessors;
+            let mut meta = props.meta.borrow_mut();
+            meta.has_accessors = prototype_has_accessors;
+            for (key, _) in props.borrow().iter() {
+                meta.set_attrs(
+                    key,
+                    PropAttrs {
+                        writable: true,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+            for key in proto_keys {
+                if let Value::Symbol(symbol) = &key {
+                    meta.set_symbol_key(&super::symbol_slot_key(symbol), symbol.clone());
+                }
+            }
         }
-        prototype.set_prop("constructor".to_string(), constructor.clone())?;
+        if !has_constructor_member {
+            prototype.set_prop("constructor".to_string(), constructor.clone())?;
+        }
 
         statics.push((
             "length".to_owned(),
@@ -436,7 +537,9 @@ impl Interpreter {
         ));
         let static_properties =
             crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(statics)));
-        if let Some(superclass) = &super_cls {
+        if let Some(superclass) = &super_cls
+            && !matches!(superclass, Value::Null)
+        {
             static_properties.set_proto(Some(Rc::new(superclass.clone())));
         } else if let Some(function_prototype) =
             FunctionData::default_function_prototype(&self.persistent_global)
@@ -449,6 +552,11 @@ impl Interpreter {
                 meta.set_attrs(&key, attrs);
             }
             meta.has_accessors = static_has_accessors;
+            for key in static_keys {
+                if let Value::Symbol(symbol) = &key {
+                    meta.set_symbol_key(&super::symbol_slot_key(symbol), symbol.clone());
+                }
+            }
         }
 
         let class_val = Value::Class(Box::new(ClassData {
@@ -458,10 +566,12 @@ impl Interpreter {
             statics: static_properties,
         }));
         if let Value::Class(class) = &class_val {
-            class
-                .prototype
-                .as_ref()
-                .set_prop("constructor".to_owned(), class_val.clone())?;
+            if !has_constructor_member {
+                class
+                    .prototype
+                    .as_ref()
+                    .set_prop("constructor".to_owned(), class_val.clone())?;
+            }
             if let Value::Object { props } = class.prototype.as_ref() {
                 props.meta.borrow_mut().set_attrs(
                     "constructor",
@@ -474,11 +584,23 @@ impl Interpreter {
             }
         }
 
+        if let Value::Class(class) = &class_val {
+            instance_home
+                .borrow_mut()
+                .set(HOME_OBJECT, class.prototype.as_ref().clone());
+            static_home.borrow_mut().set(HOME_OBJECT, class_val.clone());
+            if super_cls.is_some() {
+                constructor_home
+                    .borrow_mut()
+                    .set(SUPER_CONSTRUCTOR_HOME, class_val.clone());
+            }
+        }
+
         for (id, element) in private_statics {
             class_val.initialize_private_element(id, element)?;
         }
 
-        if !name.is_empty() {
+        if !name.is_empty() && private_scope.borrow().own_binding(&name).is_some() {
             private_scope
                 .borrow_mut()
                 .declare(&name, class_val.clone(), BindKind::Const, true);
@@ -493,9 +615,7 @@ impl Interpreter {
             scope.borrow_mut().replace_strict(Some(true));
             scope.borrow_mut().set("this", class_val.clone());
             scope.borrow_mut().set_new_target(Value::Undefined);
-            if let Some(superclass) = &super_cls {
-                scope.borrow_mut().set(SUPER_PROTO, superclass.clone());
-            }
+            scope.borrow_mut().set(HOME_OBJECT, class_val.clone());
             let saved = std::mem::replace(&mut self.global, scope);
             let result = (|| {
                 self.execution.check()?;
@@ -506,11 +626,17 @@ impl Interpreter {
                         private,
                         init,
                     } => {
-                        let value = self.eval_expr(&init)?;
+                        let value = self.evaluate_class_field(&init, &name)?;
                         if private {
-                            let id = self.global.borrow().private_name(&name).ok_or_else(|| {
-                                VmErr::Msg("TypeError: missing private field declaration".into())
-                            })?;
+                            let id = self
+                                .global
+                                .borrow()
+                                .private_name(&self.property_key(&name)?)
+                                .ok_or_else(|| {
+                                    VmErr::Msg(
+                                        "TypeError: missing private field declaration".into(),
+                                    )
+                                })?;
                             class_val.initialize_private_field(id, value)
                         } else {
                             let descriptor = Value::descriptor_record(vec![
@@ -519,11 +645,7 @@ impl Interpreter {
                                 ("enumerable".into(), Value::Bool(true)),
                                 ("configurable".into(), Value::Bool(true)),
                             ]);
-                            if !self.define_own_property(
-                                &class_val,
-                                &Value::String(crate::JsString::from_key(&name)),
-                                &descriptor,
-                            )? {
+                            if !self.define_own_property(&class_val, &name, &descriptor)? {
                                 return Err(VmErr::Msg(
                                     "TypeError: Cannot define static field".into(),
                                 ));
@@ -545,7 +667,17 @@ impl Interpreter {
         superclass: Option<&Expr>,
         body: &[ClassMember],
     ) -> Result<Value, VmErr> {
-        let member_scope = Self::class_environment(self.global.clone(), name);
+        self.build_class_with_name(name, name, superclass, body)
+    }
+
+    fn build_class_with_name(
+        &mut self,
+        binding_name: &str,
+        name: &str,
+        superclass: Option<&Expr>,
+        body: &[ClassMember],
+    ) -> Result<Value, VmErr> {
+        let member_scope = Self::class_environment(self.global.clone(), binding_name);
         let saved = std::mem::replace(&mut self.global, member_scope.clone());
         let heritage = (|| {
             let superclass = superclass.map(|expr| self.eval_expr(expr)).transpose()?;
@@ -567,17 +699,17 @@ impl Interpreter {
                 member_scope.borrow_mut().declare_private_field(name);
             }
         }
-        let member_closure = Self::member_closure_env(&member_scope, &super_proto);
-        let static_member_closure = Self::member_closure_env(
-            &member_scope,
-            &super_cls.as_ref().map(|value| Rc::new(value.clone())),
-        );
+        let member_closure = Self::member_closure_env(&member_scope);
+        let static_member_closure = Self::member_closure_env(&member_scope);
 
         // Gather the constructor, instance fields, and methods.
         let mut ctor_params: Vec<String> = Vec::new();
         let mut ctor_body: Vec<Statement> = Vec::new();
         let mut has_own_constructor = false;
-        let mut instance_fields: Vec<(String, Option<Expr>, bool)> = Vec::new();
+        let mut instance_fields: Vec<(Expr, Option<Expr>, bool)> = Vec::new();
+        let mut ctor_computed_keys = Vec::new();
+        let mut proto_keys = Vec::new();
+        let mut static_keys = Vec::new();
         let mut proto_props: Vec<(String, Value)> = Vec::new();
         let mut statics: Vec<(String, Value)> =
             vec![("name".to_string(), Value::String((name.to_string()).into()))];
@@ -603,7 +735,16 @@ impl Interpreter {
                     is_async,
                     is_generator,
                 } => {
-                    let mname = self.class_member_name(&member_scope, name)?;
+                    let key = self.class_member_name(&member_scope, name)?;
+                    let mname = self.property_key(&key)?;
+                    let display_name = self.property_function_name(&key)?;
+                    if !matches!(name, MemberName::Private(_)) {
+                        if *st {
+                            static_keys.push(key);
+                        } else {
+                            proto_keys.push(key);
+                        }
+                    }
                     // Only a written-out `constructor` is the constructor; a
                     // computed key that happens to evaluate to it stays an
                     // ordinary method.
@@ -612,7 +753,7 @@ impl Interpreter {
                         strict: true,
                         native: None,
                         identity: Rc::new(0),
-                        name: Some(mname.as_str().into()),
+                        name: Some(display_name.as_str().into()),
                         properties: FunctionData::properties_with_function_kind(
                             &self.persistent_global,
                             *is_async,
@@ -644,7 +785,7 @@ impl Interpreter {
                             PrivateElement::Method(fn_val),
                         )?;
                     } else if *st {
-                        statics.push((mname.clone(), fn_val));
+                        insert_class_method(&mut statics, mname.clone(), fn_val);
                         static_attrs.push((
                             mname.clone(),
                             PropAttrs {
@@ -658,7 +799,7 @@ impl Interpreter {
                         ctor_params = mp.clone();
                         ctor_body = mb.clone();
                     } else {
-                        proto_props.push((mname.clone(), fn_val));
+                        insert_class_method(&mut proto_props, mname.clone(), fn_val);
                     }
                 }
                 // Static blocks are collected and run after the class
@@ -679,8 +820,15 @@ impl Interpreter {
                             init: init.clone().unwrap_or(Expr::Undefined),
                         });
                     } else {
+                        let property = if matches!(name, MemberName::Computed(_)) {
+                            let index = ctor_computed_keys.len();
+                            ctor_computed_keys.push(fname);
+                            Expr::Identifier(crate::bytecode::constants::class_key_name(index))
+                        } else {
+                            Expr::String(crate::JsString::from_key(&self.property_key(&fname)?))
+                        };
                         instance_fields.push((
-                            fname.clone(),
+                            property,
                             init.clone(),
                             !matches!(name, MemberName::Private(_)),
                         ));
@@ -691,12 +839,21 @@ impl Interpreter {
                     is_static: st,
                     body: gb,
                 } => {
-                    let gname = self.class_member_name(&member_scope, name)?;
+                    let key = self.class_member_name(&member_scope, name)?;
+                    let gname = self.property_key(&key)?;
+                    let display_name = self.property_function_name(&key)?;
+                    if !matches!(name, MemberName::Private(_)) {
+                        if *st {
+                            static_keys.push(key);
+                        } else {
+                            proto_keys.push(key);
+                        }
+                    }
                     let getter_fn = Value::Function(Rc::new(FunctionData {
                         strict: true,
                         native: None,
                         identity: Rc::new(0),
-                        name: Some(format!("get {}", gname).into()),
+                        name: Some(format!("get {}", display_name).into()),
                         properties: FunctionData::properties_with_default_prototype(
                             &self.persistent_global,
                         ),
@@ -749,12 +906,21 @@ impl Interpreter {
                     is_static: st,
                     body: sb,
                 } => {
-                    let sname = self.class_member_name(&member_scope, name)?;
+                    let key = self.class_member_name(&member_scope, name)?;
+                    let sname = self.property_key(&key)?;
+                    let display_name = self.property_function_name(&key)?;
+                    if !matches!(name, MemberName::Private(_)) {
+                        if *st {
+                            static_keys.push(key);
+                        } else {
+                            proto_keys.push(key);
+                        }
+                    }
                     let setter_fn = Value::Function(Rc::new(FunctionData {
                         strict: true,
                         native: None,
                         identity: Rc::new(0),
-                        name: Some(format!("set {}", sname).into()),
+                        name: Some(format!("set {}", display_name).into()),
                         properties: FunctionData::properties_with_default_prototype(
                             &self.persistent_global,
                         ),
@@ -821,7 +987,7 @@ impl Interpreter {
             full_ctor_body.push(Statement::Expr(Expr::Assignment {
                 target: Box::new(Expr::Member {
                     object: Box::new(Expr::This),
-                    property: Box::new(Expr::String((fname.clone()).into())),
+                    property: Box::new(fname),
                     computed,
                 }),
                 op: AssignOp::Assign,
@@ -842,18 +1008,19 @@ impl Interpreter {
         }
         full_ctor_body.extend(ctor_body);
 
-        // For a derived class, expose the superclass constructor to the
-        // constructor body as `__super_ctor` so `super(...)` can call it. A
-        // native heritage is its own `super(...)` target.
-        let super_ctor_value = Self::super_ctor_for(&super_cls);
-        let ctor_closure = match super_ctor_value {
-            Some(target) => {
-                let env = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
-                env.borrow_mut().set("__super_ctor", target);
-                env
-            }
-            None => member_closure.clone(),
-        };
+        // Constructors retain their class home, so super() obtains the
+        // current constructor prototype before evaluating its arguments.
+        let ctor_closure = Rc::new(RefCell::new(Environment::child(member_closure.clone())));
+        if super_cls.is_some() {
+            ctor_closure
+                .borrow_mut()
+                .set(SUPER_CONSTRUCTOR_HOME, Value::Undefined);
+        }
+        for (index, key) in ctor_computed_keys.into_iter().enumerate() {
+            ctor_closure
+                .borrow_mut()
+                .set(&crate::bytecode::constants::class_key_name(index), key);
+        }
 
         let constructor_length =
             crate::parser::formal_parameter_length(&ctor_params, &full_ctor_body);
@@ -889,10 +1056,15 @@ impl Interpreter {
             constructor,
             constructor_length,
             proto_props,
+            proto_keys,
+            static_keys,
             statics,
             static_attrs,
             static_has_accessors,
             private_scope: member_scope,
+            instance_home: member_closure,
+            static_home: static_member_closure,
+            constructor_home: ctor_closure,
             private_statics,
             static_elements,
         })
@@ -1745,6 +1917,7 @@ impl Interpreter {
 
     fn object_literal_callable(
         &self,
+        home: &Env,
         name: &str,
         params: &[String],
         body: &[Statement],
@@ -1764,7 +1937,7 @@ impl Interpreter {
             standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
             params: intern_params(params),
             body: Rc::new(body.to_vec()),
-            closure: Some(crate::heap::capture_env(&self.global)),
+            closure: Some(crate::heap::capture_env(home)),
             is_arrow: false,
             is_constructor: false,
             is_async,
@@ -1774,6 +1947,20 @@ impl Interpreter {
             needs_hoisting: body_needs_hoisting(body),
             bound: None,
         }))
+    }
+
+    fn evaluate_call_arguments(&mut self, args: &[Expr]) -> Result<Vec<Value>, VmErr> {
+        let mut values = Vec::new();
+        for argument in args {
+            match argument {
+                Expr::Spread(inner) => {
+                    let value = self.eval_expr(inner)?;
+                    self.append_iterable(&mut values, &value, "Maximum argument count exceeded")?;
+                }
+                _ => push_call_arg(&mut values, self.eval_expr(argument)?)?,
+            }
+        }
+        Ok(values)
     }
 
     fn reject_call_assignment_target(&mut self, target: &Expr) -> Result<(), VmErr> {
@@ -1996,6 +2183,7 @@ impl Interpreter {
     }
 
     fn eval_object_literal(&mut self, props: &[ObjectProp]) -> Result<Value, VmErr> {
+        let home = Self::member_closure_env(&self.global);
         let mut object = Vec::new();
         let mut positions = HashMap::new();
         let mut accessors = HashMap::new();
@@ -2036,7 +2224,7 @@ impl Interpreter {
                     is_setter,
                 } => {
                     let key_value = self.eval_expr(key)?;
-                    let property_key = self.proxy_property_key(&key_value)?;
+                    let property_key = self.to_property_key(&key_value)?;
                     let key = self.property_key(&property_key)?;
                     let accessor = if *is_getter {
                         Some(ObjectAccessorKind::Getter)
@@ -2045,14 +2233,16 @@ impl Interpreter {
                     } else {
                         None
                     };
+                    let display = self.property_function_name(&property_key)?;
                     let function_name = if *is_getter {
-                        format!("get {key}")
+                        format!("get {display}")
                     } else if *is_setter {
-                        format!("set {key}")
+                        format!("set {display}")
                     } else {
-                        key.clone()
+                        display
                     };
                     let function = self.object_literal_callable(
+                        &home,
                         &function_name,
                         params,
                         body,
@@ -2073,16 +2263,12 @@ impl Interpreter {
                 }
                 ObjectProp::Computed(key_expression, value_expression) => {
                     let key_value = self.eval_expr(key_expression)?;
+                    let key_value = self.to_property_key(&key_value)?;
                     let symbol = match &key_value {
                         Value::Symbol(symbol) => Some(symbol.clone()),
                         _ => None,
                     };
-                    let key = match &key_value {
-                        Value::String(value) => value.to_key(),
-                        Value::Number(value) => value.to_string(),
-                        Value::Symbol(value) => super::symbol_slot_key(value),
-                        _ => continue,
-                    };
+                    let key = self.property_key(&key_value)?;
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -2102,8 +2288,14 @@ impl Interpreter {
                     is_async,
                     is_generator,
                 } => {
-                    let function =
-                        self.object_literal_callable(name, params, body, *is_async, *is_generator);
+                    let function = self.object_literal_callable(
+                        &home,
+                        name,
+                        params,
+                        body,
+                        *is_async,
+                        *is_generator,
+                    );
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -2115,6 +2307,7 @@ impl Interpreter {
                 }
                 ObjectProp::Getter { name, body } => {
                     let function = self.object_literal_callable(
+                        &home,
                         &format!("get {name}"),
                         &[],
                         body,
@@ -2132,6 +2325,7 @@ impl Interpreter {
                 }
                 ObjectProp::Setter { name, param, body } => {
                     let function = self.object_literal_callable(
+                        &home,
                         &format!("set {name}"),
                         std::slice::from_ref(param),
                         body,
@@ -2181,6 +2375,7 @@ impl Interpreter {
                 meta.set_symbol_key(&key, symbol);
             }
         }
+        home.borrow_mut().set(HOME_OBJECT, result.clone());
         Ok(result)
     }
 
@@ -2326,6 +2521,17 @@ impl Interpreter {
                 // slot from the receiver rather than computing anything from
                 // the property it names.
                 if matches!(op, UnOp::Delete) {
+                    if let Expr::Member {
+                        object, property, ..
+                    } = operand.unparenthesized()
+                        && matches!(object.as_ref(), Expr::Super)
+                    {
+                        let key = self.eval_expr(property)?;
+                        self.super_reference(&self.global.clone(), &key)?;
+                        return Err(VmErr::Msg(
+                            "ReferenceError: Cannot delete a super property".into(),
+                        ));
+                    }
                     match operand.unparenthesized() {
                         Expr::Member {
                             object, property, ..
@@ -2368,6 +2574,26 @@ impl Interpreter {
                         Expr::Identifier(_) | Expr::Member { .. }
                     )
                 {
+                    if let Expr::Member {
+                        object, property, ..
+                    } = operand.unparenthesized()
+                        && matches!(object.as_ref(), Expr::Super)
+                    {
+                        let key = self.eval_expr(property)?;
+                        let (base, receiver, key) =
+                            self.super_reference(&self.global.clone(), &key)?;
+                        let current = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
+                        let (current, updated) = self.numeric_update(&current, *op == UnOp::Inc)?;
+                        let strict = self.global.borrow().strict();
+                        self.assign_property_with_receiver(
+                            &base,
+                            &key,
+                            updated.clone(),
+                            &receiver,
+                            strict,
+                        )?;
+                        return Ok(if *prefix { updated } else { current });
+                    }
                     match operand.unparenthesized() {
                         Expr::Identifier(n) => {
                             self.inc_global_binding(n, *op == UnOp::Inc, *prefix)
@@ -2435,6 +2661,23 @@ impl Interpreter {
                 }
             }
             Expr::Call { callee, args } => {
+                if matches!(callee.unparenthesized(), Expr::Super) {
+                    let target = self.super_constructor(&self.global.clone())?;
+                    let args = self.evaluate_call_arguments(args)?;
+                    return self.invoke_ctor(&target, Value::Undefined, args);
+                }
+                if let Expr::Member {
+                    object, property, ..
+                } = callee.unparenthesized()
+                    && matches!(object.as_ref(), Expr::Super)
+                {
+                    let key = self.eval_expr(property)?;
+                    let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
+                    let method = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
+                    let args = self.evaluate_call_arguments(args)?;
+                    return self.call_this(&method, receiver, args);
+                }
+
                 // Direct eval is determined by syntax and the original intrinsic,
                 // not by a function's display name. Resolve before arguments.
                 let direct_eval =
@@ -2444,44 +2687,8 @@ impl Interpreter {
                 } else {
                     None
                 };
-                let mut a = Vec::new();
-                for x in args {
-                    match x {
-                        Expr::Spread(inner) => {
-                            let inner_val = self.eval_expr(inner)?;
-                            self.append_iterable(
-                                &mut a,
-                                &inner_val,
-                                "Maximum argument count exceeded",
-                            )?;
-                        }
-                        _ => push_call_arg(&mut a, self.eval_expr(x)?)?,
-                    }
-                }
+                let a = self.evaluate_call_arguments(args)?;
                 match callee.unparenthesized() {
-                    // `super(...)` invokes the superclass constructor on the
-                    // current `this`.
-                    Expr::Super => {
-                        let this_val = Value::Undefined;
-                        let super_ctor =
-                            self.global.borrow().get("__super_ctor").ok_or_else(|| {
-                                VmErr::Msg("super used outside a derived class".to_string())
-                            })?;
-                        self.invoke_ctor(&super_ctor, this_val, a)
-                    }
-                    // `super.m(...)`: the method comes from the superclass
-                    // prototype, but `this` stays the current receiver.
-                    Expr::Member {
-                        object,
-                        property,
-                        computed: _,
-                    } if matches!(object.as_ref(), Expr::Super) => {
-                        let this_val = self.resolve_this(&self.global)?;
-                        let prop = self.eval_expr(property)?;
-                        let method = self.super_member(&prop)?;
-                        self.call_this(&method, this_val, a)
-                    }
-                    // Method call: bind `this` to the receiver object.
                     Expr::Member {
                         object,
                         property,
@@ -2609,6 +2816,36 @@ impl Interpreter {
             // evaluates `expensive`.
             Expr::LogicalAssignment { target, op, value } => {
                 self.reject_call_assignment_target(target)?;
+                if let Expr::Member {
+                    object, property, ..
+                } = target.unparenthesized()
+                    && matches!(object.as_ref(), Expr::Super)
+                {
+                    let key = self.eval_expr(property)?;
+                    let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
+                    let current = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
+                    let should_assign = match op {
+                        LogicalAssignOp::And => current.is_truthy(),
+                        LogicalAssignOp::Or => !current.is_truthy(),
+                        LogicalAssignOp::Nullish => {
+                            matches!(current, Value::Null | Value::Undefined)
+                        }
+                    };
+                    if !should_assign {
+                        return Ok(current);
+                    }
+                    let assigned = self.eval_expr(value)?;
+                    let strict = self.global.borrow().strict();
+                    self.assign_property_with_receiver(
+                        &base,
+                        &key,
+                        assigned.clone(),
+                        &receiver,
+                        strict,
+                    )?;
+                    return Ok(assigned);
+                }
+
                 // Static member target: skip the key allocation on both the
                 // read and the conditional write.
                 if let Expr::Member {
@@ -2686,6 +2923,31 @@ impl Interpreter {
             }
             Expr::Assignment { target, op, value } => {
                 self.reject_call_assignment_target(target)?;
+                if let Expr::Member {
+                    object, property, ..
+                } = target.unparenthesized()
+                    && matches!(object.as_ref(), Expr::Super)
+                {
+                    let key = self.eval_expr(property)?;
+                    let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
+                    let current = op
+                        .bin_op()
+                        .map(|_| self.get_prop_value_with_receiver(&base, &key, &receiver))
+                        .transpose()?;
+                    let mut assigned = self.eval_expr(value)?;
+                    if let Some(op) = op.bin_op() {
+                        assigned = self.bin_op(op, &current.expect("compound value"), &assigned)?;
+                    }
+                    let strict = self.global.borrow().strict();
+                    self.assign_property_with_receiver(
+                        &base,
+                        &key,
+                        assigned.clone(),
+                        &receiver,
+                        strict,
+                    )?;
+                    return Ok(assigned);
+                }
                 let v = self.eval_expr(value)?;
                 match target.unparenthesized() {
                     Expr::Identifier(n) => {
@@ -2873,6 +3135,15 @@ impl Interpreter {
                 exprs,
             } => {
                 let (this_val, tag_fn) = match tag.unparenthesized() {
+                    Expr::Member {
+                        object, property, ..
+                    } if matches!(object.as_ref(), Expr::Super) => {
+                        let key = self.eval_expr(property)?;
+                        let (base, receiver, key) =
+                            self.super_reference(&self.global.clone(), &key)?;
+                        let method = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
+                        (receiver, method)
+                    }
                     // Preserve the receiver so `` obj.tag`…` `` sees `this`.
                     Expr::Member {
                         object, property, ..

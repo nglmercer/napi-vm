@@ -1758,8 +1758,14 @@ impl<'a> Compiler<'a> {
                     return Err(Decline::Func("private destructuring writes"));
                 }
                 if matches!(object, Expr::Super) {
-                    // The reference fails before the property evaluates.
-                    return self.raise_bare_super().map(|_| ());
+                    let (base, receiver, key) = self.compile_super_reference(property)?;
+                    self.emit(Instr::SetPropertyWithReceiver {
+                        base,
+                        receiver,
+                        key,
+                        value: val,
+                    });
+                    return Ok(());
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -3633,14 +3639,9 @@ impl<'a> Compiler<'a> {
                         _ => {
                             let key = self.compile_expr(key_expression)?;
                             let normalized = self.alloc_reg()?;
-                            self.emit(Instr::NormalKey {
+                            self.emit(Instr::PropertyKey {
                                 dst: normalized,
                                 src: key,
-                            });
-                            // Bad keys skip the value evaluation entirely.
-                            let end = self.emit_jump(|target| Instr::JumpIfNullish {
-                                src: normalized,
-                                target,
                             });
                             let val = self.compile_expr(value_expression)?;
                             template.push(PropEntry {
@@ -3648,7 +3649,6 @@ impl<'a> Compiler<'a> {
                                 val,
                                 kind: PropKind::Data,
                             });
-                            self.patch_jump(end, self.here())?;
                         }
                     }
                 }
@@ -3674,7 +3674,7 @@ impl<'a> Compiler<'a> {
                     template.push(PropEntry {
                         key: Some(KeySrc::Const(key)),
                         val,
-                        kind: PropKind::Data,
+                        kind: PropKind::Method,
                     });
                 }
                 ObjectProp::Getter { name, body } => {
@@ -3833,12 +3833,55 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn compile_super_reference(&mut self, property: &'a Expr) -> Result<(Reg, Reg, Reg), Decline> {
+        let src = self.compile_expr(property)?;
+        let base = self.alloc_reg()?;
+        let receiver = self.alloc_reg()?;
+        let key = self.alloc_reg()?;
+        self.emit(Instr::SuperReference {
+            base,
+            receiver,
+            key,
+            src,
+        });
+        Ok((base, receiver, key))
+    }
+
     fn compile_inc_dec(
         &mut self,
         op: UnOp,
         operand: &'a Expr,
         prefix: bool,
     ) -> Result<Reg, Decline> {
+        if let Expr::Member {
+            object, property, ..
+        } = operand.unparenthesized()
+            && matches!(object.as_ref(), Expr::Super)
+        {
+            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let src = self.alloc_reg()?;
+            self.emit(Instr::GetPropertyWithReceiver {
+                dst: src,
+                base,
+                receiver,
+                key,
+            });
+            let previous = self.alloc_reg()?;
+            let updated = self.alloc_reg()?;
+            self.emit(Instr::NumericUpdate {
+                previous,
+                updated,
+                src,
+                increment: op == UnOp::Inc,
+            });
+            self.emit(Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value: updated,
+            });
+            return Ok(if prefix { updated } else { previous });
+        }
         let delta = if op == UnOp::Inc { 1 } else { -1 };
         match operand {
             Expr::Identifier(name) => {
@@ -3898,7 +3941,11 @@ impl<'a> Compiler<'a> {
                 object, property, ..
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    return self.raise_bare_super();
+                    self.compile_super_reference(property)?;
+                    let msg =
+                        self.intern_string("ReferenceError: Cannot delete a super property")?;
+                    self.emit(Instr::Raise { msg });
+                    return self.load_undefined();
                 }
                 let obj = self.compile_expr(object)?;
                 let key = self.compile_expr(property)?;
@@ -4145,9 +4192,25 @@ impl<'a> Compiler<'a> {
             Expr::Super => Callee::Super,
             _ => Callee::Plain,
         };
-        // Arguments evaluate before the callee, like the evaluator — even
-        // for chains, whose short-circuit skips only the property and the
-        // call itself.
+        let super_target = if matches!(kind, Callee::Super) {
+            let dst = self.alloc_reg()?;
+            self.emit(Instr::SuperConstructor { dst });
+            Some(dst)
+        } else {
+            None
+        };
+        let super_method = if let Callee::SuperMember { property } = kind {
+            let key = self.compile_expr(property)?;
+            let callee = self.alloc_reg()?;
+            self.emit(Instr::SuperMember { dst: callee, key });
+            let this = self.compile_this()?;
+            Some((callee, this))
+        } else {
+            None
+        };
+        // Super references above are captured before argument evaluation.
+        // Ordinary/optional call references still follow the existing path;
+        // their evaluation-order audit remains a separate dependency.
         enum CallArgs {
             Range { start: Reg, argc: u16 },
             Spread { tmpl: u16 },
@@ -4259,19 +4322,21 @@ impl<'a> Compiler<'a> {
                 CallArgs::Range { start, argc } => {
                     self.emit(Instr::SuperCall {
                         dst,
+                        callee: super_target.expect("super target"),
                         args: start,
                         argc,
                     });
                 }
                 CallArgs::Spread { tmpl } => {
-                    self.emit(Instr::SuperCallSpread { dst, tmpl });
+                    self.emit(Instr::SuperCallSpread {
+                        dst,
+                        callee: super_target.expect("super target"),
+                        tmpl,
+                    });
                 }
             },
-            Callee::SuperMember { property } => {
-                let key = self.compile_expr(property)?;
-                let callee = self.alloc_reg()?;
-                self.emit(Instr::SuperMember { dst: callee, key });
-                let this = self.compile_this()?;
+            Callee::SuperMember { .. } => {
+                let (callee, this) = super_method.expect("super member reference");
                 match call_args {
                     CallArgs::Range { start, argc } => {
                         self.emit(Instr::CallMethod {
@@ -4370,6 +4435,45 @@ impl<'a> Compiler<'a> {
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
         let target = target.unparenthesized();
+        if let Expr::Member {
+            object, property, ..
+        } = target
+            && matches!(object.as_ref(), Expr::Super)
+        {
+            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let current = if op.bin_op().is_some() {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::GetPropertyWithReceiver {
+                    dst,
+                    base,
+                    receiver,
+                    key,
+                });
+                Some(dst)
+            } else {
+                None
+            };
+            let rhs = self.compile_expr(value)?;
+            let value = if let Some(op) = op.bin_op() {
+                let dst = self.alloc_reg()?;
+                self.emit(Instr::Binary {
+                    dst,
+                    op,
+                    lhs: current.expect("compound value"),
+                    rhs,
+                });
+                dst
+            } else {
+                rhs
+            };
+            self.emit(Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value,
+            });
+            return Ok(value);
+        }
         let rhs = self.compile_expr(value)?;
         match target {
             Expr::Identifier(name) => {
@@ -4456,6 +4560,38 @@ impl<'a> Compiler<'a> {
         let target = target.unparenthesized();
         // Read the current value, skip the write when it already decides.
         let join = self.alloc_reg()?;
+        if let Expr::Member {
+            object, property, ..
+        } = target.unparenthesized()
+            && matches!(object.as_ref(), Expr::Super)
+        {
+            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let current = self.alloc_reg()?;
+            self.emit(Instr::GetPropertyWithReceiver {
+                dst: current,
+                base,
+                receiver,
+                key,
+            });
+            self.emit(Instr::Mov {
+                dst: join,
+                src: current,
+            });
+            let end = self.logical_skip_jump(op, current)?;
+            let value = self.compile_expr(value)?;
+            self.emit(Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value,
+            });
+            self.emit(Instr::Mov {
+                dst: join,
+                src: value,
+            });
+            self.patch_jump(end, self.here())?;
+            return Ok(join);
+        }
         let end_jump = match target {
             Expr::Identifier(name) => {
                 let current = self.compile_identifier(name)?;
@@ -4872,5 +5008,36 @@ mod tests {
         // has no intermediate self-scope), so self-reference compiles too.
         compile("(function bar(){ return typeof bar; })();")
             .expect("self-referencing expression must compile");
+    }
+    #[test]
+    fn class_super_writes_compile_to_receiver_operations_without_method_fallback() {
+        let statements = crate::parser::parse_cached("class A{get x(){return 1;}set x(v){}}class B extends A{method(){super.x+=2;return super.x++;}}").unwrap();
+        let module = compile_program(&statements).unwrap();
+        let method = module.main.constants.iter().find_map(|constant| {
+            let Constant::ClassTemplate(template) = constant else { return None; };
+            let member = template.members.iter().find(|member| matches!(&member.name, ClassNameTemplate::Static(name) if name == "method"))?;
+            match &module.main.constants[member.func.unwrap() as usize] {
+                Constant::Function(function) => Some(function),
+                _ => panic!("super writes must not use method fallback"),
+            }
+        }).expect("compiled method");
+        assert!(
+            method
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::SuperReference { .. }))
+        );
+        assert!(
+            method
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::SetPropertyWithReceiver { .. }))
+        );
+        assert!(
+            method
+                .code
+                .iter()
+                .any(|instruction| matches!(instruction, Instr::NumericUpdate { .. }))
+        );
     }
 }

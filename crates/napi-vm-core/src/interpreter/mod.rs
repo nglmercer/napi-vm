@@ -39,8 +39,8 @@ pub use commonjs::{
 };
 pub use env::{AssignOutcome, BindKind, Env, Environment, Lookup, ModifyOutcome, Module};
 pub(crate) use eval::{
-    ClassAssembly, ClassStaticElement, ObjectAccessorKind, SUPER_PROTO,
-    define_class_private_element, insert_class_accessor, insert_object_property, intern_params,
+    ClassAssembly, ClassStaticElement, ObjectAccessorKind, define_class_private_element,
+    insert_class_accessor, insert_class_method, insert_object_property, intern_params,
     push_call_arg,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -1887,7 +1887,7 @@ impl Interpreter {
                 };
                 let name = self.eval_expr(property)?;
                 let key = self.property_key(&name)?;
-                let value = self.eval_expr(value)?;
+                let value = self.evaluate_class_field(value, &name)?;
                 if !computed && let Some(id) = self.global.borrow().private_name(&key) {
                     receiver.initialize_private_field(id, value)?;
                     continue;
@@ -1898,7 +1898,9 @@ impl Interpreter {
                     ("enumerable".into(), Value::Bool(true)),
                     ("configurable".into(), Value::Bool(true)),
                 ]);
-                crate::builtins::object::define_property(&receiver, &key, &descriptor)?;
+                if !self.define_own_property(&receiver, &name, &descriptor)? {
+                    return Err(VmErr::Msg("TypeError: Cannot define instance field".into()));
+                }
             }
             Ok(())
         })();
@@ -1944,10 +1946,7 @@ impl Interpreter {
                     .expect("implicit constructor rest parameter")
                     .borrow()
                     .clone();
-                let superclass = scope
-                    .borrow()
-                    .get("__super_ctor")
-                    .expect("implicit derived constructor superclass");
+                let superclass = self.super_constructor(&scope)?;
                 self.invoke_ctor(&superclass, Value::Undefined, arguments)?;
             }
             return self.run_program_body(&stmts[1..]);

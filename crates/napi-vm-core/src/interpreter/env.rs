@@ -324,6 +324,8 @@ impl Environment {
                 .extend(environment.private_declarations.iter().cloned());
             if !found_this && environment.own_binding("this").is_some() {
                 found_this = true;
+                context.super_property |=
+                    environment.own_binding(super::eval::HOME_OBJECT).is_some();
                 let mut closure = environment.parent.clone();
                 let mut derived = false;
                 while let Some(parent) = closure {
@@ -331,9 +333,11 @@ impl Environment {
                     if parent.own_binding("this").is_some() {
                         break;
                     }
-                    derived |= parent.own_binding("__super_ctor").is_some();
+                    derived |= parent
+                        .own_binding(super::eval::SUPER_CONSTRUCTOR_HOME)
+                        .is_some();
                     context.super_property |=
-                        parent.own_binding(super::eval::SUPER_PROTO).is_some();
+                        parent.own_binding(super::eval::HOME_OBJECT).is_some();
                     closure = parent.parent.clone();
                 }
                 context.super_call = environment.constructor_this.is_some() && derived;

@@ -362,6 +362,30 @@ fn accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
     }
 }
 
+fn accessor_kind_for(target: &Value, key: &str, value: &Value) -> Option<&'static str> {
+    let symbol = match target {
+        Value::Array(array) => array.meta.borrow().symbol_key(key),
+        _ => cell(target).and_then(|cell| cell.meta.borrow().symbol_key(key)),
+    };
+    accessor_kind_with_symbol(symbol, key, value)
+}
+
+fn accessor_kind_with_symbol(
+    symbol: Option<Rc<crate::value::SymbolData>>,
+    key: &str,
+    value: &Value,
+) -> Option<&'static str> {
+    if let Some(symbol) = symbol {
+        let name = symbol
+            .description
+            .as_ref()
+            .map_or_else(String::new, |description| format!("[{description}]"));
+        accessor_kind(&name, value).or_else(|| accessor_kind(key, value))
+    } else {
+        accessor_kind(key, value)
+    }
+}
+
 fn is_callable(value: &Value) -> bool {
     matches!(
         value,
@@ -535,7 +559,7 @@ fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Res
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
-    let key = interp.proxy_property_key(a.get(1).unwrap_or(&Value::Undefined))?;
+    let key = interp.to_property_key(a.get(1).unwrap_or(&Value::Undefined))?;
     Ok(Value::Bool(!matches!(
         descriptor_for_key_in(interp, &target, &key)?,
         Value::Undefined
@@ -547,7 +571,7 @@ fn object_has_own_property(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let key = interp.proxy_property_key(args.first().unwrap_or(&Value::Undefined))?;
+    let key = interp.to_property_key(args.first().unwrap_or(&Value::Undefined))?;
     let target = to_object_receiver(&this)?;
     Ok(Value::Bool(!matches!(
         descriptor_for_key_in(interp, &target, &key)?,
@@ -1037,7 +1061,7 @@ fn object_define_property(
     if !crate::interpreter::call::is_js_object(&target) {
         return Err(type_err("Object.defineProperty called on non-object"));
     }
-    let key = interp.proxy_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.to_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
     let descriptor =
         to_property_descriptor(interp, &a.get(2).cloned().unwrap_or(Value::Undefined))?;
     if !interp.define_own_property(&target, &key, &descriptor)? {
@@ -1163,7 +1187,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
 
     let old_accessor_kind = old_value
         .as_ref()
-        .and_then(|value| accessor_kind(key, value));
+        .and_then(|value| accessor_kind_for(target, key, value));
     let old_is_accessor = old_accessor_kind.is_some();
     let old_is_data = existing && !old_is_accessor;
     let new_is_accessor =
@@ -1525,7 +1549,7 @@ fn object_get_own_descriptor(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
-    let key = interp.proxy_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
+    let key = interp.to_property_key(&a.get(1).cloned().unwrap_or(Value::Undefined))?;
     descriptor_for_key_in(interp, &target, &key).map(from_property_descriptor)
 }
 
@@ -1821,21 +1845,24 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
         .meta
         .borrow()
         .has_accessors
-        .then(|| accessor_kind(key, &value))
+        .then(|| accessor_kind_for(target, key, &value))
         .flatten()
     {
         Some("get" | "set") => {
             let slots = c.borrow();
             let getter = slots
                 .iter()
-                .find(|(name, value)| name == key && accessor_kind(key, value) == Some("get"))
+                .find(|(name, value)| {
+                    name == key && accessor_kind_for(target, key, value) == Some("get")
+                })
                 .map(|(_, value)| value.clone())
                 .unwrap_or(Value::Undefined);
             let companion = format!("__setter:{key}__");
             let setter = slots
                 .iter()
                 .find(|(name, value)| {
-                    (name == key || name == &companion) && accessor_kind(key, value) == Some("set")
+                    (name == key || name == &companion)
+                        && accessor_kind_for(target, key, value) == Some("set")
                 })
                 .map(|(_, value)| value.clone())
                 .unwrap_or(Value::Undefined);
@@ -1858,7 +1885,7 @@ fn descriptor_for_array_value(
     value: Value,
     attrs: PropAttrs,
 ) -> Value {
-    match accessor_kind(key, &value) {
+    match accessor_kind_with_symbol(array.meta.borrow().symbol_key(key), key, &value) {
         Some("get") => Value::descriptor_record(vec![
             ("get".to_string(), value),
             (
