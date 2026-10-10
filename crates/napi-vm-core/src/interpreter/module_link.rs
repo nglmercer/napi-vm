@@ -10,7 +10,7 @@ pub(super) struct ModuleGraph {
 }
 struct LinkedModule {
     program: PreparedProgram,
-    requests: Vec<(String, String)>,
+    requests: Vec<(crate::JsString, String)>,
     state: ModuleState,
     evaluation: Option<Rc<RefCell<crate::value::PromiseInner>>>,
 }
@@ -317,7 +317,7 @@ impl Interpreter {
                 };
                 if let Some(request) = request {
                     let resolved = self
-                        .resolve_module_request(request)?
+                        .resolve_module_request(&Self::host_module_specifier(request)?)?
                         .ok_or_else(|| syntax(format!("Module not found: {request}")))?;
                     if !requests.iter().any(|(old, _)| old == request) {
                         requests.push((request.clone(), resolved));
@@ -346,7 +346,17 @@ impl Interpreter {
             .as_ref()
             .is_some_and(|id| self.module_graph.borrow().records.contains_key(id))
     }
-    fn request_target(&self, id: &str, request: &str) -> Option<String> {
+    /// The UTF-8 host contract is enforced during linking, after source
+    /// parsing. Invalid UTF-16 never aliases a replacement-character path.
+    pub(crate) fn host_module_specifier(request: &crate::JsString) -> Result<String, VmErr> {
+        request.to_utf8().map_err(|_| {
+            VmErr::Msg(
+                "TypeError: Module specifier cannot be represented by the UTF-8 host loader".into(),
+            )
+        })
+    }
+
+    fn request_target(&self, id: &str, request: &crate::JsString) -> Option<String> {
         self.module_graph
             .borrow()
             .records

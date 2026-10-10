@@ -1,6 +1,6 @@
 # Phase 1 host, realms, and GC audit
 
-This audit records the staged implementation in draft PR #24. The latest
+This audit records the staged implementation merged in PR #24. The latest
 completed full measurement is `c82f617`: 63,673/102,956 passed, with 22,266
 new passes and zero lost passes against PR #23. It records implemented
 ownership and host behavior, plus dependencies that still prevent declaring every
@@ -445,3 +445,6 @@ it does not close all Phase 1–3 dependencies. Observable computed class-key
 conversion and Symbol retention, dynamic home-object super lookup, complete
 realm/internal-operation coverage and remaining bytecode fallback are still
 open. Full-corpus AST/bytecode mismatches remain unmeasured. The PR remains a draft.
+
+
+Work after that merge is tracked in [the foundations follow-up](test262-foundations-followup.md). Its source and validation must be measured independently.

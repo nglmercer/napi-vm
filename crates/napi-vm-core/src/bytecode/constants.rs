@@ -133,7 +133,7 @@ pub struct ClassTemplate {
 /// bind (default, `(imported, local)` pairs, namespace).
 #[derive(Debug, Clone)]
 pub struct ImportTemplate {
-    pub module: String,
+    pub module: crate::JsString,
     pub default: Option<String>,
     pub named: Vec<(String, String)>,
     pub namespace: Option<String>,
@@ -144,13 +144,13 @@ pub struct ImportTemplate {
 #[derive(Debug, Clone)]
 pub struct ExportNamedTemplate {
     pub specifiers: Vec<(String, String)>,
-    pub source: Option<String>,
+    pub source: Option<crate::JsString>,
 }
 
 /// One `export * [as ns] from 'm'` statement.
 #[derive(Debug, Clone)]
 pub struct ExportAllTemplate {
-    pub source: String,
+    pub source: crate::JsString,
     pub alias: Option<String>,
 }
 
@@ -159,6 +159,8 @@ pub struct ExportAllTemplate {
 #[derive(Debug, Clone, Copy)]
 pub struct SpreadEntry {
     pub spread: bool,
+    /// A private dense snapshot produced by ExpandSpread; no second iteration.
+    pub prepared: bool,
     pub reg: Reg,
 }
 
@@ -168,8 +170,7 @@ pub struct SpreadEntry {
 #[derive(Debug, Clone)]
 pub struct PropEntry {
     /// Static keys name a string constant; computed keys name the register
-    /// holding the *original* key value (`undefined` there skips the
-    /// property, like the evaluator). `None` for spreads.
+    /// holding the converted String or Symbol key. `None` for spreads.
     pub key: Option<KeySrc>,
     /// The value register (data/accessor/method function) or the spread
     /// source.
@@ -181,6 +182,9 @@ pub struct PropEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PropKind {
     Data,
+    /// The uncomputed colon form sets the literal prototype, not an own key.
+    Prototype,
+    Method,
     Getter,
     Setter,
     Spread,

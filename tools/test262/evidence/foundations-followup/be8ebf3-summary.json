@@ -1,0 +1,185 @@
+{
+  "source_commit": "be8ebf3550985572c5f440cf3167ced6b842872f",
+  "classification": "Completed full repeat; original failed run and isolated timing diagnostics retained; Phase 1\u20132 completion not claimed",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 1003,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 205,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 12,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "be8ebf3-allfeatures-tests.log.gz": "3cece1ad1c128a640bb6bac9b9b72578dd41ec63c6ef43134556cfeebb0ef33d",
+    "be8ebf3-clippy.log.gz": "b43867c3e9a6f4688003d6cc089eff0765ce89205fe16fc9678c29d957592118",
+    "be8ebf3-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "be8ebf3-minimal-tests.log.gz": "1897203f0e9b48c70a75f400254718a46cd5386b1bc8ca78c2b84abe29010188",
+    "be8ebf3-native-build.log.gz": "a1cfa27fbf132fc7a8275f842bac51b84b0847781c81db44579226add4e2d1cc",
+    "be8ebf3-node-tests.log.gz": "e2fa52b4574e6cfd9c985e7501cd4e04eeeee71fa7652f9f136914e5ad797df4",
+    "be8ebf3-release-build.log.gz": "8149cc9196f655e69a3b65a5d17390106822877a98eeeae213f9b7c7f78ca4ee",
+    "be8ebf3-tooling-tests.log.gz": "277f8ba0ac84421908b4797ddf8c312aff362b269a86eeeecea36b7fecbfcce1",
+    "be8ebf3-wasm-tests.log.gz": "56793aaf84bb7da0e768ea428afe10e88cd91318ad93cc8d9e98ea03d2df2638",
+    "be8ebf3-focused-c82f617-transitions.json.gz": "f0643432dc6b99fdf082bf6d37d46f1ab60d74cda6891d7b1574e27dd615792e",
+    "be8ebf3-focused-193998b-projection.json.gz": "575aecd9bed7c2f2856cbb00926d0ed9b69c6a3784e59c743da021db47043623",
+    "be8ebf3-focused.jsonl.gz": "e515216896999f7c93427e6de57d78328d9895c7c21d9f035e06f0949be049f4",
+    "be8ebf3-focused-193998b-transitions.json.gz": "cdd003fd344bbb9d46af285a278005fb11af16076daf1a2a4560960d2838b5a1",
+    "be8ebf3-focused-7c0a9ce-projection.json.gz": "9ddeb3b371213dd28e3226f5c2b6f4803927a590ebef2f5b3d015ba52bb146b8",
+    "be8ebf3-focused-transitions.json.gz": "c7f81b610be086fd2ee3582f526d4f8575ac8892164fa42633b5f84ffab7d69c",
+    "be8ebf3-focused.json.gz": "7c0c949a8a7f7a479f69627cc944839e9083f9485d944b425088867ae9fcb6ff",
+    "be8ebf3-focused-c82f617-projection.json.gz": "025e9ba19bb607527b363145e889a995c697665a2e3cf2a68d2866c2baaeee6f",
+    "be8ebf3-full-193998b-transitions.json.gz": "96190a7cd654de3643ef83c53c2048b4612933060ee1cddae4e5f41898ae3127",
+    "be8ebf3-full-7c0a9ce-transitions.json.gz": "6e2f0544d6e1a3320bb4d74b4a40b5a7f62b9c260a1d61234191da7815f0e3ef",
+    "be8ebf3-full-6456b53-transitions.json.gz": "58317c265d03255a81a203650e6cff31e1bd24f5cb997df5067eaebb609f1c0e",
+    "be8ebf3-full-pr23-transitions.json.gz": "41aafd6deb3075cae911602ae6a4022afd0c2010a195e4421221e2d54ba72bde",
+    "be8ebf3-full.json.gz": "0ec7f45856f85af323716ef090074853dc966dc4be1046a99821acf278b0c004",
+    "be8ebf3-full-c82f617-transitions.json.gz": "dc5da011d092212e4e7b581757e6b6dbb83fe1b07cecf96bd282456e3af221bf",
+    "be8ebf3-full.jsonl.gz": "8e04a2e8f0cf3960ff07741eafdfaae168df99178f252e3862a53fc0b06965a9",
+    "be8ebf3-full-rerun-c82f617-transitions.json.gz": "16030bc2ec6679667cd3b293aa252b41b12484a2692bc03c2696c0fc200acfba",
+    "be8ebf3-full-rerun-pr23-transitions.json.gz": "20dd4003e0c4fb027574533922a9076e0ae29bc801aee835b100a7bafe9c85d8",
+    "be8ebf3-full-rerun-7c0a9ce-transitions.json.gz": "4389fa1fc90ad39e04884ac3e176efd484fe3faabc84be341b729a6c8315ecfc",
+    "be8ebf3-full-rerun.jsonl.gz": "842db47f021131eaafb2149b634407aa9e794560af98d0c1af5cd01ecc0f6f13",
+    "be8ebf3-full-rerun-193998b-transitions.json.gz": "c34dda14662bfd7cae99a3f833d21b7deeeee52848b2fb6fa72b0f2272434705",
+    "be8ebf3-full-rerun-6456b53-transitions.json.gz": "a340bcc9ce94e9de7072e7ce898020ce2203955ece3ed187fe9d01a1ed76b025",
+    "be8ebf3-full-rerun.json.gz": "3b0a248c9ff576a6e69fd04f343a9274ba0ec40e3513f4bc95551039e1d9fe8e",
+    "be8ebf3-syntax.json.gz": "361eb4d43a0474aa6490b123927dc2814eb9451e0f164afffa16e9cc7aac0e35",
+    "be8ebf3-contextual.json.gz": "f5904d43586ef093ec576548e91e7764dd5143a1476e56b0c71af4e9a38562d6",
+    "be8ebf3-ownkeys-timing.py.gz": "50c292b91ca99acbf5c1327bfbb6463b6d701eaa7f0f4f790dd2d4406d0692e1",
+    "be8ebf3-ownkeys-timing.json.gz": "6a34afc73c8e66d4097ad533a472a17881a7de2d6c60186a1575b17f11b3d86a",
+    "be8ebf3-ownkeys-timing.log.gz": "870d2e8558bac6303f678fff9935194279d2955eecd27b4c0c145afb373070af",
+    "be8ebf3-ownkeys-isolated-current.json.gz": "c94873217c1d63c247805d4c02bd4f2bd0e77ba4bc794ed8b86369c5a7f185da",
+    "be8ebf3-ownkeys-isolated-previous.json.gz": "6a57935fc8dccac94d01adc451056a129cf4ac8639fd380e6c5161ec9cb5beb8",
+    "be8ebf3-full-rerun-parse-negative-classification.json.gz": "b18832b7c3d693ab8f2916a0841aaa8977e9c58febf00819760aa3656b6c8366"
+  },
+  "worker_sha256": "3852475469022c00ba0881de2ed18c4f61ec7e731cfe6261b50a899093dec7d7",
+  "focused": {
+    "total": 60040,
+    "current_counts": {
+      "pass": 47017,
+      "fail": 13023,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 2352,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent c82f617 full report"
+  },
+  "full": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 66207,
+      "fail": 36746,
+      "skip": 0,
+      "timeout": 3,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 24801,
+    "lost_passes": 1,
+    "baseline": "PR #23"
+  },
+  "full_recent": {
+    "new_passes": 2535,
+    "lost_passes": 1
+  },
+  "runtime_regression_gate": "Full repeat passed zero-loss/zero-crash gate; original full run retained with one wall-clock timeout",
+  "performance_diagnostic": {
+    "isolated_cases": 8,
+    "passes": 8,
+    "new_worker_seconds": [
+      2.6451748379913624,
+      2.8690719389996957,
+      2.484511711008963,
+      2.560753432000638
+    ],
+    "previous_worker_seconds": [
+      3.227715654007625,
+      2.943223560010665,
+      3.218897700004163,
+      2.976222236000467
+    ]
+  },
+  "full_repeat": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 66208,
+      "fail": 36746,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 24801,
+    "lost_passes": 0,
+    "baseline": "pr23"
+  },
+  "full_repeat_recent": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 66208,
+      "fail": 36746,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 2535,
+    "lost_passes": 0,
+    "baseline": "c82f617"
+  },
+  "full_repeat_previous": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 66208,
+      "fail": 36746,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 57,
+    "lost_passes": 0,
+    "baseline": "193998b"
+  },
+  "parse_negative_execution": {
+    "total": 8659,
+    "nonpasses": 0
+  },
+  "syntax": {
+    "parse_negative": 8659,
+    "accepted_invalid": 0,
+    "requires_acceptance": 94297,
+    "rejected_valid": 154
+  }
+}

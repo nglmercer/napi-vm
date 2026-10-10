@@ -298,6 +298,16 @@ pub enum Instr {
         args: Reg,
         argc: u16,
     },
+    ConstructSpread {
+        dst: Reg,
+        callee: Reg,
+        tmpl: u16,
+    },
+    /// Evaluate the iterator now and retain its values in a private dense array.
+    ExpandSpread {
+        dst: Reg,
+        src: Reg,
+    },
     /// `dst = {}`: a fresh ordinary object. Superseded by [`Instr::BuildObject`]
     /// (single-shot construction needs no live intermediate); retained as
     /// valid IR, never emitted.
@@ -465,14 +475,43 @@ pub enum Instr {
     },
     /// `dst` = `super(args)`: invoke the superclass constructor on the
     /// current `this` (an error outside a derived constructor).
+    SuperReference {
+        base: Reg,
+        receiver: Reg,
+        key: Reg,
+        src: Reg,
+    },
+    GetPropertyWithReceiver {
+        dst: Reg,
+        base: Reg,
+        receiver: Reg,
+        key: Reg,
+    },
+    SetPropertyWithReceiver {
+        base: Reg,
+        receiver: Reg,
+        key: Reg,
+        value: Reg,
+    },
+    NumericUpdate {
+        previous: Reg,
+        updated: Reg,
+        src: Reg,
+        increment: bool,
+    },
+    SuperConstructor {
+        dst: Reg,
+    },
     SuperCall {
         dst: Reg,
+        callee: Reg,
         args: Reg,
         argc: u16,
     },
     /// Spread-argument form of [`Instr::SuperCall`].
     SuperCallSpread {
         dst: Reg,
+        callee: Reg,
         tmpl: u16,
     },
     /// Raise `constants[msg]` as a runtime error. Used where the
@@ -604,6 +643,8 @@ pub enum Opcode {
     CallMethod,
     Template,
     Construct,
+    ConstructSpread,
+    ExpandSpread,
     NewObject,
     SetOwnProp,
     NewArray,
@@ -629,6 +670,11 @@ pub enum Opcode {
     PopHandler,
     Rethrow,
     SuperMember,
+    SuperReference,
+    GetPropertyWithReceiver,
+    SetPropertyWithReceiver,
+    NumericUpdate,
+    SuperConstructor,
     SuperCall,
     SuperCallSpread,
     Raise,
@@ -698,6 +744,8 @@ impl Instr {
             Instr::CallMethod { .. } => Opcode::CallMethod,
             Instr::Template { .. } => Opcode::Template,
             Instr::Construct { .. } => Opcode::Construct,
+            Instr::ConstructSpread { .. } => Opcode::ConstructSpread,
+            Instr::ExpandSpread { .. } => Opcode::ExpandSpread,
             Instr::NewObject { .. } => Opcode::NewObject,
             Instr::SetOwnProp { .. } => Opcode::SetOwnProp,
             Instr::NewArray { .. } => Opcode::NewArray,
@@ -723,6 +771,11 @@ impl Instr {
             Instr::PopHandler => Opcode::PopHandler,
             Instr::Rethrow => Opcode::Rethrow,
             Instr::SuperMember { .. } => Opcode::SuperMember,
+            Instr::SuperReference { .. } => Opcode::SuperReference,
+            Instr::GetPropertyWithReceiver { .. } => Opcode::GetPropertyWithReceiver,
+            Instr::SetPropertyWithReceiver { .. } => Opcode::SetPropertyWithReceiver,
+            Instr::NumericUpdate { .. } => Opcode::NumericUpdate,
+            Instr::SuperConstructor { .. } => Opcode::SuperConstructor,
             Instr::SuperCall { .. } => Opcode::SuperCall,
             Instr::SuperCallSpread { .. } => Opcode::SuperCallSpread,
             Instr::Raise { .. } => Opcode::Raise,
@@ -757,7 +810,7 @@ impl Instr {
             | Opcode::CallMethod
             | Opcode::CallSpread
             | Opcode::MethodSpread => 5,
-            Opcode::Construct => 8,
+            Opcode::Construct | Opcode::ConstructSpread => 8,
             Opcode::NewObject | Opcode::NewArray | Opcode::BuildObject | Opcode::BuildArray => 10,
             Opcode::GetProp | Opcode::SetProp | Opcode::SetOwnProp => 2,
             Opcode::Mov
@@ -915,6 +968,10 @@ impl fmt::Display for Instr {
             } => {
                 write!(f, "CONSTRUCT r{dst}, r{callee}, r{args}..r{args}+{argc}")
             }
+            Instr::ConstructSpread { dst, callee, tmpl } => {
+                write!(f, "CONSTRUCT_SPREAD r{dst}, r{callee}, c{tmpl}")
+            }
+            Instr::ExpandSpread { dst, src } => write!(f, "EXPAND_SPREAD r{dst}, r{src}"),
             Instr::NewObject { dst } => write!(f, "NEW_OBJECT r{dst}"),
             Instr::SetOwnProp { obj, key, val } => match key {
                 KeySrc::Const(c) => write!(f, "SET_OWN_PROP r{obj}, c{c}, r{val}"),
@@ -974,10 +1031,48 @@ impl fmt::Display for Instr {
             Instr::PopHandler => write!(f, "POP_HANDLER"),
             Instr::Rethrow => write!(f, "RETHROW"),
             Instr::SuperMember { dst, key } => write!(f, "SUPER_MEMBER r{dst}, r{key}"),
-            Instr::SuperCall { dst, args, argc } => {
-                write!(f, "SUPER_CALL r{dst}, r{args}..r{args}+{argc}")
+            Instr::SuperReference {
+                base,
+                receiver,
+                key,
+                src,
+            } => write!(f, "SUPER_REFERENCE r{base}, r{receiver}, r{key}, r{src}"),
+            Instr::GetPropertyWithReceiver {
+                dst,
+                base,
+                receiver,
+                key,
+            } => write!(f, "GET_WITH_RECEIVER r{dst}, r{base}, r{receiver}, r{key}"),
+            Instr::SetPropertyWithReceiver {
+                base,
+                receiver,
+                key,
+                value,
+            } => write!(
+                f,
+                "SET_WITH_RECEIVER r{base}, r{receiver}, r{key}, r{value}"
+            ),
+            Instr::NumericUpdate {
+                previous,
+                updated,
+                src,
+                increment,
+            } => write!(
+                f,
+                "NUMERIC_UPDATE r{previous}, r{updated}, r{src}, {increment}"
+            ),
+            Instr::SuperConstructor { dst } => write!(f, "SUPER_CONSTRUCTOR r{dst}"),
+            Instr::SuperCall {
+                dst,
+                callee,
+                args,
+                argc,
+            } => {
+                write!(f, "SUPER_CALL r{dst}, r{callee}, r{args}..r{args}+{argc}")
             }
-            Instr::SuperCallSpread { dst, tmpl } => write!(f, "SUPER_CALL_SPREAD r{dst}, c{tmpl}"),
+            Instr::SuperCallSpread { dst, callee, tmpl } => {
+                write!(f, "SUPER_CALL_SPREAD r{dst}, r{callee}, c{tmpl}")
+            }
             Instr::Raise { msg } => write!(f, "RAISE c{msg}"),
             Instr::BuildClass { dst, tmpl } => write!(f, "BUILD_CLASS r{dst}, c{tmpl}"),
             Instr::PropertyKey { dst, src } => write!(f, "PROPERTY_KEY r{dst}, r{src}"),

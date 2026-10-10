@@ -293,7 +293,7 @@ impl Parser {
             self.semi();
             Some(Statement::ExportAll {
                 attributes,
-                source: self.module_specifier(source)?,
+                source,
                 alias,
             })
         } else if self.eat(&Token::LBrace) {
@@ -339,7 +339,7 @@ impl Parser {
             Some(Statement::ExportNamed {
                 attributes,
                 specifiers: sp,
-                source: s.and_then(|value| self.module_specifier(value)),
+                source: s,
             })
         } else {
             self.export_decl()
@@ -412,32 +412,48 @@ impl Parser {
         if let Token::String(value) | Token::EscapedString(value) = self.cur() {
             let value = value.clone();
             self.adv();
-            return self.module_specifier(value);
+            return match value.to_utf8() {
+                Ok(name) => Some(name),
+                Err(_) => {
+                    self.record_error("module export names must be well-formed Unicode".into());
+                    None
+                }
+            };
         }
         self.ident_or_keyword()
     }
 
+    /// Named imports share grammar whether or not a default import precedes
+    /// them. A quoted ModuleExportName always requires an explicit local name.
+    fn named_imports(&mut self) -> Option<Vec<(String, String)>> {
+        let mut nd = Vec::new();
+        while self.until(&Token::RBrace) {
+            let string_import = matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
+            let imported = self.import_specifier_name()?;
+            let local = if self.eat(&Token::KwAs) {
+                self.ident()?
+            } else {
+                if string_import {
+                    self.record_error("string import names require a local binding".into());
+                }
+                imported.clone()
+            };
+            nd.push((imported, local));
+            if !matches!(self.cur(), Token::RBrace) {
+                self.expect(&Token::Comma);
+            }
+        }
+        self.expect(&Token::RBrace);
+        Some(nd)
+    }
+
     pub(super) fn import(&mut self) -> Option<Statement> {
         self.adv();
-        let def = if let Token::Identifier(n) | Token::EscapedIdentifier(n) = self.cur() {
-            let nm = n.clone();
-            self.adv();
+        let def = if self.cur().identifier_name().is_some() {
+            let nm = self.ident()?;
             if self.eat(&Token::Comma) {
                 if self.eat(&Token::LBrace) {
-                    let mut nd = Vec::new();
-                    while self.until(&Token::RBrace) {
-                        let imported = self.import_specifier_name()?;
-                        let local = if self.eat(&Token::KwAs) {
-                            self.ident()?
-                        } else {
-                            imported.clone()
-                        };
-                        nd.push((imported, local));
-                        if !matches!(self.cur(), Token::RBrace) {
-                            self.eat(&Token::Comma);
-                        }
-                    }
-                    self.expect(&Token::RBrace);
+                    let nd = self.named_imports()?;
                     let m = self.from()?;
                     Some(Statement::Import {
                         attributes: Vec::new(),
@@ -460,7 +476,7 @@ impl Parser {
                 } else {
                     None
                 }
-            } else if self.eat(&Token::KwFrom) {
+            } else if matches!(self.cur(), Token::KwFrom) {
                 let m = self.from()?;
                 Some(Statement::Import {
                     attributes: Vec::new(),
@@ -473,7 +489,7 @@ impl Parser {
                 None
             }
         } else if self.eat(&Token::Star) {
-            self.eat(&Token::KwAs);
+            self.expect(&Token::KwAs);
             let ns = self.ident()?;
             let m = self.from()?;
             Some(Statement::Import {
@@ -484,25 +500,7 @@ impl Parser {
                 namespace: Some(ns),
             })
         } else if self.eat(&Token::LBrace) {
-            let mut nd = Vec::new();
-            while self.until(&Token::RBrace) {
-                let string_import =
-                    matches!(self.cur(), Token::String(_) | Token::EscapedString(_));
-                let imported = self.import_specifier_name()?;
-                let local = if self.eat(&Token::KwAs) {
-                    self.ident()?
-                } else {
-                    if string_import {
-                        self.record_error("string import names require a local binding".into());
-                    }
-                    imported.clone()
-                };
-                nd.push((imported, local));
-                if !matches!(self.cur(), Token::RBrace) {
-                    self.eat(&Token::Comma);
-                }
-            }
-            self.expect(&Token::RBrace);
+            let nd = self.named_imports()?;
             let m = self.from()?;
             Some(Statement::Import {
                 attributes: Vec::new(),
@@ -512,7 +510,7 @@ impl Parser {
                 namespace: None,
             })
         } else if let Token::String(s) | Token::EscapedString(s) = self.cur() {
-            let m = self.module_specifier(s.clone())?;
+            let m = s.clone();
             self.adv();
             Some(Statement::Import {
                 attributes: Vec::new(),
@@ -576,23 +574,13 @@ impl Parser {
         Some(attributes)
     }
 
-    // Module loader identifiers are a UTF-8 host contract. Reject rather than
-    // aliasing an unpaired surrogate to the replacement character.
-    fn module_specifier(&mut self, value: crate::JsString) -> Option<String> {
-        match value.to_utf8() {
-            Ok(value) => Some(value),
-            Err(_) => {
-                self.record_error("module specifier contains an unpaired surrogate unsupported by the UTF-8 loader contract".into());
-                None
-            }
-        }
-    }
-
-    fn from(&mut self) -> Option<String> {
-        self.eat(&Token::KwFrom);
+    // Preserve the ModuleSpecifier StringValue independently of the host
+    // loader's encoding; validation belongs to module resolution.
+    fn from(&mut self) -> Option<crate::JsString> {
+        self.expect(&Token::KwFrom);
         match self.cur() {
             Token::String(s) | Token::EscapedString(s) | Token::LegacyString(s) => {
-                let v = self.module_specifier(s.clone())?;
+                let v = s.clone();
                 self.adv();
                 Some(v)
             }
