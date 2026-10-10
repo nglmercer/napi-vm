@@ -352,3 +352,10 @@ a separate gate; the 287bddc full result above does not measure this later
 implementation. Computed Symbol retention,
 observable class-key conversion, dynamic home-object super lookup and complete
 internal-operation/realm coverage remain open dependencies.
+
+
+The frozen 5868d51 expanded selection passed 26,649/33,063 variants, with
+6,414 failures and zero skips, crashes, timeouts or harness errors. Against the
+matching 287bddc full projection: 898 new passes, zero losses. This passed the
+regression gate for a new complete pinned corpus run. The full run must be
+reported independently when completed; these focused results do not replace it.

@@ -37,7 +37,13 @@
     "5868d51-allfeatures-tests.log.gz": "a76e51933eb7da99666484b0d4f50c12248136dba798d68703206c6aba92f931",
     "5868d51-clippy.log.gz": "14aad944183fd96be01ff6b59154cdb0507cca56a898050b078c3027fea47430",
     "5868d51-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
-    "5868d51-release-build.log.gz": "0885898aa055c807e240e83f0f06df502bc39f50aceee2e98da3868fe6d516c6"
+    "5868d51-release-build.log.gz": "0885898aa055c807e240e83f0f06df502bc39f50aceee2e98da3868fe6d516c6",
+    "5868d51-focused-287bddc-transitions.json.gz": "2cf22fc63394c6e10bf1f2c2df30bee02f54828788accd5254e7eb53ec4401a0",
+    "5868d51-focused.json.gz": "797c80624c9dc3a8b5390159abb46f8b7ff1a1a96fbf6635eb30ccc683359c57",
+    "5868d51-focused-transitions.json.gz": "8b4c9cec8333c4fceb4546d6d06c3294f56952bba5c012c4568e36ad657cc836",
+    "5868d51-focused.jsonl.gz": "3a0eb58e3860536689c3f56047c4c357e2bd83a31ca4fb60a6e5608402aa2f4e",
+    "5868d51-focused-287bddc-projection.json.gz": "4d8c8a007bb620469fc7e91be85363bc677c392bbb0fcb9bc8e9066b3364c37a",
+    "5868d51-focused-7c0a9ce-projection.json.gz": "70d93f17462d7bf998aaacdd8d5b8ba11a2b15650e786c8d54b274c594613937"
   },
   "worker_sha256": "3740b83cd0a530c3221822f1e825ddbe85ce82d4b0c9906b4a36dc207ff96373",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
@@ -49,5 +55,19 @@
     "max_call_depth": 128,
     "max_jobs": 10000,
     "skip_features": []
+  },
+  "focused": {
+    "total": 33063,
+    "current_counts": {
+      "pass": 26649,
+      "fail": 6414,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 898,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent 287bddc full report"
   }
 }
