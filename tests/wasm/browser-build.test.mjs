@@ -8,7 +8,7 @@
 // Run `npm run playground:build` first; the suite skips itself if the package
 // is not built.
 
-import { test, before, describe } from "node:test";
+import { test, before, beforeEach, afterEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,14 +19,26 @@ const pkg = join(root, "playground", "pkg");
 const built = existsSync(join(pkg, "napi_vm_bg.wasm"));
 
 let vm;
+let WasmVm;
 let timersAvailable = false;
 
 before(async () => {
   if (!built) return;
   const module = await import(join(pkg, "napi_vm.js"));
   module.initSync({ module: readFileSync(join(pkg, "napi_vm_bg.wasm")) });
-  vm = new module.WasmVm();
+  WasmVm = module.WasmVm;
+});
+
+beforeEach(() => {
+  if (!built) return;
+  vm = new WasmVm();
+  timersAvailable = false;
   try { vm.enable_timers(); timersAvailable = true; } catch {}
+});
+
+afterEach(() => {
+  vm?.free();
+  vm = undefined;
 });
 
 /// Run one program and return its value, asserting that it succeeded.
@@ -37,6 +49,16 @@ function run(source) {
 }
 
 describe("browser build", { skip: built ? false : "playground/pkg is not built" }, () => {
+  test("persistent globals separate lexical bindings from object properties", () => {
+    assert.equal(run("let lexical=1;globalThis.lexical=2;var objectSide=3;lexical;"), "1");
+    assert.equal(run("globalThis.lexical;"), "2");
+    assert.equal(run("globalThis.objectSide;"), "3");
+    const duplicate = vm.run("let lexical=9;");
+    assert.equal(duplicate.ok, false);
+    assert.match(duplicate.error, /SyntaxError/);
+    assert.equal(run("lexical;"), "1");
+  });
+
   test("UTF-16 host callbacks preserve surrogate strings and keys", () => {
     assert.equal(run("'" + '\ud800' + "'.charCodeAt(0)"), '55296');
     vm.expose_function('\ud800', value => value);
@@ -89,11 +111,11 @@ describe("browser build", { skip: built ? false : "playground/pkg is not built" 
 
   test("a generator reports done and its return value", () => {
     assert.equal(
-      run("function* g() { yield 1; return 9; } const it = g(); it.next(); it.next().value;"),
+      run("function* g() { yield 1; return 9; } { const it = g(); it.next(); it.next().value; }"),
       "9",
     );
     assert.equal(
-      run("function* g() { yield 1; } const it = g(); it.next(); String(it.next().done);"),
+      run("function* g() { yield 1; } { const it = g(); it.next(); String(it.next().done); }"),
       "true",
     );
   });
