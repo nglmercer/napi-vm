@@ -1190,7 +1190,7 @@ impl Environment {
     /// Remove a binding from this frame only (does not walk the parent chain).
     /// Returns `true` if the binding existed and was removed.
     pub fn remove(&mut self, n: &str) -> bool {
-        match &mut self.vars {
+        let removed = match &mut self.vars {
             Vars::Small(vars) => {
                 if let Some(pos) = vars.iter().position(|(k, _)| &**k == n) {
                     vars.remove(pos);
@@ -1200,7 +1200,30 @@ impl Environment {
                 }
             }
             Vars::Large(map) => map.remove(n).is_some(),
+        };
+        if removed {
+            return true;
         }
+        if let Some(record) = &mut self.global_environment {
+            let Some(index) = record.object.own_index(n) else {
+                return false;
+            };
+            record.object.borrow_mut().remove(index);
+            let companion = format!("__setter:{n}__");
+            record
+                .object
+                .borrow_mut()
+                .retain(|(key, _)| key != &companion);
+            let mut meta = record.object.meta.borrow_mut();
+            meta.forget(n);
+            meta.forget(&companion);
+            drop(meta);
+            record.object.note_mutated();
+            record.var_names.remove(n);
+            record.user_names.remove(n);
+            return true;
+        }
+        false
     }
 
     /// Check whether a binding exists in this frame only (no parent walk).

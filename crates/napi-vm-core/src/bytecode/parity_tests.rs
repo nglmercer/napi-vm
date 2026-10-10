@@ -1401,3 +1401,16 @@ fn lexical_iteration_tdz_and_capture() {
         check(source, true);
     }
 }
+
+#[test]
+fn property_update_fast_paths_preserve_observable_operations() {
+    for source in [
+        "var calls=0,o={x:1},key={toString(){calls++;return 'x';}};var old=o[key]++;[calls,old,o.x]",
+        "var reads=0,writes=0,value=1,o={get x(){reads++;return value;},set x(v){writes++;value=v;}};var old=o.x++;[reads,writes,old,value]",
+        "var reads=0,writes=0,o=new Proxy({x:1},{get(t,k,r){reads++;return Reflect.get(t,k,r);},set(t,k,v,r){writes++;return Reflect.set(t,k,v,r);}});var old=o.x++;[reads,writes,old,o.x]",
+        "var o={};Object.defineProperty(o,'x',{value:1,writable:false});var old=o.x++;[old,o.x]",
+        "var value=1,reads=0,writes=0;Object.defineProperty(globalThis,'x',{get(){reads++;return value;},set(v){writes++;value=v;},configurable:true});var old=x++;[reads,writes,old,value]",
+    ] {
+        check(source, true);
+    }
+}

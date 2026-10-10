@@ -803,8 +803,12 @@ impl Interpreter {
         key: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let accepted =
-            self.set_member_with_receiver(object, &Value::String(key.into()), value, object)?;
+        let accepted = self.set_member_with_receiver(
+            object,
+            &Value::String(crate::JsString::from_key(key)),
+            value,
+            object,
+        )?;
         self.finish_property_write(accepted, key, self.global.borrow().strict())
     }
 
@@ -824,8 +828,12 @@ impl Interpreter {
         key: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let accepted =
-            self.set_member_with_receiver(object, &Value::String(key.into()), value, object)?;
+        let accepted = self.set_member_with_receiver(
+            object,
+            &Value::String(crate::JsString::from_key(key)),
+            value,
+            object,
+        )?;
         self.finish_property_write(accepted, key, true)
     }
 
@@ -1581,7 +1589,7 @@ impl Interpreter {
         prefix: bool,
     ) -> Result<Value, VmErr> {
         if let Some(object) = self.with_binding_object(scope, name)? {
-            let key = Value::String(name.into());
+            let key = Value::String(crate::JsString::from_key(name));
             return self.inc_prop_value(&object, &key, inc, prefix);
         }
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
@@ -1652,13 +1660,31 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
-        let cur = self.get_prop_value(obj, prop)?;
+        // An own writable Number data slot cannot invoke guest conversion or
+        // prototype setters. Update it directly through the same property cell,
+        // preserving descriptors and avoiding temporary descriptor objects.
+        let key = self.proxy_property_key(prop)?;
+        let name = self.property_key(&key)?;
+        if let Some(cell) = obj.property_cell()
+            && let Some(index) = cell.own_index(&name)
+            && cell.meta.borrow().attrs_of(&name).writable
+            && let Some(Value::Number(number)) = cell.slot_verified(index, &name)
+        {
+            let updated = Value::Number(if inc { number + 1.0 } else { number - 1.0 });
+            cell.borrow_mut()[index].1 = updated.clone();
+            return Ok(if prefix {
+                updated
+            } else {
+                Value::Number(number)
+            });
+        }
+        let cur = self.get_prop_value(obj, &key)?;
         let new_val = Value::Number(if inc {
             self.tn(&cur) + 1.0
         } else {
             self.tn(&cur) - 1.0
         });
-        self.assign_member(obj, prop, new_val.clone())?;
+        self.assign_member(obj, &key, new_val.clone())?;
         if prefix { Ok(new_val) } else { Ok(cur) }
     }
 

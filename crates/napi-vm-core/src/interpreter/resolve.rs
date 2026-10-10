@@ -82,7 +82,9 @@ impl Interpreter {
                     return Ok(environment.borrow().lookup(name));
                 }
                 let object = Value::RealmGlobal(environment.clone());
-                return if self.has_property(&object, &Value::String(name.into()))? {
+                return if self
+                    .has_property(&object, &Value::String(crate::JsString::from_key(name)))?
+                {
                     self.get_prop_value_str(&object, name)
                         .map(super::Lookup::Value)
                 } else {
@@ -113,7 +115,7 @@ impl Interpreter {
     }
 
     fn with_has_binding(&mut self, object: &Value, name: &str) -> Result<bool, VmErr> {
-        if !self.has_property(object, &Value::String(name.into()))? {
+        if !self.has_property(object, &Value::String(crate::JsString::from_key(name)))? {
             return Ok(false);
         }
         if let Some(symbol) = crate::builtins::well_known("unscopables") {
@@ -152,7 +154,7 @@ impl Interpreter {
                 }
                 let object = Value::RealmGlobal(environment.clone());
                 return self
-                    .has_property(&object, &Value::String(name.into()))
+                    .has_property(&object, &Value::String(crate::JsString::from_key(name)))
                     .map(|has| has.then_some(object));
             }
             if local {
@@ -193,8 +195,9 @@ impl Interpreter {
             }
             if global {
                 let object = Value::RealmGlobal(environment.clone());
-                if self.has_property(&object, &Value::String(name.into()))? {
-                    let result = self.delete_member(&object, &Value::String(name.into()))?;
+                if self.has_property(&object, &Value::String(crate::JsString::from_key(name)))? {
+                    let result = self
+                        .delete_member(&object, &Value::String(crate::JsString::from_key(name)))?;
                     if matches!(result, Value::Bool(true)) {
                         environment.borrow_mut().remove_global_var_name(name);
                     }
@@ -205,7 +208,8 @@ impl Interpreter {
             if let Some(object) = object
                 && self.with_has_binding(&object, name)?
             {
-                return self.delete_member(&object, &Value::String(name.into()));
+                return self
+                    .delete_member(&object, &Value::String(crate::JsString::from_key(name)));
             }
             frame = parent;
         }
@@ -670,6 +674,15 @@ impl Interpreter {
             {
                 return Ok(crate::builtins::valid_integer_index(view, index));
             }
+            // Named own slots already establish presence; avoid materializing
+            // a descriptor on ordinary [[HasProperty]] hits. Virtual/exotic
+            // properties still use their shared descriptor operation below.
+            if current
+                .property_cell()
+                .is_some_and(|cell| cell.own_index(&property).is_some())
+            {
+                return Ok(true);
+            }
             let descriptor =
                 crate::builtins::object::descriptor_for_key_in(self, &current, &trap_key)?;
             if !matches!(descriptor, Value::Undefined) {
@@ -928,7 +941,7 @@ impl Interpreter {
                     crate::builtins::object::descriptor_for_key_in(
                         self,
                         o,
-                        &Value::String(key.into())
+                        &Value::String(crate::JsString::from_key(key))
                     )?,
                     Value::Undefined
                 )
@@ -1469,8 +1482,8 @@ fn lookup_chain_found(interp: &Interpreter, o: &Value, key: &str) -> Result<Opti
                 None => return Ok(None),
             },
         };
-        if let Some((_, value)) = props.borrow().iter().find(|(xk, _)| xk == key) {
-            return Ok(Some(value.clone()));
+        if let Some(value) = props.own_value(key) {
+            return Ok(Some(value));
         }
         let Some(next) = interp.prototype_of(node) else {
             return Ok(None);

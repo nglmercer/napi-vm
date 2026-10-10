@@ -1527,7 +1527,12 @@ impl Interpreter {
 
     pub(crate) fn set_global_property(&mut self, name: &str, value: Value) -> Result<bool, VmErr> {
         let target = self.realm_global_object();
-        self.set_member_with_receiver(&target, &Value::String(name.into()), value, &target)
+        self.set_member_with_receiver(
+            &target,
+            &Value::String(crate::JsString::from_key(name)),
+            value,
+            &target,
+        )
     }
 
     #[doc(hidden)]
@@ -1764,7 +1769,7 @@ impl Interpreter {
             return receiver.private_field(id);
         }
         // Private methods/accessors still use their legacy class slots.
-        if !self.has_property(receiver, &Value::String(name.into()))? {
+        if !self.has_property(receiver, &Value::String(crate::JsString::from_key(name)))? {
             return Err(VmErr::Msg(
                 "TypeError: receiver does not contain the private member".into(),
             ));
@@ -2022,7 +2027,7 @@ impl Interpreter {
             let descriptor = crate::builtins::object::descriptor_for_key_in(
                 self,
                 &global,
-                &Value::String(name.as_str().into()),
+                &Value::String(crate::JsString::from_key(name)),
             )?;
             let definable = if matches!(descriptor, Value::Undefined) {
                 extensible
@@ -2064,7 +2069,7 @@ impl Interpreter {
             return self.set_binding_in(scope, name, value);
         }
         let target = Value::RealmGlobal(scope.clone());
-        let key = Value::String(name.into());
+        let key = Value::String(crate::JsString::from_key(name));
         let previous = crate::builtins::object::descriptor_for_key_in(self, &target, &key)?;
         let mut fields = vec![("value".into(), value)];
         if matches!(previous, Value::Undefined)

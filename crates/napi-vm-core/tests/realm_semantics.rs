@@ -1748,3 +1748,16 @@ fn proxy_prototypes_preserve_receivers_and_frozen_get_invariants() {
         );
     }
 }
+
+#[test]
+fn global_host_names_preserve_utf16_keys_and_removal_releases_the_record() {
+    let mut vm = Interpreter::with_builtins();
+    let key = napi_vm_core::JsString::from_units(vec![0xd800]).to_key();
+    vm.set_global_checked(&key, Value::Number(42.0)).unwrap();
+    assert!(matches!(vm.global_value(&key), Some(Value::Number(42.0))));
+    truth(&mut vm, "globalThis['\\ud800']===42;");
+    assert!(vm.persistent_global.borrow_mut().remove(&key));
+    assert!(vm.global_value(&key).is_none());
+    truth(&mut vm, "!Object.hasOwn(globalThis,'\\ud800');");
+    assert!(!vm.persistent_global.borrow_mut().remove(&key));
+}
