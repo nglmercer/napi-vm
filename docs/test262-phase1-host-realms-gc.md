@@ -415,3 +415,11 @@ The c82f617 required checks passed: formatting, strict Clippy, 952 workspace
 tests (four existing ignored), 203 minimal-feature tests, 73 Node tests, 15 WASM
 tests and ten runner/tooling tests. Frozen-worker focused/full validation is
 running separately; the latest valid complete measurement remains 5868d51.
+
+
+The frozen c82f617 expanded focus passed 29,053/37,581 variants, with 8,528
+failures and zero timeouts, crashes, harness errors or skips. Against the matching
+5868d51 full projection: 48 new passes, zero lost passes. The earlier identifier
+timeout passed at unchanged limits. The focused gate permits a new full pinned
+corpus run, which is running; it does not replace the latest completed 5868d51
+full result. Exact focused reports, checkpoints and comparisons are archived.

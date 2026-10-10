@@ -1,6 +1,6 @@
 {
   "source_commit": "c82f61725831b9a94d02b468663596984378007d",
-  "classification": "RegExp realm state and shared dictionary layout growth; corpus validation pending",
+  "classification": "RegExp realm state and shared dictionary layouts; focused evidence, full pending",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -48,7 +48,27 @@
     "c82f617-node-tests.log.gz": "72c3ed436a06f3b7ae3575f13d6c23cc2032da07e37f57d11e903f16523ddaca",
     "c82f617-release-build.log.gz": "ad99a033dee5a1f4183500765de2b2245d01bdb2b0eee7a956863f38a1a9b4da",
     "c82f617-tooling-tests.log.gz": "c54775ca8526f0ffa72015cf3534243168df578ca98d5e691c45b12d6f43781e",
-    "c82f617-wasm-tests.log.gz": "c25389971171ef5fc3d1d7bdb90a45912431c42550966f64284e1d8d2c22f838"
+    "c82f617-wasm-tests.log.gz": "c25389971171ef5fc3d1d7bdb90a45912431c42550966f64284e1d8d2c22f838",
+    "c82f617-focused-5868d51-projection.json.gz": "1b87db443dbbd1d6d9ba1e9f093dec3dc9dcf765881ec2b0cb08a396810dee15",
+    "c82f617-focused-7c0a9ce-projection.json.gz": "11c28f35d1f2df70a7795de67239b7804ff97935ae2cead514236c18eb602c94",
+    "c82f617-focused-transitions.json.gz": "3641ddc8c8908e940074595aaaae3b1f9a42341526fc42230b98318eadbb98cc",
+    "c82f617-focused.json.gz": "43209e6c716e8b703df7910690260b4754a58f84afdd8f5d87c1742101e2a628",
+    "c82f617-focused-5868d51-transitions.json.gz": "a8241ba592f3ab3aaa5bd086f1492a7c4d2e40ba96a31867ab98d8ddcf95b9c2",
+    "c82f617-focused.jsonl.gz": "dcddf6c677da2d8a5b0a763992f139226a4f1007ed1b460c6401a4810c05eb8b"
   },
-  "worker_sha256": "d4b6e2cbebdeec92f668f7dadc76e284b9a27250721daf6ec94e79c15cbe93a6"
+  "worker_sha256": "d4b6e2cbebdeec92f668f7dadc76e284b9a27250721daf6ec94e79c15cbe93a6",
+  "focused": {
+    "total": 37581,
+    "current_counts": {
+      "pass": 29053,
+      "fail": 8528,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 48,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent 5868d51 full report"
+  }
 }
