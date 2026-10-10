@@ -235,3 +235,10 @@ finds no syntax differences. The probe script, syntax reports, required-check
 logs and checksums are archived. These are syntax comparisons, not execution
 or AST/bytecode parity measurements. Expanded focused and full runtime
 validation remain pending for this source.
+
+The expanded `32a469b` focus completed 59,714 variants with 46,775 passes
+and 12,939 failures. Compared with the matching merged-PR-24 projection
+(`c82f617`), it gains 2,228 passes and loses none. Crashes, timeouts, harness
+errors and skips are all zero. Exact focused reports/checkpoints/transitions
+are archived. The full pinned execution is running separately; the focus
+does not establish a full-corpus result or Phase 1/2 completion.

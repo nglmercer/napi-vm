@@ -1,6 +1,6 @@
 {
   "source_commit": "32a469b39a62f4b96d37af97d1b3c33c2120c730",
-  "classification": "Agent owner heap cleanup, shared contextual import bindings and UTF-16 module requests; execution validation pending",
+  "classification": "Agent owner heap cleanup, shared contextual import grammar and realm-owned iterator allocation; focused evidence, full pending",
   "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
   "configuration": {
     "workers": 4,
@@ -54,7 +54,13 @@
     "32a469b-contextual.json.gz": "93efbd087d6c13cf6966d03a7f98b0a31156cb3221944e84ef37fc792e3eb9d2",
     "32a469b-contextual.log.gz": "f81b0d8bab4b565b0c4386637f5f4ef1d3cc1b64de2a702d3b5f842fb184feff",
     "32a469b-context-probe.py.gz": "5f0de95b4b491080268ba454b667113dcc090524517859157159b0187a266f1e",
-    "32a469b-context-probe.json.gz": "c997f5ca25be90a1ea984543dd40e5a645c233a3ceb654ff39b235036b98b87a"
+    "32a469b-context-probe.json.gz": "c997f5ca25be90a1ea984543dd40e5a645c233a3ceb654ff39b235036b98b87a",
+    "32a469b-focused-c82f617-projection.json.gz": "478570d9999184b7cd7941b52269a37687c4f711904ee141a168b86949c30ab0",
+    "32a469b-focused.json.gz": "5dc0eec315efb07ce0a47f57f8c650127b2189944603fa65917701f398bbd2f6",
+    "32a469b-focused-c82f617-transitions.json.gz": "2716812c1b045e15a5c1d1a69f6b40cd95a1a172301f378f3c8e765e2525459c",
+    "32a469b-focused-transitions.json.gz": "db033d9384ebc75a7bd2870ccd65a9fa7f28ad55f8e325d23eaaeee4c1b3f54f",
+    "32a469b-focused.jsonl.gz": "acc4838f8bd66bdc17c374d5097bdda120fb8c959eb828ecc1e79e51e5dcd2f8",
+    "32a469b-focused-7c0a9ce-projection.json.gz": "783b96afed60178b71dc9a48bc87b2e979591fa5afdede46d9b3458961398af7"
   },
   "worker_sha256": "06b04d5d9ab917980c0d3ed7e9416f845a3242433a594c062c2ec6084a58e73b",
   "syntax": {
@@ -84,5 +90,19 @@
     "mismatches": 0,
     "domain": "syntax only",
     "script_archive": "32a469b-context-probe.py.gz"
+  },
+  "focused": {
+    "total": 59714,
+    "current_counts": {
+      "pass": 46775,
+      "fail": 12939,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 2228,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent c82f617 full report"
   }
 }
