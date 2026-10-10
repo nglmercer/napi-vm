@@ -385,3 +385,37 @@ fn dynamic_import_uses_abstract_to_string_and_rejects_coercion_errors() {
         Ok(Value::Bool(true))
     ));
 }
+
+#[test]
+fn malformed_utf16_module_requests_fail_at_linking_without_aliasing_paths() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var effects=0;").unwrap();
+    source(&mut vm, "\u{fffd}", "effects++;export const value=42;");
+    for (index, declaration) in [
+        r"import '\uD800';",
+        r"import {value} from '\uD800';",
+        r"export * from '\uD800';",
+        r"export * as ns from '\uD800';",
+        r"export {value} from '\uD800';",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let name = format!("request{index}");
+        source(&mut vm, &name, &format!("effects++;{declaration}"));
+        let error = vm.link_module(&name).unwrap_err();
+        assert!(
+            error.to_string().contains("TypeError")
+                && error.to_string().contains("UTF-8 host loader"),
+            "{declaration}: {error}"
+        );
+        number(&mut vm, "effects", 0.);
+    }
+    source(
+        &mut vm,
+        "valid",
+        "import {value} from '\u{fffd}';export {value};",
+    );
+    vm.load_module("valid").unwrap();
+    number(&mut vm, "effects", 1.);
+}

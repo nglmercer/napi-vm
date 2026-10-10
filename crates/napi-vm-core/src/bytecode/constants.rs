@@ -133,7 +133,7 @@ pub struct ClassTemplate {
 /// bind (default, `(imported, local)` pairs, namespace).
 #[derive(Debug, Clone)]
 pub struct ImportTemplate {
-    pub module: String,
+    pub module: crate::JsString,
     pub default: Option<String>,
     pub named: Vec<(String, String)>,
     pub namespace: Option<String>,
@@ -144,13 +144,13 @@ pub struct ImportTemplate {
 #[derive(Debug, Clone)]
 pub struct ExportNamedTemplate {
     pub specifiers: Vec<(String, String)>,
-    pub source: Option<String>,
+    pub source: Option<crate::JsString>,
 }
 
 /// One `export * [as ns] from 'm'` statement.
 #[derive(Debug, Clone)]
 pub struct ExportAllTemplate {
-    pub source: String,
+    pub source: crate::JsString,
     pub alias: Option<String>,
 }
 

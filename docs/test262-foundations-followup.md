@@ -168,6 +168,22 @@ Iterator helper algorithms, broader descriptor dependencies and other builtin
 algorithms remain explicit gaps; installing the abstract constructor does not
 claim those algorithms are implemented.
 
+## Phase 2 module request and declaration grammar follow-up
+
+ModuleSpecifier values remain UTF-16 through parsing, compilation and linked
+request records. The shared host-loader check rejects unsupported strings during
+linking, without aliasing a replacement-character source or executing module bodies.
+Module source caches and ownership remain intact. ModuleExportName strings retain
+their well-formed Unicode early error. Named imports share one parser; `from`, `as`
+and list separators are mandatory, and quoted names require local aliases in both
+ordinary and default-plus-named forms. AST/bytecode consume the same helpers.
+The combined core suite passes 655 tests; later frozen validation is still required.
+
+Source 421fd6d passed all required checks and its fresh full syntax audit. Exact
+logs/digests are retained; focused/full execution was explicitly deferred to the
+combined Phase 1/2 source after review found these additional parser gaps. No
+execution corpus result is claimed for 421fd6d.
+
 ## Remaining work
 
 Complete descriptor/internal-operation coverage remains open, including replacing

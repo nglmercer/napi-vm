@@ -400,19 +400,19 @@ pub enum Statement {
     ExportNamed {
         attributes: Vec<(String, crate::JsString)>,
         specifiers: Vec<(String, String)>,
-        source: Option<String>,
+        source: Option<crate::JsString>,
     },
     /// `export * from 'm'` and `export * as ns from 'm'`. With `alias`, the
     /// other module's namespace object is exported under that one name;
     /// without it, every named export of `m` is re-exported.
     ExportAll {
         attributes: Vec<(String, crate::JsString)>,
-        source: String,
+        source: crate::JsString,
         alias: Option<String>,
     },
     Import {
         attributes: Vec<(String, crate::JsString)>,
-        module: String,
+        module: crate::JsString,
         default: Option<String>,
         named: Vec<(String, String)>,
         namespace: Option<String>,

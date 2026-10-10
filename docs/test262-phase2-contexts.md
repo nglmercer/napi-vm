@@ -167,3 +167,30 @@ path omitted Cargo's `deps` directory. That driver failure is retained separatel
 no corpus outcomes were produced by it. The fixed tooling passes all ten tests.
 This compile-only result does not establish runtime conformance, Phase 1 realm
 completion, or full-corpus tier parity.
+
+## Import grammar and UTF-16 module requests (follow-up)
+
+Review beyond the pinned corpus found valid ModuleSpecifier strings rejected by
+an early UTF-8 loader check, and missing mandatory tokens in import declarations.
+Module requests now retain JsString values in the AST, bytecode templates and
+linked request records. The existing UTF-8 host loader rejects unsupported UTF-16
+at linking, before module body side effects; no replacement-character path is
+resolved and the realm-owned source/cache keys remain unchanged. ModuleExportName
+strings retain their separate well-formed Unicode early error.
+
+Named imports use one parser with required separators and explicit local aliases
+for quoted names, including after a default import. Namespace imports require
+`as`, and every from-clause requires `from`. Targeted coverage includes both valid
+forms and missing-token errors, original surrogate units, side-effect-free link
+failure, replacement-character path isolation, compiler/verifier templates and
+forced AST/bytecode errors. The combined core suite passes 655 tests. New full
+required checks, a source audit and pinned execution validation remain required.
+
+Source 421fd6d, before these additional parser corrections, passed all required
+checks: 980 workspace tests (four existing ignored), 203 minimal-feature tests,
+73 Node tests, 15 WASM tests, ten tooling tests, formatting and strict Clippy.
+Its fresh compile-only audit exactly matches 1005a4c: all 8,659 parse negatives
+rejected, zero accepted-invalid variants and the same 154 proposal/depth-limit
+rejections. Its execution was explicitly deferred to this combined Phase 1/2
+source. These results are archived under foundations-followup/421fd6d* and do not
+measure the later UTF-16/import changes.

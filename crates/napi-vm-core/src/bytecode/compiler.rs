@@ -5006,4 +5006,12 @@ mod tests {
         );
         assert!(module.main.constants.iter().any(|constant| matches!(constant, Constant::SpreadTemplate(entries) if entries.iter().any(|entry| entry.spread && entry.prepared))));
     }
+    #[test]
+    fn module_templates_preserve_utf16_requests_for_link_time_validation() {
+        let module = compile(r"import '\uD800';export * from '\uDC00';")
+            .expect("valid ModuleSpecifier strings");
+        crate::bytecode::verify::verify_module(&module).expect("UTF-16 module templates verify");
+        assert!(module.main.constants.iter().any(|constant| matches!(constant, Constant::ImportTemplate(template) if template.module.units()==[0xd800])));
+        assert!(module.main.constants.iter().any(|constant| matches!(constant, Constant::ExportAllTemplate(template) if template.source.units()==[0xdc00])));
+    }
 }

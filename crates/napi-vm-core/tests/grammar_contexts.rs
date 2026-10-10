@@ -1553,3 +1553,75 @@ fn labelled_and_static_blocks_preserve_statement_lexical_goals() {
         assert!(parses(source, ParseGoal::Script), "rejected {source}");
     }
 }
+
+#[test]
+fn module_specifier_strings_preserve_utf16_but_export_names_require_unicode() {
+    for source in [
+        r"import '\uD800';",
+        r"import value from '\uDC00';",
+        r"import * as ns from '\uD800';",
+        r"export * from '\uD800';",
+        r"export * as ns from '\uD800';",
+        r"export {value} from '\uD800';",
+        r"import {value as binding} from '\uD800';",
+    ] {
+        assert!(
+            parses(source, ParseGoal::Module),
+            "rejected valid module specifier: {source}"
+        );
+        assert!(
+            !parses(source, ParseGoal::Script),
+            "accepted module declaration in Script: {source}"
+        );
+    }
+    for source in [
+        r"import {'\uD800' as binding} from 'module';",
+        r"var value=1;export {value as '\uD800'};",
+    ] {
+        assert!(
+            !parses(source, ParseGoal::Module),
+            "accepted malformed ModuleExportName: {source}"
+        );
+    }
+    let source = r"import '\uD800';";
+    let program = Parser::new(Lexer::new(source).tokenize())
+        .parse_program_with_goal(ParseGoal::Module)
+        .unwrap();
+    let napi_vm_core::parser::Statement::Import { module, .. } = &program[0] else {
+        panic!("import");
+    };
+    assert_eq!(module.units(), &[0xd800]);
+}
+
+#[test]
+fn imports_require_from_as_and_specifier_separators() {
+    for source in [
+        "import {value} 'module';",
+        "import * ns from 'module';",
+        "import * as ns 'module';",
+        "import {a b} from 'module';",
+        "import defaultValue,{a b} from 'module';",
+        "import defaultValue,* as ns 'module';",
+        "import defaultValue,{value} 'module';",
+        "import defaultValue,{'value'} from 'module';",
+    ] {
+        assert!(
+            !parses(source, ParseGoal::Module),
+            "accepted invalid import grammar: {source}"
+        );
+    }
+    for source in [
+        "import defaultValue from 'module';",
+        "import {a,b as c,} from 'module';",
+        "import * as ns from 'module';",
+        "import defaultValue,* as ns from 'module';",
+        "import defaultValue,{a,b} from 'module';",
+        "import defaultValue,{'value' as binding} from 'module';",
+        r"import {'\uD83D\uDCA9' as binding} from 'module';",
+    ] {
+        assert!(
+            parses(source, ParseGoal::Module),
+            "rejected valid import grammar: {source}"
+        );
+    }
+}

@@ -1089,12 +1089,13 @@ impl Interpreter {
     /// VM's `Import` instruction run this, so binding semantics stay single.
     pub(crate) fn stmt_import(
         &mut self,
-        module: &str,
+        module: &crate::JsString,
         default: Option<&str>,
         named: &[(String, String)],
         namespace: Option<&str>,
     ) -> Result<Value, VmErr> {
-        let resolved_module = self.resolve_module_request(module)?;
+        let module = Self::host_module_specifier(module)?;
+        let resolved_module = self.resolve_module_request(&module)?;
         if let Some(name) = resolved_module.as_ref() {
             let name = name.clone();
             self.ensure_module(&name)?;
@@ -1158,7 +1159,7 @@ impl Interpreter {
     pub(crate) fn stmt_export_named(
         &mut self,
         specifiers: &[(String, String)],
-        source: Option<&str>,
+        source: Option<&crate::JsString>,
     ) -> Result<Value, VmErr> {
         if self.is_linked_module() {
             return Ok(Value::Undefined);
@@ -1167,7 +1168,8 @@ impl Interpreter {
             // `export { a, b as c } from 'm'`: forward the *other*
             // module's live bindings without binding anything locally.
             Some(source) => {
-                let entries = self.resolve_reexports(source, specifiers)?;
+                let source = Self::host_module_specifier(source)?;
+                let entries = self.resolve_reexports(&source, specifiers)?;
                 let mut record = self.current_module();
                 for (exported, value) in entries {
                     if exported == "default" {
@@ -1223,14 +1225,15 @@ impl Interpreter {
     /// Shared `export * [as ns] from 'm'`.
     pub(crate) fn stmt_export_all(
         &mut self,
-        source: &str,
+        source: &crate::JsString,
         alias: Option<&str>,
     ) -> Result<Value, VmErr> {
         if self.is_linked_module() {
             return Ok(Value::Undefined);
         }
+        let source = Self::host_module_specifier(source)?;
         let resolved = self
-            .resolve_module_request(source)?
+            .resolve_module_request(&source)?
             .ok_or_else(|| VmErr::Msg(format!("Module not found: {}", source)))?;
         self.ensure_module(&resolved)?;
         let other = self
@@ -1657,7 +1660,7 @@ impl Interpreter {
             }
             Statement::ExportNamed {
                 specifiers, source, ..
-            } => self.stmt_export_named(specifiers, source.as_deref()),
+            } => self.stmt_export_named(specifiers, source.as_ref()),
             Statement::ExportAll { source, alias, .. } => {
                 self.stmt_export_all(source, alias.as_deref())
             }

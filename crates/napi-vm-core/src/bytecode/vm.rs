@@ -1176,7 +1176,7 @@ fn run_loop(
                         Constant::ExportNamedTemplate(template) => template.clone(),
                         _ => return Err(internal("bad export template")),
                     };
-                    interp.stmt_export_named(&template.specifiers, template.source.as_deref())?;
+                    interp.stmt_export_named(&template.specifiers, template.source.as_ref())?;
                 }
                 Instr::ExportAll { tmpl } => {
                     let template = match &frame.function.constants[tmpl as usize] {

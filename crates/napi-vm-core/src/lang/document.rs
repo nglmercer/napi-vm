@@ -733,7 +733,11 @@ impl Builder<'_> {
                 namespace,
                 ..
             } => {
-                let exports = self.module_exports(module);
+                let exports = module
+                    .to_utf8()
+                    .ok()
+                    .map(|module| self.module_exports(&module))
+                    .unwrap_or_default();
                 if let Some(name) = default {
                     let ty = exports.get("default").cloned().unwrap_or(Type::Unknown);
                     self.bindings.insert(
@@ -828,7 +832,10 @@ impl Builder<'_> {
             Statement::ExportNamed {
                 specifiers, source, ..
             } => {
-                let source_exports = source.as_deref().map(|module| self.module_exports(module));
+                let source_exports = source
+                    .as_ref()
+                    .and_then(|module| module.to_utf8().ok())
+                    .map(|module| self.module_exports(&module));
                 for (local, exported) in specifiers {
                     let ty = source_exports
                         .as_ref()

@@ -1672,3 +1672,15 @@ fn abstract_iterator_and_intrinsic_accessors_share_execution_tiers() {
         );
     }
 }
+
+#[test]
+fn utf16_module_requests_reach_shared_loader_validation_in_both_tiers() {
+    for source in [r"import '\uD800';", r"export * from '\uDC00';"] {
+        check(source, true);
+        let error = run_ast_with_modules(source, &[]).unwrap_err().to_string();
+        assert!(
+            error.contains("TypeError") && error.contains("UTF-8 host loader"),
+            "{source}: {error}"
+        );
+    }
+}
