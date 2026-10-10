@@ -950,18 +950,16 @@ impl ObjectCell {
     /// the shape already knows means the push surprised the cache (or the
     /// shape lagged a bypass), so rebuild instead of forking a duplicate.
     pub(crate) fn note_key_added(&self, key: &str) {
-        let cached = self.shape.borrow().clone();
-        let Some(shape) = cached else {
+        let mut cached = self.shape.borrow_mut();
+        let Some(shape) = cached.as_mut() else {
             // Unbuilt shapes build lazily with the key already in place.
             return;
         };
         if shape.slot_of(key).is_some() {
             let slots = self.slots.borrow();
-            *self.shape.borrow_mut() = Some(crate::shape::Shape::rebuild(
-                slots.iter().map(|(k, _)| k.as_str()),
-            ));
+            *shape = crate::shape::Shape::rebuild(slots.iter().map(|(k, _)| k.as_str()));
         } else {
-            *self.shape.borrow_mut() = Some(shape.add(key));
+            crate::shape::Shape::append(shape, key);
         }
     }
 

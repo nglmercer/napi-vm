@@ -1493,3 +1493,11 @@ fn legacy_regexp_state_and_descriptors_match_in_both_tiers() {
         check(source, true);
     }
 }
+
+#[test]
+fn dictionary_growth_preserves_property_reads_and_key_order_in_both_tiers() {
+    check(
+        "var object={};for(var i=0;i<256;i++){object['key'+i]=i;}function read(){return object.key1;}read();read();object.extra=7;var keys=Object.keys(object);read()===1&&object.key255===255&&keys.length===257&&keys[256]==='extra';",
+        true,
+    );
+}

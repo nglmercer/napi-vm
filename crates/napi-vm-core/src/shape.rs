@@ -135,6 +135,28 @@ impl Shape {
         child
     }
 
+    /// Dictionary-sized layouts are detached from the canonical transition
+    /// tree. Extend a uniquely owned one without cloning its entire index.
+    /// Mint a new id so every inline cache still observes the layout change.
+    pub fn append(shape: &mut Rc<Shape>, key: &str) {
+        if shape.keys.len() >= 128
+            && let Some(layout) = Rc::get_mut(shape)
+        {
+            layout.id = NEXT_SHAPE_ID.with(|next| {
+                let id = next.get();
+                next.set(id.wrapping_add(1).max(1));
+                id
+            });
+            let key: Rc<str> = Rc::from(key);
+            let slot = layout.keys.len() as u32;
+            layout.index.entry(key.clone()).or_insert(slot);
+            layout.keys.push(key);
+            debug_assert!(layout.transitions.get_mut().is_empty());
+            return;
+        }
+        *shape = shape.add(key);
+    }
+
     /// Canonical layout for `keys` in order, replayed from the root through
     /// memoized transitions. Deletes and bulk mutations canonicalize through
     /// Shapes minted on this thread: the id counter less the root. Deltas
@@ -397,5 +419,36 @@ mod tests {
         assert_eq!(props.own_index("p"), None);
         assert_eq!(props.own_index("z"), Some(0));
         assert!(matches!(props.own_value("z"), Some(Value::Number(x)) if x == 9.0));
+    }
+
+    #[test]
+    fn unique_dictionary_growth_preserves_storage_and_invalidates_caches() {
+        let keys: Vec<String> = (0..129).map(|index| format!("key{index}")).collect();
+        let mut shape = Shape::rebuild(keys.iter().map(String::as_str));
+        let address = Rc::as_ptr(&shape);
+        let previous_id = shape.id;
+        let cache = PropCache::empty();
+        cache.fill(previous_id, 1);
+        for index in 129..4096 {
+            Shape::append(&mut shape, &format!("key{index}"));
+        }
+        assert_eq!(Rc::as_ptr(&shape), address);
+        assert_ne!(shape.id, previous_id);
+        assert_eq!(cache.probe(Some(shape.id)), None);
+        assert_eq!(shape.slot_of("key1"), Some(1));
+        assert_eq!(shape.slot_of("key4095"), Some(4095));
+    }
+
+    #[test]
+    fn shared_dictionary_growth_detaches_without_changing_the_other_layout() {
+        let keys: Vec<String> = (0..129).map(|index| format!("key{index}")).collect();
+        let mut shape = Shape::rebuild(keys.iter().map(String::as_str));
+        let other = shape.clone();
+        let previous_id = other.id;
+        Shape::append(&mut shape, "newKey");
+        assert_ne!(shape.id, previous_id);
+        assert_eq!(other.id, previous_id);
+        assert_eq!(other.slot_of("newKey"), None);
+        assert_eq!(shape.slot_of("newKey"), Some(129));
     }
 }

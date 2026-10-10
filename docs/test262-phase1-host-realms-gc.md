@@ -402,3 +402,13 @@ identifier variants in each of three matched reruns at the unchanged pinned
 limits. These results and the first timeout are archived without replacing or
 skipping them. A general dictionary-layout growth improvement is being validated
 before repeating the focused/full gates.
+
+
+Dictionary-sized object layouts now append into a uniquely owned index, rather
+than rebuilding every growing prefix. Shared layouts detach before changing;
+small canonical layouts retain their transition sharing. Each append mints a
+fresh shape id so existing inline caches miss and verify their slots. This is
+shared ObjectCell behavior, independent of the declaration or builtin using it.
+Tests cover stable dictionary storage, shared-layout isolation, cache invalidation
+and AST/bytecode property-read/key-order parity. All 366 core unit tests passed.
+Required repository checks and a new frozen-worker corpus gate are still required.
