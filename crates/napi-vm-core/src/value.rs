@@ -2174,10 +2174,12 @@ impl ProxyData {
     fn private_properties(&self, create: bool) -> Option<Rc<ObjectCell>> {
         let mut storage = self.private_storage.borrow_mut();
         if create && storage.is_none() {
-            *storage = Some(crate::heap::tracked(Rc::new(ObjectCell::new(
-                Vec::new(),
-                None,
-            ))));
+            let mut properties = ObjectCell::new(Vec::new(), None);
+            // This is an internal slot container, not a guest allocation.
+            // Its values retain their own realms; a primitive private field
+            // must not keep the defining constructor's entire realm alive.
+            properties.meta.get_mut().realm_global = None;
+            *storage = Some(crate::heap::tracked(Rc::new(properties)));
         }
         storage.clone()
     }

@@ -363,3 +363,19 @@ fn foreign_private_field_initializers_keep_their_realm_on_proxy_receivers() {
     assert!(vm.collect_cycles().collected > 0);
     yes(&mut vm, "ref.deref()===undefined;");
 }
+
+#[test]
+fn primitive_proxy_private_fields_do_not_root_the_defining_constructor_realm() {
+    let mut vm = Interpreter::with_builtins();
+    let mut child = vm.create_realm();
+    let constructor=child.eval_source("class Identity{constructor(object){return object;}}class Stamp extends Identity{#value=1;}Stamp;").unwrap();
+    vm.set_global_checked("ForeignStamp", constructor).unwrap();
+    drop(child);
+    run(
+        &mut vm,
+        "var proxy=new Proxy({},{});var constructorRef=new WeakRef(ForeignStamp);new ForeignStamp(proxy);ForeignStamp=undefined;",
+    );
+    let stats = vm.collect_cycles();
+    assert!(stats.skipped.is_none(), "{stats:?}");
+    yes(&mut vm, "constructorRef.deref()===undefined;");
+}
