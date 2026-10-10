@@ -1,0 +1,54 @@
+{
+  "source_commit": "c82f61725831b9a94d02b468663596984378007d",
+  "classification": "RegExp realm state and shared dictionary layout growth; corpus validation pending",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 952,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 203,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 10,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Complete realm/internal-operation dependencies, class computed Symbol/key conversion, dynamic home-object super lookup, private-write bytecode fallback and complete corpus evidence",
+  "archive_sha256": {
+    "c82f617-allfeatures-tests.log.gz": "00cec7cc45e7346c6120b87831b74e954547fe51abc8fed6681ab0540f992c51",
+    "c82f617-clippy.log.gz": "b03a4c90f0d3148e5a1b91ea1d299701193dd90a1ada4cf3f7a1a0f185200cf4",
+    "c82f617-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "c82f617-minimal-tests.log.gz": "2f08a81b5443e5a6dea0de77ed1dd239c3e297394b7763113758e2cd0254c635",
+    "c82f617-native-build.log.gz": "2ff6fb4defe675ffb7cee0b099fd7fa2b6dfe7326010c2ed282db902d9cd070f",
+    "c82f617-node-tests.log.gz": "72c3ed436a06f3b7ae3575f13d6c23cc2032da07e37f57d11e903f16523ddaca",
+    "c82f617-release-build.log.gz": "ad99a033dee5a1f4183500765de2b2245d01bdb2b0eee7a956863f38a1a9b4da",
+    "c82f617-tooling-tests.log.gz": "c54775ca8526f0ffa72015cf3534243168df578ca98d5e691c45b12d6f43781e",
+    "c82f617-wasm-tests.log.gz": "c25389971171ef5fc3d1d7bdb90a45912431c42550966f64284e1d8d2c22f838"
+  },
+  "worker_sha256": "d4b6e2cbebdeec92f668f7dadc76e284b9a27250721daf6ec94e79c15cbe93a6"
+}
