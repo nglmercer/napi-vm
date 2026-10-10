@@ -270,3 +270,20 @@ development evidence; they are corrected before runtime source freezing.
 The pre-existing array-literal elision gap remains open. Required checks and
 JSON-expanded focused/full Test262 must be measured on the new source;
 `32a469b` full results do not validate this serializer.
+
+Source `193998b` passes all required checks: 1,000 workspace tests (four
+existing ignored), 205 minimal-feature tests, 73 Node tests, 15 WASM tests
+and 12 tooling tests, with fmt and strict Clippy green. Its fresh pinned
+source audit keeps all 8,659 negatives rejected and the same 154 valid
+proposal/depth-limit rejections; the 532-case Node comparison matches.
+The JSON-expanded focus passes 46,973/60,040 variants, gaining 80 and losing
+none against the matching `32a469b` projection, with zero special outcomes.
+The full pinned run passes 66,151/102,956 with 36,803 failures, two known
+deep-WeakMap timeouts and zero crashes, harness errors or skips. It gains
+24,744 passes with zero losses against PR #23, and 116 with zero losses
+against `32a469b`. Full-corpus AST/bytecode differential remains unmeasured.
+Both revoked-Proxy JSON replacer realm variants now pass. The supported
+constructor diagnostic reaches index 28 (missing Intl.Collator), after the
+first 28 constructors correctly invoke the revoking prototype trap. This
+diagnostic does not turn the failing staging test into a pass. Shared typed
+constructor static inheritance remains a separate genuine dependency.

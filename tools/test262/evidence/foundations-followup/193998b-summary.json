@@ -1,0 +1,146 @@
+{
+  "source_commit": "193998b367624f4ee546fea6975d423e30222127",
+  "classification": "Realm-aware iterative JSON serialization using shared object operations; completed full pinned corpus",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "checks": {
+    "fmt": "passed",
+    "clippy": "passed",
+    "workspace": {
+      "passed": 1000,
+      "failed": 0,
+      "ignored": 4
+    },
+    "minimal": {
+      "passed": 205,
+      "failed": 0,
+      "ignored": 0
+    },
+    "node": {
+      "passed": 73,
+      "failed": 0
+    },
+    "wasm": {
+      "passed": 15,
+      "failed": 0
+    },
+    "tooling": {
+      "passed": 12,
+      "failed": 0
+    }
+  },
+  "ast_bytecode_mismatches": "Targeted differential fixtures passed; full corpus not measured",
+  "remaining_gaps": "Typed descriptor/accessor storage, remaining class definition-order restrictions, ordinary/optional call ordering, realm/internal-operation dependencies, bytecode fallback and full-corpus differential measurement",
+  "archive_sha256": {
+    "193998b-allfeatures-tests.log.gz": "08019f55df9c41eb10800d989b9db206dafdfc1c5d50d48b0cf5dfb9fd534052",
+    "193998b-clippy.log.gz": "624a0492ac3aa4e75855605e754f4cf3a0829e7120bbc02a34582a23ed6c4733",
+    "193998b-fmt.log.gz": "f61f27bd17de546264aa58f40f3aafaac7021e0ef69c17f6b1b4cd7664a037ec",
+    "193998b-minimal-tests.log.gz": "ea953c8277a5aaf774801feb427743d28bfac43fbd3d9b4b94ed2df8d9c0aec3",
+    "193998b-native-build.log.gz": "e81fd410d5df9f48d207ec4f36eec2c39cf5a2b038d412a82cc31003c4be626a",
+    "193998b-node-tests.log.gz": "245155a4c8f0373907881573ccab5168022027322d8ff29941f76ee5390fb94d",
+    "193998b-release-build.log.gz": "e7ca0c8d4e46a492a388f2760f6b303217a9d3f92d92652da4a41eaf99339a1f",
+    "193998b-tooling-tests.log.gz": "090f6d8e26bc4bbde95f441743c82b7d05a634e5238d01aaa7a597af57e20ef0",
+    "193998b-wasm-tests.log.gz": "f2c3657f9ac860383f1027fcd76b8bcb98e8a1616772b106f750c835f8060b80",
+    "193998b-focused.jsonl.gz": "34ecb9ea0fa06b23f350e5c234165db8704b86c25a9e520a91c9cbb3951cdeef",
+    "193998b-focused-c82f617-transitions.json.gz": "6eb14d1a9b6a9b24c8c68e659a540fe483192db43d5ebf1e9431edac5aec9959",
+    "193998b-focused-32a469b-projection.json.gz": "6ceeab026f3a13effbb1e906456f9fb7687098edf1e97a8c548aa3add627ff1b",
+    "193998b-focused-transitions.json.gz": "a04a99de2f18c6b47d49adfa234e0dafca3c23ccdf37e0fc1886820205cc5478",
+    "193998b-focused-c82f617-projection.json.gz": "025e9ba19bb607527b363145e889a995c697665a2e3cf2a68d2866c2baaeee6f",
+    "193998b-focused-32a469b-transitions.json.gz": "eb078bd7e8c6598f9234e0287a198a238c7353aad0091861fb4877e187c7d4c1",
+    "193998b-focused.json.gz": "ef18b2d133bf51dd35615edabdc0b0df409cee4871fc0cc67c55d2eca82077b6",
+    "193998b-focused-7c0a9ce-projection.json.gz": "9ddeb3b371213dd28e3226f5c2b6f4803927a590ebef2f5b3d015ba52bb146b8",
+    "193998b-full-7c0a9ce-transitions.json.gz": "3aa75d02ba2a29cacde8ce586b51dbb6a84a5eb462a87f5a2d92fe626a89bfd4",
+    "193998b-full-6456b53-transitions.json.gz": "fba551870c4566e32673dfa19e012fb9bac59037bbb19ebcf64a8f26e4e698e4",
+    "193998b-full.jsonl.gz": "98bc500fcfc5687e5167da1daa0c96c3a05904a583afedcdb5bbef0805e0d17f",
+    "193998b-full-32a469b-transitions.json.gz": "cd7cb7e0ae34d5b2152119cc27a4bf7973821bdf26b8ea07e1af64f77b4898e7",
+    "193998b-full.json.gz": "ad1da3debe0c284681c15ec1c7e2b088d4e9b6ad92b156e8cf5988514a56923f",
+    "193998b-full-pr23-transitions.json.gz": "74b7e03cea95594b7e26eafa48a7dc21491ab5df176f0631851b9bd515095a4d",
+    "193998b-full-c82f617-transitions.json.gz": "8005c707c94d43a74809c01e6c90a87128ee66dd91e1141c886e47036a32a968",
+    "193998b-syntax.json.gz": "67927b9c517d339c9f37eca1260a3a2bf5f964f5dfcb9755afcdef80e0d810be",
+    "193998b-syntax.log.gz": "76b1007d9e22669c3d0c38fac2ff966c244499813421ffdcbb50665cce4d0d9e",
+    "193998b-contextual.json.gz": "888536dbb783ff1cad035502e648f0e4a68048bf09bdc313863c8ff781038894",
+    "193998b-contextual.log.gz": "26d8bc73491eee2508fecd4fad856d9fec9c8ee697eb709391ab03d0a69de14e",
+    "193998b-constructor-diagnostic.py.gz": "ac5f1edbdee8a2e24ab03946cd5928a198c8054c13aa6f504a15540b8d423200"
+  },
+  "worker_sha256": "7a3751d3bb770200c557943131658c715a792eb7f9f275676309ff418a71d163",
+  "focused": {
+    "total": 60040,
+    "current_counts": {
+      "pass": 46973,
+      "fail": 13067,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 2308,
+    "lost_passes": 0,
+    "baseline": "Matching projection from independent c82f617 full report"
+  },
+  "full": {
+    "total": 102956,
+    "current_counts": {
+      "pass": 66151,
+      "fail": 36803,
+      "skip": 0,
+      "timeout": 2,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 24744,
+    "lost_passes": 0,
+    "baseline": "PR #23"
+  },
+  "full_recent": {
+    "new_passes": 2478,
+    "lost_passes": 0
+  },
+  "syntax": {
+    "domain": "source syntax only",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "source_commit": "193998b367624f4ee546fea6975d423e30222127",
+    "engine_sha256": "ec1d27978f53c3b04ec2f5604355dcb341461ba9837509c08dafdeace210e216",
+    "total": 102956,
+    "counts": {
+      "parse_negative": 8659,
+      "accepted_invalid": 0,
+      "requires_acceptance": 94297,
+      "rejected_valid": 154
+    },
+    "limitations": [
+      "No harness or guest execution; acceptance is not a Test262 execution pass."
+    ]
+  },
+  "contextual_reference": {
+    "cases": 532,
+    "mismatches": 0,
+    "domain": "syntax only"
+  },
+  "full_previous": {
+    "new_passes": 116,
+    "lost_passes": 0,
+    "baseline": "32a469b"
+  },
+  "focused_previous": {
+    "total": 60040,
+    "current_counts": {
+      "pass": 46973,
+      "fail": 13067,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 80,
+    "lost_passes": 0,
+    "baseline": "Matching full 32a469b projection"
+  }
+}
