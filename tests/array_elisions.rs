@@ -53,7 +53,25 @@ fn elisions_observe_inherited_elements_without_owning_them() {
 
 #[test]
 fn elided_destructuring_skips_iterator_values() {
-    assert_tiers("var a = 0; [, a] = [3, 4]; JSON.stringify([a]);", "[4]");
+    // Destructuring assignment intentionally declines to the shared AST
+    // evaluator (see docs/destructuring-assignment-checkpoint.md), so this
+    // case checks both execution paths agree without requiring bytecode.
+    let source = "var a = 0; [, a] = [3, 4]; JSON.stringify([a]);";
+    let prepared = Interpreter::compile(source).unwrap();
+    let mut prepared_vm = Interpreter::with_builtins();
+    let result = prepared_vm.execute(&prepared).unwrap();
+    assert!(
+        matches!(result, Value::String(ref text) if text == "[4]"),
+        "prepared: {result:?}"
+    );
+    let mut parser = Parser::new(Lexer::new(source).tokenize());
+    let statements = parser.parse_program().unwrap();
+    let mut ast = Interpreter::with_builtins();
+    let result = ast.run_program_body(&statements).unwrap();
+    assert!(
+        matches!(result, Value::String(ref text) if text == "[4]"),
+        "AST: {result:?}"
+    );
 }
 
 #[test]

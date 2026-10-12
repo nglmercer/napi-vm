@@ -1867,7 +1867,18 @@ impl<'a> Compiler<'a> {
                     dst: value,
                     src: val,
                 });
-                let has = self.emit_jump(|target| Instr::JumpIfNotNullish { src: val, target });
+                let undefined = self.load_undefined()?;
+                let needs_default = self.alloc_reg()?;
+                self.emit(Instr::Binary {
+                    dst: needs_default,
+                    op: BinOp::Seq,
+                    lhs: val,
+                    rhs: undefined,
+                });
+                let has = self.emit_jump(|target| Instr::JumpIfFalse {
+                    src: needs_default,
+                    target,
+                });
                 let fallback = self.compile_expr(default)?;
                 self.emit(Instr::Mov {
                     dst: value,
@@ -5072,7 +5083,10 @@ mod tests {
             ("for (let k in o) { f(k); }", "compiled"),
             ("for (const v of a) { f(v); }", "compiled"),
             ("let o = { a: 1 };", "compiled"),
-            ("let [a] = b;", "compiled"),
+            (
+                "let [a] = b;",
+                "destructuring iterator or name inference semantics",
+            ),
             ("f(...args);", "compiled"),
             ("let a = [...b];", "compiled"),
             ("a?.b;", "compiled"),

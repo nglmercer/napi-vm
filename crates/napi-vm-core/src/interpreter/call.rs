@@ -528,13 +528,9 @@ impl Interpreter {
             }
             Pattern::Array(elements) => {
                 let iterator = self.iterator_for(val)?;
-                let next = match self.get_prop_value_str(&iterator, "next") {
-                    Ok(next) => next,
-                    Err(error) => {
-                        let _ = self.close_guest_iterator_for_abrupt(&iterator, false, &error);
-                        return Err(error);
-                    }
-                };
+                // GetIterator has not produced an iterator record yet when
+                // reading `next` fails, so there is nothing to close.
+                let next = self.get_prop_value_str(&iterator, "next")?;
                 let mut done = false;
                 let result = (|| {
                     for element in elements {
@@ -555,20 +551,42 @@ impl Interpreter {
                             };
                             let mut values = Vec::new();
                             while !done {
-                                let step = self.call_this(&next, iterator.clone(), vec![])?;
+                                // An abrupt IteratorStep/Value marks the
+                                // record done: IteratorClose must not run.
+                                let step = match self.call_this(&next, iterator.clone(), vec![]) {
+                                    Ok(step) => step,
+                                    Err(error) => {
+                                        done = true;
+                                        return Err(error);
+                                    }
+                                };
                                 if !super::call::is_js_object(&step) {
+                                    done = true;
                                     return vm_err("TypeError: Iterator result must be an object");
                                 }
-                                if self.get_prop_value_str(&step, "done")?.is_truthy() {
-                                    done = true;
-                                    break;
+                                match self.get_prop_value_str(&step, "done") {
+                                    Ok(flag) if flag.is_truthy() => {
+                                        done = true;
+                                        break;
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        done = true;
+                                        return Err(error);
+                                    }
                                 }
                                 if values.len() >= crate::value::MAX_ARRAY_LEN {
                                     return Err(crate::value::limit_err(
                                         "Maximum array length exceeded",
                                     ));
                                 }
-                                values.push(self.get_prop_value_str(&step, "value")?);
+                                match self.get_prop_value_str(&step, "value") {
+                                    Ok(value) => values.push(value),
+                                    Err(error) => {
+                                        done = true;
+                                        return Err(error);
+                                    }
+                                }
                             }
                             let rest = Value::checked_array(values)?;
                             self.write_pattern_element(inner, &rest, initialize, rest_target)?;
@@ -578,17 +596,38 @@ impl Interpreter {
                         let value = if done {
                             Value::Undefined
                         } else {
-                            let step = self.call_this(&next, iterator.clone(), vec![])?;
+                            // IteratorStep/Value abruptions mark the record
+                            // done, so the outer handler skips IteratorClose.
+                            let step = match self.call_this(&next, iterator.clone(), vec![]) {
+                                Ok(step) => step,
+                                Err(error) => {
+                                    done = true;
+                                    return Err(error);
+                                }
+                            };
                             if !super::call::is_js_object(&step) {
+                                done = true;
                                 return vm_err("TypeError: Iterator result must be an object");
                             }
-                            if self.get_prop_value_str(&step, "done")?.is_truthy() {
-                                done = true;
-                                Value::Undefined
-                            } else if want_value {
-                                self.get_prop_value_str(&step, "value")?
-                            } else {
-                                Value::Undefined
+                            match self.get_prop_value_str(&step, "done") {
+                                Ok(flag) if flag.is_truthy() => {
+                                    done = true;
+                                    Value::Undefined
+                                }
+                                Ok(_) if want_value => {
+                                    match self.get_prop_value_str(&step, "value") {
+                                        Ok(value) => value,
+                                        Err(error) => {
+                                            done = true;
+                                            return Err(error);
+                                        }
+                                    }
+                                }
+                                Ok(_) => Value::Undefined,
+                                Err(error) => {
+                                    done = true;
+                                    return Err(error);
+                                }
                             }
                         };
                         self.write_pattern_element(element, &value, initialize, target)?;

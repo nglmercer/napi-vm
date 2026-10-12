@@ -869,33 +869,33 @@ fn trailing_jumps_land_on_end_of_code() {
 
 #[test]
 fn destructuring_declarations() {
-    check("let [a, b] = [1, 2]; a + b", true);
+    check("let [a, b] = [1, 2]; a + b", false);
     check("const {x, y} = {x: 1, y: 2}; x * y", true);
-    check("var [a, b] = [3, 4]; a * b", true);
-    // Defaults apply on missing and nullish values only.
-    check("let [a = 5] = []; a", true);
-    check("let [a = 5] = [undefined]; a", true);
-    check("let [a = 5] = [null]; a", true);
-    check("let [a = 5] = [0]; a", true);
+    check("var [a, b] = [3, 4]; a * b", false);
+    // Defaults apply only to undefined values.
+    check("let [a = 5] = []; a", false);
+    check("let [a = 5] = [undefined]; a", false);
+    check("let [a = 5] = [null]; a", false);
+    check("let [a = 5] = [0]; a", false);
     check("let {a = 5} = {}; a", true);
     check("let {a = 5} = {a: null}; a", true);
     check(
         "let n = 0; function d(){ n++; return 9; } let [a = d()] = [1]; [a, n].join(',')",
-        true,
+        false,
     );
     // Nested patterns, renames, computed keys.
-    check("let [a, [b, c]] = [1, [2, 3]]; a + b + c", true);
+    check("let [a, [b, c]] = [1, [2, 3]]; a + b + c", false);
     check("let {a: {b}} = {a: {b: 7}}; b", true);
     check("let {a: b} = {a: 3}; b", true);
     check("let k = 'x'; let {[k]: v} = {x: 8}; v", true);
     check("let {a, b: {c}} = {a: 1, b: {c: 2}}; a + c", true);
-    // Array rest slices from its position.
+    // Array rest consumes the remaining iterator.
     check(
         "let [a, ...r] = [1, 2, 3]; [a, r.join(',')].join(':')",
-        true,
+        false,
     );
-    check("let [...r] = [1, 2]; r.join(',')", true);
-    check("let [a, ...r] = [1]; [a, r.length].join(',')", true);
+    check("let [...r] = [1, 2]; r.join(',')", false);
+    check("let [a, ...r] = [1]; [a, r.length].join(',')", false);
     // Object rest takes what named keys did not.
     check(
         "let {a, ...r} = {a: 1, b: 2, c: 3}; [a, r.b, r.c].join(',')",
@@ -905,24 +905,24 @@ fn destructuring_declarations() {
         "let k = 'b'; let {[k]: v, ...r} = {a: 1, b: 2}; [v, r.a, r.b].join(',')",
         true,
     );
-    // Strings split per character; objects are not array sources.
-    check("let [a, b] = 'xy'; a + b", true);
-    check("let [a, ...r] = 'xyz'; [a, r.join('')].join(',')", true);
-    check("let [a] = {0: 9}; a === undefined", true);
-    check("let [a] = 5; a === undefined", true);
-    check("let [a] = null; a === undefined", true);
+    // Strings iterate by code point; non-iterable sources throw.
+    check("let [a, b] = 'xy'; a + b", false);
+    check("let [a, ...r] = 'xyz'; [a, r.join('')].join(',')", false);
+    check("let [a] = {0: 9}; a === undefined", false);
+    check("let [a] = 5; a === undefined", false);
+    check("let [a] = null; a === undefined", false);
     // Object patterns reject nullish sources.
     check("let {a} = null; 1", true);
     check("let {a} = undefined; 1", true);
     // Declaration elisions consume a position without binding a name.
-    check("let [, b] = [1, 2]; b", true);
+    check("let [, b] = [1, 2]; b", false);
     // Missing initializers destructure `undefined`.
-    check("var [a]; a === undefined", true);
+    check("var [a]; a === undefined", false);
     check("var {a}; 1", true);
     // Pattern heads in `for` with trailing declarators.
     check(
         "let s = 0; for (let [a, b] = [1, 2], i = 0; i < 2; i++) { s += a + b; } s",
-        true,
+        false,
     );
     check(
         "let s = 0; for (var {x} = {x: 3}, i = 0; i < 2; i++) { s += x; } s",
@@ -936,33 +936,33 @@ fn destructuring_declarations() {
         true,
     );
     // Reading a dead-zone name from the initializer throws on both tiers.
-    check("let [a] = a; 1", true);
+    check("let [a] = a; 1", false);
 }
 
 #[test]
 fn destructuring_assignment() {
-    check("let a = 1, b = 2; [a, b] = [b, a]; a * 10 + b", true);
-    check("let a; ({x: a} = {x: 5}); a", true);
-    check("let a = 0; [a] = [7]; a", true);
+    check("let a = 1, b = 2; [a, b] = [b, a]; a * 10 + b", false);
+    check("let a; ({x: a} = {x: 5}); a", false);
+    check("let a = 0; [a] = [7]; a", false);
     // The assignment evaluates to the right-hand side.
-    check("let a = 0; let r = [a] = [7]; r.length + a", true);
+    check("let a = 0; let r = [a] = [7]; r.length + a", false);
     // Member targets write through the object.
-    check("let o = {}; [o.p] = [42]; o.p", true);
-    check("let o = {}; ({a: o.q} = {a: 9}); o.q", true);
+    check("let o = {}; [o.p] = [42]; o.p", false);
+    check("let o = {}; ({a: o.q} = {a: 9}); o.q", false);
     check(
         "let o = {p: 1}; [o.p, o.q] = [2, 3]; [o.p, o.q].join(',')",
-        true,
+        false,
     );
     // Defaults, nesting, and rest in assignments.
-    check("let a; [a = 4] = []; a", true);
-    check("let a, b; [a, [b]] = [1, [2]]; a + b", true);
-    check("let a, r; [a, ...r] = [1, 2, 3]; a + r.length", true);
-    check("let a, r; ({a, ...r} = {a: 1, b: 2}); a + r.b", true);
+    check("let a; [a = 4] = []; a", false);
+    check("let a, b; [a, [b]] = [1, [2]]; a + b", false);
+    check("let a, r; [a, ...r] = [1, 2, 3]; a + r.length", false);
+    check("let a, r; ({a, ...r} = {a: 1, b: 2}); a + r.b", false);
     // Assignment elisions leave all bindings untouched.
-    check("let a; [, a] = [1, 2]; a", true);
-    // Nullish object sources throw; array sources tolerate anything.
-    check("let a; ({a} = null); 1", true);
-    check("let a; [a] = null; a === undefined", true);
+    check("let a; [, a] = [1, 2]; a", false);
+    // Nullish object and array sources throw.
+    check("let a; ({a} = null); 1", false);
+    check("let a; [a] = null; a === undefined", false);
     // These targets are syntax errors, before either execution tier.
     assert!(parse_cached("let a; [a] += [1]; 1").is_err());
     assert!(parse_cached("let a; [a()] = [1]; 1").is_err());
@@ -1154,7 +1154,7 @@ fn for_of_loops() {
     // Pattern heads destructure per iteration.
     check(
         "let s = 0; for (let [a, b] of [[1, 2], [3, 4]]) { s += a + b; } s",
-        true,
+        false,
     );
     check(
         "let s = 0; for (let {x} of [{x: 1}, {x: 2}]) { s += x; } s",
@@ -1162,7 +1162,7 @@ fn for_of_loops() {
     );
     check(
         "let s = 0; for (let [a = 9] of [[], [2]]) { s += a; } s",
-        true,
+        false,
     );
     // Early exits close the iterator; exhaustion and continue do not.
     check(
@@ -1393,6 +1393,10 @@ fn realm_global_records_use_shared_declaration_and_property_operations() {
 
 #[test]
 fn lexical_iteration_tdz_and_capture() {
+    check(
+        "let a=[]; for(let [x] of [[1],[2]]) { a.push(()=>x); } a[0]()+a[1]()",
+        false,
+    );
     for source in [
         "let x = [1]; for (let x of x) {}",
         "let x = {}; for (let x in x) {}",
@@ -1401,7 +1405,6 @@ fn lexical_iteration_tdz_and_capture() {
         "let a=[]; for(let x in {a:1,b:2}) { a.push(()=>x); } a[0]()+a[1]()",
         "for(const x of [1]) { x=2; }",
         "let x=9; try { for(let x of [1]) { throw x; } } catch(e) {} x",
-        "let a=[]; for(let [x] of [[1],[2]]) { a.push(()=>x); } a[0]()+a[1]()",
     ] {
         check(source, true);
     }
@@ -1422,16 +1425,28 @@ fn property_update_fast_paths_preserve_observable_operations() {
 
 #[test]
 fn empty_lexical_iteration_patterns_own_and_unwind_runtime_scopes() {
-    for source in [
-        "var n=0;for(let [] of [[],[]]){n++;}n",
-        "var n=0;for(const {} of [{},{}]){n++;}n",
-        "var n=0;for(let [[]] of [[[]],[[]]]){n++;}n",
-        "try{for(let {} of [null]){}}catch(e){e instanceof TypeError;}",
-        "try{for(const {} of [undefined]){}}catch(e){e instanceof TypeError;}",
-        "var n=0;for(let [] of [[],[]]){if(++n===1)continue;break;}n",
-        "var n=0;for(const [] of [[],[]]){try{n++;}finally{}}n",
+    for (source, expect_bytecode) in [
+        ("var n=0;for(let [] of [[],[]]){n++;}n", false),
+        ("var n=0;for(const {} of [{},{}]){n++;}n", true),
+        ("var n=0;for(let [[]] of [[[]],[[]]]){n++;}n", false),
+        (
+            "try{for(let {} of [null]){}}catch(e){e instanceof TypeError;}",
+            true,
+        ),
+        (
+            "try{for(const {} of [undefined]){}}catch(e){e instanceof TypeError;}",
+            true,
+        ),
+        (
+            "var n=0;for(let [] of [[],[]]){if(++n===1)continue;break;}n",
+            false,
+        ),
+        (
+            "var n=0;for(const [] of [[],[]]){try{n++;}finally{}}n",
+            false,
+        ),
     ] {
-        check(source, true);
+        check(source, expect_bytecode);
     }
 }
 

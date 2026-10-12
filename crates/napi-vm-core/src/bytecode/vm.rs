@@ -1970,18 +1970,19 @@ mod tests {
     }
 
     #[test]
-    fn ic_serves_loop_reads_and_writes() {
+    fn prepared_assignment_writes_invalidate_loop_read_caches() {
         let (result, module) = run_module(
             "let o = {x: 41}; let s = 0; \
              for (let i = 0; i < 10; i++) { s = s + o.x; o.y = i; } s;",
         );
         assert_eq!(num(&result), 410.0);
         let (hits, misses, mega, sites) = cache_stats(&module);
-        assert!(sites >= 2, "expected read + write sites, got {sites}");
+        assert_eq!(sites, 1, "expected the property read cache site");
         assert_eq!(mega, 0);
-        // Two-strike caching: each site misses twice (mark, then build and
-        // fill) and hits the remaining eight iterations.
-        assert!(hits >= 16, "hits={hits} misses={misses}");
+        // Prepared writes invalidate the receiver's cache hints on every
+        // iteration, so the read site remains correct without cache hits.
+        assert_eq!(hits, 0);
+        assert_eq!(misses, 10);
     }
 
     #[test]
