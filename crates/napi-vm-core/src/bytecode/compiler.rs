@@ -1630,6 +1630,19 @@ impl<'a> Compiler<'a> {
     }
 }
 
+fn pattern_uses_array_iterator(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Array(_) => true,
+        Pattern::Object(properties) => properties
+            .iter()
+            .any(|(_, pattern)| pattern.as_ref().is_some_and(pattern_uses_array_iterator)),
+        Pattern::Rest(pattern) | Pattern::Default(pattern, _) => {
+            pattern_uses_array_iterator(pattern)
+        }
+        Pattern::Elision | Pattern::Ident(_) | Pattern::Member { .. } => false,
+    }
+}
+
 /// Whether a pattern binds fresh declaration names or assigns through
 /// existing bindings. `is_var` selects store-vs-initialize for declarations.
 #[derive(Clone, Copy)]
@@ -1691,6 +1704,9 @@ impl<'a> Compiler<'a> {
         val: Reg,
         mode: DestructureMode,
     ) -> Result<(), Decline> {
+        if pattern_uses_array_iterator(pat) {
+            return Err(Decline::Func("array destructuring iterator semantics"));
+        }
         self.compile_pattern_view(PatternView::from_pattern(pat), val, mode)
     }
 
