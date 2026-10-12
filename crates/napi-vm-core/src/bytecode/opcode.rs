@@ -101,6 +101,11 @@ pub enum Instr {
         dst: Reg,
         name: u16,
     },
+    ResolveAssignmentBinding {
+        base: Reg,
+        property: Reg,
+        name: u16,
+    },
     ReadAssignmentBinding {
         dst: Reg,
         base: Reg,
@@ -625,6 +630,7 @@ pub enum Opcode {
     BareVarGlobal,
     LoadGlobal,
     StoreGlobal,
+    ResolveAssignmentBinding,
     ReadAssignmentBinding,
     WriteAssignmentBinding,
     WriteAssignmentProperty,
@@ -729,6 +735,7 @@ impl Instr {
             Instr::BareVarGlobal { .. } => Opcode::BareVarGlobal,
             Instr::LoadGlobal { .. } => Opcode::LoadGlobal,
             Instr::StoreGlobal { .. } => Opcode::StoreGlobal,
+            Instr::ResolveAssignmentBinding { .. } => Opcode::ResolveAssignmentBinding,
             Instr::ReadAssignmentBinding { .. } => Opcode::ReadAssignmentBinding,
             Instr::WriteAssignmentBinding { .. } => Opcode::WriteAssignmentBinding,
             Instr::WriteAssignmentProperty { .. } => Opcode::WriteAssignmentProperty,
@@ -866,6 +873,14 @@ impl fmt::Display for Instr {
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
             Instr::LoadGlobal { dst, name } => write!(f, "LOAD_GLOBAL r{dst}, c{name}"),
             Instr::StoreGlobal { name, src } => write!(f, "STORE_GLOBAL c{name}, r{src}"),
+            Instr::ResolveAssignmentBinding {
+                base,
+                property,
+                name,
+            } => write!(
+                f,
+                "RESOLVE_ASSIGNMENT_BINDING r{base}, r{property}, c{name}"
+            ),
             Instr::ReadAssignmentBinding {
                 dst,
                 base,

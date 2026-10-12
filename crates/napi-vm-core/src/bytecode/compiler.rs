@@ -4412,13 +4412,30 @@ impl<'a> Compiler<'a> {
         op: AssignOp,
         value: &'a Expr,
     ) -> Result<Reg, Decline> {
+        let identifier_target = matches!(target, Expr::Identifier(_));
         let target = target.unparenthesized();
         if let Expr::Member {
             object, property, ..
         } = target
             && matches!(object.as_ref(), Expr::Super)
         {
-            let (base, receiver, key) = self.compile_super_reference(property)?;
+            let (base, receiver, key) = if op == AssignOp::Assign {
+                let raw_key = self.compile_expr(property)?;
+                let undefined = self.const_undefined()?;
+                let src = self.load_const(undefined)?;
+                let base = self.alloc_reg()?;
+                let receiver = self.alloc_reg()?;
+                let key = self.alloc_reg()?;
+                self.emit(Instr::SuperReference {
+                    base,
+                    receiver,
+                    key,
+                    src,
+                });
+                (base, receiver, raw_key)
+            } else {
+                self.compile_super_reference(property)?
+            };
             let current = if op.bin_op().is_some() {
                 let dst = self.alloc_reg()?;
                 self.emit(Instr::GetPropertyWithReceiver {
@@ -4443,6 +4460,16 @@ impl<'a> Compiler<'a> {
                 dst
             } else {
                 rhs
+            };
+            let key = if op == AssignOp::Assign {
+                let normalized = self.alloc_reg()?;
+                self.emit(Instr::PropertyKey {
+                    dst: normalized,
+                    src: key,
+                });
+                normalized
+            } else {
+                key
             };
             self.emit(Instr::SetPropertyWithReceiver {
                 base,
@@ -4543,6 +4570,64 @@ impl<'a> Compiler<'a> {
                     return Ok(dst);
                 }
                 _ => return Err(Decline::Func("invalid compound assignment target")),
+            }
+        }
+        if op == AssignOp::Assign {
+            match target {
+                Expr::Identifier(name) => {
+                    let binding = self.resolve(name)?;
+                    let reference = if matches!(binding, Binding::Global) {
+                        let base = self.alloc_reg()?;
+                        let property = self.alloc_reg()?;
+                        let name = self.intern_string(name)?;
+                        self.emit(Instr::ResolveAssignmentBinding {
+                            base,
+                            property,
+                            name,
+                        });
+                        Some((base, property, name))
+                    } else {
+                        None
+                    };
+                    let rhs = if identifier_target {
+                        self.compile_named_assignment_value(value, name)?
+                    } else {
+                        self.compile_expr(value)?
+                    };
+                    match binding {
+                        Binding::Slot(slot) => self.emit(Instr::StoreLocal { slot, src: rhs }),
+                        Binding::Global => {
+                            let (base, property, name) = reference.unwrap();
+                            self.emit(Instr::WriteAssignmentBinding {
+                                base,
+                                property,
+                                name,
+                                src: rhs,
+                            });
+                        }
+                    }
+                    return Ok(rhs);
+                }
+                Expr::Member {
+                    object,
+                    property,
+                    computed,
+                } => {
+                    let obj = self.compile_expr(object)?;
+                    let raw_key = self.compile_expr(property)?;
+                    let private = !computed
+                        && matches!(property.as_ref(),Expr::String(key) if key.to_key().starts_with('#'));
+                    let key = raw_key;
+                    let rhs = self.compile_expr(value)?;
+                    self.emit(Instr::WriteAssignmentProperty {
+                        obj,
+                        key,
+                        src: rhs,
+                        private,
+                    });
+                    return Ok(rhs);
+                }
+                _ => (),
             }
         }
         let rhs = self.compile_expr(value)?;

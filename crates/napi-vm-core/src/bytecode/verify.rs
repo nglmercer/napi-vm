@@ -381,6 +381,15 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *name, "string")?;
             }
+            Instr::ResolveAssignmentBinding {
+                base,
+                property,
+                name,
+            } => {
+                self.check_reg(address, *base)?;
+                self.check_reg(address, *property)?;
+                self.check_const_is(address, *name, "string")?;
+            }
             Instr::ReadAssignmentBinding {
                 dst,
                 base,

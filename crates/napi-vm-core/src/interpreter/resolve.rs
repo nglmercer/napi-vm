@@ -170,6 +170,25 @@ impl Interpreter {
         Ok(None)
     }
 
+    /// Resolve a write reference without reading its value or invoking getters.
+    pub(crate) fn resolve_assignment_binding(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<(Value, bool), VmErr> {
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            return Ok((object, true));
+        }
+        let mut current = Some(scope.clone());
+        while let Some(environment) = current {
+            if environment.borrow().own_lexical_binding(name) {
+                return Ok((Value::RealmGlobal(environment), false));
+            }
+            current = environment.borrow().parent_env();
+        }
+        Ok((Value::Undefined, false))
+    }
+
     /// Capture the base and current value once, before the assignment RHS.
     pub(crate) fn read_assignment_binding(
         &mut self,
@@ -212,6 +231,13 @@ impl Interpreter {
                 return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
             }
             return self.assign_member_str(base, name, value);
+        }
+        if matches!(base, Value::Undefined) {
+            if self.global.borrow().strict() {
+                return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
+            }
+            let global = Value::RealmGlobal(self.persistent_global.clone());
+            return self.assign_member_str(&global, name, value);
         }
         let Value::RealmGlobal(environment) = base else {
             return Err(VmErr::Msg("internal error: assignment binding base".into()));

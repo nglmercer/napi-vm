@@ -2971,7 +2971,13 @@ impl Interpreter {
                     && matches!(object.as_ref(), Expr::Super)
                 {
                     let key = self.eval_expr(property)?;
-                    let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
+                    let (base, receiver, key) = if matches!(op, AssignOp::Assign) {
+                        let (base, receiver, _) =
+                            self.super_reference(&self.global.clone(), &Value::Undefined)?;
+                        (base, receiver, key)
+                    } else {
+                        self.super_reference(&self.global.clone(), &key)?
+                    };
                     let current = op
                         .bin_op()
                         .map(|_| self.get_prop_value_with_receiver(&base, &key, &receiver))
@@ -2981,6 +2987,11 @@ impl Interpreter {
                         assigned =
                             self.apply_binary(op, &current.expect("compound value"), &assigned)?;
                     }
+                    let key = if matches!(op, AssignOp::Assign) {
+                        self.ecmascript_to_property_key(&key)?
+                    } else {
+                        key
+                    };
                     let strict = self.global.borrow().strict();
                     self.assign_property_with_receiver(
                         &base,
@@ -3037,6 +3048,41 @@ impl Interpreter {
                             return Ok(result);
                         }
                         _ => return vm_err("Invalid compound assignment target"),
+                    }
+                }
+                if matches!(op, AssignOp::Assign) {
+                    match target.unparenthesized() {
+                        Expr::Identifier(name) => {
+                            let (base, property) =
+                                self.resolve_assignment_binding(&self.global.clone(), name)?;
+                            let assigned = if matches!(target.as_ref(), Expr::Identifier(_)) {
+                                self.evaluate_class_field(value, &Value::String(name.into()))?
+                            } else {
+                                self.eval_expr(value)?
+                            };
+                            self.write_assignment_binding(&base, property, name, assigned.clone())?;
+                            return Ok(assigned);
+                        }
+                        Expr::Member {
+                            object,
+                            property,
+                            computed,
+                        } => {
+                            let object = self.eval_expr(object)?;
+                            let raw_key = self.eval_expr(property)?;
+                            let private = !computed
+                                && matches!(property.as_ref(),Expr::String(key) if key.to_key().starts_with('#'));
+                            let assigned = self.eval_expr(value)?;
+                            let key = raw_key;
+                            if private {
+                                let name = self.property_key(&key)?;
+                                self.set_private_member(&object, &name, assigned.clone())?;
+                            } else {
+                                self.assign_member(&object, &key, assigned.clone())?;
+                            }
+                            return Ok(assigned);
+                        }
+                        _ => (),
                     }
                 }
                 let v = self.eval_expr(value)?;

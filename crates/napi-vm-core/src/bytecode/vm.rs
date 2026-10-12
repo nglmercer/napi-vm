@@ -470,6 +470,17 @@ fn run_loop(
                     slot.value = value;
                     slot.initialized = true;
                 }
+                Instr::ResolveAssignmentBinding {
+                    base,
+                    property,
+                    name,
+                } => {
+                    let name = const_string(frame.function, name)?;
+                    let (target, is_property) =
+                        interp.resolve_assignment_binding(&current_scope(interp, frame), name)?;
+                    frame.registers[base as usize] = target;
+                    frame.registers[property as usize] = Value::Bool(is_property);
+                }
                 Instr::ReadAssignmentBinding {
                     dst,
                     base,

@@ -29,6 +29,14 @@ pub(super) fn install(e: &mut Environment) {
         for (name, value) in constants {
             n.set_prop(name.to_string(), Value::Number(*value))
                 .expect("built-in Number property");
+            n.property_cell().unwrap().meta.borrow_mut().set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
         }
         n.set_prop("isInteger".to_string(), nf("isInteger", number_is_integer))
             .expect("built-in Number property");
