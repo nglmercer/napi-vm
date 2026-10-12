@@ -445,52 +445,26 @@ impl Interpreter {
                         }
                     )));
                 }
-                // Own enumerable keys for `{ ...rest }`; named keys above
-                // read via Get instead.
-                let own_keys: Vec<String> = match val {
-                    Value::Object { props: oprops, .. } => {
-                        let slots = oprops.borrow();
-                        let meta = oprops.meta.borrow();
-                        slots
-                            .iter()
-                            .filter(|(k, _)| {
-                                meta.attrs_of(k).enumerable
-                                    && !crate::interpreter::is_internal_key(k)
-                            })
-                            .map(|(k, _)| k.clone())
-                            .collect()
-                    }
-                    _ => vec![],
-                };
-                let mut taken: Vec<String> = Vec::new();
+                let mut taken: Vec<Value> = Vec::new();
                 for (key, pat) in props {
                     // `{ ...rest }` takes whatever the named keys did not.
                     if matches!(key, PatternKey::Name(k) if k == "...")
                         && let Some(Pattern::Rest(target)) = pat
                     {
-                        let mut remaining: Vec<(String, Value)> = Vec::new();
-                        for k in &own_keys {
-                            if taken.iter().any(|t| t == k) {
-                                continue;
-                            }
-                            let v = self.get_prop_value_str(val, k)?;
-                            remaining.push((k.clone(), v));
-                        }
-                        let rest = Value::checked_object(remaining)?;
+                        let rest = self.copy_data_properties(val, &taken)?;
                         self.destructure_pattern(target, &rest, initialize)?;
                         continue;
                     }
-                    let key_str = match key {
-                        PatternKey::Name(name) => name.clone(),
-                        // Computed keys evaluate left to right, like member
-                        // reads, and count as taken for `{ ...rest }`.
+                    let property_key = match key {
+                        PatternKey::Name(name) => Value::String(crate::JsString::from_key(name)),
                         PatternKey::Computed(expr) => {
                             let value = self.eval_expr(expr)?;
-                            self.property_key(&value)?
+                            self.ecmascript_to_property_key(&value)?
                         }
                     };
-                    taken.push(key_str.clone());
-                    let found = self.get_prop_value_str(val, &key_str)?;
+                    let key_str = self.property_key(&property_key)?;
+                    taken.push(property_key.clone());
+                    let found = self.get_prop_value(val, &property_key)?;
                     if let Some(p) = pat {
                         self.destructure_pattern(p, &found, initialize)?;
                     } else {

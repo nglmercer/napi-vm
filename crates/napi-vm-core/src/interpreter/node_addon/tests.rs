@@ -1206,7 +1206,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     assert!(matches!(bigint, Value::String(ref value) if value == "9007199254740993"));
     let builtins = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const nativeDate = addon.makeDate(); const nativeRegex = addon.makeRegex(); const nativeSymbol = addon.makeSymbol(); const guestSymbol = Symbol('guest'); const nativeRegexMatched = nativeRegex.test('AAA'); ({inputDate:addon.dateValue(new Date(1700000000123)), nativeDate:nativeDate.getTime(), inputRegex:addon.regexSource(/a+/gi) + '/' + addon.regexFlags(/a+/gi), nativeRegex:nativeRegex.source + '/' + nativeRegex.flags, nativeRegexMatched, nativeRegexLastIndex:nativeRegex.lastIndex, nativeSymbolType:typeof nativeSymbol, nativeSymbolDescription:nativeSymbol.description, nativeSymbolNapiType:addon.isSymbol(nativeSymbol), guestSymbolNapiType:addon.isSymbol(guestSymbol), iteratorSymbolNapiType:addon.isNodeIterator(Symbol.iterator), nativeSymbolIdentity:addon.identity(nativeSymbol) === nativeSymbol, guestSymbolIdentity:addon.identity(guestSymbol) === guestSymbol});",
+                "{ const addon = require('./fixture.node'); const nativeDate = addon.makeDate(); const nativeRegex = addon.makeRegex(); const nativeSymbol = addon.makeSymbol(); const guestSymbol = Symbol('guest'); const nativeRegexMatched = nativeRegex.test('AAA'); ({inputDate:addon.dateValue(new Date(1700000000123)), nativeDate:nativeDate.getTime(), inputRegex:addon.regexSource(/a+/gi) + '/' + addon.regexFlags(/a+/gi), nativeRegex:nativeRegex.source + '/' + nativeRegex.flags, nativeRegexMatched, nativeRegexLastIndex:nativeRegex.lastIndex, nativeSymbolType:typeof nativeSymbol, nativeSymbolDescription:nativeSymbol.description, nativeSymbolNapiType:addon.isSymbol(nativeSymbol), guestSymbolNapiType:addon.isSymbol(guestSymbol), iteratorSymbolNapiType:addon.isNodeIterator(Symbol.iterator), nativeSymbolIdentity:addon.identity(nativeSymbol) === nativeSymbol, guestSymbolIdentity:addon.identity(guestSymbol) === guestSymbol}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1263,7 +1263,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let identities = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const child = {value:1}; const parent = {left:child, right:child}; const nativeArray = addon.makeSharedArray(); ({nested:addon.sameObject(parent.left, parent.right), topLevel:addon.sameObject(child, child), distinct:addon.sameObject({}, {}), nativeArray:nativeArray[0] === nativeArray[1]});",
+                "{ const addon = require('./fixture.node'); const child = {value:1}; const parent = {left:child, right:child}; const nativeArray = addon.makeSharedArray(); ({nested:addon.sameObject(parent.left, parent.right), topLevel:addon.sameObject(child, child), distinct:addon.sameObject({}, {}), nativeArray:nativeArray[0] === nativeArray[1]}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1284,7 +1284,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let cycles = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const guestObject = {value:1}; guestObject.self = guestObject; const guestArray = []; guestArray.push(guestArray); const nativeObject = addon.makeCycle(); const nativeArray = addon.makeCyclicArray(); ({guestObject:guestObject.self === addon.echo(guestObject), guestArray:guestArray[0] === addon.echo(guestArray), nativeObject:nativeObject.self === nativeObject, nativeArray:nativeArray[0] === nativeArray});",
+                "{ const addon = require('./fixture.node'); const guestObject = {value:1}; guestObject.self = guestObject; const guestArray = []; guestArray.push(guestArray); const nativeObject = addon.makeCycle(); const nativeArray = addon.makeCyclicArray(); ({guestObject:guestObject.self === addon.echo(guestObject), guestArray:guestArray[0] === addon.echo(guestArray), nativeObject:nativeObject.self === nativeObject, nativeArray:nativeArray[0] === nativeArray}); }",
             )
             .unwrap();
     for key in ["guestObject", "guestArray", "nativeObject", "nativeArray"] {
@@ -1295,7 +1295,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     }
     let cyclic_writeback = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const object = addon.makeCycle(); const result = addon.mutateObject(object); ({same:result === object, self:object.self === object, changed:object.changed, child:object.child.value});",
+                "{ const addon = require('./fixture.node'); const object = addon.makeCycle(); const result = addon.mutateObject(object); ({same:result === object, self:object.self === object, changed:object.changed, child:object.child.value}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1316,7 +1316,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let mutations = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const child = {value:1}; const object = {child, removeMe:5}; const array = [1,2]; const objectResult = addon.mutateObject(object); const arrayResult = addon.mutateArray(array); ({objectIdentity:objectResult === object, direct:object.changed, nested:child.value, removed:'removeMe' in object, arrayIdentity:arrayResult === array, item:array[1], appended:array[2], length:array.length, named:array.tag});",
+                "{ const addon = require('./fixture.node'); const child = {value:1}; const object = {child, removeMe:5}; const array = [1,2]; const objectResult = addon.mutateObject(object); const arrayResult = addon.mutateArray(array); ({objectIdentity:objectResult === object, direct:object.changed, nested:child.value, removed:'removeMe' in object, arrayIdentity:arrayResult === array, item:array[1], appended:array[2], length:array.length, named:array.tag}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1357,7 +1357,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let accessor_bridge = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); let captured = 14; const object = {}; Object.defineProperty(object, 'value', {get: () => captured, set: (value) => { captured = value; }, enumerable: true, configurable: true}); const before = addon.readProperty(object); addon.writeProperty(object, 37); ({before, captured, after: addon.readProperty(object)});",
+                "{ const addon = require('./fixture.node'); let captured = 14; const object = {}; Object.defineProperty(object, 'value', {get: () => captured, set: (value) => { captured = value; }, enumerable: true, configurable: true}); const before = addon.readProperty(object); addon.writeProperty(object, 37); ({before, captured, after: addon.readProperty(object)}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1374,7 +1374,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let symbol_bridge = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const key = Symbol('addon-key'); const defined = Symbol('defined-key'); const accessKey = Symbol('accessor-key'); const object = {[key]:18}; Object.defineProperty(object, defined, {value:29, writable:true, enumerable:true, configurable:true}); let captured = 6; Object.defineProperty(object, accessKey, {get: () => captured, set: (value) => { captured = value; }, enumerable:true, configurable:true}); const accessorBefore = addon.readSymbolProperty(object, accessKey); addon.writeSymbolProperty(object, accessKey, 61); const accessorAfter = addon.readSymbolProperty(object, accessKey); const fromKey = Symbol('from-entries'); const fromObject = Object.fromEntries([[fromKey, 71]]); const fromEntries = addon.readSymbolProperty(fromObject, fromKey); const before = addon.readSymbolProperty(object, key); addon.writeSymbolProperty(object, key, 53); const after = object[key]; const deleted = addon.deleteSymbolProperty(object, key); ({before, after, deleted, final: object[key], defined: object[defined], fromEntries, accessorBefore, accessorAfter, captured});",
+                "{ const addon = require('./fixture.node'); const key = Symbol('addon-key'); const defined = Symbol('defined-key'); const accessKey = Symbol('accessor-key'); const object = {[key]:18}; Object.defineProperty(object, defined, {value:29, writable:true, enumerable:true, configurable:true}); let captured = 6; Object.defineProperty(object, accessKey, {get: () => captured, set: (value) => { captured = value; }, enumerable:true, configurable:true}); const accessorBefore = addon.readSymbolProperty(object, accessKey); addon.writeSymbolProperty(object, accessKey, 61); const accessorAfter = addon.readSymbolProperty(object, accessKey); const fromKey = Symbol('from-entries'); const fromObject = Object.fromEntries([[fromKey, 71]]); const fromEntries = addon.readSymbolProperty(fromObject, fromKey); const before = addon.readSymbolProperty(object, key); addon.writeSymbolProperty(object, key, 53); const after = object[key]; const deleted = addon.deleteSymbolProperty(object, key); ({before, after, deleted, final: object[key], defined: object[defined], fromEntries, accessorBefore, accessorAfter, captured}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1428,7 +1428,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let callback_mutations = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const object = {value:1}; const returned = addon.mutateAfterCallback(object, () => { object.guest = 19; }); ({same:returned === object, guest:object.guest, native:object.native});",
+                "{ const addon = require('./fixture.node'); const object = {value:1}; const returned = addon.mutateAfterCallback(object, () => { object.guest = 19; }); ({same:returned === object, guest:object.guest, native:object.native}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1445,7 +1445,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let returned_alias = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const holder = {}; const result = addon.assignAndReturn(holder); ({same:result === holder.created, value:holder.created.value});",
+                "{ const addon = require('./fixture.node'); const holder = {}; const result = addon.assignAndReturn(holder); ({same:result === holder.created, value:holder.created.value}); }",
             )
             .unwrap();
     assert!(matches!(
@@ -1458,15 +1458,21 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let buffers = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const buffer = addon.makeBuffer(); const view = addon.makeDataView(); ({text:buffer.toString('utf8'), first:buffer[0], roundTrip:addon.isBuffer(buffer), guestBufferIsBuffer:addon.isBuffer(Buffer.from([1, 2])), inputLength:addon.typedArrayLength(new Uint16Array([300, 400])), typed:addon.makeTypedArray(), arrayBufferLength:addon.arrayBufferLength(new Uint8Array([1, 2, 3]).buffer), arrayBufferByte:new Uint8Array(addon.makeArrayBuffer())[1], dataViewLength:view.byteLength, dataViewByte:view.getUint8(1), dataViewRoundTrip:addon.dataViewByte(new DataView(new Uint8Array([4, 5]).buffer))});",
+                "{ const addon = require('./fixture.node'); const buffer = addon.makeBuffer(); const view = addon.makeDataView(); ({text:buffer.toString('utf8'), first:buffer[0], roundTrip:addon.isBuffer(buffer), guestBufferIsBuffer:typeof Buffer === 'undefined' ? null : addon.isBuffer(Buffer.from([1, 2])), inputLength:addon.typedArrayLength(new Uint16Array([300, 400])), typed:addon.makeTypedArray(), arrayBufferLength:addon.arrayBufferLength(new Uint8Array([1, 2, 3]).buffer), arrayBufferByte:new Uint8Array(addon.makeArrayBuffer())[1], dataViewLength:view.byteLength, dataViewByte:view.getUint8(1), dataViewRoundTrip:addon.dataViewByte(new DataView(new Uint8Array([4, 5]).buffer))}); }",
             )
             .unwrap();
     assert!(matches!(buffers.get_prop("text"), Some(Value::String(ref value)) if value == "abc"));
     assert!(matches!(buffers.get_prop("first"), Some(Value::Number(value)) if value == 97.0));
     assert!(matches!(buffers.get_prop("roundTrip"), Some(Value::Number(value)) if value == 1.0));
+    #[cfg(feature = "node-api-host")]
     assert!(matches!(
         buffers.get_prop("guestBufferIsBuffer"),
         Some(Value::Number(value)) if value == 1.0
+    ));
+    #[cfg(not(feature = "node-api-host"))]
+    assert!(matches!(
+        buffers.get_prop("guestBufferIsBuffer"),
+        Some(Value::Null)
     ));
     assert!(matches!(buffers.get_prop("inputLength"), Some(Value::Number(value)) if value == 2.0));
     assert!(
@@ -1670,7 +1676,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     );
     let counter = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const counter = new addon.Counter(19); counter.increment(); counter.count = 41; counter.increment(); const other = new addon.Counter(5); counter.increment.call(other); const spread = {...counter}; const assigned = Object.assign({}, counter); let iterated = ''; for (const key in counter) iterated += key; ({count:counter.count, receiver:other.count, same:counter === counter.self(), keys:Object.keys(counter).join(','), values:Object.values(counter).join(','), entries:Object.entries(counter)[0][0] + ':' + Object.entries(counter)[0][1], spread:spread.count, assigned:assigned.count, iterated, has:'count' in counter});",
+                "{ const addon = require('./fixture.node'); const counter = new addon.Counter(19); counter.increment(); counter.count = 41; counter.increment(); const other = new addon.Counter(5); counter.increment.call(other); const spread = {...counter}; const assigned = Object.assign({}, counter); let iterated = ''; for (const key in counter) iterated += key; ({count:counter.count, receiver:other.count, same:counter === counter.self(), keys:Object.keys(counter).join(','), values:Object.values(counter).join(','), entries:Object.entries(counter)[0][0] + ':' + Object.entries(counter)[0][1], spread:spread.count, assigned:assigned.count, iterated, has:'count' in counter}); }",
             )
             .unwrap();
     assert!(matches!(counter.get_prop("count"), Some(Value::Number(count)) if count == 42.0));
@@ -1691,7 +1697,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     assert!(matches!(counter.get_prop("has"), Some(Value::Bool(true))));
     let roundtrip = interpreter
             .eval_source(
-                "const addon = require('./fixture.node'); const counter = new addon.Counter(5); addon.echo(counter) === counter;",
+                "{ const addon = require('./fixture.node'); const counter = new addon.Counter(5); addon.echo(counter) === counter; }",
             )
             .unwrap();
     assert!(matches!(roundtrip, Value::Bool(true)));

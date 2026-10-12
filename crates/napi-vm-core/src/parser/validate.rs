@@ -964,7 +964,7 @@ fn assignment_target(target: &Expr, ctx: &Context) -> Check {
         } => {
             for (index, item) in items.iter().enumerate() {
                 match item {
-                    Expr::Undefined => {}
+                    Expr::Elision => {}
                     Expr::Spread(inner) if index + 1 == items.len() && !trailing_comma => {
                         if matches!(inner.as_ref(), Expr::Assignment { .. }) {
                             return Err("rest element cannot have an initializer".into());
@@ -1386,6 +1386,7 @@ fn expression(expr: &Expr, ctx: &Context) -> Check {
         | Expr::Bool(_)
         | Expr::Null
         | Expr::Undefined
+        | Expr::Elision
         | Expr::Identifier(_)
         | Expr::This
         | Expr::ImportMeta

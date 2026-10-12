@@ -158,6 +158,8 @@ pub struct ExportAllTemplate {
 /// it spreads (splice semantics) or passes as one value.
 #[derive(Debug, Clone, Copy)]
 pub struct SpreadEntry {
+    /// An array elision contributes length without an own indexed property.
+    pub elision: bool,
     pub spread: bool,
     /// A private dense snapshot produced by ExpandSpread; no second iteration.
     pub prepared: bool,

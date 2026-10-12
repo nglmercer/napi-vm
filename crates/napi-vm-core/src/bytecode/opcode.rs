@@ -402,21 +402,17 @@ pub enum Instr {
         src: Reg,
         from: u16,
     },
-    /// Throw a `TypeError` when `src` is nullish (object patterns cannot
-    /// destructure `null`/`undefined`); otherwise `dst` snapshots `src`'s
-    /// own enumerable string keys (only objects have any) for a later
-    /// [`Instr::RestObject`].
+    /// RequireObjectCoercible and retain the source in `dst`. Object rest
+    /// enumerates properties after the preceding named bindings have run.
     CheckDestructObject {
         dst: Reg,
         src: Reg,
     },
-    /// `dst` = object of the `src` properties named by the `keys` array
-    /// minus the `taken` array's keys, each read through the normal member
-    /// path. Implements `{ ...rest }`.
+    /// Copy own enumerable properties of `src`, excluding the normalized
+    /// string/symbol keys in `taken`. Implements `{ ...rest }`.
     RestObject {
         dst: Reg,
         src: Reg,
-        keys: Reg,
         taken: Reg,
     },
     /// `dst` = own enumerable keys of `src` as a string array (proxy traps
@@ -1003,13 +999,8 @@ impl fmt::Display for Instr {
             Instr::CheckDestructObject { dst, src } => {
                 write!(f, "CHECK_DESTRUCT_OBJECT r{dst}, r{src}")
             }
-            Instr::RestObject {
-                dst,
-                src,
-                keys,
-                taken,
-            } => {
-                write!(f, "REST_OBJECT r{dst}, r{src}, r{keys}, r{taken}")
+            Instr::RestObject { dst, src, taken } => {
+                write!(f, "REST_OBJECT r{dst}, r{src}, r{taken}")
             }
             Instr::EnumKeys { dst, src } => write!(f, "ENUM_KEYS r{dst}, r{src}"),
             Instr::ForOfInit { iter, next, src } => {

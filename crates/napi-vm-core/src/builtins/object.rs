@@ -123,6 +123,84 @@ pub(super) fn install(e: &mut Environment) {
 
 // --- Shared helpers ---------------------------------------------------------
 
+/// Complete native method objects after Function.prototype is available.
+pub(super) fn install_function_metadata(e: &Environment) {
+    let Some(object) = e.get("Object") else {
+        return;
+    };
+    let function_prototype = e.get("Function").and_then(|v| v.get_prop("prototype"));
+    for (target, methods) in [
+        (
+            object.clone(),
+            vec![
+                ("keys", 1),
+                ("values", 1),
+                ("entries", 1),
+                ("assign", 2),
+                ("getOwnPropertyNames", 1),
+                ("getOwnPropertySymbols", 1),
+                ("create", 2),
+                ("defineProperty", 3),
+                ("defineProperties", 2),
+                ("getOwnPropertyDescriptor", 2),
+                ("getOwnPropertyDescriptors", 1),
+                ("getPrototypeOf", 1),
+                ("setPrototypeOf", 2),
+                ("hasOwn", 2),
+                ("fromEntries", 1),
+                ("freeze", 1),
+                ("isFrozen", 1),
+                ("seal", 1),
+                ("isSealed", 1),
+                ("preventExtensions", 1),
+                ("isExtensible", 1),
+                ("is", 2),
+            ],
+        ),
+        (
+            object
+                .get_prop("prototype")
+                .expect("Object.prototype installed"),
+            vec![
+                ("__defineGetter__", 2),
+                ("__defineSetter__", 2),
+                ("hasOwnProperty", 1),
+                ("__lookupGetter__", 1),
+                ("__lookupSetter__", 1),
+                ("isPrototypeOf", 1),
+                ("propertyIsEnumerable", 1),
+                ("toLocaleString", 0),
+                ("toString", 0),
+                ("valueOf", 0),
+            ],
+        ),
+    ] {
+        for (name, length) in methods {
+            if let Some(Value::NativeFunction { callable, .. }) = target.get_prop(name) {
+                target
+                    .set_prop(
+                        name.into(),
+                        super::native_method(name, length, callable, function_prototype.clone()),
+                    )
+                    .expect("built-in Object method");
+                target
+                    .property_cell()
+                    .expect("Object method owner")
+                    .meta
+                    .borrow_mut()
+                    .set_attrs(
+                        name,
+                        PropAttrs {
+                            writable: true,
+                            enumerable: false,
+                            configurable: true,
+                        },
+                    );
+            }
+        }
+    }
+}
+
 fn cell(v: &Value) -> Option<Rc<ObjectCell>> {
     if let Value::Function(function) = v {
         function.ensure_name_length_properties();
@@ -224,39 +302,28 @@ pub(crate) fn own_names_for(
     value: &Value,
     enumerable_only: bool,
 ) -> Result<Vec<String>, VmErr> {
-    if let Some(global) = interp.global_scope_of(value) {
-        return Ok(global
-            .borrow()
-            .global_property_keys()
-            .into_iter()
-            .filter(|name| {
-                !enumerable_only
-                    || global
-                        .borrow()
-                        .global_property(name)
-                        .is_some_and(|(_, attrs)| attrs.enumerable)
-            })
-            .collect());
+    // Internal enumeration also serves for-in, where a nullish source is empty.
+    // Object reflection entry points perform their own ToObject first.
+    if matches!(value, Value::Null | Value::Undefined) {
+        return Ok(Vec::new());
     }
-    if matches!(value, Value::Proxy(_)) {
-        let mut names = Vec::new();
-        for key in interp.own_property_keys(value)? {
-            if let Value::String(name) = &key {
-                if enumerable_only {
-                    let descriptor = descriptor_for_key_in(interp, value, &key)?;
-                    if !descriptor
-                        .get_prop("enumerable")
-                        .is_some_and(|value| value.is_truthy())
-                    {
-                        continue;
-                    }
+    let value = to_object_receiver(value)?;
+    let mut names = Vec::new();
+    for key in interp.own_property_keys(&value)? {
+        if let Value::String(name) = &key {
+            if enumerable_only {
+                let descriptor = descriptor_for_key_in(interp, &value, &key)?;
+                if !descriptor
+                    .get_prop("enumerable")
+                    .is_some_and(|value| value.is_truthy())
+                {
+                    continue;
                 }
-                names.push(name.to_key());
             }
+            names.push(name.to_key());
         }
-        return Ok(names);
     }
-    Ok(own_names(value, enumerable_only))
+    Ok(names)
 }
 
 /// Ordinary [[OwnPropertyKeys]], including the indexed exotic keys and
@@ -455,50 +522,96 @@ pub(crate) fn install_intrinsic_accessor(
 
 // --- Enumeration ------------------------------------------------------------
 
+#[derive(Clone, Copy)]
+enum EnumerableOwnKind {
+    Key,
+    Value,
+    Entry,
+}
+
+fn enumerable_own_properties(
+    interp: &mut Interpreter,
+    source: &Value,
+    kind: EnumerableOwnKind,
+) -> Result<Value, VmErr> {
+    let source = to_object_receiver(source)?;
+    let mut result = Vec::new();
+    for key in interp.own_property_keys(&source)? {
+        interp.check_execution()?;
+        // EnumerableOwnProperties considers string keys only. In particular,
+        // it must not consult a Proxy descriptor trap for a symbol key.
+        if !matches!(key, Value::String(_)) {
+            continue;
+        }
+        let descriptor = descriptor_for_key_in(interp, &source, &key)?;
+        if !descriptor
+            .get_prop("enumerable")
+            .is_some_and(|value| value.is_truthy())
+        {
+            continue;
+        }
+        let entry = match kind {
+            EnumerableOwnKind::Key => key,
+            EnumerableOwnKind::Value => interp.get_prop_value(&source, &key)?,
+            EnumerableOwnKind::Entry => {
+                let value = interp.get_prop_value(&source, &key)?;
+                Value::array(vec![key, value])
+            }
+        };
+        if result.len() >= crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        }
+        result.push(entry);
+    }
+    Value::checked_array(result)
+}
+
 fn object_keys(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Value::checked_array(
-        own_names_for(interp, &v, true)?
-            .into_iter()
-            .map(|value| Value::String(crate::JsString::from_key(&value)))
-            .collect(),
+    enumerable_own_properties(
+        interp,
+        a.first().unwrap_or(&Value::Undefined),
+        EnumerableOwnKind::Key,
     )
 }
 
 fn object_values(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    let mut out = Vec::new();
-    for key in own_names_for(interp, &v, true)? {
-        out.push(interp.member(&v, &key)?);
-    }
-    Value::checked_array(out)
+    enumerable_own_properties(
+        interp,
+        a.first().unwrap_or(&Value::Undefined),
+        EnumerableOwnKind::Value,
+    )
 }
 
 fn object_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    let mut out = Vec::new();
-    for key in own_names_for(interp, &v, true)? {
-        let value = interp.member(&v, &key)?;
-        out.push(Value::array(vec![
-            Value::String(crate::JsString::from_key(&key)),
-            value,
-        ]));
-    }
-    Value::checked_array(out)
+    enumerable_own_properties(
+        interp,
+        a.first().unwrap_or(&Value::Undefined),
+        EnumerableOwnKind::Entry,
+    )
 }
 
 fn object_assign(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let target = a.first().cloned().unwrap_or_else(|| Value::object(vec![]));
+    let target = to_object_receiver(a.first().unwrap_or(&Value::Undefined))?;
     for src in a.iter().skip(1) {
-        // Snapshot the keys first so `Object.assign(o, o)` does not hold a
-        // borrow on the object it is about to write to.
-        for key in own_names_for(interp, src, true)? {
-            let value = interp.member(src, &key)?;
-            interp.assign_member(
-                &target,
-                &Value::String(crate::JsString::from_key(&key)),
-                value,
-            )?;
+        if matches!(src, Value::Null | Value::Undefined) {
+            continue;
+        }
+        let src = to_object_receiver(src)?;
+        // Assign interleaves each Get with a throwing Set. A setter may change
+        // the next source descriptor, so do not materialize all values first.
+        for key in interp.own_property_keys(&src)? {
+            interp.check_execution()?;
+            let descriptor = descriptor_for_key_in(interp, &src, &key)?;
+            if !descriptor
+                .get_prop("enumerable")
+                .is_some_and(|value| value.is_truthy())
+            {
+                continue;
+            }
+            let value = interp.get_prop_value(&src, &key)?;
+            if !interp.set_member_with_receiver(&target, &key, value, &target)? {
+                return Err(type_err("Cannot assign to property"));
+            }
         }
     }
     Ok(target)
@@ -510,10 +623,7 @@ fn object_get_own_property_names(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let v = to_object_receiver(&a.first().cloned().unwrap_or(Value::Undefined))?;
-    let names = match v {
-        Value::GlobalObject => interp.global_keys(),
-        ref other => own_names_for(interp, other, false)?,
-    };
+    let names = own_names_for(interp, &v, false)?;
     Value::checked_array(
         names
             .into_iter()
@@ -1053,7 +1163,7 @@ fn object_create(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
     let proto = a.first().cloned().unwrap_or(Value::Undefined);
     let created = Value::object_with_proto(vec![], proto_arg(&proto)?);
     if let Some(descriptors) = a.get(1)
-        && !matches!(descriptors, Value::Undefined | Value::Null)
+        && !matches!(descriptors, Value::Undefined)
     {
         apply_descriptor_map(interp, &created, descriptors)?;
     }
@@ -1086,7 +1196,7 @@ fn object_define_properties(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    if cell(&target).is_none() && !matches!(target, Value::Array(_)) {
+    if !crate::interpreter::call::is_js_object(&target) {
         return Err(type_err("Object.defineProperties called on non-object"));
     }
     let descriptors = a.get(1).cloned().unwrap_or(Value::Undefined);
@@ -1095,13 +1205,27 @@ fn object_define_properties(
 }
 
 fn apply_descriptor_map(
-    _interp: &mut Interpreter,
+    interp: &mut Interpreter,
     target: &Value,
     descriptors: &Value,
 ) -> Result<(), VmErr> {
-    for key in own_names(descriptors, true) {
-        let descriptor = own_slot(descriptors, &key).unwrap_or(Value::Undefined);
-        define_property(target, &key, &descriptor)?;
+    let descriptors = to_object_receiver(descriptors)?;
+    let mut pending = Vec::new();
+    for key in interp.own_property_keys(&descriptors)? {
+        interp.check_execution()?;
+        let own = descriptor_for_key_in(interp, &descriptors, &key)?;
+        if own.get_prop("enumerable").is_some_and(|v| v.is_truthy()) {
+            let value = interp.get_prop_value(&descriptors, &key)?;
+            let descriptor = to_property_descriptor(interp, &value)?;
+            pending.push((key, descriptor));
+        }
+    }
+    // All descriptor conversions precede the first mutation of the target.
+    for (key, descriptor) in pending {
+        interp.check_execution()?;
+        if !interp.define_own_property(target, &key, &descriptor)? {
+            return Err(type_err("Cannot define property"));
+        }
     }
     Ok(())
 }
@@ -1568,15 +1692,33 @@ fn object_get_own_descriptors(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let target = a.first().cloned().unwrap_or(Value::Undefined);
+    let target = to_object_receiver(a.first().unwrap_or(&Value::Undefined))?;
     let mut props = Vec::new();
-    for key in own_names_for(interp, &target, false)? {
-        let descriptor = descriptor_for_in(interp, &target, &key)?;
+    let mut symbols = Vec::new();
+    for key in interp.own_property_keys(&target)? {
+        interp.check_execution()?;
+        let descriptor = descriptor_for_key_in(interp, &target, &key)?;
         if !matches!(descriptor, Value::Undefined) {
-            props.push((key, from_property_descriptor(descriptor)));
+            let slot = interp.property_key(&key)?;
+            if let Value::Symbol(symbol) = &key {
+                symbols.push((slot.clone(), symbol.clone()));
+            }
+            if props.len() >= crate::value::MAX_OBJECT_PROPS {
+                return Err(crate::value::limit_err(
+                    "Maximum object property count exceeded",
+                ));
+            }
+            props.push((slot, from_property_descriptor(descriptor)));
         }
     }
-    Value::checked_object(props)
+    let result = Value::checked_object(props)?;
+    if let Value::Object { props } = &result {
+        let mut metadata = props.meta.borrow_mut();
+        for (slot, symbol) in symbols {
+            metadata.set_symbol_key(&slot, symbol);
+        }
+    }
+    Ok(result)
 }
 
 /// FromPropertyDescriptor creates an ordinary object only when a descriptor

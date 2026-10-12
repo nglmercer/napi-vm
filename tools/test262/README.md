@@ -42,9 +42,14 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The merged PR #23 development measurement is in `latest.json`: 41,407 passes
-out of 102,956 variants (40.2182%), with zero feature skips. This does not establish
-full conformance.
+The last full development measurement is in `latest.json`: 67,677
+passes out of 102,956 variants (65.7339%), with zero feature skips, crashes, or
+harness errors and two deep-WeakMap staging timeouts. It gains 187 passes and
+loses none versus the preceding metadata full run. Individual outcomes,
+source/worker identities and comparisons are archived under
+`evidence/abstract-equality-continuation/`. This does not establish full conformance;
+the workspace native-addon failures and full-corpus AST/bytecode comparison
+remain open. See [abstract-equality continuation](../../docs/test262-abstract-equality-continuation.md).
 
 The initial full development baseline is in `baseline.json`: 32,359 passes out
 of 102,956 variants, 31.43%. The initial run preceded binary snapshot support;

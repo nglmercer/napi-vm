@@ -392,7 +392,7 @@ impl Peer {
             )
         };
         bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 n.checked_add(data.len()).filter(|&v| v <= max)
             })
             .map_err(|_| RpcError::new("OVERLOADED", "outbound queued byte limit exceeded"))?;
@@ -470,7 +470,7 @@ impl Peer {
         let count = self
             .0
             .counter
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
             .map_err(|_| {
                 RpcError::new(
                     "OVERLOADED",

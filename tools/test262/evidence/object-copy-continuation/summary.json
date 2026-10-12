@@ -1,0 +1,73 @@
+{
+  "source_commit": "9e4f017ee76ce538d9ac076fa180ac6d12ddd104",
+  "source_state": "Working tree; archived source patch includes tracked changes and new object_spread integration tests",
+  "source_patch_sha256": "2fdf6f1e6af3589363645d53eda5180910bd31f5f2de85285f6f4100f081db92",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "54ae4204bf68771dada024933081e44e4bb8d30e2895280933fa131a489a3cd4",
+  "classification": "Full pinned regression gate passed; full conformance and workspace test gates remain incomplete",
+  "total": 102956,
+  "counts": {
+    "pass": 66826,
+    "fail": 36128,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 64.90733905746144,
+  "new_passes": 618,
+  "lost_passes": 0,
+  "baseline": "Archived be8ebf3 full repeat",
+  "parse_negative_execution_passes": 8659,
+  "focused": {
+    "total": 3939,
+    "counts": {
+      "pass": 3145,
+      "fail": 794,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 60,
+    "lost_passes": 0
+  },
+  "checks": {
+    "object_copy_ast_bytecode_fixtures": 11,
+    "array_elision_fixtures": 6,
+    "engine_boundary": 4,
+    "test262_worker": 17,
+    "tooling": 12,
+    "core_minimal": {
+      "passed": 354,
+      "failed": 0,
+      "filtered_out": 1,
+      "excluded": "interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon"
+    },
+    "fmt": "passed",
+    "clippy": "workspace/all-targets/all-features -D warnings passed",
+    "workspace": "Not green: prior workspace run stopped at core with five native-addon failures; not rerun for this change",
+    "full_corpus_ast_bytecode_differential": "Not measured"
+  },
+  "archive_sha256": {
+    "object-copy-full.json.gz": "9d6baf4f494dce09ecf8cb71c331869881980e1a628e4ec99850b6eeaa9f9deb",
+    "object-copy-full-transitions.json.gz": "b3e7fa9d9f9f598ea4b5ec0c20c14e774c60c59e21bc5b9229b4a6431c66f376",
+    "object-copy-full-triage.json.gz": "9edae96394df64062513d510fda96c53e93d8eaa00935333219b5d3fcd710b2a",
+    "object-copy-focused.json.gz": "5b868c667197a1d412755d36963cddf74432a1160acbf1025fcc22fb8859893f",
+    "object-copy-focused-transitions.json.gz": "846157b830d096830def40b1cb22e95cba95a52a3a5c0df9752e921f4e469235",
+    "object-copy-focused-baseline-projection.json.gz": "37ca9449367778323a5ecd05668d67bd3a1fda820b71751eb2cf12fe4c0a98f0",
+    "object-copy-core-tests.log.gz": "60ae98ad32801646dc5f377bdc6737849a568bf61dc7a8e9f31e23d900dd1d2c",
+    "object-copy-full.log.gz": "c0925bf5e45259ba4e265942710c405e7e711a749f36629b60f9ae4aab63ef83",
+    "object-copy-working-tree.patch.gz": "495a1a55b99ec02c836b392cae92794519339502a1c211acac2e6e3e90abe033"
+  },
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  },
+  "source_patch_note": "Snapshot frozen before evidence-only documentation/latest.json updates"
+}

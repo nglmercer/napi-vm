@@ -106,6 +106,24 @@ impl Interpreter {
     /// proxy-`has` trap for `in`, and `+` concat coercion, then [`Self::bin_op`].
     /// Shared by the AST evaluator and the bytecode VM so both tiers agree.
     pub(crate) fn apply_binary(&mut self, op: BinOp, l: &Value, r: &Value) -> Result<Value, VmErr> {
+        if matches!(op, BinOp::Eq | BinOp::Neq) {
+            let equal = self.abstract_equals(l, r)?;
+            return Ok(Value::Bool(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                !equal
+            }));
+        }
+        if matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge) {
+            let ordering = self.abstract_relational_order(l, r)?;
+            return Ok(Value::Bool(ordering.is_some_and(|order| match op {
+                BinOp::Lt => order.is_lt(),
+                BinOp::Gt => order.is_gt(),
+                BinOp::Le => order.is_le(),
+                BinOp::Ge => order.is_ge(),
+                _ => unreachable!(),
+            })));
+        }
         if matches!(op, BinOp::Instanceof) {
             return self.instance_of(l, r);
         }
@@ -113,11 +131,32 @@ impl Interpreter {
         // cannot live in `bin_op`, which does not borrow mutably.
         // `+` may need to run a guest `toString`, which `bin_op`
         // cannot do from `&self`. Coerce the operands first.
-        if matches!(op, BinOp::Add)
-            && (Self::needs_concat_coercion(l) || Self::needs_concat_coercion(r))
-        {
+        if matches!(op, BinOp::Add) {
             let left = self.coerce_for_concat(l)?;
             let right = self.coerce_for_concat(r)?;
+            if matches!(left, Value::String(_)) || matches!(right, Value::String(_)) {
+                return self.bin_op(op, &left, &right);
+            }
+            let left = self.ecmascript_to_numeric(&left)?;
+            let right = self.ecmascript_to_numeric(&right)?;
+            return self.bin_op(op, &left, &right);
+        }
+        if matches!(
+            op,
+            BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::Pow
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr
+                | BinOp::UShr
+        ) {
+            let left = self.ecmascript_to_numeric(l)?;
+            let right = self.ecmascript_to_numeric(r)?;
             return self.bin_op(op, &left, &right);
         }
         if matches!(op, BinOp::In) {
@@ -378,7 +417,12 @@ impl Interpreter {
                     BinOp::BitOr => return big(a.bitor(&b).map_err(VmErr::Msg)?),
                     BinOp::BitXor => return big(a.bitxor(&b).map_err(VmErr::Msg)?),
                     BinOp::Shl => return big(a.shl(&b).map_err(VmErr::Msg)?),
-                    BinOp::Shr | BinOp::UShr => return big(a.shr(&b).map_err(VmErr::Msg)?),
+                    BinOp::Shr => return big(a.shr(&b).map_err(VmErr::Msg)?),
+                    BinOp::UShr => {
+                        return Err(VmErr::Msg(
+                            "TypeError: BigInt has no unsigned right shift".into(),
+                        ));
+                    }
                     BinOp::Lt => Value::Bool(ordering.is_lt()),
                     BinOp::Gt => Value::Bool(ordering.is_gt()),
                     BinOp::Le => Value::Bool(ordering.is_le()),
@@ -589,6 +633,113 @@ impl Interpreter {
 
     pub fn tn(&self, v: &Value) -> f64 {
         v.to_number()
+    }
+
+    pub(crate) fn ecmascript_to_numeric(&mut self, value: &Value) -> Result<Value, VmErr> {
+        let primitive = self.coerce_object_to_primitive(value, "number")?;
+        if matches!(primitive, Value::BigInt(_)) {
+            Ok(primitive)
+        } else {
+            Ok(Value::Number(self.ecmascript_to_number(&primitive)?))
+        }
+    }
+
+    fn abstract_relational_order(
+        &mut self,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Option<std::cmp::Ordering>, VmErr> {
+        // All four operators coerce the original left operand first, including
+        // > and <= whose abstract comparison arguments are reversed.
+        let left = self.coerce_object_to_primitive(left, "number")?;
+        let right = self.coerce_object_to_primitive(right, "number")?;
+        match (&left, &right) {
+            (Value::String(left), Value::String(right)) => return Ok(Some(left.cmp(right))),
+            (Value::BigInt(left), Value::String(right)) => {
+                return Ok(
+                    super::resolve::string_to_bigint(right)?.map(|right| left.compare(&right))
+                );
+            }
+            (Value::String(left), Value::BigInt(right)) => {
+                return Ok(super::resolve::string_to_bigint(left)?.map(|left| left.compare(right)));
+            }
+            _ => {}
+        }
+        // ToNumeric is ordered too: Symbol conversion on the left must throw
+        // before attempting numeric conversion on the right.
+        let left = if matches!(left, Value::BigInt(_)) {
+            left
+        } else {
+            Value::Number(self.ecmascript_to_number(&left)?)
+        };
+        let right = if matches!(right, Value::BigInt(_)) {
+            right
+        } else {
+            Value::Number(self.ecmascript_to_number(&right)?)
+        };
+        Ok(match (&left, &right) {
+            (Value::BigInt(left), Value::BigInt(right)) => Some(left.compare(right)),
+            (Value::BigInt(left), Value::Number(right)) => left.compare_f64(*right),
+            (Value::Number(left), Value::BigInt(right)) => {
+                right.compare_f64(*left).map(std::cmp::Ordering::reverse)
+            }
+            (Value::Number(left), Value::Number(right)) => left.partial_cmp(right),
+            _ => unreachable!("ToNumeric produces Number or BigInt"),
+        })
+    }
+
+    pub(crate) fn abstract_equals(&mut self, left: &Value, right: &Value) -> Result<bool, VmErr> {
+        let mut left = left.deref_binding();
+        let mut right = right.deref_binding();
+        loop {
+            self.check_execution()?;
+            let left_object = super::call::is_js_object(&left);
+            let right_object = super::call::is_js_object(&right);
+            if (left_object && right_object)
+                || std::mem::discriminant(&left) == std::mem::discriminant(&right)
+            {
+                return Ok(strict_equals(&left, &right));
+            }
+            match (&left, &right) {
+                (Value::Null, Value::Undefined) | (Value::Undefined, Value::Null) => {
+                    return Ok(true);
+                }
+                (Value::Bool(value), _) => left = Value::Number(if *value { 1.0 } else { 0.0 }),
+                (_, Value::Bool(value)) => right = Value::Number(if *value { 1.0 } else { 0.0 }),
+                (Value::Number(number), Value::String(_)) => {
+                    return Ok(*number == self.ecmascript_to_number(&right)?);
+                }
+                (Value::String(_), Value::Number(number)) => {
+                    return Ok(self.ecmascript_to_number(&left)? == *number);
+                }
+                (Value::BigInt(big), Value::String(string))
+                | (Value::String(string), Value::BigInt(big)) => {
+                    return Ok(super::resolve::string_to_bigint(string)?
+                        .is_some_and(|parsed| big.compare(&parsed).is_eq()));
+                }
+                (Value::BigInt(big), Value::Number(number))
+                | (Value::Number(number), Value::BigInt(big)) => {
+                    return Ok(big.compare_f64(*number).is_some_and(|order| order.is_eq()));
+                }
+                _ if left_object
+                    && matches!(
+                        right,
+                        Value::String(_) | Value::Number(_) | Value::Symbol(_) | Value::BigInt(_)
+                    ) =>
+                {
+                    left = self.coerce_object_to_primitive(&left, "default")?;
+                }
+                _ if right_object
+                    && matches!(
+                        left,
+                        Value::String(_) | Value::Number(_) | Value::Symbol(_) | Value::BigInt(_)
+                    ) =>
+                {
+                    right = self.coerce_object_to_primitive(&right, "default")?;
+                }
+                _ => return Ok(false),
+            }
+        }
     }
 
     pub fn leq(&self, a: &Value, b: &Value) -> bool {

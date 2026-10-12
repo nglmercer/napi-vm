@@ -1,0 +1,66 @@
+{
+  "classification": "Full pinned regression comparison passed; full conformance and workspace gates remain incomplete",
+  "source_commit": "9e4f017ee76ce538d9ac076fa180ac6d12ddd104",
+  "source_patch_sha256": "3e7a452a34c916f317df7deed68b0fa601f7576056d21f44c87f8c240dcaac87",
+  "worker_sha256": "a58553c59b8e2784c62b087a93628ec6866b66ee6d79dc428fbdd897515e4ca0",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "focused": {
+    "total": 7606,
+    "counts": {
+      "pass": 7191,
+      "fail": 415,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 120,
+    "lost_passes": 0
+  },
+  "archive_sha256": {
+    "abstract-equality-focused.json.gz": "8cff9e8cb336806adebfb52c1bf0dd6851744c43e10d7fda5830d884f51a5060",
+    "abstract-equality-focused-baseline.json.gz": "bb86425a196ba56b41db60015284faa9ad6db4a1be5a8f7d5c2fb0d34f764f42",
+    "abstract-equality-focused-transitions.json.gz": "3def6e3cf6c353b61b96d1d3b5fd206edba72eb6b513e36859a748475fe20906",
+    "abstract-equality-working-tree.patch.gz": "cb6d0bb9189537cd77a65987a5d3b16115001145d0d6f2f1e5a6de1f8a34e976",
+    "abstract-equality-core-tests.log.gz": "f6c62b411bd196c6b9ecde0551db887058fbf0dceddc5f6e1fd0239fc306e590",
+    "abstract-equality-full.json.gz": "bafa85146cc82b25d58f2e213b2c6f5d44f216e9069c5d0983cb05866958e04d",
+    "abstract-equality-full-transitions.json.gz": "1e3cd1f98dbdf33428417aa4719d3689207b5eb482eef67c602253d927b2869f",
+    "abstract-equality-full-triage.json.gz": "f4182768c571f9f64fd8498abcd123e6ac1048c88e923e0b86e819f680a05cb1",
+    "abstract-equality-full.log.gz": "e00ee76f102cd01e86ae86d3a492d0df5cc96880ebba00d3dbae5464339d1ee0"
+  },
+  "checks": {
+    "equality_fixtures": 7,
+    "enumeration_fixtures": 13,
+    "copy_fixtures": 11,
+    "array_elision_fixtures": 6,
+    "core_minimal_passed": 354,
+    "core_excluded": "interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon",
+    "clippy": "workspace/all-targets/all-features -D warnings passed",
+    "fmt": "passed",
+    "python_tooling": 12,
+    "workspace": "Known native-addon failures remain unresolved"
+  },
+  "source_patch_note": "Working-tree patch frozen before equality checkpoint and latest metadata full-run documentation updates",
+  "total": 102956,
+  "counts": {
+    "pass": 67677,
+    "fail": 35277,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 65.73390574614399,
+  "new_passes": 187,
+  "lost_passes": 0,
+  "baseline": "Archived metadata full run",
+  "configuration": {
+    "workers": 4,
+    "timeout_seconds": 5,
+    "fuel": 1000000,
+    "loop_budget": 100000,
+    "max_call_depth": 128,
+    "max_jobs": 10000,
+    "skip_features": []
+  }
+}

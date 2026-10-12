@@ -1,0 +1,49 @@
+{
+  "classification": "Focused regression comparison passed; full execution running",
+  "source_commit": "9e4f017ee76ce538d9ac076fa180ac6d12ddd104",
+  "source_patch_sha256": "544b07396c386bcc811dc85ee4769a27518ac8bdfd957b620aeffa8a2d93a87c",
+  "worker_sha256": "0a70367cd1dac7529e613ed318792f59a2a6c0f4b7f3b2b16f56754bbe1d1611",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "focused": {
+    "total": 12396,
+    "counts": {
+      "pass": 10599,
+      "fail": 1797,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 60,
+    "lost_passes": 0,
+    "baseline": "Matching projection of completed equality full run"
+  },
+  "cumulative_metadata_comparison": {
+    "new_passes": 180,
+    "lost_passes": 0
+  },
+  "archive_sha256": {
+    "relational-operators-focused.json.gz": "8419bc3251365520a48309dfee6c3d9b89cbb57413f54b24bad23bc035138e9c",
+    "relational-operators-focused-baseline.json.gz": "08d6605f3a2c0be1e536635d8e95f59d3c8a473b318af1a92f59448f9c119d8b",
+    "relational-operators-focused-transitions.json.gz": "27879daa5ef2e8d285482db1f556f999a8875d763d1f89691e5ec532bd8d070f",
+    "relational-operators-focused-metadata-baseline.json.gz": "5fe65b11bf3f2231e3a3be2ed5913cc767617073cb664a31bd5299739301cac4",
+    "relational-operators-focused-cumulative-transitions.json.gz": "02ee5a4086cc601ad88a7e35033beecd42fd57c77139fce8d0cf7570e9634ebd",
+    "relational-operators-working-tree.patch.gz": "0e0d850e1474cf4412d420eab02bcf51c361114ac842d92f628e13af532d66c6",
+    "relational-operators-core-tests.log.gz": "a8b7bd0dc56f4fb49d97c92cd8616818b38742f463ef26f02d8d952b8ae30709",
+    "relational-operators-integration-tests.log.gz": "04b2082cc441ecd9f0f12a367a6168d45c7b92e57efb5504aee5ff054a701ebe"
+  },
+  "checks": {
+    "comparison_fixtures": 10,
+    "enumeration_fixtures": 13,
+    "copy_fixtures": 11,
+    "array_elision_fixtures": 6,
+    "engine_boundary": 4,
+    "worker": 17,
+    "core_minimal_passed": 354,
+    "core_excluded": "interpreter::node_addon::tests::loads_and_invokes_a_real_node_api_addon",
+    "clippy": "workspace/all-targets/all-features -D warnings passed",
+    "fmt": "passed",
+    "workspace": "Known native-addon failures remain unresolved"
+  },
+  "source_patch_note": "Working-tree snapshot frozen before relational checkpoint documentation and completed equality full-run evidence updates"
+}

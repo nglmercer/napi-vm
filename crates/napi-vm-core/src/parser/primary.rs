@@ -89,7 +89,7 @@ impl Parser {
                 let mut i = Vec::new();
                 while self.until(&Token::RBracket) {
                     if self.eat(&Token::Comma) {
-                        i.push(Expr::Undefined);
+                        i.push(Expr::Elision);
                         continue;
                     }
                     if self.eat(&Token::DotDotDot) {

@@ -2427,7 +2427,16 @@ impl Interpreter {
                 }
                 ObjectProp::Spread(expression) => {
                     let value = self.eval_expr(expression)?;
-                    self.for_each_spread_entry(&value, |key, property_value| {
+                    self.for_each_spread_entry(&value, &[], |key, property_value| {
+                        let key = match &key {
+                            Value::String(name) => name.to_key(),
+                            Value::Symbol(symbol) => {
+                                let key = super::symbol_slot_key(symbol);
+                                symbol_keys.push((key.clone(), symbol.clone()));
+                                key
+                            }
+                            _ => unreachable!("own property keys are strings or symbols"),
+                        };
                         insert_object_property(
                             &mut object,
                             &mut positions,
@@ -2537,7 +2546,7 @@ impl Interpreter {
                 Ok(value) => Ok(Value::BigInt(Rc::new(value))),
                 Err(error) => vm_err(error),
             },
-            Expr::Undefined => Ok(Value::Undefined),
+            Expr::Undefined | Expr::Elision => Ok(Value::Undefined),
             Expr::Identifier(n) => {
                 let scope = self.global.clone();
                 match self.lookup_binding_in(&scope, n)? {
@@ -2555,8 +2564,13 @@ impl Interpreter {
             }
             Expr::Array { items: i, .. } => {
                 let mut v = Vec::new();
+                let mut present = Vec::new();
                 for x in i {
                     match x {
+                        Expr::Elision => {
+                            v.push(Value::Undefined);
+                            present.push(false);
+                        }
                         Expr::Spread(inner) => {
                             let inner_val = self.eval_expr(inner)?;
                             self.append_iterable(
@@ -2567,11 +2581,12 @@ impl Interpreter {
                         }
                         _ => v.push(self.eval_expr(x)?),
                     }
+                    present.resize(v.len(), true);
                     if v.len() > crate::value::MAX_ARRAY_LEN {
                         return Err(crate::value::limit_err("Maximum array length exceeded"));
                     }
                 }
-                Value::checked_array(v)
+                Value::checked_array_with_presence(v, present)
             }
             Expr::Object { props, .. } => self.eval_object_literal(props),
             Expr::Binary { op, left, right } => {

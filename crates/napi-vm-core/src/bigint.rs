@@ -390,7 +390,25 @@ impl BigInt {
         if other.is_nan() {
             return None;
         }
-        self.to_f64().partial_cmp(&other)
+        if other == f64::INFINITY {
+            return Some(Ordering::Less);
+        }
+        if other == f64::NEG_INFINITY {
+            return Some(Ordering::Greater);
+        }
+        // Every finite binary64 integer fits in at most 32 limbs. Compare
+        // that exact integer rather than rounding this BigInt to binary64.
+        let integer = Self::from_f64(other.trunc()).expect("finite Number fits BigInt limits");
+        let ordering = self.compare(&integer);
+        if ordering.is_eq() && other.fract() != 0.0 {
+            Some(if other.is_sign_negative() {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            })
+        } else {
+            Some(ordering)
+        }
     }
 
     pub fn shl(&self, amount: &Self) -> BigResult<Self> {

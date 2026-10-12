@@ -2888,24 +2888,76 @@ impl Interpreter {
     }
 
     /// Copy one spread source's entries into an object under construction.
-    /// Only objects and proxies spread (anything else is silently ignored);
-    /// keys enumerate in order with getters firing per key, exactly as the
-    /// literal's spread element does. Shared by the AST evaluator and the
+    /// CopyDataProperties snapshots own keys, then checks each descriptor and
+    /// reads its value in order. Only nullish sources are ignored; primitives
+    /// are boxed, and symbols retain their identity. Shared by the evaluator and
     /// bytecode VM; the caller inserts each pair and enforces the
     /// property-count limit.
     pub(crate) fn for_each_spread_entry(
         &mut self,
         src: &Value,
-        mut insert: impl FnMut(String, Value) -> Result<(), VmErr>,
+        excluded: &[Value],
+        mut insert: impl FnMut(Value, Value) -> Result<(), VmErr>,
     ) -> Result<(), VmErr> {
-        if !matches!(src, Value::Object { .. } | Value::Proxy(_)) {
+        if matches!(src, Value::Undefined | Value::Null) {
             return Ok(());
         }
-        for key in self.keys_with_proxy_trap(src)? {
-            let value = self.member(src, &key)?;
+        let src = crate::builtins::object::to_object_receiver(src)?;
+        for key in self.own_property_keys(&src)? {
+            self.check_execution()?;
+            if excluded
+                .iter()
+                .any(|excluded| strict_equals(excluded, &key))
+            {
+                continue;
+            }
+            let descriptor = crate::builtins::object::descriptor_for_key_in(self, &src, &key)?;
+            if !descriptor
+                .get_prop("enumerable")
+                .is_some_and(|value| value.is_truthy())
+            {
+                continue;
+            }
+            let value = self.get_prop_value(&src, &key)?;
             insert(key, value)?;
         }
         Ok(())
+    }
+    /// Object rest applies CopyDataProperties after the named bindings have
+    /// run; excluded keys are already normalized and are never read again.
+    pub(crate) fn copy_data_properties(
+        &mut self,
+        source: &Value,
+        excluded: &[Value],
+    ) -> Result<Value, VmErr> {
+        let mut properties = Vec::new();
+        let mut symbols = Vec::new();
+        self.for_each_spread_entry(source, excluded, |key, value| {
+            let name = match &key {
+                Value::String(name) => name.to_key(),
+                Value::Symbol(symbol) => {
+                    let name = symbol_slot_key(symbol);
+                    symbols.push((name.clone(), symbol.clone()));
+                    name
+                }
+                _ => unreachable!("own property keys are strings or symbols"),
+            };
+            if properties.len() >= crate::value::MAX_OBJECT_PROPS {
+                return Err(crate::value::limit_err(
+                    "Maximum object property count exceeded",
+                ));
+            }
+            properties.push((name, value));
+            Ok(())
+        })?;
+        let result = Value::checked_object(properties)?;
+        if let Value::Object { props } = &result {
+            let mut meta = props.meta.borrow_mut();
+            for (name, symbol) in symbols {
+                meta.set_symbol_key(&name, symbol);
+            }
+        }
+        Ok(result)
     }
 }
 

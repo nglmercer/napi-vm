@@ -862,16 +862,10 @@ fn run_loop(
                     frame.registers[dst as usize] =
                         check_destruct_object(&frame.registers[src as usize])?;
                 }
-                Instr::RestObject {
-                    dst,
-                    src,
-                    keys,
-                    taken,
-                } => {
+                Instr::RestObject { dst, src, taken } => {
                     let source = frame.registers[src as usize].clone_for_execution();
-                    let keys = frame.registers[keys as usize].clone_for_execution();
                     let taken = frame.registers[taken as usize].clone_for_execution();
-                    frame.registers[dst as usize] = rest_object(interp, &source, &keys, &taken)?;
+                    frame.registers[dst as usize] = rest_object(interp, &source, &taken)?;
                 }
                 Instr::NewObject { .. } | Instr::SetOwnProp { .. } => {
                     // Superseded by `BuildObject`; retained as valid IR, never
@@ -1588,7 +1582,16 @@ fn build_object(
             prototype = Some(frame.registers[entry.val as usize].clone_for_execution());
         } else if entry.kind == PropKind::Spread {
             let src = frame.registers[entry.val as usize].clone_for_execution();
-            interp.for_each_spread_entry(&src, |key, value| {
+            interp.for_each_spread_entry(&src, &[], |key, value| {
+                let key = match &key {
+                    Value::String(name) => name.to_key(),
+                    Value::Symbol(symbol) => {
+                        let key = symbol_slot_key(symbol);
+                        symbol_keys.push((key.clone(), symbol.clone()));
+                        key
+                    }
+                    _ => return Err(internal("invalid own property key in spread")),
+                };
                 insert_object_property(
                     &mut object,
                     &mut positions,
@@ -1702,9 +1705,13 @@ fn spread_array(
     template: &[SpreadEntry],
 ) -> Result<Value, VmErr> {
     let mut items = Vec::new();
+    let mut present = Vec::new();
     for entry in template {
         let value = frame.registers[entry.reg as usize].clone_for_execution();
-        if entry.prepared {
+        if entry.elision {
+            items.push(Value::Undefined);
+            present.push(false);
+        } else if entry.prepared {
             let Value::Array(values) = &value else {
                 return Err(internal("spread snapshot is not an array"));
             };
@@ -1718,11 +1725,12 @@ fn spread_array(
         } else {
             items.push(value);
         }
+        present.resize(items.len(), true);
         if items.len() > crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum array length exceeded"));
         }
     }
-    Value::checked_array(items)
+    Value::checked_array_with_presence(items, present)
 }
 
 /// Materialize one value for an array destructuring pattern: arrays
@@ -1743,9 +1751,8 @@ fn to_destruct_array(value: &Value) -> Result<Value, VmErr> {
     }
 }
 
-/// Reject a nullish object-pattern source, else snapshot the own enumerable
-/// string keys a later `{ ...rest }` draws from. Only objects contribute
-/// keys; every other non-nullish value destructures through `Get` alone.
+/// RequireObjectCoercible before binding any object-pattern properties.
+/// Keys are enumerated only when the rest element is reached.
 fn check_destruct_object(value: &Value) -> Result<Value, VmErr> {
     if matches!(value, Value::Null | Value::Undefined) {
         return Err(VmErr::Msg(format!(
@@ -1757,50 +1764,15 @@ fn check_destruct_object(value: &Value) -> Result<Value, VmErr> {
             }
         )));
     }
-    let keys: Vec<Value> = match value {
-        Value::Object { props: oprops, .. } => {
-            let slots = oprops.borrow();
-            let meta = oprops.meta.borrow();
-            slots
-                .iter()
-                .filter(|(k, _)| {
-                    meta.attrs_of(k).enumerable && !crate::interpreter::is_internal_key(k)
-                })
-                .map(|(k, _)| Value::String(crate::JsString::from_key(k)))
-                .collect()
-        }
-        _ => Vec::new(),
-    };
-    Ok(Value::array(keys))
+    Ok(value.clone())
 }
 
-/// `{ ...rest }`: the snapshotted `keys` minus the `taken` keys, each read
-/// through the normal member path (getters run, the prototype applies).
-fn rest_object(
-    interp: &mut Interpreter,
-    source: &Value,
-    keys: &Value,
-    taken: &Value,
-) -> Result<Value, VmErr> {
-    let as_strings = |list: &Value| match list {
-        Value::Array(items) => items
-            .borrow()
-            .iter()
-            .map(|key| interp.property_key(key))
-            .collect::<Result<Vec<_>, _>>(),
-        _ => Err(internal("rest key list of non-array")),
+fn rest_object(interp: &mut Interpreter, source: &Value, taken: &Value) -> Result<Value, VmErr> {
+    let Value::Array(taken) = taken else {
+        return Err(internal("rest key list of non-array"));
     };
-    let taken = as_strings(taken)?;
-    let mut remaining = Vec::new();
-    for key in as_strings(keys)? {
-        if taken.iter().any(|t| t == &key) {
-            continue;
-        }
-        let value =
-            interp.get_prop_value(source, &Value::String(crate::JsString::from_key(&key)))?;
-        remaining.push((key, value));
-    }
-    Value::checked_object(remaining)
+    let taken = taken.borrow();
+    interp.copy_data_properties(source, &taken)
 }
 
 fn check_prop_limit(positions: &HashMap<String, Vec<usize>>) -> Result<(), VmErr> {

@@ -1,20 +1,42 @@
 //! `Math` methods. The constants (`PI`, `E`, ...) are installed as plain
 //! properties by `setup_builtins`; this module supplies the callable methods.
 
-use super::{NativeFn, nf};
+use super::NativeFn;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::Value;
+use crate::value::{PropAttrs, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(math) = e.get("Math") {
-        for (name, f) in math_methods() {
+        let prototype = e.get("Function").and_then(|v| v.get_prop("prototype"));
+        for (name, f) in math_methods(prototype) {
             math.set_prop(name, f).expect("built-in Math property");
+        }
+        let properties = math.property_cell().expect("Math object");
+        let keys: Vec<String> = properties
+            .borrow()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect();
+        let mut metadata = properties.meta.borrow_mut();
+        for key in keys {
+            let constant = matches!(
+                key.as_str(),
+                "PI" | "E" | "LN2" | "LN10" | "LOG2E" | "LOG10E" | "SQRT1_2" | "SQRT2"
+            );
+            metadata.set_attrs(
+                &key,
+                PropAttrs {
+                    writable: !constant,
+                    enumerable: false,
+                    configurable: !constant,
+                },
+            );
         }
     }
 }
 
-fn math_methods() -> Vec<(String, Value)> {
+fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
     let table: Vec<(&str, NativeFn)> = vec![
         ("abs", math_abs),
         ("floor", math_floor),
@@ -39,7 +61,17 @@ fn math_methods() -> Vec<(String, Value)> {
     ];
     table
         .into_iter()
-        .map(|(n, f)| (n.to_string(), nf(n, f)))
+        .map(|(n, f)| {
+            let length = match n {
+                "random" => 0,
+                "pow" | "min" | "max" | "hypot" => 2,
+                _ => 1,
+            };
+            (
+                n.to_string(),
+                super::native_method(n, length, f, prototype.clone()),
+            )
+        })
         .collect()
 }
 

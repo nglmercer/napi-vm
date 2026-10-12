@@ -938,7 +938,7 @@ impl Builder<'_> {
             Expr::LogicalAssignment { .. } => Type::Unknown,
             Expr::Bool(_) => Type::Boolean,
             Expr::Null => Type::Null,
-            Expr::Undefined => Type::Undefined,
+            Expr::Undefined | Expr::Elision => Type::Undefined,
             Expr::Identifier(name) => env
                 .get(name)
                 .cloned()

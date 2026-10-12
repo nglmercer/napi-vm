@@ -120,6 +120,8 @@ pub enum Expr {
     Bool(bool),
     Null,
     Undefined,
+    /// An omitted array literal element; never an explicit undefined value.
+    Elision,
     Identifier(String),
     Array {
         items: Vec<Expr>,
@@ -1096,6 +1098,7 @@ pub(crate) fn expr_captures_identifier(expr: &Expr, name: &str) -> bool {
         | Expr::Bool(_)
         | Expr::Null
         | Expr::Undefined
+        | Expr::Elision
         | Expr::Identifier(_)
         | Expr::This
         | Expr::Super
@@ -1419,6 +1422,7 @@ fn expr_references(e: &Expr, name: &str) -> bool {
         | Expr::Bool(_)
         | Expr::Null
         | Expr::Undefined
+        | Expr::Elision
         | Expr::This
         | Expr::Super
         | Expr::ImportMeta
@@ -1459,7 +1463,7 @@ pub fn expr_to_pattern(expr: &Expr) -> Option<Pattern> {
                         expr_to_pattern(inner).map(|p| Pattern::Rest(Box::new(p)))
                     }
                     // A hole (`[, a] = …`) skips a position.
-                    Expr::Undefined => Some(Pattern::Elision),
+                    Expr::Elision => Some(Pattern::Elision),
                     other => expr_to_pattern(other),
                 })
                 .collect::<Option<Vec<_>>>()?,

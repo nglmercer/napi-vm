@@ -52,13 +52,6 @@ pub(super) fn relative_index(number: f64, length: usize) -> usize {
     }
 }
 
-fn arr_presence(this: &Value) -> Vec<bool> {
-    match this {
-        Value::Array(array) => array.presence_snapshot(),
-        _ => vec![true; arr_items(this).len()],
-    }
-}
-
 pub(super) fn install(e: &mut Environment) {
     if let Some(a) = e.get("Array") {
         let statics: &[(&str, NativeFn)] = &[
@@ -570,31 +563,31 @@ fn array_last_index_of(
     this: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
-    let presence = arr_presence(&this);
-    let needle = a.first().cloned().unwrap_or(Value::Undefined);
-    if items.is_empty() {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    if length == 0 {
         return Ok(Value::Number(-1.0));
     }
-    // Unlike the string version, an explicit `undefined` converts to 0 (only
-    // a missing argument means "the whole array"), and negatives wrap.
-    let start = match a.get(1) {
-        None => items.len() - 1,
-        Some(v) => {
-            let n = to_integer_or_infinity(v.to_number());
-            if n >= 0.0 {
-                (n as usize).min(items.len() - 1)
-            } else {
-                let k = (items.len() as i64).saturating_add(n as i64);
-                if k < 0 {
-                    return Ok(Value::Number(-1.0));
-                }
-                k as usize
-            }
+    let needle = a.first().cloned().unwrap_or(Value::Undefined);
+    // A missing argument starts at the end; explicit undefined converts to zero.
+    let index = match a.get(1) {
+        None => (length - 1) as f64,
+        Some(value) => to_integer_or_infinity(interp.ecmascript_to_number(value)?),
+    };
+    let start = if index >= 0.0 {
+        (index as usize).min(length - 1)
+    } else {
+        let index = length as f64 + index;
+        if index < 0.0 {
+            return Ok(Value::Number(-1.0));
         }
+        index as usize
     };
     for index in (0..=start).rev() {
-        if presence.get(index).copied().unwrap_or(true) && interp.seq(&items[index], &needle) {
+        interp.check_execution()?;
+        if let Some(value) = array_element(interp, &this, index, true)?
+            && interp.seq(&value, &needle)
+        {
             return Ok(Value::Number(index as f64));
         }
     }
@@ -1017,28 +1010,47 @@ fn forward_from_index(raw: Option<f64>, len: usize) -> usize {
 }
 
 fn array_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
-    let presence = arr_presence(&this);
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    if length == 0 {
+        return Ok(Value::Number(-1.0));
+    }
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let from = forward_from_index(a.get(1).map(|v| v.to_number()), items.len());
-    for (i, it) in items.iter().enumerate().skip(from) {
-        if presence.get(i).copied().unwrap_or(true) && interp.seq(it, &target) {
-            return Ok(Value::Number(i as f64));
+    let raw = a
+        .get(1)
+        .map(|value| interp.ecmascript_to_number(value))
+        .transpose()?;
+    let from = forward_from_index(raw, length);
+    for index in from..length {
+        interp.check_execution()?;
+        if let Some(value) = array_element(interp, &this, index, true)?
+            && interp.seq(&value, &target)
+        {
+            return Ok(Value::Number(index as f64));
         }
     }
     Ok(Value::Number(-1.0))
 }
 
 fn array_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length(interp, &this)?;
+    if length == 0 {
+        return Ok(Value::Bool(false));
+    }
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let from = forward_from_index(a.get(1).map(|v| v.to_number()), items.len());
-    // Holes read as `undefined` here (no presence check), and comparison is
-    // `SameValueZero`: unlike `indexOf`, `NaN` matches itself.
+    let raw = a
+        .get(1)
+        .map(|value| interp.ecmascript_to_number(value))
+        .transpose()?;
+    let from = forward_from_index(raw, length);
+    // Includes performs Get even for holes, and compares using SameValueZero.
     let target_is_nan = matches!(&target, Value::Number(n) if n.is_nan());
-    for it in items.iter().skip(from) {
-        if interp.seq(it, &target)
-            || (target_is_nan && matches!(it, Value::Number(n) if n.is_nan()))
+    for index in from..length {
+        interp.check_execution()?;
+        let value = array_element(interp, &this, index, false)?.expect("holes are visited");
+        if interp.seq(&value, &target)
+            || (target_is_nan && matches!(value, Value::Number(n) if n.is_nan()))
         {
             return Ok(Value::Bool(true));
         }

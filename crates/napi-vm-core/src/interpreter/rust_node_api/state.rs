@@ -713,7 +713,7 @@ impl NapiHandleArena {
 /// handle while remaining unique across environments and after scope closure.
 pub(super) fn new_opaque_handle() -> Result<*mut c_void, i32> {
     NEXT_OPAQUE_HANDLE_ID
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
         .map(|id| id as *mut c_void)
         .map_err(|_| NAPI_GENERIC_FAILURE)
 }

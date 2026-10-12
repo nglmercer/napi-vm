@@ -620,7 +620,7 @@ impl Checker<'_> {
             | Instr::CallSpread { dst, callee, tmpl } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
-                self.check_spread_template(address, *tmpl)?;
+                self.check_spread_template(address, *tmpl, false)?;
             }
             Instr::MethodSpread {
                 dst,
@@ -631,11 +631,11 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
                 self.check_reg(address, *this)?;
-                self.check_spread_template(address, *tmpl)?;
+                self.check_spread_template(address, *tmpl, false)?;
             }
             Instr::BuildArray { dst, tmpl } => {
                 self.check_reg(address, *dst)?;
-                self.check_spread_template(address, *tmpl)?;
+                self.check_spread_template(address, *tmpl, true)?;
             }
             Instr::ToDestructArray { dst, src } | Instr::CheckDestructObject { dst, src } => {
                 self.check_reg(address, *dst)?;
@@ -645,15 +645,9 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
-            Instr::RestObject {
-                dst,
-                src,
-                keys,
-                taken,
-            } => {
+            Instr::RestObject { dst, src, taken } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
-                self.check_reg(address, *keys)?;
                 self.check_reg(address, *taken)?;
             }
             Instr::EnumKeys { dst, src } => {
@@ -742,7 +736,7 @@ impl Checker<'_> {
             Instr::SuperCallSpread { dst, callee, tmpl } => {
                 self.check_reg(address, *callee)?;
                 self.check_reg(address, *dst)?;
-                self.check_spread_template(address, *tmpl)?;
+                self.check_spread_template(address, *tmpl, false)?;
             }
             Instr::Raise { msg } => {
                 self.check_const_is(address, *msg, "string")?;
@@ -800,10 +794,21 @@ impl Checker<'_> {
 }
 
 impl Checker<'_> {
-    fn check_spread_template(&self, address: usize, tmpl: u16) -> Result<(), VerifyError> {
+    fn check_spread_template(
+        &self,
+        address: usize,
+        tmpl: u16,
+        allow_elision: bool,
+    ) -> Result<(), VerifyError> {
         self.check_const_is(address, tmpl, "spread-template")?;
         if let Constant::SpreadTemplate(entries) = &self.function.constants[tmpl as usize] {
             for entry in entries {
+                if entry.elision && (!allow_elision || entry.spread || entry.prepared) {
+                    return Err(VerifyError::ConstantTypeMismatch {
+                        address,
+                        expected: "array elision without spread flags",
+                    });
+                }
                 self.check_reg(address, entry.reg)?;
             }
         }
@@ -873,6 +878,33 @@ mod tests {
         let stmts = parse_cached(source).expect("test source must parse");
         let module = compile_program(&stmts).expect("test source must compile");
         (*module.main).clone()
+    }
+
+    #[test]
+    fn elisions_are_only_valid_in_array_templates_without_spread_flags() {
+        let original = compile("[, ...[1]]");
+        assert!(verify_function(&original).is_ok());
+        for prepared in [false, true] {
+            let mut unit = original.clone();
+            for constant in &mut unit.constants {
+                if let Constant::SpreadTemplate(entries) = constant {
+                    for entry in entries.iter_mut().filter(|entry| entry.elision) {
+                        entry.spread = !prepared;
+                        entry.prepared = prepared;
+                    }
+                }
+            }
+            assert!(verify_function(&unit).is_err());
+        }
+        let mut call = compile("f(...[1])");
+        for constant in &mut call.constants {
+            if let Constant::SpreadTemplate(entries) = constant {
+                entries[0].elision = true;
+                entries[0].spread = false;
+                entries[0].prepared = false;
+            }
+        }
+        assert!(verify_function(&call).is_err());
     }
 
     #[test]

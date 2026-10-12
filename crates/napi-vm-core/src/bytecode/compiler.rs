@@ -16,7 +16,7 @@
 //! arithmetic/bitwise/comparison/logical operators, typeof/void/delete
 //! ++/--, compound and logical assignment
 //! if/else, while, do-while, for(;;), break/continue, return, throw
-//! plain array literals (holes become undefined, like the parser)
+//! array literals, including elisions and iterable spreads
 //! property reads/writes, calls, method calls, new
 //! named/anonymous functions incl. arrows (capture-free only)
 //! ```
@@ -258,7 +258,7 @@ impl<'a> PatternView<'a> {
                 v.iter()
                     .map(|e| match e {
                         Expr::Spread(v) => Some(Self::Rest(Box::new(Self::from_expr(v)?))),
-                        Expr::Undefined => Some(Self::Elision),
+                        Expr::Elision => Some(Self::Elision),
                         e => Self::from_expr(e),
                     })
                     .collect::<Option<_>>()?,
@@ -1813,9 +1813,9 @@ impl<'a> Compiler<'a> {
                 Ok(())
             }
             PatternView::Object(props) => {
-                let keys = self.alloc_reg()?;
+                let checked = self.alloc_reg()?;
                 self.emit(Instr::CheckDestructObject {
-                    dst: keys,
+                    dst: checked,
                     src: val,
                 });
                 let mut taken = Vec::new();
@@ -1827,6 +1827,7 @@ impl<'a> Compiler<'a> {
                         let template = taken
                             .iter()
                             .map(|reg| SpreadEntry {
+                                elision: false,
                                 spread: false,
                                 prepared: false,
                                 reg: *reg,
@@ -1841,8 +1842,7 @@ impl<'a> Compiler<'a> {
                         let rest = self.alloc_reg()?;
                         self.emit(Instr::RestObject {
                             dst: rest,
-                            src: val,
-                            keys,
+                            src: checked,
                             taken: taken_array,
                         });
                         self.compile_pattern_view(*target, rest, mode)?;
@@ -1853,7 +1853,15 @@ impl<'a> Compiler<'a> {
                             let index = self.intern_string(name)?;
                             self.load_const(index)?
                         }
-                        PatternKeyView::Computed(expr) => self.compile_expr(expr)?,
+                        PatternKeyView::Computed(expr) => {
+                            let value = self.compile_expr(expr)?;
+                            let key = self.alloc_reg()?;
+                            self.emit(Instr::PropertyKey {
+                                dst: key,
+                                src: value,
+                            });
+                            key
+                        }
                     };
                     taken.push(key_reg);
                     let found = self.alloc_reg()?;
@@ -1861,7 +1869,7 @@ impl<'a> Compiler<'a> {
                         private: false,
                         cache: 0,
                         dst: found,
-                        obj: val,
+                        obj: checked,
                         key: key_reg,
                     });
                     match sub {
@@ -3357,7 +3365,7 @@ impl<'a> Compiler<'a> {
                 let index = self.const_null()?;
                 self.load_const(index)
             }
-            Expr::Undefined => self.load_undefined(),
+            Expr::Undefined | Expr::Elision => self.load_undefined(),
             Expr::Identifier(name) => self.compile_identifier(name),
             Expr::Array { items, .. } => self.compile_array(items),
             Expr::Binary { op, left, right } => self.compile_binary(*op, left, right),
@@ -3718,9 +3726,24 @@ impl<'a> Compiler<'a> {
                 }
                 ObjectProp::Spread(expression) => {
                     let src = self.compile_expr(expression)?;
+                    // Copy immediately: getters/traps and abrupt completions
+                    // precede every later property expression. The private
+                    // snapshot has only data properties, so final assembly has
+                    // no further guest-observable source reads.
+                    let snapshot_template =
+                        self.push_const(Constant::ObjectTemplate(vec![PropEntry {
+                            key: None,
+                            val: src,
+                            kind: PropKind::Spread,
+                        }]))?;
+                    let snapshot = self.alloc_reg()?;
+                    self.emit(Instr::BuildObject {
+                        dst: snapshot,
+                        tmpl: snapshot_template,
+                    });
                     template.push(PropEntry {
                         key: None,
-                        val: src,
+                        val: snapshot,
                         kind: PropKind::Spread,
                     });
                 }
@@ -3733,7 +3756,10 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_array(&mut self, items: &'a [Expr]) -> Result<Reg, Decline> {
-        if items.iter().any(|item| matches!(item, Expr::Spread(_))) {
+        if items
+            .iter()
+            .any(|item| matches!(item, Expr::Spread(_) | Expr::Elision))
+        {
             let mut template = Vec::with_capacity(items.len());
             for item in items {
                 match item {
@@ -3742,6 +3768,7 @@ impl<'a> Compiler<'a> {
                         let reg = self.alloc_reg()?;
                         self.emit(Instr::ExpandSpread { dst: reg, src });
                         template.push(SpreadEntry {
+                            elision: false,
                             spread: true,
                             prepared: true,
                             reg,
@@ -3750,6 +3777,7 @@ impl<'a> Compiler<'a> {
                     _ => {
                         let reg = self.compile_expr(item)?;
                         template.push(SpreadEntry {
+                            elision: matches!(item, Expr::Elision),
                             spread: false,
                             prepared: false,
                             reg,
@@ -3762,7 +3790,7 @@ impl<'a> Compiler<'a> {
             self.emit(Instr::BuildArray { dst, tmpl });
             return Ok(dst);
         }
-        // Holes arrive as `Undefined` from the parser — no special case.
+        // Dense literals use the compact register-range instruction.
         let start = self.alloc_regs(items.len())?;
         for (i, item) in items.iter().enumerate() {
             let reg = self.compile_expr(item)?;
@@ -4075,6 +4103,7 @@ impl<'a> Compiler<'a> {
             let index = self.push_const(constant)?;
             let reg = self.load_const(index)?;
             template.push(SpreadEntry {
+                elision: false,
                 spread: false,
                 prepared: false,
                 reg,
@@ -4092,6 +4121,7 @@ impl<'a> Compiler<'a> {
             let index = self.push_const(Constant::String(part.clone()))?;
             let reg = self.load_const(index)?;
             raw_template.push(SpreadEntry {
+                elision: false,
                 spread: false,
                 prepared: false,
                 reg,
@@ -4247,6 +4277,7 @@ impl<'a> Compiler<'a> {
                     (self.compile_expr(arg)?, false)
                 };
                 template.push(SpreadEntry {
+                    elision: false,
                     spread,
                     prepared: spread,
                     reg,

@@ -16,8 +16,8 @@ impl Interpreter {
         let bigint = match &primitive {
             Value::BigInt(value) => return Ok(Value::BigInt(value.clone())),
             Value::Bool(value) => crate::bigint::BigInt::from_i64(i64::from(*value)),
-            Value::String(value) => crate::bigint::BigInt::parse(value)
-                .map_err(|_| VmErr::Msg("SyntaxError: invalid BigInt value".into()))?,
+            Value::String(value) => string_to_bigint(value)?
+                .ok_or_else(|| VmErr::Msg("SyntaxError: invalid BigInt value".into()))?,
             _ => {
                 return Err(VmErr::Msg(
                     "TypeError: Cannot convert value to a BigInt".into(),
@@ -2159,6 +2159,42 @@ fn ecmascript_string_to_number(input: &str) -> f64 {
         return f64::NAN;
     }
     input.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+/// StringIntegerLiteral excludes literal-only separators and signed radix forms.
+pub(super) fn string_to_bigint(
+    value: &crate::JsString,
+) -> Result<Option<crate::bigint::BigInt>, VmErr> {
+    let Ok(text) = value.to_utf8() else {
+        return Ok(None);
+    };
+    let text = text.trim_matches(is_ecmascript_whitespace);
+    if text.is_empty() {
+        return Ok(Some(crate::bigint::BigInt::zero()));
+    }
+    let unsigned = text
+        .strip_prefix('+')
+        .or_else(|| text.strip_prefix('-'))
+        .unwrap_or(text);
+    let signed = unsigned.len() != text.len();
+    let (radix, digits) = if unsigned.starts_with("0x") || unsigned.starts_with("0X") {
+        (16, &unsigned[2..])
+    } else if unsigned.starts_with("0o") || unsigned.starts_with("0O") {
+        (8, &unsigned[2..])
+    } else if unsigned.starts_with("0b") || unsigned.starts_with("0B") {
+        (2, &unsigned[2..])
+    } else {
+        (10, unsigned)
+    };
+    if digits.is_empty()
+        || (signed && radix != 10)
+        || !digits.chars().all(|c| c.is_ascii() && c.is_digit(radix))
+    {
+        return Ok(None);
+    }
+    crate::bigint::BigInt::parse(text)
+        .map(Some)
+        .map_err(VmErr::Msg)
 }
 
 fn is_ecmascript_whitespace(character: char) -> bool {

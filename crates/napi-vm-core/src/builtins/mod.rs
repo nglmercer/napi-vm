@@ -171,9 +171,10 @@ pub fn setup_builtins(env: &Env) {
 
 /// Overwrite the placeholder members above with real native implementations.
 fn install_functions(e: &mut crate::interpreter::Environment) {
-    math::install(e);
     object::install(e);
     function::install(e);
+    object::install_function_metadata(e);
+    math::install(e);
     array::install(e);
     string::install(e);
     number::install(e);
