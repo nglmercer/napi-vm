@@ -106,7 +106,7 @@ impl WireEncodeContext {
             return Err(VmErr::Msg("guest graph node limit exceeded".into()));
         }
         let id = NEXT_GUEST_GRAPH_NODE_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
                 current.checked_add(1)
             })
             .map_err(|_| VmErr::Msg("native graph id exhausted".into()))?;
