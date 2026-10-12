@@ -1538,75 +1538,10 @@ impl Interpreter {
                 "internal error: plain `=` in compound assign".to_string(),
             ));
         };
-        let v = if matches!(op, AssignOp::Add) {
-            self.coerce_for_concat(&v)?
-        } else {
-            v
-        };
-        if let Some(object) = self.with_binding_object(scope, name)? {
-            let current = self.get_prop_value_str(&object, name)?;
-            let current = if bin == BinOp::Add {
-                self.coerce_for_concat(&current)?
-            } else {
-                current
-            };
-            let combined = self.bin_op(bin, &current, &v)?;
-            self.assign_member_str(&object, name, combined.clone())?;
-            return Ok(combined);
-        }
-        // Fused read-modify-write: one `borrow_mut` + one scan instead of a
-        // read borrow then a write borrow. `bin_op` can still fail (e.g.
-        // string-length cap); capture the error and leave the slot unchanged.
-        let mut err = None;
-        // An object on the *left* of `+=` needs its `toString`, which cannot
-        // run while the scope is borrowed. Detect it here and redo the whole
-        // assignment outside the borrow, leaving the slot untouched in the
-        // meantime.
-        let mut deferred = None;
-        let res = {
-            let mut env = scope.borrow_mut();
-            env.modify(name, |cur| {
-                if matches!(bin, BinOp::Add) && Self::needs_concat_coercion(&cur) {
-                    deferred = Some(cur.clone());
-                    return cur;
-                }
-                match self.bin_op(bin, &cur, &v) {
-                    Ok(new) => new,
-                    Err(e) => {
-                        err = Some(e);
-                        cur
-                    }
-                }
-            })
-        };
-        if let Some(current) = deferred {
-            let left = self.coerce_for_concat(&current)?;
-            let combined = self.bin_op(bin, &left, &v)?;
-            self.assign_or_set_binding_in(scope, name, combined.clone())?;
-            return Ok(combined);
-        }
-        if let Some(e) = err {
-            return Err(e);
-        }
-        match res {
-            ModifyOutcome::Updated(v) => Ok(v),
-            ModifyOutcome::ReadOnly(v) => {
-                if scope.borrow().strict() {
-                    vm_err(format!(
-                        "TypeError: Cannot assign to read-only binding {name}"
-                    ))
-                } else {
-                    Ok(v)
-                }
-            }
-            ModifyOutcome::Missing => vm_err(format!("ReferenceError: {name} is not defined")),
-            ModifyOutcome::Const => vm_err(format!(
-                "TypeError: Assignment to constant variable '{name}'"
-            )),
-            ModifyOutcome::Uninitialized => vm_err(format!(
-                "ReferenceError: Cannot access '{name}' before initialization"
-            )),
-        }
+        let (base, property, current) = self.read_assignment_binding(scope, name)?;
+        let combined = self.apply_binary(bin, &current, &v)?;
+        self.write_assignment_binding(&base, property, name, combined.clone())?;
+        Ok(combined)
     }
 
     /// `++`/`--` on a scope binding. Shared by the AST evaluator and the
@@ -1693,7 +1628,7 @@ impl Interpreter {
         }
         let key = self.ecmascript_to_property_key(prop)?;
         let c = self.get_prop_value(obj, &key)?;
-        let fv = self.bin_op(bin, &c, &v)?;
+        let fv = self.apply_binary(bin, &c, &v)?;
         self.assign_member(obj, &key, fv.clone())?;
         Ok(fv)
     }

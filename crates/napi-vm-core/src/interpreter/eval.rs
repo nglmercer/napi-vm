@@ -2865,6 +2865,23 @@ impl Interpreter {
                     return Ok(assigned);
                 }
 
+                if let Expr::Identifier(name) = target.unparenthesized() {
+                    let (base, property, current) =
+                        self.read_assignment_binding(&self.global.clone(), name)?;
+                    let should_assign = match op {
+                        LogicalAssignOp::And => current.is_truthy(),
+                        LogicalAssignOp::Or => !current.is_truthy(),
+                        LogicalAssignOp::Nullish => {
+                            matches!(current, Value::Null | Value::Undefined)
+                        }
+                    };
+                    if !should_assign {
+                        return Ok(current);
+                    }
+                    let assigned = self.evaluate_class_field(value, &Value::String(name.into()))?;
+                    self.write_assignment_binding(&base, property, name, assigned.clone())?;
+                    return Ok(assigned);
+                }
                 // Static member target: skip the key allocation on both the
                 // read and the conditional write.
                 if let Expr::Member {
@@ -2910,7 +2927,13 @@ impl Interpreter {
                         object, property, ..
                     } => {
                         let receiver = self.eval_expr(object)?;
-                        let key = self.eval_expr(property)?;
+                        let raw_key = self.eval_expr(property)?;
+                        if matches!(receiver, Value::Null | Value::Undefined) {
+                            return vm_err(
+                                "TypeError: Cannot assign a property of null or undefined",
+                            );
+                        }
+                        let key = self.ecmascript_to_property_key(&raw_key)?;
                         let current = self.get_prop_value(&receiver, &key)?;
                         (Some(receiver), Some(key), current)
                     }
@@ -2955,7 +2978,8 @@ impl Interpreter {
                         .transpose()?;
                     let mut assigned = self.eval_expr(value)?;
                     if let Some(op) = op.bin_op() {
-                        assigned = self.bin_op(op, &current.expect("compound value"), &assigned)?;
+                        assigned =
+                            self.apply_binary(op, &current.expect("compound value"), &assigned)?;
                     }
                     let strict = self.global.borrow().strict();
                     self.assign_property_with_receiver(
@@ -2966,6 +2990,54 @@ impl Interpreter {
                         strict,
                     )?;
                     return Ok(assigned);
+                }
+                if let Some(bin) = op.bin_op() {
+                    match target.unparenthesized() {
+                        Expr::Identifier(name) => {
+                            let scope = self.global.clone();
+                            let (base, property, current) =
+                                self.read_assignment_binding(&scope, name)?;
+                            let rhs = self.eval_expr(value)?;
+                            let result = self.apply_binary(bin, &current, &rhs)?;
+                            self.write_assignment_binding(&base, property, name, result.clone())?;
+                            return Ok(result);
+                        }
+                        Expr::Member {
+                            object,
+                            property,
+                            computed,
+                        } => {
+                            let object = self.eval_expr(object)?;
+                            let raw_key = self.eval_expr(property)?;
+                            if matches!(object, Value::Null | Value::Undefined) {
+                                return vm_err(
+                                    "TypeError: Cannot assign a property of null or undefined",
+                                );
+                            }
+                            let private = !computed
+                                && matches!(property.as_ref(), Expr::String(key) if key.to_key().starts_with('#'));
+                            let key = if private {
+                                raw_key
+                            } else {
+                                self.ecmascript_to_property_key(&raw_key)?
+                            };
+                            let current = if private {
+                                self.get_private_member(&object, &self.property_key(&key)?)?
+                            } else {
+                                self.get_prop_value(&object, &key)?
+                            };
+                            let rhs = self.eval_expr(value)?;
+                            let result = self.apply_binary(bin, &current, &rhs)?;
+                            if private {
+                                let name = self.property_key(&key)?;
+                                self.set_private_member(&object, &name, result.clone())?;
+                            } else {
+                                self.assign_member(&object, &key, result.clone())?;
+                            }
+                            return Ok(result);
+                        }
+                        _ => return vm_err("Invalid compound assignment target"),
+                    }
                 }
                 let v = self.eval_expr(value)?;
                 match target.unparenthesized() {

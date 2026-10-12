@@ -170,6 +170,55 @@ impl Interpreter {
         Ok(None)
     }
 
+    /// Capture the base and current value once, before the assignment RHS.
+    pub(crate) fn read_assignment_binding(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<(Value, bool, Value), VmErr> {
+        if let Some(object) = self.with_binding_object(scope, name)? {
+            let value = self.get_prop_value_str(&object, name)?;
+            return Ok((object, true, value));
+        }
+        let mut current = Some(scope.clone());
+        while let Some(environment) = current {
+            if environment.borrow().own_lexical_binding(name) {
+                let value = match environment.borrow().lookup(name) {
+                    super::Lookup::Value(value) => value,
+                    _ => {
+                        return Err(VmErr::Msg(format!(
+                            "ReferenceError: Cannot access '{name}' before initialization"
+                        )));
+                    }
+                };
+                return Ok((Value::RealmGlobal(environment), false, value));
+            }
+            current = environment.borrow().parent_env();
+        }
+        Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")))
+    }
+
+    pub(crate) fn write_assignment_binding(
+        &mut self,
+        base: &Value,
+        property: bool,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        if property {
+            if self.global.borrow().strict()
+                && !self.has_property(base, &Value::String(name.into()))?
+            {
+                return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
+            }
+            return self.assign_member_str(base, name, value);
+        }
+        let Value::RealmGlobal(environment) = base else {
+            return Err(VmErr::Msg("internal error: assignment binding base".into()));
+        };
+        self.assign_or_set_binding_in(environment, name, value)
+    }
+
     /// Resolve a deletion reference using the same environment ordering as
     /// reads and writes. Global object bindings use property configurability;
     /// declarative bindings are not deletable. With exclusions apply before
@@ -566,15 +615,6 @@ impl Interpreter {
         Err(VmErr::Msg(
             "TypeError: Cannot convert object to primitive value".into(),
         ))
-    }
-
-    /// Does `+` have to reduce this value to a primitive first?
-    ///
-    /// Objects and arrays do: `1 + [2]` is `"12"`, because the array becomes
-    /// the string `"2"` before the operator sees it. Everything else is
-    /// already primitive, and `bin_op` handles it directly.
-    pub(crate) fn needs_concat_coercion(value: &Value) -> bool {
-        !is_primitive(value)
     }
 
     /// Reduce an operand of `+` to a primitive, the way `ToPrimitive` with no
@@ -2030,17 +2070,19 @@ fn array_iter_next(
 
 /// `[Symbol.iterator]()` on a string returns a character iterator.
 fn string_iter(
-    _interp: &mut super::Interpreter,
+    interp: &mut super::Interpreter,
     this: super::Value,
     _args: Vec<super::Value>,
 ) -> Result<super::Value, crate::error::VmErr> {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    let source: crate::JsString = match &this {
-        super::Value::String(s) => s.clone(),
-        _ => crate::JsString::default(),
-    };
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot iterate null or undefined".into(),
+        ));
+    }
+    let source = interp.ecmascript_to_string(&this)?;
 
     Ok(super::Value::StringIterator {
         inner: Rc::new(RefCell::new(crate::value::StringIteratorData {

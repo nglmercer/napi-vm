@@ -470,6 +470,54 @@ fn run_loop(
                     slot.value = value;
                     slot.initialized = true;
                 }
+                Instr::ReadAssignmentBinding {
+                    dst,
+                    base,
+                    property,
+                    name,
+                } => {
+                    let name = const_string(frame.function, name)?;
+                    let (target, is_property, value) =
+                        interp.read_assignment_binding(&current_scope(interp, frame), name)?;
+                    frame.registers[base as usize] = target;
+                    frame.registers[property as usize] = Value::Bool(is_property);
+                    frame.registers[dst as usize] = value;
+                }
+                Instr::WriteAssignmentBinding {
+                    base,
+                    property,
+                    name,
+                    src,
+                } => {
+                    interp.write_assignment_binding(
+                        &frame.registers[base as usize],
+                        frame.registers[property as usize].is_truthy(),
+                        const_string(frame.function, name)?,
+                        frame.registers[src as usize].clone(),
+                    )?;
+                }
+                Instr::WriteAssignmentProperty {
+                    obj,
+                    key,
+                    src,
+                    private,
+                } => {
+                    if private {
+                        let name = interp.property_key(&frame.registers[key as usize])?;
+                        interp.set_private_member_in(
+                            &current_scope(interp, frame),
+                            &frame.registers[obj as usize],
+                            &name,
+                            frame.registers[src as usize].clone(),
+                        )?;
+                    } else {
+                        interp.assign_member(
+                            &frame.registers[obj as usize],
+                            &frame.registers[key as usize],
+                            frame.registers[src as usize].clone(),
+                        )?;
+                    }
+                }
                 Instr::LoadGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
                     // Lookup cannot run guest code or change the active
@@ -1275,10 +1323,7 @@ fn check_slot_writable(frame: &CallFrame, slot: Slot) -> Result<(), VmErr> {
     Ok(())
 }
 
-/// Read-modify-write on a slot with the evaluator's exact order: the `+`
-/// RHS coercion runs before the writability check, the current value's
-/// coercion (when it needs one) before the operator, and the write last.
-/// Nothing is written when the operator fails.
+/// Legacy fused compound operations use the shared mutable coercion helpers.
 fn compound_slot(
     interp: &mut Interpreter,
     frame: &mut CallFrame,
@@ -1289,18 +1334,13 @@ fn compound_slot(
     let Some(bin) = op.bin_op() else {
         return Err(internal("plain `=` in compound slot"));
     };
-    let rhs = frame.registers[rhs as usize].clone_for_execution();
-    let rhs = if matches!(op, crate::parser::AssignOp::Add) {
-        interp.coerce_for_concat(&rhs)?
-    } else {
-        rhs
-    };
-    check_slot_writable(frame, slot)?;
-    let mut current = frame.slots[slot as usize].value.clone_for_execution();
-    if matches!(bin, crate::parser::BinOp::Add) && Interpreter::needs_concat_coercion(&current) {
-        current = interp.coerce_for_concat(&current)?;
+    if !frame.slots[slot as usize].initialized {
+        check_slot_writable(frame, slot)?;
     }
-    let combined = interp.bin_op(bin, &current, &rhs)?;
+    let current = frame.slots[slot as usize].value.clone_for_execution();
+    let rhs = frame.registers[rhs as usize].clone_for_execution();
+    let combined = interp.apply_binary(bin, &current, &rhs)?;
+    check_slot_writable(frame, slot)?;
     frame.slots[slot as usize].value = combined.clone();
     frame.slots[slot as usize].initialized = true;
     Ok(combined)

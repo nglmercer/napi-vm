@@ -1,7 +1,9 @@
 //! The abstract Iterator constructor shares the realm's existing iterator prototype.
+mod helpers;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter, strict_equals};
 use crate::value::{PropAttrs, Value};
+pub(crate) use helpers::Slots;
 
 pub(super) fn install(environment: &mut Environment) {
     let prototype = environment
@@ -80,7 +82,16 @@ pub(super) fn install(environment: &mut Environment) {
         ),
         true,
     );
+    helpers::install(environment, &constructor, &prototype);
     environment.set("Iterator", constructor);
+    environment.set_property_attributes(
+        "Iterator",
+        PropAttrs {
+            writable: true,
+            enumerable: false,
+            configurable: true,
+        },
+    );
 }
 
 fn call(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {

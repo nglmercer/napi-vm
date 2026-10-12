@@ -1822,8 +1822,18 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
-        let id = self
-            .global
+        let scope = self.global.clone();
+        self.set_private_member_in(&scope, receiver, name, value)
+    }
+
+    pub(crate) fn set_private_member_in(
+        &mut self,
+        scope: &Env,
+        receiver: &Value,
+        name: &str,
+        value: Value,
+    ) -> Result<(), VmErr> {
+        let id = scope
             .borrow()
             .private_name(name)
             .ok_or_else(|| VmErr::Msg("SyntaxError: private name is not in scope".into()))?;

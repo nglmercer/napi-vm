@@ -101,6 +101,24 @@ pub enum Instr {
         dst: Reg,
         name: u16,
     },
+    ReadAssignmentBinding {
+        dst: Reg,
+        base: Reg,
+        property: Reg,
+        name: u16,
+    },
+    WriteAssignmentBinding {
+        base: Reg,
+        property: Reg,
+        name: u16,
+        src: Reg,
+    },
+    WriteAssignmentProperty {
+        obj: Reg,
+        key: Reg,
+        src: Reg,
+        private: bool,
+    },
     /// Assign through the scope chain, creating an implicit global when
     /// missing (sloppy mode, like the AST evaluator).
     StoreGlobal {
@@ -150,8 +168,8 @@ pub enum Instr {
         op: UnOp,
         src: Reg,
     },
-    /// Read-modify-write `slot <op>= rhs` with the AST evaluator's exact
-    /// check order (writability before coercion before write).
+    /// Legacy fused read-modify-write. New compiler output captures the
+    /// current value before the RHS and writes after shared coercion.
     CompoundLocal {
         dst: Reg,
         slot: Slot,
@@ -607,6 +625,9 @@ pub enum Opcode {
     BareVarGlobal,
     LoadGlobal,
     StoreGlobal,
+    ReadAssignmentBinding,
+    WriteAssignmentBinding,
+    WriteAssignmentProperty,
     DefineGlobal,
     LoadThis,
     LoadGlobalThis,
@@ -708,6 +729,9 @@ impl Instr {
             Instr::BareVarGlobal { .. } => Opcode::BareVarGlobal,
             Instr::LoadGlobal { .. } => Opcode::LoadGlobal,
             Instr::StoreGlobal { .. } => Opcode::StoreGlobal,
+            Instr::ReadAssignmentBinding { .. } => Opcode::ReadAssignmentBinding,
+            Instr::WriteAssignmentBinding { .. } => Opcode::WriteAssignmentBinding,
+            Instr::WriteAssignmentProperty { .. } => Opcode::WriteAssignmentProperty,
             Instr::DefineGlobal { .. } => Opcode::DefineGlobal,
             Instr::LoadThis { .. } => Opcode::LoadThis,
             Instr::LoadGlobalThis { .. } => Opcode::LoadGlobalThis,
@@ -842,6 +866,33 @@ impl fmt::Display for Instr {
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
             Instr::LoadGlobal { dst, name } => write!(f, "LOAD_GLOBAL r{dst}, c{name}"),
             Instr::StoreGlobal { name, src } => write!(f, "STORE_GLOBAL c{name}, r{src}"),
+            Instr::ReadAssignmentBinding {
+                dst,
+                base,
+                property,
+                name,
+            } => write!(
+                f,
+                "READ_ASSIGNMENT_BINDING r{dst}, r{base}, r{property}, c{name}"
+            ),
+            Instr::WriteAssignmentBinding {
+                base,
+                property,
+                name,
+                src,
+            } => write!(
+                f,
+                "WRITE_ASSIGNMENT_BINDING r{base}, r{property}, c{name}, r{src}"
+            ),
+            Instr::WriteAssignmentProperty {
+                obj,
+                key,
+                src,
+                private,
+            } => write!(
+                f,
+                "WRITE_ASSIGNMENT_PROPERTY r{obj}, r{key}, r{src}, private={private}"
+            ),
             Instr::DefineGlobal {
                 name,
                 src,

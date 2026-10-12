@@ -30,6 +30,8 @@ const WELL_KNOWN: &[&str] = &[
     "replace",
     "search",
     "split",
+    "dispose",
+    "asyncDispose",
 ];
 
 thread_local! {

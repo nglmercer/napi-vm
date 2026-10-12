@@ -4452,6 +4452,99 @@ impl<'a> Compiler<'a> {
             });
             return Ok(value);
         }
+        if let Some(bin) = op.bin_op() {
+            match target {
+                Expr::Identifier(name) => {
+                    let current = self.alloc_reg()?;
+                    let binding = self.resolve(name)?;
+                    let reference = match binding {
+                        Binding::Slot(slot) => {
+                            self.emit(Instr::LoadLocal { dst: current, slot });
+                            None
+                        }
+                        Binding::Global => {
+                            let base = self.alloc_reg()?;
+                            let property = self.alloc_reg()?;
+                            let name = self.intern_string(name)?;
+                            self.emit(Instr::ReadAssignmentBinding {
+                                dst: current,
+                                base,
+                                property,
+                                name,
+                            });
+                            Some((base, property, name))
+                        }
+                    };
+                    let rhs = self.compile_expr(value)?;
+                    let dst = self.alloc_reg()?;
+                    self.emit(Instr::Binary {
+                        dst,
+                        op: bin,
+                        lhs: current,
+                        rhs,
+                    });
+                    match binding {
+                        Binding::Slot(slot) => self.emit(Instr::StoreLocal { slot, src: dst }),
+                        Binding::Global => {
+                            let (base, property, name) =
+                                reference.expect("captured global reference");
+                            self.emit(Instr::WriteAssignmentBinding {
+                                base,
+                                property,
+                                name,
+                                src: dst,
+                            });
+                        }
+                    }
+                    return Ok(dst);
+                }
+                Expr::Member {
+                    object,
+                    property,
+                    computed,
+                } => {
+                    let obj = self.compile_expr(object)?;
+                    let raw_key = self.compile_expr(property)?;
+                    self.emit(Instr::CheckDestructObject { dst: obj, src: obj });
+                    let private = !computed
+                        && matches!(property.as_ref(), Expr::String(key) if key.to_key().starts_with('#'));
+                    let key = if private {
+                        raw_key
+                    } else {
+                        let key = self.alloc_reg()?;
+                        self.emit(Instr::PropertyKey {
+                            dst: key,
+                            src: raw_key,
+                        });
+                        key
+                    };
+                    let current = self.alloc_reg()?;
+                    self.emit(Instr::GetProp {
+                        private,
+                        dst: current,
+                        obj,
+                        key,
+                        cache: 0,
+                    });
+                    let rhs = self.compile_expr(value)?;
+                    let dst = self.alloc_reg()?;
+                    self.emit(Instr::Binary {
+                        dst,
+                        op: bin,
+                        lhs: current,
+                        rhs,
+                    });
+                    self.emit(Instr::WriteAssignmentProperty {
+                        obj,
+                        key,
+                        src: dst,
+                        private,
+                    });
+                    return Ok(dst);
+                }
+                _ => return Err(Decline::Func("invalid compound assignment target")),
+            }
+        }
         let rhs = self.compile_expr(value)?;
         match target {
             Expr::Identifier(name) => {
@@ -4529,6 +4622,69 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn compile_named_assignment_value(
+        &mut self,
+        value: &'a Expr,
+        name: &str,
+    ) -> Result<Reg, Decline> {
+        match value.unparenthesized() {
+            Expr::FnExpr {
+                name: None,
+                params,
+                body,
+                is_async,
+                is_generator,
+            } => self.defer_function(FuncDef {
+                named_expression: false,
+                name: Some(name.into()),
+                params: SharedSlice::Borrowed(params),
+                body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
+                is_arrow: false,
+                is_async: *is_async,
+                is_generator: *is_generator,
+                is_constructor: !is_async && !is_generator,
+            }),
+            Expr::ArrowFn {
+                params,
+                body,
+                is_async,
+            } => self.defer_function(FuncDef {
+                named_expression: false,
+                name: Some(name.into()),
+                params: SharedSlice::Borrowed(params),
+                body: match body.as_ref() {
+                    ExprOrBlock::Block(stmts) => FuncBody::Stmts(SharedSlice::Borrowed(stmts)),
+                    ExprOrBlock::Expr(expr) => FuncBody::Expr(expr),
+                },
+                is_arrow: true,
+                is_async: *is_async,
+                is_generator: false,
+                is_constructor: false,
+            }),
+            Expr::ClassExpr {
+                name: None,
+                superclass,
+                body,
+            } => {
+                let dst = self.compile_class("", None, superclass.as_deref(), body)?;
+                let template = self
+                    .code
+                    .iter()
+                    .rev()
+                    .find_map(|instruction| match instruction {
+                        Instr::BuildClass { dst: result, tmpl } if *result == dst => Some(*tmpl),
+                        _ => None,
+                    })
+                    .expect("compiled class template");
+                if let Constant::ClassTemplate(template) = &mut self.constants[template as usize] {
+                    template.name = name.into();
+                }
+                Ok(dst)
+            }
+            _ => self.compile_expr(value),
+        }
+    }
+
     fn compile_logical_assignment(
         &mut self,
         target: &'a Expr,
@@ -4572,19 +4728,40 @@ impl<'a> Compiler<'a> {
         }
         let end_jump = match target {
             Expr::Identifier(name) => {
-                let current = self.compile_identifier(name)?;
+                let binding = self.resolve(name)?;
+                let current = self.alloc_reg()?;
+                let reference = match binding {
+                    Binding::Slot(slot) => {
+                        self.emit(Instr::LoadLocal { dst: current, slot });
+                        None
+                    }
+                    Binding::Global => {
+                        let base = self.alloc_reg()?;
+                        let property = self.alloc_reg()?;
+                        let name = self.intern_string(name)?;
+                        self.emit(Instr::ReadAssignmentBinding {
+                            dst: current,
+                            base,
+                            property,
+                            name,
+                        });
+                        Some((base, property, name))
+                    }
+                };
                 self.emit(Instr::Mov {
                     dst: join,
                     src: current,
                 });
                 let jump = self.logical_skip_jump(op, current)?;
-                let rhs = self.compile_expr(value)?;
-                match self.resolve(name)? {
+                let rhs = self.compile_named_assignment_value(value, name)?;
+                match binding {
                     Binding::Slot(slot) => self.emit(Instr::StoreLocal { slot, src: rhs }),
                     Binding::Global => {
-                        let index = self.intern_string(name)?;
-                        self.emit(Instr::StoreGlobal {
-                            name: index,
+                        let (base, property, name) = reference.unwrap();
+                        self.emit(Instr::WriteAssignmentBinding {
+                            base,
+                            property,
+                            name,
                             src: rhs,
                         });
                     }
@@ -4596,16 +4773,31 @@ impl<'a> Compiler<'a> {
                 jump
             }
             Expr::Member {
-                object, property, ..
+                object,
+                property,
+                computed,
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
                     return self.raise_bare_super();
                 }
                 let obj = self.compile_expr(object)?;
-                let key = self.compile_expr(property)?;
+                let raw_key = self.compile_expr(property)?;
+                self.emit(Instr::CheckDestructObject { dst: obj, src: obj });
+                let private = !computed
+                    && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#'));
+                let key = if private {
+                    raw_key
+                } else {
+                    let key = self.alloc_reg()?;
+                    self.emit(Instr::PropertyKey {
+                        dst: key,
+                        src: raw_key,
+                    });
+                    key
+                };
                 let current = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
-                    private: false,
+                    private,
                     cache: 0,
                     dst: current,
                     obj,
@@ -4617,11 +4809,11 @@ impl<'a> Compiler<'a> {
                 });
                 let jump = self.logical_skip_jump(op, current)?;
                 let rhs = self.compile_expr(value)?;
-                self.emit(Instr::SetProp {
-                    cache: 0,
+                self.emit(Instr::WriteAssignmentProperty {
                     obj,
                     key,
-                    val: rhs,
+                    src: rhs,
+                    private,
                 });
                 self.emit(Instr::Mov {
                     dst: join,

@@ -4,7 +4,7 @@ mod collections;
 mod date;
 mod error;
 mod function;
-mod iterator;
+pub(crate) mod iterator;
 pub(crate) mod json;
 mod math;
 mod number;

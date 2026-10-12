@@ -381,6 +381,33 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *name, "string")?;
             }
+            Instr::ReadAssignmentBinding {
+                dst,
+                base,
+                property,
+                name,
+            } => {
+                for reg in [dst, base, property] {
+                    self.check_reg(address, *reg)?;
+                }
+                self.check_const_is(address, *name, "string")?;
+            }
+            Instr::WriteAssignmentBinding {
+                base,
+                property,
+                name,
+                src,
+            } => {
+                for reg in [base, property, src] {
+                    self.check_reg(address, *reg)?;
+                }
+                self.check_const_is(address, *name, "string")?;
+            }
+            Instr::WriteAssignmentProperty { obj, key, src, .. } => {
+                for reg in [obj, key, src] {
+                    self.check_reg(address, *reg)?;
+                }
+            }
             Instr::StoreGlobal { name, src } => {
                 self.check_const_is(address, *name, "string")?;
                 self.check_reg(address, *src)?;

@@ -644,8 +644,12 @@ pub(crate) fn register_interp(roots: GcRoots, executing: Rc<std::cell::Cell<usiz
 }
 
 pub(crate) fn unregister_interp(id: InterpId) {
-    HEAP.with(|heap| {
-        heap.borrow_mut().interps.remove(&id);
+    // Suspended coroutine interpreters may be dropped with the heap itself.
+    // TLS is unavailable at that point, and its root registry is being destroyed.
+    let _ = HEAP.try_with(|heap| {
+        if let Ok(mut heap) = heap.try_borrow_mut() {
+            heap.interps.remove(&id);
+        }
     });
 }
 
@@ -654,9 +658,12 @@ pub(crate) fn unregister_interp(id: InterpId) {
 /// whenever guest execution quiesces (loop scopes strand `global` on a
 /// transient child), so collection always walks current state.
 pub(crate) fn republish_roots(id: InterpId, roots: GcRoots) {
-    HEAP.with(|heap| {
-        if let Some(slot) = heap.borrow_mut().interps.get_mut(&id) {
-            slot.0 = roots;
+    // Forced abandonment can unwind suspended generators during TLS teardown.
+    let _ = HEAP.try_with(|heap| {
+        if let Ok(mut heap) = heap.try_borrow_mut() {
+            if let Some(slot) = heap.interps.get_mut(&id) {
+                slot.0 = roots;
+            }
         }
     });
 }
