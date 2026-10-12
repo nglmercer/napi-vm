@@ -456,7 +456,11 @@ impl Interpreter {
     ) -> Result<(), VmErr> {
         if let Pattern::Default(inner, default) = pattern {
             let value = if matches!(value, Value::Undefined) {
-                self.eval_expr(default)?
+                if let Pattern::Ident(name) = inner.as_ref() {
+                    self.evaluate_class_field(default, &Value::String(name.as_str().into()))?
+                } else {
+                    self.eval_expr(default)?
+                }
             } else {
                 value.clone()
             };
@@ -649,7 +653,14 @@ impl Interpreter {
             Pattern::Rest(_) => Ok(val.clone()),
             Pattern::Default(pat, default_expr) => {
                 if matches!(val, Value::Undefined) {
-                    let default_val = self.eval_expr(default_expr)?;
+                    let default_val = if let Pattern::Ident(name) = pat.as_ref() {
+                        self.evaluate_class_field(
+                            default_expr,
+                            &Value::String(name.as_str().into()),
+                        )?
+                    } else {
+                        self.eval_expr(default_expr)?
+                    };
                     self.destructure_pattern(pat, &default_val, initialize)
                 } else {
                     self.destructure_pattern(pat, val, initialize)

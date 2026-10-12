@@ -1630,14 +1630,21 @@ impl<'a> Compiler<'a> {
     }
 }
 
-fn pattern_uses_array_iterator(pattern: &Pattern) -> bool {
+fn pattern_requires_evaluator(pattern: &Pattern) -> bool {
     match pattern {
         Pattern::Array(_) => true,
         Pattern::Object(properties) => properties
             .iter()
-            .any(|(_, pattern)| pattern.as_ref().is_some_and(pattern_uses_array_iterator)),
-        Pattern::Rest(pattern) | Pattern::Default(pattern, _) => {
-            pattern_uses_array_iterator(pattern)
+            .any(|(_, pattern)| pattern.as_ref().is_some_and(pattern_requires_evaluator)),
+        Pattern::Rest(pattern) => pattern_requires_evaluator(pattern),
+        Pattern::Default(pattern, expression) => {
+            pattern_requires_evaluator(pattern)
+                || matches!(
+                    expression.unparenthesized(),
+                    Expr::FnExpr { name: None, .. }
+                        | Expr::ArrowFn { .. }
+                        | Expr::ClassExpr { name: None, .. }
+                )
         }
         Pattern::Elision | Pattern::Ident(_) | Pattern::Member { .. } => false,
     }
@@ -1704,8 +1711,10 @@ impl<'a> Compiler<'a> {
         val: Reg,
         mode: DestructureMode,
     ) -> Result<(), Decline> {
-        if pattern_uses_array_iterator(pat) {
-            return Err(Decline::Func("array destructuring iterator semantics"));
+        if pattern_requires_evaluator(pat) {
+            return Err(Decline::Func(
+                "destructuring iterator or name inference semantics",
+            ));
         }
         self.compile_pattern_view(PatternView::from_pattern(pat), val, mode)
     }
