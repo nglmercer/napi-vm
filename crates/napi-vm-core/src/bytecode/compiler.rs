@@ -241,56 +241,6 @@ impl<'a> PatternView<'a> {
             Pattern::Default(v, e) => Self::Default(Box::new(Self::from_pattern(v)), e),
         }
     }
-    fn from_expr(e: &'a Expr) -> Option<Self> {
-        Some(match e {
-            Expr::Identifier(n) => Self::Ident(n),
-            Expr::Member {
-                object,
-                property,
-                computed,
-            } => Self::Member {
-                object,
-                property,
-                private: !computed
-                    && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
-            },
-            Expr::Array { items: v, .. } => Self::Array(
-                v.iter()
-                    .map(|e| match e {
-                        Expr::Spread(v) => Some(Self::Rest(Box::new(Self::from_expr(v)?))),
-                        Expr::Elision => Some(Self::Elision),
-                        e => Self::from_expr(e),
-                    })
-                    .collect::<Option<_>>()?,
-            ),
-            Expr::Object { props: v, .. } => Self::Object(
-                v.iter()
-                    .map(|p| {
-                        Some(match p {
-                            ObjectProp::Shorthand(n) => (PatternKeyView::Name(n), None),
-                            ObjectProp::KeyValue(n, v) => {
-                                (PatternKeyView::Name(n), Some(Self::from_expr(v)?))
-                            }
-                            ObjectProp::Computed(k, v) => {
-                                (PatternKeyView::Computed(k), Some(Self::from_expr(v)?))
-                            }
-                            ObjectProp::Spread(v) => (
-                                PatternKeyView::Name("..."),
-                                Some(Self::Rest(Box::new(Self::from_expr(v)?))),
-                            ),
-                            _ => return None,
-                        })
-                    })
-                    .collect::<Option<_>>()?,
-            ),
-            Expr::Assignment {
-                target,
-                op: AssignOp::Assign,
-                value,
-            } => Self::Default(Box::new(Self::from_expr(target)?), value),
-            _ => return None,
-        })
-    }
 }
 
 /// A written-out `constructor` method, borrowed until its deferred
@@ -1685,7 +1635,6 @@ impl<'a> Compiler<'a> {
 #[derive(Clone, Copy)]
 enum DestructureMode {
     Decl { is_var: bool },
-    Assign,
 }
 
 /// A prepared `for-in`/`for-of` head write: a function/block slot, or a
@@ -1708,12 +1657,10 @@ impl<'a> Compiler<'a> {
         mode: DestructureMode,
     ) -> Result<(), Decline> {
         match (mode, self.resolve(name)?) {
-            (DestructureMode::Assign, Binding::Slot(slot))
-            | (DestructureMode::Decl { is_var: true }, Binding::Slot(slot)) => {
+            (DestructureMode::Decl { is_var: true }, Binding::Slot(slot)) => {
                 self.emit(Instr::StoreLocal { slot, src });
             }
-            (DestructureMode::Assign, Binding::Global)
-            | (DestructureMode::Decl { is_var: true }, Binding::Global) => {
+            (DestructureMode::Decl { is_var: true }, Binding::Global) => {
                 let index = self.intern_string(name)?;
                 self.emit(Instr::StoreGlobal { name: index, src });
             }
@@ -4692,16 +4639,7 @@ impl<'a> Compiler<'a> {
                 }
             }
             Expr::Array { .. } | Expr::Object { .. } => {
-                // Only plain `=` destructures; anything else (or an
-                // unconvertible target) fails at runtime on the AST tier.
-                if op != AssignOp::Assign {
-                    return Err(Decline::Func("invalid assignment target"));
-                }
-                let Some(pattern) = PatternView::from_expr(target) else {
-                    return Err(Decline::Func("invalid assignment target"));
-                };
-                self.compile_pattern_view(pattern, rhs, DestructureMode::Assign)?;
-                Ok(rhs)
+                Err(Decline::Func("destructuring assignment ordering"))
             }
             _ => Err(Decline::Func("invalid assignment target")),
         }

@@ -16,6 +16,24 @@ use crate::value::{GeneratorInner, ObjectCell, PromiseState, Value};
 
 type Key = Rc<str>;
 
+enum PreparedPatternTarget {
+    Binding {
+        base: Value,
+        property: bool,
+        name: String,
+    },
+    Member {
+        receiver: Value,
+        key: Value,
+        private: bool,
+    },
+    Super {
+        base: Value,
+        receiver: Value,
+        key: Value,
+    },
+}
+
 const RECURSION_STACK_RED_ZONE: usize = 1024 * 1024;
 const RECURSION_STACK_SEGMENT: usize = 8 * 1024 * 1024;
 
@@ -345,6 +363,117 @@ impl Interpreter {
     ) -> Result<Value, VmErr> {
         self.destructure_pattern(pat, val, false)
     }
+    fn prepare_pattern_target(
+        &mut self,
+        pattern: &Pattern,
+        initialize: bool,
+    ) -> Result<Option<PreparedPatternTarget>, VmErr> {
+        if initialize {
+            return Ok(None);
+        }
+        match pattern {
+            Pattern::Default(inner, _) => self.prepare_pattern_target(inner, initialize),
+            Pattern::Ident(name) => {
+                let (base, property) =
+                    self.resolve_assignment_binding(&self.global.clone(), name)?;
+                Ok(Some(PreparedPatternTarget::Binding {
+                    base,
+                    property,
+                    name: name.clone(),
+                }))
+            }
+            Pattern::Member {
+                object,
+                property,
+                private,
+            } => {
+                if matches!(object.as_ref(), crate::parser::Expr::Super) {
+                    let key = self.eval_expr(property)?;
+                    let (base, receiver, _) =
+                        self.super_reference(&self.global.clone(), &Value::Undefined)?;
+                    Ok(Some(PreparedPatternTarget::Super {
+                        base,
+                        receiver,
+                        key,
+                    }))
+                } else {
+                    let receiver = self.eval_expr(object)?;
+                    let key = self.eval_expr(property)?;
+                    Ok(Some(PreparedPatternTarget::Member {
+                        receiver,
+                        key,
+                        private: *private,
+                    }))
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn write_prepared_pattern_target(
+        &mut self,
+        target: PreparedPatternTarget,
+        value: &Value,
+    ) -> Result<(), VmErr> {
+        match target {
+            PreparedPatternTarget::Binding {
+                base,
+                property,
+                name,
+            } => self.write_assignment_binding(&base, property, &name, value.clone()),
+            PreparedPatternTarget::Member {
+                receiver,
+                key,
+                private,
+            } => {
+                if private {
+                    let key = self.ecmascript_to_property_key(&key)?;
+                    let name = self.property_key(&key)?;
+                    self.set_private_member(&receiver, &name, value.clone())?;
+                } else {
+                    self.assign_member(&receiver, &key, value.clone())?;
+                }
+                Ok(())
+            }
+            PreparedPatternTarget::Super {
+                base,
+                receiver,
+                key,
+            } => {
+                let key = self.ecmascript_to_property_key(&key)?;
+                let strict = self.global.borrow().strict();
+                self.assign_property_with_receiver(&base, &key, value.clone(), &receiver, strict)
+            }
+        }
+    }
+
+    fn write_pattern_element(
+        &mut self,
+        pattern: &Pattern,
+        value: &Value,
+        initialize: bool,
+        target: Option<PreparedPatternTarget>,
+    ) -> Result<(), VmErr> {
+        if let Pattern::Default(inner, default) = pattern {
+            let value = if matches!(value, Value::Undefined) {
+                self.eval_expr(default)?
+            } else {
+                value.clone()
+            };
+            if let Some(target) = target {
+                self.write_prepared_pattern_target(target, &value)
+            } else {
+                self.destructure_pattern(inner, &value, initialize)
+                    .map(|_| ())
+            }
+        } else if let Some(target) = target {
+            self.write_prepared_pattern_target(target, value)
+        } else {
+            self.destructure_pattern(pattern, value, initialize)
+                .map(|_| ())
+        }
+    }
+
     fn destructure_pattern(
         &mut self,
         pat: &Pattern,
@@ -394,41 +523,85 @@ impl Interpreter {
                 Ok(val.clone())
             }
             Pattern::Array(elements) => {
-                let values: Vec<Value> = match val {
-                    Value::Array(arr) => arr.borrow().clone(),
-                    // Plain objects are not iterable and must never be
-                    // materialized into a sparse vector keyed by guest data.
-                    // The old numeric-key path let `{ "1000000000": 1 }`
-                    // request an enormous allocation during destructuring.
-                    Value::Object { .. } => vec![],
-                    Value::String(s) => {
-                        if s.code_points().count() > crate::value::MAX_ARRAY_LEN {
-                            return Err(crate::value::limit_err("Maximum array length exceeded"));
-                        }
-                        s.code_points().map(Value::String).collect()
+                let iterator = self.iterator_for(val)?;
+                let next = match self.get_prop_value_str(&iterator, "next") {
+                    Ok(next) => next,
+                    Err(error) => {
+                        let _ = self.close_guest_iterator_for_abrupt(&iterator, false, &error);
+                        return Err(error);
                     }
-                    _ => vec![],
                 };
-                let mut rest_target = None;
-                for (i, elem) in elements.iter().enumerate() {
-                    if elem.is_rest() {
-                        rest_target = Some(i);
-                        break;
+                let mut done = false;
+                let result = (|| {
+                    for element in elements {
+                        let rest = matches!(element, Pattern::Rest(_));
+                        let rest_target = if let Pattern::Rest(inner) = element {
+                            self.prepare_pattern_target(inner, initialize)?
+                        } else {
+                            None
+                        };
+                        let target = if rest {
+                            None
+                        } else {
+                            self.prepare_pattern_target(element, initialize)?
+                        };
+                        if rest {
+                            let Pattern::Rest(inner) = element else {
+                                unreachable!()
+                            };
+                            let mut values = Vec::new();
+                            while !done {
+                                let step = self.call_this(&next, iterator.clone(), vec![])?;
+                                if !super::call::is_js_object(&step) {
+                                    return vm_err("TypeError: Iterator result must be an object");
+                                }
+                                if self.get_prop_value_str(&step, "done")?.is_truthy() {
+                                    done = true;
+                                    break;
+                                }
+                                if values.len() >= crate::value::MAX_ARRAY_LEN {
+                                    return Err(crate::value::limit_err(
+                                        "Maximum array length exceeded",
+                                    ));
+                                }
+                                values.push(self.get_prop_value_str(&step, "value")?);
+                            }
+                            let rest = Value::checked_array(values)?;
+                            self.write_pattern_element(inner, &rest, initialize, rest_target)?;
+                            break;
+                        }
+                        let want_value = !matches!(element, Pattern::Elision);
+                        let value = if done {
+                            Value::Undefined
+                        } else {
+                            let step = self.call_this(&next, iterator.clone(), vec![])?;
+                            if !super::call::is_js_object(&step) {
+                                return vm_err("TypeError: Iterator result must be an object");
+                            }
+                            if self.get_prop_value_str(&step, "done")?.is_truthy() {
+                                done = true;
+                                Value::Undefined
+                            } else if want_value {
+                                self.get_prop_value_str(&step, "value")?
+                            } else {
+                                Value::Undefined
+                            }
+                        };
+                        self.write_pattern_element(element, &value, initialize, target)?;
                     }
-                    if let Some(v) = values.get(i) {
-                        self.destructure_pattern(elem, v, initialize)?;
-                    } else {
-                        self.destructure_pattern(elem, &Value::Undefined, initialize)?;
+                    if !done {
+                        done = true;
+                        self.close_guest_iterator(&iterator, false)?;
                     }
+                    Ok(val.clone())
+                })();
+                if let Err(error) = result {
+                    if !done {
+                        let _ = self.close_guest_iterator_for_abrupt(&iterator, false, &error);
+                    }
+                    return Err(error);
                 }
-                if let Some(rest_idx) = rest_target
-                    && let Pattern::Rest(rest_pat) = &elements[rest_idx]
-                {
-                    let rest_vals = values.get(rest_idx..).unwrap_or(&[]).to_vec();
-                    let rest_val = Value::array(rest_vals);
-                    self.destructure_pattern(rest_pat, &rest_val, initialize)?;
-                }
-                Ok(val.clone())
+                result
             }
             Pattern::Object(props) => {
                 // Named properties read through the normal member path, so
@@ -451,8 +624,9 @@ impl Interpreter {
                     if matches!(key, PatternKey::Name(k) if k == "...")
                         && let Some(Pattern::Rest(target)) = pat
                     {
+                        let prepared = self.prepare_pattern_target(target, initialize)?;
                         let rest = self.copy_data_properties(val, &taken)?;
-                        self.destructure_pattern(target, &rest, initialize)?;
+                        self.write_pattern_element(target, &rest, initialize, prepared)?;
                         continue;
                     }
                     let property_key = match key {
@@ -463,19 +637,18 @@ impl Interpreter {
                         }
                     };
                     let key_str = self.property_key(&property_key)?;
+                    let implicit = Pattern::Ident(key_str.clone());
+                    let target_pattern = pat.as_ref().unwrap_or(&implicit);
+                    let prepared = self.prepare_pattern_target(target_pattern, initialize)?;
                     taken.push(property_key.clone());
                     let found = self.get_prop_value(val, &property_key)?;
-                    if let Some(p) = pat {
-                        self.destructure_pattern(p, &found, initialize)?;
-                    } else {
-                        self.set_binding(&key_str, found)?;
-                    }
+                    self.write_pattern_element(target_pattern, &found, initialize, prepared)?;
                 }
                 Ok(val.clone())
             }
             Pattern::Rest(_) => Ok(val.clone()),
             Pattern::Default(pat, default_expr) => {
-                if matches!(val, Value::Undefined | Value::Null) {
+                if matches!(val, Value::Undefined) {
                     let default_val = self.eval_expr(default_expr)?;
                     self.destructure_pattern(pat, &default_val, initialize)
                 } else {
