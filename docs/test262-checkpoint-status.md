@@ -46,3 +46,6 @@ and evidence checkpoint, not a completion claim.
 Work later resumed with destructuring validation and then named evaluation
 and exponentiation; see
 [the named-evaluation continuation](test262-named-evaluation-continuation.md).
+Declaration empty-completion and with-environment binding resolution
+followed; see
+[the declaration-completion continuation](test262-declaration-completion-continuation.md).

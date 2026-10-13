@@ -34,9 +34,11 @@ declaration `fn-name` variants, the four exponentiation variants, and the 16
 generator-return IteratorClose variants that failed in the same selections
 before this change, with no losses in those selections.
 
-Remaining failures in the selection are unchanged, pre-existing clusters:
-declaration statements do not yet produce an empty completion for `eval`
-(6 variants), and one `with`-environment variable binding-resolution variant.
+Remaining failures in the selection at the time of writing were declaration
+empty-completion for `eval` (6 variants) and one `with`-environment variable
+binding-resolution variant; both are now fixed in the
+[declaration-completion continuation](test262-declaration-completion-continuation.md),
+which reaches 3,008 / 3,008 on this selection.
 
 Full conformance is not achieved, and no new full-corpus measurement was run
 for this continuation; `tools/test262/latest.json` still records

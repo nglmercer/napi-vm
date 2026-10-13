@@ -351,6 +351,9 @@ pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
         statement,
         Statement::Empty
             | Statement::VarDecl { .. }
+            // A multi-declarator list only ever groups `VarDecl`s (see the
+            // parser), so it produces empty completion exactly like one.
+            | Statement::Declarations(_)
             | Statement::FnDecl { .. }
             | Statement::ClassDecl { .. }
             | Statement::Import { .. }

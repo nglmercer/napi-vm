@@ -1350,6 +1350,28 @@ impl Interpreter {
                 destructuring,
                 kind,
             } => {
+                // `var` was already hoisted to the enclosing function or
+                // program scope; this statement only assigns to it.
+                // ResolveBinding precedes Initializer evaluation, so an
+                // initializer that deletes the with-object property the
+                // declaration writes through still writes to that object.
+                if matches!(kind, VarKind::Var) && destructuring.is_none() {
+                    if let Some(e) = init {
+                        let (base, property) =
+                            self.resolve_assignment_binding(&self.global.clone(), name)?;
+                        let v =
+                            self.evaluate_class_field(e, &Value::String(name.as_str().into()))?;
+                        self.write_assignment_binding(&base, property, name, v.clone())?;
+                        return Ok(v);
+                    }
+                    // A bare `var a;` re-declaration must not erase an
+                    // existing value: `var a = 1; var a; a` is 1.
+                    // Hoisting already created the binding.
+                    if self.global.borrow().get(name).is_none() {
+                        self.assign_or_set_binding(name, Value::Undefined)?;
+                    }
+                    return Ok(Value::Undefined);
+                }
                 let v = match init {
                     Some(e) if destructuring.is_none() => {
                         self.evaluate_class_field(e, &Value::String(name.as_str().into()))?
@@ -1358,20 +1380,13 @@ impl Interpreter {
                     None => Value::Undefined,
                 };
                 match kind {
-                    // `var` was already hoisted to the enclosing function or
-                    // program scope; this statement only assigns to it.
                     VarKind::Var => {
                         if let Some(pat) = destructuring {
                             self.destructure(pat, &v)?;
                         } else if init.is_some() {
                             self.assign_or_set_binding(name, v.clone())?;
-                        } else {
-                            // A bare `var a;` re-declaration must not erase an
-                            // existing value: `var a = 1; var a; a` is 1.
-                            // Hoisting already created the binding.
-                            if self.global.borrow().get(name).is_none() {
-                                self.assign_or_set_binding(name, Value::Undefined)?;
-                            }
+                        } else if self.global.borrow().get(name).is_none() {
+                            self.assign_or_set_binding(name, Value::Undefined)?;
                         }
                     }
                     // `let`/`const` bind in *this* block, leaving the dead
