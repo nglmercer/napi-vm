@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{BuiltinConstructor, PropAttrs, Value};
+use crate::value::{BuiltinConstructor, DateData, PropAttrs, Value};
 
 const DATE_PROTOTYPE_METHODS: &[&str] = &[
     "getTime",
@@ -33,11 +33,40 @@ const DATE_PROTOTYPE_METHODS: &[&str] = &[
     "getUTCMilliseconds",
     "getTimezoneOffset",
     "setTime",
+    "setFullYear",
+    "setUTCFullYear",
+    "setMonth",
+    "setUTCMonth",
+    "setDate",
+    "setUTCDate",
+    "setHours",
+    "setUTCHours",
+    "setMinutes",
+    "setUTCMinutes",
+    "setSeconds",
+    "setUTCSeconds",
+    "setMilliseconds",
+    "setUTCMilliseconds",
+    "getYear",
+    "setYear",
     "toISOString",
     "toJSON",
     "toString",
     "toUTCString",
 ];
+
+/// Spec `length` for `Date.prototype` methods: every setter takes its full
+/// component list, so only `setTime`/`toJSON` keep length 1.
+fn date_method_length(name: &str) -> usize {
+    match name {
+        "setFullYear" | "setUTCFullYear" | "setMinutes" | "setUTCMinutes" => 3,
+        "setMonth" | "setUTCMonth" | "setSeconds" | "setUTCSeconds" => 2,
+        "setHours" | "setUTCHours" => 4,
+        "setTime" | "toJSON" | "setDate" | "setUTCDate" | "setMilliseconds"
+        | "setUTCMilliseconds" | "setYear" => 1,
+        _ => 0,
+    }
+}
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(d) = e.get("Date") {
@@ -85,7 +114,7 @@ pub(super) fn install(e: &mut Environment) {
                     (*name).into(),
                     super::native_method(
                         name,
-                        usize::from(matches!(*name, "setTime" | "toJSON")),
+                        date_method_length(name),
                         *callable,
                         function_prototype.clone(),
                     ),
@@ -97,6 +126,46 @@ pub(super) fn install(e: &mut Environment) {
             {
                 props.meta.borrow_mut().set_attrs(
                     name,
+                    PropAttrs {
+                        enumerable: false,
+                        ..PropAttrs::default()
+                    },
+                );
+            }
+        }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("toPrimitive") {
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            prototype
+                .set_prop(
+                    key.clone(),
+                    super::native_method(
+                        "[Symbol.toPrimitive]",
+                        1,
+                        date_to_primitive as super::NativeFn,
+                        function_prototype.clone(),
+                    ),
+                )
+                .expect("Date.prototype[Symbol.toPrimitive]");
+            if let Value::Object { props } = &prototype {
+                let mut meta = props.meta.borrow_mut();
+                meta.set_symbol_key(&key, symbol.clone());
+                meta.set_attrs(
+                    &key,
+                    PropAttrs {
+                        enumerable: false,
+                        ..PropAttrs::default()
+                    },
+                );
+            }
+        }
+        // Annex B: `toGMTString` is the same function object as `toUTCString`.
+        if let Some(to_utc_string) = prototype.get_prop("toUTCString") {
+            prototype
+                .set_prop("toGMTString".into(), to_utc_string)
+                .expect("Date.prototype.toGMTString");
+            if let Value::Object { props } = &prototype {
+                props.meta.borrow_mut().set_attrs(
+                    "toGMTString",
                     PropAttrs {
                         enumerable: false,
                         ..PropAttrs::default()
@@ -150,18 +219,36 @@ pub fn date_member(key: &str) -> Option<Value> {
         // No local timezone means no offset from UTC.
         "getTimezoneOffset" => date_zero,
         "setTime" => date_set_time,
+        // With no local timezone the local and UTC setters coincide; each
+        // pair shares one implementation below.
+        "setFullYear" | "setUTCFullYear" => date_set_full_year,
+        "setMonth" | "setUTCMonth" => date_set_month,
+        "setDate" | "setUTCDate" => date_set_date,
+        "setHours" | "setUTCHours" => date_set_hours,
+        "setMinutes" | "setUTCMinutes" => date_set_minutes,
+        "setSeconds" | "setUTCSeconds" => date_set_seconds,
+        "setMilliseconds" | "setUTCMilliseconds" => date_set_milliseconds,
+        "getYear" => date_get_year,
+        "setYear" => date_set_year,
         "toISOString" => date_to_iso,
         "toJSON" => date_to_json,
-        "toString" | "toUTCString" => date_to_string,
+        // `toGMTString` is installed as an alias below (same function object
+        // as `toUTCString`); the member lookup stays for direct queries.
+        "toString" | "toUTCString" | "toGMTString" => date_to_string,
         _ => return None,
     };
     Some(super::nf(key, callable))
 }
 
-fn epoch(this: &Value) -> f64 {
+/// `thisTimeValue`: the instant of a genuine `Date`, or a `TypeError` for
+/// any other receiver (including the prototype object itself, which has no
+/// `[[DateValue]]` slot).
+fn epoch(this: &Value) -> Result<f64, VmErr> {
     match this {
-        Value::Date(ms) => ms.get(),
-        other => other.to_number(),
+        Value::Date(ms) => Ok(ms.get()),
+        _ => Err(VmErr::Msg(
+            "TypeError: Date method called on incompatible receiver".into(),
+        )),
     }
 }
 
@@ -229,7 +316,7 @@ fn to_iso(ms: f64) -> String {
 macro_rules! component {
     ($name:ident, $index:tt, $adjust:expr) => {
         fn $name(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-            Ok(Value::Number(match civil(epoch(&this)) {
+            Ok(Value::Number(match civil(epoch(&this)?) {
                 Some(parts) => {
                     let adjust: fn(i64) -> i64 = $adjust;
                     adjust(parts.$index) as f64
@@ -251,7 +338,7 @@ component!(date_get_millis, 6, |v| v);
 component!(date_get_day, 7, |v| v);
 
 fn date_get_time(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Number(epoch(&this)))
+    Ok(Value::Number(epoch(&this)?))
 }
 
 fn date_zero(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
@@ -269,6 +356,243 @@ fn date_set_time(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result
     Ok(Value::Number(ms))
 }
 
+/// Spec `MakeDay` for a zero-based month: normalize month overflow into the
+/// year, then count days from the civil calendar. Out-of-range components
+/// surface as infinity so `TimeClip` turns them into `NaN`.
+fn make_day(year: f64, month0: f64, date: f64) -> f64 {
+    if !year.is_finite() || !month0.is_finite() || !date.is_finite() {
+        return f64::NAN;
+    }
+    let month = month0.trunc() as i128;
+    let year = year.trunc() as i128 + month.div_euclid(12);
+    let month = month.rem_euclid(12) + 1;
+    let (Ok(year), Ok(month)) = (i64::try_from(year), i64::try_from(month)) else {
+        return f64::INFINITY;
+    };
+    (days_from_civil(year, month, 1) + date.trunc() as i128 - 1) as f64 * 86_400_000.
+}
+
+/// Spec `MakeTime`, keeping ECMAScript's floating-point evaluation order so
+/// large finite components behave like the other time math here.
+fn make_time(hour: f64, minute: f64, second: f64, milli: f64) -> f64 {
+    ((hour * 3_600_000. + minute * 60_000.) + second * 1_000.) + milli
+}
+
+/// Finish a year/month/date setter: `MakeDate(MakeDay(...),
+/// TimeWithinDay(t))`, then clip, store, and return the new instant.
+fn finish_ymd(slot: &DateData, now: f64, year: f64, month0: f64, date: f64) -> Value {
+    let day = make_day(year, month0, date);
+    let within = now - (now / 86_400_000.).floor() * 86_400_000.;
+    let instant = time_clip(day + within);
+    slot.set(instant);
+    Value::Number(instant)
+}
+
+/// Finish an hour/minute/second/millisecond setter on a day timestamp.
+fn finish_time(slot: &DateData, day: f64, time: f64) -> Value {
+    let instant = time_clip(day * 86_400_000. + time);
+    slot.set(instant);
+    Value::Number(instant)
+}
+
+fn date_arg(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
+    match args.get(index) {
+        Some(value) => interp.ecmascript_to_number(value),
+        None => Ok(f64::NAN),
+    }
+}
+
+/// `setFullYear`/`setUTCFullYear`: the only setters that fall back to the
+/// epoch when the current instant is `NaN`. Unlike the constructor, setters
+/// apply no two-digit year mapping.
+fn date_set_full_year(
+    interp: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let Value::Date(slot) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: Date setter called on incompatible receiver".into(),
+        ));
+    };
+    // The instant is read before any argument coercion, so a `valueOf`
+    // that mutates the date still sees the pre-call components.
+    let mut now = slot.get();
+    if now.is_nan() {
+        now = 0.;
+    }
+    let year = date_arg(interp, &a, 0)?.trunc();
+    let (default_month, default_day) = match civil(now) {
+        Some(parts) => (parts.1 as f64 - 1., parts.2 as f64),
+        None => (f64::NAN, f64::NAN),
+    };
+    let month = if a.len() > 1 {
+        date_arg(interp, &a, 1)?.trunc()
+    } else {
+        default_month
+    };
+    let day = if a.len() > 2 {
+        date_arg(interp, &a, 2)?.trunc()
+    } else {
+        default_day
+    };
+    Ok(finish_ymd(slot, now, year, month, day))
+}
+
+/// Shared `setMonth`/`setDate` shape: year and the untouched components come
+/// from the current instant, which must be valid; a `NaN` instant stays one
+/// (after coercing the provided arguments in order).
+macro_rules! set_ymd {
+    ($name:ident, $start:expr, $provided:expr) => {
+        fn $name(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+            let Value::Date(slot) = &this else {
+                return Err(VmErr::Msg(
+                    "TypeError: Date setter called on incompatible receiver".into(),
+                ));
+            };
+            let now = slot.get();
+            if now.is_nan() {
+                for value in a.iter().take($provided) {
+                    interp.ecmascript_to_number(value)?;
+                }
+                return Ok(Value::Number(f64::NAN));
+            }
+            let Some(parts) = civil(now) else {
+                return Ok(Value::Number(f64::NAN));
+            };
+            let mut components = [parts.0 as f64, parts.1 as f64 - 1., parts.2 as f64];
+            // The leading component is always coerced (a missing argument
+            // is `undefined`, hence `NaN`); only the rest default. Argument
+            // indices run from zero while component indices start at $start.
+            for (offset, slot) in components
+                .iter_mut()
+                .enumerate()
+                .skip($start)
+                .take($provided)
+            {
+                *slot = match a.get(offset - $start) {
+                    Some(value) => interp.ecmascript_to_number(value)?.trunc(),
+                    None if offset == $start => f64::NAN,
+                    None => *slot,
+                };
+            }
+            Ok(finish_ymd(
+                slot,
+                now,
+                components[0],
+                components[1],
+                components[2],
+            ))
+        }
+    };
+}
+
+set_ymd!(date_set_month, 1, 2);
+set_ymd!(date_set_date, 2, 1);
+
+/// Shared hour/minute/second/millisecond shape: the untouched components
+/// come from the current day; a `NaN` instant stays one (after coercing the
+/// provided arguments in order).
+macro_rules! set_hms {
+    ($name:ident, $start:expr, $provided:expr) => {
+        fn $name(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+            let Value::Date(slot) = &this else {
+                return Err(VmErr::Msg(
+                    "TypeError: Date setter called on incompatible receiver".into(),
+                ));
+            };
+            let now = slot.get();
+            if now.is_nan() {
+                for value in a.iter().take($provided) {
+                    interp.ecmascript_to_number(value)?;
+                }
+                return Ok(Value::Number(f64::NAN));
+            }
+            let day = (now / 86_400_000.).floor();
+            let mut components = [
+                now.div_euclid(3_600_000.) % 24.,
+                now.div_euclid(60_000.) % 60.,
+                now.div_euclid(1_000.) % 60.,
+                now.rem_euclid(1_000.),
+            ];
+            for (offset, slot) in components
+                .iter_mut()
+                .enumerate()
+                .skip($start)
+                .take($provided)
+            {
+                *slot = match a.get(offset - $start) {
+                    Some(value) => interp.ecmascript_to_number(value)?.trunc(),
+                    None if offset == $start => f64::NAN,
+                    None => *slot,
+                };
+            }
+            Ok(finish_time(
+                slot,
+                day,
+                make_time(components[0], components[1], components[2], components[3]),
+            ))
+        }
+    };
+}
+
+set_hms!(date_set_hours, 0, 4);
+set_hms!(date_set_minutes, 1, 3);
+set_hms!(date_set_seconds, 2, 2);
+set_hms!(date_set_milliseconds, 3, 1);
+
+/// Annex B `getYear`: the full year minus 1900 (`NaN` for an invalid date).
+fn date_get_year(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let now = epoch(&this)?;
+    Ok(Value::Number(match civil(now) {
+        Some(parts) => parts.0 as f64 - 1900.,
+        None => f64::NAN,
+    }))
+}
+
+/// Annex B `setYear(year [, month [, date]])`: like `setFullYear`, except a
+/// truncated year in 0–99 maps into the 1900s and a `NaN` year blanks the
+/// date. Fractional years outside 0–99 truncate like the other setters;
+/// that fringe is untested by test262.
+fn date_set_year(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let Value::Date(slot) = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: Date setter called on incompatible receiver".into(),
+        ));
+    };
+    let mut now = slot.get();
+    if now.is_nan() {
+        now = 0.;
+    }
+    let year = match a.first() {
+        Some(value) => interp.ecmascript_to_number(value)?,
+        None => f64::NAN,
+    };
+    if year.is_nan() {
+        slot.set(f64::NAN);
+        return Ok(Value::Number(f64::NAN));
+    }
+    let truncated = year.trunc();
+    let year = if (0. ..=99.).contains(&truncated) {
+        truncated + 1900.
+    } else {
+        truncated
+    };
+    let (default_month, default_day) = match civil(now) {
+        Some(parts) => (parts.1 as f64 - 1., parts.2 as f64),
+        None => (f64::NAN, f64::NAN),
+    };
+    let month = match a.get(1) {
+        Some(value) => interp.ecmascript_to_number(value)?.trunc(),
+        None => default_month,
+    };
+    let day = match a.get(2) {
+        Some(value) => interp.ecmascript_to_number(value)?.trunc(),
+        None => default_day,
+    };
+    Ok(finish_ymd(slot, now, year, month, day))
+}
+
 fn date_to_iso(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let Value::Date(slot) = &this else {
         return Err(VmErr::Msg(
@@ -278,7 +602,7 @@ fn date_to_iso(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
     if !slot.get().is_finite() || slot.get().abs() > 8.64e15 {
         return Err(VmErr::Msg("RangeError: Invalid time value".into()));
     }
-    Ok(Value::String((to_iso(epoch(&this))).into()))
+    Ok(Value::String((to_iso(epoch(&this)?)).into()))
 }
 
 fn date_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
@@ -288,6 +612,50 @@ fn date_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Val
         ));
     };
     Ok(Value::String(to_iso(slot.get()).into()))
+}
+
+/// `Date.prototype [ @@toPrimitive ]`: ordinary coercion with `string`
+/// methods first for `"string"`/`"default"` hints and `number` methods first
+/// for `"number"`; any other hint or non-object receiver is a `TypeError`.
+fn date_to_primitive(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if !crate::interpreter::call::is_js_object(&this) {
+        return Err(VmErr::Msg(
+            "TypeError: Date.prototype [Symbol.toPrimitive] called on incompatible receiver".into(),
+        ));
+    }
+    let hinted_string =
+        matches!(a.first(), Some(Value::String(hint)) if hint == "string" || hint == "default");
+    if !hinted_string && !matches!(a.first(), Some(Value::String(hint)) if hint == "number") {
+        return Err(VmErr::Msg(
+            "TypeError: Invalid hint for Date.prototype [Symbol.toPrimitive]".into(),
+        ));
+    }
+    let order = if hinted_string {
+        ["toString", "valueOf"]
+    } else {
+        ["valueOf", "toString"]
+    };
+    for name in order {
+        let method = interp.member(&this, name)?;
+        if crate::interpreter::call::is_callable_value(&method) {
+            let result = interp.call_this(&method, this.clone(), vec![])?;
+            if matches!(
+                result,
+                Value::Number(_)
+                    | Value::String(_)
+                    | Value::Bool(_)
+                    | Value::Null
+                    | Value::Undefined
+                    | Value::BigInt(_)
+                    | Value::Symbol(_)
+            ) {
+                return Ok(result);
+            }
+        }
+    }
+    Err(VmErr::Msg(
+        "TypeError: Cannot convert object to primitive value".into(),
+    ))
 }
 
 fn date_to_json(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

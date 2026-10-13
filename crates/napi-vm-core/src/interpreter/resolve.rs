@@ -1231,6 +1231,15 @@ impl Interpreter {
                     Ok(Value::Undefined)
                 }
             }
+            // Symbol-keyed reads on instances (`date[Symbol.toPrimitive]`)
+            // resolve through the prototype chain like any other key.
+            (Value::Date(_), Value::Symbol(_)) => {
+                if let Some(prototype) = self.prototype_of(o) {
+                    self.prop(&prototype, p)
+                } else {
+                    Ok(Value::Undefined)
+                }
+            }
             (Value::Generator { .. } | Value::StringIterator { .. }, Value::Symbol(symbol)) => {
                 if let Some(value) = lookup_chain_found(self, o, &super::symbol_slot_key(symbol))? {
                     return Ok(value);

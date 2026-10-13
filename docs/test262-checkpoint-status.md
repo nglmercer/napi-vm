@@ -49,3 +49,6 @@ and exponentiation; see
 Declaration empty-completion and with-environment binding resolution
 followed; see
 [the declaration-completion continuation](test262-declaration-completion-continuation.md).
+Date setters, receiver checks, `Symbol.toPrimitive`, and Annex B year
+methods followed; see
+[the date-setters continuation](test262-date-setters-continuation.md).
