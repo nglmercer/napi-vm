@@ -42,3 +42,7 @@ binaries and active-run artifacts remain outside Git.
 
 Implementation work is paused at the user's request. This commit is a source
 and evidence checkpoint, not a completion claim.
+
+Work later resumed with destructuring validation and then named evaluation
+and exponentiation; see
+[the named-evaluation continuation](test262-named-evaluation-continuation.md).

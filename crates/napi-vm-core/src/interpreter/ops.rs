@@ -23,6 +23,23 @@ fn numeric_comparand(value: &Value) -> Option<f64> {
     }
 }
 
+/// ECMAScript `Number::exponentiate`, also used by `Math.pow`.
+pub(crate) fn number_pow(base: f64, exponent: f64) -> f64 {
+    if exponent.is_nan() {
+        return f64::NAN;
+    }
+    if exponent == 0.0 {
+        return 1.0;
+    }
+    if base.is_nan() {
+        return f64::NAN;
+    }
+    if base.abs() == 1.0 && exponent.is_infinite() {
+        return f64::NAN;
+    }
+    base.powf(exponent)
+}
+
 pub fn strict_equals(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Number(a), Value::Number(b)) => a == b,
@@ -189,7 +206,7 @@ impl Interpreter {
                 BinOp::Mul => Some(Value::Number(a * b)),
                 BinOp::Div => Some(Value::Number(a / b)),
                 BinOp::Mod => Some(Value::Number(a % b)),
-                BinOp::Pow => Some(Value::Number(a.powf(*b))),
+                BinOp::Pow => Some(Value::Number(number_pow(*a, *b))),
                 BinOp::BitAnd => Some(Value::Number((to_int32(*a) & to_int32(*b)) as f64)),
                 BinOp::BitOr => Some(Value::Number((to_int32(*a) | to_int32(*b)) as f64)),
                 BinOp::BitXor => Some(Value::Number((to_int32(*a) ^ to_int32(*b)) as f64)),
@@ -257,7 +274,7 @@ impl Interpreter {
             BinOp::Mul => Value::Number(self.tn(l) * self.tn(r)),
             BinOp::Div => Value::Number(self.tn(l) / self.tn(r)),
             BinOp::Mod => Value::Number(self.tn(l) % self.tn(r)),
-            BinOp::Pow => Value::Number(self.tn(l).powf(self.tn(r))),
+            BinOp::Pow => Value::Number(number_pow(self.tn(l), self.tn(r))),
             BinOp::BitAnd => Value::Number((to_int32(self.tn(l)) & to_int32(self.tn(r))) as f64),
             BinOp::BitOr => Value::Number((to_int32(self.tn(l)) | to_int32(self.tn(r))) as f64),
             BinOp::BitXor => Value::Number((to_int32(self.tn(l)) ^ to_int32(self.tn(r))) as f64),

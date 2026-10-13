@@ -140,6 +140,31 @@ fn default_failure_closes_and_preserves_original_error() {
 }
 
 #[test]
+fn generator_return_through_destructuring_runs_iterator_close() {
+    // A generator `return()` resuming a `yield` inside an array pattern must
+    // run IteratorClose: a non-object `return` result becomes a TypeError.
+    assert_both(
+        "var rc=0,unreached=0,err='';var it={[Symbol.iterator](){return {next(){return {done:false,value:undefined}},return(){rc++;return null}}}};function* g(){var r;r=[{}=yield]=it;unreached++}var gen=g();gen.next();try{gen.return()}catch(e){err=e.name}[err,rc,unreached].join(',');",
+        "TypeError,1,0",
+    );
+    // A throwing `return` replaces the return completion with its error.
+    assert_both(
+        "var rc=0,unreached=0,err='';var it={[Symbol.iterator](){return {next(){return {done:false,value:undefined}},return(){rc++;throw new Error('close')}}}};function* g(){var r;r=[{}=yield]=it;unreached++}var gen=g();gen.next();try{gen.return()}catch(e){err=e.message}[err,rc,unreached].join(',');",
+        "close,1,0",
+    );
+    // A well-behaved `return` closes the iterator and finishes normally.
+    assert_both(
+        "var rc=0,unreached=0;var it={[Symbol.iterator](){return {next(){return {done:false,value:undefined}},return(){rc++;return {}}}}};function* g(){var r;r=[{}=yield]=it;unreached++}var gen=g();gen.next();var out=gen.return(7);[out.done,out.value,rc,unreached].join(',');",
+        "true,7,1,0",
+    );
+    // Declarations share the same close-on-return semantics.
+    assert_both(
+        "var rc=0,err='';var it={[Symbol.iterator](){return {next(){return {done:false,value:undefined}},return(){rc++;throw new Error('declclose')}}}};function* g(){var [{}=yield]=it}var gen=g();gen.next();try{gen.return()}catch(e){err=e.message}[err,rc].join(',');",
+        "declclose,1",
+    );
+}
+
+#[test]
 fn falsy_values_do_not_trigger_defaults() {
     assert_both(
         "var c=0;function counter(){c++;return 99}var {a=counter(),b=counter(),d=counter(),e=counter(),f=counter()}={a:null,b:0,d:false,e:''};JSON.stringify([a,b,d,e,f,c]);",

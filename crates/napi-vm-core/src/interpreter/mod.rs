@@ -140,6 +140,7 @@ impl Realm {
     }
 }
 pub use jobs::{Job, JobQueue, Jobs};
+pub(crate) use ops::number_pow;
 pub use ops::{
     SYMBOL_ITERATOR_SLOT, is_internal_key, strict_equals, symbol_id_from_slot, symbol_slot_key,
 };

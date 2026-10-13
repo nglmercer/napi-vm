@@ -108,9 +108,10 @@ fn math_cbrt(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value,
     Ok(Value::Number(math_arg(interp, &a, 0)?.cbrt()))
 }
 fn math_pow(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Number(
-        math_arg(interp, &a, 0)?.powf(math_arg(interp, &a, 1)?),
-    ))
+    Ok(Value::Number(crate::interpreter::number_pow(
+        math_arg(interp, &a, 0)?,
+        math_arg(interp, &a, 1)?,
+    )))
 }
 fn math_trunc(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::Number(math_arg(interp, &a, 0)?.trunc()))

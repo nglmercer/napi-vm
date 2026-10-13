@@ -1351,6 +1351,9 @@ impl Interpreter {
                 kind,
             } => {
                 let v = match init {
+                    Some(e) if destructuring.is_none() => {
+                        self.evaluate_class_field(e, &Value::String(name.as_str().into()))?
+                    }
                     Some(e) => self.eval_expr(e)?,
                     None => Value::Undefined,
                 };

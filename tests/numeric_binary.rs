@@ -48,6 +48,14 @@ fn numeric_binary_operators_use_ecmascript_string_number_grammar() {
     );
 }
 
+#[test]
+fn exponentiation_special_cases_follow_number_exponentiate() {
+    assert_tiers(
+        "JSON.stringify([Number.isNaN((-1) ** Infinity), Number.isNaN((-1) ** -Infinity), Number.isNaN(1 ** NaN), Number.isNaN(Math.pow(-1, Infinity)), (NaN ** 0), ((-1) ** 2), (2 ** -1)]);",
+        "[true,true,true,true,1,1,0.5]",
+    );
+}
+
 fn assert_tiers(source: &str, expected: &str) {
     let prepared = Interpreter::compile(source).unwrap();
     assert_eq!(

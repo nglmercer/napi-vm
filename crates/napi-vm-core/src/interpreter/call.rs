@@ -640,7 +640,16 @@ impl Interpreter {
                 })();
                 if let Err(error) = result {
                     if !done {
-                        let _ = self.close_guest_iterator_for_abrupt(&iterator, false, &error);
+                        if matches!(error, VmErr::Ret(_)) {
+                            // IteratorClose with a return completion (such as
+                            // a generator `return()` resuming a `yield` inside
+                            // this pattern): a close failure — a thrown error
+                            // or a non-object `return` result — replaces the
+                            // return instead of being discarded.
+                            self.close_guest_iterator(&iterator, false)?;
+                        } else {
+                            let _ = self.close_guest_iterator_for_abrupt(&iterator, false, &error);
+                        }
                     }
                     return Err(error);
                 }

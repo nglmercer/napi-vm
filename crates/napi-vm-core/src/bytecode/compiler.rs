@@ -2307,14 +2307,14 @@ impl<'a> Compiler<'a> {
         match (kind, self.resolve(name)?) {
             (VarKind::Var, Binding::Slot(slot)) => match init {
                 Some(value) => {
-                    let src = self.compile_expr(value)?;
+                    let src = self.compile_named_assignment_value(value, name)?;
                     self.emit(Instr::StoreLocal { slot, src });
                 }
                 None => self.emit(Instr::BareVarLocal { slot }),
             },
             (VarKind::Var, Binding::Global) => match init {
                 Some(value) => {
-                    let src = self.compile_expr(value)?;
+                    let src = self.compile_named_assignment_value(value, name)?;
                     let index = self.intern_string(name)?;
                     self.emit(Instr::StoreGlobal { name: index, src });
                 }
@@ -2325,14 +2325,14 @@ impl<'a> Compiler<'a> {
             },
             (VarKind::Let | VarKind::Const, Binding::Slot(slot)) => {
                 let src = match init {
-                    Some(value) => self.compile_expr(value)?,
+                    Some(value) => self.compile_named_assignment_value(value, name)?,
                     None => self.load_undefined()?,
                 };
                 self.emit(Instr::InitLocal { slot, src });
             }
             (VarKind::Let | VarKind::Const, Binding::Global) => {
                 let src = match init {
-                    Some(value) => self.compile_expr(value)?,
+                    Some(value) => self.compile_named_assignment_value(value, name)?,
                     None => self.load_undefined()?,
                 };
                 let index = self.intern_string(name)?;
