@@ -42,17 +42,18 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest full development measurement is in `latest.json`: 76,411 passes out
-of 102,956 variants (74.2171%), with zero feature skips, crashes, or harness
-errors and the same two deep-WeakMap staging timeouts. The raw full comparison
-gains 774 passes and loses none versus the merged Math quick-wins baseline
-(75,637 passes). Of these, 772 improvements reproduce; two scheduling-sensitive
-Atomics FIFO script outcomes are not credited to the fixes.
-Complete evidence is archived under `evidence/remaining-quick-wins/`.
-See [remaining quick wins](../../docs/test262-remaining-quick-wins.md) for the
-candidate audit, reproduction commands, and deferred failures. Eight existing
-broader Rust test failures remain; full-corpus AST/bytecode differential and
-wasm32 execution validation are still open.
+The latest full development measurement is in `latest.json`: 76,823 passes out
+of 102,956 variants (74.6173%), with zero feature skips, crashes, or harness
+errors and the same two deep-WeakMap staging timeouts. This batch adds 414
+reproduced passes. The raw comparison loses two previously documented Atomics
+FIFO script outcomes; both fail on the unchanged baseline and current binary in
+two repeat runs, leaving zero unexplained regressions. Raw outcomes are retained.
+Complete evidence is archived under `evidence/math-array-number/`.
+See [Math, Array and Number quick wins](../../docs/test262-math-array-number.md)
+for the audit, reproduction commands, results, and deferred failures.
+Core Rust tests now pass. Three existing root LSP tests remain blocked by Unix
+socket binding permissions; their assertions were retained. Full-corpus tier
+differential and actual wasm32 execution validation remain open.
 
 The initial full development baseline is in `baseline.json`: 32,359 passes out
 of 102,956 variants, 31.43%. The initial run preceded binary snapshot support;
