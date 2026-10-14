@@ -42,18 +42,17 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest full development measurement is in `latest.json`: 76,823 passes out
-of 102,956 variants (74.6173%), with zero feature skips, crashes, or harness
-errors and the same two deep-WeakMap staging timeouts. This batch adds 414
-reproduced passes. The raw comparison loses two previously documented Atomics
-FIFO script outcomes; both fail on the unchanged baseline and current binary in
-two repeat runs, leaving zero unexplained regressions. Raw outcomes are retained.
-Complete evidence is archived under `evidence/math-array-number/`.
-See [Math, Array and Number quick wins](../../docs/test262-math-array-number.md)
-for the audit, reproduction commands, results, and deferred failures.
-Core Rust tests now pass. Three existing root LSP tests remain blocked by Unix
-socket binding permissions; their assertions were retained. Full-corpus tier
-differential and actual wasm32 execution validation remain open.
+The latest full development measurement is in `latest.json`: 76,959 passes out
+of 102,956 variants (74.7494%), with zero feature skips, crashes, or harness
+errors and the same two deep-WeakMap staging timeouts. This generic Array batch
+adds 136 independently reproduced passes and loses none versus merged PR #28.
+The focused Array selection gains 124 passes, reaching 5,529 / 6,117.
+Complete evidence is archived under `evidence/generic-array/`.
+See [generic Array quick wins](../../docs/test262-generic-array.md) for the audit,
+reproduction commands, full comparison, Rust build workaround, and deferred
+failures. Core Rust tests pass; three existing root LSP tests remain blocked by
+Unix socket binding permissions. No assertions or corpus files were changed.
+Full-corpus tier differential and actual wasm32 execution validation remain open.
 
 The initial full development baseline is in `baseline.json`: 32,359 passes out
 of 102,956 variants, 31.43%. The initial run preceded binary snapshot support;

@@ -36,7 +36,16 @@ fn array_element(
     index: usize,
     skip_holes: bool,
 ) -> Result<Option<Value>, VmErr> {
-    let key = Value::String((index.to_string()).into());
+    array_element_number(interp, this, index as f64, skip_holes)
+}
+
+fn array_element_number(
+    interp: &mut Interpreter,
+    this: &Value,
+    index: f64,
+    skip_holes: bool,
+) -> Result<Option<Value>, VmErr> {
+    let key = Value::String(crate::format::ecmascript_number_string(index).into());
     if skip_holes && !interp.has_property(this, &key)? {
         return Ok(None);
     }
@@ -142,6 +151,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("at", 1),
                 ("with", 2),
                 ("toReversed", 0),
+                ("toSorted", 1),
                 ("copyWithin", 2),
                 ("toSpliced", 2),
                 ("splice", 2),
@@ -280,6 +290,7 @@ const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
     "at",
     "with",
     "toReversed",
+    "toSorted",
     "copyWithin",
     "toSpliced",
     "splice",
@@ -470,6 +481,7 @@ pub fn array_method(name: &str) -> Option<Value> {
         "at" => array_at,
         "with" => array_with,
         "toReversed" => array_to_reversed,
+        "toSorted" => array_to_sorted,
         "copyWithin" => array_copy_within,
         "toSpliced" => array_to_spliced,
         "splice" => array_splice,
@@ -513,13 +525,7 @@ fn delete_array_property_or_throw(
     object: &Value,
     index: usize,
 ) -> Result<(), VmErr> {
-    if !interp
-        .delete_member(object, &Value::String(index.to_string().into()))?
-        .is_truthy()
-    {
-        return Err(VmErr::Msg("TypeError: Cannot delete array property".into()));
-    }
-    Ok(())
+    delete_numeric_property_or_throw(interp, object, index.to_string())
 }
 
 fn array_splice(
@@ -657,11 +663,8 @@ fn array_copy_within(
         if interp.has_property(&this, &from_key)? {
             let value = interp.get_prop_value(&this, &from_key)?;
             interp.set_member_str_or_throw(&this, &to_key, value)?;
-        } else if !interp
-            .delete_member(&this, &Value::String(to_key.into()))?
-            .is_truthy()
-        {
-            return Err(VmErr::Msg("TypeError: Cannot delete array property".into()));
+        } else {
+            delete_numeric_property_or_throw(interp, &this, to_key)?;
         }
         from += direction;
         to += direction;
@@ -878,30 +881,27 @@ fn array_unshift(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Valu
 }
 
 /// `fill(value, start, end)`.
-fn array_fill(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::Array(cell) = &this else {
-        return Ok(this.clone());
+fn array_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let mut index = relative_number_index(
+        interp.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let end = match a.get(2) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative_number_index(interp.ecmascript_to_number(value)?, length),
     };
-    let length = cell.borrow().len();
-    let resolve = |value: Option<&Value>, default: usize| -> usize {
-        match value {
-            Some(Value::Undefined) | None => default,
-            Some(v) => relative_index(v.to_number(), length),
-        }
-    };
-    let start = resolve(a.get(1), 0);
-    let end = resolve(a.get(2), length).max(start);
-    if start < end {
-        reject_frozen_array_mutation(cell)?;
-    }
     let value = a.first().cloned().unwrap_or(Value::Undefined);
-    {
-        let mut items = cell.borrow_mut();
-        for slot in items.iter_mut().take(end).skip(start) {
-            *slot = value.clone();
-        }
+    while index < end {
+        interp.consume_loop()?;
+        interp.set_member_str_or_throw(
+            &this,
+            &crate::format::ecmascript_number_string(index),
+            value.clone(),
+        )?;
+        index += 1.0;
     }
-    cell.fill_presence(start, end);
     Ok(this)
 }
 
@@ -1041,12 +1041,16 @@ fn reduce_direction(
     a: Vec<Value>,
     reverse: bool,
 ) -> Result<Value, VmErr> {
-    let length = array_like_length(interp, &this)?;
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
     let cb = callback(&a)?;
     let mut acc = a.get(1).cloned();
-    for step in 0..length {
-        let index = if reverse { length - 1 - step } else { step };
-        let Some(value) = array_element(interp, &this, index, true)? else {
+    let mut step = 0.0;
+    while step < length {
+        interp.consume_loop()?;
+        let index = if reverse { length - 1.0 - step } else { step };
+        step += 1.0;
+        let Some(value) = array_element_number(interp, &this, index, true)? else {
             continue;
         };
         acc = Some(match acc {
@@ -1054,7 +1058,7 @@ fn reduce_direction(
             Some(previous) => interp.call_this(
                 &cb,
                 Value::Undefined,
-                vec![previous, value, Value::Number(index as f64), this.clone()],
+                vec![previous, value, Value::Number(index), this.clone()],
             )?,
         });
     }
@@ -1066,15 +1070,20 @@ fn array_reduce(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 }
 
 fn array_for_each(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let length = array_like_length(interp, &this)?;
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    for index in 0..length {
-        if let Some(value) = array_element(interp, &this, index, true)? {
+    let mut next = 0.0;
+    while next < length {
+        interp.consume_loop()?;
+        let index = next;
+        next += 1.0;
+        if let Some(value) = array_element_number(interp, &this, index, true)? {
             interp.call_this(
                 &cb,
                 receiver.clone(),
-                vec![value, Value::Number(index as f64), this.clone()],
+                vec![value, Value::Number(index), this.clone()],
             )?;
         }
     }
@@ -1086,17 +1095,22 @@ fn array_find(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 }
 
 fn array_some(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let length = array_like_length(interp, &this)?;
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    for index in 0..length {
-        let Some(value) = array_element(interp, &this, index, true)? else {
+    let mut next = 0.0;
+    while next < length {
+        interp.consume_loop()?;
+        let index = next;
+        next += 1.0;
+        let Some(value) = array_element_number(interp, &this, index, true)? else {
             continue;
         };
         let hit = interp.call_this(
             &cb,
             receiver.clone(),
-            vec![value, Value::Number(index as f64), this.clone()],
+            vec![value, Value::Number(index), this.clone()],
         )?;
         if hit.is_truthy() {
             return Ok(Value::Bool(true));
@@ -1106,17 +1120,22 @@ fn array_some(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 }
 
 fn array_every(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let length = array_like_length(interp, &this)?;
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    for index in 0..length {
-        let Some(value) = array_element(interp, &this, index, true)? else {
+    let mut next = 0.0;
+    while next < length {
+        interp.consume_loop()?;
+        let index = next;
+        next += 1.0;
+        let Some(value) = array_element_number(interp, &this, index, true)? else {
             continue;
         };
         let hit = interp.call_this(
             &cb,
             receiver.clone(),
-            vec![value, Value::Number(index as f64), this.clone()],
+            vec![value, Value::Number(index), this.clone()],
         )?;
         if !hit.is_truthy() {
             return Ok(Value::Bool(false));
@@ -1388,16 +1407,75 @@ fn array_concat(
     Ok(result)
 }
 
-fn array_reverse(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    if let Value::Array(items) = &this {
-        if items.borrow().len() > 1 {
-            reject_frozen_array_mutation(items)?;
+fn array_reverse(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let mut lower = 0.0;
+    while lower < (length / 2.0).floor() {
+        interp.consume_loop()?;
+        let upper = length - lower - 1.0;
+        let low = array_element_number(interp, &this, lower, true)?;
+        let high = array_element_number(interp, &this, upper, true)?;
+        let low_key = crate::format::ecmascript_number_string(lower);
+        let high_key = crate::format::ecmascript_number_string(upper);
+        match (low, high) {
+            (Some(low), Some(high)) => {
+                interp.set_member_str_or_throw(&this, &low_key, high)?;
+                interp.set_member_str_or_throw(&this, &high_key, low)?;
+            }
+            (None, Some(high)) => {
+                interp.set_member_str_or_throw(&this, &low_key, high)?;
+                delete_numeric_property_or_throw(interp, &this, high_key)?;
+            }
+            (Some(low), None) => {
+                delete_numeric_property_or_throw(interp, &this, low_key)?;
+                interp.set_member_str_or_throw(&this, &high_key, low)?;
+            }
+            (None, None) => {}
         }
-        items.borrow_mut().reverse();
-        items.reverse_presence();
-        return Ok(this);
+        lower += 1.0;
     }
-    Ok(Value::Undefined)
+    Ok(this)
+}
+
+fn delete_numeric_property_or_throw(
+    interp: &mut Interpreter,
+    this: &Value,
+    key: String,
+) -> Result<(), VmErr> {
+    if interp
+        .delete_member(this, &Value::String(key.into()))?
+        .is_truthy()
+    {
+        Ok(())
+    } else {
+        Err(VmErr::Msg("TypeError: Cannot delete array property".into()))
+    }
+}
+
+fn array_to_sorted(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let comparator = args.first().cloned().unwrap_or(Value::Undefined);
+    if !matches!(comparator, Value::Undefined)
+        && !crate::interpreter::call::is_callable_value(&comparator)
+    {
+        return Err(VmErr::Msg("TypeError: comparator is not a function".into()));
+    }
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    if length > crate::value::MAX_ARRAY_LEN as f64 {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    let mut values = Vec::with_capacity(length as usize);
+    for index in 0..length as usize {
+        interp.consume_loop()?;
+        values.push(interp.get_prop_value_str(&this, &index.to_string())?);
+    }
+    merge_sort_values(interp, &mut values, &comparator)?;
+    Value::checked_array(values)
 }
 
 fn compare_sort_values(
@@ -1406,13 +1484,27 @@ fn compare_sort_values(
     left: &Value,
     right: &Value,
 ) -> Result<Ordering, VmErr> {
-    let number = interp
-        .call_this(
-            comparator,
-            Value::Undefined,
-            vec![left.clone(), right.clone()],
-        )?
-        .to_number();
+    if matches!(left, Value::Undefined) {
+        return Ok(if matches!(right, Value::Undefined) {
+            Ordering::Equal
+        } else {
+            Ordering::Greater
+        });
+    }
+    if matches!(right, Value::Undefined) {
+        return Ok(Ordering::Less);
+    }
+    if matches!(comparator, Value::Undefined) {
+        let left = interp.ecmascript_to_string(left)?;
+        let right = interp.ecmascript_to_string(right)?;
+        return Ok(left.cmp(&right));
+    }
+    let result = interp.call_this(
+        comparator,
+        Value::Undefined,
+        vec![left.clone(), right.clone()],
+    )?;
+    let number = interp.ecmascript_to_number(&result)?;
     Ok(number.partial_cmp(&0.0).unwrap_or(Ordering::Equal))
 }
 
