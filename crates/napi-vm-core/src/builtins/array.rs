@@ -141,6 +141,9 @@ pub(super) fn install(e: &mut Environment) {
                 ("flatMap", 1),
                 ("at", 1),
                 ("with", 2),
+                ("toReversed", 0),
+                ("copyWithin", 2),
+                ("toSpliced", 2),
                 ("splice", 2),
                 ("shift", 0),
                 ("unshift", 1),
@@ -193,6 +196,48 @@ pub(super) fn install(e: &mut Environment) {
                 );
             }
         }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("unscopables") {
+            let excluded = Value::object_with_proto(
+                [
+                    "at",
+                    "copyWithin",
+                    "entries",
+                    "fill",
+                    "find",
+                    "findIndex",
+                    "findLast",
+                    "findLastIndex",
+                    "flat",
+                    "flatMap",
+                    "includes",
+                    "keys",
+                    "toReversed",
+                    "toSorted",
+                    "toSpliced",
+                    "values",
+                    "with",
+                ]
+                .into_iter()
+                .map(|name| (name.into(), Value::Bool(true)))
+                .collect(),
+                None,
+            );
+            let slot = crate::interpreter::symbol_slot_key(symbol);
+            prototype
+                .set_prop(slot.clone(), excluded)
+                .expect("Array unscopables");
+            if let Value::Array(array) = &prototype {
+                array.set_symbol_key(&slot, symbol.clone());
+                array.meta.borrow_mut().set_attrs(
+                    &slot,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+            }
+        }
         a.set_prop("prototype".into(), prototype)
             .expect("Array.prototype");
         if let Value::Object { props } = &a {
@@ -234,6 +279,9 @@ const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
     "reduceRight",
     "at",
     "with",
+    "toReversed",
+    "copyWithin",
+    "toSpliced",
     "splice",
     "findIndex",
     "findLast",
@@ -421,6 +469,9 @@ pub fn array_method(name: &str) -> Option<Value> {
         "reduceRight" => array_reduce_right,
         "at" => array_at,
         "with" => array_with,
+        "toReversed" => array_to_reversed,
+        "copyWithin" => array_copy_within,
+        "toSpliced" => array_to_spliced,
         "splice" => array_splice,
         "findIndex" => array_find_index,
         "findLast" => array_find_last,
@@ -547,6 +598,124 @@ fn array_at(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Valu
         return Ok(Value::Undefined);
     }
     interp.get_prop_value_str(&this, &crate::format::ecmascript_number_string(index))
+}
+
+fn array_to_reversed(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    if length > crate::value::MAX_ARRAY_LEN as f64 {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    let mut result = Vec::with_capacity(length as usize);
+    for index in (0..length as usize).rev() {
+        interp.consume_loop()?;
+        result.push(interp.get_prop_value_str(&this, &index.to_string())?);
+    }
+    Value::checked_array(result)
+}
+
+fn relative_number_index(number: f64, length: f64) -> f64 {
+    let integer = to_integer_or_infinity(number);
+    if integer < 0.0 {
+        (length + integer).max(0.0)
+    } else {
+        integer.min(length)
+    }
+}
+
+fn array_copy_within(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let mut to = relative_number_index(
+        interp.ecmascript_to_number(args.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let mut from = relative_number_index(
+        interp.ecmascript_to_number(args.get(1).unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let end = match args.get(2) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative_number_index(interp.ecmascript_to_number(value)?, length),
+    };
+    let mut count = (end - from).min(length - to).max(0.0);
+    let direction = if from < to && to < from + count {
+        from += count - 1.0;
+        to += count - 1.0;
+        -1.0
+    } else {
+        1.0
+    };
+    while count > 0.0 {
+        interp.consume_loop()?;
+        let from_key = Value::String(crate::format::ecmascript_number_string(from).into());
+        let to_key = crate::format::ecmascript_number_string(to);
+        if interp.has_property(&this, &from_key)? {
+            let value = interp.get_prop_value(&this, &from_key)?;
+            interp.set_member_str_or_throw(&this, &to_key, value)?;
+        } else if !interp
+            .delete_member(&this, &Value::String(to_key.into()))?
+            .is_truthy()
+        {
+            return Err(VmErr::Msg("TypeError: Cannot delete array property".into()));
+        }
+        from += direction;
+        to += direction;
+        count -= 1.0;
+    }
+    Ok(this)
+}
+
+fn array_to_spliced(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let start = relative_number_index(
+        interp.ecmascript_to_number(args.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let inserted = args.len().saturating_sub(2);
+    let remove = match args.len() {
+        0 => 0.0,
+        1 => length - start,
+        _ => to_integer_or_infinity(interp.ecmascript_to_number(&args[1])?)
+            .clamp(0.0, length - start),
+    };
+    // Subtract first so cancellation stays exact near MAX_SAFE_INTEGER.
+    let new_length = (length - remove) + inserted as f64;
+    if new_length > 9_007_199_254_740_991.0 {
+        return Err(VmErr::Msg("TypeError: Invalid array-like length".into()));
+    }
+    if new_length > crate::value::MAX_ARRAY_LEN as f64 {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    let mut result = Vec::with_capacity(new_length as usize);
+    // Only indexes surviving the deletion are read, and holes become values.
+    let mut index = 0.0;
+    while index < start {
+        interp.consume_loop()?;
+        result.push(
+            interp.get_prop_value_str(&this, &crate::format::ecmascript_number_string(index))?,
+        );
+        index += 1.0;
+    }
+    result.extend(args.into_iter().skip(2));
+    index = start + remove;
+    while index < length {
+        interp.consume_loop()?;
+        result.push(
+            interp.get_prop_value_str(&this, &crate::format::ecmascript_number_string(index))?,
+        );
+        index += 1.0;
+    }
+    Value::checked_array(result)
 }
 
 fn array_with(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {

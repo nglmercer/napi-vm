@@ -70,6 +70,7 @@ pub(super) fn install(e: &mut Environment) {
             "toLocaleString",
             "toFixed",
             "toPrecision",
+            "toExponential",
             "valueOf",
         ]
         .into_iter()
@@ -97,6 +98,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("toLocaleString", 0),
                 ("toFixed", 1),
                 ("toPrecision", 1),
+                ("toExponential", 1),
                 ("valueOf", 0),
             ],
         );
@@ -225,6 +227,7 @@ pub fn number_method(name: &str) -> Option<Value> {
         "toFixed" => number_to_fixed,
         "toString" | "toLocaleString" => number_to_string,
         "toPrecision" => number_to_precision,
+        "toExponential" => number_to_exponential,
         "valueOf" => number_value_of,
         _ => return None,
     };
@@ -252,7 +255,9 @@ fn number_to_string(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
         ));
     }
     if !value.is_finite() {
-        return Ok(Value::String((crate::format::number_string(value)).into()));
+        return Ok(Value::String(
+            (crate::format::ecmascript_number_string(value)).into(),
+        ));
     }
     let negative = value < 0.0;
     let mut magnitude = value.abs().trunc() as u128;
@@ -283,7 +288,9 @@ fn number_to_precision(
     let value = number_primitive(&this)?;
     let digits = match a.first() {
         None | Some(Value::Undefined) => {
-            return Ok(Value::String((crate::format::number_string(value)).into()));
+            return Ok(Value::String(
+                (crate::format::ecmascript_number_string(value)).into(),
+            ));
         }
         Some(value) => crate::value::to_integer_or_infinity(interp.ecmascript_to_number(value)?),
     };
@@ -301,10 +308,163 @@ fn number_to_precision(
     if value == 0.0 {
         return Ok(Value::String((format!("{:.*}", digits - 1, 0.0)).into()));
     }
-    // Significant figures = decimal places, shifted by the exponent.
-    let exponent = value.abs().log10().floor() as i32;
-    let decimals = (digits as i32 - 1 - exponent).max(0) as usize;
-    Ok(Value::String((format!("{:.*}", decimals, value)).into()))
+    let (text, exponent) = significant_digits(value.abs(), digits)?;
+    let mut result = if exponent < -6 || exponent >= digits as i32 {
+        exponential_digits(&text, exponent)
+    } else if exponent >= 0 {
+        let point = exponent as usize + 1;
+        if point >= text.len() {
+            format!("{text}{}", "0".repeat(point - text.len()))
+        } else {
+            format!("{}.{}", &text[..point], &text[point..])
+        }
+    } else {
+        format!("0.{}{text}", "0".repeat((-exponent - 1) as usize))
+    };
+    if value < 0.0 {
+        result.insert(0, '-');
+    }
+    Value::checked_string(result)
+}
+
+/// Exact rational for a nonnegative finite binary64 value.
+fn binary_rational(number: f64) -> Result<(crate::bigint::BigInt, crate::bigint::BigInt), VmErr> {
+    use crate::bigint::BigInt;
+    let bits = number.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let mantissa = (bits & ((1 << 52) - 1)) | if exponent == 0 { 0 } else { 1 << 52 };
+    let shift = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    };
+    let numerator = BigInt::from_words(false, &[mantissa]);
+    let denominator = BigInt::from_i64(1);
+    if shift >= 0 {
+        Ok((
+            numerator
+                .shl(&BigInt::from_i64(shift))
+                .map_err(VmErr::Msg)?,
+            denominator,
+        ))
+    } else {
+        Ok((
+            numerator,
+            denominator
+                .shl(&BigInt::from_i64(-shift))
+                .map_err(VmErr::Msg)?,
+        ))
+    }
+}
+
+/// Round x * 10^scale once, choosing the larger integer at an exact tie.
+/// All Number formatting methods share this operation; no intermediate
+/// floating-point decimal scaling can lose a rounding bit.
+fn rounded_decimal_integer(number: f64, scale: i32) -> Result<crate::bigint::BigInt, VmErr> {
+    use crate::bigint::BigInt;
+    let (mut numerator, mut denominator) = binary_rational(number)?;
+    (|| -> crate::bigint::BigResult<BigInt> {
+        let power = BigInt::from_i64(10).pow(&BigInt::from_i64(i64::from(scale).abs()))?;
+        if scale >= 0 {
+            numerator = numerator.mul(&power)?;
+        } else {
+            denominator = denominator.mul(&power)?;
+        }
+        numerator
+            .shl(&BigInt::from_i64(1))?
+            .add(&denominator)?
+            .div(&denominator.shl(&BigInt::from_i64(1))?)
+    })()
+    .map_err(VmErr::Msg)
+}
+
+fn significant_digits(number: f64, precision: usize) -> Result<(String, i32), VmErr> {
+    use crate::bigint::BigInt;
+    if number == 0.0 {
+        return Ok(("0".repeat(precision), 0));
+    }
+    let (numerator, denominator) = binary_rational(number)?;
+    let compare_power = |exponent: i32| -> Result<std::cmp::Ordering, VmErr> {
+        let power = BigInt::from_i64(10)
+            .pow(&BigInt::from_i64(i64::from(exponent).abs()))
+            .map_err(VmErr::Msg)?;
+        if exponent >= 0 {
+            Ok(numerator.compare(&denominator.mul(&power).map_err(VmErr::Msg)?))
+        } else {
+            Ok(numerator
+                .mul(&power)
+                .map_err(VmErr::Msg)?
+                .compare(&denominator))
+        }
+    };
+    // log10 is an estimate only: exact comparisons resolve values adjoining
+    // powers of ten, including subnormals and decimal exponent boundaries.
+    let mut exponent = number.log10().floor() as i32;
+    while compare_power(exponent)?.is_lt() {
+        exponent -= 1;
+    }
+    while !compare_power(exponent + 1)?.is_lt() {
+        exponent += 1;
+    }
+    let mut text = rounded_decimal_integer(number, precision as i32 - 1 - exponent)?.to_decimal();
+    if text.len() > precision {
+        text.truncate(precision);
+        exponent += 1;
+    }
+    Ok((text, exponent))
+}
+
+fn exponential_digits(digits: &str, exponent: i32) -> String {
+    if digits.len() == 1 {
+        format!("{digits}e{exponent:+}")
+    } else {
+        format!("{}.{}e{exponent:+}", &digits[..1], &digits[1..])
+    }
+}
+
+fn number_to_exponential(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let number = number_primitive(&this)?;
+    let undefined = Value::Undefined;
+    let argument = args.first().unwrap_or(&undefined);
+    let fraction = crate::value::to_integer_or_infinity(interp.ecmascript_to_number(argument)?);
+    if !number.is_finite() {
+        return Value::checked_string(crate::format::ecmascript_number_string(number));
+    }
+    let (digits, exponent) = if matches!(argument, Value::Undefined) {
+        // The existing shortest-roundtrip formatter supplies the unspecified
+        // precision case. Convert its notation without rounding a second time.
+        let shortest = crate::format::ecmascript_number_string(number.abs());
+        let (mantissa, suffix) = shortest.split_once('e').unwrap_or((&shortest, "0"));
+        let point = mantissa.find('.').unwrap_or(mantissa.len());
+        let text: String = mantissa.chars().filter(|c| *c != '.').collect();
+        let first = text.find(|c| c != '0').unwrap_or(text.len() - 1);
+        let mut digits = text[first..].trim_end_matches('0').to_string();
+        if digits.is_empty() {
+            digits.push('0');
+        }
+        let exponent = if number == 0.0 {
+            0
+        } else {
+            point as i32 - first as i32 - 1 + suffix.parse::<i32>().expect("numeric exponent")
+        };
+        (digits, exponent)
+    } else {
+        if !(0.0..=100.0).contains(&fraction) {
+            return Err(crate::value::limit_err(
+                "toExponential digits must be between 0 and 100",
+            ));
+        }
+        significant_digits(number.abs(), fraction as usize + 1)?
+    };
+    let mut text = exponential_digits(&digits, exponent);
+    if number < 0.0 {
+        text.insert(0, '-');
+    }
+    Value::checked_string(text)
 }
 
 fn number_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
@@ -325,28 +485,7 @@ fn number_to_fixed(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resu
         return Value::checked_string(crate::format::ecmascript_number_string(n));
     }
     let digits = digits as usize;
-    // Scale the exact binary64 value with the existing integer operations.
-    // Rust's formatter rounds ties to even; toFixed chooses the larger n.
-    use crate::bigint::BigInt;
-    let bits = n.abs().to_bits();
-    let exponent = ((bits >> 52) & 0x7ff) as i64;
-    let mantissa = (bits & ((1 << 52) - 1)) | if exponent == 0 { 0 } else { 1 << 52 };
-    let shift = if exponent == 0 {
-        -1074
-    } else {
-        exponent - 1075
-    } + digits as i64;
-    let integer = (|| -> crate::bigint::BigResult<BigInt> {
-        let scaled = BigInt::from_words(false, &[mantissa])
-            .mul(&BigInt::from_i64(5).pow(&BigInt::from_i64(digits as i64))?)?;
-        if shift >= 0 {
-            scaled.shl(&BigInt::from_i64(shift))
-        } else {
-            let half = BigInt::from_i64(1).shl(&BigInt::from_i64(-shift - 1))?;
-            scaled.add(&half)?.shr(&BigInt::from_i64(-shift))
-        }
-    })()
-    .map_err(VmErr::Msg)?;
+    let integer = rounded_decimal_integer(n.abs(), digits as i32)?;
     let mut text = integer.to_decimal();
     if digits > 0 {
         if text.len() <= digits {

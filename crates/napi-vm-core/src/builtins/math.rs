@@ -78,13 +78,25 @@ fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
         ("clz32", math_clz32),
         ("imul", math_imul),
         ("fround", math_fround),
+        ("acos", math_acos),
+        ("asin", math_asin),
+        ("atan", math_atan),
+        ("atan2", math_atan2),
+        ("acosh", math_acosh),
+        ("asinh", math_asinh),
+        ("atanh", math_atanh),
+        ("cosh", math_cosh),
+        ("sinh", math_sinh),
+        ("tanh", math_tanh),
+        ("expm1", math_expm1),
+        ("log1p", math_log1p),
     ];
     table
         .into_iter()
         .map(|(n, f)| {
             let length = match n {
                 "random" => 0,
-                "pow" | "min" | "max" | "hypot" | "imul" => 2,
+                "pow" | "min" | "max" | "hypot" | "imul" | "atan2" => 2,
                 _ => 1,
             };
             (
@@ -97,6 +109,31 @@ fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
 
 fn math_arg(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
     interp.ecmascript_to_number(args.get(index).unwrap_or(&Value::Undefined))
+}
+
+macro_rules! unary_math {
+    ($name:ident, $operation:ident) => {
+        fn $name(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+            Ok(Value::Number(math_arg(interp, &args, 0)?.$operation()))
+        }
+    };
+}
+unary_math!(math_acos, acos);
+unary_math!(math_asin, asin);
+unary_math!(math_atan, atan);
+unary_math!(math_acosh, acosh);
+unary_math!(math_asinh, asinh);
+unary_math!(math_atanh, atanh);
+unary_math!(math_cosh, cosh);
+unary_math!(math_sinh, sinh);
+unary_math!(math_tanh, tanh);
+unary_math!(math_expm1, exp_m1);
+unary_math!(math_log1p, ln_1p);
+
+fn math_atan2(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let y = math_arg(interp, &args, 0)?;
+    let x = math_arg(interp, &args, 1)?;
+    Ok(Value::Number(y.atan2(x)))
 }
 
 fn math_clz32(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
