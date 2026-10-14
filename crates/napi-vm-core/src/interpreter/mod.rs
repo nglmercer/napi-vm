@@ -1483,6 +1483,17 @@ impl Interpreter {
         name: &str,
         value: Value,
     ) -> Result<(), VmErr> {
+        let strict = scope.borrow().strict();
+        self.assign_or_set_binding_with_strict(scope, name, value, strict)
+    }
+
+    pub(crate) fn assign_or_set_binding_with_strict(
+        &mut self,
+        scope: &Env,
+        name: &str,
+        value: Value,
+        strict: bool,
+    ) -> Result<(), VmErr> {
         if let Some(object) = self.with_binding_object(scope, name)? {
             return self.assign_member_str(&object, name, value);
         }
@@ -1490,7 +1501,7 @@ impl Interpreter {
         match env.assign(name, value.clone()) {
             AssignOutcome::Assigned => Ok(()),
             AssignOutcome::ReadOnly => {
-                if env.strict() {
+                if strict {
                     Err(VmErr::Msg(format!(
                         "TypeError: Cannot assign to read-only property {name}"
                     )))
@@ -1507,7 +1518,7 @@ impl Interpreter {
             // No such binding: an assignment to an undeclared name creates an
             // implicit `var`-like global, as sloppy-mode JavaScript does.
             AssignOutcome::Missing => {
-                let strict = self.cur_mod.is_some() || env.strict();
+                let strict = self.cur_mod.is_some() || strict;
                 drop(env);
                 if strict {
                     return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
@@ -2343,6 +2354,7 @@ impl Interpreter {
         let scope = Rc::new(RefCell::new(Environment::child(
             self.persistent_global.clone(),
         )));
+        scope.borrow_mut().replace_strict(Some(true));
         scope.borrow_mut().set("this", Value::Undefined);
         scope
     }

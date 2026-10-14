@@ -660,10 +660,10 @@ pub(crate) fn unregister_interp(id: InterpId) {
 pub(crate) fn republish_roots(id: InterpId, roots: GcRoots) {
     // Forced abandonment can unwind suspended generators during TLS teardown.
     let _ = HEAP.try_with(|heap| {
-        if let Ok(mut heap) = heap.try_borrow_mut() {
-            if let Some(slot) = heap.interps.get_mut(&id) {
-                slot.0 = roots;
-            }
+        if let Ok(mut heap) = heap.try_borrow_mut()
+            && let Some(slot) = heap.interps.get_mut(&id)
+        {
+            slot.0 = roots;
         }
     });
 }

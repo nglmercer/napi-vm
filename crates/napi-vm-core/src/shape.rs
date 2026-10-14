@@ -383,7 +383,10 @@ mod tests {
     fn add_transition_matches_literal() {
         // Two reads build the `[a]` shape so the add follows a transition
         // instead of lazily rebuilding.
-        let grown = cell_of(&eval("let o = {a: 1}; o.a; o.a; o.b = 2; o;"));
+        let value = eval("({a: 1})");
+        let grown = cell_of(&value);
+        built_id(&grown, "a");
+        value.set_prop("b".into(), Value::Number(2.0)).unwrap();
         let literal = cell_of(&eval("({a: 1, b: 2})"));
         assert_eq!(grown.shape_id(), Some(built_id(&literal, "a")));
     }

@@ -242,7 +242,8 @@ impl Interpreter {
         let Value::RealmGlobal(environment) = base else {
             return Err(VmErr::Msg("internal error: assignment binding base".into()));
         };
-        self.assign_or_set_binding_in(environment, name, value)
+        let strict = self.global.borrow().strict();
+        self.assign_or_set_binding_with_strict(environment, name, value, strict)
     }
 
     /// Resolve a deletion reference using the same environment ordering as

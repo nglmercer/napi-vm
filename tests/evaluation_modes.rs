@@ -1,4 +1,4 @@
-use napi_vm::interpreter::{DrainPolicy, EvaluationOptions};
+use napi_vm::interpreter::EvaluationOptions;
 #[cfg(feature = "runtime")]
 use napi_vm::{ClockMode, VirtualClock};
 use napi_vm::{Interpreter, Value};
@@ -84,7 +84,7 @@ fn compact_property_cache_verification() {
     use napi_vm::lexer::Lexer;
     use napi_vm::parser::Parser;
     let statements =
-        Parser::new_with_spans(Lexer::new("var o={x:1};o.x=2;o.x;").tokenize_with_spans())
+        Parser::new_with_spans(Lexer::new("var o={x:1,y:2};o.x;o.y;").tokenize_with_spans())
             .parse_program()
             .unwrap();
     let mut module = compile_program(&statements).unwrap();

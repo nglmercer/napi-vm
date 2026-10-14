@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "c40aac3ada611ce636becb5bf169ad10d58cc297ca5f01119d84feae5584035e",
+  "engine_sha256": "1b23d8da7be54d43b56446311251528129c06ea9bd647917412c2b5fe1017129",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
@@ -14,55 +14,54 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 76411,
-    "fail": 26543,
+    "pass": 76823,
+    "fail": 26131,
     "skip": 0,
     "timeout": 2,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 74.21714130308092,
+  "pass_percentage": 74.61731224989316,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "142a38def24b84c96a7d6898fc6345402d6dd094",
-  "source_state": "Merged PR #26 plus evidence/remaining-quick-wins/implementation.patch.gz",
-  "implementation_patch_sha256": "f3ef9897431410c4b0fa17eeeb7904f5e3fc969961fd09dea7a86c93c3c13805",
+  "source_base": "ca6e7e0ca01c03a3c84569765c3d3135837e5bf5",
+  "source_state": "source_base plus implementation.patch.gz",
+  "implementation_patch_sha256": "65f3ad20aec6abda1029587e8858dce34a1a13f3bdc060f2123b79794f8b68a3",
   "baseline": {
-    "engine_sha256": "2d83b14d79c5495b92f8ba8842f0d374eced5e4b97c09e417ca28eb297e41c05",
+    "evidence": "evidence/remaining-quick-wins/remaining-validated-full.json.gz",
+    "engine_sha256": "c40aac3ada611ce636becb5bf169ad10d58cc297ca5f01119d84feae5584035e",
     "counts": {
-      "pass": 75637,
-      "fail": 27317,
+      "pass": 76411,
+      "fail": 26543,
       "skip": 0,
       "timeout": 2,
       "crash": 0,
       "harness_error": 0
-    },
-    "total": 102956,
-    "evidence": "evidence/math-quick-wins/full-after.json.gz",
-    "transitions": {
-      "new_passes": 774,
-      "former_passes_now_nonpassing": 0
     }
   },
-  "evidence": "evidence/remaining-quick-wins/summary.json",
-  "notes": [
-    "Development measurement; full ECMAScript conformance is not achieved.",
-    "No corpus changes, feature skips, outcome substitution, or weakened assertions.",
-    "Eight existing broader Rust test failures remain; baseline reproductions are archived.",
-    "Full-corpus AST/bytecode differential and wasm32 execution remain unvalidated.",
-    "Raw full run observes 774 new passes; two Atomics FIFO script outcomes are scheduling-sensitive and excluded from the 772 reproducible improvements. No raw outcomes are substituted."
+  "new_passes": 414,
+  "reproduced_new_passes": 414,
+  "lost_passes": 2,
+  "unexplained_regressions": 0,
+  "known_scheduling_sensitive_losses": [
+    {
+      "test": "built-ins/Atomics/wait/bigint/waiterlist-order-of-operations-is-fifo.js",
+      "variant": "script",
+      "reason": "Existing Atomics FIFO instruction-fuel exhaustion; reproduced on unchanged baseline and current binary in both repeat runs"
+    },
+    {
+      "test": "built-ins/Atomics/wait/waiterlist-order-of-operations-is-fifo.js",
+      "variant": "script",
+      "reason": "Existing Atomics FIFO instruction-fuel exhaustion; reproduced on unchanged baseline and current binary in both repeat runs"
+    }
   ],
-  "reproducible_new_passes": 772,
-  "unattributed_scheduling_sensitive_passes": 2,
-  "improvement_replay": {
-    "total": 772,
-    "baseline_pass": 0,
-    "baseline_fail": 772,
-    "current_pass": 772,
-    "current_fail": 0,
-    "new_passes": 772,
-    "lost_passes": 0,
-    "evidence": "evidence/remaining-quick-wins/improvements-replay-transitions.json.gz"
-  }
+  "rust_tests": {
+    "root_passed": 335,
+    "root_failed": 3,
+    "core_passed": 642,
+    "core_failed": 0,
+    "remaining_failures": "LSP Unix socket bind PermissionDenied, also present on baseline"
+  },
+  "evidence": "evidence/math-array-number/summary.json"
 }
