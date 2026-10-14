@@ -594,6 +594,13 @@ fn methods(kind: Kind) -> Vec<(&'static str, super::NativeFn)> {
             ("getOrInsertComputed", weak_map_get_or_insert_computed),
         ],
         Set => vec![
+            ("union", set_union),
+            ("intersection", set_intersection),
+            ("difference", set_difference),
+            ("symmetricDifference", set_symmetric_difference),
+            ("isSubsetOf", set_is_subset_of),
+            ("isSupersetOf", set_is_superset_of),
+            ("isDisjointFrom", set_is_disjoint_from),
             ("has", set_has),
             ("delete", set_delete),
             ("add", set_add_branded),
@@ -888,6 +895,226 @@ pub fn describe_collection(value: &Value) -> Option<String> {
     let entries = entries_of(value)?;
     Some(format!("{}({})", kind.tag(), entries.borrow().len()))
 }
+
+// GetSetRecord captures the three observable properties once, in spec order.
+struct SetRecord {
+    object: Value,
+    size: f64,
+    has: Value,
+    keys: Value,
+}
+impl SetRecord {
+    fn get(interp: &mut Interpreter, object: Value) -> Result<Self, VmErr> {
+        if !crate::interpreter::call::is_js_object(&object) {
+            return Err(VmErr::Msg("TypeError: expected a set-like object".into()));
+        }
+        let size = interp.get_prop_value_str(&object, "size")?;
+        let size = interp.ecmascript_to_number(&size)?;
+        if size.is_nan() {
+            return Err(VmErr::Msg("TypeError: invalid set-like size".into()));
+        }
+        let size = crate::value::to_integer_or_infinity(size);
+        if size < 0.0 {
+            return Err(VmErr::Msg("RangeError: negative set-like size".into()));
+        }
+        let has = interp.get_prop_value_str(&object, "has")?;
+        if !crate::interpreter::is_callable_value(&has) {
+            return Err(VmErr::Msg("TypeError: set-like has is not callable".into()));
+        }
+        let keys = interp.get_prop_value_str(&object, "keys")?;
+        if !crate::interpreter::is_callable_value(&keys) {
+            return Err(VmErr::Msg(
+                "TypeError: set-like keys is not callable".into(),
+            ));
+        }
+        Ok(Self {
+            object,
+            size,
+            has,
+            keys,
+        })
+    }
+    fn has(&self, interp: &mut Interpreter, key: Value) -> Result<bool, VmErr> {
+        Ok(interp
+            .call_this(&self.has, self.object.clone(), vec![key])?
+            .is_truthy())
+    }
+    fn iterator(&self, interp: &mut Interpreter) -> Result<(Value, Value), VmErr> {
+        let iterator = interp.iterator_from_method(&self.object, &self.keys)?;
+        let next = interp.get_prop_value_str(&iterator, "next")?;
+        Ok((iterator, next))
+    }
+}
+fn set_keys_snapshot(entries: &Rc<ArrayCell>) -> Vec<Value> {
+    entries
+        .borrow()
+        .iter()
+        .map(|pair| pair.get_prop("0").unwrap_or(Value::Undefined))
+        .collect()
+}
+fn set_result(interp: &Interpreter, keys: Vec<Value>) -> Result<Value, VmErr> {
+    let prototype = interp
+        .persistent_global
+        .borrow()
+        .intrinsic("Set")
+        .and_then(|ctor| ctor.get_prop("prototype"));
+    let result = Value::object_with_proto(
+        vec![
+            (
+                ENTRIES_SLOT.into(),
+                Value::checked_array(
+                    keys.into_iter()
+                        .map(|key| entry(key.clone(), key))
+                        .collect(),
+                )?,
+            ),
+            (KIND_SLOT.into(), Value::String("Set".into())),
+        ],
+        prototype.map(Rc::new),
+    );
+    if let Value::Object { props } = &result {
+        props.meta.borrow_mut().collection_kind = Some(Kind::Set);
+    }
+    Ok(result)
+}
+fn set_list_add(keys: &mut Vec<Value>, mut key: Value) -> Result<(), VmErr> {
+    if !keys.iter().any(|existing| same_value_zero(existing, &key)) {
+        if keys.len() >= crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum collection size exceeded"));
+        }
+        if matches!(key, Value::Number(n) if n == 0.0) {
+            key = Value::Number(0.0);
+        }
+        keys.push(key);
+    }
+    Ok(())
+}
+// Entry identities survive vector compaction. A deletion followed by reinsertion
+// creates a fresh pair, so observable callbacks still see newly appended entries.
+fn next_live_set_entry(entries: &Rc<ArrayCell>, visited: &mut Vec<Value>) -> Option<Value> {
+    let pair = entries
+        .borrow()
+        .iter()
+        .find(|pair| !visited.iter().any(|old| strict_equals(old, pair)))
+        .cloned()?;
+    let key = pair.get_prop("0").unwrap_or(Value::Undefined);
+    visited.push(pair);
+    Some(key)
+}
+#[derive(Clone, Copy)]
+enum SetOperation {
+    Union,
+    Intersection,
+    Difference,
+    SymmetricDifference,
+    Subset,
+    Superset,
+    Disjoint,
+}
+fn set_compose(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    operation: SetOperation,
+) -> Result<Value, VmErr> {
+    if kind_of(&this) != Some(Kind::Set) {
+        return Err(VmErr::Msg(
+            "TypeError: Set method called on incompatible receiver".into(),
+        ));
+    }
+    let entries = require(&this, "Set composition")?;
+    let other = SetRecord::get(interp, args.first().cloned().unwrap_or(Value::Undefined))?;
+    let size = entries.borrow().len() as f64;
+    use SetOperation::*;
+    if matches!(operation, Subset) && size > other.size {
+        return Ok(Value::Bool(false));
+    }
+    if matches!(operation, Superset) && size < other.size {
+        return Ok(Value::Bool(false));
+    }
+    let use_has = match operation {
+        Subset => true,
+        Intersection | Difference | Disjoint => size <= other.size,
+        _ => false,
+    };
+    let mut result = if matches!(operation, Difference) {
+        set_keys_snapshot(&entries)
+    } else {
+        Vec::new()
+    };
+    if use_has {
+        if matches!(operation, Difference) {
+            let original = result.clone();
+            for key in original {
+                interp.consume_loop()?;
+                if other.has(interp, key.clone())? {
+                    result.retain(|v| !same_value_zero(v, &key));
+                }
+            }
+        } else {
+            let mut visited = Vec::new();
+            while let Some(key) = next_live_set_entry(&entries, &mut visited) {
+                interp.consume_loop()?;
+                let found = other.has(interp, key.clone())?;
+                match operation {
+                    Intersection if found => set_list_add(&mut result, key)?,
+                    Subset if !found => return Ok(Value::Bool(false)),
+                    Disjoint if found => return Ok(Value::Bool(false)),
+                    _ => {}
+                }
+            }
+        }
+    } else {
+        let (iterator, next) = other.iterator(interp)?;
+        if matches!(operation, Union | SymmetricDifference) {
+            result = set_keys_snapshot(&entries);
+        }
+        loop {
+            interp.consume_loop()?;
+            let step = interp.call_this(&next, iterator.clone(), vec![])?;
+            let (done, key) = interp.iterator_result_fields(&step)?;
+            if done {
+                break;
+            }
+            let present = position(&entries, &key).is_some();
+            match operation {
+                Union => set_list_add(&mut result, key)?,
+                Intersection if present => set_list_add(&mut result, key)?,
+                Difference => result.retain(|v| !same_value_zero(v, &key)),
+                SymmetricDifference if present => result.retain(|v| !same_value_zero(v, &key)),
+                SymmetricDifference => set_list_add(&mut result, key)?,
+                Superset if !present => {
+                    interp.close_guest_iterator(&iterator, false)?;
+                    return Ok(Value::Bool(false));
+                }
+                Disjoint if present => {
+                    interp.close_guest_iterator(&iterator, false)?;
+                    return Ok(Value::Bool(false));
+                }
+                _ => {}
+            }
+        }
+    }
+    if matches!(operation, Subset | Superset | Disjoint) {
+        Ok(Value::Bool(true))
+    } else {
+        set_result(interp, result)
+    }
+}
+macro_rules! set_composition_method {
+    ($name:ident, $operation:ident) => {
+        fn $name(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+            set_compose(interp, this, args, SetOperation::$operation)
+        }
+    };
+}
+set_composition_method!(set_union, Union);
+set_composition_method!(set_intersection, Intersection);
+set_composition_method!(set_difference, Difference);
+set_composition_method!(set_symmetric_difference, SymmetricDifference);
+set_composition_method!(set_is_subset_of, Subset);
+set_composition_method!(set_is_superset_of, Superset);
+set_composition_method!(set_is_disjoint_from, Disjoint);
 
 #[cfg(test)]
 mod lifecycle_tests {
