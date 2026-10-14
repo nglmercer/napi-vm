@@ -1,0 +1,205 @@
+{
+  "baseline_engine_sha256": "2d83b14d79c5495b92f8ba8842f0d374eced5e4b97c09e417ca28eb297e41c05",
+  "current_engine_sha256": "c40aac3ada611ce636becb5bf169ad10d58cc297ca5f01119d84feae5584035e",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "candidates": [
+    {
+      "path": "built-ins/Object/is/",
+      "total": 42,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Object/hasOwn/",
+      "total": 124,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Object/getOwnPropertyDescriptors/",
+      "total": 36,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Object/prototype/hasOwnProperty/",
+      "total": 126,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Object/prototype/propertyIsEnumerable/",
+      "total": 32,
+      "before_nonpassing": 6,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Reflect/has/",
+      "total": 20,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Reflect/ownKeys/",
+      "total": 26,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Array/prototype/at/",
+      "total": 26,
+      "before_nonpassing": 10,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Array/prototype/with/",
+      "total": 42,
+      "before_nonpassing": 40,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Array/prototype/includes/",
+      "total": 60,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Array/prototype/findLast/",
+      "total": 46,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Array/prototype/findLastIndex/",
+      "total": 46,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/String/prototype/at/",
+      "total": 22,
+      "before_nonpassing": 2,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/String/prototype/isWellFormed/",
+      "total": 16,
+      "before_nonpassing": 16,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/String/prototype/toWellFormed/",
+      "total": 16,
+      "before_nonpassing": 16,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/String/prototype/padStart/",
+      "total": 26,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/String/prototype/padEnd/",
+      "total": 26,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Number/isNaN/",
+      "total": 14,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Number/isFinite/",
+      "total": 16,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Number/isInteger/",
+      "total": 18,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Number/isSafeInteger/",
+      "total": 20,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Math/trunc/",
+      "total": 24,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Math/sign/",
+      "total": 10,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Math/clz32/",
+      "total": 20,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Math/imul/",
+      "total": 10,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Math/fround/",
+      "total": 18,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Math/hypot/",
+      "total": 24,
+      "before_nonpassing": 0,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Date/prototype/toDateString/",
+      "total": 14,
+      "before_nonpassing": 14,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Date/prototype/toTimeString/",
+      "total": 12,
+      "before_nonpassing": 12,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Date/prototype/toUTCString/",
+      "total": 18,
+      "before_nonpassing": 8,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Date/prototype/toString/",
+      "total": 16,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/Date/prototype/getTimezoneOffset/",
+      "total": 16,
+      "before_nonpassing": 6,
+      "after_nonpassing": 0
+    },
+    {
+      "path": "built-ins/JSON/stringify/",
+      "total": 132,
+      "before_nonpassing": 4,
+      "after_nonpassing": 0
+    }
+  ]
+}

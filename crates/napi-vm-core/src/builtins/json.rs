@@ -11,6 +11,23 @@ pub(super) fn install(e: &mut Environment) {
             .expect("built-in JSON property");
         j.set_prop("parse".to_string(), nf("parse", json_parse))
             .expect("built-in JSON property");
+        super::install_method_metadata(e, &j, &[("parse", 2), ("stringify", 3)]);
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            j.set_prop(key.clone(), Value::String("JSON".into()))
+                .expect("JSON tag");
+            let properties = j.property_cell().expect("JSON object");
+            let mut meta = properties.meta.borrow_mut();
+            meta.set_symbol_key(&key, symbol.clone());
+            meta.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
     }
 }
 
@@ -448,11 +465,8 @@ fn escape_json(s: impl Into<crate::JsString>, out: &mut String) -> Result<(), Vm
     Ok(())
 }
 
-fn json_parse(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let s = match a.first() {
-        Some(Value::String(s)) => s,
-        _ => return vm_err("JSON.parse requires a string argument"),
-    };
+fn json_parse(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let s = interp.ecmascript_to_string(a.first().unwrap_or(&Value::Undefined))?;
     if s.len() > crate::value::MAX_STRING_LEN {
         return Err(crate::value::limit_err("Maximum string length exceeded"));
     }
@@ -491,7 +505,7 @@ impl<'a> JsonParser<'a> {
         let v = self.value()?;
         self.skip_ws();
         if self.pos != self.bytes.len() {
-            return vm_err("Invalid JSON");
+            return vm_err("SyntaxError: Invalid JSON");
         }
         Ok(v)
     }
@@ -511,7 +525,7 @@ impl<'a> JsonParser<'a> {
             self.pos += 1;
             Ok(())
         } else {
-            Err(VmErr::Msg("Invalid JSON".to_string()))
+            Err(VmErr::Msg("SyntaxError: Invalid JSON".to_string()))
         }
     }
 
@@ -553,7 +567,7 @@ impl<'a> JsonParser<'a> {
             Some(b'f') => self.literal(b"false", Value::Bool(false)),
             Some(b'n') => self.literal(b"null", Value::Null),
             Some(c) if c == b'-' || c.is_ascii_digit() => self.number(),
-            _ => vm_err("Invalid JSON"),
+            _ => vm_err("SyntaxError: Invalid JSON"),
         }
     }
 
@@ -562,7 +576,7 @@ impl<'a> JsonParser<'a> {
             self.pos += lit.len();
             Ok(v)
         } else {
-            vm_err("Invalid JSON")
+            vm_err("SyntaxError: Invalid JSON")
         }
     }
 
@@ -571,13 +585,25 @@ impl<'a> JsonParser<'a> {
         if self.peek() == Some(b'-') {
             self.pos += 1;
         }
-        while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+        if self.peek() == Some(b'0') {
             self.pos += 1;
+        } else {
+            let start = self.pos;
+            while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+                self.pos += 1;
+            }
+            if start == self.pos {
+                return vm_err("SyntaxError: Invalid JSON");
+            }
         }
         if self.peek() == Some(b'.') {
             self.pos += 1;
+            let start = self.pos;
             while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
                 self.pos += 1;
+            }
+            if start == self.pos {
+                return vm_err("SyntaxError: Invalid JSON");
             }
         }
         if matches!(self.peek(), Some(b'e' | b'E')) {
@@ -585,17 +611,21 @@ impl<'a> JsonParser<'a> {
             if matches!(self.peek(), Some(b'+' | b'-')) {
                 self.pos += 1;
             }
+            let start = self.pos;
             while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
                 self.pos += 1;
+            }
+            if start == self.pos {
+                return vm_err("SyntaxError: Invalid JSON");
             }
         }
         // The scanned range is ASCII-only (digits and punctuation), hence a
         // valid UTF-8 slice of the original input.
         let s = std::str::from_utf8(&self.bytes[start..self.pos])
-            .map_err(|_| VmErr::Msg("Invalid JSON".to_string()))?;
+            .map_err(|_| VmErr::Msg("SyntaxError: Invalid JSON".to_string()))?;
         s.parse::<f64>()
             .map(Value::Number)
-            .map_err(|_| VmErr::Msg("Invalid JSON".to_string()))
+            .map_err(|_| VmErr::Msg("SyntaxError: Invalid JSON".to_string()))
     }
 
     fn string(&mut self) -> Result<crate::JsString, VmErr> {
@@ -603,7 +633,7 @@ impl<'a> JsonParser<'a> {
         let mut out = crate::JsString::default();
         loop {
             match self.peek() {
-                None => return Err(VmErr::Msg("Invalid JSON".to_string())),
+                None => return Err(VmErr::Msg("SyntaxError: Invalid JSON".to_string())),
                 Some(b'"') => {
                     self.pos += 1;
                     return Ok(out);
@@ -625,7 +655,7 @@ impl<'a> JsonParser<'a> {
                             out.push_str(crate::JsString::from_units(vec![hi as u16]));
                             continue;
                         }
-                        _ => return Err(VmErr::Msg("Invalid JSON".to_string())),
+                        _ => return Err(VmErr::Msg("SyntaxError: Invalid JSON".to_string())),
                     }
                     self.pos += 1;
                 }
@@ -639,7 +669,7 @@ impl<'a> JsonParser<'a> {
                         self.pos += 1;
                     }
                     let run = std::str::from_utf8(&self.bytes[start..self.pos])
-                        .map_err(|_| VmErr::Msg("Invalid JSON".to_string()))?;
+                        .map_err(|_| VmErr::Msg("SyntaxError: Invalid JSON".to_string()))?;
                     if run.chars().any(|c| (c as u32) < 0x20) {
                         return Err(VmErr::Msg("SyntaxError: Invalid JSON".into()));
                     }
@@ -654,14 +684,14 @@ impl<'a> JsonParser<'a> {
         for _ in 0..4 {
             let c = self
                 .peek()
-                .ok_or_else(|| VmErr::Msg("Invalid JSON".to_string()))?;
+                .ok_or_else(|| VmErr::Msg("SyntaxError: Invalid JSON".to_string()))?;
             self.pos += 1;
             v = v * 16
                 + match c {
                     b'0'..=b'9' => (c - b'0') as u32,
                     b'a'..=b'f' => (c - b'a' + 10) as u32,
                     b'A'..=b'F' => (c - b'A' + 10) as u32,
-                    _ => return Err(VmErr::Msg("Invalid JSON".to_string())),
+                    _ => return Err(VmErr::Msg("SyntaxError: Invalid JSON".to_string())),
                 };
         }
         Ok(v)
@@ -687,7 +717,7 @@ impl<'a> JsonParser<'a> {
                     self.pos += 1;
                     return Value::checked_array(items);
                 }
-                _ => return vm_err("Invalid JSON"),
+                _ => return vm_err("SyntaxError: Invalid JSON"),
             }
         }
     }
@@ -703,7 +733,7 @@ impl<'a> JsonParser<'a> {
         loop {
             self.skip_ws();
             if self.peek() != Some(b'"') {
-                return vm_err("Invalid JSON");
+                return vm_err("SyntaxError: Invalid JSON");
             }
             let key = self.string()?;
             self.skip_ws();
@@ -714,7 +744,12 @@ impl<'a> JsonParser<'a> {
                 ));
             }
             let v = self.value()?;
-            props.push((key.to_key(), v));
+            let key = key.to_key();
+            if let Some((_, previous)) = props.iter_mut().find(|(name, _)| *name == key) {
+                *previous = v;
+            } else {
+                props.push((key, v));
+            }
             self.skip_ws();
             match self.peek() {
                 Some(b',') => self.pos += 1,
@@ -722,7 +757,7 @@ impl<'a> JsonParser<'a> {
                     self.pos += 1;
                     return Value::checked_object(props);
                 }
-                _ => return vm_err("Invalid JSON"),
+                _ => return vm_err("SyntaxError: Invalid JSON"),
             }
         }
     }

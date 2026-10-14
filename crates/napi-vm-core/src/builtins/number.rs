@@ -46,6 +46,25 @@ pub(super) fn install(e: &mut Environment) {
         )
         .expect("built-in Number property");
         super::make_callable(&n, number_ctor, Some(number_construct));
+        for (key, value) in [
+            ("name", Value::String("Number".into())),
+            ("length", Value::Number(1.0)),
+        ] {
+            n.set_prop(key.into(), value)
+                .expect("Number constructor metadata");
+            n.property_cell()
+                .expect("Number constructor")
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+        }
         let methods = [
             "toString",
             "toLocaleString",
@@ -57,6 +76,30 @@ pub(super) fn install(e: &mut Environment) {
         .filter_map(|name| number_method(name).map(|method| (name, method)))
         .collect();
         super::install_primitive_prototype(e, &n, Value::Number(0.0), methods);
+        super::install_method_metadata(
+            e,
+            &n,
+            &[
+                ("isNaN", 1),
+                ("isFinite", 1),
+                ("isInteger", 1),
+                ("isSafeInteger", 1),
+                ("parseInt", 2),
+                ("parseFloat", 1),
+            ],
+        );
+        let prototype = n.get_prop("prototype").expect("Number.prototype");
+        super::install_method_metadata(
+            e,
+            &prototype,
+            &[
+                ("toString", 1),
+                ("toLocaleString", 0),
+                ("toFixed", 1),
+                ("toPrecision", 1),
+                ("valueOf", 0),
+            ],
+        );
     }
     if let Some(b) = e.get("Boolean") {
         super::make_callable(&b, boolean_ctor, Some(boolean_construct));
@@ -76,10 +119,14 @@ pub(super) fn install(e: &mut Environment) {
 }
 
 /// `Number(v)`: the numeric coercion of `v`.
-fn number_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn number_ctor(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::Number(match a.first() {
         None => 0.0,
-        Some(v) => v.to_number(),
+        Some(v) => match interp.ecmascript_to_numeric(v)? {
+            Value::BigInt(ref n) => n.to_f64(),
+            Value::Number(n) => n,
+            _ => unreachable!("ToNumeric produces Number or BigInt"),
+        },
     }))
 }
 
@@ -162,6 +209,17 @@ fn number_is_safe_integer(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Resul
 
 // --- Number prototype -------------------------------------------------------
 
+fn number_primitive(this: &Value) -> Result<f64, VmErr> {
+    match this {
+        Value::Number(value) => Ok(*value),
+        Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
+            Some(BoxedPrimitive::Number(value)) => Ok(*value),
+            _ => Err(VmErr::Msg("TypeError: incompatible Number receiver".into())),
+        },
+        _ => Err(VmErr::Msg("TypeError: incompatible Number receiver".into())),
+    }
+}
+
 pub fn number_method(name: &str) -> Option<Value> {
     let f: NativeFn = match name {
         "toFixed" => number_to_fixed,
@@ -176,9 +234,12 @@ pub fn number_method(name: &str) -> Option<Value> {
 /// `toString(radix)`. Base 10 renders like every other number here; another
 /// base renders the integer part in that base, as the specification does for
 /// an integral value.
-fn number_to_string(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let value = this.to_number();
-    let radix = a.first().map(|v| v.to_number()).unwrap_or(10.0);
+fn number_to_string(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let value = number_primitive(&this)?;
+    let radix = match a.first() {
+        None | Some(Value::Undefined) => 10.0,
+        Some(value) => crate::value::to_integer_or_infinity(interp.ecmascript_to_number(value)?),
+    };
     if !(2.0..=36.0).contains(&radix) {
         return Err(VmErr::Msg(
             "RangeError: toString() radix must be between 2 and 36".to_string(),
@@ -214,11 +275,23 @@ fn number_to_string(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
 }
 
 /// `toPrecision(digits)`: `digits` significant figures.
-fn number_to_precision(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let value = this.to_number();
-    let Some(digits) = a.first().map(|v| v.to_number()) else {
-        return Ok(Value::String((crate::format::number_string(value)).into()));
+fn number_to_precision(
+    interp: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = number_primitive(&this)?;
+    let digits = match a.first() {
+        None | Some(Value::Undefined) => {
+            return Ok(Value::String((crate::format::number_string(value)).into()));
+        }
+        Some(value) => crate::value::to_integer_or_infinity(interp.ecmascript_to_number(value)?),
     };
+    if !value.is_finite() {
+        return Ok(Value::String(
+            crate::format::ecmascript_number_string(value).into(),
+        ));
+    }
     if !(1.0..=100.0).contains(&digits) {
         return Err(VmErr::Msg(
             "RangeError: toPrecision() argument must be between 1 and 100".to_string(),
@@ -235,16 +308,56 @@ fn number_to_precision(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
 }
 
 fn number_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Number(this.to_number()))
+    Ok(Value::Number(number_primitive(&this)?))
 }
 
-fn number_to_fixed(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let n = this.to_number();
-    let digits = a.first().map(|v| v.to_number() as usize).unwrap_or(0);
-    if digits > crate::value::MAX_STRING_LEN {
-        return Err(crate::value::limit_err("Maximum string length exceeded"));
+fn number_to_fixed(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let n = number_primitive(&this)?;
+    let digits = crate::value::to_integer_or_infinity(
+        interp.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?,
+    );
+    if !(0.0..=100.0).contains(&digits) {
+        return Err(crate::value::limit_err(
+            "toFixed digits must be between 0 and 100",
+        ));
     }
-    Value::checked_string(format!("{:.*}", digits, n))
+    if !n.is_finite() || n.abs() >= 1e21 {
+        return Value::checked_string(crate::format::ecmascript_number_string(n));
+    }
+    let digits = digits as usize;
+    // Scale the exact binary64 value with the existing integer operations.
+    // Rust's formatter rounds ties to even; toFixed chooses the larger n.
+    use crate::bigint::BigInt;
+    let bits = n.abs().to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let mantissa = (bits & ((1 << 52) - 1)) | if exponent == 0 { 0 } else { 1 << 52 };
+    let shift = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    } + digits as i64;
+    let integer = (|| -> crate::bigint::BigResult<BigInt> {
+        let scaled = BigInt::from_words(false, &[mantissa])
+            .mul(&BigInt::from_i64(5).pow(&BigInt::from_i64(digits as i64))?)?;
+        if shift >= 0 {
+            scaled.shl(&BigInt::from_i64(shift))
+        } else {
+            let half = BigInt::from_i64(1).shl(&BigInt::from_i64(-shift - 1))?;
+            scaled.add(&half)?.shr(&BigInt::from_i64(-shift))
+        }
+    })()
+    .map_err(VmErr::Msg)?;
+    let mut text = integer.to_decimal();
+    if digits > 0 {
+        if text.len() <= digits {
+            text = format!("{}{}", "0".repeat(digits + 1 - text.len()), text);
+        }
+        text.insert(text.len() - digits, '.');
+    }
+    if n < 0.0 {
+        text.insert(0, '-');
+    }
+    Value::checked_string(text)
 }
 
 // --- Number statics ---------------------------------------------------------
@@ -263,11 +376,8 @@ fn number_is_finite(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 // --- parseInt / parseFloat (global and Number.* share these) ----------------
 
 pub(super) fn parse_int(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let s = match a.first() {
-        Some(Value::String(s)) => s.to_string(),
-        Some(v) => interp.vs(v)?,
-        None => return Ok(Value::Number(f64::NAN)),
-    };
+    let s = interp.ecmascript_to_string(a.first().unwrap_or(&Value::Undefined))?;
+    let s = s.trim_units(true, false).to_string();
     let mut radix = match a.get(1) {
         Some(v) => crate::value::to_int32(interp.ecmascript_to_number(v)?),
         None => 0,
@@ -275,7 +385,7 @@ pub(super) fn parse_int(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Re
     if radix != 0 && !(2..=36).contains(&radix) {
         return Ok(Value::Number(f64::NAN));
     }
-    let mut digits = s.trim_start();
+    let mut digits = s.as_str();
     let neg = digits.starts_with('-');
     if digits.starts_with(['+', '-']) {
         digits = &digits[1..];
@@ -348,12 +458,9 @@ pub(super) fn parse_float(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let s = match a.first() {
-        Some(Value::String(s)) => s.to_string(),
-        Some(v) => interp.vs(v)?,
-        None => return Ok(Value::Number(f64::NAN)),
-    };
-    let t = s.trim_start();
+    let s = interp.ecmascript_to_string(a.first().unwrap_or(&Value::Undefined))?;
+    let s = s.trim_units(true, false).to_string();
+    let t = s.as_str();
     let unsigned = t.strip_prefix(['+', '-']).unwrap_or(t);
     if unsigned.starts_with("Infinity") {
         return Ok(Value::Number(if t.starts_with('-') {

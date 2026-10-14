@@ -41,6 +41,35 @@ pub(super) fn install(e: &mut Environment) {
         // and the `constructor` back-link must point at this VM's namespace,
         // not a cross-VM shared object.
         let function_prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));
+        if matches!(kind, Kind::Map | Kind::Set) {
+            let species = super::well_known("species").expect("Symbol.species");
+            if let Value::Symbol(symbol) = &species {
+                let key = crate::interpreter::symbol_slot_key(symbol);
+                super::object::define_property(
+                    &namespace,
+                    &key,
+                    &Value::descriptor_record(vec![
+                        (
+                            "get".into(),
+                            super::native_method(
+                                "get [Symbol.species]",
+                                0,
+                                collection_species,
+                                function_prototype.clone(),
+                            ),
+                        ),
+                        ("configurable".into(), Value::Bool(true)),
+                    ]),
+                )
+                .expect("collection species");
+                namespace
+                    .property_cell()
+                    .expect("collection constructor")
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&key, symbol.clone());
+            }
+        }
         let proto =
             build_prototype(kind, function_prototype.clone()).expect("collection prototype");
         proto
@@ -83,6 +112,10 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
+}
+
+fn collection_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(this)
 }
 
 impl Kind {
@@ -254,7 +287,19 @@ fn build_prototype(kind: Kind, function_prototype: Option<Value>) -> Result<Valu
             &proto,
             "size",
             &Value::descriptor_record(vec![
-                ("get".into(), super::nf("get size", size_getter)),
+                (
+                    "get".into(),
+                    super::native_method(
+                        "get size",
+                        0,
+                        if kind == Kind::Map {
+                            map_size_getter
+                        } else {
+                            set_size_getter
+                        },
+                        function_prototype.clone(),
+                    ),
+                ),
                 ("configurable".into(), Value::Bool(true)),
             ]),
         )?;
@@ -490,6 +535,8 @@ macro_rules! branded {
     };
 }
 branded!(map_has, Map, collection_has);
+branded!(map_size_getter, Map, size_getter);
+branded!(set_size_getter, Set, size_getter);
 branded!(map_delete, Map, collection_delete);
 branded!(map_get_branded, Map, map_get);
 branded!(map_set_branded, Map, map_set);
@@ -764,6 +811,9 @@ fn collection_for_each(
 ) -> Result<Value, VmErr> {
     let entries = require(&this, "forEach")?;
     let callback = a.first().cloned().unwrap_or(Value::Undefined);
+    if !crate::interpreter::is_callable_value(&callback) {
+        return Err(VmErr::Msg("TypeError: callback is not callable".into()));
+    }
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
     // Snapshot: the callback may mutate the collection, and iterating a
     // borrowed `Vec` while guest code runs would panic.

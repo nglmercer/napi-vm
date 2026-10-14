@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "a58553c59b8e2784c62b087a93628ec6866b66ee6d79dc428fbdd897515e4ca0",
+  "engine_sha256": "c40aac3ada611ce636becb5bf169ad10d58cc297ca5f01119d84feae5584035e",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
@@ -14,47 +14,55 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 67677,
-    "fail": 35277,
+    "pass": 76411,
+    "fail": 26543,
     "skip": 0,
     "timeout": 2,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 65.73390574614399,
+  "pass_percentage": 74.21714130308092,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "build_profile": "release",
-  "source_commit": "9e4f017ee76ce538d9ac076fa180ac6d12ddd104",
-  "source_state": "Working tree snapshot before subsequent relational operator changes",
-  "source_patch_sha256": "3e7a452a34c916f317df7deed68b0fa601f7576056d21f44c87f8c240dcaac87",
-  "evidence": "evidence/abstract-equality-continuation/summary.json",
+  "source_base": "142a38def24b84c96a7d6898fc6345402d6dd094",
+  "source_state": "Merged PR #26 plus evidence/remaining-quick-wins/implementation.patch.gz",
+  "implementation_patch_sha256": "f3ef9897431410c4b0fa17eeeb7904f5e3fc969961fd09dea7a86c93c3c13805",
   "baseline": {
-    "engine_sha256": "b61e1e556bab32f6a246cee66afd23aa9d72dff222ab9bb0458547c26c20f410",
-    "total": 102956,
+    "engine_sha256": "2d83b14d79c5495b92f8ba8842f0d374eced5e4b97c09e417ca28eb297e41c05",
     "counts": {
-      "pass": 67490,
-      "fail": 35464,
+      "pass": 75637,
+      "fail": 27317,
       "skip": 0,
       "timeout": 2,
       "crash": 0,
       "harness_error": 0
     },
+    "total": 102956,
+    "evidence": "evidence/math-quick-wins/full-after.json.gz",
     "transitions": {
-      "new_passes": 187,
+      "new_passes": 774,
       "former_passes_now_nonpassing": 0
     }
   },
+  "evidence": "evidence/remaining-quick-wins/summary.json",
   "notes": [
-    "Development measurement: full Test262 conformance is not achieved.",
-    "No skips or isolated-outcome substitution. The two deep-WeakMap staging timeouts remain.",
-    "Native-addon workspace failures and full-corpus AST/bytecode differential validation remain open."
+    "Development measurement; full ECMAScript conformance is not achieved.",
+    "No corpus changes, feature skips, outcome substitution, or weakened assertions.",
+    "Eight existing broader Rust test failures remain; baseline reproductions are archived.",
+    "Full-corpus AST/bytecode differential and wasm32 execution remain unvalidated.",
+    "Raw full run observes 774 new passes; two Atomics FIFO script outcomes are scheduling-sensitive and excluded from the 772 reproducible improvements. No raw outcomes are substituted."
   ],
-  "worker_resource_limits": {
-    "fuel": 1000000,
-    "loop_budget": 100000,
-    "max_call_depth": 128,
-    "max_jobs": 10000
+  "reproducible_new_passes": 772,
+  "unattributed_scheduling_sensitive_passes": 2,
+  "improvement_replay": {
+    "total": 772,
+    "baseline_pass": 0,
+    "baseline_fail": 772,
+    "current_pass": 772,
+    "current_fail": 0,
+    "new_passes": 772,
+    "lost_passes": 0,
+    "evidence": "evidence/remaining-quick-wins/improvements-replay-transitions.json.gz"
   }
 }

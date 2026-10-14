@@ -134,6 +134,35 @@ fn string_at(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<
     }
     bounded_string(s.slice(n as usize, n as usize + 1))
 }
+
+fn string_is_well_formed(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let text = str_this(interp, &this)?;
+    Ok(Value::Bool(
+        char::decode_utf16(text.units().iter().copied()).all(|unit| unit.is_ok()),
+    ))
+}
+
+fn string_to_well_formed(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let text = str_this(interp, &this)?;
+    let mut units = Vec::with_capacity(text.len());
+    for decoded in char::decode_utf16(text.units().iter().copied()) {
+        let mut buffer = [0; 2];
+        units.extend_from_slice(
+            decoded
+                .unwrap_or(char::REPLACEMENT_CHARACTER)
+                .encode_utf16(&mut buffer),
+        );
+    }
+    bounded_string(JsString::from_units(units))
+}
 fn string_char_code_at(
     interp: &mut Interpreter,
     this: Value,
@@ -528,6 +557,8 @@ pub(super) fn install(e: &mut Environment) {
             "replaceAll",
             "charCodeAt",
             "at",
+            "isWellFormed",
+            "toWellFormed",
             "padStart",
             "padEnd",
             "trimStart",
@@ -543,6 +574,48 @@ pub(super) fn install(e: &mut Environment) {
         methods.push(("toString", nf("toString", string_value_of)));
         methods.push(("valueOf", nf("valueOf", string_value_of)));
         super::install_primitive_prototype(e, &s, Value::String((String::new()).into()), methods);
+        super::install_method_metadata(
+            e,
+            &s,
+            &[("fromCharCode", 1), ("fromCodePoint", 1), ("raw", 1)],
+        );
+        let prototype = s.get_prop("prototype").expect("String.prototype");
+        super::install_method_metadata(
+            e,
+            &prototype,
+            &[
+                ("at", 1),
+                ("charAt", 1),
+                ("charCodeAt", 1),
+                ("codePointAt", 1),
+                ("concat", 1),
+                ("endsWith", 1),
+                ("includes", 1),
+                ("indexOf", 1),
+                ("lastIndexOf", 1),
+                ("localeCompare", 1),
+                ("match", 1),
+                ("matchAll", 1),
+                ("padStart", 1),
+                ("padEnd", 1),
+                ("repeat", 1),
+                ("replace", 2),
+                ("replaceAll", 2),
+                ("search", 1),
+                ("slice", 2),
+                ("split", 2),
+                ("substring", 2),
+                ("isWellFormed", 0),
+                ("toWellFormed", 0),
+                ("toLowerCase", 0),
+                ("toUpperCase", 0),
+                ("trim", 0),
+                ("trimStart", 0),
+                ("trimEnd", 0),
+                ("toString", 0),
+                ("valueOf", 0),
+            ],
+        );
     }
 }
 
@@ -567,6 +640,8 @@ pub fn string_method(name: &str) -> Option<Value> {
         "replaceAll" => string_replace_all,
         "charCodeAt" => string_char_code_at,
         "at" => string_at,
+        "isWellFormed" => string_is_well_formed,
+        "toWellFormed" => string_to_well_formed,
         "padStart" => string_pad_start,
         "padEnd" => string_pad_end,
         "trimStart" => string_trim_start,

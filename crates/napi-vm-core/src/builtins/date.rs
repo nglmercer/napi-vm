@@ -53,6 +53,8 @@ const DATE_PROTOTYPE_METHODS: &[&str] = &[
     "toJSON",
     "toString",
     "toUTCString",
+    "toDateString",
+    "toTimeString",
 ];
 
 /// Spec `length` for `Date.prototype` methods: every setter takes its full
@@ -95,6 +97,24 @@ pub(super) fn install(e: &mut Environment) {
             }
         }
         super::make_callable(&d, date_call, Some(date_construct));
+        for (key, value) in [
+            ("name", Value::String("Date".into())),
+            ("length", Value::Number(7.0)),
+        ] {
+            d.set_prop(key.into(), value).expect("Date metadata");
+            d.property_cell()
+                .expect("Date constructor")
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    key,
+                    PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+        }
 
         let object_prototype = e
             .get("Object")
@@ -152,6 +172,7 @@ pub(super) fn install(e: &mut Environment) {
                 meta.set_attrs(
                     &key,
                     PropAttrs {
+                        writable: false,
                         enumerable: false,
                         ..PropAttrs::default()
                     },
@@ -180,7 +201,9 @@ pub(super) fn install(e: &mut Environment) {
 /// `Date(…)` called without `new` is the current time as a string, which is
 /// what the specification says regardless of its arguments.
 fn date_call(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::String((to_iso(now_ms())).into()))
+    Ok(Value::String(
+        format_date(now_ms(), DateFormat::Full).into(),
+    ))
 }
 
 /// `new Date(…)`: no arguments is now, one number is epoch milliseconds, one
@@ -191,7 +214,13 @@ fn date_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<V
         1 => match &a[0] {
             Value::String(s) => parse_iso(s).unwrap_or(f64::NAN),
             Value::Date(existing) => existing.get(),
-            other => interp.ecmascript_to_number(other)?,
+            other => {
+                let primitive = interp.coerce_object_to_primitive(other, "default")?;
+                match &primitive {
+                    Value::String(text) => parse_iso(text).unwrap_or(f64::NAN),
+                    _ => interp.ecmascript_to_number(&primitive)?,
+                }
+            }
         },
         _ => {
             let utc = date_utc(interp, Value::Undefined, a)?;
@@ -234,7 +263,10 @@ pub fn date_member(key: &str) -> Option<Value> {
         "toJSON" => date_to_json,
         // `toGMTString` is installed as an alias below (same function object
         // as `toUTCString`); the member lookup stays for direct queries.
-        "toString" | "toUTCString" | "toGMTString" => date_to_string,
+        "toString" => date_to_string,
+        "toUTCString" | "toGMTString" => date_to_utc_string,
+        "toDateString" => date_to_date_string,
+        "toTimeString" => date_to_time_string,
         _ => return None,
     };
     Some(super::nf(key, callable))
@@ -341,8 +373,12 @@ fn date_get_time(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Valu
     Ok(Value::Number(epoch(&this)?))
 }
 
-fn date_zero(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Number(0.0))
+fn date_zero(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(if epoch(&this)?.is_nan() {
+        f64::NAN
+    } else {
+        0.0
+    }))
 }
 
 fn date_set_time(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -606,12 +642,58 @@ fn date_to_iso(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value,
 }
 
 fn date_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::Date(slot) = &this else {
-        return Err(VmErr::Msg(
-            "TypeError: Date.toString called on incompatible receiver".into(),
-        ));
+    Ok(Value::String(
+        format_date(epoch(&this)?, DateFormat::Full).into(),
+    ))
+}
+
+const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+enum DateFormat {
+    Full,
+    Date,
+    Time,
+    Utc,
+}
+
+fn format_date(ms: f64, format: DateFormat) -> String {
+    let Some(Civil(year, month, day, hour, minute, second, _, weekday)) = civil(ms) else {
+        return "Invalid Date".into();
     };
-    Ok(Value::String(to_iso(slot.get()).into()))
+    let year = if year < 0 {
+        format!("-{:04}", -year)
+    } else {
+        format!("{year:04}")
+    };
+    let weekday = WEEKDAYS[weekday as usize];
+    let month = MONTHS[month as usize - 1];
+    let date = format!("{weekday} {month} {day:02} {year}");
+    let time = format!("{hour:02}:{minute:02}:{second:02}");
+    match format {
+        DateFormat::Date => date,
+        DateFormat::Time => format!("{time} GMT+0000 (Coordinated Universal Time)"),
+        DateFormat::Full => format!("{date} {time} GMT+0000 (Coordinated Universal Time)"),
+        DateFormat::Utc => format!("{weekday}, {day:02} {month} {year} {time} GMT"),
+    }
+}
+
+fn date_to_utc_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::String(
+        format_date(epoch(&this)?, DateFormat::Utc).into(),
+    ))
+}
+fn date_to_date_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::String(
+        format_date(epoch(&this)?, DateFormat::Date).into(),
+    ))
+}
+fn date_to_time_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::String(
+        format_date(epoch(&this)?, DateFormat::Time).into(),
+    ))
 }
 
 /// `Date.prototype [ @@toPrimitive ]`: ordinary coercion with `string`
@@ -732,11 +814,7 @@ fn time_clip(value: f64) -> f64 {
 }
 
 fn date_parse(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let s = match a.first() {
-        Some(Value::String(s)) => s.to_string(),
-        Some(v) => interp.vs(v)?,
-        None => return Ok(Value::Number(f64::NAN)),
-    };
+    let s = interp.ecmascript_to_string(a.first().unwrap_or(&Value::Undefined))?;
     Ok(Value::Number(time_clip(parse_iso(&s).unwrap_or(f64::NAN))))
 }
 
@@ -765,6 +843,33 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i128 {
 /// epoch milliseconds. Returns `None` when the string is not recognizable.
 fn parse_iso(s: &str) -> Option<f64> {
     let s = s.trim();
+    // Accept the engine's own Date.toString/toUTCString output for round trips.
+    let words: Vec<&str> = s.split_whitespace().collect();
+    if words.len() >= 6 && WEEKDAYS.contains(&words[0].trim_end_matches(',')) {
+        let utc = words[0].ends_with(',');
+        let (day, month, year) = if utc {
+            (words[1], words[2], words[3])
+        } else {
+            (words[2], words[1], words[3])
+        };
+        let month = MONTHS.iter().position(|name| *name == month)? as i64 + 1;
+        if (utc && words[5] != "GMT") || (!utc && words[5] != "GMT+0000") {
+            return None;
+        }
+        let hms: Vec<&str> = words[4].split(':').collect();
+        if hms.len() != 3 {
+            return None;
+        }
+        return Some(utc_ms(
+            year.parse().ok()?,
+            month,
+            day.parse().ok()?,
+            hms[0].parse().ok()?,
+            hms[1].parse().ok()?,
+            hms[2].parse().ok()?,
+            0,
+        ));
+    }
     let (date_part, time_part) = if let Some(idx) = s.find('T') {
         (&s[..idx], Some(&s[idx + 1..]))
     } else if let Some(idx) = s.find(' ') {
@@ -773,8 +878,18 @@ fn parse_iso(s: &str) -> Option<f64> {
         (s, None)
     };
 
-    let dseps: Vec<&str> = date_part.split(['-', '/']).collect();
-    let year: i64 = dseps.first()?.parse().ok()?;
+    let negative = date_part.starts_with('-');
+    let dseps: Vec<&str> = date_part
+        .trim_start_matches(['-', '+'])
+        .split(['-', '/'])
+        .collect();
+    let mut year: i64 = dseps.first()?.parse().ok()?;
+    if negative {
+        if year == 0 {
+            return None;
+        }
+        year = -year;
+    }
     let month: i64 = dseps.get(1).and_then(|x| x.parse().ok()).unwrap_or(1);
     let day: i64 = dseps.get(2).and_then(|x| x.parse().ok()).unwrap_or(1);
 
