@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use super::{NativeFn, arr_items, join_str, nf};
+use super::{NativeFn, nf};
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
 use crate::value::{Value, to_integer_or_infinity};
@@ -138,6 +138,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("push", 1),
                 ("pop", 0),
                 ("toString", 0),
+                ("toLocaleString", 0),
                 ("join", 1),
                 ("indexOf", 1),
                 ("lastIndexOf", 1),
@@ -277,6 +278,7 @@ const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
     "push",
     "pop",
     "toString",
+    "toLocaleString",
     "join",
     "indexOf",
     "includes",
@@ -468,6 +470,7 @@ pub fn array_method(name: &str) -> Option<Value> {
         "push" => array_push,
         "pop" => array_pop,
         "toString" => array_to_string,
+        "toLocaleString" => array_to_locale_string,
         "join" => array_join,
         "indexOf" => array_index_of,
         "includes" => array_includes,
@@ -1246,40 +1249,86 @@ fn array_pop(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Val
     Ok(result)
 }
 
+thread_local! {
+    static JOIN_STACK: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+struct JoinGuard;
+impl Drop for JoinGuard {
+    fn drop(&mut self) {
+        JOIN_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
 fn array_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
-    let sep = match a.first() {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Undefined) | None => crate::JsString::from(","),
-        Some(v) => interp.to_js_string(v)?,
+    array_join_impl(interp, this, a, false)
+}
+fn array_to_locale_string(
+    interp: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    array_join_impl(interp, this, a, true)
+}
+fn array_join_impl(
+    interp: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+    locale: bool,
+) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let separator = if locale || matches!(a.first(), None | Some(Value::Undefined)) {
+        crate::JsString::from(",")
+    } else {
+        interp.ecmascript_to_string(&a[0])?
+    };
+    // Recursive array stringification renders an active array as an empty part.
+    let _guard = if let Value::Array(array) = &this {
+        let identity = Rc::as_ptr(array) as usize;
+        if JOIN_STACK.with(|stack| stack.borrow().contains(&identity)) {
+            return Ok(Value::String(crate::JsString::default()));
+        }
+        JOIN_STACK.with(|stack| stack.borrow_mut().push(identity));
+        Some(JoinGuard)
+    } else {
+        None
     };
     let mut out = crate::JsString::default();
-    // This renderer does not execute guest code. Shared child arrays have an
-    // identical rendering during one join; cache it to keep bounded joins fast.
-    let mut shared = std::collections::HashMap::new();
-    for (index, value) in items.iter().enumerate() {
-        if index > 0 {
-            if out.len().saturating_add(sep.len()) > crate::value::MAX_STRING_LEN {
-                return Err(crate::value::limit_err("Maximum string length exceeded"));
-            }
-            out.push_str(&sep);
+    let mut index = 0.0;
+    while index < length {
+        interp.check_execution()?;
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            interp.consume_loop()?;
         }
-        let part = if let Value::Array(array) = value {
-            let key = std::rc::Rc::as_ptr(array);
-            if let Some(part) = shared.get(&key) {
-                crate::JsString::clone(part)
-            } else {
-                let part = join_str(interp, value)?;
-                shared.insert(key, part.clone());
-                part
-            }
+        let value = array_element_number(interp, &this, index, false)?.unwrap_or(Value::Undefined);
+        let part = if matches!(value, Value::Undefined | Value::Null) {
+            crate::JsString::default()
+        } else if locale {
+            let method = interp.get_prop_value_str(&value, "toLocaleString")?;
+            let result = interp.call_this(
+                &method,
+                value,
+                vec![
+                    a.first().cloned().unwrap_or(Value::Undefined),
+                    a.get(1).cloned().unwrap_or(Value::Undefined),
+                ],
+            )?;
+            interp.ecmascript_to_string(&result)?
         } else {
-            join_str(interp, value)?
+            interp.ecmascript_to_string(&value)?
         };
-        if out.len().saturating_add(part.len()) > crate::value::MAX_STRING_LEN {
+        let added = part
+            .len()
+            .saturating_add(if index > 0.0 { separator.len() } else { 0 });
+        if out.len().saturating_add(added) > crate::value::MAX_STRING_LEN {
             return Err(crate::value::limit_err("Maximum string length exceeded"));
         }
+        if index > 0.0 {
+            out.push_str(&separator);
+        }
         out.push_str(&part);
+        index += 1.0;
     }
     Value::checked_string(out)
 }
@@ -1563,96 +1612,47 @@ fn merge_sort_values(
 }
 
 fn array_sort(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let cmp = a.first().cloned().unwrap_or(Value::Undefined);
-    if !matches!(cmp, Value::Undefined) && !crate::interpreter::call::is_callable_value(&cmp) {
+    let comparator = a.first().cloned().unwrap_or(Value::Undefined);
+    if !matches!(comparator, Value::Undefined)
+        && !crate::interpreter::is_callable_value(&comparator)
+    {
         return Err(VmErr::Msg("TypeError: comparator is not a function".into()));
     }
-    if let Value::Array(items) = &this {
-        // Never hold the array's RefCell borrow while invoking guest code.
-        // Comparators are allowed to re-enter the array (for example by
-        // calling `push`), and keeping the RefMut across the callback used to
-        // turn that normal JavaScript re-entry into a Rust RefCell panic.
-        let original_values = items.borrow().clone();
-        let original_presence = items.presence_snapshot();
-        let original_len = original_values.len();
-        if original_len > 1 {
-            reject_frozen_array_mutation(items)?;
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let mut values = Vec::new();
+    let mut index = 0.0;
+    while index < length {
+        interp.check_execution()?;
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            interp.consume_loop()?;
         }
-        let present_undefined = original_values
-            .iter()
-            .zip(&original_presence)
-            .filter(|(value, present)| **present && matches!(value, Value::Undefined))
-            .count();
-        let hole_count = original_presence
-            .iter()
-            .filter(|present| !**present)
-            .count();
-        let mut sorted: Vec<Value> = original_values
-            .into_iter()
-            .zip(original_presence.iter().copied())
-            .filter_map(|(value, present)| {
-                (present && !matches!(value, Value::Undefined)).then_some(value)
-            })
-            .collect();
-        if !matches!(cmp, Value::Undefined) {
-            // Comparator errors must escape sort. Converting them to zero
-            // silently changes program behavior and leaves callers unable to
-            // catch the original exception.
-            merge_sort_values(interp, &mut sorted, &cmp)?;
-        } else {
-            // Default: lexicographic comparison of the stringified elements.
-            let mut format_error = None;
-            sorted.sort_by(|left, right| {
-                if format_error.is_some() {
-                    return Ordering::Equal;
-                }
-                match (interp.to_js_string(left), interp.to_js_string(right)) {
-                    (Ok(left), Ok(right)) => left.cmp(&right),
-                    (Err(error), _) | (_, Err(error)) => {
-                        format_error = Some(error);
-                        Ordering::Equal
-                    }
-                }
-            });
-            if let Some(error) = format_error {
-                return Err(error);
+        if let Some(value) = array_element_number(interp, &this, index, true)? {
+            if values.len() >= crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
+            values.push(value);
         }
-        let defined_len = sorted.len();
-        sorted.resize(original_len - hole_count, Value::Undefined);
-        let mut sorted_presence = vec![true; original_len - hole_count];
-        sorted_presence.resize(original_len, false);
-        debug_assert_eq!(defined_len + present_undefined + hole_count, original_len);
-
-        // Comparators may mutate the array. Keep values appended beyond the
-        // captured sort length, while the sorted prefix follows the captured
-        // values and preserves holes at the end.
-        let mut presence_after_compare = items.presence_snapshot();
-        let mut current = items.borrow_mut();
-        if current.len() < original_len {
-            current.resize(original_len, Value::Undefined);
-            presence_after_compare.resize(original_len, false);
+        index += 1.0;
+    }
+    merge_sort_values(interp, &mut values, &comparator)?;
+    for (index, value) in values.iter().enumerate() {
+        interp.set_member_str_or_throw(&this, &index.to_string(), value.clone())?;
+    }
+    index = values.len() as f64;
+    while index < length {
+        interp.check_execution()?;
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            interp.consume_loop()?;
         }
-        for (index, value) in sorted.into_iter().enumerate() {
-            current[index] = value;
-        }
-        if presence_after_compare.len() > original_len {
-            sorted_presence.extend_from_slice(&presence_after_compare[original_len..]);
-        }
-        drop(current);
-        items.replace_presence(sorted_presence);
+        delete_numeric_property_or_throw(
+            interp,
+            &this,
+            crate::format::ecmascript_number_string(index),
+        )?;
+        index += 1.0;
     }
     Ok(this)
-}
-
-fn reject_frozen_array_mutation(array: &crate::value::ArrayCell) -> Result<(), VmErr> {
-    if array.is_integrity_locked(true) {
-        Err(VmErr::Msg(
-            "TypeError: Cannot modify a frozen array".to_owned(),
-        ))
-    } else {
-        Ok(())
-    }
 }
 
 fn flatten_array_result(
