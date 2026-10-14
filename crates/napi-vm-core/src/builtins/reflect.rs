@@ -29,8 +29,9 @@ pub(super) fn install(e: &mut Environment) {
     let function_prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));
     for (name, callable) in methods {
         let length = match *name {
-            "get" | "set" | "defineProperty" | "apply" => 3,
-            "has"
+            "set" | "defineProperty" | "apply" => 3,
+            "get"
+            | "has"
             | "deleteProperty"
             | "getOwnPropertyDescriptor"
             | "setPrototypeOf"
@@ -51,6 +52,22 @@ pub(super) fn install(e: &mut Environment) {
                 },
             );
         }
+    }
+    if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        r.set_prop(key.clone(), Value::String("Reflect".into()))
+            .expect("Reflect tag");
+        let properties = r.property_cell().expect("Reflect object");
+        let mut meta = properties.meta.borrow_mut();
+        meta.set_symbol_key(&key, symbol.clone());
+        meta.set_attrs(
+            &key,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
     }
 }
 
@@ -142,6 +159,7 @@ fn reflect_get_prototype_of(
     _: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    reflect_object_target(&a)?;
     via_object(interp, "getPrototypeOf", a)
 }
 

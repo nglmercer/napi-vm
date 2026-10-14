@@ -284,6 +284,38 @@ fn nf(name: &str, callable: NativeFn) -> Value {
     }
 }
 
+/// Finish installed native methods once Function.prototype is available.
+pub(crate) fn install_method_metadata(e: &Environment, target: &Value, methods: &[(&str, usize)]) {
+    let prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));
+    for &(name, length) in methods {
+        if let Some(Value::NativeFunction { callable, .. }) = target.get_prop(name) {
+            target
+                .set_prop(
+                    name.into(),
+                    native_method(name, length, callable, prototype.clone()),
+                )
+                .expect("built-in method");
+            if let Some(properties) = target.property_cell() {
+                properties.meta.borrow_mut().set_attrs(
+                    name,
+                    PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            } else if let Value::Array(array) = target {
+                array.meta.borrow_mut().set_attrs(
+                    name,
+                    PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+    }
+}
+
 /// A native function with an internal, traced receiver which callers cannot
 /// replace. Promise resolving functions and Proxy revokers share bound calls.
 pub(crate) fn bound_native_method(
@@ -393,17 +425,7 @@ fn str_this(interp: &mut Interpreter, this: &Value) -> Result<crate::JsString, V
             "TypeError: String receiver is null or undefined".into(),
         ));
     }
-    if matches!(this, Value::Symbol(_)) {
-        return Err(VmErr::Msg(
-            "TypeError: Cannot convert a Symbol value to a string".into(),
-        ));
-    }
-    if matches!(this, Value::String(_))
-        || matches!(this, Value::Object { props } if props.meta.borrow().boxed_primitive.is_some())
-    {
-        return interp.to_js_string(this);
-    }
-    interp.display_string(this)
+    interp.ecmascript_to_string(this)
 }
 fn join_str(interp: &Interpreter, v: &Value) -> Result<crate::JsString, VmErr> {
     match v {

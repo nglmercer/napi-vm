@@ -90,7 +90,7 @@ fn setters_update_in_place_and_reject_bad_receivers() {
 fn symbol_to_primitive_follows_hint_order() {
     assert_both(
         "var d=new Date(0);JSON.stringify([d[Symbol.toPrimitive]('number'),typeof d[Symbol.toPrimitive]('string'),d[Symbol.toPrimitive]('default')]);",
-        "[0,\"string\",\"1970-01-01T00:00:00.000Z\"]",
+        "[0,\"string\",\"Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)\"]",
     );
     assert_both(
         "var d=new Date(0);var bad=0;try{d[Symbol.toPrimitive]()}catch(e){if(e instanceof TypeError)bad++}try{d[Symbol.toPrimitive]('bogus')}catch(e){if(e instanceof TypeError)bad++}try{Date.prototype[Symbol.toPrimitive].call(1,'number')}catch(e){if(e instanceof TypeError)bad++}JSON.stringify([bad,Date.prototype[Symbol.toPrimitive].name,Date.prototype[Symbol.toPrimitive].length]);",

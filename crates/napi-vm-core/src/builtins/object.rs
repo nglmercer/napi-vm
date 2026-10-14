@@ -826,18 +826,13 @@ fn object_property_is_enumerable(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    let key = interp.ecmascript_to_property_key(args.first().unwrap_or(&Value::Undefined))?;
     let receiver = to_object_receiver(&this)?;
-    let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
-    if let Some(global) = interp.global_scope_of(&receiver) {
-        return Ok(Value::Bool(
-            global
-                .borrow()
-                .global_property(&key)
-                .is_some_and(|(_, attrs)| attrs.enumerable),
-        ));
-    }
+    let descriptor = descriptor_for_key_in(interp, &receiver, &key)?;
     Ok(Value::Bool(
-        object_property_attributes(&receiver, &key).is_some_and(|attributes| attributes.enumerable),
+        descriptor
+            .get_prop("enumerable")
+            .is_some_and(|v| v.is_truthy()),
     ))
 }
 

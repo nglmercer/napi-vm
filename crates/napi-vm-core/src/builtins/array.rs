@@ -110,6 +110,46 @@ pub(super) fn install(e: &mut Environment) {
                 )
                 .expect("Array.prototype method");
         }
+        super::install_method_metadata(e, &a, &[("isArray", 1), ("from", 1), ("of", 0)]);
+        super::install_method_metadata(
+            e,
+            &prototype,
+            &[
+                ("map", 1),
+                ("filter", 1),
+                ("reduce", 1),
+                ("reduceRight", 1),
+                ("forEach", 1),
+                ("find", 1),
+                ("findIndex", 1),
+                ("findLast", 1),
+                ("findLastIndex", 1),
+                ("some", 1),
+                ("every", 1),
+                ("push", 1),
+                ("pop", 0),
+                ("toString", 0),
+                ("join", 1),
+                ("indexOf", 1),
+                ("lastIndexOf", 1),
+                ("includes", 1),
+                ("slice", 2),
+                ("concat", 1),
+                ("reverse", 0),
+                ("sort", 1),
+                ("flat", 0),
+                ("flatMap", 1),
+                ("at", 1),
+                ("with", 2),
+                ("splice", 2),
+                ("shift", 0),
+                ("unshift", 1),
+                ("fill", 1),
+                ("keys", 0),
+                ("values", 0),
+                ("entries", 0),
+            ],
+        );
         if let Value::Array(array_prototype) = &prototype {
             array_prototype.set_proto(object_prototype.map(Rc::new));
             let mut metadata = array_prototype.meta.borrow_mut();
@@ -193,6 +233,7 @@ const ARRAY_PROTOTYPE_METHODS: &[&str] = &[
     "flatMap",
     "reduceRight",
     "at",
+    "with",
     "splice",
     "findIndex",
     "findLast",
@@ -379,6 +420,7 @@ pub fn array_method(name: &str) -> Option<Value> {
         "flatMap" => array_flat_map,
         "reduceRight" => array_reduce_right,
         "at" => array_at,
+        "with" => array_with,
         "splice" => array_splice,
         "findIndex" => array_find_index,
         "findLast" => array_find_last,
@@ -494,18 +536,47 @@ fn array_splice(
 }
 
 /// `at(index)`: a negative index counts back from the end.
-fn array_at(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let items = arr_items(&this);
-    let index = to_integer_or_infinity(a.first().map(|v| v.to_number()).unwrap_or(0.0));
-    let index = if index < 0.0 {
-        items.len() as f64 + index
-    } else {
-        index
-    };
-    if !index.is_finite() || index < 0.0 || index >= items.len() as f64 {
+fn array_at(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let index = to_integer_or_infinity(
+        interp.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?,
+    );
+    let index = if index < 0.0 { length + index } else { index };
+    if !index.is_finite() || index < 0.0 || index >= length {
         return Ok(Value::Undefined);
     }
-    Ok(items[index as usize].clone())
+    interp.get_prop_value_str(&this, &crate::format::ecmascript_number_string(index))
+}
+
+fn array_with(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let relative = to_integer_or_infinity(
+        interp.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?,
+    );
+    let index = if relative < 0.0 {
+        length + relative
+    } else {
+        relative
+    };
+    if index < 0.0 || index >= length {
+        return Err(crate::value::limit_err("Array.with index out of range"));
+    }
+    if length > crate::value::MAX_ARRAY_LEN as f64 {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
+    }
+    let replacement = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let mut result = Vec::with_capacity(length as usize);
+    for k in 0..length as usize {
+        interp.consume_loop()?;
+        result.push(if k as f64 == index {
+            replacement.clone()
+        } else {
+            interp.get_prop_value_str(&this, &k.to_string())?
+        });
+    }
+    Value::checked_array(result)
 }
 
 /// Walk the elements, returning the first that satisfies `predicate`.
@@ -518,24 +589,29 @@ fn search(
     reverse: bool,
     want_index: bool,
 ) -> Result<Value, VmErr> {
-    let length = array_like_length(interp, this)?;
+    let this = super::object::to_object_receiver(this)?;
+    let length = array_like_length_number(interp, &this)?;
     let predicate = callback(a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    for step in 0..length {
-        let index = if reverse { length - 1 - step } else { step };
-        let value = array_element(interp, this, index, false)?.expect("holes are visited");
+    let mut step = 0.0;
+    while step < length {
+        interp.consume_loop()?;
+        let index = if reverse { length - 1.0 - step } else { step };
+        let value =
+            interp.get_prop_value_str(&this, &crate::format::ecmascript_number_string(index))?;
         let hit = interp.call_this(
             &predicate,
             receiver.clone(),
-            vec![value.clone(), Value::Number(index as f64), this.clone()],
+            vec![value.clone(), Value::Number(index), this.clone()],
         )?;
         if hit.is_truthy() {
             return Ok(if want_index {
-                Value::Number(index as f64)
+                Value::Number(index)
             } else {
                 value
             });
         }
+        step += 1.0;
     }
     Ok(if want_index {
         Value::Number(-1.0)
@@ -891,6 +967,13 @@ pub(super) fn array_like_length(interp: &mut Interpreter, this: &Value) -> Resul
     Ok((n.trunc() as usize).min(crate::value::MAX_ARRAY_LEN))
 }
 
+/// Logical array-like length, independent of the cap on allocated arrays.
+fn array_like_length_number(interp: &mut Interpreter, this: &Value) -> Result<f64, VmErr> {
+    let value = interp.get_prop_value_str(this, "length")?;
+    Ok(to_integer_or_infinity(interp.ecmascript_to_number(&value)?)
+        .clamp(0.0, 9_007_199_254_740_991.0))
+}
+
 fn array_push(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     if let Value::Array(items) = &this {
         reject_frozen_array_mutation(items)?;
@@ -1034,8 +1117,8 @@ fn array_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
 
 fn array_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
-    if length == 0 {
+    let length = array_like_length_number(interp, &this)?;
+    if length == 0.0 {
         return Ok(Value::Bool(false));
     }
     let target = a.first().cloned().unwrap_or(Value::Undefined);
@@ -1043,17 +1126,24 @@ fn array_includes(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Resul
         .get(1)
         .map(|value| interp.ecmascript_to_number(value))
         .transpose()?;
-    let from = forward_from_index(raw, length);
+    let from = to_integer_or_infinity(raw.unwrap_or(0.0));
+    let mut index = if from < 0.0 {
+        (length + from).max(0.0)
+    } else {
+        from
+    };
     // Includes performs Get even for holes, and compares using SameValueZero.
     let target_is_nan = matches!(&target, Value::Number(n) if n.is_nan());
-    for index in from..length {
-        interp.check_execution()?;
-        let value = array_element(interp, &this, index, false)?.expect("holes are visited");
+    while index < length {
+        interp.consume_loop()?;
+        let value =
+            interp.get_prop_value_str(&this, &crate::format::ecmascript_number_string(index))?;
         if interp.seq(&value, &target)
             || (target_is_nan && matches!(value, Value::Number(n) if n.is_nan()))
         {
             return Ok(Value::Bool(true));
         }
+        index += 1.0;
     }
     Ok(Value::Bool(false))
 }
