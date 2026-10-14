@@ -412,13 +412,6 @@ pub fn make_callable(target: &Value, call: NativeFn, construct: Option<NativeFn>
     }
 }
 
-fn arr_items(this: &Value) -> Vec<Value> {
-    match this {
-        Value::Array(a) => a.borrow().clone(),
-        _ => vec![],
-    }
-}
-
 fn str_this(interp: &mut Interpreter, this: &Value) -> Result<crate::JsString, VmErr> {
     if matches!(this, Value::Null | Value::Undefined) {
         return Err(VmErr::Msg(
@@ -427,13 +420,6 @@ fn str_this(interp: &mut Interpreter, this: &Value) -> Result<crate::JsString, V
     }
     interp.ecmascript_to_string(this)
 }
-fn join_str(interp: &Interpreter, v: &Value) -> Result<crate::JsString, VmErr> {
-    match v {
-        Value::Null | Value::Undefined => Ok(crate::JsString::default()),
-        _ => interp.to_js_string(v),
-    }
-}
-
 // --- Global functions -------------------------------------------------------
 
 pub(crate) fn is_intrinsic_eval(value: &Value, global: &Env) -> bool {

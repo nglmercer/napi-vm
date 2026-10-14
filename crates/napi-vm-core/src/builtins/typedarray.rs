@@ -1991,16 +1991,33 @@ fn typed_at(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, Vm
 }
 
 fn typed_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
+    let view = validated_typed_source(&this)?;
+    let length = view.effective_length();
     let separator = match a.first() {
-        Some(Value::Undefined) | None => ",".to_string(),
-        Some(v) => interp.vs(v)?,
+        Some(Value::Undefined) | None => crate::JsString::from(","),
+        Some(v) => interp.ecmascript_to_string(v)?,
     };
-    let parts = read_all(&view)
-        .iter()
-        .map(|v| interp.vs(v))
-        .collect::<Result<Vec<_>, _>>()?;
-    Value::checked_string(parts.join(&separator))
+    let mut result = crate::JsString::default();
+    for index in 0..length {
+        interp.check_execution()?;
+        let value = read_element(&view, index).unwrap_or(Value::Undefined);
+        let part = if matches!(value, Value::Undefined | Value::Null) {
+            crate::JsString::default()
+        } else {
+            interp.ecmascript_to_string(&value)?
+        };
+        let added = part
+            .len()
+            .saturating_add(if index > 0 { separator.len() } else { 0 });
+        if result.len().saturating_add(added) > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+        if index > 0 {
+            result.push_str(&separator);
+        }
+        result.push_str(&part);
+    }
+    Value::checked_string(result)
 }
 
 /// `set(source, offset)`: copy elements in, converting as needed.
