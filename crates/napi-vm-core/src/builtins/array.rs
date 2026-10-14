@@ -553,7 +553,7 @@ fn array_splice(
     if new_length > crate::value::MAX_ARRAY_LEN {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
-    let result = array_species_create(interp, &this, remove)?;
+    let result = array_species_create(interp, &this, remove as f64)?;
     for offset in 0..remove {
         interp.consume_loop()?;
         if let Some(value) = array_element(interp, &this, start + offset, true)? {
@@ -812,72 +812,103 @@ fn array_last_index_of(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
-    if length == 0 {
+    let length = array_like_length_number(interp, &this)?;
+    if length == 0.0 {
         return Ok(Value::Number(-1.0));
     }
     let needle = a.first().cloned().unwrap_or(Value::Undefined);
-    // A missing argument starts at the end; explicit undefined converts to zero.
-    let index = match a.get(1) {
-        None => (length - 1) as f64,
+    let from = match a.get(1) {
+        None => length - 1.0,
         Some(value) => to_integer_or_infinity(interp.ecmascript_to_number(value)?),
     };
-    let start = if index >= 0.0 {
-        (index as usize).min(length - 1)
+    let mut index = if from >= 0.0 {
+        from.min(length - 1.0)
     } else {
-        let index = length as f64 + index;
-        if index < 0.0 {
-            return Ok(Value::Number(-1.0));
-        }
-        index as usize
+        length + from
     };
-    for index in (0..=start).rev() {
-        interp.check_execution()?;
-        if let Some(value) = array_element(interp, &this, index, true)?
+    while index >= 0.0 {
+        // Preserve the existing bounded-search policy. Logical lengths beyond
+        // the allocation bound additionally need a loop limit for sparse scans.
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            interp.consume_loop()?;
+        } else {
+            interp.check_execution()?;
+        }
+        if let Some(value) = array_element_number(interp, &this, index, true)?
             && interp.seq(&value, &needle)
         {
-            return Ok(Value::Number(index as f64));
+            return Ok(Value::Number(if index == 0.0 { 0.0 } else { index }));
         }
+        index -= 1.0;
     }
     Ok(Value::Number(-1.0))
 }
 
-/// `shift()`: remove and return the first element.
-fn array_shift(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::Array(cell) = &this else {
-        return Ok(Value::Undefined);
-    };
-    reject_frozen_array_mutation(cell)?;
-    let mut items = cell.borrow_mut();
-    if items.is_empty() {
+fn array_shift(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    if length == 0.0 {
+        interp.set_member_str_or_throw(&this, "length", Value::Number(0.0))?;
         return Ok(Value::Undefined);
     }
-    let removed = items.remove(0);
-    let length = items.len();
-    drop(items);
-    cell.remove_presence(0);
-    cell.truncate_presence(length);
-    Ok(removed)
+    let first = interp.get_prop_value_str(&this, "0")?;
+    let mut index = 1.0;
+    while index < length {
+        interp.consume_loop()?;
+        let destination = crate::format::ecmascript_number_string(index - 1.0);
+        if let Some(value) = array_element_number(interp, &this, index, true)? {
+            interp.set_member_str_or_throw(&this, &destination, value)?;
+        } else {
+            delete_numeric_property_or_throw(interp, &this, destination)?;
+        }
+        index += 1.0;
+    }
+    delete_numeric_property_or_throw(
+        interp,
+        &this,
+        crate::format::ecmascript_number_string(length - 1.0),
+    )?;
+    interp.set_member_str_or_throw(&this, "length", Value::Number(length - 1.0))?;
+    Ok(first)
 }
 
-/// `unshift(...values)`: prepend, returning the new length.
-fn array_unshift(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Value::Array(cell) = &this else {
-        return Ok(Value::Number(0.0));
-    };
-    reject_frozen_array_mutation(cell)?;
-    let added = a.len();
-    let mut items = cell.borrow_mut();
-    if items.len().saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
+/// Check logical growth independently of the existing array allocation guard.
+fn array_growth_length(this: &Value, length: f64, added: usize) -> Result<f64, VmErr> {
+    if added as f64 > 9_007_199_254_740_991.0 - length {
+        return Err(VmErr::Msg(
+            "TypeError: Array-like length exceeds MAX_SAFE_INTEGER".into(),
+        ));
+    }
+    let result = length + added as f64;
+    if matches!(this, Value::Array(_)) && result > crate::value::MAX_ARRAY_LEN as f64 {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
-    for (offset, value) in a.into_iter().enumerate() {
-        items.insert(offset, value);
+    Ok(result)
+}
+
+fn array_unshift(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    let result_length = array_growth_length(&this, length, a.len())?;
+    if !a.is_empty() {
+        let mut index = length;
+        while index > 0.0 {
+            interp.consume_loop()?;
+            let destination = crate::format::ecmascript_number_string(index + a.len() as f64 - 1.0);
+            if let Some(value) = array_element_number(interp, &this, index - 1.0, true)? {
+                interp.set_member_str_or_throw(&this, &destination, value)?;
+            } else {
+                delete_numeric_property_or_throw(interp, &this, destination)?;
+            }
+            index -= 1.0;
+        }
+        for (index, value) in a.into_iter().enumerate() {
+            interp.consume_loop()?;
+            interp.set_member_str_or_throw(&this, &index.to_string(), value)?;
+        }
     }
-    let length = items.len();
-    drop(items);
-    cell.insert_present(0, added);
-    Ok(Value::Number(length as f64))
+    interp.set_member_str_or_throw(&this, "length", Value::Number(result_length))?;
+    Ok(Value::Number(result_length))
 }
 
 /// `fill(value, start, end)`.
@@ -926,10 +957,15 @@ fn array_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Valu
 fn array_species_create(
     interp: &mut Interpreter,
     original: &Value,
-    length: usize,
+    length: f64,
 ) -> Result<Value, VmErr> {
-    let default =
-        || Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length]);
+    let default = || {
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            return Err(crate::value::limit_err("Maximum array length exceeded"));
+        }
+        let length = length as usize;
+        Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length])
+    };
     if !array_is_array(interp, Value::Undefined, vec![original.clone()])?.is_truthy() {
         return default();
     }
@@ -962,13 +998,22 @@ fn array_species_create(
             "TypeError: Array species must be a constructor".into(),
         ));
     }
-    interp.ctor(&constructor, vec![Value::Number(length as f64)])
+    interp.ctor(&constructor, vec![Value::Number(length)])
 }
 
 fn create_array_result_element(
     interp: &mut Interpreter,
     result: &Value,
     index: usize,
+    value: Value,
+) -> Result<(), VmErr> {
+    create_array_result_element_number(interp, result, index as f64, value)
+}
+
+fn create_array_result_element_number(
+    interp: &mut Interpreter,
+    result: &Value,
+    index: f64,
     value: Value,
 ) -> Result<(), VmErr> {
     let descriptor = Value::descriptor_record(vec![
@@ -979,7 +1024,7 @@ fn create_array_result_element(
     ]);
     if interp.define_own_property(
         result,
-        &Value::String(index.to_string().into()),
+        &Value::String(crate::format::ecmascript_number_string(index).into()),
         &descriptor,
     )? {
         Ok(())
@@ -992,18 +1037,22 @@ fn create_array_result_element(
 
 fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
+    let length = array_like_length_number(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
     let result = array_species_create(interp, &this, length)?;
-    for index in 0..length {
-        if let Some(value) = array_element(interp, &this, index, true)? {
+    let mut cursor = 0.0;
+    while cursor < length {
+        interp.consume_loop()?;
+        let index = cursor;
+        cursor += 1.0;
+        if let Some(value) = array_element_number(interp, &this, index, true)? {
             let mapped = interp.call_this(
                 &cb,
                 receiver.clone(),
-                vec![value, Value::Number(index as f64), this.clone()],
+                vec![value, Value::Number(index), this.clone()],
             )?;
-            create_array_result_element(interp, &result, index, mapped)?;
+            create_array_result_element_number(interp, &result, index, mapped)?;
         }
     }
     Ok(result)
@@ -1011,25 +1060,29 @@ fn array_map(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Val
 
 fn array_filter(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
+    let length = array_like_length_number(interp, &this)?;
     let cb = callback(&a)?;
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    let result = array_species_create(interp, &this, 0)?;
-    let mut next = 0;
-    for index in 0..length {
-        let Some(value) = array_element(interp, &this, index, true)? else {
+    let result = array_species_create(interp, &this, 0.0)?;
+    let mut next = 0.0;
+    let mut cursor = 0.0;
+    while cursor < length {
+        interp.consume_loop()?;
+        let index = cursor;
+        cursor += 1.0;
+        let Some(value) = array_element_number(interp, &this, index, true)? else {
             continue;
         };
         if interp
             .call_this(
                 &cb,
                 receiver.clone(),
-                vec![value.clone(), Value::Number(index as f64), this.clone()],
+                vec![value.clone(), Value::Number(index), this.clone()],
             )?
             .is_truthy()
         {
-            create_array_result_element(interp, &result, next, value)?;
-            next += 1;
+            create_array_result_element_number(interp, &result, next, value)?;
+            next += 1.0;
         }
     }
     Ok(result)
@@ -1163,63 +1216,33 @@ fn array_like_length_number(interp: &mut Interpreter, this: &Value) -> Result<f6
 }
 
 fn array_push(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    if let Value::Array(items) = &this {
-        reject_frozen_array_mutation(items)?;
-        let added = a.len();
-        let mut b = items.borrow_mut();
-        if b.len().saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
-        }
-        for x in a {
-            b.push(x);
-        }
-        let length = b.len();
-        drop(b);
-        items.append_present(added);
-        return Ok(Value::Number(length as f64));
+    let this = super::object::to_object_receiver(&this)?;
+    let mut length = array_like_length_number(interp, &this)?;
+    let result_length = array_growth_length(&this, length, a.len())?;
+    for value in a {
+        interp.consume_loop()?;
+        interp.set_member_str_or_throw(
+            &this,
+            &crate::format::ecmascript_number_string(length),
+            value,
+        )?;
+        length += 1.0;
     }
-    // `push` is generic: `class NodeList extends Array` instances (plain
-    // objects in this VM) and other array-likes push through `length`.
-    if matches!(this, Value::Null | Value::Undefined) {
-        return Err(VmErr::Msg(
-            "TypeError: Cannot convert undefined or null to object".to_string(),
-        ));
-    }
-    let mut len = array_like_length(interp, &this)?;
-    if len.saturating_add(a.len()) > crate::value::MAX_ARRAY_LEN {
-        return Err(crate::value::limit_err("Maximum array length exceeded"));
-    }
-    for x in a {
-        interp.assign_member(&this, &Value::String((len.to_string()).into()), x)?;
-        len += 1;
-    }
-    interp.assign_member_str(&this, "length", Value::Number(len as f64))?;
-    Ok(Value::Number(len as f64))
+    interp.set_member_str_or_throw(&this, "length", Value::Number(result_length))?;
+    Ok(Value::Number(result_length))
 }
 
 fn array_pop(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    if let Value::Array(items) = &this {
-        reject_frozen_array_mutation(items)?;
-        let result = items.borrow_mut().pop().unwrap_or(Value::Undefined);
-        let length = items.borrow().len();
-        items.truncate_presence(length);
-        return Ok(result);
-    }
-    if matches!(this, Value::Null | Value::Undefined) {
-        return Err(VmErr::Msg(
-            "TypeError: Cannot convert undefined or null to object".to_string(),
-        ));
-    }
-    let len = array_like_length(interp, &this)?;
-    if len == 0 {
-        interp.assign_member_str(&this, "length", Value::Number(0.0))?;
+    let this = super::object::to_object_receiver(&this)?;
+    let length = array_like_length_number(interp, &this)?;
+    if length == 0.0 {
+        interp.set_member_str_or_throw(&this, "length", Value::Number(0.0))?;
         return Ok(Value::Undefined);
     }
-    let new_len = len - 1;
-    let key = Value::String((new_len.to_string()).into());
-    let result = interp.get_prop_value(&this, &key)?;
-    interp.delete_member(&this, &key)?;
-    interp.assign_member_str(&this, "length", Value::Number(new_len as f64))?;
+    let key = crate::format::ecmascript_number_string(length - 1.0);
+    let result = interp.get_prop_value_str(&this, &key)?;
+    delete_numeric_property_or_throw(interp, &this, key)?;
+    interp.set_member_str_or_throw(&this, "length", Value::Number(length - 1.0))?;
     Ok(result)
 }
 
@@ -1264,41 +1287,34 @@ fn array_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 /// `ToIntegerOrInfinity`, clamped into `[0, len]`, for the forward searches
 /// (`indexOf`, `includes`): negatives count back from the end, `NaN` and
 /// missing mean `0`.
-fn forward_from_index(raw: Option<f64>, len: usize) -> usize {
-    let n = raw.unwrap_or(0.0);
-    if n.is_nan() {
-        return 0;
-    }
-    // `as` saturates infinities and truncates toward zero, matching
-    // `ToIntegerOrInfinity`; `saturating_add` keeps `-Infinity` from
-    // overflowing.
-    let i = n as i64;
-    if i < 0 {
-        (len as i64).saturating_add(i).max(0) as usize
-    } else {
-        (i as usize).min(len)
-    }
-}
-
 fn array_index_of(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
-    if length == 0 {
+    let length = array_like_length_number(interp, &this)?;
+    if length == 0.0 {
         return Ok(Value::Number(-1.0));
     }
     let target = a.first().cloned().unwrap_or(Value::Undefined);
-    let raw = a
-        .get(1)
-        .map(|value| interp.ecmascript_to_number(value))
-        .transpose()?;
-    let from = forward_from_index(raw, length);
-    for index in from..length {
-        interp.check_execution()?;
-        if let Some(value) = array_element(interp, &this, index, true)?
+    let from =
+        to_integer_or_infinity(interp.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?);
+    let mut index = if from < 0.0 {
+        (length + from).max(0.0)
+    } else {
+        from
+    };
+    while index < length {
+        // Preserve the existing bounded-search policy. Logical lengths beyond
+        // the allocation bound additionally need a loop limit for sparse scans.
+        if length > crate::value::MAX_ARRAY_LEN as f64 {
+            interp.consume_loop()?;
+        } else {
+            interp.check_execution()?;
+        }
+        if let Some(value) = array_element_number(interp, &this, index, true)?
             && interp.seq(&value, &target)
         {
-            return Ok(Value::Number(index as f64));
+            return Ok(Value::Number(if index == 0.0 { 0.0 } else { index }));
         }
+        index += 1.0;
     }
     Ok(Value::Number(-1.0))
 }
@@ -1352,7 +1368,7 @@ fn array_slice(
         Some(value) => relative_index(interp.ecmascript_to_number(value)?, length),
     };
     let count = end.saturating_sub(start);
-    let result = array_species_create(interp, &this, count)?;
+    let result = array_species_create(interp, &this, count as f64)?;
     for offset in 0..count {
         interp.consume_loop()?;
         if let Some(value) = array_element(interp, &this, start + offset, true)? {
@@ -1369,7 +1385,7 @@ fn array_concat(
     arguments: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let result = array_species_create(interp, &this, 0)?;
+    let result = array_species_create(interp, &this, 0.0)?;
     let spreadable = super::well_known("isConcatSpreadable").expect("Symbol.isConcatSpreadable");
     let mut next = 0;
     for item in std::iter::once(this).chain(arguments) {
@@ -1652,7 +1668,7 @@ fn flatten_array_result(
         index: usize,
         depth: f64,
     }
-    let result = array_species_create(interp, &source, 0)?;
+    let result = array_species_create(interp, &source, 0.0)?;
     let mut frames = vec![Frame {
         source: source.clone(),
         length,
