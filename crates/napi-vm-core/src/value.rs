@@ -3631,10 +3631,10 @@ fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
                 .flat_map(|(_, element)| element.into_values()),
         );
         work.extend(meta.revocable_proxy.take().map(Value::Proxy));
-        if let Some(slots) = meta.iterator_helper.take() {
-            if let Ok(slots) = Rc::try_unwrap(slots) {
-                work.extend(slots.into_inner().values());
-            }
+        if let Some(slots) = meta.iterator_helper.take()
+            && let Ok(slots) = Rc::try_unwrap(slots)
+        {
+            work.extend(slots.into_inner().values());
         }
         if let Some(slots) = meta.async_from_sync.take() {
             work.extend(slots.values());

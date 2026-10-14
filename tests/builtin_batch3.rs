@@ -68,3 +68,10 @@ fn exact_number_formatting_and_signed_zero() {
     );
 }
 
+#[test]
+fn strict_named_function_assignment_uses_callers_strictness() {
+    assert_tiers(
+        "var f=function loop(){'use strict';try{loop=1;}catch(e){return e instanceof TypeError;}};JSON.stringify([f()]);",
+        "[true]",
+    );
+}

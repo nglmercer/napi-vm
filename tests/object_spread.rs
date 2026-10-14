@@ -23,6 +23,25 @@ fn assert_tiers(source: &str, expected: &str) {
     );
 }
 
+// Assignment patterns intentionally fall back until reference ordering can be
+// represented by bytecode. Assert that boundary as well as both execution APIs.
+fn assert_assignment_fallback(source: &str, expected: &str) {
+    let prepared = Interpreter::compile(source).unwrap();
+    assert_eq!(prepared.tier(), napi_vm::interpreter::ExecutionTier::Ast);
+    assert!(
+        format!("{:?}", prepared.fallback_reason()).contains("destructuring assignment ordering")
+    );
+    let result = Interpreter::with_builtins().execute(&prepared).unwrap();
+    assert!(matches!(result, Value::String(ref text) if text == expected));
+    let statements = Parser::new(Lexer::new(source).tokenize())
+        .parse_program()
+        .unwrap();
+    let result = Interpreter::with_builtins()
+        .run_program_body(&statements)
+        .unwrap();
+    assert!(matches!(result, Value::String(ref text) if text == expected));
+}
+
 #[test]
 fn spread_preserves_symbol_identity_and_integer_key_order() {
     assert_tiers(
@@ -89,7 +108,7 @@ fn rest_enumerates_after_named_bindings_and_excludes_symbol_keys() {
         "var key = Symbol('key'); var converted = 0; var selection = {toString: function(){ converted++; return key; }}; var source = {x: 2, [key]: 1}; var {[selection]: selected, ...rest} = source; JSON.stringify([selected, rest.x, converted, Object.hasOwn(rest, key)]);",
         "[1,2,1,false]",
     );
-    assert_tiers(
+    assert_assignment_fallback(
         "var key = Symbol('key'); var source = {x: 1, [key]: 2}; var x; var rest; ({x, ...rest} = source); JSON.stringify([x, rest[key], Object.keys(rest), Reflect.ownKeys(rest)[0] === key]);",
         "[1,2,[],true]",
     );

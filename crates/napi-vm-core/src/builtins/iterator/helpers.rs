@@ -192,13 +192,13 @@ impl Slots {
             }
         }
         loop {
-            if self.kind == Kind::FlatMap {
-                if let Some(inner) = &mut self.inner {
-                    match inner.step(vm, true) {
-                        Ok(Some(value)) => return Ok(Some(value)),
-                        Ok(None) => self.inner = None,
-                        Err(err) => return self.records[0].abrupt(vm, err),
-                    }
+            if self.kind == Kind::FlatMap
+                && let Some(inner) = &mut self.inner
+            {
+                match inner.step(vm, true) {
+                    Ok(Some(value)) => return Ok(Some(value)),
+                    Ok(None) => self.inner = None,
+                    Err(err) => return self.records[0].abrupt(vm, err),
                 }
             }
             if self.kind == Kind::Take {
@@ -349,10 +349,10 @@ fn make(vm: &mut Interpreter, slots: Slots) -> Value {
     value
 }
 fn slots(this: &Value) -> Result<Rc<RefCell<Slots>>, VmErr> {
-    if let Value::Object { props: object } = this {
-        if let Some(slots) = &object.meta.borrow().iterator_helper {
-            return Ok(slots.clone());
-        }
+    if let Value::Object { props: object } = this
+        && let Some(slots) = &object.meta.borrow().iterator_helper
+    {
+        return Ok(slots.clone());
     }
     Err(error("Incompatible iterator helper receiver"))
 }
@@ -828,7 +828,7 @@ pub(super) fn install(env: &mut Environment, constructor: &Value, prototype: &Va
     let Value::Symbol(ref symbol) = crate::builtins::well_known("dispose").unwrap() else {
         unreachable!()
     };
-    let key = crate::interpreter::symbol_slot_key(&symbol);
+    let key = crate::interpreter::symbol_slot_key(symbol);
     method(env, prototype, &key, 0, dispose);
     let dispose_method = crate::builtins::native_method(
         "[Symbol.dispose]",
@@ -862,7 +862,7 @@ pub(super) fn install(env: &mut Environment, constructor: &Value, prototype: &Va
             else {
                 unreachable!()
             };
-            let key = crate::interpreter::symbol_slot_key(&symbol);
+            let key = crate::interpreter::symbol_slot_key(symbol);
             object
                 .set_prop(key.clone(), Value::String("Iterator Helper".into()))
                 .unwrap();
