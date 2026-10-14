@@ -285,7 +285,10 @@ pub(super) fn install(e: &mut Environment) {
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
 
-    let typed_array_prototype = typed_array_prototype(object_prototype.clone());
+    let typed_array_prototype = typed_array_prototype(
+        object_prototype.clone(),
+        e.get("Function").and_then(|f| f.get_prop("prototype")),
+    );
     let abstract_constructor =
         Value::object(vec![("prototype".into(), typed_array_prototype.clone())]);
     super::make_callable(
@@ -492,9 +495,17 @@ fn make_prototype<const N: usize>(
     prototype
 }
 
-fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
+fn typed_array_prototype(
+    object_prototype: Option<Rc<Value>>,
+    function_prototype: Option<Value>,
+) -> Value {
     const METHODS: &[&str] = &[
         "set",
+        "copyWithin",
+        "reduceRight",
+        "findLast",
+        "findLastIndex",
+        "with",
         "subarray",
         "slice",
         "fill",
@@ -520,8 +531,19 @@ fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
     ];
     let prototype = Value::object_with_proto(Vec::new(), object_prototype);
     for name in METHODS {
+        let Value::NativeFunction { callable, .. } = typed_prototype_method(name) else {
+            unreachable!()
+        };
+        let length = match *name {
+            "copyWithin" | "with" | "subarray" | "slice" => 2,
+            "toString" | "reverse" | "keys" | "values" | "entries" => 0,
+            _ => 1,
+        };
         prototype
-            .set_prop((*name).into(), typed_prototype_method(name))
+            .set_prop(
+                (*name).into(),
+                super::native_method(name, length, callable, function_prototype.clone()),
+            )
             .expect("typed-array prototype method");
     }
     if let Some(Value::Symbol(ref symbol)) = super::well_known("iterator") {
@@ -1948,6 +1970,11 @@ fn typed_entries(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Valu
 fn typed_prototype_method(name: &str) -> Value {
     let callable: super::NativeFn = match name {
         "set" => typed_set,
+        "copyWithin" => typed_copy_within,
+        "reduceRight" => typed_reduce_right,
+        "findLast" => typed_find_last,
+        "findLastIndex" => typed_find_last_index,
+        "with" => typed_with,
         "subarray" => typed_subarray,
         "slice" => typed_slice,
         "fill" => typed_fill,
@@ -2021,54 +2048,61 @@ fn typed_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 }
 
 /// `set(source, offset)`: copy elements in, converting as needed.
-fn typed_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn typed_set(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let view = require(&this)?;
-    let offset =
-        crate::value::to_integer_or_infinity(a.get(1).map(|v| v.to_number()).unwrap_or(0.0));
-    if !offset.is_finite() || offset < 0.0 {
+    let undefined = Value::Undefined;
+    let offset = crate::value::to_integer_or_infinity(
+        interp.ecmascript_to_number(args.get(1).unwrap_or(&undefined))?,
+    );
+    if offset < 0.0 {
         return Err(range_err("Invalid offset"));
     }
-    let offset = offset as usize;
-    let items = match a.first() {
-        Some(Value::TypedArray(source)) => read_all(source),
-        Some(Value::Array(items)) => items.borrow().clone(),
-        Some(other) => interp.iterate(other)?,
-        None => Vec::new(),
-    };
-    if offset
-        .checked_add(items.len())
-        .is_none_or(|end| end > view.effective_length())
-    {
-        return Err(range_err("Source is too large"));
-    }
-    for (index, item) in items.iter().enumerate() {
-        write_element_in(interp, &view, offset + index, item)?;
-    }
-    Ok(Value::Undefined)
-}
-
-/// Resolve a `[start, end)` window over `length` elements, applying the
-/// negative-index and clamping rules the array methods share.
-fn window(length: usize, a: &[Value]) -> (usize, usize) {
-    let resolve = |value: Option<&Value>, default: usize| -> usize {
-        match value {
-            Some(Value::Undefined) | None => default,
-            Some(v) => {
-                let n = crate::value::to_integer_or_infinity(v.to_number());
-                if !n.is_finite() {
-                    return if n > 0.0 { length } else { 0 };
-                }
-                if n < 0.0 {
-                    ((length as f64 + n).max(0.0)) as usize
-                } else {
-                    (n as usize).min(length)
-                }
+    validated_typed_source(&this)?;
+    let length = view.effective_length();
+    let source = args.first().unwrap_or(&undefined);
+    if let Value::TypedArray(source) = source {
+        if source.is_out_of_bounds() {
+            return Err(VmErr::Msg("TypeError: Invalid typed array source".into()));
+        }
+        let count = source.effective_length();
+        if offset + count as f64 > length as f64 {
+            return Err(range_err("Source is too large"));
+        }
+        if is_bigint_kind(view.kind) != is_bigint_kind(source.kind) {
+            return Err(VmErr::Msg(
+                "TypeError: Incompatible typed array content types".into(),
+            ));
+        }
+        if source.kind == view.kind {
+            if let Some(bytes) = source
+                .buffer
+                .read(source.effective_byte_offset(), count * source.kind.size())
+            {
+                view.buffer.write(
+                    view.effective_byte_offset() + offset as usize * view.kind.size(),
+                    &bytes,
+                );
+            }
+        } else {
+            let values = read_all(source);
+            for (index, value) in values.iter().enumerate() {
+                write_element_in(interp, &view, offset as usize + index, value)?;
             }
         }
-    };
-    let start = resolve(a.first(), 0);
-    let end = resolve(a.get(1), length).max(start);
-    (start, end)
+    } else {
+        let source = super::object::to_object_receiver(source)?;
+        let value = interp.get_prop_value_str(&source, "length")?;
+        let count = crate::value::to_integer_or_infinity(interp.ecmascript_to_number(&value)?)
+            .clamp(0.0, 9_007_199_254_740_991.0);
+        if offset + count > length as f64 {
+            return Err(range_err("Source is too large"));
+        }
+        for index in 0..count as usize {
+            let value = interp.get_prop_value_str(&source, &index.to_string())?;
+            write_element_in(interp, &view, offset as usize + index, &value)?;
+        }
+    }
+    Ok(Value::Undefined)
 }
 
 fn window_in(
@@ -2155,15 +2189,22 @@ fn typed_slice(
 }
 
 fn typed_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let input = a.first().cloned().unwrap_or(Value::Undefined);
+    let view = validated_typed_source(&this)?;
+    let length = view.effective_length();
+    let undefined = Value::Undefined;
+    let input = a.first().unwrap_or(&undefined);
     let value = if is_bigint_kind(view.kind) {
-        interp.ecmascript_to_bigint(&input)?
+        interp.ecmascript_to_bigint(input)?
     } else {
-        Value::Number(interp.ecmascript_to_number(&input)?)
+        Value::Number(interp.ecmascript_to_number(input)?)
     };
-    let (start, end) = window(view.effective_length(), &a[1.min(a.len())..]);
-    for index in start..end {
+    let start = typed_relative(interp, a.get(1).unwrap_or(&undefined), length)?;
+    let end = match a.get(2) {
+        None | Some(Value::Undefined) => length,
+        Some(v) => typed_relative(interp, v, length)?,
+    };
+    validated_typed_source(&this)?;
+    for index in start..end.min(view.effective_length()) {
         write_element(&view, index, &value)?;
     }
     Ok(this)
@@ -2525,6 +2566,142 @@ fn abstract_typed_array_constructor(
     Err(VmErr::Msg(
         "TypeError: Abstract TypedArray constructor cannot be invoked".into(),
     ))
+}
+
+fn typed_relative(interp: &mut Interpreter, value: &Value, length: usize) -> Result<usize, VmErr> {
+    Ok(super::array::relative_index(
+        interp.ecmascript_to_number(value)?,
+        length,
+    ))
+}
+
+fn typed_copy_within(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let view = validated_typed_source(&this)?;
+    let length = view.effective_length();
+    let undefined = Value::Undefined;
+    let to = typed_relative(interp, args.first().unwrap_or(&undefined), length)?;
+    let from = typed_relative(interp, args.get(1).unwrap_or(&undefined), length)?;
+    let end = match args.get(2) {
+        None | Some(Value::Undefined) => length,
+        Some(v) => typed_relative(interp, v, length)?,
+    };
+    let count = end.saturating_sub(from).min(length - to);
+    if count > 0 {
+        validated_typed_source(&this)?;
+        let count = count
+            .min(view.effective_length().saturating_sub(from))
+            .min(view.effective_length().saturating_sub(to));
+        let size = view.kind.size();
+        let offset = view.effective_byte_offset();
+        if let Some(bytes) = view.buffer.read(offset + from * size, count * size) {
+            view.buffer.write(offset + to * size, &bytes);
+        }
+    }
+    Ok(this)
+}
+
+fn typed_find_last_direction(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    want_index: bool,
+) -> Result<Value, VmErr> {
+    let view = validated_typed_source(&this)?;
+    let length = view.effective_length();
+    let callback = super::array::callback(&args)?;
+    let receiver = args.get(1).cloned().unwrap_or(Value::Undefined);
+    for index in (0..length).rev() {
+        interp.consume_loop()?;
+        let value = read_element(&view, index).unwrap_or(Value::Undefined);
+        if interp
+            .call_this(
+                &callback,
+                receiver.clone(),
+                vec![value.clone(), Value::Number(index as f64), this.clone()],
+            )?
+            .is_truthy()
+        {
+            return Ok(if want_index {
+                Value::Number(index as f64)
+            } else {
+                value
+            });
+        }
+    }
+    Ok(if want_index {
+        Value::Number(-1.0)
+    } else {
+        Value::Undefined
+    })
+}
+fn typed_find_last(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_find_last_direction(i, t, a, false)
+}
+fn typed_find_last_index(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_find_last_direction(i, t, a, true)
+}
+fn typed_reduce_right(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let view = validated_typed_source(&this)?;
+    let length = view.effective_length();
+    let callback = super::array::callback(&args)?;
+    let mut accumulator = args.get(1).cloned();
+    for index in (0..length).rev() {
+        interp.consume_loop()?;
+        let value = read_element(&view, index).unwrap_or(Value::Undefined);
+        accumulator = Some(match accumulator {
+            None => value,
+            Some(acc) => interp.call_this(
+                &callback,
+                Value::Undefined,
+                vec![acc, value, Value::Number(index as f64), this.clone()],
+            )?,
+        });
+    }
+    accumulator.ok_or_else(|| {
+        VmErr::Msg("TypeError: Reduce of empty typed array with no initial value".into())
+    })
+}
+fn typed_with(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let view = validated_typed_source(&this)?;
+    let length = view.effective_length();
+    let undefined = Value::Undefined;
+    let relative = crate::value::to_integer_or_infinity(
+        interp.ecmascript_to_number(args.first().unwrap_or(&undefined))?,
+    );
+    let index = if relative < 0.0 {
+        length as f64 + relative
+    } else {
+        relative
+    };
+    let value = if is_bigint_kind(view.kind) {
+        interp.ecmascript_to_bigint(args.get(1).unwrap_or(&undefined))?
+    } else {
+        Value::Number(interp.ecmascript_to_number(args.get(1).unwrap_or(&undefined))?)
+    };
+    if view.is_out_of_bounds()
+        || !valid_integer_index(&view, if index == 0.0 { 0.0 } else { index })
+    {
+        return Err(range_err("Invalid typed array index"));
+    }
+    let result = allocate_typed(view.kind, length)?;
+    let destination = require(&result)?;
+    for k in 0..length {
+        let element = if k as f64 == index {
+            value.clone()
+        } else {
+            read_element(&view, k).unwrap_or(Value::Undefined)
+        };
+        write_element_in(interp, &destination, k, &element)?;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]
