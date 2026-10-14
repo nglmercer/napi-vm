@@ -4,7 +4,7 @@
 use super::NativeFn;
 use crate::error::VmErr;
 use crate::interpreter::{Environment, Interpreter};
-use crate::value::{PropAttrs, Value};
+use crate::value::{PropAttrs, Value, to_int32};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(math) = e.get("Math") {
@@ -33,6 +33,23 @@ pub(super) fn install(e: &mut Environment) {
                 },
             );
         }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            // Release the metadata borrow before inserting the property.
+            drop(metadata);
+            math.set_prop(key.clone(), Value::String("Math".into()))
+                .expect("Math toStringTag");
+            let mut metadata = properties.meta.borrow_mut();
+            metadata.set_symbol_key(&key, symbol.clone());
+            metadata.set_attrs(
+                &key,
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
     }
 }
 
@@ -58,13 +75,16 @@ fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
         ("cos", math_cos),
         ("tan", math_tan),
         ("hypot", math_hypot),
+        ("clz32", math_clz32),
+        ("imul", math_imul),
+        ("fround", math_fround),
     ];
     table
         .into_iter()
         .map(|(n, f)| {
             let length = match n {
                 "random" => 0,
-                "pow" | "min" | "max" | "hypot" => 2,
+                "pow" | "min" | "max" | "hypot" | "imul" => 2,
                 _ => 1,
             };
             (
@@ -77,6 +97,21 @@ fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
 
 fn math_arg(interp: &mut Interpreter, args: &[Value], index: usize) -> Result<f64, VmErr> {
     interp.ecmascript_to_number(args.get(index).unwrap_or(&Value::Undefined))
+}
+
+fn math_clz32(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let bits = to_int32(math_arg(interp, &a, 0)?) as u32;
+    Ok(Value::Number(bits.leading_zeros() as f64))
+}
+
+fn math_imul(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let left = to_int32(math_arg(interp, &a, 0)?);
+    let right = to_int32(math_arg(interp, &a, 1)?);
+    Ok(Value::Number(left.wrapping_mul(right) as f64))
+}
+
+fn math_fround(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number((math_arg(interp, &a, 0)? as f32) as f64))
 }
 
 fn math_abs(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -157,10 +192,8 @@ fn math_min(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
     let mut m = f64::INFINITY;
     for v in &a {
         let n = interp.ecmascript_to_number(v)?;
-        if n.is_nan() {
-            return Ok(Value::Number(f64::NAN));
-        }
-        if n < m || (n == 0.0 && m == 0.0 && n.is_sign_negative()) {
+        // All arguments must be coerced, even after encountering NaN.
+        if n.is_nan() || n < m || (n == 0.0 && m == 0.0 && n.is_sign_negative()) {
             m = n;
         }
     }
@@ -173,10 +206,7 @@ fn math_max(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, 
     let mut m = f64::NEG_INFINITY;
     for v in &a {
         let n = interp.ecmascript_to_number(v)?;
-        if n.is_nan() {
-            return Ok(Value::Number(f64::NAN));
-        }
-        if n > m || (n == 0.0 && m == 0.0 && n.is_sign_positive()) {
+        if n.is_nan() || n > m || (n == 0.0 && m == 0.0 && n.is_sign_positive()) {
             m = n;
         }
     }
