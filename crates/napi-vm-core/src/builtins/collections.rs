@@ -35,6 +35,31 @@ pub(super) fn install(e: &mut Environment) {
         let Some(namespace) = e.get(name) else {
             continue;
         };
+        if kind == Kind::Map {
+            namespace
+                .set_prop(
+                    "groupBy".into(),
+                    super::native_method(
+                        "groupBy",
+                        2,
+                        map_group_by,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                )
+                .unwrap();
+            namespace
+                .property_cell()
+                .unwrap()
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    "groupBy",
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+        }
         super::make_callable(&namespace, require_new, Some(kind.constructor()));
         // Each VM gets its own prototype object: instances inherit from the
         // namespace's live `.prototype` (identity matters for `instanceof`),
@@ -602,6 +627,13 @@ fn methods(kind: Kind) -> Vec<(&'static str, super::NativeFn)> {
             ("keys", set_keys),
             ("values", set_values),
             ("entries", set_entries),
+            ("union", set_union),
+            ("intersection", set_intersection),
+            ("difference", set_difference),
+            ("symmetricDifference", set_symmetric_difference),
+            ("isSubsetOf", set_is_subset),
+            ("isSupersetOf", set_is_superset),
+            ("isDisjointFrom", set_is_disjoint),
         ],
         WeakSet => vec![
             ("has", weak_set_has),
@@ -689,7 +721,11 @@ fn new_weak_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 
 fn size_getter(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let entries = require(&this, "size")?;
-    let size = entries.borrow().len();
+    let size = entries
+        .borrow()
+        .iter()
+        .filter(|e| !matches!(e, Value::Undefined))
+        .count();
     Ok(Value::Number(size as f64))
 }
 
@@ -751,7 +787,7 @@ fn set_add(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
         return Ok(this);
     }
     let entries = require(&this, "Set.prototype.add")?;
-    let value = a.first().cloned().unwrap_or(Value::Undefined);
+    let value = normalize_zero(a.first().cloned().unwrap_or(Value::Undefined));
     if position(&entries, &value).is_none() {
         if entries.borrow().len() >= crate::value::MAX_ARRAY_LEN {
             return Err(crate::value::limit_err("Maximum collection size exceeded"));
@@ -790,7 +826,7 @@ fn collection_delete(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
     let key = a.first().cloned().unwrap_or(Value::Undefined);
     match position(&entries, &key) {
         Some(index) => {
-            entries.borrow_mut().remove(index);
+            entries.borrow_mut()[index] = Value::Undefined;
             Ok(Value::Bool(true))
         }
         None => Ok(Value::Bool(false)),
@@ -798,7 +834,9 @@ fn collection_delete(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<
 }
 
 fn collection_clear(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    require(&this, "clear")?.borrow_mut().clear();
+    for value in require(&this, "clear")?.borrow_mut().iter_mut() {
+        *value = Value::Undefined;
+    }
     Ok(Value::Undefined)
 }
 
@@ -817,8 +855,15 @@ fn collection_for_each(
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
     // Snapshot: the callback may mutate the collection, and iterating a
     // borrowed `Vec` while guest code runs would panic.
-    let snapshot = entries.borrow().clone();
-    for item in snapshot {
+    let mut cursor = 0;
+    loop {
+        let item = entries.borrow().get(cursor).cloned();
+        let Some(item) = item else { break };
+        cursor += 1;
+        interp.consume_loop()?;
+        if matches!(item, Value::Undefined) {
+            continue;
+        }
         let key = item.get_prop("0").unwrap_or(Value::Undefined);
         let value = item.get_prop("1").unwrap_or(Value::Undefined);
         interp.call_this(&callback, receiver.clone(), vec![value, key, this.clone()])?;
@@ -833,7 +878,12 @@ fn iterate_projection(
     project: impl Fn(&Value) -> Value,
 ) -> Result<Value, VmErr> {
     let entries = require(this, "iterator")?;
-    let projected: Vec<Value> = entries.borrow().iter().map(project).collect();
+    let projected: Vec<Value> = entries
+        .borrow()
+        .iter()
+        .filter(|e| !matches!(e, Value::Undefined))
+        .map(project)
+        .collect();
     let array = Value::array(projected);
     let iterator = interp.prop(
         &array,
@@ -870,6 +920,7 @@ pub fn collection_entries_of(value: &Value) -> Option<(&'static str, Vec<(Value,
     let pairs = entries
         .borrow()
         .iter()
+        .filter(|e| !matches!(e, Value::Undefined))
         .map(|entry| {
             (
                 entry.get_prop("0").unwrap_or(Value::Undefined),
@@ -886,7 +937,15 @@ pub fn collection_entries_of(value: &Value) -> Option<(&'static str, Vec<(Value,
 pub fn describe_collection(value: &Value) -> Option<String> {
     let kind = kind_of(value)?;
     let entries = entries_of(value)?;
-    Some(format!("{}({})", kind.tag(), entries.borrow().len()))
+    Some(format!(
+        "{}({})",
+        kind.tag(),
+        entries
+            .borrow()
+            .iter()
+            .filter(|e| !matches!(e, Value::Undefined))
+            .count()
+    ))
 }
 
 #[cfg(test)]
@@ -911,5 +970,300 @@ mod lifecycle_tests {
         assert!(PROTOTYPES.with(|protos| protos.borrow().is_empty()));
         crate::heap::collect();
         assert_eq!(crate::heap::counters().tracked, 0);
+    }
+}
+
+fn normalize_zero(v: Value) -> Value {
+    if matches!(v,Value::Number(n) if n==0.) {
+        Value::Number(0.)
+    } else {
+        v
+    }
+}
+struct SetRecord {
+    object: Value,
+    size: f64,
+    has: Value,
+    keys: Value,
+}
+fn set_record(i: &mut Interpreter, v: Value) -> Result<SetRecord, VmErr> {
+    if !crate::interpreter::call::is_js_object(&v) {
+        return Err(VmErr::Msg("TypeError: set-like object required".into()));
+    }
+    let n = i.get_prop_value_str(&v, "size")?;
+    let n = i.ecmascript_to_number(&n)?;
+    if n.is_nan() {
+        return Err(VmErr::Msg("TypeError: invalid set size".into()));
+    }
+    let n = n.trunc();
+    if n < 0. {
+        return Err(VmErr::Msg("RangeError: invalid set size".into()));
+    }
+    let has = i.get_prop_value_str(&v, "has")?;
+    if !crate::interpreter::is_callable_value(&has) {
+        return Err(VmErr::Msg("TypeError: has must be callable".into()));
+    }
+    let keys = i.get_prop_value_str(&v, "keys")?;
+    if !crate::interpreter::is_callable_value(&keys) {
+        return Err(VmErr::Msg("TypeError: keys must be callable".into()));
+    }
+    Ok(SetRecord {
+        object: v,
+        size: n,
+        has,
+        keys,
+    })
+}
+fn set_count(v: &Rc<ArrayCell>) -> usize {
+    v.borrow()
+        .iter()
+        .filter(|x| !matches!(x, Value::Undefined))
+        .count()
+}
+fn set_has_record(i: &mut Interpreter, r: &SetRecord, k: Value) -> Result<bool, VmErr> {
+    Ok(i.call_this(&r.has, r.object.clone(), vec![k])?.is_truthy())
+}
+fn set_keys_visit(
+    i: &mut Interpreter,
+    r: &SetRecord,
+    mut visit: impl FnMut(&mut Interpreter, Value) -> Result<bool, VmErr>,
+) -> Result<(), VmErr> {
+    let iterator = i.call_this(&r.keys, r.object.clone(), vec![])?;
+    if !crate::interpreter::call::is_js_object(&iterator) {
+        return Err(VmErr::Msg("TypeError: keys must return iterator".into()));
+    }
+    let next = i.get_prop_value_str(&iterator, "next")?;
+    loop {
+        i.consume_loop()?;
+        let step = i.call_this(&next, iterator.clone(), vec![])?;
+        if !crate::interpreter::call::is_js_object(&step) {
+            return Err(VmErr::Msg(
+                "TypeError: iterator result must be object".into(),
+            ));
+        }
+        if i.get_prop_value_str(&step, "done")?.is_truthy() {
+            break;
+        }
+        let value = i.get_prop_value_str(&step, "value")?;
+        if !visit(i, normalize_zero(value))? {
+            i.close_guest_iterator(&iterator, false)?;
+            break;
+        }
+    }
+    Ok(())
+}
+fn set_copy(i: &mut Interpreter, source: &Rc<ArrayCell>) -> Result<Value, VmErr> {
+    let result = construct(i, Kind::Set, Value::Undefined, vec![])?;
+    let target = entries_of(&result).unwrap();
+    for item in source
+        .borrow()
+        .iter()
+        .filter(|e| !matches!(e, Value::Undefined))
+    {
+        target.borrow_mut().push(item.clone());
+    }
+    Ok(result)
+}
+fn set_require(v: &Value) -> Result<Rc<ArrayCell>, VmErr> {
+    if kind_of(v) != Some(Kind::Set) {
+        return Err(VmErr::Msg("TypeError: Set receiver required".into()));
+    }
+    require(v, "Set method")
+}
+macro_rules! compose_method {
+    ($f:ident,$name:literal) => {
+        fn $f(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+            set_compose(i, t, a, $name)
+        }
+    };
+}
+compose_method!(set_union, "union");
+compose_method!(set_intersection, "intersection");
+compose_method!(set_difference, "difference");
+compose_method!(set_symmetric_difference, "symmetricDifference");
+compose_method!(set_is_subset, "isSubsetOf");
+compose_method!(set_is_superset, "isSupersetOf");
+compose_method!(set_is_disjoint, "isDisjointFrom");
+fn set_compose(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Result<Value, VmErr> {
+    let source = set_require(&t)?;
+    let other = set_record(i, a.first().cloned().unwrap_or(Value::Undefined))?;
+    let size = set_count(&source);
+    if name == "isSubsetOf" && size as f64 > other.size {
+        return Ok(Value::Bool(false));
+    }
+    if name == "isSupersetOf" && (size as f64) < other.size {
+        return Ok(Value::Bool(false));
+    }
+    let predicate = matches!(name, "isSubsetOf" | "isSupersetOf" | "isDisjointFrom");
+    let result = if predicate {
+        Value::Undefined
+    } else if matches!(name, "union" | "difference" | "symmetricDifference") {
+        set_copy(i, &source)?
+    } else {
+        construct(i, Kind::Set, Value::Undefined, vec![])?
+    };
+    let by_source = name == "isSubsetOf"
+        || matches!(name, "intersection" | "difference" | "isDisjointFrom")
+            && size as f64 <= other.size;
+    if by_source {
+        let mut cursor = 0;
+        loop {
+            let item = source.borrow().get(cursor).cloned();
+            let Some(item) = item else { break };
+            cursor += 1;
+            i.consume_loop()?;
+            if matches!(item, Value::Undefined) {
+                continue;
+            }
+            let k = item.get_prop("0").unwrap_or(Value::Undefined);
+            let has = set_has_record(i, &other, k.clone())?;
+            match name {
+                "isSubsetOf" if !has => return Ok(Value::Bool(false)),
+                "isDisjointFrom" if has => return Ok(Value::Bool(false)),
+                "intersection" if has => {
+                    set_add(i, result.clone(), vec![k])?;
+                }
+                "difference" if has => {
+                    collection_delete(i, result.clone(), vec![k])?;
+                }
+                _ => {}
+            }
+        }
+    } else {
+        let mut answer = true;
+        set_keys_visit(i, &other, |i, k| {
+            let has = position(&source, &k).is_some();
+            match name {
+                "isSupersetOf" if !has => {
+                    answer = false;
+                    return Ok(false);
+                }
+                "isDisjointFrom" if has => {
+                    answer = false;
+                    return Ok(false);
+                }
+                "union" => {
+                    set_add(i, result.clone(), vec![k])?;
+                }
+                "intersection" if has => {
+                    set_add(i, result.clone(), vec![k])?;
+                }
+                "difference" => {
+                    collection_delete(i, result.clone(), vec![k])?;
+                }
+                "symmetricDifference" => {
+                    if has {
+                        collection_delete(i, result.clone(), vec![k])?;
+                    } else {
+                        set_add(i, result.clone(), vec![k])?;
+                    }
+                }
+                _ => {}
+            }
+            Ok(true)
+        })?;
+        if predicate {
+            return Ok(Value::Bool(answer));
+        }
+    }
+    if predicate {
+        Ok(Value::Bool(true))
+    } else {
+        Ok(result)
+    }
+}
+
+fn map_group_by(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    group_by(i, a, true)
+}
+pub(super) fn object_group_by(
+    i: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    group_by(i, a, false)
+}
+fn group_by(i: &mut Interpreter, a: Vec<Value>, map: bool) -> Result<Value, VmErr> {
+    let source = a.first().cloned().unwrap_or(Value::Undefined);
+    if matches!(source, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg("TypeError: groupBy requires an iterable".into()));
+    }
+    let callback = a.get(1).cloned().unwrap_or(Value::Undefined);
+    if !crate::interpreter::is_callable_value(&callback) {
+        return Err(VmErr::Msg(
+            "TypeError: groupBy callback must be callable".into(),
+        ));
+    }
+    let iterator = i.iterator_for(&source)?;
+    let next = i.get_prop_value_str(&iterator, "next")?;
+    let mut groups: Vec<(Value, Vec<Value>)> = vec![];
+    let mut index = 0usize;
+    loop {
+        i.consume_loop()?;
+        let step = i.call_this(&next, iterator.clone(), vec![])?;
+        if !crate::interpreter::call::is_js_object(&step) {
+            return Err(VmErr::Msg(
+                "TypeError: iterator result must be object".into(),
+            ));
+        }
+        if i.get_prop_value_str(&step, "done")?.is_truthy() {
+            break;
+        }
+        let value = i.get_prop_value_str(&step, "value")?;
+        let result = (|| {
+            if index >= crate::value::MAX_ARRAY_LEN {
+                return Err(crate::value::limit_err("Maximum groupBy length exceeded"));
+            }
+            let key = i.call_this(
+                &callback,
+                Value::Undefined,
+                vec![value.clone(), Value::Number(index as f64)],
+            )?;
+            Ok(if map {
+                normalize_zero(key)
+            } else {
+                i.ecmascript_to_property_key(&key)?
+            })
+        })();
+        let key = match result {
+            Ok(k) => k,
+            Err(e) => {
+                i.close_guest_iterator_for_abrupt(&iterator, false, &e)?;
+                return Err(e);
+            }
+        };
+        if let Some((_, values)) = groups.iter_mut().find(|(k, _)| same_value_zero(k, &key)) {
+            values.push(value);
+        } else {
+            groups.push((key, vec![value]));
+        }
+        index += 1;
+    }
+    if map {
+        let out = construct(i, Kind::Map, Value::Undefined, vec![])?;
+        let entries = entries_of(&out).unwrap();
+        for (key, values) in groups {
+            entries.borrow_mut().push(entry(key, Value::array(values)));
+        }
+        Ok(out)
+    } else {
+        let out = Value::object_with_proto(vec![], None);
+        out.property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .uses_default_prototype = false;
+        for (key, values) in groups {
+            let slot = i.property_key(&key)?;
+            out.set_prop(slot.clone(), Value::array(values))?;
+            if let Value::Symbol(symbol) = &key {
+                out.property_cell()
+                    .unwrap()
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
+            }
+        }
+        Ok(out)
     }
 }

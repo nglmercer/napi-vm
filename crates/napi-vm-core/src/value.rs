@@ -177,6 +177,7 @@ pub(crate) enum CollectionKind {
 pub struct ObjectMeta {
     /// The realm that owns native methods and implicit intrinsic prototypes.
     pub(crate) realm_global: Option<Env>,
+    pub(crate) disposable_stack: Option<Rc<RefCell<crate::builtins::disposable::Slots>>>,
     pub(crate) collection_kind: Option<CollectionKind>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
@@ -699,6 +700,9 @@ impl ArrayCell {
                     .flat_map(PrivateElement::values),
             );
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
+            if let Some(slots) = &meta.disposable_stack {
+                out.extend(slots.borrow().values());
+            }
             if let Some(slots) = &meta.iterator_helper {
                 out.extend(slots.borrow().values());
             }
@@ -733,6 +737,7 @@ impl ArrayCell {
         elements.clear();
         named.clear();
         meta.private_elements.clear();
+        meta.disposable_stack = None;
         meta.iterator_helper = None;
         meta.async_from_sync = None;
         meta.revocable_proxy = None;
@@ -834,6 +839,9 @@ impl ObjectCell {
                     .flat_map(PrivateElement::values),
             );
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
+            if let Some(slots) = &meta.disposable_stack {
+                out.extend(slots.borrow().values());
+            }
             if let Some(slots) = &meta.iterator_helper {
                 out.extend(slots.borrow().values());
             }
@@ -872,6 +880,7 @@ impl ObjectCell {
         }
         meta.symbol_keys.clear();
         meta.private_elements.clear();
+        meta.disposable_stack = None;
         meta.iterator_helper = None;
         meta.async_from_sync = None;
         meta.revocable_proxy = None;
@@ -3635,6 +3644,11 @@ fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
                 .flat_map(|(_, element)| element.into_values()),
         );
         work.extend(meta.revocable_proxy.take().map(Value::Proxy));
+        if let Some(slots) = meta.disposable_stack.take()
+            && let Ok(slots) = Rc::try_unwrap(slots)
+        {
+            work.extend(slots.into_inner().values());
+        }
         if let Some(slots) = meta.iterator_helper.take()
             && let Ok(slots) = Rc::try_unwrap(slots)
         {

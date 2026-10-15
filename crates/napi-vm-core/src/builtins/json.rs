@@ -1005,19 +1005,22 @@ mod tests {
 
     #[test]
     fn reindent_nests_objects_and_arrays() {
-        assert_eq!(reindent(r#"{"a":1}"#, "  ").unwrap(), "{\n  \"a\": 1\n}");
         assert_eq!(
-            reindent(r#"{"a":[1,2]}"#, "  ").unwrap(),
+            reindent(&r#"{"a":1}"#.into(), "  ").unwrap(),
+            "{\n  \"a\": 1\n}"
+        );
+        assert_eq!(
+            reindent(&r#"{"a":[1,2]}"#.into(), "  ").unwrap(),
             "{\n  \"a\": [\n    1,\n    2\n  ]\n}"
         );
     }
 
     #[test]
     fn reindent_keeps_empty_containers_on_one_line() {
-        assert_eq!(reindent("{}", "  ").unwrap(), "{}");
-        assert_eq!(reindent("[]", "  ").unwrap(), "[]");
+        assert_eq!(reindent(&"{}".into(), "  ").unwrap(), "{}");
+        assert_eq!(reindent(&"[]".into(), "  ").unwrap(), "[]");
         assert_eq!(
-            reindent(r#"{"a":{},"b":[]}"#, "  ").unwrap(),
+            reindent(&r#"{"a":{},"b":[]}"#.into(), "  ").unwrap(),
             "{\n  \"a\": {},\n  \"b\": []\n}"
         );
     }
@@ -1025,18 +1028,21 @@ mod tests {
     #[test]
     fn reindent_ignores_structure_inside_strings() {
         assert_eq!(
-            reindent(r#"{"a":"{x},[y]"}"#, "  ").unwrap(),
+            reindent(&r#"{"a":"{x},[y]"}"#.into(), "  ").unwrap(),
             "{\n  \"a\": \"{x},[y]\"\n}"
         );
         // Trailing spaces inside a string must not read as an empty body.
         assert_eq!(
-            reindent(r#"{"a":"  "}"#, "  ").unwrap(),
+            reindent(&r#"{"a":"  "}"#.into(), "  ").unwrap(),
             "{\n  \"a\": \"  \"\n}"
         );
     }
 
     #[test]
     fn reindent_accepts_string_indent() {
-        assert_eq!(reindent(r#"{"a":1}"#, "\t").unwrap(), "{\n\t\"a\": 1\n}");
+        assert_eq!(
+            reindent(&r#"{"a":1}"#.into(), "\t").unwrap(),
+            "{\n\t\"a\": 1\n}"
+        );
     }
 }

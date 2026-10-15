@@ -93,7 +93,12 @@ pub(super) fn install(e: &mut Environment) {
         prototype
             .set_prop(
                 key.clone(),
-                super::nf("[Symbol.hasInstance]", function_has_instance),
+                super::native_method(
+                    "[Symbol.hasInstance]",
+                    1,
+                    function_has_instance,
+                    Some(prototype.clone()),
+                ),
             )
             .expect("Function.prototype[Symbol.hasInstance]");
         if let Value::Function(function) = &prototype {
@@ -139,6 +144,10 @@ pub(super) fn install(e: &mut Environment) {
         );
     }
 
+    prototype
+        .set_prop("toString".into(), super::nf("toString", function_to_string))
+        .expect("Function.prototype.toString");
+
     namespace
         .set_prop("prototype".to_string(), prototype.clone())
         .expect("Function.prototype");
@@ -153,6 +162,11 @@ pub(super) fn install(e: &mut Environment) {
         );
         props.set_proto(Some(Rc::new(prototype.clone())));
     }
+    super::install_method_metadata(
+        e,
+        &prototype,
+        &[("call", 1), ("apply", 2), ("bind", 1), ("toString", 0)],
+    );
     for (name, callable) in [
         ("AsyncFunction", new_async_function as super::NativeFn),
         (
@@ -243,6 +257,7 @@ pub(crate) fn function_method(name: &str) -> Option<Value> {
         "call" => super::nf("call", function_call),
         "apply" => super::nf("apply", function_apply),
         "bind" => super::nf("bind", function_bind),
+        "toString" => super::nf("toString", function_to_string),
         _ => return None,
     })
 }
@@ -255,6 +270,17 @@ pub(crate) fn is_default_has_instance_method(value: &Value) -> bool {
     let expected: super::NativeFn = function_has_instance;
     matches!(value, Value::NativeFunction { callable, .. }
         if std::ptr::fn_addr_eq(*callable, expected))
+}
+
+// The VM retains parsed bodies rather than original source text. The standard
+// permits NativeFunction syntax when source text is unavailable.
+fn function_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    if !crate::interpreter::is_callable_value(&this) && !matches!(this, Value::Class(_)) {
+        return Err(VmErr::Msg(
+            "TypeError: Function.prototype.toString requires a callable".into(),
+        ));
+    }
+    Ok(Value::String("function () { [native code] }".into()))
 }
 
 fn function_bind(

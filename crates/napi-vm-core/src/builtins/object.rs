@@ -93,6 +93,7 @@ pub(super) fn install(e: &mut Environment) {
     }
     let methods: &[(&str, super::NativeFn)] = &[
         ("keys", object_keys),
+        ("groupBy", super::collections::object_group_by),
         ("values", object_values),
         ("entries", object_entries),
         ("assign", object_assign),
@@ -137,6 +138,7 @@ pub(super) fn install_function_metadata(e: &Environment) {
                 ("values", 1),
                 ("entries", 1),
                 ("assign", 2),
+                ("groupBy", 2),
                 ("getOwnPropertyNames", 1),
                 ("getOwnPropertySymbols", 1),
                 ("create", 2),

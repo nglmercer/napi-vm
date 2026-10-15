@@ -1,0 +1,20 @@
+{
+  "baseline": "temporal-time-duration-full.json",
+  "transitions": [
+    {
+      "before": "fail",
+      "after": "pass",
+      "count": 2154
+    },
+    {
+      "before": "pass",
+      "after": "pass",
+      "count": 34
+    },
+    {
+      "before": "fail",
+      "after": "fail",
+      "count": 62
+    }
+  ]
+}

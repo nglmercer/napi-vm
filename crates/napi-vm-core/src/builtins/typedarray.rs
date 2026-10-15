@@ -280,7 +280,28 @@ pub(super) fn install(e: &mut Environment) {
         );
     }
     if let Some(namespace) = e.get("DataView") {
-        super::make_callable(&namespace, new_data_view, None);
+        super::make_callable(&namespace, super::require_new, Some(new_data_view));
+        namespace
+            .set_prop("length".into(), Value::Number(1.))
+            .unwrap();
+        namespace
+            .set_prop("name".into(), Value::String("DataView".into()))
+            .unwrap();
+        for key in ["name", "length"] {
+            namespace
+                .property_cell()
+                .unwrap()
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: false,
+                        enumerable: false,
+                        configurable: true,
+                    },
+                );
+        }
         let prototype = data_view_prototype(object_prototype.clone(), namespace.clone());
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
@@ -495,16 +516,24 @@ fn make_prototype<const N: usize>(
 fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
     const METHODS: &[&str] = &[
         "set",
+        "copyWithin",
+        "with",
+        "toReversed",
+        "toSorted",
         "subarray",
         "slice",
         "fill",
         "at",
         "toString",
         "join",
+        "toLocaleString",
         "map",
         "filter",
         "forEach",
         "reduce",
+        "reduceRight",
+        "findLast",
+        "findLastIndex",
         "some",
         "every",
         "find",
@@ -545,22 +574,41 @@ fn typed_array_prototype(object_prototype: Option<Rc<Value>>) -> Value {
         ("byteOffset", typed_byte_offset_getter),
         ("length", typed_length_getter),
     ] {
-        prototype
-            .set_prop(name.into(), super::nf(&format!("get {name}"), getter))
-            .expect("typed-array getter");
-        if let Value::Object { props } = &prototype {
-            let mut metadata = props.meta.borrow_mut();
-            metadata.has_accessors = true;
-            metadata.set_attrs(
-                name,
-                crate::value::PropAttrs {
-                    writable: false,
-                    enumerable: false,
-                    configurable: true,
-                },
-            );
-        }
+        super::object::define_property(
+            &prototype,
+            name,
+            &Value::descriptor_record(vec![
+                (
+                    "get".into(),
+                    super::native_method(&format!("get {name}"), 0, getter, None),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .unwrap();
     }
+    if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        super::object::define_property(
+            &prototype,
+            &key,
+            &Value::descriptor_record(vec![
+                (
+                    "get".into(),
+                    super::native_method("get [Symbol.toStringTag]", 0, typed_tag_getter, None),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .unwrap();
+        prototype
+            .property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .set_symbol_key(&key, symbol.clone());
+    }
+
     if let Value::Object { props } = &prototype {
         let mut metadata = props.meta.borrow_mut();
         for name in METHODS {
@@ -593,6 +641,7 @@ fn data_view_prototype(object_prototype: Option<Rc<Value>>, constructor: Value) 
         ("getUint16", data_view_get_uint16),
         ("getInt32", data_view_get_int32),
         ("getUint32", data_view_get_uint32),
+        ("getFloat16", data_view_get_float16),
         ("getFloat32", data_view_get_float32),
         ("getFloat64", data_view_get_float64),
         ("getBigInt64", data_view_get_bigint64),
@@ -603,17 +652,24 @@ fn data_view_prototype(object_prototype: Option<Rc<Value>>, constructor: Value) 
         ("setUint16", data_view_set_uint16),
         ("setInt32", data_view_set_int32),
         ("setUint32", data_view_set_uint32),
+        ("setFloat16", data_view_set_float16),
         ("setFloat32", data_view_set_float32),
         ("setFloat64", data_view_set_float64),
         ("setBigInt64", data_view_set_bigint64),
         ("setBigUint64", data_view_set_biguint64),
     ];
     let mut properties = vec![("constructor".to_string(), constructor)];
-    properties.extend(
-        methods
-            .iter()
-            .map(|(name, function)| (name.to_string(), super::nf(name, *function))),
-    );
+    properties.extend(methods.iter().map(|(name, function)| {
+        (
+            name.to_string(),
+            super::native_method(
+                name,
+                if name.starts_with("get") { 1 } else { 2 },
+                *function,
+                None,
+            ),
+        )
+    }));
     let prototype = Value::object_with_proto(properties, object_prototype);
     if let Value::Object { props } = &prototype {
         let mut metadata = props.meta.borrow_mut();
@@ -633,6 +689,41 @@ fn data_view_prototype(object_prototype: Option<Rc<Value>>, constructor: Value) 
                 },
             );
         }
+    }
+    for (key, f) in [
+        ("buffer", data_view_buffer as super::NativeFn),
+        ("byteLength", data_view_byte_length),
+        ("byteOffset", data_view_byte_offset),
+    ] {
+        super::object::define_property(
+            &prototype,
+            key,
+            &Value::descriptor_record(vec![
+                (
+                    "get".into(),
+                    super::native_method(&format!("get {key}"), 0, f, None),
+                ),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )
+        .unwrap();
+    }
+    if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        prototype
+            .set_prop(key.clone(), Value::String("DataView".into()))
+            .unwrap();
+        let cell = prototype.property_cell().unwrap();
+        let mut meta = cell.meta.borrow_mut();
+        meta.set_symbol_key(&key, symbol.clone());
+        meta.set_attrs(
+            &key,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
     }
     prototype
 }
@@ -1816,34 +1907,6 @@ fn require(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
     }
 }
 
-/// Run an `Array.prototype` method over a copy of the elements.
-///
-/// Legacy non-allocating delegates still share Array iteration over a copy.
-/// Allocating methods use TypedArrayCreate and species helpers below.
-fn typed_delegate_named(
-    interp: &mut Interpreter,
-    this: Value,
-    a: Vec<Value>,
-    name: &str,
-) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let array = Value::array(read_all(&view));
-    let method = interp.member(&array, name)?;
-    interp.call_this(&method, array, a)
-}
-
-macro_rules! typed_delegate_method {
-    ($function:ident, $name:literal) => {
-        fn $function(
-            interp: &mut Interpreter,
-            this: Value,
-            args: Vec<Value>,
-        ) -> Result<Value, VmErr> {
-            typed_delegate_named(interp, this, args, $name)
-        }
-    };
-}
-
 fn validated_typed_source(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
     let view = require(this)?;
     if view.is_out_of_bounds() {
@@ -1915,17 +1978,34 @@ fn typed_filter(
     }
     Ok(result)
 }
-typed_delegate_method!(typed_for_each, "forEach");
-typed_delegate_method!(typed_reduce, "reduce");
-typed_delegate_method!(typed_some, "some");
-typed_delegate_method!(typed_every, "every");
-typed_delegate_method!(typed_find, "find");
-typed_delegate_method!(typed_find_index, "findIndex");
-typed_delegate_method!(typed_index_of, "indexOf");
-typed_delegate_method!(typed_last_index_of, "lastIndexOf");
-typed_delegate_method!(typed_includes, "includes");
-typed_delegate_method!(typed_reverse, "reverse");
-typed_delegate_method!(typed_sort, "sort");
+fn typed_for_each(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "forEach")
+}
+fn typed_reduce(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "reduce")
+}
+fn typed_some(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "some")
+}
+fn typed_every(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "every")
+}
+fn typed_find(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "find")
+}
+fn typed_find_index(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "findIndex")
+}
+fn typed_index_of(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_search(i, t, a, "indexOf")
+}
+fn typed_last_index_of(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_search(i, t, a, "lastIndexOf")
+}
+fn typed_includes(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_search(i, t, a, "includes")
+}
+
 fn typed_iterator(this: Value, kind: &str) -> Result<Value, VmErr> {
     let view = require(&this)?;
     if view.is_out_of_bounds() {
@@ -1948,15 +2028,23 @@ fn typed_entries(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Valu
 fn typed_prototype_method(name: &str) -> Value {
     let callable: super::NativeFn = match name {
         "set" => typed_set,
+        "copyWithin" => typed_copy_within,
+        "with" => typed_with,
+        "toReversed" => typed_to_reversed,
+        "toSorted" => typed_to_sorted,
         "subarray" => typed_subarray,
         "slice" => typed_slice,
         "fill" => typed_fill,
         "at" => typed_at,
         "toString" | "join" => typed_join,
+        "toLocaleString" => typed_to_locale_string,
         "map" => typed_map,
         "filter" => typed_filter,
         "forEach" => typed_for_each,
         "reduce" => typed_reduce,
+        "reduceRight" => typed_reduce_right,
+        "findLast" => typed_find_last,
+        "findLastIndex" => typed_find_last_index,
         "some" => typed_some,
         "every" => typed_every,
         "find" => typed_find,
@@ -1971,14 +2059,25 @@ fn typed_prototype_method(name: &str) -> Value {
         "entries" => typed_entries,
         _ => unreachable!("unknown typed-array prototype method"),
     };
-    super::nf(name, callable)
+    super::native_method(
+        name,
+        match name {
+            "keys" | "values" | "entries" | "reverse" | "toString" | "toReversed"
+            | "toLocaleString" => 0,
+            "subarray" | "slice" | "copyWithin" | "with" => 2,
+            _ => 1,
+        },
+        callable,
+        None,
+    )
 }
 
-fn typed_at(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
+fn typed_at(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let view = validated_typed_source(&this)?;
     let length = view.effective_length();
-    let index =
-        crate::value::to_integer_or_infinity(a.first().map(|v| v.to_number()).unwrap_or(0.0));
+    let index = crate::value::to_integer_or_infinity(
+        i.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?,
+    );
     let index = if index < 0.0 {
         length as f64 + index
     } else {
@@ -1990,6 +2089,34 @@ fn typed_at(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, Vm
     Ok(read_element(&view, index as usize).unwrap_or(Value::Undefined))
 }
 
+fn typed_to_locale_string(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let v = validated_typed_source(&this)?;
+    let length = v.effective_length();
+    let mut out = crate::JsString::default();
+    for k in 0..length {
+        i.consume_loop()?;
+        if k > 0 {
+            out.push_str(",");
+        }
+        let value = read_element(&v, k).unwrap_or(Value::Undefined);
+        if !matches!(value, Value::Undefined | Value::Null) {
+            let method = i.get_prop_value_str(&value, "toLocaleString")?;
+            let result = i.call_this(
+                &method,
+                value,
+                vec![
+                    a.first().cloned().unwrap_or(Value::Undefined),
+                    a.get(1).cloned().unwrap_or(Value::Undefined),
+                ],
+            )?;
+            out.push_str(i.ecmascript_to_string(&result)?);
+        }
+        if out.len() > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+    }
+    Value::checked_string(out)
+}
 fn typed_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = validated_typed_source(&this)?;
     let length = view.effective_length();
@@ -2021,54 +2148,61 @@ fn typed_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 }
 
 /// `set(source, offset)`: copy elements in, converting as needed.
-fn typed_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
-    let offset =
-        crate::value::to_integer_or_infinity(a.get(1).map(|v| v.to_number()).unwrap_or(0.0));
-    if !offset.is_finite() || offset < 0.0 {
+fn typed_set(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let v = require(&t)?;
+    let offset = crate::value::to_integer_or_infinity(
+        i.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?,
+    );
+    if offset < 0. {
         return Err(range_err("Invalid offset"));
     }
-    let offset = offset as usize;
-    let items = match a.first() {
-        Some(Value::TypedArray(source)) => read_all(source),
-        Some(Value::Array(items)) => items.borrow().clone(),
-        Some(other) => interp.iterate(other)?,
-        None => Vec::new(),
-    };
-    if offset
-        .checked_add(items.len())
-        .is_none_or(|end| end > view.effective_length())
-    {
-        return Err(range_err("Source is too large"));
+    if v.is_out_of_bounds() {
+        return Err(VmErr::Msg("TypeError: TypedArray out of bounds".into()));
     }
-    for (index, item) in items.iter().enumerate() {
-        write_element_in(interp, &view, offset + index, item)?;
-    }
-    Ok(Value::Undefined)
-}
-
-/// Resolve a `[start, end)` window over `length` elements, applying the
-/// negative-index and clamping rules the array methods share.
-fn window(length: usize, a: &[Value]) -> (usize, usize) {
-    let resolve = |value: Option<&Value>, default: usize| -> usize {
-        match value {
-            Some(Value::Undefined) | None => default,
-            Some(v) => {
-                let n = crate::value::to_integer_or_infinity(v.to_number());
-                if !n.is_finite() {
-                    return if n > 0.0 { length } else { 0 };
-                }
-                if n < 0.0 {
-                    ((length as f64 + n).max(0.0)) as usize
-                } else {
-                    (n as usize).min(length)
-                }
+    let len = v.effective_length();
+    let source = a.first().cloned().unwrap_or(Value::Undefined);
+    if let Value::TypedArray(ref other) = source {
+        if other.is_out_of_bounds() {
+            return Err(VmErr::Msg("TypeError: source out of bounds".into()));
+        }
+        let count = other.effective_length();
+        if offset + count as f64 > len as f64 {
+            return Err(range_err("Source is too large"));
+        }
+        if is_bigint_kind(v.kind) != is_bigint_kind(other.kind) {
+            return Err(VmErr::Msg(
+                "TypeError: incompatible typed array content types".into(),
+            ));
+        }
+        if v.kind == other.kind {
+            let bytes = other
+                .buffer
+                .read(other.byte_offset, count * other.kind.size())
+                .unwrap();
+            v.buffer
+                .write(v.byte_offset + offset as usize * v.kind.size(), &bytes);
+        } else {
+            let values = read_all(other);
+            for (k, x) in values.iter().enumerate() {
+                i.consume_loop()?;
+                write_element_in(i, &v, offset as usize + k, x)?;
             }
         }
-    };
-    let start = resolve(a.first(), 0);
-    let end = resolve(a.get(1), length).max(start);
-    (start, end)
+        return Ok(Value::Undefined);
+    }
+    let object = super::object::to_object_receiver(&source)?;
+    let l = i.get_prop_value_str(&object, "length")?;
+    let count = crate::value::to_integer_or_infinity(i.ecmascript_to_number(&l)?)
+        .clamp(0., 9_007_199_254_740_991.);
+    if offset + count > len as f64 {
+        return Err(range_err("Source is too large"));
+    }
+    for k in 0..count as usize {
+        i.consume_loop()?;
+        let x = i.get_prop_value_str(&object, &k.to_string())?;
+        write_element_in(i, &v, offset as usize + k, &x)?;
+    }
+    Ok(Value::Undefined)
 }
 
 fn window_in(
@@ -2155,15 +2289,20 @@ fn typed_slice(
 }
 
 fn typed_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let view = require(&this)?;
+    let view = validated_typed_source(&this)?;
+    let len = view.effective_length();
     let input = a.first().cloned().unwrap_or(Value::Undefined);
     let value = if is_bigint_kind(view.kind) {
         interp.ecmascript_to_bigint(&input)?
     } else {
         Value::Number(interp.ecmascript_to_number(&input)?)
     };
-    let (start, end) = window(view.effective_length(), &a[1.min(a.len())..]);
+    let (start, end) = window_in(interp, len, &a[1.min(a.len())..])?;
+    if view.is_out_of_bounds() {
+        return Err(VmErr::Msg("TypeError: TypedArray out of bounds".into()));
+    }
     for index in start..end {
+        interp.consume_loop()?;
         write_element(&view, index, &value)?;
     }
     Ok(this)
@@ -2316,6 +2455,20 @@ fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
     {
         return Err(range_err("Invalid DataView length"));
     }
+    let prototype = buffer_constructor_prototype(interp, "DataView")?;
+    if backing.is_detached() {
+        return Err(VmErr::Msg("TypeError: detached DataView buffer".into()));
+    }
+    if byte_offset > backing.len()
+        || (a.get(2).is_some_and(|v| !matches!(v, Value::Undefined))
+            && byte_offset
+                .checked_add(byte_length)
+                .is_none_or(|end| end > backing.len()))
+    {
+        return Err(range_err("Invalid DataView length"));
+    }
+    let properties = Value::instance_properties();
+    properties.set_proto(prototype);
     let length_tracking = match &backing {
         BufferBacking::Array(buffer) => buffer.is_resizable(),
         BufferBacking::Shared(buffer) => buffer.is_growable(),
@@ -2324,7 +2477,7 @@ fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
         .is_none_or(|length| matches!(length, Value::Undefined));
     Ok(Value::DataView(Rc::new(TypedArrayData {
         length_tracking,
-        properties: Value::instance_properties(),
+        properties,
         kind: TypedKind::Uint8,
         buffer: backing,
         byte_offset,
@@ -2336,32 +2489,41 @@ fn new_data_view(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
 /// `DataView` accessors. Each `get`/`set` pair names its element type, and
 /// takes a `littleEndian` flag defaulting to big-endian — the opposite of the
 /// typed arrays, which is what the specification says.
-pub fn data_view_member(view: &Rc<TypedArrayData>, key: &str) -> Option<Value> {
-    Some(match key {
-        "byteLength" => Value::Number(view.effective_length() as f64),
-        "byteOffset" => Value::Number(view.effective_byte_offset() as f64),
-        "buffer" => view.buffer.to_value(),
-        _ => return None,
-    })
-}
-
-/// A `DataView` element access, resolved as a one-element typed array over the
-/// requested byte offset so the conversion code is shared.
-fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<TypedArrayData>, VmErr> {
+fn require_data_view(this: &Value) -> Result<Rc<TypedArrayData>, VmErr> {
     let Value::DataView(view) = this else {
-        return Err(VmErr::Msg("TypeError: not a DataView".to_string()));
+        return Err(VmErr::Msg("TypeError: not a DataView".into()));
     };
+    Ok(view.clone())
+}
+fn data_view_buffer(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(require_data_view(&this)?.buffer.to_value())
+}
+fn data_view_byte_length(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let v = require_data_view(&this)?;
+    if v.is_out_of_bounds() {
+        return Err(VmErr::Msg("TypeError: DataView out of bounds".into()));
+    }
+    Ok(Value::Number(v.effective_length() as f64))
+}
+fn data_view_byte_offset(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let v = require_data_view(&this)?;
+    if v.is_out_of_bounds() {
+        return Err(VmErr::Msg("TypeError: DataView out of bounds".into()));
+    }
+    Ok(Value::Number(v.byte_offset as f64))
+}
+fn data_view_slot(
+    view: &Rc<TypedArrayData>,
+    offset: usize,
+    kind: TypedKind,
+) -> Result<Rc<TypedArrayData>, VmErr> {
     if view.is_out_of_bounds() {
-        return Err(VmErr::Msg(
-            "TypeError: Cannot access a DataView backed by a detached ArrayBuffer".to_string(),
-        ));
+        return Err(VmErr::Msg("TypeError: DataView out of bounds".into()));
     }
-    let offset = a.first().map(|v| v.to_number()).unwrap_or(0.0);
-    if !offset.is_finite() || offset < 0.0 {
-        return Err(range_err("Offset is outside the DataView"));
-    }
-    let offset = offset as usize;
-    if offset + kind.size() > view.effective_length() {
+    if offset
+        .checked_add(kind.size())
+        .is_none_or(|end| end > view.effective_length())
+    {
         return Err(range_err("Offset is outside the DataView"));
     }
     Ok(Rc::new(TypedArrayData {
@@ -2369,52 +2531,91 @@ fn data_view_slot(this: &Value, a: &[Value], kind: TypedKind) -> Result<Rc<Typed
         properties: Value::instance_properties(),
         kind,
         buffer: view.buffer.clone(),
-        byte_offset: view.effective_byte_offset() + offset,
+        byte_offset: view.byte_offset + offset,
         length: 1,
         is_buffer: false,
     }))
 }
 
-fn swap_if_big_endian(slot: &Rc<TypedArrayData>, little_endian: bool) {
-    if little_endian || slot.kind.size() == 1 {
-        return;
-    }
-    let at = slot.byte_offset;
-    let size = slot.kind.size();
-    if let Some(mut bytes) = slot.buffer.read(at, size) {
+fn data_view_write(slot: &Rc<TypedArrayData>, value: &Value, little: bool) -> Result<(), VmErr> {
+    let buffer = BufferBacking::Array(Buffer::zeroed(slot.kind.size()));
+    let local = Rc::new(TypedArrayData {
+        length_tracking: false,
+        properties: Value::instance_properties(),
+        kind: slot.kind,
+        buffer,
+        byte_offset: 0,
+        length: 1,
+        is_buffer: false,
+    });
+    write_element(&local, 0, value)?;
+    let mut bytes = local.buffer.read(0, slot.kind.size()).unwrap();
+    if !little {
         bytes.reverse();
-        slot.buffer.write(at, &bytes);
     }
+    slot.buffer.write(slot.byte_offset, &bytes);
+    Ok(())
 }
 
-fn data_view_get_kind(this: Value, a: Vec<Value>, kind: TypedKind) -> Result<Value, VmErr> {
-    let slot = data_view_slot(&this, &a, kind)?;
+fn data_view_get_kind(
+    i: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+    kind: TypedKind,
+) -> Result<Value, VmErr> {
+    let view = require_data_view(&this)?;
+    let offset = constructor_index(i, a.first())?;
+    let slot = data_view_slot(&view, offset, kind)?;
     let little_endian = a.get(1).map(|v| v.is_truthy()).unwrap_or(false);
-    swap_if_big_endian(&slot, little_endian);
-    let value = read_element(&slot, 0).unwrap_or(Value::Undefined);
-    // Restore the bytes: the read is not supposed to mutate the buffer.
-    swap_if_big_endian(&slot, little_endian);
-    Ok(value)
+    let mut bytes = slot
+        .buffer
+        .read(slot.byte_offset, kind.size())
+        .ok_or_else(|| range_err("Invalid DataView read"))?;
+    if !little_endian {
+        bytes.reverse();
+    }
+    let local = Rc::new(TypedArrayData {
+        length_tracking: false,
+        properties: Value::instance_properties(),
+        kind,
+        buffer: BufferBacking::Array(Buffer::owned(bytes)),
+        byte_offset: 0,
+        length: 1,
+        is_buffer: false,
+    });
+    Ok(read_element(&local, 0).unwrap_or(Value::Undefined))
 }
 
-fn data_view_set_kind(this: Value, a: Vec<Value>, kind: TypedKind) -> Result<Value, VmErr> {
-    let slot = data_view_slot(&this, &a, kind)?;
-    let value = a.get(1).cloned().unwrap_or(Value::Undefined);
-    write_element(&slot, 0, &value)?;
-    let little_endian = a.get(2).map(|v| v.is_truthy()).unwrap_or(false);
-    swap_if_big_endian(&slot, little_endian);
+fn data_view_set_kind(
+    i: &mut Interpreter,
+    this: Value,
+    a: Vec<Value>,
+    kind: TypedKind,
+) -> Result<Value, VmErr> {
+    let view = require_data_view(&this)?;
+    let offset = constructor_index(i, a.first())?;
+    let undefined = Value::Undefined;
+    let value = a.get(1).unwrap_or(&undefined);
+    let value = if matches!(kind, TypedKind::BigInt64 | TypedKind::BigUint64) {
+        i.ecmascript_to_bigint(value)?
+    } else {
+        Value::Number(i.ecmascript_to_number(value)?)
+    };
+    let little = a.get(2).is_some_and(Value::is_truthy);
+    let slot = data_view_slot(&view, offset, kind)?;
+    data_view_write(&slot, &value, little)?;
     Ok(Value::Undefined)
 }
 
 macro_rules! data_view_accessors {
     ($(($get_fn:ident, $set_fn:ident, $kind:ident, $get_name:literal, $set_name:literal)),* $(,)?) => {
         $(
-            fn $get_fn(_: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-                data_view_get_kind(this, args, TypedKind::$kind)
+            fn $get_fn(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+                data_view_get_kind(i, this, args, TypedKind::$kind)
             }
 
-            fn $set_fn(_: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-                data_view_set_kind(this, args, TypedKind::$kind)
+            fn $set_fn(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+                data_view_set_kind(i, this, args, TypedKind::$kind)
             }
         )*
     };
@@ -2804,4 +3005,374 @@ runClonedWaiter()"#;
             );
         }
     }
+}
+
+fn float16_bits(n: f64) -> u16 {
+    let sign = if n.is_sign_negative() { 0x8000 } else { 0 };
+    let n = n.abs();
+    if n.is_nan() {
+        return sign | 0x7e00;
+    }
+    if n >= 65520. {
+        return sign | 0x7c00;
+    }
+    if n < 2f64.powi(-14) {
+        return sign | (n * 2f64.powi(24)).round_ties_even() as u16;
+    }
+    let exponent = ((n.to_bits() >> 52) & 0x7ff) as i32 - 1023;
+    let mantissa = (n / 2f64.powi(exponent - 10)).round_ties_even() as u16;
+    sign | (((exponent + 14) as u16) << 10).wrapping_add(mantissa)
+}
+fn float16_number(bits: u16) -> f64 {
+    let exp = (bits >> 10) & 31;
+    let mantissa = bits & 1023;
+    let n = match exp {
+        0 => (mantissa as f64) * 2f64.powi(-24),
+        31 => {
+            if mantissa == 0 {
+                f64::INFINITY
+            } else {
+                f64::NAN
+            }
+        }
+        _ => ((1024 + mantissa) as f64) * 2f64.powi(exp as i32 - 25),
+    };
+    if bits & 0x8000 != 0 { -n } else { n }
+}
+fn data_view_get_float16(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let v = data_view_get_kind(i, this, a, TypedKind::Uint16)?;
+    Ok(Value::Number(float16_number(v.to_number() as u16)))
+}
+fn data_view_set_float16(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let view = require_data_view(&this)?;
+    let offset = constructor_index(i, a.first())?;
+    let n = i.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?;
+    let little = a.get(2).is_some_and(Value::is_truthy);
+    let slot = data_view_slot(&view, offset, TypedKind::Uint16)?;
+    data_view_write(&slot, &Value::Number(float16_bits(n) as f64), little)?;
+    Ok(Value::Undefined)
+}
+
+fn typed_find_last(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "findLast")
+}
+fn typed_find_last_index(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "findLastIndex")
+}
+fn typed_reduce_right(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_callback(i, t, a, "reduceRight")
+}
+fn typed_callback(
+    i: &mut Interpreter,
+    t: Value,
+    a: Vec<Value>,
+    name: &str,
+) -> Result<Value, VmErr> {
+    let view = validated_typed_source(&t)?;
+    let len = view.effective_length();
+    let callback = super::array::callback(&a)?;
+    let reduce = matches!(name, "reduce" | "reduceRight");
+    let reverse = matches!(name, "reduceRight" | "findLast" | "findLastIndex");
+    let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let mut acc = receiver.clone();
+    let mut first = 0;
+    if reduce && a.len() < 2 {
+        if len == 0 {
+            return Err(VmErr::Msg("TypeError: Reduce of empty typed array".into()));
+        }
+        acc = read_element(&view, if reverse { len - 1 } else { 0 }).unwrap_or(Value::Undefined);
+        first = 1;
+    }
+    for step in first..len {
+        i.consume_loop()?;
+        let k = if reverse { len - 1 - step } else { step };
+        let v = read_element(&view, k).unwrap_or(Value::Undefined);
+        if reduce {
+            acc = i.call_this(
+                &callback,
+                Value::Undefined,
+                vec![acc, v, Value::Number(k as f64), t.clone()],
+            )?;
+            continue;
+        }
+        let result = i
+            .call_this(
+                &callback,
+                receiver.clone(),
+                vec![v.clone(), Value::Number(k as f64), t.clone()],
+            )?
+            .is_truthy();
+        match name {
+            "every" if !result => return Ok(Value::Bool(false)),
+            "some" if result => return Ok(Value::Bool(true)),
+            "find" | "findLast" if result => return Ok(v),
+            "findIndex" | "findLastIndex" if result => return Ok(Value::Number(k as f64)),
+            _ => {}
+        }
+    }
+    Ok(match name {
+        "reduce" | "reduceRight" => acc,
+        "every" => Value::Bool(true),
+        "some" => Value::Bool(false),
+        "findIndex" | "findLastIndex" => Value::Number(-1.),
+        _ => Value::Undefined,
+    })
+}
+
+fn typed_tag_getter(_: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(match t {
+        Value::TypedArray(ref v) => Value::String(v.kind.name().into()),
+        _ => Value::Undefined,
+    })
+}
+
+fn typed_relative(
+    i: &mut Interpreter,
+    v: Option<&Value>,
+    len: usize,
+    default: usize,
+) -> Result<usize, VmErr> {
+    let Some(v) = v else { return Ok(default) };
+    if matches!(v, Value::Undefined) {
+        return Ok(default);
+    }
+    let n = i.ecmascript_to_number(v)?;
+    let n = if n.is_nan() { 0. } else { n.trunc() };
+    Ok(if n < 0. {
+        (len as f64 + n).clamp(0., len as f64) as usize
+    } else {
+        n.min(len as f64) as usize
+    })
+}
+fn typed_copy_within(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let v = validated_typed_source(&t)?;
+    let len = v.effective_length();
+    let to = typed_relative(i, a.first(), len, 0)?;
+    let from = typed_relative(i, a.get(1), len, 0)?;
+    let end = typed_relative(i, a.get(2), len, len)?;
+    let count = end.saturating_sub(from).min(len - to);
+    if count == 0 {
+        return Ok(t);
+    }
+    if v.is_out_of_bounds() {
+        return Err(VmErr::Msg("TypeError: TypedArray out of bounds".into()));
+    }
+    let current = v.effective_length();
+    let count = count
+        .min(current.saturating_sub(to))
+        .min(current.saturating_sub(from));
+    if count > 0 {
+        i.consume_loop()?;
+        let size = v.kind.size();
+        let bytes = v
+            .buffer
+            .read(v.byte_offset + from * size, count * size)
+            .unwrap();
+        v.buffer.write(v.byte_offset + to * size, &bytes);
+    }
+    Ok(t)
+}
+fn typed_reverse(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let v = validated_typed_source(&t)?;
+    let len = v.effective_length();
+    let size = v.kind.size();
+    for k in 0..len / 2 {
+        i.consume_loop()?;
+        let a = v.byte_offset + k * size;
+        let b = v.byte_offset + (len - 1 - k) * size;
+        let first = v.buffer.read(a, size).unwrap();
+        let last = v.buffer.read(b, size).unwrap();
+        v.buffer.write(a, &last);
+        v.buffer.write(b, &first);
+    }
+    Ok(t)
+}
+
+fn typed_with(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let v = validated_typed_source(&t)?;
+    let len = v.effective_length();
+    let n = crate::value::to_integer_or_infinity(
+        i.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?,
+    );
+    let k = if n < 0. { len as f64 + n } else { n };
+    let x = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let x = if is_bigint_kind(v.kind) {
+        i.ecmascript_to_bigint(&x)?
+    } else {
+        Value::Number(i.ecmascript_to_number(&x)?)
+    };
+    if !k.is_finite() || k < 0. || k >= v.effective_length() as f64 {
+        return Err(range_err("Invalid typed array index"));
+    }
+    let result = allocate_typed(v.kind, len)?;
+    let dest = require(&result)?;
+    for j in 0..len {
+        i.consume_loop()?;
+        let value = if j == k as usize {
+            x.clone()
+        } else {
+            read_element(&v, j).unwrap_or(Value::Undefined)
+        };
+        write_element_in(i, &dest, j, &value)?;
+    }
+    Ok(result)
+}
+fn typed_to_reversed(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let v = validated_typed_source(&t)?;
+    let len = v.effective_length();
+    let result = allocate_typed(v.kind, len)?;
+    let dest = require(&result)?;
+    let size = v.kind.size();
+    for k in 0..len {
+        i.consume_loop()?;
+        let bytes = v
+            .buffer
+            .read(v.byte_offset + (len - 1 - k) * size, size)
+            .unwrap();
+        dest.buffer.write(k * size, &bytes);
+    }
+    Ok(result)
+}
+fn typed_search(i: &mut Interpreter, t: Value, a: Vec<Value>, name: &str) -> Result<Value, VmErr> {
+    let v = validated_typed_source(&t)?;
+    let len = v.effective_length();
+    let found = |k: Option<usize>| {
+        if name == "includes" {
+            Value::Bool(k.is_some())
+        } else {
+            Value::Number(k.map(|k| k as f64).unwrap_or(-1.))
+        }
+    };
+    if len == 0 {
+        return Ok(found(None));
+    }
+    let needle = a.first().cloned().unwrap_or(Value::Undefined);
+    let last = name == "lastIndexOf";
+    let n = if last && a.len() < 2 {
+        len as f64 - 1.
+    } else {
+        crate::value::to_integer_or_infinity(
+            i.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?,
+        )
+    };
+    let k = if n < 0. { len as f64 + n } else { n };
+    let mut k = if last {
+        k.min(len as f64 - 1.)
+    } else {
+        k.max(0.)
+    };
+    while k >= 0. && k < len as f64 {
+        i.consume_loop()?;
+        let value = read_element(&v, k as usize).unwrap_or(Value::Undefined);
+        let equal = (name == "includes" || !matches!(value, Value::Undefined))
+            && i.seq(&value, &needle)
+            || name == "includes"
+                && matches!((&value,&needle),(Value::Number(a),Value::Number(b)) if a.is_nan()&&b.is_nan());
+        if equal {
+            return Ok(found(Some(k as usize)));
+        }
+        k += if last { -1. } else { 1. };
+    }
+    Ok(found(None))
+}
+fn typed_sort_compare(
+    i: &mut Interpreter,
+    a: &Value,
+    b: &Value,
+    cmp: &Value,
+) -> Result<std::cmp::Ordering, VmErr> {
+    if !matches!(cmp, Value::Undefined) {
+        let r = i.call_this(cmp, Value::Undefined, vec![a.clone(), b.clone()])?;
+        let n = i.ecmascript_to_number(&r)?;
+        return Ok(if n < 0. {
+            std::cmp::Ordering::Less
+        } else if n > 0. {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        });
+    }
+    if let (Value::BigInt(a), Value::BigInt(b)) = (a, b) {
+        return Ok(a.compare(b));
+    }
+    let a = a.to_number();
+    let b = b.to_number();
+    Ok(if a.is_nan() {
+        if b.is_nan() {
+            std::cmp::Ordering::Equal
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    } else if b.is_nan() {
+        std::cmp::Ordering::Less
+    } else if a == 0. && b == 0. {
+        b.is_sign_negative().cmp(&a.is_sign_negative())
+    } else {
+        a.partial_cmp(&b).unwrap()
+    })
+}
+fn typed_sort_values(
+    i: &mut Interpreter,
+    values: &mut Vec<Value>,
+    cmp: &Value,
+) -> Result<(), VmErr> {
+    let len = values.len();
+    let mut width = 1;
+    while width < len {
+        let mut out = Vec::with_capacity(len);
+        for start in (0..len).step_by(width * 2) {
+            let mid = (start + width).min(len);
+            let end = (start + 2 * width).min(len);
+            let (mut a, mut b) = (start, mid);
+            while a < mid && b < end {
+                i.consume_loop()?;
+                if typed_sort_compare(i, &values[a], &values[b], cmp)?
+                    != std::cmp::Ordering::Greater
+                {
+                    out.push(values[a].clone());
+                    a += 1;
+                } else {
+                    out.push(values[b].clone());
+                    b += 1;
+                }
+            }
+            out.extend_from_slice(&values[a..mid]);
+            out.extend_from_slice(&values[b..end]);
+        }
+        *values = out;
+        width *= 2;
+    }
+    Ok(())
+}
+fn typed_sort(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_sort_impl(i, t, a, false)
+}
+fn typed_to_sorted(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    typed_sort_impl(i, t, a, true)
+}
+fn typed_sort_impl(
+    i: &mut Interpreter,
+    t: Value,
+    a: Vec<Value>,
+    copy: bool,
+) -> Result<Value, VmErr> {
+    let cmp = a.first().cloned().unwrap_or(Value::Undefined);
+    if !matches!(cmp, Value::Undefined) && !crate::interpreter::call::is_callable_value(&cmp) {
+        return Err(VmErr::Msg("TypeError: comparator must be callable".into()));
+    }
+    let v = validated_typed_source(&t)?;
+    let len = v.effective_length();
+    let result = if copy {
+        allocate_typed(v.kind, len)?
+    } else {
+        t
+    };
+    let dest = require(&result)?;
+    let mut values = read_all(&v);
+    typed_sort_values(i, &mut values, &cmp)?;
+    for (k, x) in values.iter().enumerate() {
+        i.consume_loop()?;
+        write_element(&dest, k, x)?;
+    }
+    Ok(result)
 }

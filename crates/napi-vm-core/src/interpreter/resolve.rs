@@ -1492,16 +1492,7 @@ impl Interpreter {
                 }
                 Ok(Value::Undefined)
             }
-            Value::DataView(view) => {
-                if view.is_out_of_bounds() && matches!(k, "byteLength" | "byteOffset") {
-                    return Err(VmErr::Msg(
-                        "TypeError: Cannot access a DataView backed by a detached ArrayBuffer"
-                            .to_string(),
-                    ));
-                }
-                if let Some(value) = crate::builtins::data_view_member(view, k) {
-                    return Ok(value);
-                }
+            Value::DataView(_) => {
                 if let Some(prototype) = self.prototype_of(o) {
                     return self.prop_str(&prototype, k);
                 }

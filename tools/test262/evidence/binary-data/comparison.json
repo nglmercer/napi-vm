@@ -1,0 +1,20 @@
+{
+  "baseline": "temporal-zoned-release-full.json",
+  "transitions": [
+    {
+      "before": "pass",
+      "after": "pass",
+      "count": 2644
+    },
+    {
+      "before": "fail",
+      "after": "pass",
+      "count": 940
+    },
+    {
+      "before": "fail",
+      "after": "fail",
+      "count": 428
+    }
+  ]
+}

@@ -225,6 +225,17 @@ fn string_substring(
     };
     bounded_string(s.slice(a.min(b), a.max(b)))
 }
+fn string_substr(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let s = str_this(interp, &this)?;
+    let n = position(interp, &args, 0, 0.0)?;
+    let start = clamp(if n < 0.0 { s.len() as f64 + n } else { n }, s.len());
+    let count = if matches!(args.get(1), None | Some(Value::Undefined)) {
+        s.len() - start
+    } else {
+        clamp(position(interp, &args, 1, 0.0)?, s.len() - start)
+    };
+    bounded_string(s.slice(start, start + count))
+}
 fn reject_regexp(args: &[Value]) -> Result<(), VmErr> {
     if args.first().is_some_and(|v| v.as_regexp().is_some()) {
         Err(VmErr::Msg(
@@ -543,6 +554,7 @@ pub(super) fn install(e: &mut Environment) {
             "trim",
             "slice",
             "substring",
+            "substr",
             "split",
             "match",
             "matchAll",
@@ -571,6 +583,49 @@ pub(super) fn install(e: &mut Environment) {
         .into_iter()
         .filter_map(|name| super::string_method(name).map(|method| (name, method)))
         .collect();
+        methods.push((
+            "anchor",
+            super::native_method("anchor", 1, string_html_anchor, None),
+        ));
+        methods.push(("big", super::native_method("big", 0, string_html_big, None)));
+        methods.push((
+            "blink",
+            super::native_method("blink", 0, string_html_blink, None),
+        ));
+        methods.push((
+            "bold",
+            super::native_method("bold", 0, string_html_bold, None),
+        ));
+        methods.push((
+            "fixed",
+            super::native_method("fixed", 0, string_html_fixed, None),
+        ));
+        methods.push((
+            "fontcolor",
+            super::native_method("fontcolor", 1, string_html_fontcolor, None),
+        ));
+        methods.push((
+            "fontsize",
+            super::native_method("fontsize", 1, string_html_fontsize, None),
+        ));
+        methods.push((
+            "italics",
+            super::native_method("italics", 0, string_html_italics, None),
+        ));
+        methods.push((
+            "link",
+            super::native_method("link", 1, string_html_link, None),
+        ));
+        methods.push((
+            "small",
+            super::native_method("small", 0, string_html_small, None),
+        ));
+        methods.push((
+            "strike",
+            super::native_method("strike", 0, string_html_strike, None),
+        ));
+        methods.push(("sub", super::native_method("sub", 0, string_html_sub, None)));
+        methods.push(("sup", super::native_method("sup", 0, string_html_sup, None)));
         methods.push(("toString", nf("toString", string_value_of)));
         methods.push(("valueOf", nf("valueOf", string_value_of)));
         super::install_primitive_prototype(e, &s, Value::String((String::new()).into()), methods);
@@ -605,6 +660,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("slice", 2),
                 ("split", 2),
                 ("substring", 2),
+                ("substr", 2),
                 ("isWellFormed", 0),
                 ("toWellFormed", 0),
                 ("toLowerCase", 0),
@@ -616,6 +672,22 @@ pub(super) fn install(e: &mut Environment) {
                 ("valueOf", 0),
             ],
         );
+        for (alias, name) in [("trimLeft", "trimStart"), ("trimRight", "trimEnd")] {
+            let method = prototype.get_prop(name).unwrap();
+            prototype.set_prop(alias.into(), method).unwrap();
+            prototype
+                .property_cell()
+                .unwrap()
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    alias,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+        }
     }
 }
 
@@ -626,6 +698,7 @@ pub fn string_method(name: &str) -> Option<Value> {
         "trim" => string_trim,
         "slice" => string_slice,
         "substring" => string_substring,
+        "substr" => string_substr,
         "split" => string_split,
         "match" => super::regexp::string_match,
         "matchAll" => super::regexp::string_match_all,
@@ -653,4 +726,132 @@ pub fn string_method(name: &str) -> Option<Value> {
         _ => return None,
     };
     Some(nf(name, f))
+}
+
+fn string_html(
+    i: &mut Interpreter,
+    t: Value,
+    a: Vec<Value>,
+    tag: &str,
+    attribute: &str,
+) -> Result<Value, VmErr> {
+    let text = str_this(i, &t)?;
+    let mut out = JsString::from(format!("<{tag}"));
+    if !attribute.is_empty() {
+        let value = arg_string(i, &a, 0)?;
+        out.push_str(format!(" {attribute}=\""));
+        for unit in value.units() {
+            if *unit == 34 {
+                out.push_str("&quot;");
+            } else {
+                out.push_str(JsString::from_units(vec![*unit]));
+            }
+            if out.len() > crate::value::MAX_STRING_LEN {
+                return Err(crate::value::limit_err("Maximum string length exceeded"));
+            }
+        }
+        out.push_str("\"");
+    }
+    out.push_str(">");
+    out.push_str(text);
+    out.push_str(format!("</{tag}>"));
+    bounded_string(out)
+}
+fn string_html_anchor(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "a", "name")
+}
+fn string_html_big(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "big", "")
+}
+fn string_html_blink(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "blink", "")
+}
+fn string_html_bold(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "b", "")
+}
+fn string_html_fixed(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "tt", "")
+}
+fn string_html_fontcolor(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "font", "color")
+}
+fn string_html_fontsize(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "font", "size")
+}
+fn string_html_italics(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "i", "")
+}
+fn string_html_link(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "a", "href")
+}
+fn string_html_small(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "small", "")
+}
+fn string_html_strike(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "strike", "")
+}
+fn string_html_sub(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "sub", "")
+}
+fn string_html_sup(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    string_html(i, t, a, "sup", "")
+}
+
+pub(super) fn legacy_escape(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let text = arg_string(i, &a, 0)?;
+    let mut out = String::new();
+    for &u in text.units() {
+        i.consume_loop()?;
+        if u < 128 && ((u as u8).is_ascii_alphanumeric() || b"@*_+-./".contains(&(u as u8))) {
+            out.push(u as u8 as char);
+        } else if u < 256 {
+            out.push_str(&format!("%{u:02X}"));
+        } else {
+            out.push_str(&format!("%u{u:04X}"));
+        }
+        if out.len() > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+    }
+    bounded_string(out)
+}
+pub(super) fn legacy_unescape(
+    i: &mut Interpreter,
+    _: Value,
+    a: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let text = arg_string(i, &a, 0)?;
+    let units = text.units();
+    let mut out = Vec::new();
+    let mut p = 0;
+    while p < units.len() {
+        i.consume_loop()?;
+        if units[p] == 37 {
+            let (start, count) = if units.get(p + 1) == Some(&117) {
+                (p + 2, 4)
+            } else {
+                (p + 1, 2)
+            };
+            if start + count <= units.len() {
+                let mut value = 0u16;
+                let mut valid = true;
+                for &u in &units[start..start + count] {
+                    if let Some(n) = char::from_u32(u as u32).and_then(|c| c.to_digit(16)) {
+                        value = value * 16 + n as u16;
+                    } else {
+                        valid = false;
+                        break;
+                    }
+                }
+                if valid {
+                    out.push(value);
+                    p = start + count;
+                    continue;
+                }
+            }
+        }
+        out.push(units[p]);
+        p += 1;
+    }
+    bounded_string(JsString::from_units(out))
 }

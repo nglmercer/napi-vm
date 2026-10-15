@@ -1,0 +1,20 @@
+{
+  "baseline": "temporal-time-duration-full.json overlaid with temporal-plain-date-focused-final.json",
+  "transitions": [
+    {
+      "before": "pass",
+      "after": "pass",
+      "count": 3006
+    },
+    {
+      "before": "fail",
+      "after": "pass",
+      "count": 2438
+    },
+    {
+      "before": "fail",
+      "after": "fail",
+      "count": 344
+    }
+  ]
+}

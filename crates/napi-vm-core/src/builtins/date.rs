@@ -763,7 +763,7 @@ fn date_now(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr
 /// Milliseconds since the Unix epoch. On native targets this reads the system
 /// clock; on `wasm32` (where `SystemTime` panics) it asks the JS host.
 #[cfg(not(target_arch = "wasm32"))]
-fn now_ms() -> f64 {
+pub(super) fn now_ms() -> f64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as f64)
@@ -771,7 +771,7 @@ fn now_ms() -> f64 {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn now_ms() -> f64 {
+pub(super) fn now_ms() -> f64 {
     js_sys::Date::now()
 }
 

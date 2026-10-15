@@ -1,0 +1,19 @@
+{
+  "baseline": "evidence/binary-data/full.json.gz",
+  "baseline_pass": 91224,
+  "current_pass": 92800,
+  "total": 102956,
+  "gained": 1580,
+  "lost": 4,
+  "required_pass": 92661,
+  "above_threshold": 139,
+  "counts": {
+    "pass": 92800,
+    "fail": 10154,
+    "skip": 0,
+    "timeout": 2,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "engine_sha256": "f13bdc1fd0724206aeffd1d6dc97950be605e3f36290edd222be1430ce58b40e"
+}

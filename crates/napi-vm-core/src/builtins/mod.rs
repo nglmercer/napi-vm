@@ -2,6 +2,7 @@ mod array;
 mod bigint;
 mod collections;
 mod date;
+pub(crate) mod disposable;
 mod error;
 mod function;
 pub(crate) mod iterator;
@@ -48,8 +49,7 @@ pub(crate) use symbol::symbol_for_key;
 pub use symbol::symbol_method;
 pub(crate) use symbol::{is_iterator_symbol, symbol_for, symbol_key_for, well_known};
 pub use typedarray::{
-    array_buffer_member, data_view_member, read_element, shared_array_buffer_member, typed_member,
-    write_element,
+    array_buffer_member, read_element, shared_array_buffer_member, typed_member, write_element,
 };
 pub(crate) use typedarray::{
     canonical_numeric_index, set_integer_index_in, valid_integer_index, write_element_in,
@@ -168,6 +168,7 @@ pub fn setup_builtins(env: &Env) {
     crate::interpreter::resolve::install_iterator_intrinsics(&mut e);
     iterator::install(&mut e);
     temporal::install(&mut e);
+    disposable::install(&mut e);
     e.snapshot_intrinsics();
 }
 
@@ -194,6 +195,8 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     symbol::install(e);
     // Global functions.
     e.set("parseInt", nf("parseInt", number::parse_int));
+    e.set("escape", nf("escape", string::legacy_escape));
+    e.set("unescape", nf("unescape", string::legacy_unescape));
     e.set("parseFloat", nf("parseFloat", number::parse_float));
     e.set("isNaN", nf("isNaN", global_is_nan));
     e.set("isFinite", nf("isFinite", global_is_finite));
