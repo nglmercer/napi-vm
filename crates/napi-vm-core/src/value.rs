@@ -208,6 +208,9 @@ pub struct ObjectMeta {
     /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
     /// BigInt object. Ordinary objects leave this empty.
     pub boxed_primitive: Option<BoxedPrimitive>,
+    /// Whether this object is a function `arguments` exotic object carrying
+    /// a [[ParameterMap]] internal slot.
+    pub(crate) is_arguments: bool,
     /// Presence of [[IsRawJSON]], independent of prototypes and realms.
     pub(crate) raw_json: bool,
     /// Branded Temporal data, inaccessible to guest property operations.
@@ -3100,6 +3103,9 @@ impl Value {
                 .collect(),
         );
         args_obj.set_prop("length".to_string(), Value::Number(args.len() as f64))?;
+        if let Value::Object { props } = &args_obj {
+            props.meta.borrow_mut().is_arguments = true;
+        }
         Ok(args_obj)
     }
 

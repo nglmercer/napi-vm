@@ -889,7 +889,20 @@ fn iterate_projection(
         &array,
         &Value::String((crate::interpreter::SYMBOL_ITERATOR_SLOT.to_string()).into()),
     )?;
-    interp.call_this(&iterator, array, vec![])
+    let iterator = interp.call_this(&iterator, array, vec![])?;
+    // Collection iterators share the array-iterator stepping behavior but
+    // report their own brand through a dedicated prototype, so guest
+    // mutation of one kind's tag never leaks into another's.
+    let intrinsic = match kind_of(this) {
+        Some(Kind::Set) => "%SetIteratorPrototype%",
+        _ => "%MapIteratorPrototype%",
+    };
+    if let Value::Object { props } = &iterator
+        && let Some(prototype) = interp.persistent_global.borrow().intrinsic(intrinsic)
+    {
+        props.set_proto(Some(Rc::new(prototype)));
+    }
+    Ok(iterator)
 }
 
 fn collection_keys(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

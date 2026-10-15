@@ -94,3 +94,11 @@ fn annex_b_accessors_route_through_proxy_traps_and_abrupt_keys() {
         r#"[[true,true,true,true,true],1,true]"#,
     );
 }
+
+#[test]
+fn object_to_string_uses_tags_arguments_and_proxy_brands() {
+    assert_tiers(
+        r#"var t=Object.prototype.toString,log=[];log.push(t.call(function(){return arguments}()));log.push(t.call(new Proxy([],{})));log.push(t.call(new Proxy(function(){},{})));var m=new Map(),it=m[Symbol.iterator]();log.push(t.call(it));var p=new Promise(function(){});log.push(t.call(p));delete Promise.prototype[Symbol.toStringTag];log.push(t.call(p));log.push(t.call(Object(1)));log.push(t.call(new Number(1)));Number.prototype[Symbol.toStringTag]='test262';log.push(t.call(0));delete Number.prototype[Symbol.toStringTag];var s=new Set(),sit=s[Symbol.iterator]();log.push(t.call(sit));JSON.stringify(log);"#,
+        r#"["[object Arguments]","[object Array]","[object Function]","[object Map Iterator]","[object Promise]","[object Object]","[object Number]","[object Number]","[object test262]","[object Set Iterator]"]"#,
+    );
+}

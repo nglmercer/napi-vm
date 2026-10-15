@@ -1272,6 +1272,12 @@ impl Interpreter {
                     Ok(Value::Undefined)
                 }
             }
+            (Value::Promise { .. }, Value::Symbol(symbol)) => {
+                if let Some(value) = lookup_chain_found(self, o, &super::symbol_slot_key(symbol))? {
+                    return Ok(value);
+                }
+                Ok(Value::Undefined)
+            }
             (Value::Generator { .. } | Value::StringIterator { .. }, Value::Symbol(symbol)) => {
                 if let Some(value) = lookup_chain_found(self, o, &super::symbol_slot_key(symbol))? {
                     return Ok(value);
@@ -1873,6 +1879,16 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
             "%StringIteratorPrototype%",
             "String Iterator",
             vec![("next", 0, string_iter_next)],
+        ),
+        (
+            "%MapIteratorPrototype%",
+            "Map Iterator",
+            vec![("next", 0, array_iter_next)],
+        ),
+        (
+            "%SetIteratorPrototype%",
+            "Set Iterator",
+            vec![("next", 0, array_iter_next)],
         ),
         (
             "%GeneratorPrototype%",

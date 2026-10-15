@@ -875,41 +875,55 @@ fn object_is_prototype_of(
     Err(crate::value::limit_err("Maximum prototype depth exceeded"))
 }
 
-fn object_to_string_tag(value: &Value) -> String {
-    match value {
+/// The `builtinTag` fallback of `Object.prototype.toString`: only the
+/// specification's internal-slot brands apply here. Named host brands
+/// (`Map`, `Promise`, iterators, …) come from `@@toStringTag` properties
+/// on prototype objects, so deleting or shadowing a tag falls back to
+/// `"Object"` instead of leaking the value kind.
+fn object_to_string_tag(value: &Value) -> Result<String, VmErr> {
+    // Proxies expose their target's brand; following the links throws on a
+    // revoked proxy, matching `IsArray`'s abrupt path.
+    let mut source = value.clone();
+    while let Value::Proxy(proxy) = &source {
+        source = proxy.snapshot()?.0;
+    }
+    if super::array::is_array(&source)? {
+        return Ok("Array".into());
+    }
+    let callable = crate::interpreter::is_callable_value(&source);
+    let errored = source.is_error_object();
+    Ok(match &source {
         Value::Uninitialized | Value::Undefined => "Undefined".into(),
         Value::Null => "Null".into(),
-        Value::Bool(_) => "Boolean".into(),
-        Value::Number(_) => "Number".into(),
-        Value::String(_) => "String".into(),
-        Value::Symbol(_) => "Symbol".into(),
-        Value::BigInt(_) => "BigInt".into(),
-        Value::Object { .. } if crate::interpreter::is_callable_value(value) => "Function".into(),
-        Value::Object { .. } if value.is_error_object() => "Error".into(),
-        Value::Object { props } => match props.meta.borrow().boxed_primitive.as_ref() {
-            Some(BoxedPrimitive::Bool(_)) => "Boolean".into(),
-            Some(BoxedPrimitive::Number(_)) => "Number".into(),
-            Some(BoxedPrimitive::String(_)) => "String".into(),
-            Some(BoxedPrimitive::Symbol(_)) => "Symbol".into(),
-            Some(BoxedPrimitive::BigInt(_)) => "BigInt".into(),
-            None => crate::builtins::collection_tag(value)
-                .unwrap_or("Object")
-                .into(),
-        },
+        Value::Object { .. } if callable => "Function".into(),
+        Value::Object { .. } if errored => "Error".into(),
+        Value::Object { props } => {
+            let meta = props.meta.borrow();
+            if meta.is_arguments {
+                "Arguments".into()
+            } else {
+                // Primitive wrappers report their brand when no string tag
+                // is found, matching observed engine behavior for both
+                // `ToObject` wrappers and genuine `new` wrappers. Boxed
+                // symbols and bigints stay ordinary objects.
+                match meta.boxed_primitive.as_ref() {
+                    Some(BoxedPrimitive::Bool(_)) => "Boolean".into(),
+                    Some(BoxedPrimitive::Number(_)) => "Number".into(),
+                    Some(BoxedPrimitive::String(_)) => "String".into(),
+                    _ => "Object".into(),
+                }
+            }
+        }
         Value::Array(_) => "Array".into(),
         Value::Function(_)
         | Value::NativeFunction { .. }
         | Value::HostFunction { .. }
         | Value::Class(_) => "Function".into(),
         Value::GlobalObject | Value::RealmGlobal(_) => "global".into(),
-        Value::Promise(_) => "Promise".into(),
-        Value::Generator { .. } => "Generator".into(),
-        Value::StringIterator { .. } => "String Iterator".into(),
         Value::HostPending { .. } | Value::Binding(_) => "Object".into(),
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => "AsyncTask".into(),
         Value::Date(_) => "Date".into(),
-        Value::Proxy(_) => "Object".into(),
         Value::ArrayBuffer(_) => "ArrayBuffer".into(),
         Value::SharedArrayBuffer(_) => "SharedArrayBuffer".into(),
         Value::TypedArray(view) if view.is_buffer => "Uint8Array".into(),
@@ -917,17 +931,27 @@ fn object_to_string_tag(value: &Value) -> String {
         Value::DataView(_) => "DataView".into(),
         Value::RegExp(_) => "RegExp".into(),
         Value::Error(_) => "Error".into(),
-    }
+        // The proxy chain above always resolves, so reaching this arm means
+        // the value kind itself carries no brand.
+        _ => "Object".into(),
+    })
 }
 
 fn object_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let this = this.deref_binding();
-    let mut tag = crate::JsString::from(object_to_string_tag(&this));
-    if !matches!(this, Value::Undefined | Value::Null)
-        && let Some(Value::Symbol(to_string_tag)) =
-            crate::builtins::well_known("toStringTag").as_ref()
+    if matches!(this, Value::Undefined | Value::Uninitialized) {
+        return Ok(Value::String(crate::JsString::from("[object Undefined]")));
+    }
+    if matches!(this, Value::Null) {
+        return Ok(Value::String(crate::JsString::from("[object Null]")));
+    }
+    // Primitives box through `ToObject`, so their prototype's
+    // `@@toStringTag` (or its absence) governs the result.
+    let object = to_object_receiver(&this)?;
+    let mut tag = crate::JsString::from(object_to_string_tag(&object)?.as_str());
+    if let Some(Value::Symbol(to_string_tag)) = crate::builtins::well_known("toStringTag").as_ref()
     {
-        let custom = interp.get_prop_value(&this, &Value::Symbol(to_string_tag.clone()))?;
+        let custom = interp.get_prop_value(&object, &Value::Symbol(to_string_tag.clone()))?;
         if let Value::String(custom) = &custom {
             tag = custom.clone();
         }
