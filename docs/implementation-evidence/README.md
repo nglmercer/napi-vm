@@ -92,3 +92,38 @@ adding `--checkpoint artifacts/test262/full-2026-10-15.checkpoint.jsonl`.
 Runner unit tests pass (`python3 -m unittest discover -s tools/test262`,
 12 tests OK). This establishes a local Linux x64 re-measurement, not a new
 conformance claim: remaining failures are unchanged from the archived triage.
+
+## Conformance clusters after the baseline (2026-10-15)
+
+Focused selections against the same pinned corpus, each compared to its own
+earlier selection run (all comparisons report zero lost passes):
+
+- v-mode string tables (`unicodeSets` + `property-escapes`, 1,454 variants):
+  570 pass, 156 fail, 728 timeout — **+24 passes, 0 lost** vs `sel5`.
+  Includes a first-unit index for string alternatives and a linear
+  repetition-layer loop (the 12k-unit RGI positive run dropped from >120s
+  to ~70ms). Evidence: `artifacts/test262/sel9-2026-10-15.json`,
+  `sel9-2026-10-15-comparison.json`; strings-only `sel8` is 56/56.
+- Annex B accessors (`__lookupGetter__/__lookupSetter__/__defineGetter__/
+  __defineSetter__`, 108 variants): **108/108**. Lookup and define now run
+  through proxy traps with abrupt `ToPropertyKey` and spec-order callable
+  checks. Evidence: `artifacts/test262/objab-2026-10-15.json`.
+- `Object.prototype.toString` (82 variants): **82/82**. Tags resolve from
+  prototype properties with internal-slot-only builtin fallbacks, Arguments
+  exotic detection, proxy-target brands, and dedicated Map/Set iterator
+  prototypes. Full `built-ins/Object` + `built-ins/Promise` (8,260 variants):
+  8,137 pass — **+32 passes, 0 lost** on the Object paths.
+  Evidence: `artifacts/test262/objts-2026-10-15.json`,
+  `artifacts/test262/objp-2026-10-15.json`.
+- Float16: `Math/f16round` + DataView `getFloat16`/`setFloat16`
+  (100 variants): **100/100**. `Math.f16round` reuses DataView's
+  round-ties-even conversion after the `half` crate mis-rounded
+  just-above-midpoint subnormals. Evidence:
+  `artifacts/test262/f16b-2026-10-15.json`.
+- URI codecs (342/346, 4 guest-loop-bound timeouts) and Array
+  slice/splice length handling were measured in earlier selections the same
+  day; each landed with a maintained regression test and zero lost passes.
+
+A full pinned re-baseline pass is in progress
+(`artifacts/test262/full-results-2026-10-15c.json`); until it lands, the
+95.1960% headline above remains the last complete measurement.

@@ -518,6 +518,11 @@ dashboard, failure triage, and the comparison are generated under
 `full-2026-10-15.html`, `full-2026-10-15-triage.json`,
 `full-2026-10-15-comparison.json`); see
 [tools/test262/README.md](tools/test262/README.md) to reproduce.
+Focused follow-up clusters landed after that snapshot (v-mode string tables,
+Annex B accessors, `Object.prototype.toString`, Float16 — each with zero
+lost passes); see
+[docs/implementation-evidence/README.md](docs/implementation-evidence/README.md).
+A full pinned re-baseline is in progress.
 
 ## License
 
