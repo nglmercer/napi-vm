@@ -87,6 +87,16 @@ pub enum Instr {
     HoistVarGlobal {
         name: u16,
     },
+    /// Web-compatible block-function var binding, conditional on realm state.
+    AnnexBInit {
+        name: u16,
+    },
+    /// Update the variable environment when its block declaration executes.
+    AnnexBUpdate {
+        name: u16,
+        src: Reg,
+        slot: Option<Slot>,
+    },
     /// A bare `var x;` on a slot: no-op when initialized, dead-zone error
     /// otherwise (a merged `let` may still be uninitialized).
     BareVarLocal {
@@ -626,6 +636,8 @@ pub enum Opcode {
     InitLocal,
     InitGlobal,
     HoistVarGlobal,
+    AnnexBInit,
+    AnnexBUpdate,
     BareVarLocal,
     BareVarGlobal,
     LoadGlobal,
@@ -731,6 +743,8 @@ impl Instr {
             Instr::InitLocal { .. } => Opcode::InitLocal,
             Instr::InitGlobal { .. } => Opcode::InitGlobal,
             Instr::HoistVarGlobal { .. } => Opcode::HoistVarGlobal,
+            Instr::AnnexBInit { .. } => Opcode::AnnexBInit,
+            Instr::AnnexBUpdate { .. } => Opcode::AnnexBUpdate,
             Instr::BareVarLocal { .. } => Opcode::BareVarLocal,
             Instr::BareVarGlobal { .. } => Opcode::BareVarGlobal,
             Instr::LoadGlobal { .. } => Opcode::LoadGlobal,
@@ -869,6 +883,10 @@ impl fmt::Display for Instr {
             Instr::InitLocal { slot, src } => write!(f, "INIT_LOCAL s{slot}, r{src}"),
             Instr::InitGlobal { name, src, .. } => write!(f, "INIT_GLOBAL c{name}, r{src}"),
             Instr::HoistVarGlobal { name } => write!(f, "HOIST_VAR_GLOBAL c{name}"),
+            Instr::AnnexBInit { name } => write!(f, "ANNEX_B_INIT c{name}"),
+            Instr::AnnexBUpdate { name, src, slot } => {
+                write!(f, "ANNEX_B_UPDATE c{name}, r{src}, {slot:?}")
+            }
             Instr::BareVarLocal { slot } => write!(f, "BARE_VAR_LOCAL s{slot}"),
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
             Instr::LoadGlobal { dst, name } => write!(f, "LOAD_GLOBAL r{dst}, c{name}"),

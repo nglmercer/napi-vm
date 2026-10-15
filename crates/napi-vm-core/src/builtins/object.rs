@@ -1135,7 +1135,8 @@ fn object_get_prototype_of(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    interp.get_prototype_of(&v)
+    let object = to_object_receiver(&v)?;
+    interp.get_prototype_of(&object)
 }
 
 fn object_set_prototype_of(
@@ -1324,7 +1325,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
     let writable = own_slot(descriptor, "writable");
     let enumerable = own_slot(descriptor, "enumerable");
     let configurable = own_slot(descriptor, "configurable");
-    if c.meta.borrow().module_namespace {
+    if c.meta.borrow().module_namespace && c.meta.borrow().symbol_key(key).is_none() {
         let same = match (&old_value, &value) {
             (_, None) => true,
             (Some(Value::Number(a)), Some(Value::Number(b))) => {

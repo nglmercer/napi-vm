@@ -31,6 +31,7 @@ pub enum Job {
         realm: super::Env,
         target: Rc<RefCell<PromiseInner>>,
         specifier: String,
+        phase: crate::parser::ImportPhase,
         referrer: Option<String>,
     },
     /// A promise reaction: run `reaction`'s handler for a promise that settled

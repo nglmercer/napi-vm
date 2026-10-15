@@ -42,18 +42,19 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest full development measurement is in `latest.json`: 77,085 passes out
-of 102,956 variants (74.8718%), with zero feature skips, crashes, or harness
-errors and the same two deep-WeakMap staging timeouts. The Array mutation/search
-and map/filter batch adds 126 independently reproduced passes and loses none
-versus merged PR #29. Focused Array results reach 5,645 / 6,117 (+116, zero losses).
-Complete evidence is archived under `evidence/array-mutation-search/`.
-See [Array mutation and search quick wins](../../docs/test262-array-mutation-search.md)
-for reproduction commands, full comparison, bounded-search execution policy,
-Rust build workaround, and deferred failures. Core Rust tests pass; three existing
-root LSP tests remain blocked by Unix socket binding permissions. No assertions,
-corpus files, feature skips, allocation caps, or runner limits were changed.
-Full-corpus tier differential and actual wasm32 execution validation remain open.
+The latest full development measurement in `latest.json` passes **98,010 out
+of 102,956 variants (95.1960%)**, achieving the minimum 95% goal. There are
+4,944 failures, two timeouts, and zero feature skips, crashes, or harness errors.
+It gains 1,907 passes with zero regressions against the preceding full snapshot.
+The corpus revision, runner limits, and full-suite denominator are unchanged.
+
+Complete reports, status transitions, measured source patch, source hashes,
+build environment, and validation logs are archived in
+`evidence/unicode-annex-builtins/`. See
+[the implementation and reproduction record](../../docs/test262-unicode-annex-builtins-continuation.md).
+All 68 selected integration tests and the Node-API host feature check pass.
+The core library has 355 passes and one existing native-addon fixture failure.
+Full-corpus tier differential and actual wasm32 execution remain unmeasured.
 
 The initial full development baseline is in `baseline.json`: 32,359 passes out
 of 102,956 variants, 31.43%. The initial run preceded binary snapshot support;

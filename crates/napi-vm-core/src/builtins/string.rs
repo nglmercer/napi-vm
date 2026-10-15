@@ -297,7 +297,10 @@ fn string_last_index_of(
 ) -> Result<Value, VmErr> {
     let s = str_this(interp, &this)?;
     let n = arg_string(interp, &args, 0)?;
-    let raw = args.get(1).map(Value::to_number).unwrap_or(f64::INFINITY);
+    let raw = match args.get(1) {
+        Some(v) => interp.ecmascript_to_number(v)?,
+        None => f64::INFINITY,
+    };
     let pos = if raw.is_nan() {
         s.len()
     } else {
@@ -426,20 +429,85 @@ fn string_trim_start(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Val
 fn string_trim_end(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     bounded_string(str_this(i, &t)?.trim_units(false, true))
 }
-fn string_to_upper(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    bounded_string(str_this(i, &t)?.map_case(true))
+// Preserve unpaired UTF-16 surrogates while mapping complete scalar runs.
+fn map_scalar_runs(text: &JsString, mut map: impl FnMut(&str) -> String) -> JsString {
+    let mut output = Vec::new();
+    let mut run = String::new();
+    for ch in char::decode_utf16(text.units().iter().copied()) {
+        match ch {
+            Ok(ch) => run.push(ch),
+            Err(error) => {
+                output.extend(map(&run).encode_utf16());
+                run.clear();
+                output.push(error.unpaired_surrogate());
+            }
+        }
+    }
+    output.extend(map(&run).encode_utf16());
+    JsString::from_units(output)
 }
-fn string_to_lower(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    bounded_string(str_this(i, &t)?.map_case(false))
+fn case_map(
+    i: &mut Interpreter,
+    t: Value,
+    a: Vec<Value>,
+    upper: bool,
+    localized: bool,
+) -> Result<Value, VmErr> {
+    let text = str_this(i, &t)?;
+    let mut language = icu_locale::LanguageIdentifier::UNKNOWN;
+    if localized {
+        let locales = super::intl::locale_list(i, a.first().cloned().unwrap_or(Value::Undefined))?;
+        if let Some(locale) = locales.first() {
+            // Casing only resolves the language; extensions do not participate.
+            language = locale
+                .parse::<icu_locale::Locale>()
+                .map(|l| l.id)
+                .unwrap_or(icu_locale::LanguageIdentifier::UNKNOWN);
+        }
+    }
+    let mapper = icu_casemap::CaseMapper::new();
+    bounded_string(map_scalar_runs(&text, |s| {
+        if upper {
+            mapper.uppercase_to_string(s, &language).into_owned()
+        } else {
+            mapper.lowercase_to_string(s, &language).into_owned()
+        }
+    }))
+}
+fn string_to_upper(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    case_map(i, t, a, true, false)
+}
+fn string_to_lower(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    case_map(i, t, a, false, false)
+}
+fn string_to_locale_upper(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    case_map(i, t, a, true, true)
+}
+fn string_to_locale_lower(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    case_map(i, t, a, false, true)
+}
+fn string_normalize(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let text = str_this(i, &t)?;
+    let form = match a.first() {
+        None | Some(Value::Undefined) => JsString::from("NFC"),
+        Some(value) => i.ecmascript_to_string(value)?,
+    };
+    use icu_normalizer::{ComposingNormalizer, DecomposingNormalizer};
+    let form = form.to_string();
+    if !matches!(form.as_str(), "NFC" | "NFD" | "NFKC" | "NFKD") {
+        return Err(VmErr::Msg("RangeError: Invalid normalization form".into()));
+    }
+    bounded_string(map_scalar_runs(&text, |s| match form.as_str() {
+        "NFC" => ComposingNormalizer::new_nfc().normalize(s).into_owned(),
+        "NFKC" => ComposingNormalizer::new_nfkc().normalize(s).into_owned(),
+        "NFD" => DecomposingNormalizer::new_nfd().normalize(s).into_owned(),
+        _ => DecomposingNormalizer::new_nfkd().normalize(s).into_owned(),
+    }))
 }
 fn string_locale_compare(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let l = str_this(i, &t)?;
     let r = arg_string(i, &a, 0)?;
-    Ok(Value::Number(match l.cmp(&r) {
-        std::cmp::Ordering::Less => -1.0,
-        std::cmp::Ordering::Equal => 0.0,
-        std::cmp::Ordering::Greater => 1.0,
-    }))
+    super::intl::collator::compare_strings(i, l, r, a.into_iter().skip(1).collect())
 }
 fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     if matches!(t, Value::Null | Value::Undefined) {
@@ -467,13 +535,13 @@ fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, V
         Some(v) => (crate::value::to_int32(i.ecmascript_to_number(v)?) as u32 as usize)
             .min(crate::value::MAX_ARRAY_LEN),
     };
+    let needle = arg_string(i, &a, 0)?;
     if limit == 0 {
         return Value::checked_array(vec![]);
     }
     if matches!(a.first(), None | Some(Value::Undefined)) {
         return Value::checked_array(vec![Value::String(s)]);
     }
-    let needle = arg_string(i, &a, 0)?;
     let mut parts = Vec::new();
     if needle.is_empty() {
         for &u in s.units().iter().take(limit) {
@@ -619,6 +687,9 @@ pub(super) fn install(e: &mut Environment) {
         let mut methods: Vec<(&str, Value)> = [
             "toUpperCase",
             "toLowerCase",
+            "toLocaleLowerCase",
+            "toLocaleUpperCase",
+            "normalize",
             "trim",
             "slice",
             "substring",
@@ -732,6 +803,9 @@ pub(super) fn install(e: &mut Environment) {
                 ("isWellFormed", 0),
                 ("toWellFormed", 0),
                 ("toLowerCase", 0),
+                ("toLocaleLowerCase", 0),
+                ("toLocaleUpperCase", 0),
+                ("normalize", 0),
                 ("toUpperCase", 0),
                 ("trim", 0),
                 ("trimStart", 0),
@@ -763,6 +837,9 @@ pub fn string_method(name: &str) -> Option<Value> {
     let f: NativeFn = match name {
         "toUpperCase" => string_to_upper,
         "toLowerCase" => string_to_lower,
+        "toLocaleLowerCase" => string_to_locale_lower,
+        "toLocaleUpperCase" => string_to_locale_upper,
+        "normalize" => string_normalize,
         "trim" => string_trim,
         "slice" => string_slice,
         "substring" => string_substring,

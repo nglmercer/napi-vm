@@ -1820,6 +1820,23 @@ impl Interpreter {
             let key = Value::String(crate::JsString::from_key(name));
             return self.inc_prop_value(&object, &key, inc, prefix);
         }
+        if !matches!(scope.borrow().get(name), Some(Value::Number(_))) {
+            let (base, property) = self.resolve_assignment_binding(scope, name)?;
+            let current = match self.lookup_binding_in(scope, name)? {
+                super::Lookup::Value(v) => v,
+                super::Lookup::Missing => {
+                    return vm_err(format!("ReferenceError: {name} is not defined"));
+                }
+                super::Lookup::Uninitialized => {
+                    return vm_err(format!(
+                        "ReferenceError: Cannot access '{name}' before initialization"
+                    ));
+                }
+            };
+            let (previous, updated) = self.numeric_update(&current, inc)?;
+            self.write_assignment_binding(&base, property, name, updated.clone())?;
+            return Ok(if prefix { updated } else { previous });
+        }
         // Fused read-modify-write: one `borrow_mut` + one scan instead of a
         // read borrow followed by a separate write borrow. `old` captures
         // the value before the update so postfix can return it.
@@ -1919,11 +1936,7 @@ impl Interpreter {
             });
         }
         let cur = self.get_prop_value(obj, &key)?;
-        let new_val = Value::Number(if inc {
-            self.tn(&cur) + 1.0
-        } else {
-            self.tn(&cur) - 1.0
-        });
+        let (cur, new_val) = self.numeric_update(&cur, inc)?;
         self.assign_member(obj, &key, new_val.clone())?;
         if prefix { Ok(new_val) } else { Ok(cur) }
     }

@@ -213,6 +213,9 @@ pub struct ObjectMeta {
     /// Branded Temporal data, inaccessible to guest property operations.
     pub(crate) temporal: Option<crate::builtins::temporal::Slots>,
     pub(crate) regexp_iterator: Option<Rc<RefCell<crate::builtins::regexp::RegExpIteratorSlots>>>,
+    pub(crate) intl_plurals: Option<crate::builtins::intl::plurals::Slots>,
+    pub(crate) intl_collator: Option<crate::builtins::intl::collator::Slots>,
+    pub(crate) intl_bound_compare: Option<Value>,
     pub(crate) intl_list: Option<crate::builtins::intl::list::Slots>,
     pub(crate) intl_segmenter: Option<crate::builtins::intl::segmenter::SegmenterSlots>,
     pub(crate) intl_segments: Option<Rc<crate::builtins::intl::segmenter::SegmentsSlots>>,
@@ -224,6 +227,7 @@ pub struct ObjectMeta {
     pub(crate) builtin_constructor: Option<BuiltinConstructor>,
     /// Presence of [[ErrorData]], independent of prototypes and realms.
     pub(crate) error_object: bool,
+    pub(crate) error_stack: Option<crate::JsString>,
     /// Lexical private field identities never enter ordinary property storage.
     pub(crate) private_elements: std::collections::HashMap<u64, PrivateElement>,
     /// Intrinsic iterator/continuation state, invisible to property operations.
@@ -705,6 +709,7 @@ impl ArrayCell {
                     .values()
                     .flat_map(PrivateElement::values),
             );
+            out.extend(meta.intl_bound_compare.iter().cloned());
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
@@ -751,6 +756,7 @@ impl ArrayCell {
         meta.async_from_sync = None;
         meta.regexp_iterator = None;
         meta.revocable_proxy = None;
+        meta.intl_bound_compare = None;
         meta.proto = None;
         meta.realm_global = None;
         true
@@ -848,6 +854,7 @@ impl ObjectCell {
                     .values()
                     .flat_map(PrivateElement::values),
             );
+            out.extend(meta.intl_bound_compare.iter().cloned());
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
@@ -898,6 +905,7 @@ impl ObjectCell {
         meta.async_from_sync = None;
         meta.regexp_iterator = None;
         meta.revocable_proxy = None;
+        meta.intl_bound_compare = None;
         meta.proto = None;
         meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access

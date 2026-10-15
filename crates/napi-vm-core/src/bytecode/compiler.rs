@@ -349,6 +349,7 @@ struct Compiler<'a> {
     /// the chain: the defining non-arrow function seeds it. Fed by direct
     /// references while the body compiles and by deferred arrow outcomes.
     captures_arguments: bool,
+    annex_updates: HashMap<usize, (String, Binding)>,
 }
 
 impl<'a> Compiler<'a> {
@@ -381,6 +382,7 @@ impl<'a> Compiler<'a> {
             this_mode: ThisMode::Global,
             is_arrow: false,
             captures_arguments: false,
+            annex_updates: HashMap::new(),
         }
     }
 
@@ -413,6 +415,7 @@ impl<'a> Compiler<'a> {
             this_mode,
             is_arrow,
             captures_arguments: false,
+            annex_updates: HashMap::new(),
         }
     }
 
@@ -904,7 +907,18 @@ impl<'a> Compiler<'a> {
     /// previous `eval` may own the name), lexical declares, eager functions.
     fn hoist_top(&mut self, stmts: &'a [Statement]) -> Result<(), Decline> {
         let mut vars = Vec::new();
-        collect_var_names(stmts, &mut vars);
+        crate::parser::collect_var_declaration_names(stmts, &mut vars);
+        let mut direct = Vec::new();
+        block_fn_decls(stmts, &mut direct);
+        vars.extend(direct.iter().map(|d| d.name.to_string()));
+        for (statement, name) in crate::interpreter::annex::eligible(stmts, &[], false) {
+            self.annex_updates.insert(
+                statement as *const Statement as usize,
+                (name.clone(), Binding::Global),
+            );
+            let name = self.intern_string(&name)?;
+            self.emit(Instr::AnnexBInit { name });
+        }
         let lexical_names = crate::parser::top_lexical_names(stmts);
         let mut seen = HashSet::new();
         for name in vars {
@@ -967,7 +981,10 @@ impl<'a> Compiler<'a> {
             self.declare_slot(param, SlotKind::Var)?;
         }
         let mut vars = Vec::new();
-        collect_var_names(body, &mut vars);
+        crate::parser::collect_var_declaration_names(body, &mut vars);
+        let mut direct = Vec::new();
+        block_fn_decls(body, &mut direct);
+        vars.extend(direct.iter().map(|d| d.name.to_string()));
         let mut seen = HashSet::new();
         for name in vars {
             if seen.insert(name.clone()) {
@@ -975,6 +992,15 @@ impl<'a> Compiler<'a> {
                 // bind only when absent.
                 self.declare_slot_if_absent(&name, SlotKind::Var)?;
             }
+        }
+        for (statement, name) in crate::interpreter::annex::eligible(body, params, !self.is_arrow) {
+            let binding = self.resolve(&name)?;
+            self.annex_updates.insert(
+                statement as *const Statement as usize,
+                (name.clone(), binding),
+            );
+            let name = self.intern_string(&name)?;
+            self.emit(Instr::AnnexBInit { name });
         }
         let mut lexicals = Vec::new();
         block_lexicals(body, &mut lexicals);
@@ -1327,39 +1353,33 @@ impl<'a> Compiler<'a> {
                 init.as_deref(),
                 destructuring.as_deref(),
             ),
-            // Hoisted functions instantiate eagerly at scope entry AND again
-            // here in order: the evaluator runs `eval_stmt` on the
-            // declaration both during `hoist_lexical` and when `run` reaches
-            // it, so two distinct function objects exist when code between
-            // the hoist and the statement captured the first.
-            Statement::FnDecl {
-                name,
-                params,
-                body,
-                is_async,
-                is_generator,
-                ..
-            } => {
-                let value = self.defer_function(FuncDef {
-                    named_expression: false,
-                    name: Some(name.clone()),
-                    params: SharedSlice::Borrowed(params),
-                    body: FuncBody::Stmts(SharedSlice::Borrowed(body)),
-                    is_arrow: false,
-                    is_async: *is_async,
-                    is_generator: *is_generator,
-                    is_constructor: !is_async && !is_generator,
-                })?;
-                match self.resolve(name)? {
-                    Binding::Slot(slot) => self.emit(Instr::InitLocal { slot, src: value }),
-                    Binding::Global => {
-                        let index = self.intern_string(name)?;
-                        self.emit(Instr::InitGlobal {
-                            name: index,
-                            src: value,
-                            function: true,
-                        });
+            // Function identities are initialized at scope entry.
+            Statement::FnDecl { name, .. } => {
+                if let Some((_, target)) = self
+                    .annex_updates
+                    .get(&(stmt as *const Statement as usize))
+                    .cloned()
+                {
+                    let src = self.alloc_reg()?;
+                    match self.resolve(name)? {
+                        Binding::Slot(slot) => self.emit(Instr::LoadLocal { dst: src, slot }),
+                        Binding::Global => {
+                            let key = self.intern_string(name)?;
+                            self.emit(Instr::LoadGlobal {
+                                dst: src,
+                                name: key,
+                            });
+                        }
                     }
+                    let name = self.intern_string(name)?;
+                    self.emit(Instr::AnnexBUpdate {
+                        name,
+                        src,
+                        slot: match target {
+                            Binding::Slot(slot) => Some(slot),
+                            Binding::Global => None,
+                        },
+                    });
                 }
                 self.load_undefined()
             }
@@ -5162,9 +5182,8 @@ mod tests {
             compile("function fib(n) { if (n < 2) return n; return fib(n - 1) + fib(n - 2); }")
                 .unwrap();
         crate::bytecode::verify::verify_module(&module).expect("compiler output verifies");
-        // Undefined + "fib" + two instantiations (hoist-eager and in-order,
-        // mirroring the evaluator's double evaluation of declarations).
-        assert_eq!(module.main.constants.len(), 4);
+        // Undefined, the binding name, and one hoisted function identity.
+        assert_eq!(module.main.constants.len(), 3);
         let mut functions = module
             .main
             .constants
@@ -5173,9 +5192,8 @@ mod tests {
                 Constant::Function(func) => Some(func),
                 _ => None,
             });
-        let (first, second) = (functions.next().unwrap(), functions.next().unwrap());
+        let first = functions.next().unwrap();
         assert!(functions.next().is_none());
-        assert_eq!(format!("{:?}", first.code), format!("{:?}", second.code));
         // The body loads the parameter slot and recurses through the global.
         let disassembly = first.disassemble();
         assert!(disassembly.contains("LOAD_LOCAL r0, s0"), "{disassembly}");
@@ -5206,9 +5224,9 @@ mod tests {
             }
             other => panic!("expected bytecode function, got {other:?}"),
         }
-        // Hoisted declarations instantiate twice (hoist + statement).
+        // Function declarations instantiate only at scope entry.
         let consts = nested_functions("function g(){}");
-        assert_eq!(consts.len(), 2);
+        assert_eq!(consts.len(), 1);
         for c in &consts {
             match c {
                 Constant::Function(code) => {
@@ -5219,7 +5237,7 @@ mod tests {
             }
         }
         let consts = nested_functions("async function h(){}");
-        assert_eq!(consts.len(), 2);
+        assert_eq!(consts.len(), 1);
         assert!(consts.iter().all(|c| matches!(c, Constant::AstFunction(_))));
     }
 

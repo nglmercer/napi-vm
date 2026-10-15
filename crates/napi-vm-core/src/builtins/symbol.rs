@@ -62,6 +62,26 @@ pub(super) fn install(e: &mut Environment) {
     let constructor = Value::object(vec![]);
     e.set("Symbol", constructor.clone());
     super::make_callable(&constructor, symbol_call, Some(symbol_construct));
+    for (key, value) in [
+        ("name", Value::String("Symbol".into())),
+        ("length", Value::Number(0.)),
+    ] {
+        constructor.set_prop(key.into(), value).unwrap();
+        constructor
+            .property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+    }
+
     constructor
         .set_prop("for".into(), super::nf("for", symbol_for))
         .expect("Symbol.for");
@@ -75,6 +95,22 @@ pub(super) fn install(e: &mut Environment) {
                 .expect("well-known Symbol property");
         }
     }
+    for name in WELL_KNOWN {
+        constructor
+            .property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                name,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+    }
+    super::install_method_metadata(e, &constructor, &[("for", 1), ("keyFor", 1)]);
     let methods = ["toString", "valueOf"]
         .into_iter()
         .filter_map(|name| symbol_method(name).map(|method| (name, method)))
@@ -94,6 +130,41 @@ pub(super) fn install(e: &mut Environment) {
             super::native_method("get description", 0, symbol_description, function_prototype),
         )
         .expect("Symbol.prototype.description");
+    prototype
+        .property_cell()
+        .unwrap()
+        .meta
+        .borrow_mut()
+        .boxed_primitive = None;
+    for (name, value) in [
+        (
+            "toPrimitive",
+            super::native_method(
+                "[Symbol.toPrimitive]",
+                1,
+                symbol_value_of,
+                e.get("Function").and_then(|f| f.get_prop("prototype")),
+            ),
+        ),
+        ("toStringTag", Value::String("Symbol".into())),
+    ] {
+        let Some(Value::Symbol(ref symbol)) = well_known(name) else {
+            unreachable!()
+        };
+        let key = crate::interpreter::symbol_slot_key(symbol);
+        prototype.set_prop(key.clone(), value).unwrap();
+        let cell = prototype.property_cell().unwrap();
+        let mut meta = cell.meta.borrow_mut();
+        meta.set_symbol_key(&key, symbol.clone());
+        meta.set_attrs(
+            &key,
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
     if let Value::Object { props } = &prototype {
         props.meta.borrow_mut().has_accessors = true;
         props.meta.borrow_mut().set_attrs(
@@ -139,7 +210,7 @@ fn symbol_call(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
     let description = match a.first() {
         None | Some(Value::Undefined) => None,
         Some(Value::String(s)) => Some(s.clone()),
-        Some(v) => Some(interp.to_js_string(v)?),
+        Some(v) => Some(interp.ecmascript_to_string(v)?),
     };
     Ok(new_symbol(description))
 }
@@ -153,7 +224,7 @@ pub(crate) fn symbol_for(
     let key = match a.first() {
         Some(Value::String(s)) => s.to_key(),
         Some(Value::Undefined) | None => "undefined".to_string(),
-        Some(v) => interp.to_js_string(v)?.to_key(),
+        Some(v) => interp.ecmascript_to_string(v)?.to_key(),
     };
     Ok(Value::Symbol(symbol_for_key(&key)))
 }
@@ -181,7 +252,9 @@ pub(crate) fn symbol_key_for(
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let Some(Value::Symbol(target)) = a.first() else {
-        return Ok(Value::Undefined);
+        return Err(VmErr::Msg(
+            "TypeError: Symbol.keyFor requires a symbol".into(),
+        ));
     };
     SYMBOL_REGISTRY.with(|reg| {
         Ok(reg

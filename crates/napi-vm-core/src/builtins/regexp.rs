@@ -151,6 +151,26 @@ pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("RegExp") {
         e.regexp_legacy = Some(Rc::new(RefCell::new(LegacyState::default())));
         super::make_callable(&namespace, regexp_call, Some(regexp_construct));
+        let fp = e.get("Function").and_then(|f| f.get_prop("prototype"));
+        namespace
+            .set_prop(
+                "escape".into(),
+                super::native_method("escape", 1, regexp_escape, fp),
+            )
+            .unwrap();
+        namespace
+            .property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                "escape",
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
+
         for (names, getter) in [
             (&["input", "$_"][..], legacy_input as super::NativeFn),
             (&["lastMatch", "$&"][..], legacy_last_match),
@@ -784,4 +804,62 @@ fn escaped_source(source: &crate::JsString) -> crate::JsString {
         backslashes = if unit == 92 { backslashes + 1 } else { 0 };
     }
     result
+}
+
+fn regexp_escape(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let Some(Value::String(text)) = args.first() else {
+        return Err(VmErr::Msg(
+            "TypeError: RegExp.escape requires a string".into(),
+        ));
+    };
+    let mut out = Vec::new();
+    let units = text.units();
+    let mut index = 0;
+    while index < units.len() {
+        let u = units[index];
+        let c = char::from_u32(u as u32);
+        let escaped = if index == 0 && c.is_some_and(|c| c.is_ascii_alphanumeric()) {
+            Some(format!("\\x{u:02x}"))
+        } else if c.is_some_and(|c| "^$\\.*+?()[]{}|/".contains(c)) {
+            Some(format!("\\{}", c.unwrap()))
+        } else if let Some(letter) = match u {
+            9 => Some('t'),
+            10 => Some('n'),
+            11 => Some('v'),
+            12 => Some('f'),
+            13 => Some('r'),
+            _ => None,
+        } {
+            Some(format!("\\{letter}"))
+        } else if u == 32 || c.is_some_and(|c| ",-=<>#&!%:;@~'`\"".contains(c)) {
+            Some(format!("\\x{u:02x}"))
+        } else if c.is_some_and(|c| c.is_whitespace() && c != '\u{85}') || u == 0xfeff {
+            Some(if u <= 255 {
+                format!("\\x{u:02x}")
+            } else {
+                format!("\\u{u:04x}")
+            })
+        } else if (0xd800..=0xdbff).contains(&u)
+            && units
+                .get(index + 1)
+                .is_some_and(|lo| (0xdc00..=0xdfff).contains(lo))
+        {
+            out.push(u);
+            index += 1;
+            out.push(units[index]);
+            index += 1;
+            continue;
+        } else if (0xd800..=0xdfff).contains(&u) {
+            Some(format!("\\u{u:04x}"))
+        } else {
+            None
+        };
+        if let Some(s) = escaped {
+            out.extend(s.encode_utf16());
+        } else {
+            out.push(u);
+        }
+        index += 1;
+    }
+    Value::checked_string(crate::JsString::from_units(out))
 }

@@ -6,8 +6,10 @@ use crate::interpreter::{Environment, Interpreter};
 use crate::value::{PropAttrs, Value};
 use icu_locale::{Locale, LocaleCanonicalizer};
 use std::rc::Rc;
+pub(crate) mod collator;
 mod data;
 pub(crate) mod list;
+pub(crate) mod plurals;
 pub(crate) mod segmenter;
 
 #[derive(Clone, Debug)]
@@ -199,6 +201,8 @@ pub(super) fn install(e: &mut Environment) {
     e.install_intrinsic("Intl.Locale.prototype", proto);
     segmenter::install(e, &intl);
     list::install(e, &intl);
+    collator::install(e, &intl);
+    plurals::install(e, &intl);
     e.set("Intl", intl);
 }
 
@@ -665,7 +669,7 @@ fn minimize_id(id: &mut icu_locale::LanguageIdentifier) {
     }
 }
 
-fn locale_list(i: &mut Interpreter, value: Value) -> Result<Vec<String>, VmErr> {
+pub(super) fn locale_list(i: &mut Interpreter, value: Value) -> Result<Vec<String>, VmErr> {
     let result = canonical_locales(i, Value::Undefined, vec![value])?;
     let array = result.as_array().unwrap();
     Ok(array

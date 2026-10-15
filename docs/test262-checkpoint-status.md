@@ -1,5 +1,20 @@
 # Conformance development checkpoint
 
+## Current measured state
+
+The minimum 95% goal is achieved: **98,010 / 102,956 (95.1960%)** in a complete
+optimized run of pinned Test262 revision
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, with zero skips, crashes, or harness
+errors and two timeouts. Comparison against the preceding full run proves
+1,907 gains and zero regressions. See the
+[implementation/evidence record](test262-unicode-annex-builtins-continuation.md)
+and [current compact result](../tools/test262/latest.json).
+
+## Historical checkpoint
+
+The following records an earlier paused checkpoint; its counts and pause state
+are historical.
+
 This checkpoint includes array elisions, observable spread/rest/assign copying,
 Object enumeration and descriptor maps, Object/Math metadata, abstract equality,
 exact mixed BigInt/Number comparisons, relational conversions, and the latest

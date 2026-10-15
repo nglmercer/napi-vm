@@ -378,10 +378,28 @@ impl Interpreter {
                 realm,
                 target,
                 specifier,
+                phase,
                 referrer,
             } => {
                 let outer = std::mem::replace(&mut self.cur_mod, referrer);
-                let result = self.with_global_storage(realm, |vm| vm.import_module(&specifier));
+                let result = self.with_global_storage(realm, |vm| match phase {
+                    crate::parser::ImportPhase::Evaluation => vm.import_module(&specifier),
+                    crate::parser::ImportPhase::Source => {
+                        let id = vm.resolve_module_request(&specifier)?.ok_or_else(|| {
+                            VmErr::Msg(format!("TypeError: Module not found: {specifier}"))
+                        })?;
+                        if !vm.link_module(&id)? {
+                            return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
+                        }
+                        Err(VmErr::Msg(
+                            "SyntaxError: JavaScript modules do not provide source-phase objects"
+                                .into(),
+                        ))
+                    }
+                    crate::parser::ImportPhase::Deferred => Err(VmErr::Msg(
+                        "TypeError: deferred module evaluation is not implemented".into(),
+                    )),
+                });
                 self.cur_mod = outer;
                 match result {
                     Ok(promise) => self.resolve_promise(&target, promise),

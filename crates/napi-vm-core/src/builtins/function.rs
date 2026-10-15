@@ -17,6 +17,22 @@ pub(super) fn install(e: &mut Environment) {
         return;
     };
     super::make_callable(&namespace, new_function, None);
+    namespace
+        .set_prop("length".into(), Value::Number(1.))
+        .unwrap();
+    namespace
+        .property_cell()
+        .unwrap()
+        .meta
+        .borrow_mut()
+        .set_attrs(
+            "length",
+            crate::value::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
 
     let object_prototype = e
         .get("Object")
@@ -283,7 +299,7 @@ fn function_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result
     Ok(Value::String("function () { [native code] }".into()))
 }
 
-fn function_bind(
+pub(super) fn function_bind(
     interp: &mut Interpreter,
     target: Value,
     args: Vec<Value>,

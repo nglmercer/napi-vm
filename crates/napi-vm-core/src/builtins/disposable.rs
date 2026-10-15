@@ -264,6 +264,8 @@ fn suppressed_error(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
         .and_then(|c| c.get_prop("prototype"));
     let out = Value::object_with_proto(vec![], proto.map(Rc::new));
     out.property_cell().unwrap().meta.borrow_mut().error_object = true;
+    out.property_cell().unwrap().meta.borrow_mut().error_stack =
+        Some(crate::JsString::from("SuppressedError"));
     if !matches!(a.get(2), None | Some(Value::Undefined)) {
         out.set_prop(
             "message".into(),

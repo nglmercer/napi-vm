@@ -44,7 +44,6 @@ pub(super) fn install(e: &mut Environment) {
                 ("constructor".into(), constructor.clone()),
                 ("name".into(), Value::String(name.into())),
                 ("message".into(), Value::String(crate::JsString::default())),
-                ("stack".into(), Value::String(crate::JsString::default())),
             ],
             parent.map(Rc::new),
         );
@@ -78,6 +77,23 @@ pub(super) fn install(e: &mut Environment) {
                     ),
                 )
                 .expect("Error.prototype.toString");
+            super::object::define_property(
+                &prototype,
+                "stack",
+                &Value::descriptor_record(vec![
+                    (
+                        "get".into(),
+                        super::native_method("get stack", 0, stack_get, function_prototype.clone()),
+                    ),
+                    (
+                        "set".into(),
+                        super::native_method("set stack", 1, stack_set, function_prototype.clone()),
+                    ),
+                    ("enumerable".into(), Value::Bool(false)),
+                    ("configurable".into(), Value::Bool(true)),
+                ]),
+            )
+            .unwrap();
             base_prototype = Some(prototype.clone());
         }
         if let Value::Object { props } = &prototype {
@@ -199,7 +215,7 @@ fn construct_error(interp: &mut Interpreter, name: &str, args: Vec<Value>) -> Re
         .concat(&crate::JsString::from(": "))
         .concat(&message)
         .concat(&crate::JsString::from(tail));
-    error.set_prop("stack".into(), Value::String(stack))?;
+    error.property_cell().unwrap().meta.borrow_mut().error_stack = Some(stack);
     if let Value::Object { props } = &error {
         for key in ["message", "cause", "stack"] {
             if props.borrow().iter().any(|(property, _)| property == key) {
@@ -249,4 +265,57 @@ fn aggregate_error_constructor(
             },
         );
     Ok(error)
+}
+
+fn stack_get(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    if !crate::interpreter::call::is_js_object(&this) {
+        return Err(VmErr::Msg(
+            "TypeError: Error stack receiver must be an object".into(),
+        ));
+    }
+    if let Value::Error(data) = &this {
+        return Ok(Value::String(data.stack.clone()));
+    }
+    Ok(this
+        .property_cell()
+        .and_then(|p| p.meta.borrow().error_stack.clone())
+        .map(Value::String)
+        .unwrap_or(Value::Undefined))
+}
+fn stack_set(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    if !matches!(args.first(), Some(Value::String(_))) {
+        return Err(VmErr::Msg("TypeError: Error stack must be a string".into()));
+    }
+    let home = i
+        .persistent_global
+        .borrow()
+        .intrinsic("Error")
+        .and_then(|c| c.get_prop("prototype"))
+        .unwrap();
+    if !crate::interpreter::call::is_js_object(&this)
+        || crate::interpreter::strict_equals(&this, &home)
+    {
+        return Err(VmErr::Msg("TypeError: Invalid Error stack receiver".into()));
+    }
+    let key = Value::String("stack".into());
+    let value = args.first().cloned().unwrap_or(Value::Undefined);
+    let descriptor = super::object::descriptor_for_key_in(i, &this, &key)?;
+    let accepted = if matches!(descriptor, Value::Undefined) {
+        i.define_own_property(
+            &this,
+            &key,
+            &Value::descriptor_record(vec![
+                ("value".into(), value),
+                ("writable".into(), Value::Bool(true)),
+                ("enumerable".into(), Value::Bool(true)),
+                ("configurable".into(), Value::Bool(true)),
+            ]),
+        )?
+    } else {
+        i.set_member_with_receiver(&this, &key, value, &this)?
+    };
+    if !accepted {
+        return Err(VmErr::Msg("TypeError: Cannot set Error stack".into()));
+    }
+    Ok(Value::Undefined)
 }

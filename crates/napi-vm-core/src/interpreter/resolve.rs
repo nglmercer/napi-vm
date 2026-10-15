@@ -986,6 +986,15 @@ impl Interpreter {
         key: &str,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        if let Value::String(text) = o {
+            let own = key == "length"
+                || crate::value::array_index(key).is_some_and(|index| index < text.len());
+            if !own {
+                if let Some(prototype) = self.primitive_reference_prototype(o) {
+                    return self.get_prop_value_str_with_receiver(&prototype, key, receiver);
+                }
+            }
+        }
         if let Value::Array(array) = o
             && let Some(index) = crate::value::array_index(key)
             && !array.has_index(index)
@@ -1979,6 +1988,14 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
                 ),
             )
             .expect("string iterator method");
+        let cell = string_prototype.property_cell().unwrap();
+        cell.meta.borrow_mut().set_attrs(
+            super::SYMBOL_ITERATOR_SLOT,
+            crate::value::PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
     }
 }
 

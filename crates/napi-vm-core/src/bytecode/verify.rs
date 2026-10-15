@@ -370,11 +370,20 @@ impl Checker<'_> {
                 self.check_slot(address, *slot)?;
                 self.check_reg(address, *src)?;
             }
+            Instr::AnnexBUpdate { name, src, slot } => {
+                self.check_const_is(address, *name, "string")?;
+                self.check_reg(address, *src)?;
+                if let Some(slot) = slot {
+                    self.check_slot(address, *slot)?;
+                }
+            }
             Instr::InitGlobal { name, src, .. } => {
                 self.check_const_is(address, *name, "string")?;
                 self.check_reg(address, *src)?;
             }
-            Instr::HoistVarGlobal { name } | Instr::BareVarGlobal { name } => {
+            Instr::AnnexBInit { name }
+            | Instr::HoistVarGlobal { name }
+            | Instr::BareVarGlobal { name } => {
                 self.check_const_is(address, *name, "string")?;
             }
             Instr::LoadGlobal { dst, name } | Instr::TypeofGlobal { dst, name } => {

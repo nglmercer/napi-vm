@@ -147,6 +147,32 @@ impl BigInt {
         Ok(Self::normalized(negative, limbs))
     }
 
+    pub fn to_radix(&self, radix: u32) -> String {
+        if radix == 10 {
+            return self.to_decimal();
+        }
+        if self.is_zero() {
+            return "0".into();
+        }
+        let mut limbs = self.limbs.clone();
+        let mut digits = Vec::new();
+        while !limbs.is_empty() {
+            let mut remainder = 0u64;
+            for limb in limbs.iter_mut().rev() {
+                let current = (remainder << 32) | *limb as u64;
+                *limb = (current / radix as u64) as u32;
+                remainder = current % radix as u64;
+            }
+            while limbs.last() == Some(&0) {
+                limbs.pop();
+            }
+            digits.push(char::from_digit(remainder as u32, radix).unwrap());
+        }
+        if self.negative {
+            digits.push('-');
+        }
+        digits.into_iter().rev().collect()
+    }
     pub fn to_decimal(&self) -> String {
         if self.is_zero() {
             return "0".to_string();
@@ -559,6 +585,13 @@ impl BigInt {
     pub fn as_n_bit(&self, bits: usize, signed: bool) -> BigResult<Self> {
         if bits == 0 {
             return Ok(Self::zero());
+        }
+        // No storage proportional to the requested width is necessary when
+        // the input already fits. This also handles very large valid indices.
+        if (signed && bits > self.bit_length())
+            || (!signed && !self.negative && bits >= self.bit_length())
+        {
+            return Ok(self.clone());
         }
         if bits > MAX_LIMBS * 32 {
             return Err(overflow());

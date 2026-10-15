@@ -584,6 +584,22 @@ fn run_loop(
                         interp.set_binding_in(&scope, name, value)?;
                     }
                 }
+                Instr::AnnexBInit { name } => {
+                    let name = const_string(frame.function, name)?;
+                    let scope = current_scope(interp, frame);
+                    interp.init_compiled_annex(&scope, name)?;
+                }
+                Instr::AnnexBUpdate { name, src, slot } => {
+                    let name = const_string(frame.function, name)?;
+                    let scope = current_scope(interp, frame);
+                    let value = frame.registers[src as usize].clone_for_execution();
+                    if interp.update_compiled_annex(&scope, name, value.clone())? {
+                        if let Some(slot) = slot {
+                            frame.slots[slot as usize].value = value;
+                            frame.slots[slot as usize].initialized = true;
+                        }
+                    }
+                }
                 Instr::HoistVarGlobal { name } => {
                     let name = const_string(frame.function, name)?;
                     let scope = current_scope(interp, frame);
@@ -671,11 +687,13 @@ fn run_loop(
                 } => {
                     check_slot_writable(frame, slot)?;
                     let current = frame.slots[slot as usize].value.clone_for_execution();
-                    let updated = Value::Number(if delta > 0 {
-                        interp.tn(&current) + 1.0
-                    } else {
-                        interp.tn(&current) - 1.0
-                    });
+                    let (current, updated) = match &current {
+                        Value::Number(n) => (
+                            current.clone(),
+                            Value::Number(n + if delta > 0 { 1.0 } else { -1.0 }),
+                        ),
+                        _ => interp.numeric_update(&current, delta > 0)?,
+                    };
                     frame.slots[slot as usize].value = updated.clone();
                     frame.slots[slot as usize].initialized = true;
                     frame.registers[dst as usize] = if prefix { updated } else { current };

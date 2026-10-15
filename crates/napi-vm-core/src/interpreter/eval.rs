@@ -1262,13 +1262,18 @@ impl Interpreter {
 
     /// Shared dynamic `import(specifier)`: a promise for the namespace.
     pub(crate) fn eval_dynamic_import(&mut self, specifier: Value) -> Result<Value, VmErr> {
-        self.eval_dynamic_import_with_options(specifier, None)
+        self.eval_dynamic_import_with_options(
+            specifier,
+            None,
+            crate::parser::ImportPhase::Evaluation,
+        )
     }
 
     fn eval_dynamic_import_with_options(
         &mut self,
         specifier: Value,
         options: Option<Value>,
+        phase: crate::parser::ImportPhase,
     ) -> Result<Value, VmErr> {
         let target = Value::pending_promise();
         let converted = (|| {
@@ -1312,6 +1317,7 @@ impl Interpreter {
                         realm: self.persistent_global.clone(),
                         target: target.clone(),
                         specifier,
+                        phase,
                         referrer: self.cur_mod.clone(),
                     })
             }
@@ -1340,6 +1346,56 @@ impl Interpreter {
         Ok(Value::object(o))
     }
 
+    pub(crate) fn instantiate_function_declaration(
+        &mut self,
+        statement: &Statement,
+    ) -> Result<Value, VmErr> {
+        let Statement::FnDecl {
+            name,
+            params,
+            body,
+            is_async,
+            is_generator,
+            ..
+        } = statement
+        else {
+            unreachable!()
+        };
+
+        let scope = if self.global.borrow().is_eval_scope() {
+            Environment::variable_environment(&self.global)
+        } else {
+            self.global.clone()
+        };
+        self.declare_function_binding_in(
+            &scope,
+            name,
+            Value::Function(Rc::new(FunctionData {
+                strict: self.global.borrow().strict() || crate::parser::use_strict(body),
+                native: None,
+                identity: Rc::new(0),
+                name: Some(name.as_str().into()),
+                properties: FunctionData::properties_with_function_kind(
+                    &self.persistent_global,
+                    *is_async,
+                    *is_generator,
+                ),
+                standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
+                params: intern_params(params),
+                body: Rc::new(body.clone()),
+                closure: Some(crate::heap::capture_env(&self.global)),
+                is_arrow: false,
+                is_constructor: !*is_async && !*is_generator,
+                is_async: *is_async,
+                is_generator: *is_generator,
+                uses_arguments: crate::parser::stmts_need_arguments(body),
+                bytecode: None,
+                needs_hoisting: body_needs_hoisting(body),
+                bound: None,
+            })),
+        )?;
+        Ok(Value::Undefined)
+    }
     pub(super) fn eval_stmt(&mut self, s: &Statement) -> Result<Value, VmErr> {
         self.consume_fuel(1)?;
         match s {
@@ -1414,48 +1470,7 @@ impl Interpreter {
                 }
                 Ok(v)
             }
-            Statement::FnDecl {
-                name,
-                params,
-                body,
-                is_async,
-                is_generator,
-                ..
-            } => {
-                let scope = if self.global.borrow().is_eval_scope() {
-                    Environment::variable_environment(&self.global)
-                } else {
-                    self.global.clone()
-                };
-                self.declare_function_binding_in(
-                    &scope,
-                    name,
-                    Value::Function(Rc::new(FunctionData {
-                        strict: self.global.borrow().strict() || crate::parser::use_strict(body),
-                        native: None,
-                        identity: Rc::new(0),
-                        name: Some(name.as_str().into()),
-                        properties: FunctionData::properties_with_function_kind(
-                            &self.persistent_global,
-                            *is_async,
-                            *is_generator,
-                        ),
-                        standard_properties_initialized: Rc::new(std::cell::Cell::new(false)),
-                        params: intern_params(params),
-                        body: Rc::new(body.clone()),
-                        closure: Some(crate::heap::capture_env(&self.global)),
-                        is_arrow: false,
-                        is_constructor: !*is_async && !*is_generator,
-                        is_async: *is_async,
-                        is_generator: *is_generator,
-                        uses_arguments: crate::parser::stmts_need_arguments(body),
-                        bytecode: None,
-                        needs_hoisting: body_needs_hoisting(body),
-                        bound: None,
-                    })),
-                )?;
-                Ok(Value::Undefined)
-            }
+            Statement::FnDecl { .. } => self.evaluate_function_declaration(s),
             Statement::ClassDecl {
                 name,
                 superclass,
@@ -3292,15 +3307,12 @@ impl Interpreter {
                 options,
                 phase,
             } => {
-                if *phase != crate::parser::ImportPhase::Evaluation {
-                    return vm_err("TypeError: non-evaluation import phases are not implemented");
-                }
                 let specifier = self.eval_expr(specifier)?;
                 let options = options
                     .as_deref()
                     .map(|expr| self.eval_expr(expr))
                     .transpose()?;
-                self.eval_dynamic_import_with_options(specifier, options)
+                self.eval_dynamic_import_with_options(specifier, options, *phase)
             }
             Expr::ImportMeta => self.eval_import_meta(),
             Expr::NewTarget => self

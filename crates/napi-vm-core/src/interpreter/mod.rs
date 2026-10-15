@@ -3,6 +3,7 @@ pub(crate) mod async_from_sync;
 pub(crate) mod async_generator;
 pub(crate) mod call;
 pub use call::is_callable_value;
+pub(crate) mod annex;
 pub mod commonjs;
 mod env;
 mod eval;
@@ -1086,6 +1087,8 @@ export default { createRequire, isBuiltin, builtinModules };
         let scope = self.global.clone();
         let strict = scope.borrow().strict() || module.main.strict || self.cur_mod.is_some();
         let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
+        let saved_annex = std::mem::take(&mut scope.borrow_mut().annex_functions);
+        let saved_annex_names = std::mem::take(&mut scope.borrow_mut().annex_names);
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
         let result = {
@@ -1094,6 +1097,8 @@ export default { createRequire, isBuiltin, builtinModules };
         };
         let result = self.finish_resources(&scope, result);
         scope.borrow_mut().replace_strict(saved_strict);
+        scope.borrow_mut().annex_functions = saved_annex;
+        scope.borrow_mut().annex_names = saved_annex_names;
         if depth.get() == 0 {
             self.republish_roots();
         }
@@ -1467,6 +1472,22 @@ impl Interpreter {
                     },
                 );
             }
+        }
+        if let Some(Value::Symbol(ref symbol)) = crate::builtins::well_known("toStringTag") {
+            let key = symbol_slot_key(&symbol);
+            let cell = namespace.property_cell().unwrap();
+            cell.borrow_mut()
+                .push((key.clone(), Value::String("Module".into())));
+            let mut meta = cell.meta.borrow_mut();
+            meta.set_symbol_key(&key, symbol.clone());
+            meta.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
         }
         *module.namespace.borrow_mut() = Some(namespace.clone());
         Ok(namespace)
@@ -1996,6 +2017,8 @@ impl Interpreter {
         let strict =
             scope.borrow().strict() || crate::parser::use_strict(stmts) || self.cur_mod.is_some();
         let saved_strict = scope.borrow_mut().replace_strict(Some(strict));
+        let saved_annex = std::mem::take(&mut scope.borrow_mut().annex_functions);
+        let saved_annex_names = std::mem::take(&mut scope.borrow_mut().annex_names);
         let depth = self.guest_execution_depth.clone();
         depth.set(depth.get().saturating_add(1));
         let script = scope.borrow().is_global_scope();
@@ -2008,6 +2031,8 @@ impl Interpreter {
         };
         let result = self.finish_resources(&scope, result);
         scope.borrow_mut().replace_strict(saved_strict);
+        scope.borrow_mut().annex_functions = saved_annex;
+        scope.borrow_mut().annex_names = saved_annex_names;
         if depth.get() == 0 {
             self.republish_roots();
         }
@@ -2300,7 +2325,7 @@ impl Interpreter {
         // so a hoisted function closing over a later `let` sees the binding.
         for stmt in stmts {
             if let Statement::FnDecl { name, .. } = stmt {
-                let value = self.eval_stmt(stmt)?;
+                let value = self.instantiate_function_declaration(stmt)?;
                 let _ = value;
                 let _ = name;
             }
@@ -2314,8 +2339,21 @@ impl Interpreter {
     /// `var` can hide -- but never into a nested function, which starts its own
     /// variable scope.
     fn hoist_vars(&mut self, stmts: &[Statement]) -> Result<(), VmErr> {
+        self.hoist_annex_functions(stmts)?;
         let mut names = Vec::new();
-        collect_var_names(stmts, &mut names);
+        crate::parser::collect_var_declaration_names(stmts, &mut names);
+        // Only declarations directly in the function/program list are var
+        // functions. Nested block functions use Annex B eligibility above.
+        fn top_functions(stmts: &[Statement], names: &mut Vec<String>) {
+            for s in stmts {
+                match s {
+                    Statement::FnDecl { name, .. } => names.push(name.clone()),
+                    Statement::Declarations(inner) => top_functions(inner, names),
+                    _ => {}
+                }
+            }
+        }
+        top_functions(stmts, &mut names);
         let lexical = crate::parser::top_lexical_names(stmts);
         let scope = self.global.clone();
         for name in names {

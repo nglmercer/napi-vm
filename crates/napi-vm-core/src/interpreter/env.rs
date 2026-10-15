@@ -285,6 +285,8 @@ pub struct Environment {
     variable_scope: bool,
     pub(crate) async_generator_body: bool,
     eval_scope: bool,
+    pub(super) annex_functions: HashSet<usize>,
+    pub(super) annex_names: HashSet<String>,
     parameter_scope: bool,
     property_attributes: HashMap<String, crate::value::PropAttrs>,
     intrinsics: HashMap<String, Value>,
@@ -525,6 +527,11 @@ impl Environment {
         Ok(())
     }
 
+    pub(super) fn lexical_declaration(&self, name: &str) -> bool {
+        self.vars
+            .get(name)
+            .is_some_and(|b| matches!(b.kind, BindKind::Let | BindKind::Const))
+    }
     pub(crate) fn own_lexical_binding(&self, name: &str) -> bool {
         self.vars.get(name).is_some()
     }
@@ -693,6 +700,8 @@ impl Environment {
             variable_scope: false,
             async_generator_body: false,
             eval_scope: false,
+            annex_functions: HashSet::new(),
+            annex_names: HashSet::new(),
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
@@ -721,6 +730,8 @@ impl Environment {
             variable_scope: false,
             async_generator_body: false,
             eval_scope: false,
+            annex_functions: HashSet::new(),
+            annex_names: HashSet::new(),
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
@@ -753,6 +764,8 @@ impl Environment {
             variable_scope: false,
             async_generator_body: false,
             eval_scope: false,
+            annex_functions: HashSet::new(),
+            annex_names: HashSet::new(),
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
@@ -796,6 +809,8 @@ impl Environment {
             variable_scope: true,
             async_generator_body: false,
             eval_scope: false,
+            annex_functions: HashSet::new(),
+            annex_names: HashSet::new(),
             parameter_scope: false,
             with_object: None,
             resources: Vec::new(),
