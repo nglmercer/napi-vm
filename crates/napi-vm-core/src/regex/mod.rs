@@ -16,6 +16,7 @@
 //! scalar value. JavaScript indexes UTF-16 code units, so a pattern matching
 //! text outside the Basic Multilingual Plane reports different offsets here.
 
+mod emoji_tables;
 mod parse;
 
 use std::cell::Cell;
@@ -307,10 +308,24 @@ impl Matcher<'_> {
         let mut ends = Vec::new();
         for item in items {
             match item {
-                ClassItem::Strings(alternatives) => {
-                    for alternative in alternatives {
-                        if self.string_at(alternative, pos) {
-                            ends.push(pos + alternative.len());
+                ClassItem::Strings(strings) => {
+                    if self.modifiers.get() & 1 == 0 && pos < self.input.len() {
+                        if let Some(indices) = strings.candidates(self.input[pos]) {
+                            for index in indices {
+                                let alternative = &strings.all()[*index];
+                                if self.string_at(alternative, pos) {
+                                    ends.push(pos + alternative.len());
+                                }
+                            }
+                        }
+                        if strings.has_empty() {
+                            ends.push(pos);
+                        }
+                    } else {
+                        for alternative in strings.all() {
+                            if self.string_at(alternative, pos) {
+                                ends.push(pos + alternative.len());
+                            }
                         }
                     }
                 }
@@ -380,9 +395,20 @@ impl Matcher<'_> {
     /// scalar here too.
     fn union_matches(&self, items: &[ClassItem], c: u32) -> bool {
         items.iter().any(|item| match item {
-            ClassItem::Strings(alternatives) => alternatives.iter().any(|alternative| {
-                alternative.len() == 1 && self.same_char(c, alternative[0] as u32)
-            }),
+            ClassItem::Strings(strings) => {
+                if self.modifiers.get() & 1 == 0 && c <= u16::MAX as u32 {
+                    strings.candidates(c as u16).is_some_and(|indices| {
+                        indices.iter().any(|index| {
+                            let alternative = &strings.all()[*index];
+                            alternative.len() == 1
+                        })
+                    })
+                } else {
+                    strings.all().iter().any(|alternative| {
+                        alternative.len() == 1 && self.same_char(c, alternative[0] as u32)
+                    })
+                }
+            }
             ClassItem::Nested { negated, items } => self.union_matches(items, c) != *negated,
             ClassItem::Conjoin(unions) => unions.iter().all(|union| self.union_matches(union, c)),
             ClassItem::Except { left, right } => {
@@ -682,13 +708,17 @@ impl Matcher<'_> {
         while let Node::Group { index: None, node } = atom {
             atom = node;
         }
-        // String classes take the general continuation path so every
-        // alternative end backtracks; scalar-only classes keep the fast
-        // single-advance loop.
-        let scalar_class = matches!(atom, Node::Class { negated: false, items } if !parse::Parser::set_contains_strings(items))
-            || matches!(atom, Node::Class { negated: true, .. });
-        if count == 0 && (matches!(atom, Node::Char(_) | Node::AnyChar) || scalar_class) {
-            return self.repeat_atom(atom, min, max, greedy, pos, caps, k);
+        // Classes iterate end-position sets without nesting one frame per
+        // repetition, so long runs over string tables cannot exhaust the
+        // nesting budget. Scalar-only classes keep the exact historical
+        // order (counts, then the single advance).
+        if count == 0 {
+            if let Node::Class { negated, items } = atom {
+                return self.repeat_class(*negated, items, min, max, greedy, pos, caps, k);
+            }
+            if matches!(atom, Node::Char(_) | Node::AnyChar) {
+                return self.repeat_atom(atom, min, max, greedy, pos, caps, k);
+            }
         }
         self.step()?;
         let mut error = None;
@@ -758,6 +788,87 @@ impl Matcher<'_> {
 
     // Character repeats need no capture stack: retain code-point boundaries
     // for greedy backtracking and consume lazy repeats only when needed.
+    /// Repeat a class without nesting one frame per iteration. Each
+    /// layer holds the end positions reachable in exactly that many
+    /// iterations; expansion stops at `max` or when no new end appears
+    /// (ends range over a finite slice of the input, so this terminates).
+    /// Backtracking then tries (count, end) pairs highest-count-first for
+    /// greedy quantifiers and lowest-first for lazy ones; the continuation
+    /// never observes the count, so each distinct end is tried once.
+    /// Scalar-only classes produce one end per layer, exactly the order
+    /// the historical positions loop used.
+    #[allow(clippy::too_many_arguments)]
+    fn repeat_class(
+        &self,
+        negated: bool,
+        items: &[ClassItem],
+        min: u32,
+        max: Option<u32>,
+        greedy: bool,
+        pos: usize,
+        caps: &mut Captures,
+        k: Cont<'_>,
+    ) -> Result<bool, String> {
+        let strings = parse::Parser::set_contains_strings(items);
+        let mut layers: Vec<Vec<usize>> = vec![vec![pos]];
+        // Every end ever produced; ends range over input positions, so a
+        // layer with no new end means all later layers repeat it exactly.
+        let mut seen = vec![false; self.input.len() + 1];
+        seen[pos] = true;
+        loop {
+            let count = layers.len() - 1;
+            if max.map_or(false, |m| count as u64 >= m as u64) {
+                break;
+            }
+            if strings {
+                self.step()?;
+            }
+            let mut next = Vec::new();
+            for &start in layers.last().expect("layer") {
+                for end in self.class_ends(negated, items, start)? {
+                    if !seen[end] {
+                        seen[end] = true;
+                        next.push(end);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            next.sort_unstable();
+            layers.push(next);
+        }
+        // Counts beyond the frozen layers repeat the same ends; extend to
+        // `min` so empty-matching iterations can still satisfy it.
+        while ((layers.len() - 1) as u64) < min as u64 {
+            layers.push(layers.last().expect("layer").clone());
+        }
+        let top = layers.len() - 1;
+        let mut counts: Vec<usize> = (min as usize..=top).collect();
+        if greedy {
+            counts.reverse();
+        }
+        let mut tried = Vec::new();
+        for count in counts {
+            let mut ends = layers[count].clone();
+            if greedy {
+                ends.sort_unstable_by(|a, b| b.cmp(a));
+            } else {
+                ends.sort_unstable();
+            }
+            for end in ends {
+                if tried.contains(&end) {
+                    continue;
+                }
+                tried.push(end);
+                if k(end, caps) {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn repeat_atom(
         &self,
@@ -853,18 +964,41 @@ mod modifier_tests {
         ));
         assert!(matches("[\\q{0|2|4|9\u{FE0F}\u{20E3}}]", "v", "2"));
         assert!(!matches("[\\q{0|2|4|9\u{FE0F}\u{20E3}}]", "v", "9"));
-        assert!(matches("[\\p{Emoji_Keycap_Sequence}]", "v", "1\u{20E3}"));
+        assert!(matches(
+            "[\\p{Emoji_Keycap_Sequence}]",
+            "v",
+            "1\u{FE0F}\u{20E3}"
+        ));
         assert!(matches(
             "[\\p{Emoji_Keycap_Sequence}]",
             "v",
             "#\u{FE0F}\u{20E3}"
         ));
+        assert!(!matches("[\\p{Emoji_Keycap_Sequence}]", "v", "1\u{20E3}"));
         assert!(!matches("[\\p{Emoji_Keycap_Sequence}]", "v", "1"));
         assert!(matches("^[\\q{ab|a}]+$", "v", "aba"));
         assert!(matches("[\\q{ab}--b]", "v", "ab"));
         assert!(!matches("[\\q{a}&&b]", "v", "a"));
         assert!(Regex::new("[^\\q{ab}]", "v").is_err());
         assert!(Regex::new("[\\p{Emoji_Keycap_Sequence}]", "u").is_err());
+    }
+
+    #[test]
+    fn vsets_indexed_string_repeat_matches_long_runs() {
+        // Shared-prefix alternatives exercise the first-unit index on
+        // both match and mismatch paths.
+        let run = "ab".repeat(2000);
+        assert!(matches("^[\\q{a|ab|abc}]+$", "v", &run));
+        assert!(!matches("^[\\q{a|ab|abc}]+$", "v", &(run.clone() + "x")));
+        assert!(!matches("^[\\q{a|ab|abc}]+$", "v", "c"));
+        // A full-table run over thousands of emoji must stay linear: the
+        // repetition layer loop tracks seen ends in one set instead of
+        // rescanning every previous layer per end (cubic). The 30s bound
+        // is ~500x the observed ~50ms, so only the old blowup can trip it.
+        let emoji = "\u{1F600}".repeat(4000);
+        let started = std::time::Instant::now();
+        assert!(matches("^\\p{RGI_Emoji}+$", "v", &emoji));
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
     }
 
     #[test]

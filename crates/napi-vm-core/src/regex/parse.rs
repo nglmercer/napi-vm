@@ -28,7 +28,7 @@ pub enum ClassItem {
     },
     /// `v`-mode string alternatives (`\q{…}`, properties of strings) as
     /// UTF-16 units. Matched before scalar items, in source order.
-    Strings(Vec<Vec<u16>>),
+    Strings(StringAlts),
     /// `v`-mode `A&&B&&…`: every operand union must match.
     Conjoin(Vec<Vec<ClassItem>>),
     /// `v`-mode `A--B`: the left union matches and the right one does not.
@@ -36,6 +36,48 @@ pub enum ClassItem {
         left: Vec<ClassItem>,
         right: Vec<ClassItem>,
     },
+}
+
+/// Ordered string alternatives with a first-unit index so long tables
+/// (e.g. `RGI_Emoji` with ~4k entries) only attempt alternatives that
+/// can start at the current input unit on the common no-fold path.
+#[derive(Debug, Clone, Default)]
+pub struct StringAlts {
+    alts: Vec<Vec<u16>>,
+    by_first: HashMap<u16, Vec<usize>>,
+    has_empty: bool,
+}
+
+impl StringAlts {
+    pub fn new(alts: Vec<Vec<u16>>) -> Self {
+        let mut by_first: HashMap<u16, Vec<usize>> = HashMap::new();
+        let mut has_empty = false;
+        for (index, alternative) in alts.iter().enumerate() {
+            match alternative.first() {
+                Some(first) => by_first.entry(*first).or_default().push(index),
+                None => has_empty = true,
+            }
+        }
+        Self {
+            alts,
+            by_first,
+            has_empty,
+        }
+    }
+
+    pub fn all(&self) -> &[Vec<u16>] {
+        &self.alts
+    }
+
+    pub fn has_empty(&self) -> bool {
+        self.has_empty
+    }
+
+    /// Candidate alternative indices whose first unit equals `unit`,
+    /// or `None` when no alternative can start with it.
+    pub fn candidates(&self, unit: u16) -> Option<&[usize]> {
+        self.by_first.get(&unit).map(Vec::as_slice)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -642,7 +684,7 @@ impl Parser {
         };
         if e == 'q' {
             self.pos += 1;
-            return Ok(ClassItem::Strings(self.q_string()?));
+            return Ok(ClassItem::Strings(StringAlts::new(self.q_string()?)));
         }
         self.pos += 1;
         self.class_atom_tail(e)
@@ -707,16 +749,66 @@ impl Parser {
         })
     }
 
-    /// RGI Emoji_Keycap_Sequence: `[0-9#*]` with an optional U+FE0F
+    /// RGI Emoji_Keycap_Sequence: `[0-9#*]` with a required U+FE0F
     /// before U+20E3. Fully specified by UTS#51, no data tables needed.
     fn keycap_sequences() -> Vec<Vec<u16>> {
-        let mut sequences = Vec::with_capacity(24);
+        let mut sequences = Vec::with_capacity(12);
         for base in "0123456789#*".chars() {
-            let base = base as u16;
-            sequences.push(vec![base, 0x20E3]);
-            sequences.push(vec![base, 0xFE0F, 0x20E3]);
+            sequences.push(vec![base as u16, 0xFE0F, 0x20E3]);
         }
         sequences
+    }
+
+    /// Resolve a `v`-mode property-of-strings name (loosely matched) to
+    /// its alternatives. RGI_Emoji composes the six sequence sets plus the
+    /// fully-qualified singles; Basic_Emoji the singles plus the
+    /// presentation-selector pairs.
+    fn string_property(name: &str) -> Option<Vec<Vec<u16>>> {
+        use super::emoji_tables as tables;
+        let take = |table: &[&[u16]]| table.iter().map(|units| units.to_vec()).collect::<Vec<_>>();
+        match name {
+            "emojikeycapsequence" => Some(Self::keycap_sequences()),
+            "rgiemojiflagsequence" => Some(take(tables::RGI_EMOJI_FLAG_SEQUENCE)),
+            "rgiemojitagsequence" => Some(take(tables::RGI_EMOJI_TAG_SEQUENCE)),
+            "rgiemojimodifiersequence" => Some(take(tables::RGI_EMOJI_MODIFIER_SEQUENCE)),
+            "rgiemojizwjsequence" => Some(take(tables::RGI_EMOJI_ZWJ_SEQUENCE)),
+            "basicemoji" => {
+                let mut strings: Vec<Vec<u16>> = tables::RGI_EMOJI_SINGLES
+                    .iter()
+                    .map(|cp| {
+                        char::from_u32(*cp).map(|c| {
+                            let mut pair = [0u16; 2];
+                            c.encode_utf16(&mut pair).to_vec()
+                        })
+                    })
+                    .collect::<Option<_>>()?;
+                strings.extend(take(tables::BASIC_EMOJI_PAIRS));
+                Some(strings)
+            }
+            "rgiemoji" => {
+                let mut strings: Vec<Vec<u16>> = tables::RGI_EMOJI_SINGLES
+                    .iter()
+                    .map(|cp| {
+                        char::from_u32(*cp).map(|c| {
+                            let mut pair = [0u16; 2];
+                            c.encode_utf16(&mut pair).to_vec()
+                        })
+                    })
+                    .collect::<Option<_>>()?;
+                strings.extend(Self::keycap_sequences());
+                for table in [
+                    tables::RGI_EMOJI_FLAG_SEQUENCE,
+                    tables::RGI_EMOJI_TAG_SEQUENCE,
+                    tables::RGI_EMOJI_MODIFIER_SEQUENCE,
+                    tables::RGI_EMOJI_ZWJ_SEQUENCE,
+                    tables::BASIC_EMOJI_PAIRS,
+                ] {
+                    strings.extend(take(table));
+                }
+                Some(strings)
+            }
+            _ => None,
+        }
     }
 
     /// Shared class-escape shapes for both class flavors. The escape
@@ -844,12 +936,15 @@ impl Parser {
             .flat_map(|c| c.to_lowercase())
             .collect();
         // String properties exist only in `v` mode; without it the name
-        // falls through to the scalar tables, which reject it.
-        if self.vsets && loose == "emojikeycapsequence" {
-            if negated {
-                return Err("Cannot negate strings in character class".to_string());
+        // falls through to the scalar tables, which reject it. Negated
+        // string properties stay an error, matching V8.
+        if self.vsets {
+            if let Some(strings) = Self::string_property(&loose) {
+                if negated {
+                    return Err("Cannot negate strings in character class".to_string());
+                }
+                return Ok(ClassItem::Strings(StringAlts::new(strings)));
             }
-            return Ok(ClassItem::Strings(Self::keycap_sequences()));
         }
         let pattern = format!(r"\p{{{property}}}");
         let hir = regex_syntax::Parser::new()
