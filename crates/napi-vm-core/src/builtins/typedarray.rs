@@ -5,6 +5,7 @@
 //! other's writes, which is the whole point of the type — so the buffer is
 //! shared (`Rc<RefCell<Vec<u8>>>`) and the view holds only the window.
 
+mod encoding;
 use std::rc::Rc;
 
 use crate::error::VmErr;
@@ -37,6 +38,22 @@ pub(super) fn install(e: &mut Environment) {
 
     for name in ["ArrayBuffer", "SharedArrayBuffer"] {
         let constructor = e.get(name).expect("buffer constructor");
+        constructor
+            .set_prop("name".into(), Value::String(name.into()))
+            .unwrap();
+        constructor
+            .property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                "name",
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
         constructor
             .set_prop("length".into(), Value::Number(1.0))
             .expect("constructor length");
@@ -83,7 +100,12 @@ pub(super) fn install(e: &mut Environment) {
         namespace
             .set_prop(
                 "isView".to_string(),
-                super::nf("isView", array_buffer_is_view),
+                super::native_method(
+                    "isView",
+                    1,
+                    array_buffer_is_view,
+                    e.get("Function").and_then(|f| f.get_prop("prototype")),
+                ),
             )
             .expect("built-in ArrayBuffer property");
         super::make_callable(&namespace, super::require_new, Some(new_array_buffer));
@@ -112,11 +134,71 @@ pub(super) fn install(e: &mut Environment) {
                 ),
             ],
         );
+        for (name, function) in [
+            ("transfer", array_buffer_transfer as super::NativeFn),
+            ("transferToFixedLength", array_buffer_transfer_fixed),
+            ("transferToImmutable", array_buffer_transfer_immutable),
+            ("sliceToImmutable", array_buffer_slice_immutable),
+        ] {
+            prototype
+                .set_prop(
+                    name.into(),
+                    super::native_method(
+                        name,
+                        if name == "sliceToImmutable" { 2 } else { 0 },
+                        function,
+                        e.get("Function").and_then(|f| f.get_prop("prototype")),
+                    ),
+                )
+                .unwrap();
+            prototype
+                .property_cell()
+                .unwrap()
+                .meta
+                .borrow_mut()
+                .set_attrs(
+                    name,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+        }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            prototype
+                .set_prop(key.clone(), Value::String("ArrayBuffer".into()))
+                .unwrap();
+            let cell = prototype.property_cell().unwrap();
+            let mut meta = cell.meta.borrow_mut();
+            meta.set_symbol_key(&key, symbol.clone());
+            meta.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        namespace
+            .property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                "isView",
+                crate::value::PropAttrs {
+                    enumerable: false,
+                    ..Default::default()
+                },
+            );
         for (name, getter) in [
             ("byteLength", array_byte_length as super::NativeFn),
             ("maxByteLength", array_maximum_length),
             ("resizable", array_resizable),
             ("detached", array_detached),
+            ("immutable", array_immutable),
         ] {
             prototype
                 .set_prop(
@@ -477,6 +559,7 @@ pub(super) fn install(e: &mut Environment) {
         }
         e.set(name, namespace);
     }
+    encoding::install(e);
 }
 
 fn make_prototype<const N: usize>(
@@ -1240,6 +1323,9 @@ fn atomics(
             "TypeError: Atomics requires an integer typed array".into(),
         ));
     }
+    if !matches!(method, AtomicsMethod::Load) {
+        require_writable(&view.buffer)?;
+    }
     if view.is_out_of_bounds() {
         return Err(VmErr::Msg("TypeError: Detached buffer".into()));
     }
@@ -1618,6 +1704,7 @@ pub(crate) fn set_integer_index_in(
     index: f64,
     value: &Value,
 ) -> Result<(), VmErr> {
+    require_writable(&view.buffer)?;
     let converted = if is_bigint_kind(view.kind) {
         interp.ecmascript_to_bigint(value)?
     } else {
@@ -1674,6 +1761,7 @@ fn typed_array_create(
     constructor: &Value,
     arguments: Vec<Value>,
     minimum_length: Option<usize>,
+    writable: bool,
 ) -> Result<Value, VmErr> {
     if !super::is_constructor(constructor) {
         return Err(VmErr::Msg(
@@ -1682,6 +1770,9 @@ fn typed_array_create(
     }
     let result = interp.ctor(constructor, arguments)?;
     let view = require(&result)?;
+    if writable {
+        require_writable(&view.buffer)?;
+    }
     if view.is_out_of_bounds()
         || minimum_length.is_some_and(|minimum| view.effective_length() < minimum)
     {
@@ -1697,10 +1788,11 @@ fn typed_species_create(
     original: &Value,
     arguments: Vec<Value>,
     minimum_length: Option<usize>,
+    writable: bool,
 ) -> Result<Value, VmErr> {
     let source = require(original)?;
     let constructor = interp.species_constructor(original, source.kind.name())?;
-    let result = typed_array_create(interp, &constructor, arguments, minimum_length)?;
+    let result = typed_array_create(interp, &constructor, arguments, minimum_length, writable)?;
     if is_bigint_kind(source.kind) != is_bigint_kind(require(&result)?.kind) {
         return Err(VmErr::Msg(
             "TypeError: TypedArray species has a different content type".into(),
@@ -1720,6 +1812,7 @@ fn typed_of(
         &constructor,
         vec![Value::Number(length as f64)],
         Some(length),
+        true,
     )?;
     let view = require(&result)?;
     for (index, value) in arguments.iter().enumerate() {
@@ -1772,6 +1865,7 @@ fn typed_from(
         &constructor,
         vec![Value::Number(length as f64)],
         Some(length),
+        true,
     )?;
     let view = require(&result)?;
     for index in 0..length {
@@ -1828,6 +1922,7 @@ pub fn read_element(view: &Rc<TypedArrayData>, index: usize) -> Option<Value> {
 /// Write element `index`, converting and wrapping as the element type
 /// requires. Out-of-range indices are ignored, as they are on a typed array.
 pub fn write_element(view: &Rc<TypedArrayData>, index: usize, value: &Value) -> Result<(), VmErr> {
+    require_writable(&view.buffer)?;
     if index >= view.effective_length() {
         return Ok(());
     }
@@ -1927,6 +2022,7 @@ fn typed_map(interp: &mut Interpreter, this: Value, arguments: Vec<Value>) -> Re
         &this,
         vec![Value::Number(length as f64)],
         Some(length),
+        true,
     )?;
     let destination = require(&result)?;
     for index in 0..length {
@@ -1971,6 +2067,7 @@ fn typed_filter(
         &this,
         vec![Value::Number(kept.len() as f64)],
         Some(kept.len()),
+        true,
     )?;
     let destination = require(&result)?;
     for (index, value) in kept.iter().enumerate() {
@@ -2150,6 +2247,7 @@ fn typed_join(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Va
 /// `set(source, offset)`: copy elements in, converting as needed.
 fn typed_set(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = require(&t)?;
+    require_writable(&v.buffer)?;
     let offset = crate::value::to_integer_or_infinity(
         i.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?,
     );
@@ -2241,7 +2339,7 @@ fn typed_subarray(
     {
         constructor_arguments.push(Value::Number((end - start) as f64));
     }
-    typed_species_create(interp, &this, constructor_arguments, None)
+    typed_species_create(interp, &this, constructor_arguments, None, false)
 }
 
 fn typed_slice(
@@ -2257,6 +2355,7 @@ fn typed_slice(
         &this,
         vec![Value::Number(count as f64)],
         Some(count),
+        true,
     )?;
     if count == 0 {
         return Ok(result);
@@ -2290,6 +2389,7 @@ fn typed_slice(
 
 fn typed_fill(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = validated_typed_source(&this)?;
+    require_writable(&view.buffer)?;
     let len = view.effective_length();
     let input = a.first().cloned().unwrap_or(Value::Undefined);
     let value = if is_bigint_kind(view.kind) {
@@ -2404,7 +2504,8 @@ fn buffer_slice(
         }
         _ => source.identity() == destination.identity(),
     };
-    if same || destination.is_detached() || destination.len() < count {
+    if same || destination.is_detached() || destination.is_immutable() || destination.len() < count
+    {
         return Err(VmErr::Msg("TypeError: invalid species buffer".into()));
     }
     if source.is_detached() {
@@ -2538,6 +2639,7 @@ fn data_view_slot(
 }
 
 fn data_view_write(slot: &Rc<TypedArrayData>, value: &Value, little: bool) -> Result<(), VmErr> {
+    require_writable(&slot.buffer)?;
     let buffer = BufferBacking::Array(Buffer::zeroed(slot.kind.size()));
     let local = Rc::new(TypedArrayData {
         length_tracking: false,
@@ -2593,6 +2695,7 @@ fn data_view_set_kind(
     kind: TypedKind,
 ) -> Result<Value, VmErr> {
     let view = require_data_view(&this)?;
+    require_writable(&view.buffer)?;
     let offset = constructor_index(i, a.first())?;
     let undefined = Value::Undefined;
     let value = a.get(1).unwrap_or(&undefined);
@@ -3045,6 +3148,7 @@ fn data_view_get_float16(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
 }
 fn data_view_set_float16(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let view = require_data_view(&this)?;
+    require_writable(&view.buffer)?;
     let offset = constructor_index(i, a.first())?;
     let n = i.ecmascript_to_number(a.get(1).unwrap_or(&Value::Undefined))?;
     let little = a.get(2).is_some_and(Value::is_truthy);
@@ -3146,6 +3250,7 @@ fn typed_relative(
 }
 fn typed_copy_within(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = validated_typed_source(&t)?;
+    require_writable(&v.buffer)?;
     let len = v.effective_length();
     let to = typed_relative(i, a.first(), len, 0)?;
     let from = typed_relative(i, a.get(1), len, 0)?;
@@ -3174,6 +3279,7 @@ fn typed_copy_within(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Val
 }
 fn typed_reverse(i: &mut Interpreter, t: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let v = validated_typed_source(&t)?;
+    require_writable(&v.buffer)?;
     let len = v.effective_length();
     let size = v.kind.size();
     for k in 0..len / 2 {
@@ -3317,6 +3423,21 @@ fn typed_sort_values(
     cmp: &Value,
 ) -> Result<(), VmErr> {
     let len = values.len();
+    // Sorted numeric inputs need no merge passes. This keeps zero-filled and
+    // already ordered buffers linear without adding observable comparator calls.
+    if matches!(cmp, Value::Undefined) {
+        let mut ordered = true;
+        for pair in values.windows(2) {
+            i.consume_loop()?;
+            if typed_sort_compare(i, &pair[0], &pair[1], cmp)? == std::cmp::Ordering::Greater {
+                ordered = false;
+                break;
+            }
+        }
+        if ordered {
+            return Ok(());
+        }
+    }
     let mut width = 1;
     while width < len {
         let mut out = Vec::with_capacity(len);
@@ -3361,6 +3482,9 @@ fn typed_sort_impl(
         return Err(VmErr::Msg("TypeError: comparator must be callable".into()));
     }
     let v = validated_typed_source(&t)?;
+    if !copy {
+        require_writable(&v.buffer)?;
+    }
     let len = v.effective_length();
     let result = if copy {
         allocate_typed(v.kind, len)?
@@ -3375,4 +3499,152 @@ fn typed_sort_impl(
         write_element(&dest, k, x)?;
     }
     Ok(result)
+}
+
+fn array_buffer_transfer(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    transfer_buffer(i, this, args, BufferTransferMode::Preserve)
+}
+fn array_buffer_transfer_fixed(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    transfer_buffer(i, this, args, BufferTransferMode::Fixed)
+}
+fn transfer_buffer(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    mode: BufferTransferMode,
+) -> Result<Value, VmErr> {
+    let source = require_array_buffer(&this)?;
+    let length = match args.first() {
+        None | Some(Value::Undefined) => source.borrow().len(),
+        Some(value) => constructor_index(i, Some(value))?,
+    };
+    if source.is_detached() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot transfer a detached ArrayBuffer".into(),
+        ));
+    }
+    if source.is_immutable() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot transfer an immutable ArrayBuffer".into(),
+        ));
+    }
+    if matches!(mode, BufferTransferMode::Immutable) {
+        let count = length.min(source.borrow().len());
+        let result = immutable_buffer(i, source, 0, length, count)?;
+        source.try_detach()?;
+        return Ok(result);
+    }
+    let destination = if matches!(mode, BufferTransferMode::Preserve) && source.is_resizable() {
+        Buffer::resizable(length, source.maximum_length())
+            .ok_or_else(|| range_err("Invalid transferred ArrayBuffer length"))?
+    } else {
+        new_buffer(length)?
+    };
+    {
+        let bytes = source.borrow();
+        let count = bytes.len().min(length);
+        destination.borrow_mut()[..count].copy_from_slice(&bytes[..count]);
+    }
+    let result = Value::ArrayBuffer(destination);
+    let prototype = i
+        .persistent_global
+        .borrow()
+        .intrinsic("ArrayBuffer")
+        .and_then(|c| c.get_prop("prototype"));
+    result
+        .property_cell()
+        .unwrap()
+        .set_proto(prototype.map(Rc::new));
+    source.try_detach()?;
+    Ok(result)
+}
+
+enum BufferTransferMode {
+    Preserve,
+    Fixed,
+    Immutable,
+}
+fn array_immutable(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Bool(require_array_buffer(&this)?.is_immutable()))
+}
+fn array_buffer_transfer_immutable(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    transfer_buffer(i, this, args, BufferTransferMode::Immutable)
+}
+fn immutable_buffer(
+    i: &mut Interpreter,
+    source: &Buffer,
+    start: usize,
+    length: usize,
+    count: usize,
+) -> Result<Value, VmErr> {
+    if length > crate::value::MAX_ARRAY_LEN * 8 {
+        return Err(range_err("Invalid array buffer length"));
+    }
+    let mut bytes = vec![0; length];
+    if count > 0 {
+        bytes[..count].copy_from_slice(&source.borrow()[start..start + count]);
+    }
+    let result = Value::ArrayBuffer(Buffer::immutable(bytes));
+    let prototype = i
+        .persistent_global
+        .borrow()
+        .intrinsic("ArrayBuffer")
+        .and_then(|c| c.get_prop("prototype"));
+    result
+        .property_cell()
+        .unwrap()
+        .set_proto(prototype.map(Rc::new));
+    Ok(result)
+}
+fn array_buffer_slice_immutable(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let source = require_array_buffer(&this)?;
+    if source.is_detached() {
+        return Err(VmErr::Msg("TypeError: Detached ArrayBuffer".into()));
+    }
+    let length = source.borrow().len();
+    let relative = |number: f64| {
+        let integer = crate::value::to_integer_or_infinity(number);
+        if integer < 0. {
+            (length as f64 + integer).max(0.) as usize
+        } else {
+            integer.min(length as f64) as usize
+        }
+    };
+    let start = relative(i.ecmascript_to_number(args.first().unwrap_or(&Value::Undefined))?);
+    let end = match args.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative(i.ecmascript_to_number(value)?),
+    };
+    if source.is_detached() {
+        return Err(VmErr::Msg("TypeError: Detached ArrayBuffer".into()));
+    }
+    let length = end.saturating_sub(start);
+    if source.borrow().len() < end {
+        return Err(range_err("ArrayBuffer shrank below the resolved slice end"));
+    }
+    immutable_buffer(i, source, start, length, length)
+}
+fn require_writable(buffer: &BufferBacking) -> Result<(), VmErr> {
+    if buffer.is_immutable() {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot write an immutable ArrayBuffer".into(),
+        ));
+    }
+    Ok(())
 }

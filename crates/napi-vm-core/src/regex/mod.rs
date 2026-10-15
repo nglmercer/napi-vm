@@ -34,7 +34,7 @@ const MAX_STEPS: usize = 1_000_000;
 pub struct Regex {
     root: Node,
     pub group_count: usize,
-    pub names: HashMap<String, usize>,
+    pub names: HashMap<String, Vec<usize>>,
     pub source: crate::JsString,
     pub flags: String,
     pub global: bool,
@@ -106,10 +106,13 @@ pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<S
             return Err("Maximum regular expression nesting exceeded".into());
         }
     }
+    // Normalize only identifier escapes in capture names. Oxc compares raw
+    // escaped spellings for named references; ECMAScript compares StringValue.
+    let normalized_names = normalize_group_names(&pattern, unicode)?;
     let allocator = oxc_allocator::Allocator::default();
     oxc_regular_expression::LiteralParser::new(
         &allocator,
-        &pattern,
+        normalized_names.as_deref().unwrap_or(&pattern),
         Some(flags),
         oxc_regular_expression::Options::default(),
     )
@@ -156,6 +159,11 @@ impl Regex {
             input,
             steps: Cell::new(0),
             depth: Cell::new(0),
+            modifiers: Cell::new(
+                u8::from(self.ignore_case)
+                    | (u8::from(self.multiline) << 1)
+                    | (u8::from(self.dot_all) << 2),
+            ),
         };
         // Unicode matching starts at a code-point boundary even when a
         // caller supplies lastIndex between the halves of a valid pair.
@@ -193,6 +201,7 @@ struct Matcher<'a> {
     input: &'a [u16],
     steps: Cell<usize>,
     depth: Cell<usize>,
+    modifiers: Cell<u8>,
 }
 
 struct MatchDepth<'a>(&'a Cell<usize>);
@@ -247,16 +256,18 @@ impl Matcher<'_> {
     }
     fn same_char(&self, a: u32, b: u32) -> bool {
         a == b
-            || (self.regex.ignore_case
+            || ((self.modifiers.get() & 1 != 0)
                 && match (char::from_u32(a), char::from_u32(b)) {
                     (Some(a), Some(b)) => a.to_lowercase().eq(b.to_lowercase()),
                     _ => false,
                 })
     }
+    fn word_character(&self, c: u32) -> bool {
+        matches!(c, 48..=57 | 65..=90 | 97..=122 | 95)
+            || (self.regex.unicode && self.modifiers.get() & 1 != 0 && matches!(c, 0x017f | 0x212a))
+    }
     fn is_word(&self, index: usize) -> bool {
-        self.input
-            .get(index)
-            .is_some_and(|c| matches!(*c,48..=57|65..=90|97..=122|95))
+        self.scalar(index).is_some_and(|c| self.word_character(c))
     }
     fn is_line_terminator(c: u16) -> bool {
         matches!(c, 10 | 13 | 0x2028 | 0x2029)
@@ -266,7 +277,7 @@ impl Matcher<'_> {
             ClassItem::Char(want) => self.same_char(c, *want),
             ClassItem::Range(low, high) => {
                 (*low..=*high).contains(&c)
-                    || (self.regex.ignore_case
+                    || ((self.modifiers.get() & 1 != 0)
                         && char::from_u32(c).is_some_and(|ch| {
                             ch.to_lowercase()
                                 .any(|v| (*low..=*high).contains(&(v as u32)))
@@ -278,18 +289,40 @@ impl Matcher<'_> {
             ClassItem::Shorthand { kind, negated } => {
                 let base = match kind {
                     Shorthand::Digit => (48..=57).contains(&c),
-                    Shorthand::Word => matches!(c,48..=57|65..=90|97..=122|95),
+                    Shorthand::Word => self.word_character(c),
                     Shorthand::Space => {
                         char::from_u32(c).is_some_and(char::is_whitespace) || c == 0xFEFF
                     }
                 };
                 base != *negated
             }
-            ClassItem::UnicodeProperty { ranges, negated } => {
+            ClassItem::UnicodeProperty {
+                ranges,
+                folded,
+                folded_complement,
+                negated,
+            } => {
+                let folding = self.modifiers.get() & 1 != 0;
+                // Unicode mode folds the complement of a negative property;
+                // UnicodeSets mode complements the already folded property.
+                let complement_first = folding && *negated && !self.regex.flags.contains('v');
+                let ranges = if complement_first {
+                    folded_complement
+                } else if folding {
+                    folded
+                } else {
+                    ranges
+                };
+                let index = ranges.partition_point(|(_, high)| (*high as u32) < c);
                 let hit = ranges
-                    .iter()
-                    .any(|(a, b)| (*a as u32..=*b as u32).contains(&c));
-                hit != *negated
+                    .get(index)
+                    .is_some_and(|(low, high)| (*low as u32..=*high as u32).contains(&c))
+                    || (complement_first && (0xd800..=0xdfff).contains(&c));
+                if complement_first {
+                    hit
+                } else {
+                    hit != *negated
+                }
             }
         });
         hit != negated
@@ -302,16 +335,41 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
+        stacker::maybe_grow(64 * 1024, 1024 * 1024, || {
+            self.node_inner(node, pos, caps, k)
+        })
+    }
+
+    fn node_inner(
+        &self,
+        node: &Node,
+        pos: usize,
+        caps: &mut Captures,
+        k: Cont<'_>,
+    ) -> Result<bool, String> {
         let _depth = self.enter()?;
         self.step()?;
         match node {
+            Node::Modifiers { add, remove, node } => {
+                let outer = self.modifiers.get();
+                let inner = (outer | add) & !remove;
+                self.modifiers.set(inner);
+                let result = self.node(node, pos, caps, &mut |pos, caps| {
+                    self.modifiers.set(outer);
+                    let accepted = k(pos, caps);
+                    self.modifiers.set(inner);
+                    accepted
+                });
+                self.modifiers.set(outer);
+                result
+            }
             Node::Empty => Ok(k(pos, caps)),
             Node::Char(want) => match self.scalar(pos) {
                 Some(c) if self.same_char(c, *want) => Ok(k(self.advance(pos), caps)),
                 _ => Ok(false),
             },
             Node::AnyChar => match self.input.get(pos) {
-                Some(c) if self.regex.dot_all || !Self::is_line_terminator(*c) => {
+                Some(c) if (self.modifiers.get() & 4 != 0) || !Self::is_line_terminator(*c) => {
                     Ok(k(self.advance(pos), caps))
                 }
                 _ => Ok(false),
@@ -362,34 +420,34 @@ impl Matcher<'_> {
             },
             // An unset group matches the empty string, which is why
             // `/(a)?\1/` matches `""`.
-            Node::Backref(index) => {
-                let Some(Some((start, end))) = caps.get(*index).copied() else {
-                    return Ok(k(pos, caps));
-                };
-                let len = end - start;
-                if pos + len > self.input.len() {
-                    return Ok(false);
+            Node::Backref(index) => self.backreference(*index, pos, caps, k),
+            Node::NamedBackref(name) => {
+                let index = self
+                    .regex
+                    .names
+                    .get(name)
+                    .and_then(|indices| {
+                        indices
+                            .iter()
+                            .find(|index| caps.get(**index).is_some_and(Option::is_some))
+                    })
+                    .copied();
+                match index {
+                    Some(index) => self.backreference(index, pos, caps, k),
+                    None => Ok(k(pos, caps)),
                 }
-                for offset in 0..len {
-                    if !self.same_char(
-                        self.input[pos + offset] as u32,
-                        self.input[start + offset] as u32,
-                    ) {
-                        return Ok(false);
-                    }
-                }
-                Ok(k(pos + len, caps))
             }
             Node::Anchor(anchor) => {
                 let ok = match anchor {
                     Anchor::Start => {
                         pos == 0
-                            || (self.regex.multiline
+                            || ((self.modifiers.get() & 2 != 0)
                                 && Self::is_line_terminator(self.input[pos - 1]))
                     }
                     Anchor::End => {
                         pos == self.input.len()
-                            || (self.regex.multiline && Self::is_line_terminator(self.input[pos]))
+                            || ((self.modifiers.get() & 2 != 0)
+                                && Self::is_line_terminator(self.input[pos]))
                     }
                     Anchor::WordBoundary => {
                         let before = pos > 0 && self.is_word(pos - 1);
@@ -436,6 +494,31 @@ impl Matcher<'_> {
         }
     }
 
+    fn backreference(
+        &self,
+        index: usize,
+        pos: usize,
+        caps: &mut Captures,
+        k: Cont<'_>,
+    ) -> Result<bool, String> {
+        let Some(Some((start, end))) = caps.get(index).copied() else {
+            return Ok(k(pos, caps));
+        };
+        let len = end - start;
+        if pos + len > self.input.len() {
+            return Ok(false);
+        }
+        for offset in 0..len {
+            if !self.same_char(
+                self.input[pos + offset] as u32,
+                self.input[start + offset] as u32,
+            ) {
+                return Ok(false);
+            }
+        }
+        Ok(k(pos + len, caps))
+    }
+
     fn sequence(
         &self,
         nodes: &[Node],
@@ -443,7 +526,6 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
-        let _depth = self.enter()?;
         match nodes.split_first() {
             None => Ok(k(pos, caps)),
             Some((head, rest)) => {
@@ -479,7 +561,6 @@ impl Matcher<'_> {
         caps: &mut Captures,
         k: Cont<'_>,
     ) -> Result<bool, String> {
-        let _depth = self.enter()?;
         let mut atom = node;
         while let Node::Group { index: None, node } = atom {
             atom = node;
@@ -491,6 +572,7 @@ impl Matcher<'_> {
         let mut error = None;
         // Below the minimum there is no choice: the body must match again.
         if count < min {
+            clear_captures(node, caps);
             let matched = self.node(node, pos, caps, &mut |next, caps| match self.repeat(
                 node,
                 min,
@@ -523,6 +605,7 @@ impl Matcher<'_> {
 
         if may_repeat {
             let saved = caps.clone();
+            clear_captures(node, caps);
             // A body that matched the empty string would repeat forever, so
             // the iteration that consumed nothing is the last one.
             let matched = self.node(node, pos, caps, &mut |next, caps| {
@@ -580,10 +663,9 @@ impl Matcher<'_> {
             }
             let matches = match atom {
                 Node::Char(want) => self.scalar(pos).is_some_and(|c| self.same_char(c, *want)),
-                Node::AnyChar => self
-                    .input
-                    .get(pos)
-                    .is_some_and(|c| self.regex.dot_all || !Self::is_line_terminator(*c)),
+                Node::AnyChar => self.input.get(pos).is_some_and(|c| {
+                    (self.modifiers.get() & 4 != 0) || !Self::is_line_terminator(*c)
+                }),
                 Node::Class { negated, items } => self
                     .scalar(pos)
                     .is_some_and(|c| self.class_matches(*negated, items, c)),
@@ -609,4 +691,109 @@ impl Matcher<'_> {
         }
         Ok(false)
     }
+}
+
+#[cfg(test)]
+mod modifier_tests {
+    use super::Regex;
+
+    fn matches(pattern: &str, flags: &str, input: &str) -> bool {
+        Regex::new(pattern, flags)
+            .unwrap()
+            .find_at(&input.encode_utf16().collect::<Vec<_>>(), 0)
+            .unwrap()
+            .is_some()
+    }
+
+    #[test]
+    fn scoped_flags_restore_on_exit_and_backtracking() {
+        assert!(matches("^(?i:a)b$", "", "Ab"));
+        assert!(!matches("^(?i:a)b$", "", "AB"));
+        assert!(matches("^(?i:a|ab)c$", "", "ABc"));
+        assert!(!matches("^(?i:a|ab)c$", "", "ABC"));
+        assert!(matches("^(?i:a(?-i:b)c)d$", "", "AbCd"));
+        assert!(!matches("^(?i:a(?-i:b)c)d$", "", "ABCd"));
+        assert!(matches("^(?-i:a)b$", "i", "aB"));
+        assert!(!matches("^(?-i:a)b$", "i", "AB"));
+        assert!(matches("(?s-:.)", "", "\n"));
+        assert!(matches("(?m:^a$)", "", "b\na\nc"));
+        assert!(matches(r"(?i:\w)", "u", "ſ"));
+        assert!(matches(r"(?i:\b)", "u", "K"));
+        assert!(matches(r"(?i:\p{Lu})", "u", "a"));
+        assert!(matches(r"(?i:\P{Lu})", "u", "A"));
+        assert!(!matches(r"(?i:\P{Lu})", "v", "A"));
+    }
+}
+
+fn clear_captures(node: &Node, caps: &mut Captures) {
+    match node {
+        Node::Group { index, node } => {
+            if let Some(index) = index {
+                caps[*index] = None;
+            }
+            clear_captures(node, caps);
+        }
+        Node::Concat(nodes) | Node::Alt(nodes) => {
+            for node in nodes {
+                clear_captures(node, caps);
+            }
+        }
+        Node::Repeat { node, .. } | Node::Look { node, .. } | Node::Modifiers { node, .. } => {
+            clear_captures(node, caps)
+        }
+        _ => {}
+    }
+}
+
+fn normalize_group_names(pattern: &str, unicode: bool) -> Result<Option<String>, String> {
+    if !pattern.contains('\\') || !(pattern.contains("(?<") || pattern.contains("\\k<")) {
+        return Ok(None);
+    }
+    let parser = parse::Parser::new(pattern, unicode);
+    let references = unicode || parser.has_named_captures;
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut output = String::new();
+    let mut at = 0;
+    let mut class = false;
+    while at < chars.len() {
+        let capture = !class
+            && chars[at..].starts_with(&['(', '?', '<'])
+            && !matches!(chars.get(at + 3), Some('=' | '!'));
+        let reference = !class && references && chars[at..].starts_with(&['\\', 'k', '<']);
+        if capture || reference {
+            output.extend(chars[at..at + 3].iter());
+            at += 3;
+            let end = chars[at..]
+                .iter()
+                .position(|c| *c == '>')
+                .map(|n| at + n)
+                .ok_or("Invalid capture group name")?;
+            let raw: String = chars[at..=end].iter().collect();
+            let name = parse::Parser::new(&raw, true).group_name()?;
+            let mut identifier = name.chars();
+            if !identifier
+                .next()
+                .is_some_and(crate::lexer::is_identifier_start)
+                || !identifier.all(crate::lexer::is_identifier_continue)
+            {
+                return Err("Invalid capture group name".into());
+            }
+            output.push_str(&name);
+            output.push('>');
+            at = end + 1;
+        } else {
+            let c = chars[at];
+            output.push(c);
+            at += 1;
+            if c == '\\' && at < chars.len() {
+                output.push(chars[at]);
+                at += 1;
+            } else if c == '[' {
+                class = true;
+            } else if c == ']' {
+                class = false;
+            }
+        }
+    }
+    Ok(Some(output))
 }

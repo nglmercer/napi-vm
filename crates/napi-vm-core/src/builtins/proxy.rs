@@ -158,6 +158,13 @@ impl Interpreter {
         if let Value::TypedArray(view) = object
             && let Some(index) = super::canonical_numeric_index(&slot)
         {
+            if view.buffer.is_immutable() {
+                if !super::valid_integer_index(view, index) {
+                    return Ok(false);
+                }
+                let current = super::object::descriptor_for_key_in(self, object, key)?;
+                return Ok(super::object::compatible_descriptor(&current, descriptor));
+            }
             if !super::valid_integer_index(view, index)
                 || descriptor.get_prop("get").is_some()
                 || descriptor.get_prop("set").is_some()

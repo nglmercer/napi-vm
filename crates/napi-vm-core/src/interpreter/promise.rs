@@ -208,6 +208,33 @@ impl Interpreter {
         on_rejected: Value,
         derived: Option<Rc<RefCell<PromiseInner>>>,
     ) -> Result<Value, VmErr> {
+        self.register_internal(promise, on_fulfilled, on_rejected, derived, None)
+    }
+    pub(crate) fn register_capability(
+        &mut self,
+        promise: &Value,
+        on_fulfilled: Value,
+        on_rejected: Value,
+        resolve: Value,
+        reject: Value,
+    ) -> Result<(), VmErr> {
+        self.register_internal(
+            promise,
+            on_fulfilled,
+            on_rejected,
+            None,
+            Some((resolve, reject)),
+        )?;
+        Ok(())
+    }
+    fn register_internal(
+        &mut self,
+        promise: &Value,
+        on_fulfilled: Value,
+        on_rejected: Value,
+        derived: Option<Rc<RefCell<PromiseInner>>>,
+        capability: Option<(Value, Value)>,
+    ) -> Result<Value, VmErr> {
         let adopted = derived.is_some();
         let derived = derived.unwrap_or_else(Value::pending_promise);
         // A non-promise is registered on through `Promise.resolve(v)`, so its
@@ -234,6 +261,7 @@ impl Interpreter {
             on_rejected,
             derived: derived.clone(),
             adopted,
+            capability: capability.map(Box::new),
         };
         let settled = {
             let mut state = inner.borrow_mut();
@@ -264,6 +292,29 @@ impl Interpreter {
         value: Value,
         reaction: Reaction,
     ) -> Result<(), VmErr> {
+        if let Some((resolve, reject)) = reaction.capability.as_deref() {
+            let handler = if state == PromiseState::Fulfilled {
+                &reaction.on_fulfilled
+            } else {
+                &reaction.on_rejected
+            };
+            let outcome = if is_callable(handler) {
+                self.call_this(handler, Value::Undefined, vec![value])
+            } else if state == PromiseState::Fulfilled {
+                Ok(value)
+            } else {
+                Err(VmErr::Throw(value))
+            };
+            let (function, value) = match outcome {
+                Ok(v) => (resolve, v),
+                Err(error @ (VmErr::Throw(_) | VmErr::Msg(_) | VmErr::RuntimeError(_))) => {
+                    (reject, promise_error_reason(error))
+                }
+                Err(other) => return Err(other),
+            };
+            self.call_this(function, Value::Undefined, vec![value])?;
+            return Ok(());
+        }
         if reaction.adopted {
             settle(&self.jobs, &reaction.derived, state, value);
             return Ok(());

@@ -131,7 +131,7 @@ fn detach_array_buffer(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Resul
             "TypeError: ArrayBuffer detachment key mismatch".into(),
         ));
     }
-    buffer.detach();
+    buffer.try_detach()?;
     Ok(Value::Undefined)
 }
 

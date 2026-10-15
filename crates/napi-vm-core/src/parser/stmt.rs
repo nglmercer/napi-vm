@@ -652,10 +652,59 @@ impl Parser {
                     | Token::KwYield
                     | Token::KwOf
             )
-            && (await_using || !matches!(self.peek(), Token::KwOf))
+            && (await_using
+                || !matches!(self.peek(), Token::KwOf)
+                || matches!(self.toks.get(self.pos + 2), Some((Token::Equal, _))))
         {
             self.adv();
             let name = self.ident()?;
+            if matches!(self.cur(), Token::Equal) {
+                if is_await {
+                    self.record_error("for await requires of".into());
+                }
+                let mut declarations = Vec::new();
+                let mut name = name;
+                loop {
+                    self.expect(&Token::Equal);
+                    let init = self.with_in(false, Self::assign)?;
+                    declarations.push(Statement::VarDecl {
+                        kind: VarKind::Const,
+                        name,
+                        init: Some(Box::new(init)),
+                        destructuring: None,
+                    });
+                    if !self.eat(&Token::Comma) {
+                        break;
+                    }
+                    name = self.ident()?;
+                }
+                self.expect(&Token::Semicolon);
+                let test = if matches!(self.cur(), Token::Semicolon) {
+                    None
+                } else {
+                    Some(Box::new(self.expr()?))
+                };
+                self.expect(&Token::Semicolon);
+                let update = if matches!(self.cur(), Token::RParen) {
+                    None
+                } else {
+                    Some(Box::new(self.expr()?))
+                };
+                self.expect(&Token::RParen);
+                let body = self.block_or_stmt(false);
+                return Some(Statement::Block(vec![
+                    Statement::ResourceDeclaration {
+                        declarations,
+                        is_await: await_using,
+                    },
+                    Statement::For {
+                        init: None,
+                        test,
+                        update,
+                        body,
+                    },
+                ]));
+            }
             self.expect(&Token::KwOf);
             let iter = Box::new(self.assign()?);
             self.expect(&Token::RParen);

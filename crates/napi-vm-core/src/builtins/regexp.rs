@@ -2,6 +2,9 @@
 //! take a pattern (`match`, `matchAll`, `replace`, `replaceAll`, `search`,
 //! `split`).
 
+mod protocol;
+pub(crate) use protocol::{IteratorSlots as RegExpIteratorSlots, install_iterator};
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -147,7 +150,7 @@ fn update_legacy(
 pub(super) fn install(e: &mut Environment) {
     if let Some(namespace) = e.get("RegExp") {
         e.regexp_legacy = Some(Rc::new(RefCell::new(LegacyState::default())));
-        super::make_callable(&namespace, regexp_construct, None);
+        super::make_callable(&namespace, regexp_call, Some(regexp_construct));
         for (names, getter) in [
             (&["input", "$_"][..], legacy_input as super::NativeFn),
             (&["lastMatch", "$&"][..], legacy_last_match),
@@ -205,8 +208,11 @@ pub(super) fn install(e: &mut Environment) {
                 ("constructor".into(), namespace.clone()),
                 ("exec".into(), super::nf("exec", regexp_exec)),
                 ("compile".into(), super::nf("compile", regexp_compile)),
-                ("test".into(), super::nf("test", regexp_test)),
-                ("toString".into(), super::nf("toString", regexp_to_string)),
+                ("test".into(), super::nf("test", protocol::test)),
+                (
+                    "toString".into(),
+                    super::nf("toString", protocol::to_string),
+                ),
             ],
             object_prototype.map(Rc::new),
         );
@@ -223,6 +229,7 @@ pub(super) fn install(e: &mut Environment) {
             }
         }
         for (name, getter) in [
+            ("flags", protocol::flags as super::NativeFn),
             ("source", regexp_source as super::NativeFn),
             ("global", regexp_global),
             ("ignoreCase", regexp_ignore_case),
@@ -251,6 +258,71 @@ pub(super) fn install(e: &mut Environment) {
             )
             .expect("RegExp intrinsic getter");
         }
+        for (name, function) in [
+            ("match", protocol::matches as super::NativeFn),
+            ("search", protocol::search),
+            ("matchAll", protocol::match_all),
+            ("split", protocol::split),
+            ("replace", protocol::replace),
+        ] {
+            if let Some(Value::Symbol(ref symbol)) = super::well_known(name) {
+                let key = crate::interpreter::symbol_slot_key(symbol);
+                prototype
+                    .set_prop(
+                        key.clone(),
+                        super::native_method(
+                            &format!("[Symbol.{name}]"),
+                            if name == "split" || name == "replace" {
+                                2
+                            } else {
+                                1
+                            },
+                            function,
+                            e.get("Function").and_then(|f| f.get_prop("prototype")),
+                        ),
+                    )
+                    .unwrap();
+                let cell = prototype.property_cell().unwrap();
+                let mut meta = cell.meta.borrow_mut();
+                meta.set_symbol_key(&key, symbol.clone());
+                meta.set_attrs(
+                    &key,
+                    crate::value::PropAttrs {
+                        enumerable: false,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        if let Some(Value::Symbol(ref symbol)) = super::well_known("species") {
+            let key = crate::interpreter::symbol_slot_key(symbol);
+            let getter = super::native_method(
+                "get [Symbol.species]",
+                0,
+                regexp_species,
+                e.get("Function").and_then(|f| f.get_prop("prototype")),
+            );
+            super::object::define_property(
+                &namespace,
+                &key,
+                &Value::descriptor_record(vec![
+                    ("get".into(), getter),
+                    ("configurable".into(), Value::Bool(true)),
+                ]),
+            )
+            .unwrap();
+            namespace
+                .property_cell()
+                .unwrap()
+                .meta
+                .borrow_mut()
+                .set_symbol_key(&key, symbol.clone());
+        }
+        super::install_method_metadata(
+            e,
+            &prototype,
+            &[("exec", 1), ("test", 1), ("compile", 2), ("toString", 0)],
+        );
         super::set_builtin_constructor_prototype(e, &namespace, prototype);
     }
 }
@@ -314,24 +386,60 @@ pub(crate) fn compile(source: impl Into<crate::JsString>, flags: &str) -> Result
 
 /// `RegExp(pattern, flags)`. A `RegExp` argument is re-compiled, taking its
 /// own flags unless new ones are given.
-fn regexp_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let (source, own_flags) = match a.first() {
-        Some(Value::RegExp(data)) => (
-            data.regex.borrow().source.clone(),
-            data.regex.borrow().flags.clone(),
-        ),
-        Some(Value::Undefined) | None => (crate::JsString::default(), String::new()),
-        Some(other) => (interp.to_js_string(other)?, String::new()),
+fn is_regexp(i: &mut Interpreter, pattern: &Value) -> Result<bool, VmErr> {
+    if !crate::interpreter::call::is_js_object(pattern) {
+        return Ok(false);
+    }
+    let key = super::well_known("match").unwrap();
+    let matcher = i.get_prop_value(pattern, &key)?;
+    Ok(if matches!(matcher, Value::Undefined) {
+        pattern.as_regexp().is_some()
+    } else {
+        matcher.is_truthy()
+    })
+}
+fn regexp_call(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let pattern = args.first().cloned().unwrap_or(Value::Undefined);
+    let regex = is_regexp(i, &pattern)?;
+    if regex && matches!(args.get(1), None | Some(Value::Undefined)) {
+        let constructor = i.member(&pattern, "constructor")?;
+        let intrinsic = i.persistent_global.borrow().intrinsic("RegExp").unwrap();
+        if crate::interpreter::strict_equals(&constructor, &intrinsic) {
+            return Ok(pattern);
+        }
+    }
+    initialize_regexp(i, args, regex)
+}
+fn regexp_construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let regex = is_regexp(i, args.first().unwrap_or(&Value::Undefined))?;
+    initialize_regexp(i, args, regex)
+}
+fn initialize_regexp(i: &mut Interpreter, args: Vec<Value>, regex: bool) -> Result<Value, VmErr> {
+    let pattern = args.first().cloned().unwrap_or(Value::Undefined);
+    let mut flags = args.get(1).cloned().unwrap_or(Value::Undefined);
+    let source = if let Value::RegExp(data) = &pattern {
+        if matches!(flags, Value::Undefined) {
+            flags = Value::String(data.regex.borrow().flags.clone().into());
+        }
+        Value::String(data.regex.borrow().source.clone())
+    } else if regex {
+        let source = i.member(&pattern, "source")?;
+        if matches!(flags, Value::Undefined) {
+            flags = i.member(&pattern, "flags")?;
+        }
+        source
+    } else {
+        pattern
     };
-    let flags = match a.get(1) {
-        Some(Value::Undefined) | None => own_flags,
-        Some(other) => interp.vs(other)?,
-    };
-    // `RegExp(/(?:)/)` round-trips through the canonical empty source.
-    let source = if source == "(?:)" {
+    let source = if matches!(source, Value::Undefined) {
         crate::JsString::default()
     } else {
-        source
+        i.ecmascript_to_string(&source)?
+    };
+    let flags = if matches!(flags, Value::Undefined) {
+        String::new()
+    } else {
+        i.ecmascript_to_string(&flags)?.to_string()
     };
     compile(source, &flags)
 }
@@ -340,29 +448,17 @@ fn regexp_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result
 pub fn regexp_member(data: &Rc<RegExpData>, key: &str) -> Option<Value> {
     let regex = data.regex.borrow();
     Some(match key {
-        "source" => Value::String(regex.source.clone()),
+        "source" => Value::String(escaped_source(&regex.source)),
         "flags" => Value::String((regex.flags.clone()).into()),
         "global" => Value::Bool(regex.global),
         "ignoreCase" => Value::Bool(regex.ignore_case),
         "multiline" => Value::Bool(regex.multiline),
         "dotAll" => Value::Bool(regex.dot_all),
         "sticky" => Value::Bool(regex.sticky),
-        "unicode" => Value::Bool(regex.unicode),
+        "unicode" => Value::Bool(regex.flags.contains('u')),
         "lastIndex" => Value::Number(data.last_index.get() as f64),
         _ => return None,
     })
-}
-
-fn regexp_to_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    let Some(data) = this.as_regexp() else {
-        return Ok(Value::String(("/(?:)/".to_string()).into()));
-    };
-    Ok(Value::String(
-        crate::JsString::from("/")
-            .concat(&data.regex.borrow().source)
-            .concat(&crate::JsString::from("/"))
-            .concat(&crate::JsString::from(&data.regex.borrow().flags)),
-    ))
 }
 
 /// Build the array `exec` returns: the whole match, then each group, with
@@ -391,50 +487,110 @@ fn match_result(
             .borrow()
             .names
             .iter()
-            .map(|(name, index)| (name.clone(), slice(caps.get(*index).copied().flatten())))
+            .map(|(name, indices)| {
+                (
+                    name.clone(),
+                    slice(
+                        indices
+                            .iter()
+                            .find_map(|index| caps.get(*index).copied().flatten()),
+                    ),
+                )
+            })
             .collect();
-        named.sort_by(|a, b| a.0.cmp(&b.0));
-        Value::checked_object(named)?
+        named.sort_by_key(|(name, _)| data.regex.borrow().names[name][0]);
+        Value::object_with_proto(named, None)
     };
     result.set_prop("groups".to_string(), groups)?;
+    if data.regex.borrow().flags.contains('d') {
+        let indices = Value::checked_array(
+            caps.iter()
+                .map(|range| match range {
+                    Some((start, end)) => Value::array(vec![
+                        Value::Number(*start as f64),
+                        Value::Number(*end as f64),
+                    ]),
+                    None => Value::Undefined,
+                })
+                .collect(),
+        )?;
+        let groups = if data.regex.borrow().names.is_empty() {
+            Value::Undefined
+        } else {
+            let mut names: Vec<_> = data
+                .regex
+                .borrow()
+                .names
+                .iter()
+                .map(|(name, indices)| (name.clone(), indices.clone()))
+                .collect();
+            names.sort_by_key(|(_, indices)| indices[0]);
+            Value::object_with_proto(
+                names
+                    .into_iter()
+                    .map(|(name, groups)| {
+                        let group = groups
+                            .iter()
+                            .find(|index| caps.get(**index).is_some_and(Option::is_some));
+                        (
+                            name,
+                            group
+                                .and_then(|index| indices.get_prop(&index.to_string()))
+                                .unwrap_or(Value::Undefined),
+                        )
+                    })
+                    .collect(),
+                None,
+            )
+        };
+        indices.set_prop("groups".into(), groups)?;
+        result.set_prop("indices".into(), indices)?;
+    }
+
     Ok(result)
 }
 
 /// Run one search, honouring and updating `lastIndex` for a `g`/`y` pattern.
 fn exec(
-    interp: &Interpreter,
+    interp: &mut Interpreter,
     data: &Rc<RegExpData>,
     input: &crate::JsString,
 ) -> Result<Option<Captures>, VmErr> {
+    let receiver = Value::RegExp(data.clone());
+    let last_index = interp.member(&receiver, "lastIndex")?;
+    let last_index = interp.ecmascript_to_number(&last_index)?;
+    let last_index = if last_index.is_nan() || last_index < 0. {
+        0
+    } else {
+        last_index.trunc().min(9_007_199_254_740_991.) as usize
+    };
     let stateful = data.regex.borrow().global || data.regex.borrow().sticky;
-    let start = if stateful { data.last_index.get() } else { 0 };
+    let start = if stateful { last_index } else { 0 };
     if start > input.len() {
-        data.last_index.set(0);
+        interp.set_member_str_or_throw(&receiver, "lastIndex", Value::Number(0.))?;
         return Ok(None);
     }
     let found = data
         .regex
         .borrow()
         .find_at(input.units(), start)
-        .map_err(|e| VmErr::Msg(e.to_string()))?;
+        .map_err(VmErr::Msg)?;
     match &found {
         Some(caps) => {
             update_legacy(interp, data, input, caps);
             if stateful {
                 let end = caps[0].map(|(_, e)| e).unwrap_or(start);
-                // An empty match must still advance, or a `g` loop never ends.
-                data.last_index.set(if end == start {
-                    advance(input, end, data.regex.borrow().unicode)
-                } else {
-                    end
-                });
+                interp.set_member_str_or_throw(
+                    &receiver,
+                    "lastIndex",
+                    Value::Number(end as f64),
+                )?;
             }
         }
-        None => {
-            if stateful {
-                data.last_index.set(0);
-            }
+        None if stateful => {
+            interp.set_member_str_or_throw(&receiver, "lastIndex", Value::Number(0.))?;
         }
+        None => {}
     }
     Ok(found)
 }
@@ -452,18 +608,11 @@ fn regexp_exec(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<V
     }
 }
 
-fn regexp_test(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let Some(data) = this.as_regexp() else {
-        return Err(VmErr::Msg(
-            "TypeError: RegExp.prototype.test called on a non-RegExp".to_string(),
-        ));
-    };
-    let subject = subject_chars(interp, a.first())?;
-    Ok(Value::Bool(exec(interp, &data, &subject)?.is_some()))
-}
-
-fn subject_chars(interp: &Interpreter, value: Option<&Value>) -> Result<crate::JsString, VmErr> {
-    interp.to_js_string(value.unwrap_or(&Value::Undefined))
+fn subject_chars(
+    interp: &mut Interpreter,
+    value: Option<&Value>,
+) -> Result<crate::JsString, VmErr> {
+    interp.ecmascript_to_string(value.unwrap_or(&Value::Undefined))
 }
 
 // ---------------------------------------------------------------------------
@@ -472,80 +621,42 @@ fn subject_chars(interp: &Interpreter, value: Option<&Value>) -> Result<crate::J
 
 /// Coerce the pattern argument of a string method: a `RegExp` is used as-is, a
 /// string is a literal to find (not a pattern to compile).
-fn as_pattern(value: Option<&Value>) -> Option<Rc<RegExpData>> {
-    value?.as_regexp()
-}
-
-/// Every match of a global pattern, or just the first for a non-global one.
-fn all_matches(
-    interp: &Interpreter,
-    data: &Rc<RegExpData>,
-    input: &crate::JsString,
-) -> Result<Vec<Captures>, VmErr> {
-    let mut out = Vec::new();
-    let mut at = 0usize;
-    loop {
-        let found = data
-            .regex
-            .borrow()
-            .find_at(input.units(), at)
-            .map_err(|e| VmErr::Msg(e.to_string()))?;
-        let Some(caps) = found else { break };
-        update_legacy(interp, data, input, &caps);
-        let (start, end) = caps[0].unwrap_or((at, at));
-        out.push(caps);
-        if !data.regex.borrow().global {
-            break;
-        }
-        // An empty match advances by one so the scan terminates.
-        at = if end == start {
-            advance(input, end, data.regex.borrow().unicode)
-        } else {
-            end
-        };
-        if at > input.len() || out.len() > crate::value::MAX_ARRAY_LEN {
-            break;
-        }
-    }
-    Ok(out)
-}
 
 /// `str.match(pattern)`.
 ///
 /// A global pattern returns every matched substring; a non-global one returns
 /// the full `exec` result, groups and all.
 pub fn string_match(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let input = super::str_this(interp, &this)?;
-    let Some(data) = as_pattern(a.first()) else {
-        let source = if matches!(a.first(), None | Some(Value::Undefined)) {
-            crate::JsString::default()
-        } else {
-            interp.to_js_string(&a[0])?
-        };
-        let compiled = compile(source, "")?;
-        return string_match(interp, this, vec![compiled]);
-    };
-    if data.regex.borrow().global {
-        data.last_index.set(0);
-        let matches = all_matches(interp, &data, &input)?;
-        if matches.is_empty() {
-            return Ok(Value::Null);
+    string_protocol(interp, this, a, "match")
+}
+fn string_protocol(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+    name: &str,
+) -> Result<Value, VmErr> {
+    if matches!(this, Value::Undefined | Value::Null) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".into(),
+        ));
+    }
+    let pattern = args.first().cloned().unwrap_or(Value::Undefined);
+    let symbol = super::well_known(name).unwrap();
+    if crate::interpreter::call::is_js_object(&pattern) {
+        let method = i.get_prop_value(&pattern, &symbol)?;
+        if !matches!(method, Value::Undefined | Value::Null) {
+            return i.call_this(&method, pattern, vec![this]);
         }
-        let items = matches
-            .iter()
-            .map(|caps| match caps[0] {
-                Some((start, end)) => Value::String(crate::JsString::from_units(
-                    input.units()[start..end].to_vec(),
-                )),
-                None => Value::Undefined,
-            })
-            .collect();
-        return Value::checked_array(items);
     }
-    match exec(interp, &data, &input)? {
-        Some(caps) => match_result(&data, &input, &caps),
-        None => Ok(Value::Null),
-    }
+    let input = i.ecmascript_to_string(&this)?;
+    let source = if matches!(pattern, Value::Undefined) {
+        crate::JsString::default()
+    } else {
+        i.ecmascript_to_string(&pattern)?
+    };
+    let regex = compile(source, "")?;
+    let method = i.get_prop_value(&regex, &symbol)?;
+    i.call_this(&method, regex, vec![Value::String(input)])
 }
 
 /// `str.matchAll(pattern)`: an array of full match results.
@@ -557,265 +668,53 @@ pub fn string_match_all(
     this: Value,
     a: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let input = super::str_this(interp, &this)?;
-    let Some(data) = as_pattern(a.first()) else {
+    if matches!(this, Value::Undefined | Value::Null) {
         return Err(VmErr::Msg(
-            "TypeError: matchAll requires a global RegExp".to_string(),
-        ));
-    };
-    if !data.regex.borrow().global {
-        return Err(VmErr::Msg(
-            "TypeError: matchAll must be called with a global RegExp".to_string(),
+            "TypeError: Cannot convert undefined or null to object".into(),
         ));
     }
-    let matches = all_matches(interp, &data, &input)?;
-    let items = matches
-        .iter()
-        .map(|caps| match_result(&data, &input, caps))
-        .collect::<Result<Vec<_>, _>>()?;
-    Value::checked_array(items)
+    let pattern = a.first().cloned().unwrap_or(Value::Undefined);
+    let symbol = super::well_known("matchAll").unwrap();
+    if crate::interpreter::call::is_js_object(&pattern) {
+        let match_symbol = super::well_known("match").unwrap();
+        let matcher = interp.get_prop_value(&pattern, &match_symbol)?;
+        let is_regexp = if matches!(matcher, Value::Undefined) {
+            pattern.as_regexp().is_some()
+        } else {
+            matcher.is_truthy()
+        };
+        if is_regexp {
+            let flags = interp.member(&pattern, "flags")?;
+            if matches!(flags, Value::Undefined | Value::Null) {
+                return Err(VmErr::Msg(
+                    "TypeError: RegExp flags cannot be nullish".into(),
+                ));
+            }
+            if !interp.ecmascript_to_string(&flags)?.contains('g') {
+                return Err(VmErr::Msg(
+                    "TypeError: matchAll requires a global RegExp".into(),
+                ));
+            }
+        }
+        let method = interp.get_prop_value(&pattern, &symbol)?;
+        if !matches!(method, Value::Undefined | Value::Null) {
+            return interp.call_this(&method, pattern, vec![this]);
+        }
+    }
+    let input = interp.ecmascript_to_string(&this)?;
+    let source = if matches!(pattern, Value::Undefined) {
+        crate::JsString::default()
+    } else {
+        interp.ecmascript_to_string(&pattern)?
+    };
+    let regex = compile(source, "g")?;
+    let method = interp.get_prop_value(&regex, &symbol)?;
+    interp.call_this(&method, regex, vec![Value::String(input)])
 }
 
 /// `str.search(pattern)`: the index of the first match, or `-1`.
 pub fn string_search(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let input = super::str_this(interp, &this)?;
-    let data = match as_pattern(a.first()) {
-        Some(data) => data,
-        None => {
-            let source = if matches!(a.first(), None | Some(Value::Undefined)) {
-                crate::JsString::default()
-            } else {
-                interp.to_js_string(&a[0])?
-            };
-            let compiled = compile(source, "")?;
-            compiled.as_regexp().expect("compile returns a RegExp")
-        }
-    };
-    let found = data
-        .regex
-        .borrow()
-        .find_at(input.units(), 0)
-        .map_err(|e| VmErr::Msg(e.to_string()))?;
-    if let Some(caps) = &found {
-        update_legacy(interp, &data, &input, caps);
-    }
-    Ok(Value::Number(match found {
-        Some(caps) => caps[0].map(|(start, _)| start as f64).unwrap_or(-1.0),
-        None => -1.0,
-    }))
-}
-
-/// Expand `$&`, `$1`, `$<name>` and friends in a replacement template.
-fn expand(
-    template: &crate::JsString,
-    input: &crate::JsString,
-    caps: &Captures,
-    data: &Rc<RegExpData>,
-) -> Result<crate::JsString, VmErr> {
-    let slice = |range: Option<(usize, usize)>| -> crate::JsString {
-        match range {
-            Some((start, end)) => input.slice(start, end),
-            None => crate::JsString::default(),
-        }
-    };
-    let chars = template.units();
-    let mut out = crate::JsString::default();
-    let mut index = 0;
-    let (whole_start, whole_end) = caps[0].unwrap_or((0, 0));
-    while index < chars.len() {
-        if chars[index] != 36 || index + 1 >= chars.len() {
-            out.push_str(crate::JsString::from_units(vec![chars[index]]));
-            index += 1;
-            continue;
-        }
-        match chars[index + 1] {
-            36 => {
-                out.push('$');
-                index += 2;
-            }
-            38 => {
-                out.push_str(slice(caps[0]));
-                index += 2;
-            }
-            96 => {
-                out.push_str(input.slice(0, whole_start));
-                index += 2;
-            }
-            39 => {
-                out.push_str(input.slice(whole_end, input.len()));
-                index += 2;
-            }
-            60 => {
-                let mut name = String::new();
-                let mut cursor = index + 2;
-                while cursor < chars.len() && chars[cursor] != 62 {
-                    name.push(char::from_u32(chars[cursor] as u32).unwrap_or('\u{FFFD}'));
-                    cursor += 1;
-                }
-                if cursor >= chars.len() {
-                    out.push('$');
-                    index += 1;
-                    continue;
-                }
-                if let Some(group) = data.regex.borrow().names.get(&name) {
-                    out.push_str(slice(caps.get(*group).copied().flatten()));
-                }
-                index = cursor + 1;
-            }
-            c if (48..=57).contains(&c) => {
-                // Prefer the two-digit group when it exists, as specified.
-                let mut group = (c - 48) as u32 as usize;
-                let mut width = 2;
-                if index + 2 < chars.len()
-                    && let Some(second) =
-                        char::from_u32(chars[index + 2] as u32).and_then(|c| c.to_digit(10))
-                {
-                    let two = group * 10 + second as usize;
-                    if two <= data.regex.borrow().group_count && two > 0 {
-                        group = two;
-                        width = 3;
-                    }
-                }
-                if group > 0 && group <= data.regex.borrow().group_count {
-                    out.push_str(slice(caps.get(group).copied().flatten()));
-                    index += width;
-                } else {
-                    out.push('$');
-                    index += 1;
-                }
-            }
-            _ => {
-                out.push('$');
-                index += 1;
-            }
-        }
-        if out.len() > crate::value::MAX_STRING_LEN {
-            return Err(crate::value::limit_err("Maximum string length exceeded"));
-        }
-    }
-    Ok(out)
-}
-
-/// Shared implementation of `replace` and `replaceAll`.
-pub fn replace_with_pattern(
-    interp: &mut Interpreter,
-    input: &crate::JsString,
-    data: &Rc<RegExpData>,
-    replacement: &Value,
-    all: bool,
-) -> Result<Value, VmErr> {
-    let matches = if all || data.regex.borrow().global {
-        all_matches(interp, data, input)?
-    } else {
-        data.regex
-            .borrow()
-            .find_at(input.units(), 0)
-            .map_err(|e| VmErr::Msg(e.to_string()))?
-            .into_iter()
-            .collect()
-    };
-    if !(all || data.regex.borrow().global)
-        && let Some(caps) = matches.first()
-    {
-        update_legacy(interp, data, input, caps);
-    }
-    let callable = matches!(
-        replacement,
-        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-    );
-    let template = if callable {
-        crate::JsString::default()
-    } else {
-        interp.to_js_string(replacement)?
-    };
-
-    let mut out = crate::JsString::default();
-    let mut cursor = 0usize;
-    for caps in &matches {
-        let Some((start, end)) = caps[0] else {
-            continue;
-        };
-        out.push_str(input.slice(cursor, start));
-        let piece = if callable {
-            // The callback receives (match, ...groups, index, input).
-            let mut args: Vec<Value> = caps
-                .iter()
-                .map(|range| match range {
-                    Some((s, e)) => {
-                        Value::String(crate::JsString::from_units(input.units()[*s..*e].to_vec()))
-                    }
-                    None => Value::Undefined,
-                })
-                .collect();
-            args.push(Value::Number(start as f64));
-            args.push(Value::String(input.clone()));
-            let produced = interp.call_this(replacement, Value::Undefined, args)?;
-            interp.to_js_string(&produced)?
-        } else {
-            expand(&template, input, caps, data)?
-        };
-        out.push_str(&piece);
-        cursor = end;
-        if out.len() > crate::value::MAX_STRING_LEN {
-            return Err(crate::value::limit_err("Maximum string length exceeded"));
-        }
-    }
-    out.push_str(input.slice(cursor.min(input.len()), input.len()));
-    Value::checked_string(out)
-}
-
-/// `str.split(pattern, limit)` where the separator is a regular expression.
-/// Capture groups in the separator are spliced into the result.
-pub fn split_with_pattern(
-    interp: &Interpreter,
-    input: &crate::JsString,
-    data: &Rc<RegExpData>,
-    limit: usize,
-) -> Result<Value, VmErr> {
-    let mut out: Vec<Value> = Vec::new();
-    let mut cursor = 0usize;
-    let mut at = 0usize;
-    while at <= input.len() && out.len() < limit {
-        let found = data
-            .regex
-            .borrow()
-            .find_at(input.units(), at)
-            .map_err(|e| VmErr::Msg(e.to_string()))?;
-        let Some(caps) = found else { break };
-        update_legacy(interp, data, input, &caps);
-        let (start, end) = caps[0].unwrap_or((at, at));
-        // An empty match at the cursor would split into empty strings forever.
-        if end == start && start == cursor {
-            at = advance(input, start, data.regex.borrow().unicode);
-            continue;
-        }
-        out.push(Value::String(crate::JsString::from_units(
-            input.units()[cursor..start].to_vec(),
-        )));
-        for group in caps.iter().skip(1) {
-            if out.len() >= limit {
-                break;
-            }
-            out.push(match group {
-                Some((s, e)) => {
-                    Value::String(crate::JsString::from_units(input.units()[*s..*e].to_vec()))
-                }
-                None => Value::Undefined,
-            });
-        }
-        cursor = end;
-        at = if end == start {
-            advance(input, end, data.regex.borrow().unicode)
-        } else {
-            end
-        };
-    }
-    if out.len() < limit {
-        out.push(Value::String(crate::JsString::from_units(
-            input.units()[cursor.min(input.len())..].to_vec(),
-        )));
-    }
-    Value::checked_array(out)
+    string_protocol(interp, this, a, "search")
 }
 
 fn advance(input: &crate::JsString, pos: usize, unicode: bool) -> usize {
@@ -859,6 +758,30 @@ fn regexp_compile(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Re
     let replacement = replacement.regex.borrow();
     let compiled = Regex::new(replacement.source.clone(), &replacement.flags).map_err(type_err)?;
     *data.regex.borrow_mut() = compiled;
-    data.last_index.set(0);
+    interp.set_member_str_or_throw(&this, "lastIndex", Value::Number(0.))?;
     Ok(this)
+}
+
+fn regexp_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(this)
+}
+
+fn escaped_source(source: &crate::JsString) -> crate::JsString {
+    if source.is_empty() {
+        return "(?:)".into();
+    }
+    let mut result = crate::JsString::default();
+    let mut backslashes = 0;
+    for &unit in source.units() {
+        match unit {
+            47 if backslashes % 2 == 0 => result.push_str("\\/"),
+            10 => result.push_str("\\n"),
+            13 => result.push_str("\\r"),
+            0x2028 => result.push_str("\\u2028"),
+            0x2029 => result.push_str("\\u2029"),
+            _ => result.push_str(crate::JsString::from_units(vec![unit])),
+        }
+        backslashes = if unit == 92 { backslashes + 1 } else { 0 };
+    }
+    result
 }

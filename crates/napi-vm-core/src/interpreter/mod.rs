@@ -347,6 +347,9 @@ impl Drop for GuestExecutionGuard {
 /// terms, which is not the same as producing `undefined`: an empty completion
 /// leaves the previous statement's value in place.
 pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
+    if let Statement::Block(body) = statement {
+        return body.iter().any(produces_completion_value);
+    }
     !matches!(
         statement,
         Statement::Empty
@@ -354,6 +357,7 @@ pub(crate) fn produces_completion_value(statement: &Statement) -> bool {
             // A multi-declarator list only ever groups `VarDecl`s (see the
             // parser), so it produces empty completion exactly like one.
             | Statement::Declarations(_)
+            | Statement::ResourceDeclaration { .. }
             | Statement::FnDecl { .. }
             | Statement::ClassDecl { .. }
             | Statement::Import { .. }
@@ -1088,6 +1092,7 @@ export default { createRequire, isBuiltin, builtinModules };
             let _execution_guard = GuestExecutionGuard(depth.clone());
             crate::bytecode::vm::run_module(self, module)
         };
+        let result = self.finish_resources(&scope, result);
         scope.borrow_mut().replace_strict(saved_strict);
         if depth.get() == 0 {
             self.republish_roots();
@@ -1601,6 +1606,7 @@ impl Interpreter {
         }
         let outer = self.push_scope();
         let result = self.hoist_lexical(stmts).and_then(|()| self.run(stmts));
+        let result = self.finish_resources(&self.global.clone(), result);
         self.pop_scope(outer);
         result
     }
@@ -1941,7 +1947,8 @@ impl Interpreter {
     /// so their declarations land there rather than in a second, nested frame.
     pub(crate) fn run_hoisted_here(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
         self.hoist_lexical(stmts)?;
-        self.run(stmts)
+        let result = self.run(stmts);
+        self.finish_resources(&self.global.clone(), result)
     }
 
     /// Execute a function body or a whole program in the current scope,
@@ -1999,6 +2006,7 @@ impl Interpreter {
                 .and_then(|()| self.hoist_lexical(stmts))
                 .and_then(|()| self.run(stmts))
         };
+        let result = self.finish_resources(&scope, result);
         scope.borrow_mut().replace_strict(saved_strict);
         if depth.get() == 0 {
             self.republish_roots();
@@ -2006,6 +2014,30 @@ impl Interpreter {
         result
     }
 
+    pub(crate) fn finish_resources(
+        &mut self,
+        scope: &Env,
+        result: Result<Value, VmErr>,
+    ) -> Result<Value, VmErr> {
+        let records = std::mem::take(&mut scope.borrow_mut().resources);
+        if records.is_empty() {
+            return result;
+        }
+        crate::builtins::disposable::dispose_scope(self, records, result)
+    }
+    pub(crate) fn acquire_resource(
+        &mut self,
+        value: Value,
+        asynchronous: bool,
+    ) -> Result<(), VmErr> {
+        if self.global.borrow().resources.len() >= crate::value::MAX_ARRAY_LEN {
+            return Err(crate::value::limit_err("Maximum resource count exceeded"));
+        }
+        if let Some(resource) = crate::builtins::disposable::acquire(self, value, asynchronous)? {
+            self.global.borrow_mut().resources.push(resource);
+        }
+        Ok(())
+    }
     /// Execute a function body, hoisting only if it declares anything.
     ///
     /// Identical to [`run_program_body`](Self::run_program_body) when the

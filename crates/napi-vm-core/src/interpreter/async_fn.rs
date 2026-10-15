@@ -253,7 +253,11 @@ fn spawn_body(
 
         let outcome = match &bytecode {
             Some(code) => body_interp.run_bytecode_module(code),
-            None if linked => body_interp.run(&body),
+            None if linked => {
+                let outcome = body_interp.run(&body);
+                let scope = body_interp.global.clone();
+                body_interp.finish_resources(&scope, outcome)
+            }
             None => body_interp.run_program_body(&body),
         };
         match outcome {

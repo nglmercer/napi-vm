@@ -922,6 +922,15 @@ impl Interpreter {
             return self.call_this(&v, receiver.clone(), vec![]);
         }
         if is_setter_only {
+            // Object literals can store the setter before its paired getter.
+            // Resolve the complete own accessor descriptor instead of treating
+            // the first stored function as a setter-only property.
+            let descriptor = crate::builtins::object::descriptor_for_key_in(self, o, p)?;
+            if let Some(getter) = descriptor.get_prop("get") {
+                if !matches!(getter, Value::Undefined) {
+                    return self.call_this(&getter, receiver.clone(), vec![]);
+                }
+            }
             return Ok(Value::Undefined);
         }
         Ok(v)
@@ -1064,6 +1073,19 @@ impl Interpreter {
             return self.call_this(&v, receiver.clone(), vec![]);
         }
         if is_setter_only {
+            // Object literals can store the setter before its paired getter.
+            // Resolve the complete own accessor descriptor instead of treating
+            // the first stored function as a setter-only property.
+            let descriptor = crate::builtins::object::descriptor_for_key_in(
+                self,
+                o,
+                &Value::String(crate::JsString::from_key(key)),
+            )?;
+            if let Some(getter) = descriptor.get_prop("get") {
+                if !matches!(getter, Value::Undefined) {
+                    return self.call_this(&getter, receiver.clone(), vec![]);
+                }
+            }
             return Ok(Value::Undefined);
         }
         Ok(v)
@@ -1506,8 +1528,8 @@ impl Interpreter {
             }
             Value::BigInt(_) => Ok(crate::builtins::bigint_method(k).unwrap_or(Value::Undefined)),
             Value::RegExp(data) => {
-                if let Some(value) = crate::builtins::regexp_member(data, k) {
-                    return Ok(value);
+                if k == "lastIndex" {
+                    return Ok(crate::builtins::regexp_member(data, k).unwrap());
                 }
                 if let Some(prototype) = self.prototype_of(o) {
                     return self.prop_str(&prototype, k);

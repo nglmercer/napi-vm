@@ -245,15 +245,17 @@ pub(super) unsafe extern "C" fn api_is_buffer(env: NapiEnv, value: NapiValue, re
     })
 }
 
-pub(super) fn napi_arraybuffer_data(buffer: &Buffer) -> (*mut c_void, usize) {
+pub(super) fn napi_arraybuffer_data(buffer: &Buffer) -> Result<(*mut c_void, usize), i32> {
+    if buffer.is_immutable() { return Err(NAPI_GENERIC_FAILURE); }
     if buffer.is_detached() {
-        return (std::ptr::null_mut(), 0);
+        return Ok((std::ptr::null_mut(), 0));
     }
     let mut bytes = buffer.borrow_mut();
-    (bytes.as_mut_ptr().cast::<c_void>(), bytes.len())
+    Ok((bytes.as_mut_ptr().cast::<c_void>(), bytes.len()))
 }
 
 pub(super) fn napi_typedarray_data(view: &TypedArrayData) -> Result<(*mut c_void, usize), i32> {
+    if view.buffer.is_immutable() { return Err(NAPI_GENERIC_FAILURE); }
     if view.buffer.is_detached() {
         return Ok((std::ptr::null_mut(), 0));
     }
@@ -358,7 +360,7 @@ pub(super) unsafe extern "C" fn api_create_arraybuffer(
         }
         let environment = environment(env)?;
         let buffer = Buffer::zeroed(byte_length);
-        let (data_pointer, _) = napi_arraybuffer_data(&buffer);
+        let (data_pointer, _) = napi_arraybuffer_data(&buffer)?;
         let handle = environment
             .handles
             .borrow_mut()
@@ -495,7 +497,7 @@ pub(super) unsafe extern "C" fn api_get_arraybuffer_info(
         let Value::ArrayBuffer(buffer) = &value else {
             return Err(NAPI_ARRAYBUFFER_EXPECTED);
         };
-        let (data_pointer, length) = napi_arraybuffer_data(buffer);
+        let (data_pointer, length) = napi_arraybuffer_data(buffer)?;
         if !data.is_null() {
             unsafe { data.write(data_pointer) };
         }
@@ -513,7 +515,7 @@ pub(super) unsafe extern "C" fn api_detach_arraybuffer(env: NapiEnv, value: Napi
         let Value::ArrayBuffer(buffer) = &value else {
             return Err(NAPI_ARRAYBUFFER_EXPECTED);
         };
-        buffer.detach();
+        buffer.try_detach().map_err(|_| NAPI_GENERIC_FAILURE)?;
         Ok(())
     })
 }

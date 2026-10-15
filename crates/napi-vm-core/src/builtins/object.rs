@@ -737,7 +737,7 @@ pub(crate) fn to_object_receiver(value: &Value) -> Result<Value, VmErr> {
     Value::boxed_primitive(value).ok_or_else(|| type_err("Cannot convert value to object"))
 }
 
-fn object_property_attributes(value: &Value, key: &str) -> Option<PropAttrs> {
+pub(crate) fn object_property_attributes(value: &Value, key: &str) -> Option<PropAttrs> {
     match value {
         Value::GlobalObject => return None,
         Value::Object { props } => {
@@ -800,7 +800,17 @@ fn object_property_attributes(value: &Value, key: &str) -> Option<PropAttrs> {
                 _ => None,
             };
         }
-        Value::RegExp(_) if key == "lastIndex" => {
+        Value::RegExp(data) if key == "lastIndex" => {
+            if let Some((_, attrs)) = data
+                .properties
+                .meta
+                .borrow()
+                .attrs
+                .iter()
+                .find(|(name, _)| name == key)
+            {
+                return Some(*attrs);
+            }
             return Some(PropAttrs {
                 writable: true,
                 enumerable: false,
@@ -810,7 +820,11 @@ fn object_property_attributes(value: &Value, key: &str) -> Option<PropAttrs> {
         Value::TypedArray(view) => {
             return crate::value::array_index(key)
                 .filter(|index| *index < view.effective_length())
-                .map(|_| PropAttrs::default());
+                .map(|_| PropAttrs {
+                    writable: !view.buffer.is_immutable(),
+                    enumerable: true,
+                    configurable: !view.buffer.is_immutable(),
+                });
         }
         _ => {}
     }
@@ -1259,6 +1273,28 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
             || numeric.is_some_and(|index| index.to_string() == key);
         if canonical {
             let index = numeric.unwrap_or(f64::NAN);
+            if view.buffer.is_immutable() {
+                if !crate::builtins::valid_integer_index(view, index) {
+                    return Err(type_err("Cannot redefine an invalid typed array index"));
+                }
+                if own_slot(descriptor, "get").is_some()
+                    || own_slot(descriptor, "set").is_some()
+                    || own_slot(descriptor, "configurable").is_some_and(|v| v.is_truthy())
+                    || own_slot(descriptor, "writable").is_some_and(|v| v.is_truthy())
+                    || own_slot(descriptor, "enumerable").is_some_and(|v| !v.is_truthy())
+                    || own_slot(descriptor, "value").is_some_and(|v| {
+                        !same_value(
+                            &v,
+                            &crate::builtins::read_element(view, index as usize)
+                                .unwrap_or(Value::Undefined),
+                        )
+                    })
+                {
+                    return Err(type_err("Cannot redefine an immutable typed array element"));
+                }
+                return Ok(());
+            }
+
             if key == "-0"
                 || !index.is_finite()
                 || index < 0.0

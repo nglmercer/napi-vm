@@ -512,6 +512,10 @@ impl Marker {
                     };
                     self.mark_value(&borrowed.value);
                     for reaction in &borrowed.reactions {
+                        if let Some((resolve, reject)) = reaction.capability.as_deref() {
+                            self.mark_value(resolve);
+                            self.mark_value(reject);
+                        }
                         self.mark_value(&reaction.on_fulfilled);
                         self.mark_value(&reaction.on_rejected);
                         if self.marked.insert(id_of(&reaction.derived)) {
@@ -1006,12 +1010,14 @@ mod tests {
             on_rejected: Value::Undefined,
             derived: p2.clone(),
             adopted: false,
+            capability: None,
         });
         p2.borrow_mut().reactions.push(Reaction {
             on_fulfilled: Value::Undefined,
             on_rejected: Value::Undefined,
             derived: p1.clone(),
             adopted: false,
+            capability: None,
         });
         drop(p1);
         drop(p2);

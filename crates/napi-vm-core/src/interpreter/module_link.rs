@@ -646,7 +646,11 @@ impl Interpreter {
             }
             match &program.executable {
                 Executable::Bytecode(code) => self.run_bytecode_module(code).map(|_| ()),
-                Executable::Ast => self.run(&linked_body(&program.statements)).map(|_| ()),
+                Executable::Ast => {
+                    let result = self.run(&linked_body(&program.statements));
+                    self.finish_resources(&self.global.clone(), result)
+                        .map(|_| ())
+                }
             }
         })();
         self.global = outer_scope;

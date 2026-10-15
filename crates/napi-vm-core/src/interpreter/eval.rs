@@ -10,7 +10,7 @@ use super::{
 use crate::error::{VmErr, vm_err, vm_ret, vm_throw};
 use crate::parser::{
     AssignOp, ClassMember, Expr, ExprOrBlock, ForBinding, ForInit, LogicalAssignOp, MemberName,
-    ObjectProp, Statement, UnOp, VarKind, arrow_body_references,
+    ObjectProp, Pattern, Statement, UnOp, VarKind, arrow_body_references,
 };
 use crate::value::{ClassData, FunctionData, ObjectCell, PrivateElement, PropAttrs, Value};
 
@@ -1485,25 +1485,41 @@ impl Interpreter {
                     Ok(Value::Undefined)
                 }
             }
-            Statement::ResourceForOf { name, iter, .. } => {
-                let mut environment = Environment::child(self.global.clone());
-                environment.declare(name, Value::Undefined, BindKind::Const, false);
-                let saved = std::mem::replace(&mut self.global, Rc::new(RefCell::new(environment)));
-                let source = self.eval_expr(iter);
-                self.global = saved;
-                source?;
-                vm_err("TypeError: resource disposal execution is not implemented")
+            Statement::ResourceForOf {
+                name,
+                iter,
+                body,
+                is_await,
+                await_disposal,
+            } => {
+                let binding = ForBinding::Declaration {
+                    kind: VarKind::Const,
+                    pattern: Pattern::Ident(name.clone()),
+                    initializer: None,
+                };
+                self.with_loop_binding_scope(&binding, |vm| {
+                    vm.run_for_of(&binding, iter, body, *is_await, Some(*await_disposal))
+                })
             }
-            Statement::ResourceDeclaration { declarations, .. } => {
-                // Initializers precede acquisition of a disposal method and
-                // can fail against the already-instantiated lexical TDZ.
-                if let Some(Statement::VarDecl {
-                    init: Some(init), ..
-                }) = declarations.first()
-                {
-                    self.eval_expr(init)?;
+            Statement::ResourceDeclaration {
+                declarations,
+                is_await,
+            } => {
+                for declaration in declarations {
+                    let Statement::VarDecl {
+                        name,
+                        init: Some(init),
+                        ..
+                    } = declaration
+                    else {
+                        return vm_err("SyntaxError: invalid resource declaration");
+                    };
+                    let value =
+                        self.evaluate_class_field(init, &Value::String(name.as_str().into()))?;
+                    self.acquire_resource(value.clone(), *is_await)?;
+                    self.declare_binding(name, value, BindKind::Const, true)?;
                 }
-                vm_err("TypeError: resource disposal execution is not implemented")
+                Ok(Value::Undefined)
             }
             Statement::With { object, body } => {
                 let object = self.eval_expr(object)?;
@@ -1591,7 +1607,7 @@ impl Interpreter {
                 body,
                 is_await,
             } => self.with_loop_binding_scope(binding, |vm| {
-                vm.run_for_of(binding, iter, body, *is_await)
+                vm.run_for_of(binding, iter, body, *is_await, None)
             }),
             Statement::Block(s) => self.run_block(s),
             // A declarator group shares the enclosing scope: no new frame.
@@ -1669,6 +1685,7 @@ impl Interpreter {
                 // `let` declared in one case is visible in the next.
                 let outer = self.push_scope();
                 let result = self.run_switch_cases(&d, cases);
+                let result = self.finish_resources(&self.global.clone(), result);
                 self.pop_scope(outer);
                 result
             }
@@ -2115,6 +2132,7 @@ impl Interpreter {
         iter: &Expr,
         body: &[Statement],
         is_await: bool,
+        disposal: Option<bool>,
     ) -> Result<Value, VmErr> {
         let source = self.eval_expr(iter)?;
         let body_needs_scope = block_needs_lexical_scope(body);
@@ -2151,13 +2169,25 @@ impl Interpreter {
                 break;
             }
             self.enter_iteration_binding_scope(binding);
-            if let Err(error) = self.assign_iteration_binding(binding, &value) {
+            let assignment = (|| {
+                if let Some(asynchronous) = disposal {
+                    self.acquire_resource(value.clone(), asynchronous)?;
+                }
+                self.assign_iteration_binding(binding, &value)
+            })();
+            if let Err(error) = assignment {
                 if !error.is_abandon() {
                     let _ = self.close_guest_iterator(&iterator, is_await);
                 }
                 return Err(error);
             }
-            match self.run_block_with_lexical_scope(body, body_needs_scope) {
+            let outcome = self.run_block_with_lexical_scope(body, body_needs_scope);
+            let outcome = if disposal.is_some() {
+                self.finish_resources(&self.global.clone(), outcome)
+            } else {
+                outcome
+            };
+            match outcome {
                 Err(VmErr::Break(None)) => break,
                 Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
                 Err(VmErr::Continue(None)) => continue,

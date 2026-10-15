@@ -16,6 +16,8 @@ pub enum ClassItem {
     /// A Unicode property escape, compiled to sorted scalar-value ranges.
     UnicodeProperty {
         ranges: Vec<(char, char)>,
+        folded: Vec<(char, char)>,
+        folded_complement: Vec<(char, char)>,
         negated: bool,
     },
 }
@@ -61,7 +63,13 @@ pub enum Node {
         index: Option<usize>,
         node: Box<Node>,
     },
+    Modifiers {
+        add: u8,
+        remove: u8,
+        node: Box<Node>,
+    },
     Backref(usize),
+    NamedBackref(String),
     Anchor(Anchor),
     /// `(?=…)`, `(?!…)`, `(?<=…)`, `(?<!…)`. A lookaround consumes nothing;
     /// it only asserts that its body does (or does not) match at this point.
@@ -77,29 +85,54 @@ pub struct Parsed {
     /// Number of capturing groups, so a match can size its capture list.
     pub group_count: usize,
     /// Names from `(?<name>…)`, mapped to their group index.
-    pub names: HashMap<String, usize>,
+    pub names: HashMap<String, Vec<usize>>,
 }
 
 pub struct Parser {
     chars: Vec<char>,
     pos: usize,
     group_count: usize,
-    names: HashMap<String, usize>,
+    names: HashMap<String, Vec<usize>>,
     /// `u` flag: makes otherwise-tolerated escapes an error, as in a real
     /// engine's Unicode mode.
     unicode: bool,
+    pub(super) has_named_captures: bool,
 }
 
 pub type ParseResult<T> = Result<T, String>;
 
 impl Parser {
     pub fn new(pattern: &str, unicode: bool) -> Self {
+        let chars: Vec<char> = pattern.chars().collect();
+        let mut class = false;
+        let mut at = 0;
+        let mut has_named_captures = false;
+        while at < chars.len() {
+            match chars[at] {
+                '\\' => {
+                    at += 2;
+                    continue;
+                }
+                '[' => class = true,
+                ']' => class = false,
+                '(' if !class
+                    && chars.get(at + 1) == Some(&'?')
+                    && chars.get(at + 2) == Some(&'<')
+                    && !matches!(chars.get(at + 3), Some('=' | '!')) =>
+                {
+                    has_named_captures = true
+                }
+                _ => {}
+            }
+            at += 1;
+        }
         Self {
-            chars: pattern.chars().collect(),
+            chars,
             pos: 0,
             group_count: 0,
             names: HashMap::new(),
             unicode,
+            has_named_captures,
         }
     }
 
@@ -292,13 +325,51 @@ impl Parser {
                 let name = self.group_name()?;
                 self.group_count += 1;
                 let index = self.group_count;
-                if self.names.insert(name.clone(), index).is_some() {
-                    return Err(format!("Duplicate capture group name '{}'", name));
-                }
+                // The standards syntax validator has already rejected names
+                // that could participate together in one match.
+                self.names.entry(name).or_default().push(index);
                 let node = self.alternation()?;
                 self.expect(')')?;
                 return Ok(Node::Group {
                     index: Some(index),
+                    node: Box::new(node),
+                });
+            }
+            if matches!(self.peek(), Some('i' | 'm' | 's' | '-')) {
+                let mut add = 0;
+                let mut remove = 0;
+                let mut subtract = false;
+                while let Some(c) = self.peek() {
+                    if c == '-' && !subtract {
+                        subtract = true;
+                        self.pos += 1;
+                        continue;
+                    }
+                    let bit = match c {
+                        'i' => 1,
+                        'm' => 2,
+                        's' => 4,
+                        _ => break,
+                    };
+                    if (add | remove) & bit != 0 {
+                        return Err("Duplicate regular expression modifier".into());
+                    }
+                    if subtract {
+                        remove |= bit;
+                    } else {
+                        add |= bit;
+                    }
+                    self.pos += 1;
+                }
+                if add | remove == 0 {
+                    return Err("Empty regular expression modifier".into());
+                }
+                self.expect(':')?;
+                let node = self.alternation()?;
+                self.expect(')')?;
+                return Ok(Node::Modifiers {
+                    add,
+                    remove,
                     node: Box::new(node),
                 });
             }
@@ -324,20 +395,31 @@ impl Parser {
         })
     }
 
-    fn group_name(&mut self) -> ParseResult<String> {
-        let mut name = String::new();
+    pub(super) fn group_name(&mut self) -> ParseResult<String> {
+        let mut units = Vec::new();
         while let Some(c) = self.peek() {
-            if c == '>' {
-                self.pos += 1;
-                if name.is_empty() {
-                    return Err("Invalid capture group name".to_string());
-                }
-                return Ok(name);
-            }
-            name.push(c);
             self.pos += 1;
+            if c == '>' {
+                if units.is_empty() {
+                    return Err("Invalid capture group name".into());
+                }
+                return String::from_utf16(&units).map_err(|_| "Invalid capture group name".into());
+            }
+            if c == '\\' {
+                self.expect('u')?;
+                let code = self.escaped_char('u')?;
+                if code > 0xffff {
+                    units.push(0xd800 + ((code - 0x10000) >> 10) as u16);
+                    units.push(0xdc00 + ((code - 0x10000) & 0x3ff) as u16);
+                } else {
+                    units.push(code as u16);
+                }
+            } else {
+                let mut pair = [0; 2];
+                units.extend_from_slice(c.encode_utf16(&mut pair));
+            }
         }
-        Err("Invalid capture group name".to_string())
+        Err("Invalid capture group name".into())
     }
 
     fn expect(&mut self, c: char) -> ParseResult<()> {
@@ -462,16 +544,13 @@ impl Parser {
             'b' => Node::Anchor(Anchor::WordBoundary),
             'B' => Node::Anchor(Anchor::NotWordBoundary),
             // `\k<name>`: a named backreference.
+            'k' if !self.unicode && !self.has_named_captures => Node::Char('k' as u32),
             'k' => {
                 if !self.eat('<') {
                     return Err("Invalid named reference".to_string());
                 }
                 let name = self.group_name()?;
-                let index = *self
-                    .names
-                    .get(&name)
-                    .ok_or_else(|| format!("Invalid named capture referenced: {}", name))?;
-                Node::Backref(index)
+                Node::NamedBackref(name)
             }
             c if c.is_ascii_digit() && c != '0' => {
                 self.pos -= 1;
@@ -513,7 +592,26 @@ impl Parser {
             .iter()
             .map(|range| (range.start(), range.end()))
             .collect();
-        Ok(ClassItem::UnicodeProperty { ranges, negated })
+        let to_ranges = |class: &regex_syntax::hir::ClassUnicode| {
+            class
+                .ranges()
+                .iter()
+                .map(|r| (r.start(), r.end()))
+                .collect()
+        };
+        let mut folded = class.clone();
+        folded.try_case_fold_simple().map_err(|e| e.to_string())?;
+        let mut complement = class.clone();
+        complement.negate();
+        complement
+            .try_case_fold_simple()
+            .map_err(|e| e.to_string())?;
+        Ok(ClassItem::UnicodeProperty {
+            ranges,
+            folded: to_ranges(&folded),
+            folded_complement: to_ranges(&complement),
+            negated,
+        })
     }
 
     /// Resolve a single-character escape: the control abbreviations, the

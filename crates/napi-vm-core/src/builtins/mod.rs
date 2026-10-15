@@ -5,6 +5,7 @@ mod date;
 pub(crate) mod disposable;
 mod error;
 mod function;
+pub(crate) mod intl;
 pub(crate) mod iterator;
 pub(crate) mod json;
 mod math;
@@ -167,8 +168,10 @@ pub fn setup_builtins(env: &Env) {
     }
     crate::interpreter::resolve::install_iterator_intrinsics(&mut e);
     iterator::install(&mut e);
+    regexp::install_iterator(&mut e);
     temporal::install(&mut e);
     disposable::install(&mut e);
+    intl::install(&mut e);
     e.snapshot_intrinsics();
 }
 
@@ -353,8 +356,8 @@ pub(crate) fn native_method(
 ) -> Value {
     let properties = crate::heap::tracked(std::rc::Rc::new(crate::value::ObjectCell::new(
         vec![
-            ("name".into(), Value::String(name.into())),
             ("length".into(), Value::Number(length as f64)),
+            ("name".into(), Value::String(name.into())),
         ],
         prototype.map(std::rc::Rc::new),
     )));

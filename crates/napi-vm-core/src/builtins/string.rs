@@ -35,7 +35,12 @@ fn string_construct(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    Ok(Value::boxed_primitive(string_ctor(interp, this, args)?).unwrap())
+    let _ = this;
+    let text = match args.first() {
+        None => JsString::default(),
+        Some(value) => interp.ecmascript_to_string(value)?,
+    };
+    Ok(Value::boxed_primitive(Value::String(text)).unwrap())
 }
 fn string_ctor(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     match args.first() {
@@ -43,7 +48,7 @@ fn string_ctor(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<V
         Some(Value::Symbol(s)) => bounded_string(s.to_display()),
         Some(v) => {
             let primitive = interp.coerce_object_to_primitive(v, "string")?;
-            bounded_string(interp.to_js_string(&primitive)?)
+            bounded_string(interp.ecmascript_to_string(&primitive)?)
         }
     }
 }
@@ -67,11 +72,11 @@ fn string_raw(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Va
     let mut out = JsString::default();
     for i in 0..length {
         let part = interp.member(&raw, &i.to_string())?;
-        out.push_str(interp.display_string(&part)?);
+        out.push_str(interp.ecmascript_to_string(&part)?);
         if i + 1 < length
             && let Some(v) = args.get(i + 1)
         {
-            out.push_str(interp.display_string(v)?);
+            out.push_str(interp.ecmascript_to_string(v)?);
         }
         if out.len() > crate::value::MAX_STRING_LEN {
             return Err(crate::value::limit_err("Maximum string length exceeded"));
@@ -236,14 +241,27 @@ fn string_substr(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Res
     };
     bounded_string(s.slice(start, start + count))
 }
-fn reject_regexp(args: &[Value]) -> Result<(), VmErr> {
-    if args.first().is_some_and(|v| v.as_regexp().is_some()) {
-        Err(VmErr::Msg(
-            "TypeError: search string cannot be a RegExp".into(),
-        ))
-    } else {
-        Ok(())
+fn is_regexp(i: &mut Interpreter, value: &Value) -> Result<bool, VmErr> {
+    if !crate::interpreter::call::is_js_object(value) {
+        return Ok(false);
     }
+    let symbol = super::well_known("match").unwrap();
+    let matcher = i.get_prop_value(value, &symbol)?;
+    Ok(if matches!(matcher, Value::Undefined) {
+        value.as_regexp().is_some()
+    } else {
+        matcher.is_truthy()
+    })
+}
+fn reject_regexp(i: &mut Interpreter, args: &[Value]) -> Result<(), VmErr> {
+    if let Some(value) = args.first() {
+        if is_regexp(i, value)? {
+            return Err(VmErr::Msg(
+                "TypeError: search string cannot be a RegExp".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 fn string_index_of(
     interp: &mut Interpreter,
@@ -262,8 +280,14 @@ fn string_includes(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    reject_regexp(&args)?;
-    let result = string_index_of(interp, this, args)?;
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".into(),
+        ));
+    }
+    let source = str_this(interp, &this)?;
+    reject_regexp(interp, &args)?;
+    let result = string_index_of(interp, Value::String(source), args)?;
     Ok(Value::Bool(result.to_number() >= 0.0))
 }
 fn string_last_index_of(
@@ -298,8 +322,13 @@ fn string_starts_with(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    reject_regexp(&args)?;
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".into(),
+        ));
+    }
     let s = str_this(interp, &this)?;
+    reject_regexp(interp, &args)?;
     let n = arg_string(interp, &args, 0)?;
     let pos = clamp(position(interp, &args, 1, 0.0)?, s.len());
     Ok(Value::Bool(s.units()[pos..].starts_with(n.units())))
@@ -309,8 +338,13 @@ fn string_ends_with(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    reject_regexp(&args)?;
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".into(),
+        ));
+    }
     let s = str_this(interp, &this)?;
+    reject_regexp(interp, &args)?;
     let n = arg_string(interp, &args, 0)?;
     let pos = if matches!(args.get(1), None | Some(Value::Undefined)) {
         s.len()
@@ -322,7 +356,7 @@ fn string_ends_with(
 fn string_concat(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
     let mut s = str_this(interp, &this)?;
     for a in args {
-        let part = interp.display_string(&a)?;
+        let part = interp.ecmascript_to_string(&a)?;
         if s.len().saturating_add(part.len()) > crate::value::MAX_STRING_LEN {
             return Err(crate::value::limit_err("Maximum string length exceeded"));
         }
@@ -408,6 +442,25 @@ fn string_locale_compare(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result
     }))
 }
 fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if matches!(t, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".into(),
+        ));
+    }
+    if let Some(separator) = a
+        .first()
+        .filter(|v| crate::interpreter::call::is_js_object(v))
+    {
+        let symbol = super::well_known("split").unwrap();
+        let method = i.get_prop_value(separator, &symbol)?;
+        if !matches!(method, Value::Undefined | Value::Null) {
+            return i.call_this(
+                &method,
+                separator.clone(),
+                vec![t, a.get(1).cloned().unwrap_or(Value::Undefined)],
+            );
+        }
+    }
     let s = str_this(i, &t)?;
     let limit = match a.get(1) {
         None | Some(Value::Undefined) => crate::value::MAX_ARRAY_LEN,
@@ -416,9 +469,6 @@ fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, V
     };
     if limit == 0 {
         return Value::checked_array(vec![]);
-    }
-    if let Some(re) = a.first().and_then(Value::as_regexp) {
-        return super::regexp::split_with_pattern(i, &s, &re, limit);
     }
     if matches!(a.first(), None | Some(Value::Undefined)) {
         return Value::checked_array(vec![Value::String(s)]);
@@ -444,22 +494,40 @@ fn string_split(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, V
     Value::checked_array(parts)
 }
 fn replace(i: &mut Interpreter, t: Value, a: Vec<Value>, all: bool) -> Result<Value, VmErr> {
-    let s = str_this(i, &t)?;
-    let replacement = a.get(1).cloned().unwrap_or(Value::Undefined);
-    if let Some(re) = a.first().and_then(Value::as_regexp) {
-        if all && !re.regex.borrow().global {
-            return Err(VmErr::Msg(
-                "TypeError: replaceAll requires a global RegExp".into(),
-            ));
-        }
-        return super::regexp::replace_with_pattern(i, &s, &re, &replacement, all);
+    if matches!(t, Value::Null | Value::Undefined) {
+        return Err(VmErr::Msg(
+            "TypeError: Cannot convert undefined or null to object".into(),
+        ));
     }
+    let search = a.first().cloned().unwrap_or(Value::Undefined);
+    let replacement = a.get(1).cloned().unwrap_or(Value::Undefined);
+    if crate::interpreter::call::is_js_object(&search) {
+        if all && is_regexp(i, &search)? {
+            let flags = i.member(&search, "flags")?;
+            if matches!(flags, Value::Null | Value::Undefined) {
+                return Err(VmErr::Msg(
+                    "TypeError: RegExp flags cannot be nullish".into(),
+                ));
+            }
+            if !i.ecmascript_to_string(&flags)?.contains('g') {
+                return Err(VmErr::Msg(
+                    "TypeError: replaceAll requires a global RegExp".into(),
+                ));
+            }
+        }
+        let symbol = super::well_known("replace").unwrap();
+        let method = i.get_prop_value(&search, &symbol)?;
+        if !matches!(method, Value::Undefined | Value::Null) {
+            return i.call_this(&method, search, vec![t, replacement]);
+        }
+    }
+    let s = str_this(i, &t)?;
     let needle = arg_string(i, &a, 0)?;
     let callable = crate::interpreter::call::is_callable_value(&replacement);
     let text = if callable {
         JsString::default()
     } else {
-        i.display_string(&replacement)?
+        i.ecmascript_to_string(&replacement)?
     };
     let mut out = JsString::default();
     let mut consumed = 0;
@@ -477,7 +545,7 @@ fn replace(i: &mut Interpreter, t: Value, a: Vec<Value>, all: bool) -> Result<Va
                     Value::String(s.clone()),
                 ],
             )?;
-            out.push_str(i.display_string(&result)?);
+            out.push_str(i.ecmascript_to_string(&result)?);
         } else {
             out.push_str(substitution(&text, &matched, &s, at, at + needle.len()));
         }

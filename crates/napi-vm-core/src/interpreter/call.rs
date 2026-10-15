@@ -1373,6 +1373,9 @@ impl Interpreter {
             if let Value::TypedArray(view) = &current
                 && let Some(index) = crate::builtins::canonical_numeric_index(&slot)
             {
+                if view.buffer.is_immutable() {
+                    return Ok(false);
+                }
                 if crate::interpreter::strict_equals(&current, receiver) {
                     crate::builtins::set_integer_index_in(self, view, index, &value)?;
                     return Ok(true);
@@ -1472,13 +1475,21 @@ impl Interpreter {
             Value::Class(class) => self.set_cell_property(obj, &class.statics, key, val),
             // `re.lastIndex = 0` resets a global pattern's scan position.
             Value::RegExp(data) if key == "lastIndex" => {
-                let index = self.tn(&val);
-                data.last_index.set(if index.is_finite() && index > 0.0 {
-                    index as usize
-                } else {
-                    0
-                });
-                Ok(true)
+                if crate::builtins::object::object_property_attributes(obj, "lastIndex")
+                    .is_some_and(|attrs| !attrs.writable)
+                {
+                    return Ok(false);
+                }
+                let index = val.to_number();
+                let accepted = self.set_cell_property(obj, &data.properties, "lastIndex", val)?;
+                if accepted {
+                    data.last_index.set(if index.is_finite() && index > 0.0 {
+                        index as usize
+                    } else {
+                        0
+                    });
+                }
+                Ok(accepted)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
             Value::GlobalObject => self.set_global_property(key, val),
@@ -1611,32 +1622,40 @@ impl Interpreter {
             // the element type; an out-of-range index is ignored, not grown.
             (Value::TypedArray(view), key) => {
                 let slot = self.property_key(key)?;
-                if slot.parse::<f64>().is_err() {
-                    let properties = view.properties.clone();
-                    let accepted = self.set_cell_property(obj, &properties, &slot, val)?;
-                    if let Value::Symbol(symbol) = key {
-                        properties
-                            .meta
-                            .borrow_mut()
-                            .set_symbol_key(&slot, symbol.clone());
+                if let Some(index) = crate::builtins::canonical_numeric_index(&slot) {
+                    if view.buffer.is_immutable() {
+                        return Ok(false);
                     }
-                    return Ok(accepted);
+                    crate::builtins::set_integer_index_in(self, view, index, &val)?;
+                    return Ok(true);
                 }
-                let index = self.tn(key);
-                if index.is_finite() && index >= 0.0 && index.fract() == 0.0 {
-                    crate::builtins::write_element_in(self, view, index as usize, &val)?;
+                let properties = view.properties.clone();
+                let accepted = self.set_cell_property(obj, &properties, &slot, val)?;
+                if let Value::Symbol(symbol) = key {
+                    properties
+                        .meta
+                        .borrow_mut()
+                        .set_symbol_key(&slot, symbol.clone());
                 }
-                Ok(true)
+                Ok(accepted)
             }
             // `re.lastIndex = 0` resets a global pattern's scan position.
             (Value::RegExp(data), Value::String(k)) if k == "lastIndex" => {
-                let index = self.tn(&val);
-                data.last_index.set(if index.is_finite() && index > 0.0 {
-                    index as usize
-                } else {
-                    0
-                });
-                Ok(true)
+                if crate::builtins::object::object_property_attributes(obj, "lastIndex")
+                    .is_some_and(|attrs| !attrs.writable)
+                {
+                    return Ok(false);
+                }
+                let index = val.to_number();
+                let accepted = self.set_cell_property(obj, &data.properties, "lastIndex", val)?;
+                if accepted {
+                    data.last_index.set(if index.is_finite() && index > 0.0 {
+                        index as usize
+                    } else {
+                        0
+                    });
+                }
+                Ok(accepted)
             }
             // `window.x = v` / `globalThis.x = v` define a real global.
             (Value::GlobalObject, Value::String(k)) => self.set_global_property(&k.to_key(), val),
@@ -2662,7 +2681,8 @@ impl Interpreter {
                     | "ArrayBuffer"
                     | "SharedArrayBuffer"
                     | "Proxy"
-            ) {
+            ) || builtin.starts_with("Intl.")
+            {
                 // These constructors perform OrdinaryCreateFromConstructor
                 // using the active newTarget. Do not read prototype twice.
                 return self.call_this(&target, f.clone(), args);

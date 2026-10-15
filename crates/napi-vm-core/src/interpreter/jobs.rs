@@ -93,12 +93,18 @@ impl Job {
             }
             Job::Reaction {
                 value, reaction, ..
-            } => out.extend([
-                value.clone(),
-                reaction.on_fulfilled.clone(),
-                reaction.on_rejected.clone(),
-                Value::Promise(reaction.derived.clone()),
-            ]),
+            } => {
+                out.extend([
+                    value.clone(),
+                    reaction.on_fulfilled.clone(),
+                    reaction.on_rejected.clone(),
+                    Value::Promise(reaction.derived.clone()),
+                ]);
+                if let Some((resolve, reject)) = reaction.capability.as_deref() {
+                    out.push(resolve.clone());
+                    out.push(reject.clone());
+                }
+            }
             Job::PromiseResolveThenable {
                 realm,
                 target,

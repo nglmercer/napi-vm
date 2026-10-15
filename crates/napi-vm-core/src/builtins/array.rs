@@ -1,5 +1,6 @@
 //! `Array` statics and `Array.prototype` methods.
 
+mod from_async;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
@@ -66,6 +67,7 @@ pub(super) fn install(e: &mut Environment) {
         let statics: &[(&str, NativeFn)] = &[
             ("isArray", array_is_array),
             ("from", array_from),
+            ("fromAsync", from_async::from_async),
             ("of", array_of),
         ];
         for (name, callable) in statics {
@@ -119,7 +121,11 @@ pub(super) fn install(e: &mut Environment) {
                 )
                 .expect("Array.prototype method");
         }
-        super::install_method_metadata(e, &a, &[("isArray", 1), ("from", 1), ("of", 0)]);
+        super::install_method_metadata(
+            e,
+            &a,
+            &[("isArray", 1), ("from", 1), ("fromAsync", 1), ("of", 0)],
+        );
         super::install_method_metadata(
             e,
             &prototype,
@@ -357,6 +363,9 @@ fn array_result_create(
                 vec![Value::Number(length as f64)]
             },
         );
+    }
+    if length > crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
     Value::checked_array_with_presence(vec![Value::Undefined; length], vec![false; length])
 }
@@ -1212,7 +1221,10 @@ pub(super) fn array_like_length(interp: &mut Interpreter, this: &Value) -> Resul
 }
 
 /// Logical array-like length, independent of the cap on allocated arrays.
-fn array_like_length_number(interp: &mut Interpreter, this: &Value) -> Result<f64, VmErr> {
+pub(super) fn array_like_length_number(
+    interp: &mut Interpreter,
+    this: &Value,
+) -> Result<f64, VmErr> {
     let value = interp.get_prop_value_str(this, "length")?;
     Ok(to_integer_or_infinity(interp.ecmascript_to_number(&value)?)
         .clamp(0.0, 9_007_199_254_740_991.0))

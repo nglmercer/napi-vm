@@ -1,483 +1,576 @@
-//! The `Promise` constructor, its statics, and `Promise.prototype`.
-//!
-//! Reactions run as microtasks, so `Promise.resolve().then(f); g();` runs `g`
-//! first. See `interpreter::promise` for the resolution algorithm itself.
+//! Promise capabilities, species construction, and observable combinator iteration.
+use super::{NativeFn, bound_native_method, native_method};
+use crate::{
+    error::VmErr,
+    interpreter::{Environment, Interpreter, is_callable_value, strict_equals},
+    value::{PropAttrs, Value},
+};
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::error::VmErr;
-use crate::interpreter::{Environment, Interpreter};
-use crate::value::{PromiseInner, PromiseState, PropAttrs, Value};
+fn arg(args: &[Value], index: usize) -> Value {
+    args.get(index).cloned().unwrap_or(Value::Undefined)
+}
+fn error(message: &str) -> VmErr {
+    VmErr::Msg(format!("TypeError: {message}"))
+}
+fn reason(error: VmErr) -> Result<Value, VmErr> {
+    match error {
+        VmErr::Throw(v) => Ok(v),
+        VmErr::RuntimeError(d) => Ok(d.guest_value()),
+        VmErr::Msg(m) => Ok(crate::error::error_value_from_msg(&m)),
+        other => Err(other),
+    }
+}
+fn state_record(values: Vec<Value>) -> Value {
+    Value::object(
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect(),
+    )
+}
+fn function(i: &Interpreter, name: &str, length: usize, f: NativeFn, state: Value) -> Value {
+    let proto = crate::value::FunctionData::default_function_prototype(&i.persistent_global);
+    bound_native_method(name, length, f, proto, state)
+}
+#[derive(Clone)]
+pub(crate) struct Capability {
+    pub promise: Value,
+    pub resolve: Value,
+    pub reject: Value,
+}
+impl Capability {
+    pub(crate) fn new(i: &mut Interpreter, constructor: &Value) -> Result<Self, VmErr> {
+        let state = state_record(vec![Value::Undefined, Value::Undefined]);
+        let executor = function(i, "", 2, capability_executor, state.clone());
+        let promise = i.ctor(constructor, vec![executor])?;
+        let resolve = state.get_prop("0").unwrap();
+        let reject = state.get_prop("1").unwrap();
+        if !is_callable_value(&resolve) || !is_callable_value(&reject) {
+            return Err(error("Promise capability functions must be callable"));
+        }
+        Ok(Self {
+            promise,
+            resolve,
+            reject,
+        })
+    }
+    fn call_reject(&self, i: &mut Interpreter, e: VmErr) -> Result<Value, VmErr> {
+        let value = reason(e)?;
+        i.call_this(&self.reject, Value::Undefined, vec![value])?;
+        Ok(self.promise.clone())
+    }
+}
+fn capability_executor(_: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if !matches!(this.get_prop("0"), Some(Value::Undefined))
+        || !matches!(this.get_prop("1"), Some(Value::Undefined))
+    {
+        return Err(error("Promise capability executor already called"));
+    }
+    this.set_prop("0".into(), arg(&a, 0))?;
+    this.set_prop("1".into(), arg(&a, 1))?;
+    Ok(Value::Undefined)
+}
 
 pub(crate) fn promise_method(name: &str) -> Option<Value> {
-    let callable: super::NativeFn = match name {
+    let f: NativeFn = match name {
         "then" => promise_then,
         "catch" => promise_catch,
         "finally" => promise_finally,
         _ => return None,
     };
-    Some(super::nf(name, callable))
+    Some(super::nf(name, f))
 }
-
 pub(super) fn install(e: &mut Environment) {
-    if let Some(p) = e.get("Promise") {
-        let statics: &[(&str, super::NativeFn)] = &[
-            ("resolve", promise_resolve),
-            ("reject", promise_reject),
-            ("all", promise_all),
-            ("allSettled", promise_all_settled),
-            ("race", promise_race),
-            ("any", promise_any),
-        ];
-        for (name, callable) in statics {
-            p.set_prop(name.to_string(), super::nf(name, *callable))
-                .expect("built-in Promise property");
-        }
-        super::make_callable(&p, promise_construct, None);
-
-        let object_prototype = e
-            .get("Object")
-            .and_then(|object| object.get_prop("prototype"));
-        let prototype =
-            Value::object_with_proto(Vec::new(), object_prototype.map(std::rc::Rc::new));
-        prototype
-            .set_prop("constructor".into(), p.clone())
-            .expect("Promise.prototype constructor");
-        for name in ["then", "catch", "finally"] {
-            prototype
-                .set_prop(
-                    name.into(),
-                    promise_method(name).expect("listed Promise.prototype method"),
-                )
-                .expect("Promise.prototype method");
-        }
-        if let Value::Object { props } = &prototype {
-            for name in ["constructor", "then", "catch", "finally"] {
-                props.meta.borrow_mut().set_attrs(
-                    name,
-                    PropAttrs {
-                        enumerable: false,
-                        ..PropAttrs::default()
-                    },
-                );
-            }
-        }
-        super::set_builtin_constructor_prototype(e, &p, prototype);
+    let Some(p) = e.get("Promise") else { return };
+    super::make_callable(&p, super::require_new, Some(promise_construct));
+    let fp = e.get("Function").and_then(|v| v.get_prop("prototype"));
+    for (name, len, f) in [
+        ("resolve", 1, promise_resolve as NativeFn),
+        ("reject", 1, promise_reject),
+        ("all", 1, promise_all),
+        ("allSettled", 1, promise_all_settled),
+        ("race", 1, promise_race),
+        ("any", 1, promise_any),
+        ("withResolvers", 0, promise_with_resolvers),
+        ("try", 1, promise_try),
+        ("allKeyed", 1, promise_all_keyed),
+        ("allSettledKeyed", 1, promise_all_settled_keyed),
+    ] {
+        p.set_prop(name.into(), native_method(name, len, f, fp.clone()))
+            .unwrap();
+        p.property_cell().unwrap().meta.borrow_mut().set_attrs(
+            name,
+            PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
     }
-}
-
-fn is_callable(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
+    let op = e.get("Object").and_then(|v| v.get_prop("prototype"));
+    let proto = Value::object_with_proto(
+        vec![("constructor".into(), p.clone())],
+        op.map(std::rc::Rc::new),
+    );
+    for (name, len, f) in [
+        ("then", 2, promise_then as NativeFn),
+        ("catch", 1, promise_catch),
+        ("finally", 1, promise_finally),
+    ] {
+        proto
+            .set_prop(name.into(), native_method(name, len, f, fp.clone()))
+            .unwrap();
+        proto.property_cell().unwrap().meta.borrow_mut().set_attrs(
+            name,
+            PropAttrs {
+                enumerable: false,
+                ..Default::default()
+            },
+        );
+    }
+    proto.property_cell().unwrap().meta.borrow_mut().set_attrs(
+        "constructor",
+        PropAttrs {
+            enumerable: false,
+            ..Default::default()
+        },
+    );
+    let Value::Symbol(ref tag) = super::well_known("toStringTag").unwrap() else {
+        unreachable!()
+    };
+    let key = crate::interpreter::symbol_slot_key(tag);
+    proto
+        .set_prop(key.clone(), Value::String("Promise".into()))
+        .unwrap();
+    proto
+        .property_cell()
+        .unwrap()
+        .meta
+        .borrow_mut()
+        .set_symbol_key(&key, tag.clone());
+    proto.property_cell().unwrap().meta.borrow_mut().set_attrs(
+        &key,
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    super::set_builtin_constructor_prototype(e, &p, proto);
+    p.set_prop("length".into(), Value::Number(1.0)).unwrap();
+    p.property_cell().unwrap().meta.borrow_mut().set_attrs(
+        "length",
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    p.set_prop("name".into(), Value::String("Promise".into()))
+        .unwrap();
+    p.property_cell().unwrap().meta.borrow_mut().set_attrs(
+        "name",
+        PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    let Value::Symbol(ref species) = super::well_known("species").unwrap() else {
+        unreachable!()
+    };
+    let key = crate::interpreter::symbol_slot_key(species);
+    let getter = native_method("get [Symbol.species]", 0, promise_species, fp);
+    super::object::define_property(
+        &p,
+        &key,
+        &Value::descriptor_record(vec![
+            ("get".into(), getter),
+            ("configurable".into(), Value::Bool(true)),
+        ]),
     )
+    .unwrap();
+    p.property_cell()
+        .unwrap()
+        .meta
+        .borrow_mut()
+        .set_symbol_key(&key, species.clone());
 }
-
-/// `new Promise(executor)`.
-///
-/// The executor runs *synchronously*, before the constructor returns, and a
-/// throw from it rejects the promise.
-fn promise_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let executor = a.first().cloned().unwrap_or(Value::Undefined);
-    if !is_callable(&executor) {
-        return Err(VmErr::Msg(
-            "TypeError: Promise resolver is not a function".to_string(),
-        ));
+fn promise_species(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(this)
+}
+fn promise_construct(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let executor = arg(&a, 0);
+    if !is_callable_value(&executor) {
+        return Err(error("Promise executor must be callable"));
     }
     let promise = Value::pending_promise();
-    let (resolve, reject) = interp.settle_functions(promise.clone());
-    match interp.call_this(&executor, Value::Undefined, vec![resolve, reject]) {
-        Ok(_) => {}
-        Err(VmErr::Throw(reason)) => interp.reject_promise(&promise, reason),
-        Err(other) => return Err(other),
+    let (resolve, reject) = i.settle_functions(promise.clone());
+    if let Err(e) = i.call_this(&executor, Value::Undefined, vec![resolve, reject]) {
+        i.reject_promise(&promise, reason(e)?);
     }
     Ok(Value::Promise(promise))
 }
-
-fn promise_resolve(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let v = a.first().cloned().unwrap_or(Value::Undefined);
-    // `Promise.resolve` on a promise returns it unchanged.
-    if matches!(v, Value::Promise(_)) {
-        return Ok(v);
-    }
-    let promise = Value::pending_promise();
-    interp.resolve_promise(&promise, v)?;
-    Ok(Value::Promise(promise))
-}
-
-fn promise_reject(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::settled_promise(
-        PromiseState::Rejected,
-        a.first().cloned().unwrap_or(Value::Undefined),
-    ))
-}
-
-// --- Instance methods -------------------------------------------------------
-
-fn promise_then(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let on_fulfilled = args.first().cloned().unwrap_or(Value::Undefined);
-    let on_rejected = args.get(1).cloned().unwrap_or(Value::Undefined);
-    interp.register(&this, on_fulfilled, on_rejected, None)
-}
-
-fn promise_catch(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let on_rejected = args.first().cloned().unwrap_or(Value::Undefined);
-    interp.register(&this, Value::Undefined, on_rejected, None)
-}
-
-/// `p.finally(f)`: runs `f` on either settlement and passes the original
-/// settlement through, so it is transparent to the chain.
-fn promise_finally(
-    interp: &mut Interpreter,
-    this: Value,
-    args: Vec<Value>,
+pub(crate) fn promise_resolve_with(
+    i: &mut Interpreter,
+    c: &Value,
+    v: Value,
 ) -> Result<Value, VmErr> {
-    let callback = args.first().cloned().unwrap_or(Value::Undefined);
-    let handler = Value::object(vec![
-        (FINALLY_SLOT.to_string(), callback),
-        (
-            crate::interpreter::call::CALL_SLOT.to_string(),
-            super::nf("finally", finally_passthrough),
-        ),
-    ]);
-    let rethrow = Value::object(vec![
-        (
-            FINALLY_SLOT.to_string(),
-            handler.get_prop(FINALLY_SLOT).unwrap_or(Value::Undefined),
-        ),
-        (
-            crate::interpreter::call::CALL_SLOT.to_string(),
-            super::nf("finally", finally_rethrow),
-        ),
-    ]);
-    interp.register(&this, handler, rethrow, None)
-}
-
-const FINALLY_SLOT: &str = "__symbol_finally__";
-
-fn run_finally(interp: &mut Interpreter, this: &Value) -> Result<(), VmErr> {
-    let callback = this.get_prop(FINALLY_SLOT).unwrap_or(Value::Undefined);
-    if is_callable(&callback) {
-        interp.call_this(&callback, Value::Undefined, vec![])?;
+    if !crate::interpreter::call::is_js_object(c) {
+        return Err(error("Promise.resolve receiver must be an object"));
     }
-    Ok(())
-}
-
-fn finally_passthrough(
-    interp: &mut Interpreter,
-    this: Value,
-    args: Vec<Value>,
-) -> Result<Value, VmErr> {
-    run_finally(interp, &this)?;
-    Ok(args.into_iter().next().unwrap_or(Value::Undefined))
-}
-
-fn finally_rethrow(
-    interp: &mut Interpreter,
-    this: Value,
-    args: Vec<Value>,
-) -> Result<Value, VmErr> {
-    run_finally(interp, &this)?;
-    Err(VmErr::Throw(
-        args.into_iter().next().unwrap_or(Value::Undefined),
-    ))
-}
-
-// --- Combinators ------------------------------------------------------------
-
-/// State shared by the reactions of one combinator call.
-struct Combinator {
-    result: Rc<RefCell<PromiseInner>>,
-    slots: Rc<crate::value::ArrayCell>,
-    remaining: Rc<std::cell::Cell<usize>>,
-}
-
-/// Register `handler` on each input, resolving non-promises through
-/// `Promise.resolve` so a plain value participates like a settled promise.
-fn each_input(
-    interp: &mut Interpreter,
-    inputs: &[Value],
-    mut register: impl FnMut(&mut Interpreter, usize, &Value) -> Result<(), VmErr>,
-) -> Result<(), VmErr> {
-    for (index, input) in inputs.iter().enumerate() {
-        register(interp, index, input)?;
-    }
-    Ok(())
-}
-
-fn reject_input_error(error: VmErr) -> Value {
-    let reason = match error {
-        VmErr::Throw(reason) => reason,
-        VmErr::RuntimeError(data) => data.guest_value(),
-        other => crate::error::error_value_from_msg(&other.to_string()),
-    };
-    Value::settled_promise(PromiseState::Rejected, reason)
-}
-
-fn inputs_of(interp: &mut Interpreter, a: &[Value]) -> Result<Vec<Value>, VmErr> {
-    interp.drain_iterable(a.first().unwrap_or(&Value::Undefined))
-}
-
-/// Build the `(onFulfilled, onRejected)` pair for one input of a combinator,
-/// carrying the shared state and this input's index in hidden slots.
-fn reaction_pair(
-    state: &Combinator,
-    index: usize,
-    on_fulfilled: super::NativeFn,
-    on_rejected: super::NativeFn,
-) -> (Value, Value) {
-    let make = |callable: super::NativeFn| {
-        Value::object(vec![
-            (
-                COMBINATOR_SLOT.to_string(),
-                Value::Promise(state.result.clone()),
-            ),
-            (SLOTS_SLOT.to_string(), Value::Array(state.slots.clone())),
-            (INDEX_SLOT.to_string(), Value::Number(index as f64)),
-            (
-                REMAINING_SLOT.to_string(),
-                Value::Number(state.remaining.get() as f64),
-            ),
-            (
-                crate::interpreter::call::CALL_SLOT.to_string(),
-                super::nf("", callable),
-            ),
-        ])
-    };
-    (make(on_fulfilled), make(on_rejected))
-}
-
-const COMBINATOR_SLOT: &str = "__symbol_combinator__";
-const SLOTS_SLOT: &str = "__symbol_slots__";
-const INDEX_SLOT: &str = "__symbol_index__";
-const REMAINING_SLOT: &str = "__symbol_remaining__";
-/// Counts still-outstanding inputs. Stored in the slots array's last position
-/// so every reaction of one call shares it.
-fn pending_count(this: &Value) -> Option<Rc<crate::value::ArrayCell>> {
-    this.get_prop(SLOTS_SLOT)?.as_array()
-}
-
-fn combinator_target(this: &Value) -> Option<Rc<RefCell<PromiseInner>>> {
-    this.get_prop(COMBINATOR_SLOT)?.as_promise()
-}
-
-fn slot_index(this: &Value) -> usize {
-    match this.get_prop(INDEX_SLOT) {
-        Some(Value::Number(n)) => n as usize,
-        _ => 0,
-    }
-}
-
-/// Record one input's outcome and, when it was the last one outstanding,
-/// settle the combinator's promise with `finish`.
-fn record(
-    interp: &mut Interpreter,
-    this: &Value,
-    value: Value,
-    finish: impl FnOnce(&mut Interpreter, &Rc<RefCell<PromiseInner>>, Vec<Value>) -> Result<(), VmErr>,
-) -> Result<(), VmErr> {
-    let (Some(target), Some(slots)) = (combinator_target(this), pending_count(this)) else {
-        return Ok(());
-    };
-    let index = slot_index(this);
-    let done = {
-        let mut slots = slots.borrow_mut();
-        if index < slots.len() {
-            slots[index] = value;
+    if v.as_promise().is_some() {
+        let constructor = i.get_prop_value_str(&v, "constructor")?;
+        if strict_equals(&constructor, c) {
+            return Ok(v);
         }
-        // The tail slot is the outstanding counter.
-        let counter = slots.len() - 1;
-        let remaining = slots[counter].to_number() - 1.0;
-        slots[counter] = Value::Number(remaining);
-        remaining <= 0.0
-    };
-    if done {
-        let mut values = slots.borrow().clone();
-        values.pop();
-        finish(interp, &target, values)?;
     }
-    Ok(())
+    let cap = Capability::new(i, c)?;
+    i.call_this(&cap.resolve, Value::Undefined, vec![v])?;
+    Ok(cap.promise)
 }
-
-/// Allocate the shared state: one slot per input plus a trailing counter.
-fn combinator_state(inputs: &[Value]) -> Combinator {
-    let mut slots = vec![Value::Undefined; inputs.len()];
-    slots.push(Value::Number(inputs.len() as f64));
-    Combinator {
-        result: Value::pending_promise(),
-        slots: Value::array(slots)
-            .as_array()
-            .expect("Value::array returns an array"),
-        remaining: Rc::new(std::cell::Cell::new(inputs.len())),
+fn promise_resolve(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    promise_resolve_with(i, &this, arg(&a, 0))
+}
+fn promise_reject(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let cap = Capability::new(i, &this)?;
+    i.call_this(&cap.reject, Value::Undefined, vec![arg(&a, 0)])?;
+    Ok(cap.promise)
+}
+fn promise_with_resolvers(i: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let c = Capability::new(i, &this)?;
+    Ok(Value::object(vec![
+        ("promise".into(), c.promise),
+        ("resolve".into(), c.resolve),
+        ("reject".into(), c.reject),
+    ]))
+}
+fn promise_try(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if !crate::interpreter::call::is_js_object(&this) {
+        return Err(error("Promise.try receiver must be an object"));
     }
-}
-
-fn promise_all(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = match inputs_of(interp, &a) {
-        Ok(inputs) => inputs,
-        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
-            return Ok(reject_input_error(error));
+    let result = i.call_this(
+        &arg(&a, 0),
+        Value::Undefined,
+        a.into_iter().skip(1).collect(),
+    );
+    match result {
+        Ok(value) => promise_resolve_with(i, &this, value),
+        Err(e) => {
+            let cap = Capability::new(i, &this)?;
+            cap.call_reject(i, e)
         }
-        Err(error) => return Err(error),
-    };
-    let state = combinator_state(&inputs);
-    let result = state.result.clone();
-    if inputs.is_empty() {
-        interp.resolve_promise(&result, Value::array(vec![]))?;
-        return Ok(Value::Promise(result));
     }
-    each_input(interp, &inputs, |interp, index, input| {
-        let (on_fulfilled, on_rejected) = reaction_pair(&state, index, all_fulfil, all_reject);
-        interp.register(input, on_fulfilled, on_rejected, None)?;
-        Ok(())
-    })?;
-    Ok(Value::Promise(result))
 }
 
-fn all_fulfil(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let value = args.into_iter().next().unwrap_or(Value::Undefined);
-    record(interp, &this, value, |interp, target, values| {
-        interp.resolve_promise(target, Value::array(values))
-    })?;
-    Ok(Value::Undefined)
+fn invoke_then(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let then = i.get_prop_value_str(&this, "then")?;
+    i.call_this(&then, this, a)
 }
-
-/// The first rejection settles `Promise.all` immediately; later outcomes are
-/// ignored because a settled promise cannot settle again.
-fn all_reject(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    if let Some(target) = combinator_target(&this) {
-        interp.reject_promise(&target, args.into_iter().next().unwrap_or(Value::Undefined));
+fn promise_then(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if this.as_promise().is_none() {
+        return Err(error("Promise.prototype.then requires a Promise"));
     }
-    Ok(Value::Undefined)
+    let c = i.species_constructor(&this, "Promise")?;
+    let cap = Capability::new(i, &c)?;
+    i.register_capability(&this, arg(&a, 0), arg(&a, 1), cap.resolve, cap.reject)?;
+    Ok(cap.promise)
 }
-
-fn promise_all_settled(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = match inputs_of(interp, &a) {
-        Ok(inputs) => inputs,
-        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
-            return Ok(reject_input_error(error));
-        }
-        Err(error) => return Err(error),
-    };
-    let state = combinator_state(&inputs);
-    let result = state.result.clone();
-    if inputs.is_empty() {
-        interp.resolve_promise(&result, Value::array(vec![]))?;
-        return Ok(Value::Promise(result));
+fn promise_catch(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    invoke_then(i, this, vec![Value::Undefined, arg(&a, 0)])
+}
+fn promise_finally(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    if !crate::interpreter::call::is_js_object(&this) {
+        return Err(error("Promise.prototype.finally requires an object"));
     }
-    each_input(interp, &inputs, |interp, index, input| {
-        let (on_fulfilled, on_rejected) =
-            reaction_pair(&state, index, settled_fulfil, settled_reject);
-        interp.register(input, on_fulfilled, on_rejected, None)?;
-        Ok(())
-    })?;
-    Ok(Value::Promise(result))
+    let c = i.species_constructor(&this, "Promise")?;
+    let f = arg(&a, 0);
+    if !is_callable_value(&f) {
+        return invoke_then(i, this, vec![f.clone(), f]);
+    }
+    let state = state_record(vec![f, c]);
+    let yes = function(i, "", 1, finally_fulfil, state.clone());
+    let no = function(i, "", 1, finally_reject, state);
+    invoke_then(i, this, vec![yes, no])
 }
-
-fn settled_record(
-    interp: &mut Interpreter,
+fn finally_run(
+    i: &mut Interpreter,
     this: Value,
-    args: Vec<Value>,
+    a: Vec<Value>,
     rejected: bool,
 ) -> Result<Value, VmErr> {
-    let value = args.into_iter().next().unwrap_or(Value::Undefined);
-    let entry = if rejected {
+    let callback = this.get_prop("0").unwrap();
+    let c = this.get_prop("1").unwrap();
+    let result = i.call_this(&callback, Value::Undefined, vec![])?;
+    let promise = promise_resolve_with(i, &c, result)?;
+    let state = state_record(vec![arg(&a, 0), Value::Bool(rejected)]);
+    let thunk = function(i, "", 0, finally_thunk, state);
+    invoke_then(i, promise, vec![thunk])
+}
+fn finally_fulfil(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    finally_run(i, t, a, false)
+}
+fn finally_reject(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    finally_run(i, t, a, true)
+}
+fn finally_thunk(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let value = this.get_prop("0").unwrap();
+    if this.get_prop("1").unwrap().is_truthy() {
+        Err(VmErr::Throw(value))
+    } else {
+        Ok(value)
+    }
+}
+
+// Combinator state is bound to native closures and traced as ordinary values:
+// [resolve, reject, values, remaining, kind, keys]. Remaining starts at one,
+// preventing synchronous thenables from completing before iteration finishes.
+fn promise_all(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    combine(i, t, a, "all", false)
+}
+fn promise_all_settled(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    combine(i, t, a, "settled", false)
+}
+fn promise_any(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    combine(i, t, a, "any", false)
+}
+fn promise_race(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    combine(i, t, a, "race", false)
+}
+fn promise_all_keyed(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    combine(i, t, a, "all", true)
+}
+fn promise_all_settled_keyed(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    combine(i, t, a, "settled", true)
+}
+fn combine(
+    i: &mut Interpreter,
+    c: Value,
+    a: Vec<Value>,
+    kind: &str,
+    keyed: bool,
+) -> Result<Value, VmErr> {
+    let cap = Capability::new(i, &c)?;
+    let state = state_record(vec![
+        cap.resolve.clone(),
+        cap.reject.clone(),
+        Value::array(vec![]),
+        Value::Number(1.),
+        Value::String(kind.into()),
+        if keyed {
+            Value::array(vec![])
+        } else {
+            Value::Undefined
+        },
+    ]);
+    let result = (|| {
+        let resolve = i.get_prop_value_str(&c, "resolve")?;
+        if !is_callable_value(&resolve) {
+            return Err(error("Promise resolve must be callable"));
+        }
+        let source = arg(&a, 0);
+        if keyed {
+            if !crate::interpreter::call::is_js_object(&source) {
+                return Err(error("Keyed promises require an object"));
+            }
+            for key in i.own_property_keys(&source)? {
+                i.consume_loop()?;
+                let descriptor = super::object::descriptor_for_key_in(i, &source, &key)?;
+                if !matches!(descriptor, Value::Undefined)
+                    && descriptor
+                        .get_prop("enumerable")
+                        .is_some_and(|v| v.is_truthy())
+                {
+                    let value = i.get_prop_value(&source, &key)?;
+                    add_input(i, &state, &c, &resolve, value, Some(key))?;
+                }
+            }
+        } else {
+            let iterator = i.iterator_for(&source)?;
+            let next = i.get_prop_value_str(&iterator, "next")?;
+            loop {
+                i.consume_loop()?;
+                let step = i.call_this(&next, iterator.clone(), vec![])?;
+                if !crate::interpreter::call::is_js_object(&step) {
+                    return Err(error("Iterator result must be an object"));
+                }
+                if i.get_prop_value_str(&step, "done")?.is_truthy() {
+                    break;
+                }
+                let value = i.get_prop_value_str(&step, "value")?;
+                if let Err(e) = add_input(i, &state, &c, &resolve, value, None) {
+                    i.close_guest_iterator_for_abrupt(&iterator, false, &e)?;
+                    return Err(e);
+                }
+            }
+        }
+        decrement(i, &state)?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => Ok(cap.promise),
+        Err(e) => cap.call_reject(i, e),
+    }
+}
+fn add_input(
+    i: &mut Interpreter,
+    state: &Value,
+    c: &Value,
+    resolve: &Value,
+    value: Value,
+    key: Option<Value>,
+) -> Result<(), VmErr> {
+    let values = state.get_prop("2").unwrap().as_array().unwrap();
+    let index = values.borrow().len();
+    if index >= crate::value::MAX_ARRAY_LEN {
+        return Err(crate::value::limit_err(
+            "Maximum promise input length exceeded",
+        ));
+    }
+    values.borrow_mut().push(Value::Undefined);
+    if let Some(key) = key {
+        state
+            .get_prop("5")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .borrow_mut()
+            .push(key);
+    }
+    let promise = i.call_this(resolve, c.clone(), vec![value])?;
+    let kind = state.get_prop("4").unwrap();
+    let Value::String(ref kind) = kind else {
+        unreachable!()
+    };
+    let kind = kind.as_str();
+    let guard = state_record(vec![Value::Bool(false)]);
+    let carrier = Value::array(vec![state.clone(), Value::Number(index as f64), guard]);
+    let (yes, no) = match kind {
+        "race" => (state.get_prop("0").unwrap(), state.get_prop("1").unwrap()),
+        "any" => (
+            state.get_prop("0").unwrap(),
+            function(i, "", 1, any_reject, carrier),
+        ),
+        "settled" => (
+            function(i, "", 1, settled_fulfil, carrier.clone()),
+            function(i, "", 1, settled_reject, carrier),
+        ),
+        _ => (
+            function(i, "", 1, all_fulfil, carrier),
+            state.get_prop("1").unwrap(),
+        ),
+    };
+    state.set_prop(
+        "3".into(),
+        Value::Number(state.get_prop("3").unwrap().to_number() + 1.),
+    )?;
+    invoke_then(i, promise, vec![yes, no])?;
+    Ok(())
+}
+fn decrement(i: &mut Interpreter, state: &Value) -> Result<(), VmErr> {
+    let remaining = state.get_prop("3").unwrap().to_number() - 1.;
+    state.set_prop("3".into(), Value::Number(remaining))?;
+    if remaining != 0. {
+        return Ok(());
+    }
+    let kind = state.get_prop("4").unwrap();
+    let Value::String(ref kind) = kind else {
+        unreachable!()
+    };
+    let kind = kind.as_str();
+    if kind == "race" {
+        return Ok(());
+    }
+    let values = state
+        .get_prop("2")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .borrow()
+        .clone();
+    let result = if kind == "any" {
+        let ctor = i
+            .persistent_global
+            .borrow()
+            .intrinsic("AggregateError")
+            .unwrap();
+        i.ctor(
+            &ctor,
+            vec![
+                Value::array(values),
+                Value::String("All promises were rejected".into()),
+            ],
+        )?
+    } else if let Some(keys) = state.get_prop("5").unwrap().as_array() {
+        let out = Value::object_with_proto(vec![], None);
+        out.property_cell()
+            .unwrap()
+            .meta
+            .borrow_mut()
+            .uses_default_prototype = false;
+        for (key, value) in keys.borrow().iter().zip(values) {
+            let slot = i.property_key(key)?;
+            out.set_prop(slot.clone(), value)?;
+            if let Value::Symbol(symbol) = key {
+                out.property_cell()
+                    .unwrap()
+                    .meta
+                    .borrow_mut()
+                    .set_symbol_key(&slot, symbol.clone());
+            }
+        }
+        out
+    } else {
+        Value::array(values)
+    };
+    let callback = state
+        .get_prop(if kind == "any" { "1" } else { "0" })
+        .unwrap();
+    i.call_this(&callback, Value::Undefined, vec![result])?;
+    Ok(())
+}
+fn record(
+    i: &mut Interpreter,
+    this: Value,
+    value: Value,
+    settled: Option<bool>,
+) -> Result<Value, VmErr> {
+    let guard = this.get_prop("2").unwrap();
+    if guard.get_prop("0").unwrap().is_truthy() {
+        return Ok(Value::Undefined);
+    }
+    guard.set_prop("0".into(), Value::Bool(true))?;
+    let state = this.get_prop("0").unwrap();
+    let index = this.get_prop("1").unwrap().to_number() as usize;
+    let value = if let Some(rejected) = settled {
         Value::object(vec![
             (
-                "status".to_string(),
-                Value::String(("rejected".to_string()).into()),
+                "status".into(),
+                Value::String(if rejected { "rejected" } else { "fulfilled" }.into()),
             ),
-            ("reason".to_string(), value),
+            (if rejected { "reason" } else { "value" }.into(), value),
         ])
     } else {
-        Value::object(vec![
-            (
-                "status".to_string(),
-                Value::String(("fulfilled".to_string()).into()),
-            ),
-            ("value".to_string(), value),
-        ])
+        value
     };
-    record(interp, &this, entry, |interp, target, values| {
-        interp.resolve_promise(target, Value::array(values))
-    })?;
+    state
+        .get_prop("2")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .borrow_mut()[index] = value;
+    decrement(i, &state)?;
     Ok(Value::Undefined)
 }
-
-fn settled_fulfil(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    settled_record(interp, this, args, false)
+fn all_fulfil(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    record(i, t, arg(&a, 0), None)
 }
-fn settled_reject(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    settled_record(interp, this, args, true)
+fn any_reject(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    record(i, t, arg(&a, 0), None)
 }
-
-fn promise_race(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = match inputs_of(interp, &a) {
-        Ok(inputs) => inputs,
-        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
-            return Ok(reject_input_error(error));
-        }
-        Err(error) => return Err(error),
-    };
-    let state = combinator_state(&inputs);
-    let result = state.result.clone();
-    each_input(interp, &inputs, |interp, index, input| {
-        let (on_fulfilled, on_rejected) = reaction_pair(&state, index, race_fulfil, all_reject);
-        interp.register(input, on_fulfilled, on_rejected, None)?;
-        Ok(())
-    })?;
-    Ok(Value::Promise(result))
+fn settled_fulfil(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    record(i, t, arg(&a, 0), Some(false))
 }
-
-fn race_fulfil(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    if let Some(target) = combinator_target(&this) {
-        let value = args.into_iter().next().unwrap_or(Value::Undefined);
-        interp.resolve_promise(&target, value)?;
-    }
-    Ok(Value::Undefined)
-}
-
-/// `Promise.any`: the first fulfilment wins; if every input rejects, the
-/// result rejects with an `AggregateError`.
-fn promise_any(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let inputs = match inputs_of(interp, &a) {
-        Ok(inputs) => inputs,
-        Err(error @ (VmErr::Throw(_) | VmErr::RuntimeError(_) | VmErr::Msg(_))) => {
-            return Ok(reject_input_error(error));
-        }
-        Err(error) => return Err(error),
-    };
-    let state = combinator_state(&inputs);
-    let result = state.result.clone();
-    if inputs.is_empty() {
-        interp.reject_promise(
-            &result,
-            Value::Error(crate::value::ErrorData::new(
-                "AggregateError",
-                "All promises were rejected".to_string(),
-            )),
-        );
-        return Ok(Value::Promise(result));
-    }
-    each_input(interp, &inputs, |interp, index, input| {
-        let (on_fulfilled, on_rejected) = reaction_pair(&state, index, race_fulfil, any_reject);
-        interp.register(input, on_fulfilled, on_rejected, None)?;
-        Ok(())
-    })?;
-    Ok(Value::Promise(result))
-}
-
-fn any_reject(interp: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let reason = args.into_iter().next().unwrap_or(Value::Undefined);
-    record(interp, &this, reason, |interp, target, errors| {
-        let aggregate = Value::Error(crate::value::ErrorData::new(
-            "AggregateError",
-            "All promises were rejected".to_string(),
-        ));
-        aggregate.set_prop("errors".to_string(), Value::array(errors))?;
-        interp.reject_promise(target, aggregate);
-        Ok(())
-    })?;
-    Ok(Value::Undefined)
+fn settled_reject(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    record(i, t, arg(&a, 0), Some(true))
 }

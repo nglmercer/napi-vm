@@ -212,6 +212,12 @@ pub struct ObjectMeta {
     pub(crate) raw_json: bool,
     /// Branded Temporal data, inaccessible to guest property operations.
     pub(crate) temporal: Option<crate::builtins::temporal::Slots>,
+    pub(crate) regexp_iterator: Option<Rc<RefCell<crate::builtins::regexp::RegExpIteratorSlots>>>,
+    pub(crate) intl_list: Option<crate::builtins::intl::list::Slots>,
+    pub(crate) intl_segmenter: Option<crate::builtins::intl::segmenter::SegmenterSlots>,
+    pub(crate) intl_segments: Option<Rc<crate::builtins::intl::segmenter::SegmentsSlots>>,
+    pub(crate) intl_segment_iterator: Option<Rc<crate::builtins::intl::segmenter::IteratorSlots>>,
+    pub(crate) intl_locale: Option<crate::builtins::intl::LocaleSlots>,
     /// Some built-in instances (currently Date) have dedicated VM value
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
@@ -706,6 +712,9 @@ impl ArrayCell {
             if let Some(slots) = &meta.iterator_helper {
                 out.extend(slots.borrow().values());
             }
+            if let Some(slots) = &meta.regexp_iterator {
+                out.extend(slots.borrow().values());
+            }
             if let Some(slots) = &meta.async_from_sync {
                 out.extend(slots.values());
             }
@@ -740,6 +749,7 @@ impl ArrayCell {
         meta.disposable_stack = None;
         meta.iterator_helper = None;
         meta.async_from_sync = None;
+        meta.regexp_iterator = None;
         meta.revocable_proxy = None;
         meta.proto = None;
         meta.realm_global = None;
@@ -845,6 +855,9 @@ impl ObjectCell {
             if let Some(slots) = &meta.iterator_helper {
                 out.extend(slots.borrow().values());
             }
+            if let Some(slots) = &meta.regexp_iterator {
+                out.extend(slots.borrow().values());
+            }
             if let Some(slots) = &meta.async_from_sync {
                 out.extend(slots.values());
             }
@@ -883,6 +896,7 @@ impl ObjectCell {
         meta.disposable_stack = None;
         meta.iterator_helper = None;
         meta.async_from_sync = None;
+        meta.regexp_iterator = None;
         meta.revocable_proxy = None;
         meta.proto = None;
         meta.realm_global = None;
@@ -1422,6 +1436,7 @@ pub struct Buffer(Rc<BufferData>);
 
 #[derive(Debug)]
 struct BufferData {
+    immutable: bool,
     maximum_length: Option<usize>,
     storage: RefCell<BufferStorage>,
     properties: Rc<ObjectCell>,
@@ -1437,12 +1452,33 @@ impl std::ops::Deref for BufferData {
 impl Buffer {
     pub fn owned(bytes: Vec<u8>) -> Self {
         Self(Rc::new(BufferData {
+            immutable: false,
             maximum_length: None,
             storage: RefCell::new(BufferStorage::Owned(bytes)),
             properties: Value::instance_properties(),
         }))
     }
 
+    pub(crate) fn immutable(bytes: Vec<u8>) -> Self {
+        Self(Rc::new(BufferData {
+            immutable: true,
+            maximum_length: None,
+            storage: RefCell::new(BufferStorage::Owned(bytes)),
+            properties: Value::instance_properties(),
+        }))
+    }
+    pub fn is_immutable(&self) -> bool {
+        self.0.immutable
+    }
+    pub fn try_detach(&self) -> Result<(), VmErr> {
+        if self.is_immutable() {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot detach an immutable ArrayBuffer".into(),
+            ));
+        }
+        self.detach();
+        Ok(())
+    }
     pub fn zeroed(length: usize) -> Self {
         Self::owned(vec![0; length])
     }
@@ -1455,6 +1491,7 @@ impl Buffer {
         bytes.try_reserve_exact(maximum).ok()?;
         bytes.resize(length, 0);
         Some(Self(Rc::new(BufferData {
+            immutable: false,
             maximum_length: Some(maximum),
             storage: RefCell::new(BufferStorage::Owned(bytes)),
             properties: Value::instance_properties(),
@@ -1503,6 +1540,7 @@ impl Buffer {
             None => return None,
         };
         Some(Self(Rc::new(BufferData {
+            immutable: false,
             maximum_length: None,
             storage: RefCell::new(BufferStorage::External { data, length }),
             properties: Value::instance_properties(),
@@ -1514,6 +1552,10 @@ impl Buffer {
     }
 
     pub fn borrow_mut(&self) -> RefMut<'_, [u8]> {
+        assert!(
+            !self.is_immutable(),
+            "immutable buffer cannot be borrowed mutably"
+        );
         RefMut::map(self.0.borrow_mut(), |storage| unsafe {
             storage.as_mut_slice()
         })
@@ -1539,6 +1581,9 @@ impl Buffer {
     /// Repeated detachment is idempotent, matching Node's current Node-API
     /// behavior for both VM-owned and externally backed ArrayBuffers.
     pub fn detach(&self) {
+        if self.is_immutable() {
+            return;
+        }
         let mut storage = self.0.borrow_mut();
         if !matches!(*storage, BufferStorage::Detached) {
             *storage = BufferStorage::Detached;
@@ -2058,6 +2103,10 @@ impl BufferBacking {
         }
     }
 
+    pub fn is_immutable(&self) -> bool {
+        matches!(self, Self::Array(buffer) if buffer.is_immutable())
+    }
+
     pub fn is_shared(&self) -> bool {
         matches!(self, Self::Shared(_))
     }
@@ -2088,6 +2137,9 @@ impl BufferBacking {
     }
 
     pub fn write(&self, offset: usize, bytes: &[u8]) -> bool {
+        if self.is_immutable() {
+            return false;
+        }
         let end = match offset.checked_add(bytes.len()) {
             Some(end) if end <= self.len() => end,
             _ => return false,
@@ -2109,6 +2161,9 @@ impl BufferBacking {
     }
 
     pub fn data_ptr(&self) -> *mut u8 {
+        if self.is_immutable() {
+            return std::ptr::null_mut();
+        }
         match self {
             Self::Array(buffer) => {
                 if buffer.is_detached() {
@@ -2450,6 +2505,8 @@ pub struct Reaction {
     /// source promise; they must not re-enter the target's already-used
     /// resolve function.
     pub adopted: bool,
+    /// Generic species capability; intrinsic continuations keep this absent.
+    pub capability: Option<Box<(Value, Value)>>,
 }
 
 /// The shared state of one promise.
@@ -3562,6 +3619,11 @@ impl Value {
                 {
                     work.push(std::mem::replace(&mut cell.value, Value::Undefined));
                     for reaction in cell.reactions.drain(..) {
+                        if let Some(capability) = reaction.capability {
+                            let (resolve, reject) = *capability;
+                            work.push(resolve);
+                            work.push(reject);
+                        }
                         work.push(reaction.on_fulfilled);
                         work.push(reaction.on_rejected);
                         // The derived promise drains through the work stack;

@@ -263,6 +263,7 @@ impl GlobalEnvironment {
 
 #[derive(Clone)]
 pub struct Environment {
+    pub(crate) resources: Vec<crate::builtins::disposable::Resource>,
     pub(crate) class_initializer: bool,
     pub(crate) with_object: Option<Value>,
     vars: Vars,
@@ -694,6 +695,7 @@ impl Environment {
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
+            resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
             regexp_legacy: None,
@@ -721,6 +723,7 @@ impl Environment {
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
+            resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
             regexp_legacy: None,
@@ -752,6 +755,7 @@ impl Environment {
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
+            resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
             regexp_legacy: None,
@@ -794,6 +798,7 @@ impl Environment {
             eval_scope: false,
             parameter_scope: false,
             with_object: None,
+            resources: Vec::new(),
             property_attributes: HashMap::new(),
             intrinsics: HashMap::new(),
             regexp_legacy: None,
@@ -1338,6 +1343,7 @@ impl Environment {
                 .map(GlobalEnvironment::value),
         );
         values.extend(self.with_object.iter().cloned());
+        values.extend(self.resources.iter().flat_map(|r| r.values()));
         values.extend(self.new_target.iter().cloned());
         values.extend(self.constructor_this.iter().flatten().cloned());
         values.extend(self.intrinsics.values().cloned());
@@ -1362,6 +1368,7 @@ impl Environment {
         self.vars.clear();
         self.global_environment = None;
         self.with_object = None;
+        self.resources.clear();
         self.property_attributes.clear();
         self.intrinsics.clear();
         self.regexp_legacy = None;
@@ -1382,6 +1389,7 @@ impl Environment {
                     env.vars.drain_into(work);
                     work.extend(env.global_environment.take().map(|record| record.value()));
                     work.extend(env.with_object.take());
+                    work.extend(env.resources.drain(..).flat_map(|r| r.values()));
                     work.extend(env.new_target.take());
                     work.extend(env.constructor_this.take().flatten());
                     work.extend(env.intrinsics.drain().map(|(_, value)| value));
