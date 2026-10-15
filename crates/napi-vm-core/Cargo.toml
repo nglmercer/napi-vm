@@ -24,6 +24,7 @@ oxc_regular_expression = "0.120.0"
 url = "2"
 base64 = "0.22"
 libloading = { version = "0.9", optional = true }
+temporal_rs = { version = "0.2.6", default-features = false, features = ["compiled_data", "float64_representable_durations"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 [target.'cfg(any(target_arch = "x86_64", target_arch = "x86"))'.dependencies]

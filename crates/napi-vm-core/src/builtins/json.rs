@@ -11,7 +11,20 @@ pub(super) fn install(e: &mut Environment) {
             .expect("built-in JSON property");
         j.set_prop("parse".to_string(), nf("parse", json_parse))
             .expect("built-in JSON property");
-        super::install_method_metadata(e, &j, &[("parse", 2), ("stringify", 3)]);
+        j.set_prop("rawJSON".into(), nf("rawJSON", json_raw))
+            .expect("JSON rawJSON");
+        j.set_prop("isRawJSON".into(), nf("isRawJSON", json_is_raw))
+            .expect("JSON isRawJSON");
+        super::install_method_metadata(
+            e,
+            &j,
+            &[
+                ("parse", 2),
+                ("stringify", 3),
+                ("rawJSON", 1),
+                ("isRawJSON", 1),
+            ],
+        );
         if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
             let key = crate::interpreter::symbol_slot_key(symbol);
             j.set_prop(key.clone(), Value::String("JSON".into()))
@@ -29,6 +42,55 @@ pub(super) fn install(e: &mut Environment) {
             );
         }
     }
+}
+
+fn is_raw(value: &Value) -> bool {
+    value
+        .property_cell()
+        .is_some_and(|cell| cell.meta.borrow().raw_json)
+}
+
+fn json_is_raw(_: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Bool(args.first().is_some_and(is_raw)))
+}
+
+fn json_raw(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    let source = interp.ecmascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
+    if source.is_empty()
+        || source
+            .units()
+            .first()
+            .is_some_and(|u| matches!(u, 9 | 10 | 13 | 32))
+        || source
+            .units()
+            .last()
+            .is_some_and(|u| matches!(u, 9 | 10 | 13 | 32))
+    {
+        return vm_err("SyntaxError: Invalid raw JSON");
+    }
+    let parsed = json_parse(
+        interp,
+        Value::Undefined,
+        vec![Value::String(source.clone())],
+    )?;
+    if crate::interpreter::call::is_js_object(&parsed) {
+        return vm_err("SyntaxError: Raw JSON must be a primitive");
+    }
+    let object = Value::object_with_proto(vec![("rawJSON".into(), Value::String(source))], None);
+    let cell = object.property_cell().expect("raw JSON object");
+    let mut meta = cell.meta.borrow_mut();
+    meta.raw_json = true;
+    meta.non_extensible = true;
+    meta.set_attrs(
+        "rawJSON",
+        crate::value::PropAttrs {
+            writable: false,
+            enumerable: true,
+            configurable: false,
+        },
+    );
+    drop(meta);
+    Ok(object)
 }
 
 /// Maximum nesting `JSON.stringify` / `JSON.parse` will walk. Real engines
@@ -57,7 +119,7 @@ fn json_stringify(
         _ => crate::JsString::default(),
     };
     let holder = Value::checked_object(vec![(String::new(), value)])?;
-    let mut out = String::new();
+    let mut out = crate::JsString::default();
     if !state.serialize(interp, &holder, &crate::JsString::default(), &mut out)? {
         return Ok(Value::Undefined);
     }
@@ -73,7 +135,10 @@ fn json_stringify(
 /// Operating on the finished text rather than threading a width through the
 /// serializer keeps one code path for both forms; the input is JSON this
 /// module just produced, so the scan only has to respect string literals.
-fn reindent(compact: &str, indent: impl Into<crate::JsString>) -> Result<crate::JsString, VmErr> {
+fn reindent(
+    compact: &crate::JsString,
+    indent: impl Into<crate::JsString>,
+) -> Result<crate::JsString, VmErr> {
     let indent = indent.into();
     let mut out = crate::JsString::default();
     let mut depth = 0usize;
@@ -83,7 +148,11 @@ fn reindent(compact: &str, indent: impl Into<crate::JsString>) -> Result<crate::
     let mut pads: Vec<crate::JsString> = vec![crate::JsString::default()];
     let mut in_string = false;
     let mut escaped = false;
-    for c in compact.chars() {
+    for unit in compact.units().iter().copied() {
+        let Some(c) = char::from_u32(unit as u32) else {
+            out.push_str(crate::JsString::from_units(vec![unit]));
+            continue;
+        };
         if out.len() > crate::value::MAX_STRING_LEN {
             return Err(crate::value::limit_err("Maximum string length exceeded"));
         }
@@ -146,7 +215,7 @@ fn reindent(compact: &str, indent: impl Into<crate::JsString>) -> Result<crate::
     Ok(out)
 }
 
-fn append_json_str(out: &mut String, value: &str) -> Result<(), VmErr> {
+fn append_json_str(out: &mut crate::JsString, value: &str) -> Result<(), VmErr> {
     if out.len().saturating_add(value.len()) > crate::value::MAX_STRING_LEN {
         return Err(crate::value::limit_err("Maximum string length exceeded"));
     }
@@ -154,8 +223,8 @@ fn append_json_str(out: &mut String, value: &str) -> Result<(), VmErr> {
     Ok(())
 }
 
-fn append_json_char(out: &mut String, value: char) -> Result<(), VmErr> {
-    if out.len().saturating_add(value.len_utf8()) > crate::value::MAX_STRING_LEN {
+fn append_json_char(out: &mut crate::JsString, value: char) -> Result<(), VmErr> {
+    if out.len().saturating_add(value.len_utf16()) > crate::value::MAX_STRING_LEN {
         return Err(crate::value::limit_err("Maximum string length exceeded"));
     }
     out.push(value);
@@ -249,7 +318,7 @@ impl Serialization {
         interp: &mut Interpreter,
         holder: &Value,
         key: &crate::JsString,
-        out: &mut String,
+        out: &mut crate::JsString,
         depth: usize,
     ) -> Result<SerializedProperty, VmErr> {
         if depth > MAX_JSON_DEPTH {
@@ -277,6 +346,15 @@ impl Serialization {
             Some(BoxedPrimitive::BigInt(value)) => Value::BigInt(value),
             _ => value,
         };
+        if is_raw(&value) {
+            if let Value::String(ref source) = interp.get_prop_value_str(&value, "rawJSON")? {
+                if out.len().saturating_add(source.len()) > crate::value::MAX_STRING_LEN {
+                    return Err(crate::value::limit_err("Maximum string length exceeded"));
+                }
+                out.push_str(source);
+            }
+            return Ok(SerializedProperty::Written);
+        }
         match &value {
             Value::Null => append_json_str(out, "null")?,
             Value::Bool(value) => append_json_str(out, if *value { "true" } else { "false" })?,
@@ -311,7 +389,7 @@ impl Serialization {
         &mut self,
         interp: &mut Interpreter,
         value: Value,
-        out: &mut String,
+        out: &mut crate::JsString,
     ) -> Result<SerializationFrame, VmErr> {
         if self
             .stack
@@ -367,7 +445,7 @@ impl Serialization {
         interp: &mut Interpreter,
         holder: &Value,
         key: &crate::JsString,
-        out: &mut String,
+        out: &mut crate::JsString,
     ) -> Result<bool, VmErr> {
         let mut frames = match self.property(interp, holder, key, out, 0)? {
             SerializedProperty::Absent => return Ok(false),
@@ -438,7 +516,7 @@ impl Serialization {
     }
 }
 
-fn escape_json(s: impl Into<crate::JsString>, out: &mut String) -> Result<(), VmErr> {
+fn escape_json(s: impl Into<crate::JsString>, out: &mut crate::JsString) -> Result<(), VmErr> {
     let s = s.into();
     for decoded in char::decode_utf16(s.units().iter().copied()) {
         let c = match decoded {
@@ -470,14 +548,138 @@ fn json_parse(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value
     if s.len() > crate::value::MAX_STRING_LEN {
         return Err(crate::value::limit_err("Maximum string length exceeded"));
     }
+    let reviver = a
+        .get(1)
+        .filter(|value| crate::interpreter::call::is_callable_value(value));
     let mut encoded = String::new();
+    let mut source_offsets = vec![(0, 0)];
+    let mut source_offset = 0;
     for decoded in char::decode_utf16(s.units().iter().copied()) {
         match decoded {
-            Ok(ch) => encoded.push(ch),
-            Err(e) => encoded.push_str(&format!("\\u{:04x}", e.unpaired_surrogate())),
+            Ok(ch) => {
+                encoded.push(ch);
+                source_offset += ch.len_utf16();
+            }
+            Err(e) => {
+                encoded.push_str(&format!("\\u{:04x}", e.unpaired_surrogate()));
+                source_offset += 1;
+            }
+        }
+        if reviver.is_some() {
+            source_offsets.push((encoded.len(), source_offset));
         }
     }
-    JsonParser::new(&encoded).parse()
+    let mut parser = JsonParser::new(&encoded);
+    parser.record_source = reviver.is_some();
+    parser.original_source = Some((s, source_offsets));
+    let value = parser.parse()?;
+    let Some(reviver) = reviver else {
+        return Ok(value);
+    };
+    let holder = Value::checked_object(vec![(String::new(), value)])?;
+    internalize_json(
+        interp,
+        &holder,
+        &Value::String("".into()),
+        reviver,
+        &parser.records,
+        &mut Vec::new(),
+        true,
+        0,
+    )
+}
+
+// Retain the original value as well as its spelling: earlier callbacks may
+// replace a sibling or its container, which invalidates that source record.
+type JsonSourceRecords = std::collections::HashMap<Vec<String>, (Value, crate::JsString)>;
+
+#[allow(clippy::too_many_arguments)]
+fn internalize_json(
+    interp: &mut Interpreter,
+    holder: &Value,
+    key: &Value,
+    reviver: &Value,
+    records: &JsonSourceRecords,
+    path: &mut Vec<String>,
+    parent_matches: bool,
+    depth: usize,
+) -> Result<Value, VmErr> {
+    if depth > MAX_JSON_DEPTH {
+        return vm_err("RangeError: Maximum JSON depth exceeded");
+    }
+    let value = interp.get_prop_value(holder, key)?;
+    let record = records.get(path);
+    let matches = parent_matches
+        && record.is_some_and(|(original, _)| super::object::same_value(original, &value));
+    let primitive = matches!(
+        value,
+        Value::Undefined
+            | Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::BigInt(_)
+            | Value::Symbol(_)
+    );
+    if !primitive {
+        let keys = if super::array::is_array(&value)? {
+            (0..json_length(interp, &value)?)
+                .map(|i| Value::String(i.to_string().into()))
+                .collect()
+        } else {
+            let mut keys = Vec::new();
+            for key in interp.own_property_keys(&value)? {
+                if matches!(key, Value::String(_)) {
+                    let descriptor = super::object::descriptor_for_key_in(interp, &value, &key)?;
+                    if descriptor
+                        .get_prop("enumerable")
+                        .is_some_and(|v| v.is_truthy())
+                    {
+                        keys.push(key);
+                    }
+                }
+            }
+            keys
+        };
+        for key in keys {
+            let Value::String(ref name) = key else {
+                unreachable!()
+            };
+            path.push(name.to_key());
+            let revived = internalize_json(
+                interp,
+                &value,
+                &key,
+                reviver,
+                records,
+                path,
+                matches,
+                depth + 1,
+            )?;
+            path.pop();
+            if matches!(revived, Value::Undefined) {
+                interp.delete_member(&value, &key)?;
+            } else {
+                let descriptor = Value::descriptor_record(vec![
+                    ("value".into(), revived),
+                    ("writable".into(), Value::Bool(true)),
+                    ("enumerable".into(), Value::Bool(true)),
+                    ("configurable".into(), Value::Bool(true)),
+                ]);
+                // InternalizeJSONProperty ignores a false result, but propagates exceptions.
+                interp.define_own_property(&value, &key, &descriptor)?;
+            }
+        }
+    }
+    let context = if primitive && matches {
+        Value::checked_object(vec![(
+            "source".into(),
+            Value::String(record.unwrap().1.clone()),
+        )])?
+    } else {
+        Value::checked_object(vec![])?
+    };
+    interp.call_this(reviver, holder.clone(), vec![key.clone(), value, context])
 }
 
 /// A small recursive-descent JSON parser producing `Value`s directly, with no
@@ -490,6 +692,10 @@ struct JsonParser<'a> {
     /// Current container nesting; bounded by `MAX_JSON_DEPTH` so a deeply
     /// nested document errors out instead of overflowing the native stack.
     depth: usize,
+    record_source: bool,
+    path: Vec<String>,
+    records: JsonSourceRecords,
+    original_source: Option<(crate::JsString, Vec<(usize, usize)>)>,
 }
 
 impl<'a> JsonParser<'a> {
@@ -498,10 +704,14 @@ impl<'a> JsonParser<'a> {
             bytes: s.as_bytes(),
             pos: 0,
             depth: 0,
+            record_source: false,
+            path: Vec::new(),
+            records: JsonSourceRecords::new(),
+            original_source: None,
         }
     }
 
-    fn parse(mut self) -> Result<Value, VmErr> {
+    fn parse(&mut self) -> Result<Value, VmErr> {
         let v = self.value()?;
         self.skip_ws();
         if self.pos != self.bytes.len() {
@@ -538,7 +748,7 @@ impl<'a> JsonParser<'a> {
     }
 
     fn push_char(&mut self, out: &mut crate::JsString, value: char) -> Result<(), VmErr> {
-        if out.len().saturating_add(value.len_utf8()) > crate::value::MAX_STRING_LEN {
+        if out.len().saturating_add(value.len_utf16()) > crate::value::MAX_STRING_LEN {
             return Err(crate::value::limit_err("Maximum string length exceeded"));
         }
         out.push(value);
@@ -552,7 +762,26 @@ impl<'a> JsonParser<'a> {
                 "RangeError: Maximum JSON depth exceeded".to_string(),
             ));
         }
+        self.skip_ws();
+        let start = self.pos;
         let r = self.value_inner();
+        if self.record_source
+            && let Ok(value) = &r
+        {
+            let source = if let Some((text, offsets)) = &self.original_source {
+                let first = offsets.binary_search_by_key(&start, |pair| pair.0).unwrap();
+                let last = offsets
+                    .binary_search_by_key(&self.pos, |pair| pair.0)
+                    .unwrap();
+                text.slice(offsets[first].1, offsets[last].1)
+            } else {
+                std::str::from_utf8(&self.bytes[start..self.pos])
+                    .unwrap()
+                    .into()
+            };
+            self.records
+                .insert(self.path.clone(), (value.clone(), source));
+        }
         self.depth -= 1;
         r
     }
@@ -709,7 +938,9 @@ impl<'a> JsonParser<'a> {
             if items.len() >= crate::value::MAX_ARRAY_LEN {
                 return Err(crate::value::limit_err("Maximum array length exceeded"));
             }
+            self.path.push(items.len().to_string());
             items.push(self.value()?);
+            self.path.pop();
             self.skip_ws();
             match self.peek() {
                 Some(b',') => self.pos += 1,
@@ -743,8 +974,13 @@ impl<'a> JsonParser<'a> {
                     "Maximum object property count exceeded",
                 ));
             }
-            let v = self.value()?;
             let key = key.to_key();
+            self.path.push(key.clone());
+            if self.record_source && props.iter().any(|(name, _)| *name == key) {
+                self.records.retain(|path, _| !path.starts_with(&self.path));
+            }
+            let v = self.value()?;
+            self.path.pop();
             if let Some((_, previous)) = props.iter_mut().find(|(name, _)| *name == key) {
                 *previous = v;
             } else {

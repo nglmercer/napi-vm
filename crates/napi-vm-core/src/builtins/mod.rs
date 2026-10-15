@@ -15,6 +15,7 @@ mod reflect;
 pub(crate) mod regexp;
 mod string;
 mod symbol;
+pub(crate) mod temporal;
 mod typedarray;
 mod weak;
 pub(crate) use symbol::is_registered as symbol_is_registered;
@@ -166,6 +167,7 @@ pub fn setup_builtins(env: &Env) {
     }
     crate::interpreter::resolve::install_iterator_intrinsics(&mut e);
     iterator::install(&mut e);
+    temporal::install(&mut e);
     e.snapshot_intrinsics();
 }
 

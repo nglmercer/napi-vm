@@ -207,6 +207,10 @@ pub struct ObjectMeta {
     /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
     /// BigInt object. Ordinary objects leave this empty.
     pub boxed_primitive: Option<BoxedPrimitive>,
+    /// Presence of [[IsRawJSON]], independent of prototypes and realms.
+    pub(crate) raw_json: bool,
+    /// Branded Temporal data, inaccessible to guest property operations.
+    pub(crate) temporal: Option<crate::builtins::temporal::Slots>,
     /// Some built-in instances (currently Date) have dedicated VM value
     /// variants, so their constructor identity cannot be recovered by walking
     /// an ordinary `[[Prototype]]` chain.
