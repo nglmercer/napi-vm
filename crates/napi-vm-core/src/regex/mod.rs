@@ -110,26 +110,14 @@ pub(crate) fn validate_syntax(source: &crate::JsString, flags: &str) -> Result<S
     // escaped spellings for named references; ECMAScript compares StringValue.
     let normalized_names = normalize_group_names(&pattern, unicode)?;
     let allocator = oxc_allocator::Allocator::default();
-    let validation = oxc_regular_expression::LiteralParser::new(
+    oxc_regular_expression::LiteralParser::new(
         &allocator,
         normalized_names.as_deref().unwrap_or(&pattern),
         Some(flags),
         oxc_regular_expression::Options::default(),
     )
     .parse()
-    .map_err(|error| error.to_string());
-    if let Err(message) = validation {
-        // Oxc enforces the strict range-order early error even outside
-        // Unicode mode, where Annex B reads an out-of-order range as the
-        // endpoint characters with a literal hyphen. The engine parser
-        // below implements that tolerance (and keeps the Unicode-mode
-        // error), so its verdict governs here; every other oxc rejection
-        // still stands, and v-mode set ranges stay strict.
-        if !unicode && message.contains("range out of order") {
-            return Ok(pattern);
-        }
-        return Err(message);
-    }
+    .map_err(|error| error.to_string())?;
     Ok(pattern)
 }
 
@@ -715,15 +703,6 @@ mod modifier_tests {
             .find_at(&input.encode_utf16().collect::<Vec<_>>(), 0)
             .unwrap()
             .is_some()
-    }
-
-    #[test]
-    fn annex_b_out_of_order_range_is_literal_outside_unicode_mode() {
-        assert!(matches("[z-a]", "", "z"));
-        assert!(matches("[z-a]", "", "-"));
-        assert!(matches("[z-a]", "", "a"));
-        assert!(!matches("[z-a]", "", "b"));
-        assert!(Regex::new("[z-a]", "u").is_err());
     }
 
     #[test]

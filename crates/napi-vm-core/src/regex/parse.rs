@@ -449,19 +449,10 @@ impl Parser {
                 let high = self.class_atom()?;
                 match (low, high) {
                     (ClassItem::Char(a), ClassItem::Char(b)) => {
-                        if a > b && self.unicode {
+                        if a > b {
                             return Err("Range out of order in character class".to_string());
                         }
-                        if a > b {
-                            // Annex B: an out-of-order range outside Unicode
-                            // mode is the two endpoint characters with a
-                            // literal hyphen, not an error.
-                            items.push(ClassItem::Char(a));
-                            items.push(ClassItem::Char('-' as u32));
-                            items.push(ClassItem::Char(b));
-                        } else {
-                            items.push(ClassItem::Range(a, b));
-                        }
+                        items.push(ClassItem::Range(a, b));
                     }
                     // `[\d-z]` is not a range; the parts stand alone with a
                     // literal hyphen between them.
