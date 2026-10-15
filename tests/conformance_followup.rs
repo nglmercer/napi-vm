@@ -86,3 +86,11 @@ fn groupby_preserves_key_identity_and_legacy_escape_preserves_code_units() {
         r#"[[1,3],[2],true,["a","b"],true,true,"%uD800%E9%20@",true,"b"]"#,
     );
 }
+
+#[test]
+fn annex_b_accessors_route_through_proxy_traps_and_abrupt_keys() {
+    assert_tiers(
+        r#"var sentinel={},caught=[],root=Object.defineProperty({},'target',{get:function(){}});var throwing=function(){throw sentinel};var lookup=new Proxy(root,{getOwnPropertyDescriptor:throwing});try{lookup.__lookupGetter__('target')}catch(e){caught.push(e===sentinel)}try{lookup.__lookupSetter__('target')}catch(e){caught.push(e===sentinel)}var protoSubject=new Proxy(root,{getPrototypeOf:function(){throw sentinel}});try{protoSubject.__lookupGetter__('missing')}catch(e){caught.push(e===sentinel)}var coerced=0,badKey={toString:function(){coerced++;throw sentinel}};try{({}).__lookupGetter__(badKey)}catch(e){caught.push(e===sentinel)}var fixed=function(){};var holder={};holder.__defineGetter__('x',fixed);holder.__defineSetter__('x',fixed);var seen=holder.__lookupGetter__('x')===fixed&&holder.__lookupSetter__('x')===fixed;var defineTrap=new Proxy({},{defineProperty:throwing});try{defineTrap.__defineGetter__('attr',function(){})}catch(e){caught.push(e===sentinel)}JSON.stringify([caught,coerced,seen]);"#,
+        r#"[[true,true,true,true,true],1,true]"#,
+    );
+}

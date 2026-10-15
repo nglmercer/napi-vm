@@ -984,23 +984,28 @@ fn object_define_accessor(
     is_getter: bool,
 ) -> Result<Value, VmErr> {
     let target = this.deref_binding();
-    if !is_ecmascript_object(&target)
-        || (cell(&target).is_none() && !matches!(&target, Value::Array(_)))
-    {
+    if !is_ecmascript_object(&target) {
         return Err(type_err("Object.prototype accessor called on non-object"));
     }
-    let raw_key = args.first().cloned().unwrap_or(Value::Undefined);
-    let symbol = match &raw_key {
-        Value::Symbol(symbol) => Some(symbol.clone()),
-        _ => None,
-    };
-    let key = interp.property_key(&raw_key)?;
     let accessor = args.get(1).cloned().unwrap_or(Value::Undefined);
+    // Spec order: the callable check precedes key coercion, so a
+    // non-callable getter never coerces (or observes) the key.
     if !is_callable(&accessor) {
         return Err(type_err("Getter and setter must be callable"));
     }
+    // ToPropertyKey is abrupt: a throwing key coercion propagates.
+    let key_value = interp.ecmascript_to_property_key(args.first().unwrap_or(&Value::Undefined))?;
+    let symbol = match &key_value {
+        Value::Symbol(symbol) => Some(symbol.clone()),
+        _ => None,
+    };
+    let key = match &key_value {
+        Value::String(string) => string.to_key(),
+        Value::Symbol(symbol) => crate::interpreter::symbol_slot_key(symbol),
+        _ => unreachable!("ToPropertyKey yields a String or a Symbol"),
+    };
 
-    let previous = descriptor_for(&target, &key);
+    let previous = descriptor_for_key_in(interp, &target, &key_value)?;
     let existing_getter = previous.get_prop("get").unwrap_or(Value::Undefined);
     let existing_setter = previous.get_prop("set").unwrap_or(Value::Undefined);
     let mut fields = vec![
@@ -1014,7 +1019,10 @@ fn object_define_accessor(
     if !is_getter && is_callable(&existing_getter) {
         fields.push(("get".into(), existing_getter));
     }
-    define_property(&target, &key, &Value::descriptor_record(fields))?;
+    // DefinePropertyOrThrow dispatches through Proxy defineProperty traps.
+    if !interp.define_own_property(&target, &key_value, &Value::descriptor_record(fields))? {
+        return Err(type_err("Cannot define property"));
+    }
     if let Some(symbol) = symbol {
         if let Value::Array(array) = &target {
             array.set_symbol_key(&key, symbol);
@@ -1047,28 +1055,23 @@ fn object_lookup_accessor(
     args: Vec<Value>,
     want_setter: bool,
 ) -> Result<Value, VmErr> {
-    let receiver = to_object_receiver(&this)?;
-    let key = interp.property_key(args.first().unwrap_or(&Value::Undefined))?;
-    let mut current = receiver;
+    let mut current = to_object_receiver(&this)?;
+    // ToPropertyKey is abrupt: a key whose coercion throws (for example a
+    // throwing `toString`) propagates instead of silently stringifying.
+    let key = interp.ecmascript_to_property_key(args.first().unwrap_or(&Value::Undefined))?;
+    // Both [[GetOwnProperty]] and [[GetPrototypeOf]] dispatch through
+    // Proxy traps, so revoked proxies and throwing traps surface here.
+    let field = if want_setter { "set" } else { "get" };
     for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-        if let Some(value) = own_slot(&current, &key) {
-            if accessor_kind(&key, &value) == Some("get") {
-                if !want_setter {
-                    return Ok(value);
-                }
-                return Ok(
-                    own_slot(&current, &format!("__setter:{key}__")).unwrap_or(Value::Undefined)
-                );
-            }
-            if accessor_kind(&key, &value) == Some("set") {
-                return Ok(if want_setter { value } else { Value::Undefined });
-            }
+        let desc = descriptor_for_key_in(interp, &current, &key)?;
+        if !matches!(desc, Value::Undefined) {
+            return Ok(desc.get_prop(field).unwrap_or(Value::Undefined));
+        }
+        let prototype = interp.get_prototype_of(&current)?;
+        if matches!(prototype, Value::Null) {
             return Ok(Value::Undefined);
         }
-        let Some(prototype) = interp.prototype_of(&current) else {
-            return Ok(Value::Undefined);
-        };
-        current = prototype.as_ref().clone();
+        current = prototype;
     }
     Err(crate::value::limit_err("Maximum prototype depth exceeded"))
 }
