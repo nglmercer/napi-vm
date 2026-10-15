@@ -78,6 +78,7 @@ fn math_methods(prototype: Option<Value>) -> Vec<(String, Value)> {
         ("clz32", math_clz32),
         ("imul", math_imul),
         ("fround", math_fround),
+        ("f16round", math_f16round),
         ("acos", math_acos),
         ("asin", math_asin),
         ("atan", math_atan),
@@ -149,6 +150,10 @@ fn math_imul(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value,
 
 fn math_fround(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     Ok(Value::Number((math_arg(interp, &a, 0)? as f32) as f64))
+}
+
+fn math_f16round(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Number(half::f16::from_f64(math_arg(interp, &a, 0)?).to_f64()))
 }
 
 fn math_abs(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

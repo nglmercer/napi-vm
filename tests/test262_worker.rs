@@ -321,6 +321,17 @@ fn worker_agents_parse_source_with_script_goal() {
     );
 }
 
+/// The worker tracks the engine's default execution budgets instead of a
+/// stricter worker-only cap: a terminating script needing more than the old
+/// one-million-fuel / one-hundred-thousand-iteration limits must complete.
+#[test]
+fn worker_budgets_track_engine_defaults() {
+    let result = worker(json!({
+        "source": "let total = 0; for (let index = 0; index < 2000000; index++) total += index; total;"
+    }));
+    assert_eq!(result["status"], "ok", "{result}");
+}
+
 #[test]
 fn conformance_host_timers_use_the_owner_queue_and_can_be_cancelled() {
     let result = worker(json!({

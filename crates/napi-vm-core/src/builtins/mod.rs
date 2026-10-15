@@ -203,6 +203,16 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     e.set("parseFloat", nf("parseFloat", number::parse_float));
     e.set("isNaN", nf("isNaN", global_is_nan));
     e.set("isFinite", nf("isFinite", global_is_finite));
+    e.set("encodeURI", nf("encodeURI", string::encode_uri));
+    e.set(
+        "encodeURIComponent",
+        nf("encodeURIComponent", string::encode_uri_component),
+    );
+    e.set("decodeURI", nf("decodeURI", string::decode_uri));
+    e.set(
+        "decodeURIComponent",
+        nf("decodeURIComponent", string::decode_uri_component),
+    );
 }
 
 /// Give a callable built-in its own prototype object and the standard

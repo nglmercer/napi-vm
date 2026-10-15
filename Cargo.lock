@@ -1330,6 +1330,7 @@ dependencies = [
  "base64 0.22.1",
  "corosensei",
  "fixed_decimal",
+ "half",
  "icu_casemap",
  "icu_collator",
  "icu_list",

@@ -64,3 +64,31 @@ x64 validation, not remote platform/release readiness.
 `recheck-03-before-final-library.log` preserves a failed check from overlapping
 source edits and compilation; the completed panic-cleanup implementation passes
 the subsequent library and release checks. Final comparisons run without builds.
+
+## Test262 full pass (2026-10-15)
+
+A complete pinned-corpus run at source `aec3df4458ae7866ecb1f0182b61d39dd95cd9ab`
+(clean tree) reproduces the archived 95% snapshot exactly: **98,010 / 102,956
+variants (95.1960%)**, 4,944 failures, 2 timeouts, zero skips, crashes, or
+harness errors. Corpus `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; worker
+SHA-256 `dda45144ab2a946433f3819ad4041fd103451de1d17e051f910907761b29ec9d`
+(freshly rebuilt, identical to the snapshot digest). Four workers, five-second
+timeout, resumable journal with zero resumed files.
+
+- Full rows: `artifacts/test262/full-results-2026-10-15.json`
+- Journal: `artifacts/test262/full-2026-10-15.checkpoint.jsonl`
+- Dashboard: `artifacts/test262/full-2026-10-15.html`
+- Triage: `artifacts/test262/full-2026-10-15-triage.json` (top clusters:
+  `built-ins/RegExp` 1,102, `intl402/NumberFormat` 500, `staging/sm` 271)
+- Comparison vs `tools/test262/evidence/unicode-annex-builtins/full.json.gz`:
+  `artifacts/test262/full-2026-10-15-comparison.json` (0 new passes, 0 lost)
+- Timeout rerun: `artifacts/test262/timeout-rerun-2026-10-15.json` — both
+  timeouts are `staging/sm/regress/regress-1507322-deep-weakmap.js`
+  (script + strict) and time out again in isolation, so they are genuine
+  over-budget cases, not flakes.
+
+Reproduce with the command in [tools/test262/README.md](../../tools/test262/README.md),
+adding `--checkpoint artifacts/test262/full-2026-10-15.checkpoint.jsonl`.
+Runner unit tests pass (`python3 -m unittest discover -s tools/test262`,
+12 tests OK). This establishes a local Linux x64 re-measurement, not a new
+conformance claim: remaining failures are unchanged from the archived triage.

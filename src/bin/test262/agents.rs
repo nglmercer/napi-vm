@@ -267,12 +267,14 @@ fn run_worker(
         .set_clock(napi_vm::ClockMode::RealTime(std::rc::Rc::new(
             napi_vm::RealTimeClock::default(),
         )))?;
+    // Keep the agent worker on the same budget as the main worker: fuel
+    // is a host resource guard, not ECMAScript semantics.
     vm.set_execution_budget(ExecutionBudget {
-        fuel: 1_000_000,
+        fuel: napi_vm::interpreter::DEFAULT_FUEL_BUDGET,
         max_call_depth: 128,
         max_jobs: 10_000,
     });
-    vm.set_loop_budget(100_000);
+    vm.set_loop_budget(napi_vm::interpreter::DEFAULT_LOOP_BUDGET);
     vm.set_cancellation_token(cancellation.clone());
     let host = super::realm_host(&mut vm);
     vm.global.borrow_mut().set("$262", host);

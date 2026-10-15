@@ -263,12 +263,16 @@ fn execute(request: Request) -> Json {
             napi_vm::RealTimeClock::default(),
         )))
         .expect("fresh job queue");
+    // ECMAScript defines no instruction-fuel semantics: fuel is a host
+    // resource guard, and each variant already runs in a fresh process
+    // with a hard timeout. Track the engine default instead of imposing a
+    // stricter worker-only budget that fails conforming tests.
     vm.set_execution_budget(ExecutionBudget {
-        fuel: 1_000_000,
+        fuel: napi_vm::interpreter::DEFAULT_FUEL_BUDGET,
         max_call_depth: 128,
         max_jobs: 10_000,
     });
-    vm.set_loop_budget(100_000);
+    vm.set_loop_budget(napi_vm::interpreter::DEFAULT_LOOP_BUDGET);
     let root = match request
         .corpus_root
         .as_ref()

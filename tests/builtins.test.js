@@ -107,3 +107,50 @@ for (const name of ["console", "process", "Buffer", "crypto", "navigator", "perf
     expect(runCode(`typeof ${name};`)).toBe("undefined");
   });
 }
+
+test("encodeURI leaves reserved characters alone", () => {
+  expect(runCode("encodeURI('https://example.com/a b?x=1&y=2#frag');")).toBe(
+    "https://example.com/a%20b?x=1&y=2#frag"
+  );
+  expect(runCode("encodeURI(';,/?:@&=+$#');")).toBe(";,/?:@&=+$#");
+});
+
+test("encodeURIComponent escapes reserved characters", () => {
+  expect(runCode("encodeURIComponent(';,/?:@&=+$#');")).toBe(
+    "%3B%2C%2F%3F%3A%40%26%3D%2B%24%23"
+  );
+  expect(runCode("encodeURIComponent(\"'-_.!~*'()\" );")).toBe("'-_.!~*'()");
+});
+
+test("URI codecs handle non-ASCII via UTF-8", () => {
+  expect(runCode("encodeURIComponent('é');")).toBe("%C3%A9");
+  expect(runCode("encodeURIComponent('€');")).toBe("%E2%82%AC");
+  expect(runCode("encodeURIComponent('😀');")).toBe("%F0%9F%98%80");
+  expect(runCode("decodeURIComponent('%C3%A9');")).toBe("é");
+  expect(runCode("decodeURIComponent('%E2%82%AC');")).toBe("€");
+  expect(runCode("decodeURIComponent('%F0%9F%98%80');")).toBe("😀");
+});
+
+test("decodeURI keeps reserved triplets encoded", () => {
+  expect(runCode("decodeURI('%23');")).toBe("%23");
+  expect(runCode("decodeURIComponent('%23');")).toBe("#");
+  expect(runCode("decodeURIComponent('%41');")).toBe("A");
+});
+
+test("Math.f16round rounds to half precision", () => {
+  expect(runCode("Math.f16round(1.0005);")).toBe("1");
+  expect(runCode("Math.f16round(0.1);")).toBe("0.0999755859375");
+  expect(runCode("Math.f16round.length;")).toBe("1");
+  expect(runCode("String(Math.f16round(NaN));")).toBe("NaN");
+});
+
+test("malformed URIs throw URIError", () => {
+  expect(runCode("try { decodeURI('%'); } catch(e) { e.name; }")).toBe("URIError");
+  expect(runCode("try { decodeURI('%ZZ'); } catch(e) { e.name; }")).toBe("URIError");
+  expect(runCode("try { decodeURI('%C0%AF'); } catch(e) { e.name; }")).toBe("URIError");
+  expect(runCode("try { decodeURI('%ED%A0%80'); } catch(e) { e.name; }")).toBe("URIError");
+  expect(runCode("try { encodeURI('\\uD800'); } catch(e) { e.name; }")).toBe("URIError");
+  expect(
+    runCode("decodeURIComponent('%ED%A0%80%ED%B0%80') === '\\uD800\\uDC00';")
+  ).toBe("true");
+});

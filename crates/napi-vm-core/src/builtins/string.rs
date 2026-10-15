@@ -1000,3 +1000,230 @@ pub(super) fn legacy_unescape(
     }
     bounded_string(JsString::from_units(out))
 }
+
+fn uri_malformed() -> VmErr {
+    VmErr::Msg("URIError: URI malformed".into())
+}
+
+fn hex_value(unit: u16) -> Option<u8> {
+    char::from_u32(unit as u32)?.to_digit(16).map(|n| n as u8)
+}
+
+/// The `unescapedSet` argument of `Encode`: ASCII alphanumerics, the mark
+/// characters, and the caller-supplied reserved set. Anything else —
+/// including every non-ASCII unit — is percent-encoded.
+fn uri_unescaped(unit: u16, extra: &str) -> bool {
+    unit < 128
+        && ((unit as u8).is_ascii_alphanumeric()
+            || b"-_.!~*'()".contains(&(unit as u8))
+            || extra.as_bytes().contains(&(unit as u8)))
+}
+
+fn push_octet(out: &mut Vec<u16>, octet: u8) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    out.push('%' as u16);
+    out.push(HEX[(octet >> 4) as usize] as u16);
+    out.push(HEX[(octet & 15) as usize] as u16);
+}
+
+/// `Encode` (ECMA-262 §19.2.6): UTF-16 units become UTF-8 octets, then
+/// `%XX` triplets. A lone surrogate throws `URIError`.
+fn encode_uri_impl(
+    interp: &mut Interpreter,
+    args: &[Value],
+    unescaped_extra: &str,
+) -> Result<Value, VmErr> {
+    let text = arg_string(interp, args, 0)?;
+    let units = text.units();
+    let mut out: Vec<u16> = Vec::new();
+    let mut k = 0;
+    while k < units.len() {
+        interp.consume_loop()?;
+        let c = units[k];
+        if uri_unescaped(c, unescaped_extra) {
+            out.push(c);
+            k += 1;
+            continue;
+        }
+        let (code, width) = match c {
+            0xD800..=0xDBFF => match units.get(k + 1) {
+                Some(&trail) if (0xDC00..=0xDFFF).contains(&trail) => (
+                    0x10000 + ((c as u32 - 0xD800) << 10) + (trail as u32 - 0xDC00),
+                    2,
+                ),
+                _ => return Err(uri_malformed()),
+            },
+            0xDC00..=0xDFFF => return Err(uri_malformed()),
+            _ => (c as u32, 1),
+        };
+        let ch = char::from_u32(code).ok_or_else(uri_malformed)?;
+        let mut encoded = [0u8; 4];
+        for octet in ch.encode_utf8(&mut encoded).bytes() {
+            push_octet(&mut out, octet);
+        }
+        k += width;
+        if out.len() > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+    }
+    bounded_string(JsString::from_units(out))
+}
+
+pub(super) fn encode_uri(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    encode_uri_impl(interp, &args, ";/?:@&=+$,#")
+}
+
+pub(super) fn encode_uri_component(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    encode_uri_impl(interp, &args, "")
+}
+
+/// Read one `%XX` triplet at `*k`; a missing or non-hex triplet is a
+/// `URIError`. Advances `*k` past the triplet on success.
+fn take_octet(units: &[u16], k: &mut usize) -> Result<u8, VmErr> {
+    if units.get(*k) != Some(&('%' as u16)) {
+        return Err(uri_malformed());
+    }
+    let (Some(&hi), Some(&lo)) = (units.get(*k + 1), units.get(*k + 2)) else {
+        return Err(uri_malformed());
+    };
+    let (Some(hi), Some(lo)) = (hex_value(hi), hex_value(lo)) else {
+        return Err(uri_malformed());
+    };
+    *k += 3;
+    Ok(hi << 4 | lo)
+}
+
+/// `Decode` (ECMA-262 §19.2.7): `%XX` triplets become octets, valid UTF-8
+/// becomes code points, and octets decoding to a reserved character stay
+/// literally encoded. Overlong forms, lone surrogates, and truncated
+/// sequences throw `URIError`.
+fn decode_uri_impl(
+    interp: &mut Interpreter,
+    args: &[Value],
+    reserved_extra: &str,
+) -> Result<Value, VmErr> {
+    let text = arg_string(interp, args, 0)?;
+    let units = text.units();
+    let mut out: Vec<u16> = Vec::new();
+    let mut k = 0;
+    while k < units.len() {
+        interp.consume_loop()?;
+        if units[k] != '%' as u16 {
+            out.push(units[k]);
+            k += 1;
+            continue;
+        }
+        let start = k;
+        let first = take_octet(units, &mut k)?;
+        if first & 0x80 == 0 {
+            // Only reserved-set characters stay literally encoded; every
+            // other ASCII octet decodes (unlike `Encode`'s unescaped set).
+            if reserved_extra.as_bytes().contains(&first) {
+                out.extend_from_slice(&units[start..k]);
+            } else {
+                out.push(first as u16);
+            }
+            continue;
+        }
+        let mut shifted = first;
+        let mut n = 0;
+        while shifted & 0x80 != 0 {
+            n += 1;
+            shifted <<= 1;
+        }
+        if !(2..=4).contains(&n) || first == 0xC0 || first == 0xC1 {
+            return Err(uri_malformed());
+        }
+        let mut octets = vec![first];
+        for _ in 1..n {
+            let next = take_octet(units, &mut k)?;
+            if next & 0xC0 != 0x80 {
+                return Err(uri_malformed());
+            }
+            octets.push(next);
+        }
+        let value = decode_utf8_value(&octets).ok_or_else(uri_malformed)?;
+        // Reject non-shortest forms: the value must need all n octets.
+        let minimum = match n {
+            2 => 0x80,
+            3 => 0x800,
+            _ => 0x10000,
+        };
+        if value < minimum || value > 0x10FFFF {
+            return Err(uri_malformed());
+        }
+        match value {
+            0xD800..=0xDBFF => {
+                // A leading surrogate needs three more triplets forming a
+                // trailing surrogate; the pair is kept as two UTF-16 units.
+                for position in 0..3 {
+                    let next = take_octet(units, &mut k)?;
+                    if position == 0 {
+                        if next & 0xE0 != 0xE0 {
+                            return Err(uri_malformed());
+                        }
+                    } else if next & 0xC0 != 0x80 {
+                        return Err(uri_malformed());
+                    }
+                    octets.push(next);
+                }
+                let trail_value = decode_utf8_value(&octets[3..]).ok_or_else(uri_malformed)?;
+                if !(0xDC00..=0xDFFF).contains(&trail_value) {
+                    return Err(uri_malformed());
+                }
+                out.push(value as u16);
+                out.push(trail_value as u16);
+            }
+            0xDC00..=0xDFFF => return Err(uri_malformed()),
+            _ => {
+                let ch = char::from_u32(value).ok_or_else(uri_malformed)?;
+                let mut pair = [0u16; 2];
+                out.extend_from_slice(ch.encode_utf16(&mut pair));
+            }
+        }
+        if out.len() > crate::value::MAX_STRING_LEN {
+            return Err(crate::value::limit_err("Maximum string length exceeded"));
+        }
+    }
+    bounded_string(JsString::from_units(out))
+}
+
+/// Decode 2–4 well-formed UTF-8 octets (continuation bits already checked)
+/// into a code point.
+fn decode_utf8_value(octets: &[u8]) -> Option<u32> {
+    let (first, rest) = octets.split_first()?;
+    let mut value = match octets.len() {
+        2 => (first & 0x1F) as u32,
+        3 => (first & 0x0F) as u32,
+        4 => (first & 0x07) as u32,
+        _ => return None,
+    };
+    for &next in rest {
+        value = (value << 6) | (next & 0x3F) as u32;
+    }
+    Some(value)
+}
+
+pub(super) fn decode_uri(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    decode_uri_impl(interp, &args, ";/?:@&=+$,#")
+}
+
+pub(super) fn decode_uri_component(
+    interp: &mut Interpreter,
+    _: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    decode_uri_impl(interp, &args, "")
+}
