@@ -126,7 +126,7 @@ impl Regex {
         let source = source.into();
         let pattern = validate_syntax(&source, flags)?;
         let unicode = flags.contains('u') || flags.contains('v');
-        let parsed = parse::Parser::new(&pattern, unicode).parse()?;
+        let parsed = parse::Parser::new(&pattern, unicode, flags.contains('v')).parse()?;
         Ok(Self {
             root: parsed.root,
             group_count: parsed.group_count,
@@ -273,7 +273,121 @@ impl Matcher<'_> {
         matches!(c, 10 | 13 | 0x2028 | 0x2029)
     }
     fn class_matches(&self, negated: bool, items: &[ClassItem], c: u32) -> bool {
-        let hit = items.iter().any(|item| match item {
+        self.union_matches(items, c) != negated
+    }
+
+    /// Possible end positions for a class match at `pos`: string
+    /// alternatives in source order, then one scalar advance. Callers
+    /// backtrack across every end through their continuation.
+    fn class_ends(
+        &self,
+        negated: bool,
+        items: &[ClassItem],
+        pos: usize,
+    ) -> Result<Vec<usize>, String> {
+        if negated {
+            // Negated classes never hold strings (rejected at parse).
+            return Ok(match self.scalar(pos) {
+                Some(c) if !self.union_matches(items, c) => vec![self.advance(pos)],
+                _ => vec![],
+            });
+        }
+        let mut ends = Vec::new();
+        for end in self.union_ends(items, pos)? {
+            if !ends.contains(&end) {
+                ends.push(end);
+            }
+        }
+        Ok(ends)
+    }
+
+    /// End positions for a union: every string alternative that matches
+    /// here, plus one scalar advance when the scalar predicate matches.
+    fn union_ends(&self, items: &[ClassItem], pos: usize) -> Result<Vec<usize>, String> {
+        let mut ends = Vec::new();
+        for item in items {
+            match item {
+                ClassItem::Strings(alternatives) => {
+                    for alternative in alternatives {
+                        if self.string_at(alternative, pos) {
+                            ends.push(pos + alternative.len());
+                        }
+                    }
+                }
+                ClassItem::Nested { negated, items } => {
+                    let sub = self.union_ends(items, pos)?;
+                    if *negated {
+                        if sub.is_empty() {
+                            if self.scalar(pos).is_some() {
+                                ends.push(self.advance(pos));
+                            }
+                        }
+                    } else {
+                        ends.extend(sub);
+                    }
+                }
+                ClassItem::Conjoin(unions) => {
+                    let mut common: Option<Vec<usize>> = None;
+                    for union in unions {
+                        let union_ends = self.union_ends(union, pos)?;
+                        common = Some(match common {
+                            None => union_ends,
+                            Some(kept) => kept
+                                .into_iter()
+                                .filter(|end| union_ends.contains(end))
+                                .collect(),
+                        });
+                    }
+                    ends.extend(common.unwrap_or_default());
+                }
+                ClassItem::Except { left, right } => {
+                    let excluded = self.union_ends(right, pos)?;
+                    ends.extend(
+                        self.union_ends(left, pos)?
+                            .into_iter()
+                            .filter(|end| !excluded.contains(end)),
+                    );
+                }
+                _ => {}
+            }
+        }
+        if let Some(c) = self.scalar(pos) {
+            if self.union_matches(items, c) {
+                ends.push(self.advance(pos));
+            }
+        }
+        Ok(ends)
+    }
+
+    /// Match one input unit slice against a string alternative, folding
+    /// each unit under the `i` flag like scalar matching does.
+    fn string_at(&self, alternative: &[u16], pos: usize) -> bool {
+        if alternative.is_empty() {
+            return true;
+        }
+        if pos + alternative.len() > self.input.len() {
+            return false;
+        }
+        alternative
+            .iter()
+            .enumerate()
+            .all(|(offset, unit)| self.same_char(self.input[pos + offset] as u32, *unit as u32))
+    }
+
+    /// Match one scalar against a union of class items, including `v`-mode
+    /// nesting, conjunction, and difference. Case folding reuses each
+    /// item's own semantics. Single-unit string alternatives match their
+    /// scalar here too.
+    fn union_matches(&self, items: &[ClassItem], c: u32) -> bool {
+        items.iter().any(|item| match item {
+            ClassItem::Strings(alternatives) => alternatives.iter().any(|alternative| {
+                alternative.len() == 1 && self.same_char(c, alternative[0] as u32)
+            }),
+            ClassItem::Nested { negated, items } => self.union_matches(items, c) != *negated,
+            ClassItem::Conjoin(unions) => unions.iter().all(|union| self.union_matches(union, c)),
+            ClassItem::Except { left, right } => {
+                self.union_matches(left, c) && !self.union_matches(right, c)
+            }
             ClassItem::Char(want) => self.same_char(c, *want),
             ClassItem::Range(low, high) => {
                 (*low..=*high).contains(&c)
@@ -324,8 +438,7 @@ impl Matcher<'_> {
                     hit != *negated
                 }
             }
-        });
-        hit != negated
+        })
     }
 
     fn node(
@@ -374,10 +487,14 @@ impl Matcher<'_> {
                 }
                 _ => Ok(false),
             },
-            Node::Class { negated, items } => match self.scalar(pos) {
-                Some(c) if self.class_matches(*negated, items, c) => Ok(k(self.advance(pos), caps)),
-                _ => Ok(false),
-            },
+            Node::Class { negated, items } => {
+                for end in self.class_ends(*negated, items, pos)? {
+                    if k(end, caps) {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            }
             Node::Concat(items) => self.sequence(items, pos, caps, k),
             Node::Alt(branches) => {
                 // Leftmost-first: the earlier alternative wins even when a
@@ -565,7 +682,12 @@ impl Matcher<'_> {
         while let Node::Group { index: None, node } = atom {
             atom = node;
         }
-        if count == 0 && matches!(atom, Node::Char(_) | Node::AnyChar | Node::Class { .. }) {
+        // String classes take the general continuation path so every
+        // alternative end backtracks; scalar-only classes keep the fast
+        // single-advance loop.
+        let scalar_class = matches!(atom, Node::Class { negated: false, items } if !parse::Parser::set_contains_strings(items))
+            || matches!(atom, Node::Class { negated: true, .. });
+        if count == 0 && (matches!(atom, Node::Char(_) | Node::AnyChar) || scalar_class) {
             return self.repeat_atom(atom, min, max, greedy, pos, caps, k);
         }
         self.step()?;
@@ -706,6 +828,67 @@ mod modifier_tests {
     }
 
     #[test]
+    fn vsets_nesting_intersection_and_difference() {
+        assert!(matches("[[0-9]]", "v", "5"));
+        assert!(!matches("[[0-9]]", "v", "a"));
+        assert!(matches("[^[^0-9]]", "v", "5"));
+        assert!(!matches("[^[^0-9]]", "v", "a"));
+        assert!(matches("[\\d&&[0-9]]", "v", "0"));
+        assert!(!matches("[\\d&&[0-9]]", "v", "a"));
+        assert!(matches("[[0-9]--[0-5]]", "v", "7"));
+        assert!(!matches("[[0-9]--[0-5]]", "v", "3"));
+        assert!(!matches("[_--_]", "v", "_"));
+        assert!(!matches("[a&&b]", "v", "a"));
+        assert!(matches("[a&&a]", "v", "a"));
+    }
+
+    #[test]
+    fn vsets_string_literals_and_keycap_sequences() {
+        assert!(matches("[\\q{ab}]", "v", "ab"));
+        assert!(!matches("[\\q{ab}]", "v", "a"));
+        assert!(matches(
+            "[\\q{0|2|4|9\u{FE0F}\u{20E3}}]",
+            "v",
+            "9\u{FE0F}\u{20E3}"
+        ));
+        assert!(matches("[\\q{0|2|4|9\u{FE0F}\u{20E3}}]", "v", "2"));
+        assert!(!matches("[\\q{0|2|4|9\u{FE0F}\u{20E3}}]", "v", "9"));
+        assert!(matches("[\\p{Emoji_Keycap_Sequence}]", "v", "1\u{20E3}"));
+        assert!(matches(
+            "[\\p{Emoji_Keycap_Sequence}]",
+            "v",
+            "#\u{FE0F}\u{20E3}"
+        ));
+        assert!(!matches("[\\p{Emoji_Keycap_Sequence}]", "v", "1"));
+        assert!(matches("^[\\q{ab|a}]+$", "v", "aba"));
+        assert!(matches("[\\q{ab}--b]", "v", "ab"));
+        assert!(!matches("[\\q{a}&&b]", "v", "a"));
+        assert!(Regex::new("[^\\q{ab}]", "v").is_err());
+        assert!(Regex::new("[\\p{Emoji_Keycap_Sequence}]", "u").is_err());
+    }
+
+    #[test]
+    fn vsets_rejects_mixed_operators_and_ranges() {
+        for pattern in [
+            "[ab&&b]",
+            "[a&&bc]",
+            "[a&&b c]",
+            "[a--b c]",
+            "[a&&b--c]",
+            "[a-b&&c]",
+            "[a-b--c]",
+            "[a&&]",
+            "[a--]",
+            "[\\d-z]",
+            "[a-]",
+            "[--a]",
+            "[(]",
+        ] {
+            assert!(Regex::new(pattern, "v").is_err(), "{pattern}");
+        }
+    }
+
+    #[test]
     fn scoped_flags_restore_on_exit_and_backtracking() {
         assert!(matches("^(?i:a)b$", "", "Ab"));
         assert!(!matches("^(?i:a)b$", "", "AB"));
@@ -749,7 +932,7 @@ fn normalize_group_names(pattern: &str, unicode: bool) -> Result<Option<String>,
     if !pattern.contains('\\') || !(pattern.contains("(?<") || pattern.contains("\\k<")) {
         return Ok(None);
     }
-    let parser = parse::Parser::new(pattern, unicode);
+    let parser = parse::Parser::new(pattern, unicode, false);
     let references = unicode || parser.has_named_captures;
     let chars: Vec<char> = pattern.chars().collect();
     let mut output = String::new();
@@ -769,7 +952,7 @@ fn normalize_group_names(pattern: &str, unicode: bool) -> Result<Option<String>,
                 .map(|n| at + n)
                 .ok_or("Invalid capture group name")?;
             let raw: String = chars[at..=end].iter().collect();
-            let name = parse::Parser::new(&raw, true).group_name()?;
+            let name = parse::Parser::new(&raw, true, false).group_name()?;
             let mut identifier = name.chars();
             if !identifier
                 .next()

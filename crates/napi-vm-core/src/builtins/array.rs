@@ -546,19 +546,46 @@ fn array_splice(
     arguments: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
-    let start = relative_index(
-        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
-        length,
-    );
+    // Read `length` once: observable getters run a single time.
+    let length_value = interp.get_prop_value_str(&this, "length")?;
+    let length_number = interp.ecmascript_to_number(&length_value)?;
+    let logical = to_integer_or_infinity(length_number).clamp(0.0, 9_007_199_254_740_991.0);
+    let length = if !length_number.is_finite() || length_number <= 0.0 {
+        0
+    } else {
+        (length_number.trunc() as usize).min(crate::value::MAX_ARRAY_LEN)
+    };
+    let start_number =
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?;
+    let delete_number = arguments
+        .get(1)
+        .map(|value| interp.ecmascript_to_number(value))
+        .transpose()?;
+    // ArraySpeciesCreate throws for result lengths above 2^32-1. Check the
+    // logical remove count first; the clamped path below still bounds the
+    // actual allocation.
+    let logical_start = relative_number_index(start_number, logical);
+    let logical_remove = if arguments.is_empty() {
+        0.0
+    } else if let Some(delete) = delete_number {
+        to_integer_or_infinity(delete)
+            .max(0.0)
+            .min(logical - logical_start)
+    } else {
+        logical - logical_start
+    };
+    if logical_remove > 4294967295.0 {
+        return Err(VmErr::Msg("RangeError: Invalid array length".into()));
+    }
+    let start = relative_index(start_number, length);
     let remove = if arguments.is_empty() {
         0
-    } else if arguments.len() == 1 {
-        length - start
-    } else {
-        to_integer_or_infinity(interp.ecmascript_to_number(&arguments[1])?)
+    } else if let Some(delete) = delete_number {
+        to_integer_or_infinity(delete)
             .max(0.0)
             .min((length - start) as f64) as usize
+    } else {
+        length - start
     };
     let inserted = arguments.len().saturating_sub(2);
     let new_length = length - remove + inserted;
@@ -1419,14 +1446,34 @@ fn array_slice(
     arguments: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    let length = array_like_length(interp, &this)?;
-    let start = relative_index(
-        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
-        length,
-    );
-    let end = match arguments.get(1) {
-        None | Some(Value::Undefined) => length,
-        Some(value) => relative_index(interp.ecmascript_to_number(value)?, length),
+    // Read `length` once: the logical (spec) length drives the 2^32-1
+    // ArrayCreate check while the clamped length bounds the allocation.
+    let length_value = interp.get_prop_value_str(&this, "length")?;
+    let length_number = interp.ecmascript_to_number(&length_value)?;
+    let logical = to_integer_or_infinity(length_number).clamp(0.0, 9_007_199_254_740_991.0);
+    let length = if !length_number.is_finite() || length_number <= 0.0 {
+        0
+    } else {
+        (length_number.trunc() as usize).min(crate::value::MAX_ARRAY_LEN)
+    };
+    let start_number =
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?;
+    let end_number = match arguments.get(1) {
+        None | Some(Value::Undefined) => None,
+        Some(value) => Some(interp.ecmascript_to_number(value)?),
+    };
+    // ArrayCreate throws for lengths above 2^32-1. The clamped `length`
+    // above would swallow that spec error, so validate the logical count
+    // first; the clamped path below still bounds the actual allocation.
+    let logical_start = relative_number_index(start_number, logical);
+    let logical_end = end_number.map_or(logical, |end| relative_number_index(end, logical));
+    if logical_end - logical_start > 4294967295.0 {
+        return Err(VmErr::Msg("RangeError: Invalid array length".into()));
+    }
+    let start = relative_index(start_number, length);
+    let end = match end_number {
+        None => length,
+        Some(value) => relative_index(value, length),
     };
     let count = end.saturating_sub(start);
     let result = array_species_create(interp, &this, count as f64)?;

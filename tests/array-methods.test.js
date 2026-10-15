@@ -7,6 +7,24 @@ import { hasTrueSuspension } from "./suspension.mjs";
 // methods (`throw`, `return`) that complete the iterator protocol.
 // ---------------------------------------------------------------------------
 
+test("slice rejects result lengths above 2^32-1", () => {
+  expect(
+    runCode(
+      "try { Array.prototype.slice.call({ length: 4294967296 }); 'no throw'; } catch (e) { e.name; }"
+    )
+  ).toBe("RangeError");
+  expect(runCode("[1, 2, 3].slice(1).join(',');")).toBe("2,3");
+});
+
+test("splice rejects result lengths above 2^32-1", () => {
+  expect(
+    runCode(
+      "try { Array.prototype.splice.call({ length: 4294967296 }, 0, 4294967296); 'no throw'; } catch (e) { e.name; }"
+    )
+  ).toBe("RangeError");
+  expect(runCode("let a = [1, 2, 3]; a.splice(1, 1); a.join(',');")).toBe("1,3");
+});
+
 test("at supports negative indices", () => {
   expect(runCode("[1, 2, 3].at(-1);")).toBe("3");
   expect(runCode("[1, 2, 3].at(0);")).toBe("1");

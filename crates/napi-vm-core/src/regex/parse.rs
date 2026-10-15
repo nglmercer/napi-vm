@@ -20,6 +20,22 @@ pub enum ClassItem {
         folded_complement: Vec<(char, char)>,
         negated: bool,
     },
+    /// A nested `v`-mode class: matches when the inner union matches (or
+    /// does not, when negated).
+    Nested {
+        negated: bool,
+        items: Vec<ClassItem>,
+    },
+    /// `v`-mode string alternatives (`\q{…}`, properties of strings) as
+    /// UTF-16 units. Matched before scalar items, in source order.
+    Strings(Vec<Vec<u16>>),
+    /// `v`-mode `A&&B&&…`: every operand union must match.
+    Conjoin(Vec<Vec<ClassItem>>),
+    /// `v`-mode `A--B`: the left union matches and the right one does not.
+    Except {
+        left: Vec<ClassItem>,
+        right: Vec<ClassItem>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +43,22 @@ pub enum Shorthand {
     Digit,
     Word,
     Space,
+}
+
+/// `v`-mode operators. A chain uses one kind; mixing `&&` and `--`
+/// is an error, as V8 enforces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SetOperator {
+    Intersect,
+    Difference,
+}
+
+/// One `v`-mode operand: a single character, escape, or nested class,
+/// or a `X-Y` range. Ranges cannot neighbor `&&` or `--`.
+#[derive(Debug, Clone)]
+enum SetOperand {
+    Unit(ClassItem),
+    Range(u32, u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,13 +128,15 @@ pub struct Parser {
     /// `u` flag: makes otherwise-tolerated escapes an error, as in a real
     /// engine's Unicode mode.
     unicode: bool,
+    /// `v` flag: class-set expressions with nesting, `&&` and `--`.
+    vsets: bool,
     pub(super) has_named_captures: bool,
 }
 
 pub type ParseResult<T> = Result<T, String>;
 
 impl Parser {
-    pub fn new(pattern: &str, unicode: bool) -> Self {
+    pub fn new(pattern: &str, unicode: bool, vsets: bool) -> Self {
         let chars: Vec<char> = pattern.chars().collect();
         let mut class = false;
         let mut at = 0;
@@ -132,6 +166,7 @@ impl Parser {
             group_count: 0,
             names: HashMap::new(),
             unicode,
+            vsets,
             has_named_captures,
         }
     }
@@ -433,6 +468,14 @@ impl Parser {
     fn class(&mut self) -> ParseResult<Node> {
         self.pos += 1; // `[`
         let negated = self.eat('^');
+        if self.vsets {
+            let items = self.class_set_expression()?;
+            // A negated class cannot hold strings, at any depth.
+            if negated && Self::set_contains_strings(&items) {
+                return Err("Cannot negate strings in character class".to_string());
+            }
+            return Ok(Node::Class { negated, items });
+        }
         let mut items = Vec::new();
         loop {
             let Some(c) = self.peek() else {
@@ -469,19 +512,216 @@ impl Parser {
         Ok(Node::Class { negated, items })
     }
 
-    fn class_atom(&mut self) -> ParseResult<ClassItem> {
-        let Some(c) = self.peek() else {
-            return Err("Unterminated character class".to_string());
-        };
-        if c != '\\' {
-            self.pos += 1;
-            return Ok(ClassItem::Char(c as u32));
+    /// Parse a `v`-mode class body up to and including `]`, lowering set
+    /// expressions to union items. `A&&B` becomes a conjunction,
+    /// `A--B` a difference; juxtaposed unions and ranges may not neighbor
+    /// an operator.
+    fn class_set_expression(&mut self) -> ParseResult<Vec<ClassItem>> {
+        let mut operands: Vec<SetOperand> = Vec::new();
+        let mut operators: Vec<SetOperator> = Vec::new();
+        let mut juxtaposed = false;
+        let mut after_operator = false;
+        loop {
+            match self.peek() {
+                None => return Err("Unterminated character class".to_string()),
+                Some(']') => {
+                    self.pos += 1;
+                    break;
+                }
+                _ => {}
+            }
+            // Two operands with no operator between them is juxtaposition,
+            // which may not neighbor `&&` or `--`.
+            if !operands.is_empty() && !after_operator {
+                juxtaposed = true;
+            }
+            after_operator = false;
+            operands.push(self.class_set_operand()?);
+            if self.peek() == Some('&') && self.chars.get(self.pos + 1) == Some(&'&') {
+                self.pos += 2;
+                operators.push(SetOperator::Intersect);
+                after_operator = true;
+            } else if self.peek() == Some('-') && self.chars.get(self.pos + 1) == Some(&'-') {
+                self.pos += 2;
+                operators.push(SetOperator::Difference);
+                after_operator = true;
+            } else if self.peek() == Some('-') {
+                self.class_set_range(&mut operands)?;
+            }
         }
+        if operators.is_empty() {
+            return Ok(operands
+                .into_iter()
+                .map(|operand| match operand {
+                    SetOperand::Unit(item) => item,
+                    SetOperand::Range(low, high) => ClassItem::Range(low, high),
+                })
+                .collect());
+        }
+        if juxtaposed
+            || operands.len() != operators.len() + 1
+            || operands
+                .iter()
+                .any(|operand| matches!(operand, SetOperand::Range(..)))
+            || operators.iter().any(|op| *op != operators[0])
+        {
+            return Err("Invalid class set operation".to_string());
+        }
+        let mut units = operands.into_iter().map(|operand| match operand {
+            SetOperand::Unit(item) => vec![item],
+            SetOperand::Range(..) => unreachable!("rejected above"),
+        });
+        if operators[0] == SetOperator::Intersect {
+            return Ok(vec![ClassItem::Conjoin(units.collect())]);
+        }
+        let first = units.next().expect("operator has a left operand");
+        Ok(vec![ClassItem::Except {
+            left: first,
+            right: units.flatten().collect(),
+        }])
+    }
+
+    /// Parse one `v`-mode operand: a nested class, an escape, or a single
+    /// character. Reserved punctuators must be escaped; a bare `-`, `&`
+    /// starting `&&`, or `]` never starts an operand.
+    fn class_set_operand(&mut self) -> ParseResult<SetOperand> {
+        match self.peek() {
+            Some('[') => {
+                self.pos += 1;
+                let negated = self.eat('^');
+                let items = self.class_set_expression()?;
+                if negated && Self::set_contains_strings(&items) {
+                    return Err("Cannot negate strings in character class".to_string());
+                }
+                Ok(SetOperand::Unit(ClassItem::Nested { negated, items }))
+            }
+            Some('\\') => Ok(SetOperand::Unit(self.class_set_escape()?)),
+            Some(c) if "(){}-/|".contains(c) => {
+                Err("Invalid character in character class".to_string())
+            }
+            Some('-') | Some('&') => Err("Invalid class set operation".to_string()),
+            Some(c) => {
+                self.pos += 1;
+                Ok(SetOperand::Unit(ClassItem::Char(c as u32)))
+            }
+            None => Err("Unterminated character class".to_string()),
+        }
+    }
+
+    /// Parse the `-Y` half of a `v`-mode `X-Y` range after `X`. The end
+    /// must be a single character with a value not below `X`.
+    fn class_set_range(&mut self, operands: &mut Vec<SetOperand>) -> ParseResult<()> {
+        let Some(SetOperand::Unit(ClassItem::Char(low))) = operands.pop() else {
+            return Err("Invalid character in character class".to_string());
+        };
+        self.pos += 1; // `-`
+        let end = match self.peek() {
+            Some('\\') => self.class_set_escape()?,
+            Some(c) if !"(){}-/|]^".contains(c) => {
+                self.pos += 1;
+                ClassItem::Char(c as u32)
+            }
+            _ => return Err("Invalid character in character class".to_string()),
+        };
+        let ClassItem::Char(high) = end else {
+            return Err("Invalid character in character class".to_string());
+        };
+        if high < low {
+            return Err("Range out of order in character class".to_string());
+        }
+        operands.push(SetOperand::Range(low, high));
+        Ok(())
+    }
+
+    /// Parse a `v`-mode class escape: string literals, shorthands,
+    /// Unicode properties, and character escapes.
+    fn class_set_escape(&mut self) -> ParseResult<ClassItem> {
         self.pos += 1; // `\`
         let Some(e) = self.peek() else {
             return Err("Trailing backslash in regular expression".to_string());
         };
+        if e == 'q' {
+            self.pos += 1;
+            return Ok(ClassItem::Strings(self.q_string()?));
+        }
         self.pos += 1;
+        self.class_atom_tail(e)
+    }
+
+    /// Parse `\q{alt|alt|…}` string alternatives as UTF-16 units. Each
+    /// alternative holds characters and character escapes; shorthands and
+    /// nested sets are rejected, and empty alternatives match empty.
+    fn q_string(&mut self) -> ParseResult<Vec<Vec<u16>>> {
+        if !self.eat('{') {
+            return Err("Invalid escape '\\q'".to_string());
+        }
+        let mut alternatives = Vec::new();
+        let mut current = Vec::new();
+        loop {
+            match self.peek() {
+                None => return Err("Unterminated character class".to_string()),
+                Some('}') => {
+                    self.pos += 1;
+                    break;
+                }
+                Some('|') => {
+                    self.pos += 1;
+                    alternatives.push(std::mem::take(&mut current));
+                }
+                Some('\\') => {
+                    self.pos += 1;
+                    let Some(e) = self.peek() else {
+                        return Err("Trailing backslash in regular expression".to_string());
+                    };
+                    self.pos += 1;
+                    match self.class_atom_tail(e)? {
+                        ClassItem::Char(unit) if unit <= 0xFFFF => current.push(unit as u16),
+                        _ => return Err("Invalid escape in string literal".to_string()),
+                    }
+                }
+                Some(c) => {
+                    self.pos += 1;
+                    let mut pair = [0u16; 2];
+                    current.extend_from_slice(c.encode_utf16(&mut pair));
+                }
+            }
+        }
+        alternatives.push(current);
+        Ok(alternatives)
+    }
+
+    /// Whether a lowered union holds string alternatives, directly or
+    /// through nesting, conjunction, or difference. `\q` always counts,
+    /// even for single-unit alternatives.
+    pub(super) fn set_contains_strings(items: &[ClassItem]) -> bool {
+        items.iter().any(|item| match item {
+            ClassItem::Strings(_) => true,
+            ClassItem::Nested { items, .. } => Self::set_contains_strings(items),
+            ClassItem::Conjoin(unions) => {
+                unions.iter().any(|union| Self::set_contains_strings(union))
+            }
+            ClassItem::Except { left, right } => {
+                Self::set_contains_strings(left) || Self::set_contains_strings(right)
+            }
+            _ => false,
+        })
+    }
+
+    /// RGI Emoji_Keycap_Sequence: `[0-9#*]` with an optional U+FE0F
+    /// before U+20E3. Fully specified by UTS#51, no data tables needed.
+    fn keycap_sequences() -> Vec<Vec<u16>> {
+        let mut sequences = Vec::with_capacity(24);
+        for base in "0123456789#*".chars() {
+            let base = base as u16;
+            sequences.push(vec![base, 0x20E3]);
+            sequences.push(vec![base, 0xFE0F, 0x20E3]);
+        }
+        sequences
+    }
+
+    /// Shared class-escape shapes for both class flavors. The escape
+    /// character is already consumed.
+    fn class_atom_tail(&mut self, e: char) -> ParseResult<ClassItem> {
         if self.unicode && matches!(e, 'p' | 'P') {
             return self.unicode_property(e == 'P');
         }
@@ -514,6 +754,22 @@ impl Parser {
             'b' => ClassItem::Char(8),
             other => ClassItem::Char(self.escaped_char(other)?),
         })
+    }
+
+    fn class_atom(&mut self) -> ParseResult<ClassItem> {
+        let Some(c) = self.peek() else {
+            return Err("Unterminated character class".to_string());
+        };
+        if c != '\\' {
+            self.pos += 1;
+            return Ok(ClassItem::Char(c as u32));
+        }
+        self.pos += 1; // `\`
+        let Some(e) = self.peek() else {
+            return Err("Trailing backslash in regular expression".to_string());
+        };
+        self.pos += 1;
+        self.class_atom_tail(e)
     }
 
     fn escape(&mut self) -> ParseResult<Node> {
@@ -578,6 +834,23 @@ impl Parser {
             return Err("Invalid Unicode property escape".to_string());
         }
         let property: String = self.chars[start..self.pos - 1].iter().collect();
+        // Properties of strings are outside regex-syntax's scalar tables.
+        // Emoji_Keycap_Sequence is fully specified by UTS#51, so it is
+        // enumerated directly; anything else stays an error, as does a
+        // negated string property.
+        let loose: String = property
+            .chars()
+            .filter(|c| !matches!(c, '_' | '-' | ' '))
+            .flat_map(|c| c.to_lowercase())
+            .collect();
+        // String properties exist only in `v` mode; without it the name
+        // falls through to the scalar tables, which reject it.
+        if self.vsets && loose == "emojikeycapsequence" {
+            if negated {
+                return Err("Cannot negate strings in character class".to_string());
+            }
+            return Ok(ClassItem::Strings(Self::keycap_sequences()));
+        }
         let pattern = format!(r"\p{{{property}}}");
         let hir = regex_syntax::Parser::new()
             .parse(&pattern)
