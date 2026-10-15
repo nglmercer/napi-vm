@@ -3110,7 +3110,7 @@ runClonedWaiter()"#;
     }
 }
 
-fn float16_bits(n: f64) -> u16 {
+pub(crate) fn float16_bits(n: f64) -> u16 {
     let sign = if n.is_sign_negative() { 0x8000 } else { 0 };
     let n = n.abs();
     if n.is_nan() {
@@ -3126,7 +3126,7 @@ fn float16_bits(n: f64) -> u16 {
     let mantissa = (n / 2f64.powi(exponent - 10)).round_ties_even() as u16;
     sign | (((exponent + 14) as u16) << 10).wrapping_add(mantissa)
 }
-fn float16_number(bits: u16) -> f64 {
+pub(crate) fn float16_number(bits: u16) -> f64 {
     let exp = (bits >> 10) & 31;
     let mantissa = bits & 1023;
     let n = match exp {

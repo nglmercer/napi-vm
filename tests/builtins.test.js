@@ -142,6 +142,8 @@ test("Math.f16round rounds to half precision", () => {
   expect(runCode("Math.f16round(0.1);")).toBe("0.0999755859375");
   expect(runCode("Math.f16round.length;")).toBe("1");
   expect(runCode("String(Math.f16round(NaN));")).toBe("NaN");
+  expect(runCode("Math.f16round(2.980232238769532e-8);")).toBe("5.960464477539063e-8");
+  expect(runCode("Math.f16round(65519);")).toBe("65504");
 });
 
 test("malformed URIs throw URIError", () => {

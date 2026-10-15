@@ -153,9 +153,10 @@ fn math_fround(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Valu
 }
 
 fn math_f16round(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Number(
-        half::f16::from_f64(math_arg(interp, &a, 0)?).to_f64(),
-    ))
+    // Share DataView's conversion: the `half` crate mis-rounds values just
+    // above the subnormal midpoint (e.g. 2^-25 + 1ulp rounds to zero).
+    let bits = super::typedarray::float16_bits(math_arg(interp, &a, 0)?);
+    Ok(Value::Number(super::typedarray::float16_number(bits)))
 }
 
 fn math_abs(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
