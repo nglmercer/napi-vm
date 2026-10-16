@@ -3612,7 +3612,14 @@ impl<'a> Compiler<'a> {
                     });
                 }
                 ObjectProp::KeyValue(key, expression) => {
-                    let val = self.compile_expr(expression)?;
+                    // NamedEvaluation matches the evaluator: an anonymous
+                    // function or class value takes the key as its name.
+                    // `__proto__` never infers a name.
+                    let val = if key == "__proto__" {
+                        self.compile_expr(expression)?
+                    } else {
+                        self.compile_named_assignment_value(expression, key)?
+                    };
                     let kind = if key == "__proto__" {
                         PropKind::Prototype
                     } else {
@@ -3632,8 +3639,10 @@ impl<'a> Compiler<'a> {
                     match key_expression {
                         // Statically known keys skip the normalization check.
                         Expr::String(key) | Expr::EscapedString(key) => {
-                            let val = self.compile_expr(value_expression)?;
-                            let key = self.intern_string(&key.to_key())?;
+                            let display = key.to_key();
+                            let val =
+                                self.compile_named_assignment_value(value_expression, &display)?;
+                            let key = self.intern_string(&display)?;
                             template.push(PropEntry {
                                 key: Some(KeySrc::Const(key)),
                                 val,
@@ -3641,9 +3650,10 @@ impl<'a> Compiler<'a> {
                             });
                         }
                         Expr::Number(key) => {
-                            let val = self.compile_expr(value_expression)?;
-                            let key =
-                                self.intern_string(&crate::format::ecmascript_number_string(*key))?;
+                            let display = crate::format::ecmascript_number_string(*key);
+                            let val =
+                                self.compile_named_assignment_value(value_expression, &display)?;
+                            let key = self.intern_string(&display)?;
                             template.push(PropEntry {
                                 key: Some(KeySrc::Const(key)),
                                 val,
@@ -3658,6 +3668,19 @@ impl<'a> Compiler<'a> {
                                 src: key,
                             });
                             let val = self.compile_expr(value_expression)?;
+                            // The display name is only known at runtime here;
+                            // rename anonymous functions and classes then.
+                            if matches!(
+                                value_expression.unparenthesized(),
+                                Expr::FnExpr { name: None, .. }
+                                    | Expr::ArrowFn { .. }
+                                    | Expr::ClassExpr { name: None, .. }
+                            ) {
+                                self.emit(Instr::InferName {
+                                    dst: val,
+                                    key: normalized,
+                                });
+                            }
                             template.push(PropEntry {
                                 key: Some(KeySrc::Reg(normalized)),
                                 val,
@@ -3985,7 +4008,12 @@ impl<'a> Compiler<'a> {
                 object, property, ..
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    self.compile_super_reference(property)?;
+                    // `this` resolution throws for an unbound receiver,
+                    // then the key expression still evaluates, then the
+                    // ReferenceError — without any ToPropertyKey conversion.
+                    let this_value = self.alloc_reg()?;
+                    self.emit(Instr::LoadGlobalThis { dst: this_value });
+                    let _ = self.compile_expr(property)?;
                     let msg =
                         self.intern_string("ReferenceError: Cannot delete a super property")?;
                     self.emit(Instr::Raise { msg });

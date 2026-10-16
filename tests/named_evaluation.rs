@@ -49,3 +49,19 @@ fn declaration_name_inference_only_for_direct_anonymous_definitions() {
         ",b",
     );
 }
+
+#[test]
+fn object_literal_names_anonymous_functions_and_classes() {
+    assert_tiers(
+        "var namedSym = Symbol('test262'); var anonSym = Symbol(); var o = {id:function(){}, named:function named(){}, arrow:()=>{}, cls:class {}, gen:function*(){}, [anonSym]:()=>{}, [namedSym]:class {}}; [o.id.name, o.named.name, o.arrow.name, o.cls.name, o.gen.name, o[anonSym].name, o[namedSym].name].join(',');",
+        "id,named,arrow,cls,gen,,[test262]",
+    );
+}
+
+#[test]
+fn object_literal_name_descriptors_match_named_definitions() {
+    assert_tiers(
+        "var o = {id:()=>{}}; var desc = Object.getOwnPropertyDescriptor(o.id, 'name'); JSON.stringify([desc.value, desc.writable, desc.enumerable, desc.configurable]);",
+        "[\"id\",false,false,true]",
+    );
+}

@@ -794,6 +794,10 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
+            Instr::InferName { dst, key } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *key)?;
+            }
             Instr::ClassScope { name } => {
                 if let Some(name) = name {
                     self.check_const_is(address, *name, "string")?;

@@ -564,6 +564,13 @@ pub enum Instr {
         dst: Reg,
         src: Reg,
     },
+    /// Name an anonymous function or class in `dst` after the property key
+    /// in `key` (object literal NamedEvaluation with a computed key).
+    /// Values that already carry a name pass through untouched.
+    InferName {
+        dst: Reg,
+        key: Reg,
+    },
     /// Enter the strict lexical class environment before heritage evaluation.
     ClassScope {
         name: Option<u16>,
@@ -715,6 +722,7 @@ pub enum Opcode {
     Raise,
     BuildClass,
     PropertyKey,
+    InferName,
     PrivateIn,
     ClassScope,
     ClassPrivateEnvironment,
@@ -822,6 +830,7 @@ impl Instr {
             Instr::Raise { .. } => Opcode::Raise,
             Instr::BuildClass { .. } => Opcode::BuildClass,
             Instr::PropertyKey { .. } => Opcode::PropertyKey,
+            Instr::InferName { .. } => Opcode::InferName,
             Instr::PrivateIn { .. } => Opcode::PrivateIn,
             Instr::ClassScope { .. } => Opcode::ClassScope,
             Instr::ClassPrivateEnvironment { .. } => Opcode::ClassPrivateEnvironment,
@@ -1151,6 +1160,7 @@ impl fmt::Display for Instr {
             Instr::Raise { msg } => write!(f, "RAISE c{msg}"),
             Instr::BuildClass { dst, tmpl } => write!(f, "BUILD_CLASS r{dst}, c{tmpl}"),
             Instr::PropertyKey { dst, src } => write!(f, "PROPERTY_KEY r{dst}, r{src}"),
+            Instr::InferName { dst, key } => write!(f, "INFER_NAME r{dst}, r{key}"),
             Instr::PrivateIn { dst, obj, name } => write!(f, "PRIVATE_IN r{dst}, r{obj}, c{name}"),
             Instr::ClassScope { name } => write!(f, "CLASS_SCOPE {name:?}"),
             Instr::ClassPrivateEnvironment { names } => write!(f, "CLASS_PRIVATE_ENV c{names}"),

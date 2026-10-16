@@ -96,6 +96,26 @@ fn annex_b_accessors_route_through_proxy_traps_and_abrupt_keys() {
 }
 
 #[test]
+fn delete_super_property_skips_key_conversion() {
+    assert_tiers(
+        "var log = []; var key = {toString:function(){log.push('convert'); return 'x';}}; var obj = {m(){return delete super[key];}}; var kind = ''; try {obj.m();} catch (e) {kind = e instanceof ReferenceError ? 'reference' : 'other:' + e;} JSON.stringify([kind, log]);",
+        "[\"reference\",[]]",
+    );
+    assert_tiers(
+        "var ran = false; class Base {constructor(){throw new Error('base');}} class Derived extends Base {constructor(){delete super[(ran = true, 0)];}} var kind = ''; try {new Derived();} catch (e) {kind = e instanceof ReferenceError ? 'reference' : 'other:' + e;} JSON.stringify([kind, ran]);",
+        "[\"reference\",false]",
+    );
+    assert_tiers(
+        "var log = []; var obj = {m(){return delete super[(log.push('key'), 'x')];}}; var kind = ''; try {obj.m();} catch (e) {kind = e instanceof ReferenceError ? 'reference' : 'other:' + e;} JSON.stringify([kind, log]);",
+        "[\"reference\",[\"key\"]]",
+    );
+    assert_tiers(
+        "function throwsType(fn) {try {fn();} catch (e) {return e instanceof TypeError;} return false;} var n = null; var u; JSON.stringify([throwsType(function(){delete n[0];}), throwsType(function(){delete u.x;}), throwsType(function(){delete Object[0][0];}), delete (5).x, delete true.toString]);",
+        "[true,true,true,true,true]",
+    );
+}
+
+#[test]
 fn object_to_string_uses_tags_arguments_and_proxy_brands() {
     assert_tiers(
         r#"var t=Object.prototype.toString,log=[];log.push(t.call(function(){return arguments}()));log.push(t.call(new Proxy([],{})));log.push(t.call(new Proxy(function(){},{})));var m=new Map(),it=m[Symbol.iterator]();log.push(t.call(it));var p=new Promise(function(){});log.push(t.call(p));delete Promise.prototype[Symbol.toStringTag];log.push(t.call(p));log.push(t.call(Object(1)));log.push(t.call(new Number(1)));Number.prototype[Symbol.toStringTag]='test262';log.push(t.call(0));delete Number.prototype[Symbol.toStringTag];var s=new Set(),sit=s[Symbol.iterator]();log.push(t.call(sit));JSON.stringify(log);"#,

@@ -2352,12 +2352,16 @@ impl Interpreter {
                     prototype = Some(self.eval_expr(expression)?);
                 }
                 ObjectProp::KeyValue(key, expression) => {
+                    // NamedEvaluation: an anonymous function or class value
+                    // takes the property key as its name, shared with class
+                    // field initializers.
+                    let key_value = Value::String(crate::JsString::from_key(key));
                     insert_object_property(
                         &mut object,
                         &mut positions,
                         &mut accessors,
                         key.clone(),
-                        self.eval_expr(expression)?,
+                        self.evaluate_class_field(expression, &key_value)?,
                         None,
                     );
                 }
@@ -2421,7 +2425,7 @@ impl Interpreter {
                         &mut positions,
                         &mut accessors,
                         key.clone(),
-                        self.eval_expr(value_expression)?,
+                        self.evaluate_class_field(value_expression, &key_value)?,
                         None,
                     );
                     if let Some(symbol) = symbol {
@@ -2691,8 +2695,12 @@ impl Interpreter {
                     } = operand.unparenthesized()
                         && matches!(object.as_ref(), Expr::Super)
                     {
-                        let key = self.eval_expr(property)?;
-                        self.super_reference(&self.global.clone(), &key)?;
+                        // `delete super[key]`: `this` resolution throws for
+                        // an unbound receiver, then the key expression
+                        // evaluates, then deletion throws before any
+                        // ToPropertyKey conversion of the key.
+                        self.resolve_this(&self.global.clone())?;
+                        self.eval_expr(property)?;
                         return Err(VmErr::Msg(
                             "ReferenceError: Cannot delete a super property".into(),
                         ));

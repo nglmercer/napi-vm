@@ -1190,6 +1190,11 @@ fn run_loop(
                     let key = frame.registers[src as usize].clone_for_execution();
                     frame.registers[dst as usize] = interp.ecmascript_to_property_key(&key)?;
                 }
+                Instr::InferName { dst, key } => {
+                    let key = frame.registers[key as usize].clone_for_execution();
+                    let value = frame.registers[dst as usize].clone_for_execution();
+                    frame.registers[dst as usize] = interp.apply_inferred_name(value, &key)?;
+                }
                 Instr::ClassScope { name } => {
                     let name = name
                         .map(|name| const_string(frame.function, name))

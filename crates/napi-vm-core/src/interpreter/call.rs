@@ -984,6 +984,11 @@ impl Interpreter {
                 Ok(Value::Bool(true))
             }
             _ => {
+                if matches!(obj, Value::Null | Value::Undefined) {
+                    return Err(VmErr::Msg(
+                        "TypeError: Cannot convert undefined or null to object".into(),
+                    ));
+                }
                 if let Some(properties) = obj.exotic_properties() {
                     return self.delete_member_key(
                         &Value::Object { props: properties },
@@ -1015,6 +1020,38 @@ impl Interpreter {
                 .map_or_else(String::new, |description| format!("[{description}]"))),
             _ => self.property_key(key),
         }
+    }
+
+    /// Apply NamedEvaluation to an already-evaluated property value: an
+    /// anonymous function or class takes the property key as its name.
+    /// Values that already carry a name pass through untouched.
+    pub(crate) fn apply_inferred_name(&self, value: Value, key: &Value) -> Result<Value, VmErr> {
+        let display = self.property_function_name(key)?;
+        Ok(match &value {
+            Value::Function(function)
+                if function.name.as_deref().is_none_or(|name| name.is_empty()) =>
+            {
+                let mut renamed = function.as_ref().clone();
+                renamed.name = Some(Rc::from(display));
+                Value::Function(Rc::new(renamed))
+            }
+            Value::Class(class) if class.name.is_empty() => {
+                let mut data = class.as_ref().clone();
+                data.name = display.clone();
+                let renamed = Value::Class(Box::new(data));
+                // Plain assignment cannot overwrite the non-writable `name`
+                // slot installed at build time, so redefine it instead.
+                let descriptor = Value::descriptor_record(vec![
+                    ("value".to_string(), Value::String(display.into())),
+                    ("writable".to_string(), Value::Bool(false)),
+                    ("enumerable".to_string(), Value::Bool(false)),
+                    ("configurable".to_string(), Value::Bool(true)),
+                ]);
+                crate::builtins::object::define_property(&renamed, "name", &descriptor)?;
+                renamed
+            }
+            _ => value,
+        })
     }
 
     /// Coerce a value used in a computed member expression to the slot name
