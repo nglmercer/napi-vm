@@ -196,3 +196,32 @@ fn close_error_replaces_a_return_completion() {
         "true"
     );
 }
+
+#[test]
+fn builtin_next_rejects_receivers_without_iterator_slots() {
+    assert_eq!(
+        evaluate(
+            r#"
+        function throwsType(fn) {try {fn();} catch(error) {return error instanceof TypeError;} return false;}
+        let arrayNext = [][Symbol.iterator]().next;
+        let mapIter = new Map([[1, 2]]).entries();
+        let setIter = new Set([1]).values();
+        let exhausted = [1][Symbol.iterator]();
+        exhausted.next();
+        let second = exhausted.next();
+        let heir = Object.create([][Symbol.iterator]());
+        [
+            throwsType(() => arrayNext.call({})),
+            throwsType(() => arrayNext.call(1)),
+            throwsType(() => mapIter.next.call(new Map())),
+            throwsType(() => setIter.next.call(new Set())),
+            throwsType(() => mapIter.next.call({})),
+            throwsType(() => heir.next()),
+            second.done === true,
+            [...new Map([[1, 2]]).keys()].join(','),
+        ].join(',');
+    "#
+        ),
+        "true,true,true,true,true,true,true,1"
+    );
+}

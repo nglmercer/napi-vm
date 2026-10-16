@@ -857,6 +857,11 @@ fn object_is_prototype_of(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
+    // A nullish receiver is not an object, so it prototypes nothing — this
+    // returns `false` instead of throwing.
+    if matches!(this, Value::Null | Value::Undefined) {
+        return Ok(Value::Bool(false));
+    }
     let receiver = to_object_receiver(&this)?;
     let mut current = args.first().cloned().unwrap_or(Value::Undefined);
     if !is_ecmascript_object(&current) {
@@ -1446,8 +1451,11 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
         } else {
             None
         };
-        let getter = getter.or(old_getter).unwrap_or(Value::Undefined);
-        let setter = setter.or(old_setter).unwrap_or(Value::Undefined);
+        // A present field overrides even when it is `undefined`
+        // (`{ set: undefined }` clears the setter); only an absent field
+        // inherits the current accessor.
+        let getter = getter.unwrap_or_else(|| old_getter.unwrap_or(Value::Undefined));
+        let setter = setter.unwrap_or_else(|| old_setter.unwrap_or(Value::Undefined));
         let getter = getter
             .is_truthy()
             .then(|| name_callable(&getter, &format!("get {key}")))
@@ -1456,9 +1464,11 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
             .is_truthy()
             .then(|| name_callable(&setter, &format!("set {key}")))
             .flatten();
+        let has_getter = getter.is_some();
         if let Some(getter) = getter {
             values.push((key.to_string(), getter));
         }
+        let has_setter = setter.is_some();
         if let Some(setter) = setter {
             // A setter lives in the same slot when there is no getter; with a
             // getter present it is stored under a companion slot the assign
@@ -1473,6 +1483,12 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
         if values.is_empty() {
             // `{ get: undefined, set: undefined }` still converts the slot.
             values.push((key.to_string(), Value::Undefined));
+        }
+        // Clearing one side of an accessor pair must also drop the companion
+        // setter slot; otherwise the old function stays visible through the
+        // descriptor and assignment paths.
+        if old_is_accessor && (!has_getter || !has_setter) {
+            drop_companion = true;
         }
     } else {
         let property_value = value
@@ -1711,8 +1727,11 @@ fn define_array_property(
         } else {
             None
         };
-        let getter = getter.or(old_getter).unwrap_or(Value::Undefined);
-        let setter = setter.or(old_setter).unwrap_or(Value::Undefined);
+        // A present field overrides even when it is `undefined`
+        // (`{ set: undefined }` clears the setter); only an absent field
+        // inherits the current accessor.
+        let getter = getter.unwrap_or_else(|| old_getter.unwrap_or(Value::Undefined));
+        let setter = setter.unwrap_or_else(|| old_setter.unwrap_or(Value::Undefined));
         let getter = getter
             .is_truthy()
             .then(|| name_callable(&getter, &format!("get {key}")))

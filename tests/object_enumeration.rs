@@ -137,3 +137,27 @@ fn descriptor_collection_omits_deleted_properties_and_late_additions() {
         "[2,\"a\",false,false]",
     );
 }
+
+#[test]
+fn for_in_enumerates_inherited_enumerable_keys_once() {
+    assert_tiers(
+        "Object.defineProperty(Boolean.prototype,'inherited',{value:1,enumerable:true,configurable:true}); var own = new Boolean(); own.own = 2; var seen = []; for (var key in own) { seen.push(key); } delete Boolean.prototype.inherited; JSON.stringify([seen, own.hasOwnProperty('inherited')]);",
+        "[[\"own\",\"inherited\"],false]",
+    );
+    assert_tiers(
+        "var proto = {}; Object.defineProperty(proto,'hidden',{value:1,writable:true,enumerable:false,configurable:true}); var child = Object.create(proto); child.first = 1; child.hidden = 2; var seen = []; for (var key in child) { seen.push(key); } JSON.stringify(seen);",
+        "[\"first\",\"hidden\"]",
+    );
+    assert_tiers(
+        "var proto = {p2:'p2'}; var o = Object.create(proto,{'p1':{value:'p1',enumerable:true},'p2':{value:'p1',enumerable:false}}); var keys = []; for (var key in o) { keys.push(key); } JSON.stringify(keys);",
+        "[\"p1\"]",
+    );
+}
+
+#[test]
+fn present_undefined_accessor_field_clears_while_absent_inherits() {
+    assert_tiers(
+        "var obj = {}; var get = function(){return 1;}; var set = function(v){}; Object.defineProperty(obj,'prop',{get:get,set:set,enumerable:true,configurable:true}); Object.defineProperty(obj,'prop',{set:undefined}); var cleared = Object.getOwnPropertyDescriptor(obj,'prop'); Object.defineProperty(obj,'prop',{get:undefined}); var both = Object.getOwnPropertyDescriptor(obj,'prop'); var arr = []; Object.defineProperty(arr,'0',{get:get,set:set,enumerable:true,configurable:true}); Object.defineProperty(arr,'0',{set:undefined}); var arrDesc = Object.getOwnPropertyDescriptor(arr,'0'); JSON.stringify([typeof cleared.set, cleared.get === get, typeof both.get, typeof both.set, typeof arrDesc.set, arrDesc.get === get]);",
+        "[\"undefined\",true,\"undefined\",\"undefined\",\"undefined\",true]",
+    );
+}

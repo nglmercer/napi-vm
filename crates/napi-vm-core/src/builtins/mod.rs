@@ -524,12 +524,12 @@ fn eval_indirect(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result
     result
 }
 
-fn global_is_nan(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let n = a.first().map(|v| v.to_number()).unwrap_or(f64::NAN);
+fn global_is_nan(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let n = interp.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?;
     Ok(Value::Bool(n.is_nan()))
 }
-fn global_is_finite(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
-    let n = a.first().map(|v| v.to_number()).unwrap_or(f64::NAN);
+fn global_is_finite(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+    let n = interp.ecmascript_to_number(a.first().unwrap_or(&Value::Undefined))?;
     Ok(Value::Bool(n.is_finite()))
 }
 

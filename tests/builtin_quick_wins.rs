@@ -221,3 +221,19 @@ fn logical_array_lengths_still_respect_execution_budgets() {
         }
     }
 }
+
+#[test]
+fn global_is_finite_and_is_nan_use_to_number() {
+    assert_tiers(
+        "var abruptFinite=false;try{isFinite({valueOf:function(){throw new Error('stop')}})}catch(e){abruptFinite=e.message==='stop'}var abruptNaN=false;try{isNaN({toString:function(){throw new Error('stop')}})}catch(e){abruptNaN=e.message==='stop'}var prim={};prim[Symbol.toPrimitive]=function(){return 42};var symFinite=false;try{isFinite(Symbol())}catch(e){symFinite=e instanceof TypeError}var bigNaN=false;try{isNaN(1n)}catch(e){bigNaN=e instanceof TypeError}JSON.stringify([abruptFinite,abruptNaN,isFinite(prim),isNaN(prim),symFinite,bigNaN,isFinite(),isNaN(),isFinite('42'),isNaN('foo')]);",
+        "[true,true,true,false,true,true,false,true,true,true]",
+    );
+}
+
+#[test]
+fn is_prototype_of_with_nullish_receiver_returns_false() {
+    assert_tiers(
+        "JSON.stringify([Object.prototype.isPrototypeOf.call(null, undefined), Object.prototype.isPrototypeOf.call(null, {}), Object.prototype.isPrototypeOf.call(undefined, {}), Object.prototype.isPrototypeOf.call(5, {}), ({}).isPrototypeOf(Object.create({}))]);",
+        "[false,false,false,false,false]",
+    );
+}

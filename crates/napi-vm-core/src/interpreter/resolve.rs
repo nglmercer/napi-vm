@@ -2100,10 +2100,25 @@ fn array_iter_next(
     this: super::Value,
     _args: Vec<super::Value>,
 ) -> Result<super::Value, crate::error::VmErr> {
-    let source = this
-        .get_prop("__items__")
-        .unwrap_or(super::Value::Undefined);
+    // Internal slots are own properties: receivers that merely inherit
+    // them through the prototype chain are still foreign values.
+    fn own_slot(value: &super::Value, key: &str) -> Option<super::Value> {
+        match value {
+            super::Value::Object { props } => props.own_value(key),
+            _ => None,
+        }
+    }
+    let source = own_slot(&this, "__items__").unwrap_or(super::Value::Undefined);
     if matches!(source, super::Value::Undefined) {
+        // Receivers without iterator slots are rejected. Exhausted
+        // iterators keep their kind marker, so only a missing marker means
+        // `next` was called on a foreign value.
+        let has_kind = matches!(own_slot(&this, "__kind__"), Some(super::Value::String(_)));
+        if !has_kind {
+            return Err(crate::error::VmErr::Msg(
+                "TypeError: Iterator method next called on incompatible receiver".into(),
+            ));
+        }
         return Ok(super::call::iter_result(super::Value::Undefined, true));
     }
     if matches!(&source, Value::TypedArray(view) if view.is_out_of_bounds()) {

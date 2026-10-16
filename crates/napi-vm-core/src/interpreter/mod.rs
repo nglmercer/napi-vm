@@ -2966,7 +2966,40 @@ impl Interpreter {
 
     pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
         if !matches!(value, Value::Proxy(_)) {
-            return crate::builtins::object::own_names_for(self, value, true);
+            // `for-in` enumerates inherited enumerable string keys as well:
+            // walk the prototype chain. Every own key marks its name visited
+            // (so a non-enumerable own property still shadows an inherited
+            // enumerable of the same name); only enumerable keys are emitted.
+            if matches!(value, Value::Null | Value::Undefined) {
+                return Ok(Vec::new());
+            }
+            let mut seen = std::collections::HashSet::new();
+            let mut names = Vec::new();
+            let mut current = value.clone();
+            for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+                for key in self.own_property_keys(&current)? {
+                    let Value::String(name) = &key else {
+                        continue;
+                    };
+                    let name = name.to_key();
+                    if !seen.insert(name.clone()) {
+                        continue;
+                    }
+                    let descriptor =
+                        crate::builtins::object::descriptor_for_key_in(self, &current, &key)?;
+                    if descriptor
+                        .get_prop("enumerable")
+                        .is_some_and(|value| value.is_truthy())
+                    {
+                        names.push(name);
+                    }
+                }
+                match self.prototype_of(&current) {
+                    Some(parent) => current = parent.as_ref().clone(),
+                    None => break,
+                }
+            }
+            return Ok(names);
         }
         let mut names = Vec::new();
         for key in self.own_property_keys(value)? {
