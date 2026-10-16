@@ -124,6 +124,9 @@ earlier selection run (all comparisons report zero lost passes):
   slice/splice length handling were measured in earlier selections the same
   day; each landed with a maintained regression test and zero lost passes.
 
-A full pinned re-baseline pass is in progress
-(`artifacts/test262/full-results-2026-10-15c.json`); until it lands, the
-95.1960% headline above remains the last complete measurement.
+A first re-baseline (`full-results-2026-10-15c.json`, 98,525 / 102,956)
+ran on an intermediate build whose repetition layers broke greedy
+backtracking order (120 lost passes, all since recovered and verified on
+selections). A fresh full pass on the fixed build is in progress
+(`artifacts/test262/full-results-2026-10-15d.json`); until it lands, the
+95.1960% headline above remains the last clean complete measurement.
