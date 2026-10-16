@@ -225,7 +225,8 @@ fn number_primitive(this: &Value) -> Result<f64, VmErr> {
 pub fn number_method(name: &str) -> Option<Value> {
     let f: NativeFn = match name {
         "toFixed" => number_to_fixed,
-        "toString" | "toLocaleString" => number_to_string,
+        "toString" => number_to_string,
+        "toLocaleString" => number_to_locale_string,
         "toPrecision" => number_to_precision,
         "toExponential" => number_to_exponential,
         "valueOf" => number_value_of,
@@ -277,6 +278,15 @@ fn number_to_string(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Res
     Ok(Value::String(
         (String::from_utf8(digits).unwrap_or_else(|_| "0".to_string())).into(),
     ))
+}
+
+fn number_to_locale_string(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = number_primitive(&this)?;
+    super::intl::number::to_locale(i, Value::Number(value), args)
 }
 
 /// `toPrecision(digits)`: `digits` significant figures.

@@ -55,6 +55,9 @@ const DATE_PROTOTYPE_METHODS: &[&str] = &[
     "toUTCString",
     "toDateString",
     "toTimeString",
+    "toLocaleString",
+    "toLocaleDateString",
+    "toLocaleTimeString",
 ];
 
 /// Spec `length` for `Date.prototype` methods: every setter takes its full
@@ -267,6 +270,9 @@ pub fn date_member(key: &str) -> Option<Value> {
         "toUTCString" | "toGMTString" => date_to_utc_string,
         "toDateString" => date_to_date_string,
         "toTimeString" => date_to_time_string,
+        "toLocaleString" => date_to_locale_string,
+        "toLocaleDateString" => date_to_locale_date_string,
+        "toLocaleTimeString" => date_to_locale_time_string,
         _ => return None,
     };
     Some(super::nf(key, callable))
@@ -694,6 +700,45 @@ fn date_to_time_string(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Resul
     Ok(Value::String(
         format_date(epoch(&this)?, DateFormat::Time).into(),
     ))
+}
+/// `Date.prototype.toLocaleString`: Intl formatting with date+time defaults.
+fn date_to_locale_string(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    super::intl::datetime::date_to_locale(
+        interp,
+        this,
+        args,
+        super::intl::datetime::DateLocaleKind::DateTime,
+    )
+}
+/// `Date.prototype.toLocaleDateString`: Intl formatting with date defaults.
+fn date_to_locale_date_string(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    super::intl::datetime::date_to_locale(
+        interp,
+        this,
+        args,
+        super::intl::datetime::DateLocaleKind::DateOnly,
+    )
+}
+/// `Date.prototype.toLocaleTimeString`: Intl formatting with time defaults.
+fn date_to_locale_time_string(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    super::intl::datetime::date_to_locale(
+        interp,
+        this,
+        args,
+        super::intl::datetime::DateLocaleKind::TimeOnly,
+    )
 }
 
 /// `Date.prototype [ @@toPrimitive ]`: ordinary coercion with `string`

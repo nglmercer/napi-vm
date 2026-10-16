@@ -1350,7 +1350,7 @@ impl Interpreter {
             }
             Value::Array(items) => {
                 if k == "length" {
-                    Ok(Value::Number(items.borrow().len() as f64))
+                    Ok(Value::Number(items.array_length() as f64))
                 } else if let Some(idx) = crate::value::array_index(k) {
                     let items = items.borrow();
                     if idx < items.len() {

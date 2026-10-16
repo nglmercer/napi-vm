@@ -15,6 +15,7 @@ pub enum ClassItem {
     },
     /// A Unicode property escape, compiled to sorted scalar-value ranges.
     UnicodeProperty {
+        surrogates: bool,
         ranges: Vec<(char, char)>,
         folded: Vec<(char, char)>,
         folded_complement: Vec<(char, char)>,
@@ -966,15 +967,8 @@ impl Parser {
                 return Ok(ClassItem::Strings(StringAlts::new(strings)));
             }
         }
-        let pattern = format!(r"\p{{{property}}}");
-        let hir = regex_syntax::Parser::new()
-            .parse(&pattern)
-            .map_err(|error| format!("Invalid Unicode property escape: {error}"))?;
-        let regex_syntax::hir::HirKind::Class(regex_syntax::hir::Class::Unicode(class)) =
-            hir.kind()
-        else {
-            return Err("Invalid Unicode property escape".to_string());
-        };
+        let (class, surrogates) = super::unicode::property(&property)
+            .ok_or_else(|| "Invalid Unicode property escape".to_string())?;
         let ranges = class
             .ranges()
             .iter()
@@ -987,14 +981,12 @@ impl Parser {
                 .map(|r| (r.start(), r.end()))
                 .collect()
         };
-        let mut folded = class.clone();
-        folded.try_case_fold_simple().map_err(|e| e.to_string())?;
+        let folded = super::unicode::case_closure(&class);
         let mut complement = class.clone();
         complement.negate();
-        complement
-            .try_case_fold_simple()
-            .map_err(|e| e.to_string())?;
+        let complement = super::unicode::case_closure(&complement);
         Ok(ClassItem::UnicodeProperty {
+            surrogates,
             ranges,
             folded: to_ranges(&folded),
             folded_complement: to_ranges(&complement),

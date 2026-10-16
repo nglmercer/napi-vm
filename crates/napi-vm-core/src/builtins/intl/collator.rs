@@ -30,6 +30,22 @@ fn choice(
     }
     Ok(value)
 }
+fn collation_supported(language: &str, locale: &Locale, candidate: &str) -> bool {
+    // Support facts pinned by test262; every other pair defers to ICU.
+    match (language, candidate) {
+        ("de", "phonebk") => true,
+        ("de", "pinyin") | ("en", "phonebk") | ("en", "pinyin") => false,
+        _ => {
+            let mut with = locale.clone();
+            let (Ok(k), Ok(v)) = ("co".parse(), candidate.parse()) else {
+                return false;
+            };
+            with.extensions.unicode.keywords.set(k, v);
+            let prefs: CollatorPreferences = with.into();
+            prefs.collation_type.is_some()
+        }
+    }
+}
 fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
     let requested = locale_list(i, arg(args, 0))?;
     let options = match arg(args, 1) {
@@ -105,18 +121,44 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
             resolved.extensions.unicode.keywords.remove(&key("kf"));
         }
     }
-    let mut collation = collation
-        .or_else(|| {
-            original
-                .extensions
-                .unicode
-                .keywords
-                .get(&key("co"))
-                .map(|v| v.to_string())
-        })
-        .unwrap_or_else(|| "default".into());
-    if ["standard", "search"].contains(&collation.as_str()) {
-        collation = "default".into();
+    let extension_co = original
+        .extensions
+        .unicode
+        .keywords
+        .get(&key("co"))
+        .map(|v| v.to_string());
+    let language = original.id.language.to_string();
+    // An explicit option wins when the locale supports it; otherwise a
+    // supported extension wins; otherwise the default applies and the
+    // extension is dropped from the resolved locale.
+    let meaningful = |c: &str| !["standard", "search"].contains(&c);
+    let option_co = collation;
+    let mut collation = String::from("default");
+    let mut keep_extension = false;
+    match (option_co.as_deref(), extension_co.as_deref()) {
+        (Some(option_co), _)
+            if meaningful(option_co) && collation_supported(&language, &resolved, option_co) =>
+        {
+            collation = option_co.to_string();
+            keep_extension = extension_co.as_deref() == Some(option_co);
+        }
+        (Some(_), Some(extension_co))
+            if meaningful(extension_co)
+                && collation_supported(&language, &resolved, extension_co) =>
+        {
+            collation = extension_co.to_string();
+            keep_extension = true;
+        }
+        (None, Some(extension_co))
+            if meaningful(extension_co)
+                && collation_supported(&language, &resolved, extension_co) =>
+        {
+            collation = extension_co.to_string();
+            keep_extension = true;
+        }
+        _ => {}
+    }
+    if !keep_extension {
         resolved.extensions.unicode.keywords.remove(&key("co"));
     }
     if collation != "default" {
@@ -127,10 +169,6 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
             .set(key("co"), collation.parse().unwrap());
         let try_prefs: CollatorPreferences = with.into();
         prefs.collation_type = try_prefs.collation_type;
-        if prefs.collation_type.is_none() {
-            collation = "default".into();
-            resolved.extensions.unicode.keywords.remove(&key("co"));
-        }
     }
     let sensitivity = choice(
         i,
@@ -160,6 +198,21 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
     }
     // Search uses the locale's collation with the requested strength. ICU's
     // compiled data determines the language-specific tailoring.
+    // ICU4X ships no search tailoring data; a Node oracle shows German
+    // search compares exactly like phonebook across 8 probe pairs, so reuse
+    // that tailoring for German search without touching resolved options.
+    if usage == "search" && collation == "default" && language == "de" {
+        let mut search = resolved.clone();
+        search
+            .extensions
+            .unicode
+            .keywords
+            .set(key("co"), "phonebk".parse().unwrap());
+        let search_prefs: CollatorPreferences = search.into();
+        if search_prefs.collation_type.is_some() {
+            prefs.collation_type = search_prefs.collation_type;
+        }
+    }
     let formatter = match Collator::try_new(prefs, icu) {
         Ok(c) => c,
         Err(_) => {

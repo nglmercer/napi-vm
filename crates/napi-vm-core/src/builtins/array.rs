@@ -12,13 +12,11 @@ use crate::value::{Value, to_integer_or_infinity};
 /// ArraySetLength converts the original value twice: ToUint32, then ToNumber.
 /// Both observable conversions precede descriptor compatibility checks.
 pub(super) fn array_length_value(interp: &mut Interpreter, value: &Value) -> Result<Value, VmErr> {
-    let unsigned = crate::value::to_int32(interp.ecmascript_to_number(value)?) as u32;
+    // ArraySetLength accepts any Uint32; huge lengths stay sparse downstream.
+    let unsigned = crate::value::to_uint32(interp.ecmascript_to_number(value)?);
     let number = interp.ecmascript_to_number(value)?;
     if number != unsigned as f64 {
         return Err(VmErr::Msg("RangeError: Invalid array length".into()));
-    }
-    if unsigned as usize > crate::value::MAX_ARRAY_LEN {
-        return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
     Ok(Value::Number(unsigned as f64))
 }
@@ -333,11 +331,16 @@ pub(super) fn is_array(value: &Value) -> Result<bool, VmErr> {
 /// `Array(n)` allocates `n` holes; `Array(a, b, …)` collects its arguments.
 fn array_ctor(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     if let [Value::Number(n)] = a.as_slice() {
-        if !n.is_finite() || *n < 0.0 || n.fract() != 0.0 {
+        if !n.is_finite() || *n < 0.0 || n.fract() != 0.0 || *n > u32::MAX as f64 {
             return Err(crate::value::limit_err("Invalid array length"));
         }
         if *n > crate::value::MAX_ARRAY_LEN as f64 {
-            return Err(crate::value::limit_err("Maximum array length exceeded"));
+            // Huge single-argument lengths stay sparse: no allocation.
+            let empty = Value::array(vec![]);
+            if let Value::Array(cell) = &empty {
+                cell.set_length(*n as usize);
+            }
+            return Ok(empty);
         }
         let length = *n as usize;
         return Ok(Value::array_with_presence(

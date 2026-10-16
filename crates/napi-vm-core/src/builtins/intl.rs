@@ -8,9 +8,15 @@ use icu_locale::{Locale, LocaleCanonicalizer};
 use std::rc::Rc;
 pub(crate) mod collator;
 mod data;
+pub(crate) mod datetime;
+pub(crate) mod displaynames;
+pub(crate) mod duration;
 pub(crate) mod list;
+pub(crate) mod number;
 pub(crate) mod plurals;
+pub(crate) mod relative;
 pub(crate) mod segmenter;
+mod supported;
 
 #[derive(Clone, Debug)]
 pub(crate) struct LocaleSlots {
@@ -138,6 +144,11 @@ pub(super) fn install(e: &mut Environment) {
         "getCanonicalLocales",
         native_method("getCanonicalLocales", 1, canonical_locales, fp.clone()),
     );
+    nonenum(
+        &intl,
+        "supportedValuesOf",
+        native_method("supportedValuesOf", 1, supported_values_of, fp.clone()),
+    );
     let ctor = Value::object_with_proto(vec![], fp.clone().map(Rc::new));
     super::make_callable(&ctor, super::require_new, Some(construct));
     for (key, value) in [
@@ -163,7 +174,10 @@ pub(super) fn install(e: &mut Environment) {
         ("minimize", minimize),
         ("getTextInfo", get_text_info),
         ("getCalendars", get_calendars),
+        ("getCollations", get_collations as NativeFn),
         ("getHourCycles", get_hour_cycles),
+        ("getNumberingSystems", get_numbering_systems as NativeFn),
+        ("getTimeZones", get_time_zones as NativeFn),
         ("getWeekInfo", get_week_info),
     ] {
         nonenum(&proto, name, native_method(name, 0, f, fp.clone()));
@@ -202,7 +216,12 @@ pub(super) fn install(e: &mut Environment) {
     segmenter::install(e, &intl);
     list::install(e, &intl);
     collator::install(e, &intl);
+    datetime::install(e, &intl);
+    displaynames::install(e, &intl);
     plurals::install(e, &intl);
+    relative::install(e, &intl);
+    duration::install(e, &intl);
+    number::install(e, &intl);
     e.set("Intl", intl);
 }
 
@@ -575,6 +594,61 @@ fn get_hour_cycles(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Va
         .1;
     Ok(strings(cycle))
 }
+fn is_private_language(language: &str) -> bool {
+    let bytes = language.as_bytes();
+    bytes.len() == 3 && bytes[0] == b'q' && matches!(bytes[1], b'a'..=b't')
+}
+fn get_collations(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let loc = locale(&this)?;
+    if let Some(collation) = keyword_in(&loc, "co") {
+        return Ok(Value::array(vec![Value::String(collation.into())]));
+    }
+    let language = loc.id.language.to_string();
+    // Root and private-use locales fall back to the root collations.
+    if language == "und" || is_private_language(&language) {
+        return Ok(strings("emoji eor"));
+    }
+    Ok(Value::array(
+        supported::SUPPORTED_COLLATIONS
+            .iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+    ))
+}
+fn get_numbering_systems(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let loc = locale(&this)?;
+    if let Some(numbering) = keyword_in(&loc, "nu") {
+        return Ok(Value::array(vec![Value::String(numbering.into())]));
+    }
+    Ok(Value::array(
+        number::numbering_system_names()
+            .map(|name| Value::String(name.into()))
+            .collect(),
+    ))
+}
+fn get_time_zones(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let loc = locale(&this)?;
+    // GetRegion without maximization: a locale without region yields undefined.
+    let region = keyword_in(&loc, "rg")
+        .and_then(|rg| rg.strip_suffix("zzzz").map(str::to_string))
+        .or_else(|| loc.id.region.map(|r| r.to_string()));
+    let Some(region) = region else {
+        return Ok(Value::Undefined);
+    };
+    let mut zones: Vec<&str> = datetime::ZONE_TAB
+        .iter()
+        .filter(|(country, _)| *country == region)
+        .map(|(_, zone)| *zone)
+        .collect();
+    zones.sort();
+    zones.dedup();
+    Ok(Value::array(
+        zones
+            .into_iter()
+            .map(|zone| Value::String(zone.into()))
+            .collect(),
+    ))
+}
 fn get_week_info(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let loc = locale(&this)?;
     let region = region_for_info(&loc);
@@ -721,4 +795,40 @@ fn supported_locales(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<
             .map(|tag| Value::String(tag.into()))
             .collect(),
     ))
+}
+fn supported_values_of(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
+    // ECMA-402 Intl.supportedValuesOf: coerce the key, then return a fresh
+    // array with the values the implementation observably supports.
+    let key = i.ecmascript_to_string(&arg(&args, 0))?.to_string();
+    let values: Vec<Value> = match key.as_str() {
+        "calendar" => supported::SUPPORTED_CALENDARS
+            .iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+        "collation" => supported::SUPPORTED_COLLATIONS
+            .iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+        "currency" => supported::SUPPORTED_CURRENCIES
+            .iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+        "numberingSystem" => number::numbering_system_names()
+            .map(|name| Value::String(name.into()))
+            .collect(),
+        "timeZone" => supported::SUPPORTED_TIME_ZONES
+            .iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+        "unit" => number::unit_names()
+            .iter()
+            .map(|name| Value::String((*name).into()))
+            .collect(),
+        _ => {
+            return Err(VmErr::Msg(
+                "RangeError: Invalid supportedValuesOf key".into(),
+            ));
+        }
+    };
+    Ok(Value::array(values))
 }

@@ -120,7 +120,8 @@ fn as_uint_n(i: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmEr
 /// Methods readable on a `BigInt` value.
 pub fn bigint_method(key: &str) -> Option<Value> {
     match key {
-        "toString" | "toLocaleString" => Some(super::nf(key, bigint_to_string)),
+        "toString" => Some(super::nf(key, bigint_to_string)),
+        "toLocaleString" => Some(super::nf(key, bigint_to_locale_string)),
         "valueOf" => Some(super::nf("valueOf", bigint_value_of)),
         _ => None,
     }
@@ -136,6 +137,15 @@ fn bigint_to_string(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Resul
         return Err(VmErr::Msg("RangeError: Invalid BigInt radix".into()));
     }
     Value::checked_string(value.to_radix(radix as u32))
+}
+
+fn bigint_to_locale_string(
+    i: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let value = bigint_receiver(&this)?;
+    super::intl::number::to_locale(i, Value::BigInt(value), args)
 }
 
 fn bigint_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {

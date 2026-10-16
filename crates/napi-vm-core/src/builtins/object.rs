@@ -377,7 +377,7 @@ fn own_slot(v: &Value, key: &str) -> Option<Value> {
     }
     if let Value::Array(array) = v {
         if key == "length" {
-            return Some(Value::Number(array.borrow().len() as f64));
+            return Some(Value::Number(array.array_length() as f64));
         }
         if let Some(index) = crate::value::array_index(key) {
             return array
@@ -1515,7 +1515,7 @@ pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> 
 
 fn array_property_value(array: &crate::value::ArrayCell, key: &str) -> Option<Value> {
     if key == "length" {
-        return Some(Value::Number(array.borrow().len() as f64));
+        return Some(Value::Number(array.array_length() as f64));
     }
     if let Some(index) = crate::value::array_index(key) {
         return array
@@ -1595,13 +1595,14 @@ fn define_array_property(
         {
             return Err(type_err("Cannot redefine array length attributes"));
         }
-        let old_length = array.borrow().len();
+        let old_length = array.array_length();
         let requested_length = match value {
             Some(Value::Number(length)) => {
+                // Array lengths are Uint32 values; only huge ones stay sparse.
                 if !length.is_finite()
                     || length < 0.0
                     || length.fract() != 0.0
-                    || length > crate::value::MAX_ARRAY_LEN as f64
+                    || length > u32::MAX as f64
                 {
                     return Err(type_err("Invalid array length"));
                 }
@@ -1621,7 +1622,7 @@ fn define_array_property(
         }
         if let Some(length) = requested_length {
             array.set_length(length);
-            if array.borrow().len() != length {
+            if array.array_length() != length {
                 if !requested_writable {
                     let mut attributes = array.meta.borrow().attrs_of("length");
                     attributes.writable = false;
@@ -1688,7 +1689,7 @@ fn define_array_property(
         )));
     }
     if let Some(index) = index {
-        let length = array.borrow().len();
+        let length = array.array_length();
         if index >= length && !array.meta.borrow().attrs_of("length").writable {
             return Err(type_err("Cannot extend array with non-writable length"));
         }

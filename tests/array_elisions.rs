@@ -24,6 +24,49 @@ fn assert_tiers(source: &str, expected: &str) {
 }
 
 #[test]
+fn indexed_writes_preserve_inherited_setters_and_receiver_descriptors() {
+    assert_tiers(
+        r#"
+        var seen = 0;
+        var proto = Object.create(Array.prototype);
+        Object.defineProperty(proto, '0', {set: function(v) { seen = v; }});
+        var a = [];
+        Object.setPrototypeOf(a, proto);
+        a[0] = 9;
+        var b = [1];
+        Object.defineProperty(b, '0', {writable: false});
+        b[0] = 7;
+        var c = [];
+        Object.defineProperty(c, 'length', {writable: false});
+        c[0] = 8;
+        var d = [];
+        Object.preventExtensions(d);
+        d[0] = 6;
+        JSON.stringify([seen, a.length, Object.hasOwn(a, 0), b[0], c.length, d.length]);
+        "#,
+        "[9,0,false,1,0,0]",
+    );
+    assert_tiers(
+        r#"
+        var seen = 0;
+        var proto = new Proxy({}, {set: function(t, k, v, r) { seen = v; return true; }});
+        var a = [];
+        Object.setPrototypeOf(a, proto);
+        a[0] = 4;
+        var b = [];
+        Object.setPrototypeOf(b, new String('x'));
+        b[0] = 'y';
+        JSON.stringify([seen, a.length, b.length, b[0]]);
+        "#,
+        "[4,0,0,\"x\"]",
+    );
+    assert_tiers(
+        "var a = [1,,3]; a[0] = 4; a[1] = 5; a[3] = 6; JSON.stringify([a, Object.keys(a)]);",
+        "[[4,5,3,6],[\"0\",\"1\",\"2\",\"3\"]]",
+    );
+}
+
+#[test]
 fn elisions_contribute_length_without_creating_properties() {
     assert_tiers(
         "var a = [, undefined, , 4,,]; JSON.stringify([a.length, Object.keys(a), 0 in a, 1 in a, 2 in a, 4 in a, Object.getOwnPropertyDescriptor(a, '0')]);",

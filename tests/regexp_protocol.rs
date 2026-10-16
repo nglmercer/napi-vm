@@ -79,3 +79,15 @@ fn named_backreferences_resolve_forward_and_decode_identifier_escapes() {
         r#"[true,true,true,["SyntaxError"]]"#,
     );
 }
+
+#[test]
+fn linear_scans_scale_with_input_while_catastrophic_patterns_stay_bounded() {
+    check(
+        r#"var s='ab'.repeat(300000);var result=[/\d/.test(s),/\d/u.test(s),/\d/v.test(s),s.length];"#,
+        r#"[false,false,false,600000]"#,
+    );
+    check(
+        r#"var hit='';try{/(a+)+$/.test('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab')}catch(e){hit=String(e&&e.message||e)}var result=hit.indexOf('backtracking budget')!==-1;"#,
+        r#"true"#,
+    );
+}

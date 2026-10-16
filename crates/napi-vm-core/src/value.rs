@@ -67,6 +67,14 @@ pub(crate) fn to_int32(number: f64) -> i32 {
     }
 }
 
+/// ECMAScript ToUint32 wraps modulo 2^32.
+pub(crate) fn to_uint32(number: f64) -> u32 {
+    if !number.is_finite() {
+        return 0;
+    }
+    number.trunc().rem_euclid(4_294_967_296.0) as u32
+}
+
 /// Convenience constructor for the guest-visible limit errors.
 pub fn limit_err(msg: &str) -> VmErr {
     VmErr::Msg(format!("RangeError: {}", msg))
@@ -219,7 +227,13 @@ pub struct ObjectMeta {
     pub(crate) intl_plurals: Option<crate::builtins::intl::plurals::Slots>,
     pub(crate) intl_collator: Option<crate::builtins::intl::collator::Slots>,
     pub(crate) intl_bound_compare: Option<Value>,
+    pub(crate) intl_bound_format: Option<Value>,
+    pub(crate) intl_number: Option<crate::builtins::intl::number::Slots>,
+    pub(crate) intl_datetime: Option<crate::builtins::intl::datetime::Slots>,
+    pub(crate) intl_displaynames: Option<crate::builtins::intl::displaynames::Slots>,
     pub(crate) intl_list: Option<crate::builtins::intl::list::Slots>,
+    pub(crate) intl_relative: Option<crate::builtins::intl::relative::Slots>,
+    pub(crate) intl_duration: Option<crate::builtins::intl::duration::Slots>,
     pub(crate) intl_segmenter: Option<crate::builtins::intl::segmenter::SegmenterSlots>,
     pub(crate) intl_segments: Option<Rc<crate::builtins::intl::segmenter::SegmentsSlots>>,
     pub(crate) intl_segment_iterator: Option<Rc<crate::builtins::intl::segmenter::IteratorSlots>>,
@@ -374,6 +388,10 @@ impl ObjectMeta {
 #[derive(Debug)]
 pub struct ArrayCell {
     elements: RefCell<Vec<Value>>,
+    /// Logical length beyond `elements`: lengths above `MAX_ARRAY_LEN` stay
+    /// sparse (no allocation), as ArraySetLength allows up to 2^32 - 1.
+    /// Reads report the maximum of both.
+    length_override: RefCell<Option<usize>>,
     /// Array indices can exist without owning a value. Element reads still
     /// return `undefined` for those indices; this bitmap preserves the
     /// observable distinction for `in`, `Object.hasOwn`, reflection, and host
@@ -406,9 +424,17 @@ fn array_meta() -> ObjectMeta {
 }
 
 impl ArrayCell {
+    /// Logical length: stored elements, or the sparse override above them.
+    pub fn array_length(&self) -> usize {
+        self.elements
+            .borrow()
+            .len()
+            .max(self.length_override.borrow().unwrap_or(0))
+    }
     pub fn new(elements: Vec<Value>) -> Self {
         Self {
             elements: RefCell::new(elements),
+            length_override: RefCell::new(None),
             present: RefCell::new(None),
             named: RefCell::new(Vec::new()),
             meta: RefCell::new(array_meta()),
@@ -423,6 +449,7 @@ impl ArrayCell {
         let normalized = (!normalized.iter().all(|present| *present)).then_some(normalized);
         Self {
             elements: RefCell::new(elements),
+            length_override: RefCell::new(None),
             present: RefCell::new(normalized),
             named: RefCell::new(Vec::new()),
             meta: RefCell::new(array_meta()),
@@ -464,7 +491,9 @@ impl ArrayCell {
 
     /// Set an array's length while respecting its own indexed property
     /// descriptors. Shrinking stops at the highest non-configurable index,
-    /// matching the partial truncation performed by ArraySetLength.
+    /// matching the partial truncation performed by ArraySetLength. Lengths
+    /// above `MAX_ARRAY_LEN` stay sparse in `length_override` so 2^32 - 1
+    /// never allocates.
     pub fn set_length(&self, requested: usize) {
         let old_length = self.elements.borrow().len();
         let mut length = requested;
@@ -477,6 +506,11 @@ impl ArrayCell {
                 }
             }
         }
+        if length > MAX_ARRAY_LEN {
+            *self.length_override.borrow_mut() = Some(length);
+            return;
+        }
+        *self.length_override.borrow_mut() = None;
         self.elements.borrow_mut().resize(length, Value::Undefined);
         self.resize_presence(old_length, length, false);
     }
@@ -713,6 +747,7 @@ impl ArrayCell {
                     .flat_map(PrivateElement::values),
             );
             out.extend(meta.intl_bound_compare.iter().cloned());
+            out.extend(meta.intl_bound_format.iter().cloned());
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
@@ -760,6 +795,7 @@ impl ArrayCell {
         meta.regexp_iterator = None;
         meta.revocable_proxy = None;
         meta.intl_bound_compare = None;
+        meta.intl_bound_format = None;
         meta.proto = None;
         meta.realm_global = None;
         true
@@ -858,6 +894,7 @@ impl ObjectCell {
                     .flat_map(PrivateElement::values),
             );
             out.extend(meta.intl_bound_compare.iter().cloned());
+            out.extend(meta.intl_bound_format.iter().cloned());
             out.extend(meta.revocable_proxy.iter().cloned().map(Value::Proxy));
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
@@ -909,6 +946,7 @@ impl ObjectCell {
         meta.regexp_iterator = None;
         meta.revocable_proxy = None;
         meta.intl_bound_compare = None;
+        meta.intl_bound_format = None;
         meta.proto = None;
         meta.realm_global = None;
         // The layout is empty now; drop the cached shape so a later access

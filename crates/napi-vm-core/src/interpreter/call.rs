@@ -1324,6 +1324,41 @@ impl Interpreter {
     ) -> Result<bool, VmErr> {
         let key = self.ecmascript_to_property_key(property)?;
         let slot = self.property_key(&key)?;
+        // Dense array construction should not materialize descriptor objects
+        // for every element. Only bypass OrdinarySet when the receiver is the
+        // target and no inherited indexed property can intercept a new write.
+        if let Value::Array(array) = target
+            && crate::interpreter::strict_equals(target, receiver)
+            && let Some(index) = crate::value::array_index(&slot)
+        {
+            let own_data = array.has_index(index) && !array.meta.borrow().has_accessors;
+            let mut clear_chain = false;
+            if !array.has_index(index) {
+                let mut prototype = self.prototype_of(target);
+                for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
+                    let Some(current) = prototype else {
+                        clear_chain = true;
+                        break;
+                    };
+                    let absent = match current.as_ref() {
+                        Value::Object { props } => {
+                            !props.meta.borrow().module_namespace
+                                && props.meta.borrow().boxed_primitive.is_none()
+                                && props.own_value(&slot).is_none()
+                        }
+                        Value::Array(cell) => !cell.has_index(index),
+                        _ => false,
+                    };
+                    if !absent {
+                        break;
+                    }
+                    prototype = self.prototype_of(current.as_ref());
+                }
+            }
+            if own_data || clear_chain {
+                return self.set_member(target, &Value::Number(index as f64), value);
+            }
+        }
         let mut current = if matches!(target, Value::GlobalObject) {
             self.realm_global_object()
         } else {

@@ -18,6 +18,7 @@
 
 mod emoji_tables;
 mod parse;
+mod unicode;
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ pub use parse::{Anchor, ClassItem, Node, Shorthand};
 /// Sized so an ordinary pattern never notices while a catastrophic one fails
 /// in well under a second.
 const MAX_STEPS: usize = 1_000_000;
+const STEPS_PER_INPUT_UNIT: usize = 64;
 
 /// A compiled pattern together with its flags.
 #[derive(Debug)]
@@ -159,6 +161,10 @@ impl Regex {
             regex: self,
             input,
             steps: Cell::new(0),
+            // Linear scans over large inputs are legitimate work, not
+            // runaway backtracking: grant a per-unit allowance above the
+            // flat budget so only super-linear blowups trip it.
+            budget: MAX_STEPS.saturating_add(input.len().saturating_mul(STEPS_PER_INPUT_UNIT)),
             depth: Cell::new(0),
             modifiers: Cell::new(
                 u8::from(self.ignore_case)
@@ -201,6 +207,7 @@ struct Matcher<'a> {
     regex: &'a Regex,
     input: &'a [u16],
     steps: Cell<usize>,
+    budget: usize,
     depth: Cell<usize>,
     modifiers: Cell<u8>,
 }
@@ -228,7 +235,7 @@ impl Matcher<'_> {
     fn step(&self) -> Result<(), String> {
         let steps = self.steps.get() + 1;
         self.steps.set(steps);
-        if steps > MAX_STEPS {
+        if steps > self.budget {
             return Err(
                 "RangeError: Regular expression exceeded the backtracking budget".to_string(),
             );
@@ -258,10 +265,8 @@ impl Matcher<'_> {
     fn same_char(&self, a: u32, b: u32) -> bool {
         a == b
             || ((self.modifiers.get() & 1 != 0)
-                && match (char::from_u32(a), char::from_u32(b)) {
-                    (Some(a), Some(b)) => a.to_lowercase().eq(b.to_lowercase()),
-                    _ => false,
-                })
+                && unicode::canonical(a, self.regex.unicode)
+                    == unicode::canonical(b, self.regex.unicode))
     }
     fn word_character(&self, c: u32) -> bool {
         matches!(c, 48..=57 | 65..=90 | 97..=122 | 95)
@@ -453,26 +458,21 @@ impl Matcher<'_> {
             ClassItem::Char(want) => self.same_char(c, *want),
             ClassItem::Range(low, high) => {
                 (*low..=*high).contains(&c)
-                    || ((self.modifiers.get() & 1 != 0)
-                        && char::from_u32(c).is_some_and(|ch| {
-                            ch.to_lowercase()
-                                .any(|v| (*low..=*high).contains(&(v as u32)))
-                                || ch
-                                    .to_uppercase()
-                                    .any(|v| (*low..=*high).contains(&(v as u32)))
-                        }))
+                    || (self.modifiers.get() & 1 != 0
+                        && unicode::range_matches(c, *low, *high, self.regex.unicode))
             }
             ClassItem::Shorthand { kind, negated } => {
                 let base = match kind {
                     Shorthand::Digit => (48..=57).contains(&c),
                     Shorthand::Word => self.word_character(c),
                     Shorthand::Space => {
-                        char::from_u32(c).is_some_and(char::is_whitespace) || c == 0xFEFF
+                        matches!(c, 0x0009..=0x000d | 0x0020 | 0x00a0 | 0x1680 | 0x2000..=0x200a | 0x2028 | 0x2029 | 0x202f | 0x205f | 0x3000 | 0xfeff)
                     }
                 };
                 base != *negated
             }
             ClassItem::UnicodeProperty {
+                surrogates,
                 ranges,
                 folded,
                 folded_complement,
@@ -490,10 +490,17 @@ impl Matcher<'_> {
                     ranges
                 };
                 let index = ranges.partition_point(|(_, high)| (*high as u32) < c);
-                let hit = ranges
-                    .get(index)
-                    .is_some_and(|(low, high)| (*low as u32..=*high as u32).contains(&c))
-                    || (complement_first && (0xd800..=0xdfff).contains(&c));
+                let hit = if (0xd800..=0xdfff).contains(&c) {
+                    if complement_first {
+                        !surrogates
+                    } else {
+                        *surrogates
+                    }
+                } else {
+                    ranges
+                        .get(index)
+                        .is_some_and(|(low, high)| (*low as u32..=*high as u32).contains(&c))
+                };
                 if complement_first {
                     hit
                 } else {
@@ -846,6 +853,53 @@ impl Matcher<'_> {
         k: Cont<'_>,
     ) -> Result<bool, String> {
         let strings = parse::Parser::set_contains_strings(items);
+        // Scalar-only classes advance deterministically (one scalar per
+        // iteration), so the layers would be singletons. Walk the maximal
+        // run directly instead: same greedy/lazy end order, one position
+        // vector, no per-layer or per-count allocation. This keeps
+        // million-unit `+` runs (unicode property tests) in budget.
+        let scalar_only = !strings
+            && items.iter().all(|item| {
+                matches!(
+                    item,
+                    parse::ClassItem::Char(_)
+                        | parse::ClassItem::Range(_, _)
+                        | parse::ClassItem::Shorthand { .. }
+                        | parse::ClassItem::UnicodeProperty { .. }
+                )
+            });
+        if scalar_only {
+            let mut ends = vec![pos];
+            let mut current = pos;
+            loop {
+                if max.is_some_and(|limit| ends.len() - 1 >= limit as usize) {
+                    break;
+                }
+                let Some(c) = self.scalar(current) else {
+                    break;
+                };
+                if !self.class_matches(negated, items, c) {
+                    break;
+                }
+                current = self.advance(current);
+                ends.push(current);
+            }
+            let top = ends.len() - 1;
+            if greedy {
+                for index in (min as usize..=top).rev() {
+                    if k(ends[index], caps) {
+                        return Ok(true);
+                    }
+                }
+            } else {
+                for index in min as usize..=top {
+                    if k(ends[index], caps) {
+                        return Ok(true);
+                    }
+                }
+            }
+            return Ok(false);
+        }
         let mut layers: Vec<Vec<usize>> = vec![vec![pos]];
         // Every end ever produced, so the fixed-point check below stays
         // linear instead of rescanning all previous layers per end. Layers
@@ -1000,6 +1054,117 @@ mod modifier_tests {
             .find_at(&input.encode_utf16().collect::<Vec<_>>(), 0)
             .unwrap()
             .is_some()
+    }
+
+    #[test]
+    fn unicode_17_properties_and_simple_case_equivalence() {
+        for flags in ["u", "v"] {
+            assert!(matches(r"^\p{Alphabetic}$", flags, "\u{88f}"));
+            assert!(matches(r"^\p{Assigned}$", flags, "\u{1fac8}"));
+            assert!(matches(r"^\p{Script=Sidetic}$", flags, "\u{10940}"));
+            assert!(matches(
+                r"^\p{Script_Extensions=Sidetic}$",
+                flags,
+                "\u{10940}"
+            ));
+            assert!(matches(
+                r"^\p{General_Category=Currency_Symbol}$",
+                flags,
+                "\u{20c1}"
+            ));
+            assert!(Regex::new(r"\p{alphabetic}", flags).is_err());
+            assert!(Regex::new(r"\p{Script=latin}", flags).is_err());
+            assert!(Regex::new(r"\p{Block=ASCII}", flags).is_err());
+        }
+        assert!(matches("^\u{390}$", "iu", "\u{1fd3}"));
+        assert!(matches("^[\u{390}-\u{390}]$", "iu", "\u{1fd3}"));
+        assert!(matches("^s$", "iu", "ſ"));
+        assert!(!matches("^s$", "i", "ſ"));
+        assert!(!matches("^[s-s]$", "i", "ſ"));
+        assert!(!matches("^k$", "i", "K"));
+        assert!(matches("^k$", "iu", "K"));
+        assert!(!matches("^[I-I]$", "iu", "ı"));
+        assert!(!matches("^[S-S]$", "iu", "ß"));
+        assert!(matches("^꟎$", "iu", "꟏"));
+        assert!(matches(r"^\p{Uppercase}$", "iu", "꟏"));
+    }
+
+    #[test]
+    fn whitespace_classes_use_ecmascript_whitespace() {
+        for flags in ["", "u", "v"] {
+            for c in ["\u{85}", "\u{180e}", "\u{200b}"] {
+                assert!(!matches(r"\s", flags, c));
+                assert!(matches(r"\S", flags, c));
+            }
+            for c in ["\t", "\n", "\u{a0}", "\u{2028}", "\u{feff}"] {
+                assert!(matches(r"\s", flags, c));
+                assert!(!matches(r"\S", flags, c));
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_properties_include_lone_surrogates_where_required() {
+        for flags in ["u", "v", "iu", "iv"] {
+            for property in [
+                "Any",
+                "Assigned",
+                "Cs",
+                "Surrogate",
+                "gc=Cs",
+                "General_Category=Surrogate",
+                "C",
+                "Other",
+            ] {
+                for unit in [0xd800, 0xdbff, 0xdc00, 0xdfff] {
+                    let positive = Regex::new(&format!(r"^\p{{{property}}}+$"), flags).unwrap();
+                    assert!(
+                        positive.find_at(&[unit], 0).unwrap().is_some(),
+                        "{property}/{flags}"
+                    );
+                    let negative = Regex::new(&format!(r"^\P{{{property}}}+$"), flags).unwrap();
+                    assert!(
+                        negative.find_at(&[unit], 0).unwrap().is_none(),
+                        "{property}/{flags}"
+                    );
+                }
+            }
+            assert!(
+                Regex::new(r"^\p{Cs}$", flags)
+                    .unwrap()
+                    .find_at(&[0xd83d, 0xde00], 0)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                Regex::new(r"^\P{Cs}$", flags)
+                    .unwrap()
+                    .find_at(&[0xd83d, 0xde00], 0)
+                    .unwrap()
+                    .is_some()
+            );
+            assert!(
+                Regex::new(r"^\p{ASCII}$", flags)
+                    .unwrap()
+                    .find_at(&[0xd800], 0)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_class_repeat_preserves_bounds_backtracking_and_unicode() {
+        assert!(matches(r"^[a-z]+[a-z]$", "", "abc"));
+        assert!(matches(r"^[a-z]+?[a-z]$", "", "abc"));
+        assert!(!matches(r"^[a-z]{4,}$", "", "abc"));
+        assert!(matches(r"^[a-z]{0}$", "", ""));
+        assert!(matches(r"^\p{ASCII}{2,3}b$", "u", "aab"));
+        assert!(!matches(r"^\p{ASCII}{2,3}b$", "u", "ab"));
+        assert!(matches(r"^[^a]{2}$", "u", "😀😀"));
+        assert!(matches(r"^(?i:[a-z]+)Z$", "", "AbZ"));
+        assert!(!matches(r"^(?i:[a-z]+)Z$", "", "Abz"));
+        assert!(matches(r"^\p{ASCII}+$", "u", &"a".repeat(1_000_000)));
     }
 
     #[test]

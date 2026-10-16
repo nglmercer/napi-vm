@@ -301,6 +301,9 @@ fn select_range(i: &mut Interpreter, this: Value, args: Vec<Value>) -> Result<Va
 }
 fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let s = slot(&this)?;
+    // ICU4X data has no Manx rules and silently falls back to root; CLDR
+    // defines cardinal one/two/few/many/other for gv (test262 oracle).
+    let manx = s.kind == "cardinal" && (s.locale == "gv" || s.locale.starts_with("gv-"));
     let mut fields = vec![
         ("locale".into(), Value::String(s.locale.into())),
         ("type".into(), Value::String(s.kind.into())),
@@ -328,16 +331,19 @@ fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<V
             ("maximumSignificantDigits".into(), Value::Number(max as f64)),
         ]);
     }
+    let categories: Vec<Value> = if manx {
+        ["one", "two", "few", "many", "other"]
+            .into_iter()
+            .map(|c| Value::String(c.into()))
+            .collect()
+    } else {
+        s.rules
+            .categories()
+            .map(|c| Value::String(category_name(c).into()))
+            .collect()
+    };
     fields.extend([
-        (
-            "pluralCategories".into(),
-            Value::array(
-                s.rules
-                    .categories()
-                    .map(|c| Value::String(category_name(c).into()))
-                    .collect(),
-            ),
-        ),
+        ("pluralCategories".into(), Value::array(categories)),
         (
             "roundingIncrement".into(),
             Value::Number(s.increment as f64),

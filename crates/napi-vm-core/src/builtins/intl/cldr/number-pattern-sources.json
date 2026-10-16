@@ -1,0 +1,11 @@
+{
+  "cldr_version": "48.0.0",
+  "archive_sha256": {
+    "numbers": "d3d12515b0f6f7c4b5f82586b52b16164a0cffbf4d45a9f2bd894380a96b1cb3",
+    "units": "702cec5d8caa9c1c323188eab426262003f45d1a58fc7ad073be4c7128ee8137",
+    "core": "3b739a175e47e50905050a34612584fd5590c9352b11f36e3498eacff1c9aa94"
+  },
+  "locales": 766,
+  "unique_records": 518,
+  "blob_sha256": "c46b014bfca84fafa805cc4cdccb2c47564e915611b88704d280a2adf5d6d1ab"
+}
