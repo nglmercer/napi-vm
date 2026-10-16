@@ -44,23 +44,31 @@ pub enum ClassItem {
 #[derive(Debug, Clone, Default)]
 pub struct StringAlts {
     alts: Vec<Vec<u16>>,
-    by_first: HashMap<u16, Vec<usize>>,
+    /// Single-unit alternatives by their unit.
+    by_single: HashMap<u16, Vec<usize>>,
+    /// Longer alternatives by their first two units. Astral emoji share a
+    /// handful of lead surrogates, so one unit still matches hundreds of
+    /// entries; two units narrow RGI candidates to roughly a dozen.
+    by_pair: HashMap<(u16, u16), Vec<usize>>,
     has_empty: bool,
 }
 
 impl StringAlts {
     pub fn new(alts: Vec<Vec<u16>>) -> Self {
-        let mut by_first: HashMap<u16, Vec<usize>> = HashMap::new();
+        let mut by_single: HashMap<u16, Vec<usize>> = HashMap::new();
+        let mut by_pair: HashMap<(u16, u16), Vec<usize>> = HashMap::new();
         let mut has_empty = false;
         for (index, alternative) in alts.iter().enumerate() {
-            match alternative.first() {
-                Some(first) => by_first.entry(*first).or_default().push(index),
-                None => has_empty = true,
+            match alternative.as_slice() {
+                [] => has_empty = true,
+                [only] => by_single.entry(*only).or_default().push(index),
+                [first, second, ..] => by_pair.entry((*first, *second)).or_default().push(index),
             }
         }
         Self {
             alts,
-            by_first,
+            by_single,
+            by_pair,
             has_empty,
         }
     }
@@ -73,10 +81,22 @@ impl StringAlts {
         self.has_empty
     }
 
-    /// Candidate alternative indices whose first unit equals `unit`,
-    /// or `None` when no alternative can start with it.
-    pub fn candidates(&self, unit: u16) -> Option<&[usize]> {
-        self.by_first.get(&unit).map(Vec::as_slice)
+    /// Whether a single-unit alternative equals `unit`.
+    pub fn has_single(&self, unit: u16) -> bool {
+        self.by_single.contains_key(&unit)
+    }
+
+    /// Single-unit alternative indices starting with `unit`, in source
+    /// order. Used to merge singles with longer matches without
+    /// disturbing alternative order.
+    pub fn singles(&self, unit: u16) -> Option<&[usize]> {
+        self.by_single.get(&unit).map(Vec::as_slice)
+    }
+
+    /// Candidate longer alternatives whose first two units equal
+    /// (`first`, `second`), or `None` when none can start with them.
+    pub fn candidates(&self, first: u16, second: u16) -> Option<&[usize]> {
+        self.by_pair.get(&(first, second)).map(Vec::as_slice)
     }
 }
 

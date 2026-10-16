@@ -310,14 +310,7 @@ impl Matcher<'_> {
             match item {
                 ClassItem::Strings(strings) => {
                     if self.modifiers.get() & 1 == 0 && pos < self.input.len() {
-                        if let Some(indices) = strings.candidates(self.input[pos]) {
-                            for index in indices {
-                                let alternative = &strings.all()[*index];
-                                if self.string_at(alternative, pos) {
-                                    ends.push(pos + alternative.len());
-                                }
-                            }
-                        }
+                        self.string_table_ends(strings, pos, &mut ends);
                         if strings.has_empty() {
                             ends.push(pos);
                         }
@@ -374,6 +367,54 @@ impl Matcher<'_> {
         Ok(ends)
     }
 
+    /// Ends for a string table at `pos` on the no-fold path, in source
+    /// alternative order: single-unit matches (which always match their
+    /// first unit) merged by alternative index with the verified longer
+    /// matches. Callers deduplicate or sort as their order needs.
+    fn string_table_ends(&self, strings: &parse::StringAlts, pos: usize, ends: &mut Vec<usize>) {
+        let unit = self.input[pos];
+        // Verified longer matches as (alternative index, end). Indices
+        // ascend because the pair buckets were built in source order.
+        let mut longer = Vec::new();
+        if pos + 1 < self.input.len() {
+            if let Some(indices) = strings.candidates(unit, self.input[pos + 1]) {
+                for index in indices {
+                    let alternative = &strings.all()[*index];
+                    if self.string_at(alternative, pos) {
+                        longer.push((*index, pos + alternative.len()));
+                    }
+                }
+            }
+        }
+        // Singles match unconditionally on the no-fold path. Both lists
+        // ascend in alternative index, so a merge join preserves source
+        // alternative order exactly.
+        let mut singles = strings
+            .singles(unit)
+            .unwrap_or(&[])
+            .iter()
+            .map(|index| (*index, pos + 1))
+            .peekable();
+        let mut longer = longer.into_iter().peekable();
+        while longer.peek().is_some() {
+            let take_single = match (singles.peek(), longer.peek()) {
+                (Some((si, _)), Some((li, _))) => si <= li,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if take_single {
+                let (_, end) = singles.next().expect("peeked single");
+                ends.push(end);
+            } else {
+                let (_, end) = longer.next().expect("peeked longer");
+                ends.push(end);
+            }
+        }
+        for (_, end) in singles {
+            ends.push(end);
+        }
+    }
+
     /// Match one input unit slice against a string alternative, folding
     /// each unit under the `i` flag like scalar matching does.
     fn string_at(&self, alternative: &[u16], pos: usize) -> bool {
@@ -397,12 +438,7 @@ impl Matcher<'_> {
         items.iter().any(|item| match item {
             ClassItem::Strings(strings) => {
                 if self.modifiers.get() & 1 == 0 && c <= u16::MAX as u32 {
-                    strings.candidates(c as u16).is_some_and(|indices| {
-                        indices.iter().any(|index| {
-                            let alternative = &strings.all()[*index];
-                            alternative.len() == 1
-                        })
-                    })
+                    strings.has_single(c as u16)
                 } else {
                     strings.all().iter().any(|alternative| {
                         alternative.len() == 1 && self.same_char(c, alternative[0] as u32)
@@ -811,8 +847,11 @@ impl Matcher<'_> {
     ) -> Result<bool, String> {
         let strings = parse::Parser::set_contains_strings(items);
         let mut layers: Vec<Vec<usize>> = vec![vec![pos]];
-        // Every end ever produced; ends range over input positions, so a
-        // layer with no new end means all later layers repeat it exactly.
+        // Every end ever produced, so the fixed-point check below stays
+        // linear instead of rescanning all previous layers per end. Layers
+        // keep their full end sets (including ends seen at lower counts)
+        // because greedy/lazy backtracking order depends on which counts
+        // can reach each end.
         let mut seen = vec![false; self.input.len() + 1];
         seen[pos] = true;
         loop {
@@ -824,18 +863,43 @@ impl Matcher<'_> {
                 self.step()?;
             }
             let mut next = Vec::new();
-            for &start in layers.last().expect("layer") {
-                for end in self.class_ends(negated, items, start)? {
-                    if !seen[end] {
-                        seen[end] = true;
-                        next.push(end);
+            // Pure string tables dominate long runs (RGI has ~4k entries):
+            // expand inline without one allocation per end, then sort and
+            // deduplicate. The end multiset matches `class_ends` exactly.
+            let table_only = !negated
+                && self.modifiers.get() & 1 == 0
+                && matches!(items, [parse::ClassItem::Strings(_)]);
+            if table_only {
+                let [parse::ClassItem::Strings(strings)] = items else {
+                    unreachable!("table-only match checked above")
+                };
+                for &start in layers.last().expect("layer") {
+                    if start < self.input.len() {
+                        self.string_table_ends(strings, start, &mut next);
+                    } else if strings.has_empty() {
+                        next.push(start);
                     }
                 }
+                next.sort_unstable();
+                next.dedup();
+            } else {
+                for &start in layers.last().expect("layer") {
+                    for end in self.class_ends(negated, items, start)? {
+                        if !next.contains(&end) {
+                            next.push(end);
+                        }
+                    }
+                }
+                next.sort_unstable();
             }
-            if next.is_empty() {
+            if next.iter().all(|end| {
+                let already = seen[*end];
+                seen[*end] = true;
+                already
+            }) {
+                layers.push(next);
                 break;
             }
-            next.sort_unstable();
             layers.push(next);
         }
         // Counts beyond the frozen layers repeat the same ends; extend to
@@ -848,7 +912,7 @@ impl Matcher<'_> {
         if greedy {
             counts.reverse();
         }
-        let mut tried = Vec::new();
+        let mut tried = vec![false; self.input.len() + 1];
         for count in counts {
             let mut ends = layers[count].clone();
             if greedy {
@@ -857,10 +921,10 @@ impl Matcher<'_> {
                 ends.sort_unstable();
             }
             for end in ends {
-                if tried.contains(&end) {
+                if tried[end] {
                     continue;
                 }
-                tried.push(end);
+                tried[end] = true;
                 if k(end, caps) {
                     return Ok(true);
                 }
