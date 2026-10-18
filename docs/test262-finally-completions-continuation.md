@@ -33,5 +33,5 @@ remaining failures and zero skips, timeouts, crashes, or harness errors.
 It uses the same selection, pinned corpus, two workers, five-second timeout,
 and no feature skips. Reports, comparisons, worker identity, and the source
 patch are archived under [finally completion evidence](../tools/test262/evidence/finally-completions-2026-10-18/). The last completed
-full score remains 101,806 / 102,956 on d8d1652; focused gains are not added to
+full score measures 101,728 / 102,956 on 607d086; focused gains are not added to
 that score.

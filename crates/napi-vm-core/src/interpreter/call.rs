@@ -205,6 +205,41 @@ impl Interpreter {
         }
         Ok(arguments)
     }
+    /// Link mapped indexes to the initialized parameter environment.
+    pub(crate) fn map_function_arguments(
+        &self,
+        function: &Value,
+        env: &Env,
+        count: usize,
+    ) -> Result<(), VmErr> {
+        let Value::Function(data) = function else {
+            return Ok(());
+        };
+        if !data.has_mapped_arguments() || !data.needs_arguments_object() {
+            return Ok(());
+        }
+        let Some(object) = env.borrow().get("arguments") else {
+            return Ok(());
+        };
+        let Some(properties) = object.property_cell() else {
+            return Ok(());
+        };
+        if !properties.meta.borrow().is_arguments {
+            return Ok(());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for (index, name) in data.params.iter().enumerate().rev() {
+            if seen.insert(name.clone()) && index < count {
+                let cell = env
+                    .borrow_mut()
+                    .export_cell(name)
+                    .expect("initialized parameter");
+                object.set_prop(index.to_string(), Value::Binding(cell))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Build arguments through one shared path for AST and bytecode calls.
     pub(crate) fn function_arguments(
         &self,
@@ -215,15 +250,7 @@ impl Interpreter {
             return Value::arguments_object(args);
         };
         let object = Value::arguments_object(args)?;
-        let unmapped = data.strict
-            || data.params.iter().any(|name| name.starts_with("..."))
-            || data
-                .body
-                .iter()
-                .find(|statement| !matches!(statement, Statement::ClassInitialization { .. }))
-                .is_some_and(|statement| {
-                    matches!(statement, Statement::ParameterInitialization { .. })
-                });
+        let unmapped = !data.has_mapped_arguments();
         if unmapped {
             if let Some(thrower) = self
                 .persistent_global
@@ -2279,7 +2306,23 @@ impl Interpreter {
                             self.global = saved;
                             (Rc::new(fd.body[1..].to_vec()), result?, true)
                         } else {
-                            (fd.body.clone(), context, false)
+                            for (index, parameter) in fd.params.iter().enumerate() {
+                                if let Some(name) = parameter.strip_prefix("...") {
+                                    context.borrow_mut().set(
+                                        name,
+                                        Value::checked_array(
+                                            args.get(index..).unwrap_or(&[]).to_vec(),
+                                        )?,
+                                    );
+                                } else {
+                                    context.borrow_mut().set(
+                                        parameter,
+                                        args.get(index).cloned().unwrap_or(Value::Undefined),
+                                    );
+                                }
+                            }
+                            self.map_function_arguments(f, &context, args.len())?;
+                            (fd.body.clone(), context, true)
                         };
                     let properties = Value::instance_properties();
                     let prototype = fd.prototype_value(f);
@@ -2357,7 +2400,7 @@ impl Interpreter {
                             let arg = args.get(i).cloned().unwrap_or(Value::Undefined);
                             vars.push((p.clone(), arg));
                         }
-                        // Create the (detached) arguments object only when
+                        // Create the arguments object only when
                         // the body actually reads it; most functions never do.
                         // Arrows inherit `arguments` through the chain; only real
                         // functions bind their own.
@@ -2407,6 +2450,7 @@ impl Interpreter {
                     }
                 };
 
+                self.map_function_arguments(f, &fe, args.len())?;
                 fe.borrow_mut().replace_strict(Some(fd.strict));
                 if !fd.is_arrow {
                     fe.borrow_mut().set_new_target(new_target);

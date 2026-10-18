@@ -434,10 +434,6 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn is_arrow(&self) -> bool {
-        self.is_arrow
-    }
-
     // -- allocation --------------------------------------------------------
 
     fn alloc_reg(&mut self) -> Result<Reg, Decline> {
@@ -1281,6 +1277,13 @@ impl<'a> Compiler<'a> {
         // Box before hoisting: `resolve` and slot allocation both consult
         // this set while the body compiles.
         self.captured = find_captured(params, body);
+        if !*is_arrow
+            && matches!(body, FuncBody::Stmts(stmts) if crate::parser::stmts_need_arguments(stmts))
+        {
+            self.captured.extend(params.iter().cloned());
+            self.captured.insert("arguments".into());
+            self.captures_arguments = true;
+        }
         let parameter_count = params.len();
         match body {
             FuncBody::Stmts(stmts) => {
@@ -3705,17 +3708,11 @@ impl<'a> Compiler<'a> {
     }
 
     /// Identifier reads resolve lexical bindings, including shadowed `undefined`.
-    /// `arguments` in a
-    /// real function needs the arguments object (per-function fallback); in
-    /// an arrow it captures the enclosing one through the chain (seeded by
-    /// the defining non-arrow function).
+    /// Real functions seed their own arguments object; arrows capture the
+    /// enclosing one through the environment chain.
     fn compile_identifier(&mut self, name: &str) -> Result<Reg, Decline> {
         if name == "arguments" && !self.top_level {
-            if self.is_arrow() {
-                self.captures_arguments = true;
-            } else {
-                return Err(Decline::Func("arguments object needs fallback"));
-            }
+            self.captures_arguments = true;
         }
         let dst = self.alloc_reg()?;
         match self.resolve(name)? {
@@ -5288,7 +5285,7 @@ mod tests {
             ("outer: for (;;) { break outer; }", "compiled"),
             ("async function f() {} f();", "compiled"), // per-function fallback
             ("function* g() {}", "compiled"),           // per-function fallback
-            ("function f() { return arguments; }", "compiled"), // per-function fallback
+            ("function f() { return arguments; }", "compiled"), // arguments objects compile
             ("let x = 10n;", "compiled"),
             ("let r = /ab+c/;", "compiled"),
         ] {

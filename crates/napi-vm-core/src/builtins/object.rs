@@ -1321,6 +1321,49 @@ fn apply_descriptor_map(
 /// which is why `defineProperty` produces a non-enumerable property by
 /// default while plain assignment produces an enumerable one.
 pub(crate) fn define_property(target: &Value, key: &str, descriptor: &Value) -> Result<(), VmErr> {
+    let mapped = target.property_cell().and_then(|props| {
+        if !props.meta.borrow().is_arguments {
+            return None;
+        }
+        match props.own_value(key) {
+            Some(Value::Binding(ref cell)) => Some(cell.clone()),
+            _ => None,
+        }
+    });
+    let Some(mapped) = mapped else {
+        return define_ordinary_property(target, key, descriptor);
+    };
+    let accessor = descriptor.get_prop("get").is_some() || descriptor.get_prop("set").is_some();
+    let readonly = descriptor
+        .get_prop("writable")
+        .is_some_and(|value| !value.is_truthy());
+    let snapshot;
+    let actual = if !accessor && readonly && descriptor.get_prop("value").is_none() {
+        let Value::Object { props } = descriptor else {
+            unreachable!("normalized descriptor");
+        };
+        let mut fields = props.borrow().clone();
+        fields.push(("value".into(), mapped.borrow().clone_for_execution()));
+        snapshot = Value::descriptor_record(fields);
+        &snapshot
+    } else {
+        descriptor
+    };
+    define_ordinary_property(target, key, actual)?;
+    if !accessor {
+        if let Some(value) = descriptor.get_prop("value") {
+            *mapped.borrow_mut() = value;
+        }
+        if !readonly {
+            let props = target.property_cell().expect("arguments properties");
+            let index = props.own_index(key).expect("defined mapped index");
+            props.borrow_mut()[index].1 = Value::Binding(mapped);
+        }
+    }
+    Ok(())
+}
+
+fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Result<(), VmErr> {
     if let Value::Array(array) = target {
         return define_array_property(array, key, descriptor);
     }

@@ -2,15 +2,17 @@
 
 ## Current measured state
 
-The latest completed full measurement passes **101,806 / 102,956 (98.8830%)**,
-with 1,094 failures, 56 timeouts, and zero skips, crashes, or harness errors.
-It measures source `d8d1652`, including static module attributes, control-flow
-completion, and strict tail calls. It gains 175 passes and loses two against
-the previous full run, using the same two workers and five-second timeout.
-Both losses are timeouts in `staging/sm/String/string-upper-lower-mapping.js`;
-no timeout outcomes are reclassified. See
-[`latest.json`](../tools/test262/latest.json) and the
-[full tail-call evidence](../tools/test262/evidence/full-tail-calls-2026-10-18/).
+The latest completed full pinned Test262 run (2026-10-18, corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `607d086`)
+passes **101,728 / 102,956 variants (98.8073%)**, with 1,076 failures,
+152 timeouts, and zero skips, crashes, or harness errors. It gains 18 passes
+and loses 96 against the preceding full run, with two workers and a
+five-second timeout. All lost passes are measured timeouts: 94 RegExp
+property-escape variants and two staging variants. Outcomes are retained
+without reclassification. The snapshot includes live collection iteration,
+module attributes, control-flow completion, and strict tail calls.
+See [`latest.json`](../tools/test262/latest.json) and the
+[full live-collection evidence](../tools/test262/evidence/full-live-collections-2026-10-18/).
 
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
@@ -39,15 +41,18 @@ selection passes **3,599 / 3,624**, gaining eight overlapping passes with zero
 losses. Strict Clippy and 149 selected integration tests pass.
 
 Static module attributes, control-flow completion, and tail-call execution are
-included in the completed full-run snapshot. Later live collection changes are
-tracked in the [live collection continuation](test262-live-collections-continuation.md)
-and remain outside that full score.
+included in the completed full-run snapshot, along with the changes tracked in
+the [live collection continuation](test262-live-collections-continuation.md).
+Later lexical scopes, nested finally, for-in, and mapped arguments remain
+outside that full score.
 
 Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes remain outside the completed full score. See the [lexical scope continuation](test262-lexical-scopes-continuation.md).
 
 Nested finally completions subsequently pass **5,897 / 5,908** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [finally completion continuation](test262-finally-completions-continuation.md).
 
-Descriptor-aware for-in enumeration subsequently pass **6,498 / 6,515** selected variants, gaining **2 passes with zero losses**. These changes remain outside the completed full score. See the [for-in enumeration continuation](test262-for-in-enumeration-continuation.md).
+Descriptor-aware for-in enumeration subsequently passes **6,498 / 6,515** selected variants, gaining **2 passes with zero losses**. These changes remain outside the completed full score. See the [for-in enumeration continuation](test262-for-in-enumeration-continuation.md).
+
+Mapped arguments subsequently pass **13,621 / 13,661** selected variants, gaining **31 passes with zero losses**. All 43 mapped-arguments variants and all 1,442 for-of variants pass. These changes remain outside the completed full score. See the [mapped arguments continuation](test262-mapped-arguments-continuation.md).
 
 ## Historical checkpoint
 

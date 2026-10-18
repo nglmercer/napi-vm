@@ -266,6 +266,15 @@ fn seed_captured(
         if !info.captured {
             continue;
         }
+        // A hoisted bare var must preserve the seeded arguments object.
+        if code.captures_arguments
+            && !code.is_arrow
+            && info.name == "arguments"
+            && info.kind == SlotKind::Var
+            && index >= code.parameter_count as usize
+        {
+            continue;
+        }
         let (value, initialized) =
             if index < code.parameter_count as usize && info.kind == SlotKind::Var {
                 (args.get(index).cloned().unwrap_or(Value::Undefined), true)
@@ -277,6 +286,7 @@ fn seed_captured(
         fe.borrow_mut()
             .declare(&info.name, value, bind_kind(info.kind), initialized);
     }
+    interp.map_function_arguments(function, fe, args.len())?;
     Ok(())
 }
 
@@ -381,7 +391,14 @@ fn set_prop_cached(
         && let Some(current) = props.slot_verified(index, name)
         && !is_accessor_for(&current, name)
     {
-        props.borrow_mut()[index].1 = val;
+        let mut slots = props.borrow_mut();
+        if props.meta.borrow().is_arguments
+            && let Value::Binding(cell) = &slots[index].1
+        {
+            *cell.borrow_mut() = val;
+        } else {
+            slots[index].1 = val;
+        }
         return Ok(());
     }
     interp.assign_member(obj, key, val)?;

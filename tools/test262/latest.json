@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+  "engine_sha256": "0b5a2e4502040997e4e6d5d85be5ddaa65f0a72eaea34900de8da4ff0b7c85f0",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 2,
@@ -14,21 +14,21 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 101806,
-    "fail": 1094,
+    "pass": 101728,
+    "fail": 1076,
     "skip": 0,
-    "timeout": 56,
+    "timeout": 152,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 98.88301798826683,
+  "pass_percentage": 98.80725746921014,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "d8d1652887916244fe1c9acc3ef108984254539e",
-  "source_state": "clean committed tail-call snapshot; includes static module attributes and control-flow completion; excludes later live collection iteration changes",
-  "evidence": "evidence/full-tail-calls-2026-10-18/final-full.json.gz",
-  "note": "Last completed full pinned run: 101,806 / 102,956 (98.8830%), on source d8d1652. It gains 175 passes and loses two against the previous completed full run, using the same two workers and five-second timeout. Both losses are timeouts in staging/sm/String/string-upper-lower-mapping.js; outcomes are retained without reclassification. Static module attributes, control-flow completion, and strict tail calls are included in this measured snapshot. Later live collection iteration changes are outside it and require separate evidence. Live collection release evidence separately passes 1,726/1,726 variants (18 gains, zero losses) and 3,599/3,624 neighboring control-flow variants (eight overlapping gains, zero losses).",
+  "source_base": "607d086dff90d047ed5677eca90e05ed8b082c84",
+  "source_state": "clean committed live-collection snapshot; includes module attributes, completion values, and tail calls; excludes later lexical scopes, nested finally, for-in enumeration, and mapped arguments",
+  "evidence": "evidence/full-live-collections-2026-10-18/final-full.json.gz",
+  "note": "Last completed full pinned run: 101,728 / 102,956 (98.8073%) on source 607d086. It gains 18 passes and loses 96 against the preceding full run, with two workers and a five-second timeout. All 96 lost passes are measured timeouts (94 RegExp property-escape variants and two staging variants), retained without reclassification. Later lexical scopes, nested finally, descriptor-aware for-in, and mapped arguments remain outside this measured full snapshot.",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -655,5 +655,50 @@
     "source_base": "672c721cb97d0c88adab609cc36e75f65e389c49",
     "implementation_patch_sha256": "34348e32ffb302717bf7f48d9e1799abcc2810c4719894f186259dceb5ce25b2",
     "evidence": "evidence/for-in-enumeration-2026-10-18/focused.json.gz"
+  },
+  "mapped_arguments_focused": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue",
+      "language/expressions/typeof",
+      "language/expressions/object",
+      "built-ins/Proxy",
+      "language/arguments-object",
+      "built-ins/Object/defineProperty",
+      "built-ins/Object/defineProperties",
+      "built-ins/Object/freeze",
+      "built-ins/Object/seal",
+      "built-ins/Reflect/defineProperty",
+      "language/expressions/generators",
+      "language/statements/generators",
+      "language/expressions/async-generator",
+      "language/statements/async-generator"
+    ],
+    "engine_sha256": "100e81ac9aea7285c3fe44065dedf05449f0d3320aa923e49a564bdd9b7e7c9e",
+    "total": 13661,
+    "counts": {
+      "pass": 13621,
+      "fail": 40,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 31,
+    "losses": 0,
+    "source_base": "f8f2fca7defca53ac92ee8de168bbf694d1786ee",
+    "implementation_patch_sha256": "93cad31205bff798d62c426cf29b5c11cd7588f870d760b9cacd2e31235c331c",
+    "evidence": "evidence/mapped-arguments-2026-10-18/focused.json.gz"
   }
 }

@@ -1131,7 +1131,14 @@ fn set_cell_prop(props: &ObjectCell, key: String, val: Value) -> Result<(), VmEr
     };
     if let Some(index) = index {
         if writable {
-            props.borrow_mut()[index].1 = val;
+            let mut slots = props.borrow_mut();
+            if props.meta.borrow().is_arguments
+                && let Value::Binding(cell) = &slots[index].1
+            {
+                *cell.borrow_mut() = val;
+            } else {
+                slots[index].1 = val;
+            }
         }
         return Ok(());
     }
@@ -1225,7 +1232,7 @@ pub struct FunctionData {
     pub is_async: bool,
     pub is_generator: bool,
     /// Whether the body references `arguments`. Frames for functions that
-    /// never read it skip building the (detached) arguments object.
+    /// never read it skip building the arguments object.
     pub uses_arguments: bool,
     /// Whether the body declares anything hoistable (`var`/`let`/`const`,
     /// function, or class). Computed once at creation so calls skip both
@@ -1282,6 +1289,19 @@ impl FunctionData {
             properties.set_proto(Some(Rc::new(prototype)));
         }
         properties
+    }
+
+    pub(crate) fn has_mapped_arguments(&self) -> bool {
+        !self.strict
+            && !self.is_arrow
+            && !self.params.iter().any(|name| name.starts_with("..."))
+            && !self
+                .body
+                .iter()
+                .find(|statement| !matches!(statement, Statement::ClassInitialization { .. }))
+                .is_some_and(|statement| {
+                    matches!(statement, Statement::ParameterInitialization { .. })
+                })
     }
 
     pub(crate) fn needs_arguments_object(&self) -> bool {
@@ -3189,7 +3209,7 @@ impl Value {
         }
     }
 
-    /// The detached `arguments` object for a call: indexed properties plus
+    /// Initial arguments storage for a call: indexed properties plus
     /// `length`. Shared by the evaluator's call paths and the VM's frame
     /// seeding, so both tiers bind the identical shape.
     pub fn arguments_object(args: &[Value]) -> Result<Self, crate::error::VmErr> {
