@@ -18,12 +18,29 @@ use crate::interpreter::{Environment, Interpreter, strict_equals};
 use crate::value::weak::{WeakStorage, WeakTarget};
 use crate::value::{ArrayCell, CollectionKind as Kind, ObjectCell, Value};
 
-/// Slot holding a collection's entries: `[key, value]` pairs for a map,
-/// `[value, value]` for a set, so one storage shape serves both.
-const ENTRIES_SLOT: &str = "__symbol_entries__";
-/// Slot marking which kind of collection an object is, so the methods can
-/// report the right `TypeError` and render the right string.
-const KIND_SLOT: &str = "__symbol_collection__";
+#[derive(Clone, Copy)]
+enum Projection {
+    Key,
+    Value,
+    Entry,
+}
+
+/// A live cursor into the stable, tombstoned collection data list.
+pub(crate) struct CollectionIteratorSlots {
+    collection: Option<Value>,
+    cursor: usize,
+    kind: Kind,
+    projection: Projection,
+}
+
+impl CollectionIteratorSlots {
+    pub(crate) fn values(&self) -> Vec<Value> {
+        self.collection.iter().cloned().collect()
+    }
+    pub(crate) fn into_values(self) -> Vec<Value> {
+        self.collection.into_iter().collect()
+    }
+}
 
 pub(super) fn install(e: &mut Environment) {
     for (name, kind) in [
@@ -182,7 +199,10 @@ fn same_value_zero(a: &Value, b: &Value) -> bool {
 }
 
 fn entries_of(this: &Value) -> Option<Rc<ArrayCell>> {
-    this.get_prop(ENTRIES_SLOT)?.as_array()
+    let Value::Object { props } = this else {
+        return None;
+    };
+    props.meta.borrow().collection_entries.clone()
 }
 
 fn kind_of(this: &Value) -> Option<Kind> {
@@ -464,28 +484,14 @@ fn construct(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let collection = match in_place_target(interp, kind, &this)? {
-        Some(target) => {
-            target.set_prop(ENTRIES_SLOT.to_string(), Value::array(vec![]))?;
-            target.set_prop(
-                KIND_SLOT.to_string(),
-                Value::String((kind.tag().to_string()).into()),
-            )?;
-            target
-        }
-        None => Value::object_with_proto(
-            vec![
-                (ENTRIES_SLOT.to_string(), Value::array(vec![])),
-                (
-                    KIND_SLOT.to_string(),
-                    Value::String((kind.tag().to_string()).into()),
-                ),
-            ],
-            Some(instance_proto(interp, kind)?),
-        ),
+        Some(target) => target,
+        None => Value::object_with_proto(vec![], Some(instance_proto(interp, kind)?)),
     };
-
     if let Value::Object { props } = &collection {
-        props.meta.borrow_mut().collection_kind = Some(kind);
+        let storage = Value::array(vec![]).as_array().expect("collection data");
+        let mut meta = props.meta.borrow_mut();
+        meta.collection_kind = Some(kind);
+        meta.collection_entries = Some(storage);
         if matches!(kind, Kind::WeakMap | Kind::WeakSet) {
             *props.weak.borrow_mut() = WeakStorage::Map(Vec::new());
         }
@@ -761,7 +767,7 @@ fn map_set(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
         return Ok(this);
     }
     let entries = require(&this, "Map.prototype.set")?;
-    let key = a.first().cloned().unwrap_or(Value::Undefined);
+    let key = normalize_zero(a.first().cloned().unwrap_or(Value::Undefined));
     let value = a.get(1).cloned().unwrap_or(Value::Undefined);
     match position(&entries, &key) {
         // Re-setting an existing key keeps its original insertion position.
@@ -853,8 +859,8 @@ fn collection_for_each(
         return Err(VmErr::Msg("TypeError: callback is not callable".into()));
     }
     let receiver = a.get(1).cloned().unwrap_or(Value::Undefined);
-    // Snapshot: the callback may mutate the collection, and iterating a
-    // borrowed `Vec` while guest code runs would panic.
+    // Clone only the current entry, releasing the borrow before guest code.
+    // Re-read the list length after each callback so additions are visited.
     let mut cursor = 0;
     loop {
         let item = entries.borrow().get(cursor).cloned();
@@ -871,58 +877,113 @@ fn collection_for_each(
     Ok(Value::Undefined)
 }
 
-/// Build an array iterator over a projection of the entries.
 fn iterate_projection(
     interp: &mut Interpreter,
     this: &Value,
-    project: impl Fn(&Value) -> Value,
+    projection: Projection,
 ) -> Result<Value, VmErr> {
-    let entries = require(this, "iterator")?;
-    let projected: Vec<Value> = entries
-        .borrow()
-        .iter()
-        .filter(|e| !matches!(e, Value::Undefined))
-        .map(project)
-        .collect();
-    let array = Value::array(projected);
-    let iterator = interp.prop(
-        &array,
-        &Value::String((crate::interpreter::SYMBOL_ITERATOR_SLOT.to_string()).into()),
-    )?;
-    let iterator = interp.call_this(&iterator, array, vec![])?;
-    // Collection iterators share the array-iterator stepping behavior but
-    // report their own brand through a dedicated prototype, so guest
-    // mutation of one kind's tag never leaks into another's.
-    let intrinsic = match kind_of(this) {
-        Some(Kind::Set) => "%SetIteratorPrototype%",
-        _ => "%MapIteratorPrototype%",
+    require(this, "iterator")?;
+    let kind = kind_of(this).expect("branded collection");
+    let intrinsic = if kind == Kind::Set {
+        "%SetIteratorPrototype%"
+    } else {
+        "%MapIteratorPrototype%"
     };
-    if let Value::Object { props } = &iterator
-        && let Some(prototype) = interp.persistent_global.borrow().intrinsic(intrinsic)
-    {
-        props.set_proto(Some(Rc::new(prototype)));
+    let prototype = interp
+        .persistent_global
+        .borrow()
+        .intrinsic(intrinsic)
+        .expect("collection iterator prototype");
+    let iterator = Value::object_with_proto(vec![], Some(Rc::new(prototype)));
+    if let Value::Object { props } = &iterator {
+        props.meta.borrow_mut().collection_iterator = Some(CollectionIteratorSlots {
+            collection: Some(this.clone()),
+            cursor: 0,
+            kind,
+            projection,
+        });
     }
     Ok(iterator)
 }
 
+pub(crate) fn map_iterator_next(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    collection_iterator_next(interp, this, Kind::Map)
+}
+pub(crate) fn set_iterator_next(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    collection_iterator_next(interp, this, Kind::Set)
+}
+fn collection_iterator_next(
+    interp: &mut Interpreter,
+    this: Value,
+    kind: Kind,
+) -> Result<Value, VmErr> {
+    let Value::Object { props } = &this else {
+        return Err(VmErr::Msg(
+            "TypeError: incompatible collection iterator receiver".into(),
+        ));
+    };
+    let next = {
+        let mut meta = props.meta.borrow_mut();
+        let slots = meta
+            .collection_iterator
+            .as_mut()
+            .filter(|slots| slots.kind == kind)
+            .ok_or_else(|| {
+                VmErr::Msg("TypeError: incompatible collection iterator receiver".into())
+            })?;
+        let mut next = None;
+        if let Some(entries) = slots.collection.as_ref().and_then(entries_of) {
+            while slots.cursor < entries.borrow().len() {
+                interp.consume_fuel(1)?;
+                let item = entries.borrow()[slots.cursor].clone();
+                slots.cursor += 1;
+                if !matches!(item, Value::Undefined) {
+                    next = Some((item, slots.projection));
+                    break;
+                }
+            }
+        }
+        if next.is_none() {
+            slots.collection = None;
+        }
+        next
+    };
+    let Some((item, projection)) = next else {
+        return Ok(crate::interpreter::call::iter_result(
+            Value::Undefined,
+            true,
+        ));
+    };
+    let key = item.get_prop("0").unwrap_or(Value::Undefined);
+    let value = item.get_prop("1").unwrap_or(Value::Undefined);
+    let value = match projection {
+        Projection::Key => key,
+        Projection::Value => value,
+        Projection::Entry => Value::array(vec![key, value]),
+    };
+    Ok(crate::interpreter::call::iter_result(value, false))
+}
+
 fn collection_keys(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    iterate_projection(interp, &this, |e| {
-        e.get_prop("0").unwrap_or(Value::Undefined)
-    })
+    iterate_projection(interp, &this, Projection::Key)
 }
-
 fn collection_values(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    iterate_projection(interp, &this, |e| {
-        e.get_prop("1").unwrap_or(Value::Undefined)
-    })
+    iterate_projection(interp, &this, Projection::Value)
 }
-
 fn collection_entries(
     interp: &mut Interpreter,
     this: Value,
     _: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    iterate_projection(interp, &this, |e| e.clone())
+    iterate_projection(interp, &this, Projection::Entry)
 }
 
 /// A collection's kind name and its entries, for callers that need to rebuild

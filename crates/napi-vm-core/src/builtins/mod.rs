@@ -544,3 +544,5 @@ pub(crate) use symbol::SymbolContext;
 
 #[cfg(test)]
 pub use crate::test_support::interpreter as with_runtime_builtins;
+
+pub(crate) use collections::{CollectionIteratorSlots, map_iterator_next, set_iterator_next};

@@ -2,16 +2,15 @@
 
 ## Current measured state
 
-The latest completed full measurement passes **101,633 / 102,956 (98.7150%)**,
-with 1,246 failures, 77 timeouts, and zero skips, crashes, or harness errors.
-It measures source `8333a38`, including Object integrity, `Object.fromEntries`,
-deferred imports, and the earlier dynamic-import attributes implementation.
-It gains 169 passes and loses 24 against the previous full run: 23 former
-passes time out and one JSON-module test fails. Concurrency changed from four
-to two workers. No timeout outcomes are reclassified. The JSON-module failure
-is fixed by the later static module-attributes commit `5b119d4`.
-See [`latest.json`](../tools/test262/latest.json) and the
-[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-18/).
+The latest completed full measurement passes **101,806 / 102,956 (98.8830%)**,
+with 1,094 failures, 56 timeouts, and zero skips, crashes, or harness errors.
+It measures source `d8d1652`, including static module attributes, control-flow
+completion, and strict tail calls. It gains 175 passes and loses two against
+the previous full run, using the same two workers and five-second timeout.
+Both losses are timeouts in `staging/sm/String/string-upper-lower-mapping.js`;
+no timeout outcomes are reclassified. See
+[`latest.json`](../tools/test262/latest.json) and the
+[full tail-call evidence](../tools/test262/evidence/full-tail-calls-2026-10-18/).
 
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
@@ -34,9 +33,15 @@ remains 170 / 170. Strict Clippy, 104 integration tests, 83 realm tests, and the
 79 selected bytecode tests pass. See the
 [tail-call continuation](test262-tail-calls-continuation.md).
 
+Live collection iteration subsequently passes **1,726 / 1,726** selected
+variants, gaining **18 passes with zero losses**. Its neighboring control-flow
+selection passes **3,599 / 3,624**, gaining eight overlapping passes with zero
+losses. Strict Clippy and 149 selected integration tests pass.
+
 Static module attributes, control-flow completion, and tail-call execution are
-outside the completed full-run snapshot. Newer focused gains are not added to
-its score.
+included in the completed full-run snapshot. Later live collection changes are
+tracked in the [live collection continuation](test262-live-collections-continuation.md)
+and remain outside that full score.
 
 ## Historical checkpoint
 

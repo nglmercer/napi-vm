@@ -57,10 +57,10 @@ verifier, and bytecode parity tests are also exercised.
 
 ## Full-corpus state
 
-The latest completed full run passes 101,633 / 102,956 (98.7150%) on source
-`8333a38`. It excludes later static module attributes, control-flow completion,
-and this tail-call implementation. Its 169 gained passes and 24 lost passes
-are recorded without altering timeout outcomes; see the
-[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-18/).
-Focused gains are not added to that full-run score. Full conformance remains
-incomplete, including remaining loop/environment and collection iteration gaps.
+The completed full run on this committed tail-call snapshot `d8d1652` passes
+**101,806 / 102,956 (98.8830%)**, with 1,094 failures and 56 timeouts. It gains
+175 passes and loses two against the preceding full report; both lost passes
+are staging string-mapping timeouts. No timeout outcomes are reclassified.
+See the [full tail-call evidence](../tools/test262/evidence/full-tail-calls-2026-10-18/).
+The subsequent [live collection iteration work](test262-live-collections-continuation.md)
+is outside that measured snapshot. Full conformance remains incomplete.

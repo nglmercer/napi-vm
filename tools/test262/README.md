@@ -43,14 +43,14 @@ worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
 The latest completed full development measurement in `latest.json` passes
-**101,633 / 102,956 variants (98.7150%)**: 1,246 failures, 77 timeouts, and
-zero feature skips, crashes, or harness errors. It measures source `8333a38`
-and adds 169 passes while losing 24 against the prior full run. Of those lost
-passes, 23 time out and one JSON-module test fails. The old full run used four
-workers; this run used two. All measured outcomes are retained. The later
-static module-attributes implementation fixes the JSON-module failure.
-Full rows, triage, comparison, and source identity are archived in
-[`evidence/full-refresh-2026-10-18/`](evidence/full-refresh-2026-10-18/).
+**101,806 / 102,956 variants (98.8830%)**: 1,094 failures, 56 timeouts, and
+zero feature skips, crashes, or harness errors. It measures source `d8d1652`,
+including static module attributes, control-flow completion, and strict tail
+calls. It gains 175 passes and loses two against the preceding full run, with
+the same two workers and five-second timeout. Both losses are timeouts in
+`staging/sm/String/string-upper-lower-mapping.js`. Outcomes are retained.
+Full reports, comparison, and source identity are archived in
+[`evidence/full-tail-calls-2026-10-18/`](evidence/full-tail-calls-2026-10-18/).
 
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
@@ -78,8 +78,17 @@ green at **216 / 216**. Native call/apply/bind/proxy regression retains 420 / 42
 passes, and the combined module regression remains 170 / 170. Reports and
 comparisons are under [`evidence/tail-calls-2026-10-18/`](evidence/tail-calls-2026-10-18/);
 see the [tail-call continuation](../../docs/test262-tail-calls-continuation.md).
-The static module-attributes, control-flow, and tail-call changes remain outside
-the completed full-corpus score; focused gains are not added to it.
+The live collection release selection passes **1,726 / 1,726** variants,
+gaining 18 passes with zero losses. It covers Map, Set, their iterator
+prototypes, ArrayIteratorPrototype, WeakMap, WeakSet, and selected mutation
+for-of tests. The neighboring control-flow selection passes **3,599 / 3,624**,
+with eight overlapping gains and zero losses. Evidence is archived under
+[`evidence/live-collections-2026-10-18/`](evidence/live-collections-2026-10-18/).
+
+The static module-attributes, control-flow, and tail-call changes are included
+in the completed full snapshot. Subsequent live collection iteration changes
+remain outside it; see the
+[live collection continuation](../../docs/test262-live-collections-continuation.md).
 
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including

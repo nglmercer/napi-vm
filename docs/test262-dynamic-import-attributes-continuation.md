@@ -22,8 +22,9 @@ focused worker passes **170 / 170** variants across:
 
 The neighboring `language/module-code` and
 `language/expressions/dynamic-import` selection passes **2,454 / 2,502**. The
-full-corpus run for the prior worker snapshot is recorded separately; these
-focused gains are not added to that denominator. Current focused reports and
+completed full-corpus run now includes this implementation at source `d8d1652`
+and passes 101,806 / 102,956 (98.8830%). Its measured score and denominator are
+recorded separately in [the full evidence](../tools/test262/evidence/full-tail-calls-2026-10-18/). Current focused reports and
 the measured source patch are archived in
 [`tools/test262/evidence/module-attributes-2026-10-18/`](../tools/test262/evidence/module-attributes-2026-10-18/).
 The earlier 42 / 44 dynamic-import report remains in the

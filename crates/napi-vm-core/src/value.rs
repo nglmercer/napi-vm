@@ -191,6 +191,8 @@ pub struct ObjectMeta {
     pub(crate) shadow_realm_wrapped: Option<ShadowRealmWrappedSlots>,
     pub(crate) disposable_stack: Option<Rc<RefCell<crate::builtins::disposable::Slots>>>,
     pub(crate) collection_kind: Option<CollectionKind>,
+    pub(crate) collection_entries: Option<Rc<ArrayCell>>,
+    pub(crate) collection_iterator: Option<crate::builtins::CollectionIteratorSlots>,
     /// Prototype link. `None` means either a null prototype or the runtime's
     /// default prototype, distinguished by `uses_default_prototype`.
     pub proto: Option<Rc<Value>>,
@@ -766,6 +768,10 @@ impl ArrayCell {
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
             }
+            out.extend(meta.collection_entries.iter().cloned().map(Value::Array));
+            if let Some(slots) = &meta.collection_iterator {
+                out.extend(slots.values());
+            }
             if let Some(slots) = &meta.iterator_helper {
                 out.extend(slots.borrow().values());
             }
@@ -816,6 +822,8 @@ impl ArrayCell {
         meta.private_elements.clear();
         meta.disposable_stack = None;
         meta.iterator_helper = None;
+        meta.collection_entries = None;
+        meta.collection_iterator = None;
         meta.async_from_sync = None;
         meta.regexp_iterator = None;
         meta.revocable_proxy = None;
@@ -926,6 +934,10 @@ impl ObjectCell {
             if let Some(slots) = &meta.disposable_stack {
                 out.extend(slots.borrow().values());
             }
+            out.extend(meta.collection_entries.iter().cloned().map(Value::Array));
+            if let Some(slots) = &meta.collection_iterator {
+                out.extend(slots.values());
+            }
             if let Some(slots) = &meta.iterator_helper {
                 out.extend(slots.borrow().values());
             }
@@ -980,6 +992,8 @@ impl ObjectCell {
         meta.private_elements.clear();
         meta.disposable_stack = None;
         meta.iterator_helper = None;
+        meta.collection_entries = None;
+        meta.collection_iterator = None;
         meta.async_from_sync = None;
         meta.regexp_iterator = None;
         meta.revocable_proxy = None;
@@ -3803,6 +3817,10 @@ fn drain_prototype(meta: &RefCell<ObjectMeta>, work: &mut Vec<Value>) {
                 .flat_map(|(_, element)| element.into_values()),
         );
         work.extend(meta.revocable_proxy.take().map(Value::Proxy));
+        work.extend(meta.collection_entries.take().map(Value::Array));
+        if let Some(slots) = meta.collection_iterator.take() {
+            work.extend(slots.into_values());
+        }
         if let Some(slots) = meta.disposable_stack.take()
             && let Ok(slots) = Rc::try_unwrap(slots)
         {

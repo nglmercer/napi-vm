@@ -47,7 +47,8 @@ if, try, with, block, labeled, break, and continue statements. A separate
 selection includes every statement `cptn-*.js` completion test plus the complete
 switch directory. Evidence includes the measured source patch and worker hash;
 these focused results do not change the last completed full-corpus score of
-101,633 / 102,956 (98.7150%) on the earlier `8333a38` source snapshot.
+101,806 / 102,956 (98.8830%) on the later `d8d1652` source snapshot, which
+includes this implementation and tail-call execution.
 
 ## Validation and remaining work
 
@@ -65,6 +66,6 @@ implements strict tail-call execution. Its worker passes 35 / 35 tail-call
 variants, all 216 / 216 switch variants, and 3,591 / 3,624 neighboring control-flow
 variants. The earlier measurements above retain this completion checkpoint's
 worker identity and counts. The completed full-corpus refresh uses
-the earlier `8333a38` worker snapshot, so it excludes this continuation
-and the later static module-attributes changes. Full conformance and full-corpus
+the later `d8d1652` worker snapshot and includes this continuation, static module
+attributes, and strict tail calls. Full conformance and full-corpus
 AST/bytecode differential validation remain incomplete.

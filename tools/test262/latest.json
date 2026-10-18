@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
+  "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 2,
@@ -14,21 +14,21 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 101633,
-    "fail": 1246,
+    "pass": 101806,
+    "fail": 1094,
     "skip": 0,
-    "timeout": 77,
+    "timeout": 56,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 98.71498504215393,
+  "pass_percentage": 98.88301798826683,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "8333a381832107248fe790ec6a36b5df7b2b632f",
-  "source_state": "clean committed dynamic-import-attributes snapshot; excludes later static attributes, control-flow completion, and tail-call changes",
-  "evidence": "evidence/full-refresh-2026-10-18/final-full.json.gz",
-  "note": "Last completed full pinned run: 101,633 / 102,956 (98.7150%), on source 8333a38. It gains 169 passes and loses 24 against the previous completed full run: 23 former passes time out and one JSON-module case fails. Worker concurrency changed from four to two; measured outcomes are retained. The JSON-module failure is fixed by later static module-attributes work. Static/module attribute and control-flow completion gains remain separate focused evidence: 170/170 combined import variants and 3,574/3,624 neighboring control-flow variants (71 gains, zero losses). No newer focused gains are added to this full score. Later tail-call release evidence passes 35/35 (34 gains, zero losses), 3,591/3,624 control-flow variants (17 more gains, zero losses), and all 216 switch variants. Native-call regression: 420/424, zero lost passes; combined import/deferred module regression: 170/170.",
+  "source_base": "d8d1652887916244fe1c9acc3ef108984254539e",
+  "source_state": "clean committed tail-call snapshot; includes static module attributes and control-flow completion; excludes later live collection iteration changes",
+  "evidence": "evidence/full-tail-calls-2026-10-18/final-full.json.gz",
+  "note": "Last completed full pinned run: 101,806 / 102,956 (98.8830%), on source d8d1652. It gains 175 passes and loses two against the previous completed full run, using the same two workers and five-second timeout. Both losses are timeouts in staging/sm/String/string-upper-lower-mapping.js; outcomes are retained without reclassification. Static module attributes, control-flow completion, and strict tail calls are included in this measured snapshot. Later live collection iteration changes are outside it and require separate evidence. Live collection release evidence separately passes 1,726/1,726 variants (18 gains, zero losses) and 3,599/3,624 neighboring control-flow variants (eight overlapping gains, zero losses).",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -362,11 +362,22 @@
     "implementation_patch_sha256": "3399f8e1eafb678cd133cfd2a934e5f08a12635146890ca9e24a14924afa0986"
   },
   "full_refresh_comparison": {
-    "baseline_worker_jobs": 4,
-    "current_worker_jobs": 2,
-    "new_passes": 169,
-    "lost_passes": 24,
-    "measurement_note": "Worker concurrency changed from four to two. Timeout changes remain measured outcomes; no outcomes are reclassified."
+    "worker_jobs": 2,
+    "timeout_seconds": 5.0,
+    "new_passes": 175,
+    "lost_passes": 2,
+    "lost_variants": [
+      {
+        "test": "staging/sm/String/string-upper-lower-mapping.js",
+        "variant": "script",
+        "status": "timeout"
+      },
+      {
+        "test": "staging/sm/String/string-upper-lower-mapping.js",
+        "variant": "strict",
+        "status": "timeout"
+      }
+    ]
   },
   "tail_calls_focused": {
     "selection": [
@@ -476,5 +487,70 @@
     "gains": 0,
     "losses": 0,
     "evidence": "evidence/tail-calls-2026-10-18/native-regression.json.gz"
+  },
+  "live_collections_focused": {
+    "selection": [
+      "built-ins/Map",
+      "built-ins/Set",
+      "built-ins/MapIteratorPrototype",
+      "built-ins/SetIteratorPrototype",
+      "built-ins/ArrayIteratorPrototype",
+      "built-ins/WeakMap",
+      "built-ins/WeakSet",
+      "language/statements/for-of/map-contract-expand.js",
+      "language/statements/for-of/map-contract.js",
+      "language/statements/for-of/map-expand-contract.js",
+      "language/statements/for-of/map-expand.js",
+      "language/statements/for-of/set-contract-expand.js",
+      "language/statements/for-of/set-contract.js",
+      "language/statements/for-of/set-expand-contract.js",
+      "language/statements/for-of/set-expand.js"
+    ],
+    "total": 1726,
+    "counts": {
+      "pass": 1726,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 1708,
+    "gains": 18,
+    "losses": 0,
+    "engine_sha256": "0b5a2e4502040997e4e6d5d85be5ddaa65f0a72eaea34900de8da4ff0b7c85f0",
+    "evidence": "evidence/live-collections-2026-10-18/focused.json.gz",
+    "implementation_patch_sha256": "98b99469ac89372fb3e8a45b8878156ac91ebeb0578c4355b5d2a6672935971d"
+  },
+  "live_collections_control_flow_regression": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue"
+    ],
+    "total": 3624,
+    "counts": {
+      "pass": 3599,
+      "fail": 25,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 3591,
+    "gains": 8,
+    "losses": 0,
+    "engine_sha256": "0b5a2e4502040997e4e6d5d85be5ddaa65f0a72eaea34900de8da4ff0b7c85f0",
+    "evidence": "evidence/live-collections-2026-10-18/control-flow-regression.json.gz"
   }
 }

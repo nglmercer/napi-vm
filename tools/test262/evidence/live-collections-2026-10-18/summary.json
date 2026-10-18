@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-18",
+  "source_base": "d8d1652887916244fe1c9acc3ef108984254539e",
+  "test262_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "0b5a2e4502040997e4e6d5d85be5ddaa65f0a72eaea34900de8da4ff0b7c85f0",
+  "implementation_patch_sha256": "98b99469ac89372fb3e8a45b8878156ac91ebeb0578c4355b5d2a6672935971d",
+  "focused": {
+    "selection": [
+      "built-ins/Map",
+      "built-ins/Set",
+      "built-ins/MapIteratorPrototype",
+      "built-ins/SetIteratorPrototype",
+      "built-ins/ArrayIteratorPrototype",
+      "built-ins/WeakMap",
+      "built-ins/WeakSet",
+      "language/statements/for-of/map-contract-expand.js",
+      "language/statements/for-of/map-contract.js",
+      "language/statements/for-of/map-expand-contract.js",
+      "language/statements/for-of/map-expand.js",
+      "language/statements/for-of/set-contract-expand.js",
+      "language/statements/for-of/set-contract.js",
+      "language/statements/for-of/set-expand-contract.js",
+      "language/statements/for-of/set-expand.js"
+    ],
+    "total": 1726,
+    "counts": {
+      "pass": 1726,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 1708,
+    "gains": 18,
+    "losses": 0
+  },
+  "control_flow_regression": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue"
+    ],
+    "total": 3624,
+    "counts": {
+      "pass": 3599,
+      "fail": 25,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 3591,
+    "gains": 8,
+    "losses": 0
+  },
+  "validation": [
+    "cargo fmt --check",
+    "git diff --check",
+    "cargo clippy --locked --workspace --all-targets -- -D warnings",
+    "cargo test --locked --test live_collections --test gc_public_lifecycle --test iterator_protocol --test engine_boundary (32 passed)",
+    "cargo test --locked -p napi-vm-core --test collection_conformance --test realm_semantics --test weak_gc (117 passed)",
+    "cargo build --locked --release --bin napi-vm-test262"
+  ],
+  "full_corpus": "Latest completed full run measures preceding d8d1652 snapshot (101806/102956); these focused gains are not added to that full score."
+}

@@ -1883,12 +1883,12 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
         (
             "%MapIteratorPrototype%",
             "Map Iterator",
-            vec![("next", 0, array_iter_next)],
+            vec![("next", 0, crate::builtins::map_iterator_next)],
         ),
         (
             "%SetIteratorPrototype%",
             "Set Iterator",
-            vec![("next", 0, array_iter_next)],
+            vec![("next", 0, crate::builtins::set_iterator_next)],
         ),
         (
             "%GeneratorPrototype%",

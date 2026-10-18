@@ -1,8 +1,8 @@
 # ShadowRealm Test262 continuation
 
 This document records the ShadowRealm checkpoint. A later full measurement on
-source `8333a38` passes 101,633 / 102,956 (98.7150%); see the
-[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-18/)
+source `d8d1652` passes 101,806 / 102,956 (98.8830%); see the
+[full refresh evidence](../tools/test262/evidence/full-tail-calls-2026-10-18/)
 and [current status](test262-checkpoint-status.md).
 
 ShadowRealm now has constructor and prototype metadata, a fresh isolated

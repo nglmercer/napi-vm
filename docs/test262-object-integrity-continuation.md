@@ -21,11 +21,11 @@ errors. Focused outcomes and the exact implementation patch are archived in
 Strict workspace Clippy, formatting, whitespace, and all 12 Test262 runner
 unit tests pass.
 
-A later complete pinned full-corpus measurement now passes **101,633 / 102,956
-(98.7150%)** on source `8333a38`, including these Object integrity and
+A later complete pinned full-corpus measurement now passes **101,806 / 102,956
+(98.8830%)** on source `d8d1652`, including these Object integrity and
 `Object.fromEntries` changes. See the compact
 [`latest.json`](../tools/test262/latest.json) and
-[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-18/).
+[full refresh evidence](../tools/test262/evidence/full-tail-calls-2026-10-18/).
 
 The next focused implementation completed deferred module evaluation: its
 pinned 109-variant `language/import/import-defer` selection now passes 109 / 109.
@@ -33,4 +33,4 @@ The adjacent `language/module-code` and `language/expressions/dynamic-import`
 selection passes 2,444 / 2,502, gaining four passes with zero losses against
 the previous full-run outcomes for those exact variants. See the
 [deferred-import continuation](test262-deferred-import-continuation.md) and
-its archived evidence. Deferred imports are also included in the later `8333a38` full-run snapshot.
+its archived evidence. Deferred imports are also included in the later `d8d1652` full-run snapshot.

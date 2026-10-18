@@ -508,22 +508,22 @@ The core language and bridge are actively developed and covered by the native
 regression suite. Run `npm test` to see the current verified count.
 
 The latest completed full pinned Test262 pass (2026-10-18, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `8333a38`)
-passes **101,633 / 102,956 variants (98.7150%)**, with 1,246 failures,
-77 timeouts, and zero skips, crashes, or harness errors. It gains 169 passes
-and loses 24 against the previous full run: 23 former passes time out and one
-JSON-module test fails. Worker concurrency changed from four to two; measured
-outcomes are retained. The JSON-module failure is fixed by the later static
-module-attributes change. Full results and comparisons are archived in
-[`full-refresh-2026-10-18`](tools/test262/evidence/full-refresh-2026-10-18/).
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `d8d1652`)
+passes **101,806 / 102,956 variants (98.8830%)**, with 1,094 failures,
+56 timeouts, and zero skips, crashes, or harness errors. It gains 175 passes
+and loses two against the previous full run using the same two workers and
+five-second timeout. Both losses are timeouts in a staging string-mapping
+test; measured outcomes are retained. This snapshot includes static module
+attributes, control-flow completion, and strict tail calls. Full results and
+comparisons are archived in
+[`full-tail-calls-2026-10-18`](tools/test262/evidence/full-tail-calls-2026-10-18/).
 See [tools/test262/README.md](tools/test262/README.md) to reproduce.
 
 The current deferred-import implementation passes its pinned 109-variant
 Test262 selection. Static import attributes pass 17 / 17 variants and dynamic
 import attributes pass 44 / 44. The neighboring module-code and dynamic-import
 selection now passes 2,454 / 2,502, gaining six passes with zero losses against
-the previous committed release selection. The completed full snapshot includes deferred imports and earlier dynamic
-attributes; the newer static/module-attribute gains remain focused evidence. Details and evidence are in the
+the previous committed release selection. These module changes are included in the completed `d8d1652` full snapshot. Details and evidence are in the
 [deferred-import continuation](docs/test262-deferred-import-continuation.md)
 and [module attributes continuation](docs/test262-dynamic-import-attributes-continuation.md).
 
@@ -536,7 +536,12 @@ The neighboring control-flow release selection passes **3,591 / 3,624**, with
 17 additional gains and zero losses over the completion checkpoint. See the
 [control-flow continuation](docs/test262-control-flow-completion-continuation.md)
 and [tail-call continuation](docs/test262-tail-calls-continuation.md).
-These focused gains remain outside the completed full-corpus score.
+These changes are included in the completed full-corpus snapshot. Later live
+collection iteration passes **1,726 / 1,726** selected variants, gaining 18
+passes with zero losses. The neighboring control-flow selection now passes
+**3,599 / 3,624**, with eight overlapping gains and zero losses. These later
+collection changes remain outside the full score; see the
+[live collection continuation](docs/test262-live-collections-continuation.md).
 
 ## License
 
