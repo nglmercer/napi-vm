@@ -15,7 +15,7 @@ pub trait ModuleLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr>;
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr>;
 
-    /// Load a module with the attributes supplied to dynamic `import()`.
+    /// Load a static or dynamic module request with its import attributes.
     /// Hosts that do not assign meaning to attributes can keep using `load`.
     fn load_with_attributes(
         &self,

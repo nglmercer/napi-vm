@@ -8,6 +8,7 @@ pub(crate) struct ModuleRealm {
     sources: Rc<RefCell<HashMap<String, std::sync::Arc<str>>>>,
     aliases: Rc<RefCell<HashMap<(String, String), String>>>,
     urls: Rc<RefCell<HashMap<String, String>>>,
+    identities: Rc<RefCell<ModuleIdentityMap>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
     graph: Rc<RefCell<module_link::ModuleGraph>>,
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
@@ -22,6 +23,7 @@ impl ModuleRealm {
             sources: vm.module_sources.clone(),
             aliases: vm.module_aliases.clone(),
             urls: vm.module_file_urls.clone(),
+            identities: vm.module_identities.clone(),
             evaluating: vm.evaluating.clone(),
             graph: vm.module_graph.clone(),
             commonjs_loader: vm.commonjs_loader.clone(),
@@ -35,6 +37,7 @@ impl ModuleRealm {
         vm.module_sources = self.sources;
         vm.module_aliases = self.aliases;
         vm.module_file_urls = self.urls;
+        vm.module_identities = self.identities;
         vm.evaluating = self.evaluating;
         vm.module_graph = self.graph;
         vm.commonjs_loader = self.commonjs_loader;
@@ -46,6 +49,7 @@ impl ModuleRealm {
         *child.module_sources.borrow_mut() = parent.module_sources.borrow().clone();
         *child.module_aliases.borrow_mut() = parent.module_aliases.borrow().clone();
         *child.module_file_urls.borrow_mut() = parent.module_file_urls.borrow().clone();
+        *child.module_identities.borrow_mut() = parent.module_identities.borrow().clone();
         child.module_loader = parent.module_loader.clone();
         child.commonjs_loader = parent.commonjs_loader.clone();
         child.commonjs_entry = parent.commonjs_entry.clone();

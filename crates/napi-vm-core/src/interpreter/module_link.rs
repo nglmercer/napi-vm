@@ -8,9 +8,15 @@ use std::collections::HashSet;
 pub(super) struct ModuleGraph {
     records: HashMap<String, LinkedModule>,
 }
+type ModuleRequest = (
+    crate::JsString,
+    String,
+    crate::parser::ImportPhase,
+    super::ModuleAttributes,
+);
 struct LinkedModule {
     program: PreparedProgram,
-    requests: Vec<(crate::JsString, String, crate::parser::ImportPhase)>,
+    requests: Vec<ModuleRequest>,
     has_tla: bool,
     cycle_root: Option<String>,
     state: ModuleState,
@@ -104,7 +110,7 @@ impl Interpreter {
         let _guard = GuestExecutionGuard(depth);
         let mut created = Vec::new();
         let result = (|| {
-            if !self.discover_module(name, &mut created, 0)? {
+            if !self.discover_module(name, &[], &mut created, 0)? {
                 return Ok(false);
             }
             // Resolve stars and indirect exports after the whole graph exists.
@@ -158,6 +164,7 @@ impl Interpreter {
     fn discover_module(
         &mut self,
         name: &str,
+        attributes: &[(String, crate::JsString)],
         created: &mut Vec<String>,
         depth: usize,
     ) -> Result<bool, VmErr> {
@@ -176,14 +183,15 @@ impl Interpreter {
             let Some(loader) = self.module_loader.clone() else {
                 return Ok(false);
             };
-            let loaded = loader.load(name)?;
-            if loaded.id != name {
+            let canonical = self.canonical_module_id(name);
+            let loaded = loader.load_with_attributes(&canonical, attributes)?;
+            if loaded.id != canonical {
                 return Err(VmErr::Msg(
                     "module loader changed canonical identity".into(),
                 ));
             }
-            if name.starts_with("file:") {
-                self.define_module_file_url(name, name.into());
+            if canonical.starts_with("file:") {
+                self.define_module_file_url(name, canonical);
             }
             self.define_module(name, loaded.source);
         }
@@ -315,24 +323,31 @@ impl Interpreter {
             let mut requests = Vec::new();
             for stmt in declarations {
                 let request = match stmt {
-                    Statement::Import { module, phase, .. } => Some((module, *phase)),
-                    Statement::ExportNamed { source, .. } => source
-                        .as_ref()
-                        .map(|source| (source, crate::parser::ImportPhase::Evaluation)),
-                    Statement::ExportAll { source, .. } => {
-                        Some((source, crate::parser::ImportPhase::Evaluation))
-                    }
+                    Statement::Import {
+                        module,
+                        phase,
+                        attributes,
+                        ..
+                    } => Some((module, *phase, attributes)),
+                    Statement::ExportNamed {
+                        source: Some(source),
+                        attributes,
+                        ..
+                    } => Some((source, crate::parser::ImportPhase::Evaluation, attributes)),
+                    Statement::ExportAll {
+                        source, attributes, ..
+                    } => Some((source, crate::parser::ImportPhase::Evaluation, attributes)),
                     _ => None,
                 };
-                if let Some((request, phase)) = request {
+                if let Some((request, phase, attributes)) = request {
                     let resolved = self
                         .resolve_module_request(&Self::host_module_specifier(request)?)?
                         .ok_or_else(|| syntax(format!("Module not found: {request}")))?;
-                    if !requests
-                        .iter()
-                        .any(|(old, _, old_phase)| old == request && *old_phase == phase)
-                    {
-                        requests.push((request.clone(), resolved, phase));
+                    let target = self.module_request_key(&resolved, attributes);
+                    if !requests.iter().any(|(old, _, old_phase, old_attributes)| {
+                        old == request && *old_phase == phase && old_attributes == attributes
+                    }) {
+                        requests.push((request.clone(), target, phase, attributes.clone()));
                     }
                 }
             }
@@ -342,8 +357,8 @@ impl Interpreter {
                 .get_mut(name)
                 .unwrap()
                 .requests = requests.clone();
-            for (_, dependency, _) in requests {
-                if !self.discover_module(&dependency, created, depth + 1)? {
+            for (_, dependency, _, attributes) in requests {
+                if !self.discover_module(&dependency, &attributes, created, depth + 1)? {
                     return Err(syntax(format!("Module not found: {dependency}")));
                 }
             }
@@ -431,9 +446,9 @@ impl Interpreter {
             ModuleState::Failed(_) => true,
             ModuleState::Linked => {
                 !has_tla
-                    && requests
-                        .iter()
-                        .all(|(_, dependency, _)| self.ready_for_sync_execution(dependency, seen))
+                    && requests.iter().all(|(_, dependency, _, _)| {
+                        self.ready_for_sync_execution(dependency, seen)
+                    })
             }
         }
     }
@@ -470,15 +485,20 @@ impl Interpreter {
         })
     }
 
-    fn request_target(&self, id: &str, request: &crate::JsString) -> Option<String> {
+    fn request_target(
+        &self,
+        id: &str,
+        request: &crate::JsString,
+        attributes: &[(String, crate::JsString)],
+    ) -> Option<String> {
         self.module_graph
             .borrow()
             .records
             .get(id)?
             .requests
             .iter()
-            .find(|(r, _, _)| r == request)
-            .map(|(_, id, _)| id.clone())
+            .find(|(r, _, _, attrs)| r == request && attrs == attributes)
+            .map(|(_, id, _, _)| id.clone())
     }
     fn exported_names(&self, id: &str, seen: &mut HashSet<String>) -> HashSet<String> {
         if !seen.insert(id.into()) {
@@ -510,10 +530,10 @@ impl Interpreter {
                     }
                     Statement::ExportAll {
                         source,
+                        attributes,
                         alias: None,
-                        ..
                     } => {
-                        if let Some(target) = self.request_target(id, source) {
+                        if let Some(target) = self.request_target(id, source, attributes) {
                             names.extend(
                                 self.exported_names(&target, seen)
                                     .into_iter()
@@ -562,13 +582,17 @@ impl Interpreter {
                     return Ok(self.module(id).and_then(|m| m.default));
                 }
                 Statement::ExportNamed {
-                    specifiers, source, ..
+                    attributes,
+                    specifiers,
+                    source,
                 } => {
                     if let Some((local, _)) =
                         specifiers.iter().find(|(_, exported)| exported == name)
                     {
                         if let Some(source) = source {
-                            let target = self.request_target(id, source).expect("resolved request");
+                            let target = self
+                                .request_target(id, source, attributes)
+                                .expect("resolved request");
                             return self
                                 .resolve_export(&target, local, seen)?
                                 .map(Some)
@@ -584,14 +608,16 @@ impl Interpreter {
                             if let Statement::Import {
                                 module,
                                 phase,
+                                attributes,
                                 default,
                                 named,
                                 namespace,
                                 ..
                             } = imported
                             {
-                                let target =
-                                    self.request_target(id, module).expect("resolved import");
+                                let target = self
+                                    .request_target(id, module, attributes)
+                                    .expect("resolved import");
                                 if default.as_deref() == Some(local) {
                                     return self.resolve_export(&target, "default", seen);
                                 }
@@ -622,10 +648,12 @@ impl Interpreter {
                 }
                 Statement::ExportAll {
                     source,
+                    attributes,
                     alias: Some(alias),
-                    ..
                 } if alias == name => {
-                    let target = self.request_target(id, source).expect("resolved request");
+                    let target = self
+                        .request_target(id, source, attributes)
+                        .expect("resolved request");
                     return self
                         .module(&target)
                         .map(|m| Self::namespace_object(&m))
@@ -641,11 +669,13 @@ impl Interpreter {
         for stmt in flat(&program.statements) {
             if let Statement::ExportAll {
                 source,
+                attributes,
                 alias: None,
-                ..
             } = stmt
             {
-                let target = self.request_target(id, source).expect("resolved star");
+                let target = self
+                    .request_target(id, source, attributes)
+                    .expect("resolved star");
                 if let Some(candidate) = self.resolve_export(&target, name, &mut seen.clone())? {
                     if let Some(previous) = &resolved {
                         let same = match (previous, &candidate) {
@@ -669,6 +699,7 @@ impl Interpreter {
         let result = (|| {
             for stmt in flat(&program.statements) {
                 if let Statement::Import {
+                    attributes,
                     module,
                     phase,
                     default,
@@ -691,7 +722,9 @@ impl Interpreter {
                             return Err(syntax(format!("Duplicate module binding '{local}'")));
                         }
                     }
-                    let target = self.request_target(id, module).expect("resolved import");
+                    let target = self
+                        .request_target(id, module, attributes)
+                        .expect("resolved import");
                     let mut bindings = named.clone();
                     if let Some(local) = default {
                         bindings.push(("default".into(), local.clone()));
@@ -767,7 +800,7 @@ impl Interpreter {
         let scope = self.module_scope(id);
         let outer_scope = std::mem::replace(&mut self.global, scope);
         let result = (|| {
-            for (_, dependency, phase) in requests {
+            for (_, dependency, phase, _) in requests {
                 if phase != crate::parser::ImportPhase::Deferred {
                     self.evaluate_linked_module(&dependency)?;
                 }

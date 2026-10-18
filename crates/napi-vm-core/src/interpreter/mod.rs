@@ -64,6 +64,9 @@ pub use rust_node_api::{ReportedNodeVersion, RustNodeApiHost, RustNodeApiOptions
 /// without an explicit hand-off a promise settled inside one would schedule
 /// reactions nobody drains, and an `import` inside one would resolve against
 /// an empty registry.
+pub(crate) type ModuleAttributes = Vec<(String, crate::JsString)>;
+pub(crate) type ModuleIdentityMap = HashMap<String, (String, ModuleAttributes)>;
+
 #[derive(Clone)]
 pub struct Realm {
     jobs: Jobs,
@@ -71,6 +74,7 @@ pub struct Realm {
     module_sources: Rc<RefCell<HashMap<String, std::sync::Arc<str>>>>,
     module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
     module_file_urls: Rc<RefCell<HashMap<String, String>>>,
+    module_identities: Rc<RefCell<ModuleIdentityMap>>,
     evaluating: Rc<RefCell<std::collections::HashSet<String>>>,
     module_graph: Rc<RefCell<module_link::ModuleGraph>>,
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
@@ -97,6 +101,7 @@ impl Realm {
             module_sources: interp.module_sources.clone(),
             module_aliases: interp.module_aliases.clone(),
             module_file_urls: interp.module_file_urls.clone(),
+            module_identities: interp.module_identities.clone(),
             evaluating: interp.evaluating.clone(),
             module_graph: interp.module_graph.clone(),
             commonjs_loader: interp.commonjs_loader.clone(),
@@ -130,6 +135,7 @@ impl Realm {
         interp.module_sources = self.module_sources;
         interp.module_aliases = self.module_aliases;
         interp.module_file_urls = self.module_file_urls;
+        interp.module_identities = self.module_identities;
         interp.evaluating = self.evaluating;
         interp.module_graph = self.module_graph;
         interp.commonjs_loader = self.commonjs_loader;
@@ -233,6 +239,9 @@ pub struct Interpreter {
     /// same bare specifier without sharing a global name.
     pub(crate) module_aliases: Rc<RefCell<HashMap<(String, String), String>>>,
     module_file_urls: Rc<RefCell<HashMap<String, String>>>,
+    /// Attribute-qualified module records retain their canonical loader id
+    /// separately from the internal key used by the module registry.
+    pub(crate) module_identities: Rc<RefCell<ModuleIdentityMap>>,
     /// Host-selected CommonJS source/native module resolver. No filesystem or
     /// native addon access is enabled unless an embedding host installs one.
     commonjs_loader: Option<Rc<dyn CommonJsModuleLoader>>,
@@ -453,6 +462,7 @@ impl Interpreter {
             module_sources: Rc::new(RefCell::new(HashMap::new())),
             module_aliases: Rc::new(RefCell::new(HashMap::new())),
             module_file_urls: Rc::new(RefCell::new(HashMap::new())),
+            module_identities: Rc::new(RefCell::new(HashMap::new())),
             commonjs_loader: None,
             module_loader: None,
             commonjs_cache: Rc::new(RefCell::new(HashMap::new())),
@@ -565,9 +575,59 @@ impl Interpreter {
             return Ok(Some(name));
         }
         if let Some(loader) = &self.module_loader {
-            return loader.resolve(specifier, self.cur_mod.as_deref()).map(Some);
+            let referrer = self
+                .cur_mod
+                .as_deref()
+                .map(|id| self.canonical_module_id(id));
+            return loader.resolve(specifier, referrer.as_deref()).map(Some);
         }
         Ok(self.resolve_module_name(specifier))
+    }
+
+    pub(crate) fn canonical_module_id(&self, key: &str) -> String {
+        self.module_identities
+            .borrow()
+            .get(key)
+            .map(|(canonical, _)| canonical.clone())
+            .unwrap_or_else(|| key.to_string())
+    }
+
+    pub(crate) fn module_request_key(
+        &mut self,
+        canonical: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> String {
+        if attributes.is_empty() {
+            return canonical.to_string();
+        }
+        let mut normalized = attributes.to_vec();
+        normalized.sort_by(|(left_name, left_value), (right_name, right_value)| {
+            left_name
+                .cmp(right_name)
+                .then_with(|| left_value.units().cmp(right_value.units()))
+        });
+        if let Some((key, _)) = self
+            .module_identities
+            .borrow()
+            .iter()
+            .find(|(_, (id, attrs))| id == canonical && attrs == &normalized)
+        {
+            return key.clone();
+        }
+        let mut index = self.module_identities.borrow().len();
+        loop {
+            let key = format!("{canonical}\0napi-vm-attributes-{index}");
+            let occupied = self.module_identities.borrow().contains_key(&key)
+                || self.module_sources.borrow().contains_key(&key)
+                || self.modules.borrow().contains_key(&key);
+            if !occupied {
+                self.module_identities
+                    .borrow_mut()
+                    .insert(key.clone(), (canonical.to_string(), normalized));
+                return key;
+            }
+            index += 1;
+        }
     }
 
     /// Attach a host bridge for values such as native addon exports.
@@ -2598,13 +2658,32 @@ impl Interpreter {
     /// map, so a module left here stays importable no matter what the public
     /// API reports.
     pub fn remove_module(&mut self, name: &str) -> bool {
-        self.module_graph.borrow_mut().remove(name);
-        self.module_file_urls.borrow_mut().remove(name);
-        let had_source = self.module_sources.borrow_mut().remove(name).is_some();
-        let had_module = self.modules.borrow_mut().remove(name).is_some();
+        let canonical = self.canonical_module_id(name);
+        let mut ids = self
+            .module_identities
+            .borrow()
+            .iter()
+            .filter(|(_, (id, _))| id == &canonical)
+            .map(|(key, _)| key.clone())
+            .collect::<std::collections::HashSet<_>>();
+        ids.insert(canonical.clone());
+        ids.insert(name.to_string());
+        for id in &ids {
+            self.module_graph.borrow_mut().remove(id);
+            self.module_file_urls.borrow_mut().remove(id);
+        }
+        let mut had_source = false;
+        let mut had_module = false;
+        for id in &ids {
+            had_source |= self.module_sources.borrow_mut().remove(id).is_some();
+            had_module |= self.modules.borrow_mut().remove(id).is_some();
+        }
+        self.module_identities
+            .borrow_mut()
+            .retain(|_, (id, _)| id != &canonical);
         self.module_aliases
             .borrow_mut()
-            .retain(|(importer, _), target| importer != name && target != name);
+            .retain(|(importer, _), target| importer != &canonical && !ids.contains(target));
         had_module || had_source
     }
 
@@ -2617,7 +2696,11 @@ impl Interpreter {
     /// Module names use browser-style POSIX paths so the same source behaves
     /// consistently in the native VM and in the browser playground.
     pub(crate) fn resolve_module_name(&self, module: &str) -> Option<String> {
-        if let Some(importer) = self.cur_mod.as_deref()
+        let importer = self
+            .cur_mod
+            .as_deref()
+            .map(|id| self.canonical_module_id(id));
+        if let Some(importer) = importer.as_deref()
             && let Some(target) = self
                 .module_aliases
                 .borrow()
@@ -2629,7 +2712,7 @@ impl Interpreter {
             return Some(module.to_string());
         }
 
-        let current = self.cur_mod.as_deref()?;
+        let current = importer.as_deref()?;
         let current = current.strip_prefix("./").unwrap_or(current);
         let mut parts: Vec<&str> = current
             .rsplit_once('/')

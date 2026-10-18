@@ -96,22 +96,31 @@ impl CorpusLoader {
         id: &str,
         module_type: Option<&str>,
     ) -> Result<ModuleSource, VmErr> {
-        if let Ok(source) = self.virtual_loader.load(id) {
-            return Ok(source);
-        }
-        let path = self.path(id)?;
-        let metadata = path.metadata().map_err(|e| VmErr::Msg(e.to_string()))?;
-        if metadata.len() > 32 * 1024 * 1024 {
-            return Err(VmErr::Msg(
-                "ResourceLimit: Module source size exceeded".into(),
-            ));
-        }
-        let source = std::fs::read_to_string(&path).map_err(|e| VmErr::Msg(e.to_string()))?;
-        let json_path = path
-            .extension()
-            .is_some_and(|extension| extension == "json");
+        let (source, json_path) = if let Ok(source) = self.virtual_loader.load(id) {
+            (
+                source.source,
+                std::path::Path::new(id)
+                    .extension()
+                    .is_some_and(|extension| extension == "json"),
+            )
+        } else {
+            let path = self.path(id)?;
+            let metadata = path.metadata().map_err(|e| VmErr::Msg(e.to_string()))?;
+            if metadata.len() > 32 * 1024 * 1024 {
+                return Err(VmErr::Msg(
+                    "ResourceLimit: Module source size exceeded".into(),
+                ));
+            }
+            let source = std::fs::read_to_string(&path).map_err(|e| VmErr::Msg(e.to_string()))?;
+            let json_path = path
+                .extension()
+                .is_some_and(|extension| extension == "json");
+            (source, json_path)
+        };
         let source = match module_type {
             Some("json") if json_path => {
+                serde_json::from_str::<Json>(&source)
+                    .map_err(|error| VmErr::Msg(format!("SyntaxError: Invalid JSON: {error}")))?;
                 let encoded = serde_json::to_string(&source)
                     .map_err(|error| VmErr::Msg(format!("Invalid JSON module source: {error}")))?;
                 format!("export default JSON.parse({encoded});")
@@ -305,9 +314,12 @@ fn execute(request: Request) -> Json {
     } else {
         napi_vm::parser::ParseGoal::Script
     };
-    if let Err(error) = Interpreter::compile_with_goal(&request.source, goal) {
-        return json!({"status":"error", "phase":"parse", "error_type":"SyntaxError", "message":error.to_string()});
-    }
+    let prepared = match Interpreter::compile_with_goal(&request.source, goal) {
+        Ok(program) => program,
+        Err(error) => {
+            return json!({"status":"error", "phase":"parse", "error_type":"SyntaxError", "message":error.to_string()});
+        }
+    };
     let mut vm = Interpreter::with_builtins();
     vm.set_can_block(request.can_block);
     vm.jobs
@@ -393,7 +405,7 @@ fn execute(request: Request) -> Json {
                 .map(|_| Value::Undefined)
         }
     } else {
-        vm.eval_source(&request.source)
+        vm.execute(&prepared)
     };
     collect_requested_gc(&mut vm);
     if let Err(error) = result {

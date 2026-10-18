@@ -44,7 +44,7 @@ impl Interpreter {
             out.push(id.into());
             return;
         }
-        for (_, dependency, _) in requests {
+        for (_, dependency, _, _) in requests {
             self.gather_async_dependencies(&dependency, seen, out);
         }
     }
@@ -82,29 +82,33 @@ impl Interpreter {
         specifier: &str,
         attributes: &[(String, crate::JsString)],
     ) -> Result<String, VmErr> {
-        let id = if self.cur_mod.is_none() && self.has_module(specifier) {
+        let resolved = if self.cur_mod.is_none() && self.has_module(specifier) {
             specifier.to_string()
         } else {
             self.resolve_module_request(specifier)?
                 .ok_or_else(|| VmErr::Msg(format!("TypeError: Module not found: {specifier}")))?
         };
-        if self.has_module(&id) {
-            return Ok(id);
+        let canonical = self.canonical_module_id(&resolved);
+        let key = self.module_request_key(&canonical, attributes);
+        if self.has_module(&key) {
+            return Ok(key);
         }
         let Some(loader) = self.module_loader.clone() else {
-            return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
+            return Err(VmErr::Msg(format!(
+                "TypeError: Module not found: {canonical}"
+            )));
         };
-        let loaded = loader.load_with_attributes(&id, attributes)?;
-        if loaded.id != id {
+        let loaded = loader.load_with_attributes(&canonical, attributes)?;
+        if loaded.id != canonical {
             return Err(VmErr::Msg(
                 "module loader changed canonical identity".into(),
             ));
         }
-        if id.starts_with("file:") {
-            self.define_module_file_url(&id, id.clone());
+        if canonical.starts_with("file:") {
+            self.define_module_file_url(&key, canonical);
         }
-        self.define_module(&id, loaded.source);
-        Ok(id)
+        self.define_module(&key, loaded.source);
+        Ok(key)
     }
     fn start_async_module(
         &mut self,
@@ -167,7 +171,7 @@ impl Interpreter {
         ancestors.insert(id.into());
         let mut dependencies = Vec::new();
         let mut scheduled = HashSet::new();
-        for (_, dependency, phase) in requests {
+        for (_, dependency, phase, _) in requests {
             if phase == crate::parser::ImportPhase::Deferred {
                 let mut asynchronous = Vec::new();
                 self.gather_async_dependencies(&dependency, &mut HashSet::new(), &mut asynchronous);

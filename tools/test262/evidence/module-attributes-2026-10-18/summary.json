@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-18",
+  "source_base": "8333a381832107248fe790ec6a36b5df7b2b632f",
+  "test262_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "f0e59fa7a76c240da54f655e5bd23f634c8a10df0ddc2ec60ddd57a08fbacf33",
+  "focused": {
+    "total": 170,
+    "counts": {
+      "pass": 170,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "subsets": {
+      "dynamic_import_attributes": {
+        "total": 44,
+        "counts": {
+          "pass": 44
+        }
+      },
+      "static_import_attributes": {
+        "total": 17,
+        "counts": {
+          "pass": 17
+        }
+      },
+      "deferred_import": {
+        "total": 109,
+        "counts": {
+          "pass": 109
+        }
+      }
+    }
+  },
+  "module_async_regression": {
+    "selection": [
+      "language/module-code",
+      "language/expressions/dynamic-import"
+    ],
+    "total": 2502,
+    "counts": {
+      "pass": 2454,
+      "fail": 48,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "previous_committed_passes": 2448,
+    "gains": [
+      {
+        "test": "language/expressions/dynamic-import/assignment-expression/await-identifier.js",
+        "variant": "script"
+      },
+      {
+        "test": "language/expressions/dynamic-import/assignment-expression/await-identifier.js",
+        "variant": "strict"
+      },
+      {
+        "test": "language/expressions/dynamic-import/import-attributes/2nd-param-await-ident.js",
+        "variant": "script"
+      },
+      {
+        "test": "language/expressions/dynamic-import/import-attributes/2nd-param-await-ident.js",
+        "variant": "strict"
+      },
+      {
+        "test": "language/module-code/top-level-await/new-await-script-code.js",
+        "variant": "script"
+      },
+      {
+        "test": "language/module-code/top-level-await/new-await-script-code.js",
+        "variant": "strict"
+      }
+    ],
+    "losses": []
+  },
+  "full_corpus": "not represented by this focused report; a full run is being performed on the immediately preceding worker snapshot",
+  "validation": [
+    "cargo fmt --all -- --check",
+    "cargo clippy --locked --workspace --all-targets -- -D warnings",
+    "cargo test --locked --test engine_boundary --test test262_worker (26 passed)",
+    "release worker build"
+  ],
+  "implementation_patch_sha256": "4c04fdce6afc92568eb9bc502a0cec235a0885c9a6ab6ab0b0db4c20199d13f7"
+}
