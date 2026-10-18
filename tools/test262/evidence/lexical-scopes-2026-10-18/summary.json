@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-18",
+  "source_base": "607d086dff90d047ed5677eca90e05ed8b082c84",
+  "test262_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "872089d070210ddce760c0f54a2c0f368c303262d5d6601b28f82dc7f91be187",
+  "implementation_patch_sha256": "b1bf9e83097371f5b9a0ce4ee8d71a4637d605bd66954c0a9dc8cd98634bf48c",
+  "selection": [
+    "language/statements/switch",
+    "language/statements/while",
+    "language/statements/do-while",
+    "language/statements/for",
+    "language/statements/for-in",
+    "language/statements/for-of",
+    "language/statements/if",
+    "language/statements/try",
+    "language/statements/with",
+    "language/statements/block",
+    "language/statements/labeled",
+    "language/statements/break",
+    "language/statements/continue",
+    "language/expressions/typeof",
+    "language/expressions/object"
+  ],
+  "total": 5908,
+  "counts": {
+    "pass": 5893,
+    "fail": 15,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": 20,
+  "losses": 0,
+  "validation": {
+    "lexical_integration_tests": 11,
+    "neighbor_integration_tests": 33,
+    "selected_bytecode_tests": 79,
+    "bytecode_exclusion": "super_destructuring_tags_and_delete_keep_tier_parity (pre-existing failure)",
+    "strict_workspace_clippy": "pass",
+    "format": "pass"
+  },
+  "full_snapshot": "d8d1652; focused gains are not added to full score"
+}

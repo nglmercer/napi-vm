@@ -543,6 +543,8 @@ passes with zero losses. The neighboring control-flow selection now passes
 collection changes remain outside the full score; see the
 [live collection continuation](docs/test262-live-collections-continuation.md).
 
+Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes remain outside the completed full score. See the [lexical scope continuation](docs/test262-lexical-scopes-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -90,6 +90,8 @@ in the completed full snapshot. Subsequent live collection iteration changes
 remain outside it; see the
 [live collection continuation](../../docs/test262-live-collections-continuation.md).
 
+Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes remain outside the completed full score. See the [lexical scope continuation](../../docs/test262-lexical-scopes-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

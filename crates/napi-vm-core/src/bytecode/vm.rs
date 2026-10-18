@@ -658,16 +658,26 @@ fn run_loop(
                 Instr::TypeofGlobal { dst, name } => {
                     let name = const_string(frame.function, name)?;
                     let scope = current_scope(interp, frame);
-                    let value = scope.borrow().get(name).unwrap_or(Value::Undefined);
+                    let value = match interp.lookup_binding_in(&scope, name)? {
+                        Lookup::Value(value) => value,
+                        Lookup::Missing => Value::Undefined,
+                        Lookup::Uninitialized => {
+                            return Err(VmErr::Msg(format!(
+                                "ReferenceError: Cannot access '{name}' before initialization"
+                            )));
+                        }
+                    };
                     frame.registers[dst as usize] =
                         interp.un_op(crate::parser::UnOp::Typeof, &value)?;
                 }
                 Instr::TypeofLocal { dst, slot } => {
-                    let value = if frame.slots[slot as usize].initialized {
-                        frame.slots[slot as usize].value.clone_for_execution()
-                    } else {
-                        Value::Undefined
-                    };
+                    if !frame.slots[slot as usize].initialized {
+                        return Err(VmErr::Msg(format!(
+                            "ReferenceError: Cannot access '{}' before initialization",
+                            frame.function.slots[slot as usize].name
+                        )));
+                    }
+                    let value = frame.slots[slot as usize].value.clone_for_execution();
                     frame.registers[dst as usize] =
                         interp.un_op(crate::parser::UnOp::Typeof, &value)?;
                 }

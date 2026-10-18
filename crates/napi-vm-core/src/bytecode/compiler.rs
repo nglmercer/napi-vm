@@ -3192,13 +3192,33 @@ impl<'a> Compiler<'a> {
         body: &'a [Statement],
     ) -> Result<Reg, Decline> {
         // The head owns a scope, like the evaluator's pushed loop scope.
-        // Captured `let`/`const` heads box per iteration: after the update,
-        // the scope rotates (pop, push, copy the head values forward), so
+        // Captured lexical heads box into a runtime environment. `let`
+        // rotates before the first test and each update, so
         // each iteration's closures observe their own cells.
         let boxed = boxed_for_head_names(init, test, update, body);
         self.push_scope(boxed.clone());
         if let Some(init) = init {
+            self.prepare_for_lexicals(init)?;
             self.compile_for_init(init)?;
+        }
+        let rotating = if matches!(
+            init,
+            Some(
+                ForInit::Var {
+                    kind: VarKind::Let,
+                    ..
+                } | ForInit::Pattern {
+                    kind: VarKind::Let,
+                    ..
+                }
+            )
+        ) {
+            boxed.clone()
+        } else {
+            HashSet::new()
+        };
+        if !rotating.is_empty() {
+            self.rotate_head_scope(&rotating)?;
         }
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
@@ -3237,8 +3257,8 @@ impl<'a> Compiler<'a> {
         // iteration's cells, so the current iteration's closures keep the
         // values they observed — like the evaluator's per-iteration copy.
         let continue_addr = self.here();
-        if !boxed.is_empty() {
-            self.rotate_head_scope(&boxed)?;
+        if !rotating.is_empty() {
+            self.rotate_head_scope(&rotating)?;
         }
         if let Some(update) = update {
             let _ = self.compile_expr(update)?;
@@ -3281,10 +3301,11 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::PushScope);
         for (name, tmp) in names.iter().zip(temps) {
             let index = self.intern_string(name)?;
-            self.emit(Instr::InitGlobal {
+            self.emit(Instr::DefineGlobal {
                 name: index,
                 src: tmp,
-                function: false,
+                kind: SlotKind::Let,
+                initialized: true,
             });
         }
         Ok(())
@@ -3298,13 +3319,15 @@ impl<'a> Compiler<'a> {
         decls: &'a [(String, Option<Expr>)],
     ) -> Result<(), Decline> {
         for (name, init) in decls {
+            if *kind == VarKind::Var && init.is_none() {
+                continue;
+            }
             match kind {
                 // Head `var`s live in the function scope (hoisted);
-                // the head only assigns, defaulting to `undefined`
-                // even when the declarator has no initializer.
+                // only initialized declarators assign a value.
                 VarKind::Var => {
                     let src = match init {
-                        Some(value) => self.compile_expr(value)?,
+                        Some(value) => self.compile_named_assignment_value(value, name)?,
                         None => self.load_undefined()?,
                     };
                     match self.resolve(name)? {
@@ -3333,7 +3356,7 @@ impl<'a> Compiler<'a> {
                             initialized: false,
                         });
                         let src = match init {
-                            Some(value) => self.compile_expr(value)?,
+                            Some(value) => self.compile_named_assignment_value(value, name)?,
                             None => self.load_undefined()?,
                         };
                         self.emit(Instr::InitGlobal {
@@ -3350,11 +3373,63 @@ impl<'a> Compiler<'a> {
                         initialized: false,
                     });
                     let src = match init {
-                        Some(value) => self.compile_expr(value)?,
+                        Some(value) => self.compile_named_assignment_value(value, name)?,
                         None => self.load_undefined()?,
                     };
                     self.emit(Instr::InitLocal { slot, src });
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Create every lexical head binding before any initializer runs.
+    fn prepare_for_lexicals(&mut self, init: &'a ForInit) -> Result<(), Decline> {
+        let (kind, names) = match init {
+            ForInit::Var { kind, decls } => (
+                kind.clone(),
+                decls
+                    .iter()
+                    .map(|(name, _)| name.clone())
+                    .collect::<Vec<_>>(),
+            ),
+            ForInit::Pattern {
+                kind,
+                pattern,
+                trailing,
+                ..
+            } => {
+                let mut names = pattern_names(pattern);
+                names.extend(trailing.iter().map(|(name, _)| name.clone()));
+                (kind.clone(), names)
+            }
+            _ => return Ok(()),
+        };
+        if kind == VarKind::Var {
+            return Ok(());
+        }
+        let kind = if kind == VarKind::Const {
+            SlotKind::Const
+        } else {
+            SlotKind::Let
+        };
+        for name in names {
+            if self.is_boxed_here(&name) {
+                let name = self.intern_string(&name)?;
+                let value = self.load_undefined()?;
+                self.emit(Instr::DefineGlobal {
+                    name,
+                    src: value,
+                    kind,
+                    initialized: false,
+                });
+            } else {
+                let slot = self.declare_slot(&name, kind)?;
+                self.emit(Instr::DeclareLocal {
+                    slot,
+                    kind,
+                    initialized: false,
+                });
             }
         }
         Ok(())
@@ -3674,7 +3749,7 @@ impl<'a> Compiler<'a> {
         let mut template = Vec::with_capacity(props.len());
         for prop in props {
             match prop {
-                // Shorthand reads tolerate missing and dead bindings.
+                // Shorthand uses the same binding resolution as an identifier.
                 ObjectProp::CoverInitializedName { .. } => {
                     return Err(Decline::Func("object assignment default"));
                 }
@@ -3682,11 +3757,11 @@ impl<'a> Compiler<'a> {
                     let val = self.alloc_reg()?;
                     match self.resolve(name)? {
                         Binding::Slot(slot) => {
-                            self.emit(Instr::LoadLocalSoft { dst: val, slot });
+                            self.emit(Instr::LoadLocal { dst: val, slot });
                         }
                         Binding::Global => {
                             let index = self.intern_string(name)?;
-                            self.emit(Instr::LoadGlobalSoft {
+                            self.emit(Instr::LoadGlobal {
                                 dst: val,
                                 name: index,
                             });
@@ -4152,10 +4227,9 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// `typeof` never throws on undeclared names — but a dead-zone slot
-    /// still reads as `undefined` rather than throwing, like the evaluator.
+    /// `typeof` tolerates missing bindings but rejects uninitialized ones.
     fn compile_typeof(&mut self, operand: &'a Expr) -> Result<Reg, Decline> {
-        if let Expr::Identifier(name) = operand {
+        if let Expr::Identifier(name) = operand.unparenthesized() {
             let dst = self.alloc_reg()?;
             match self.resolve(name)? {
                 Binding::Slot(slot) => self.emit(Instr::TypeofLocal { dst, slot }),

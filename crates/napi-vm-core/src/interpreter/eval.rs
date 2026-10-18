@@ -1885,23 +1885,59 @@ impl Interpreter {
         let mut per_iteration: Vec<String> = Vec::new();
 
         if let Some(init) = init {
+            let lexical = match init {
+                ForInit::Var {
+                    kind: kind @ (VarKind::Let | VarKind::Const),
+                    decls,
+                } => Some((
+                    kind.clone(),
+                    decls
+                        .iter()
+                        .map(|(name, _)| name.clone())
+                        .collect::<Vec<_>>(),
+                )),
+                ForInit::Pattern {
+                    kind: kind @ (VarKind::Let | VarKind::Const),
+                    pattern,
+                    trailing,
+                    ..
+                } => {
+                    let mut names = crate::parser::pattern_names(pattern);
+                    names.extend(trailing.iter().map(|(name, _)| name.clone()));
+                    Some((kind.clone(), names))
+                }
+                _ => None,
+            };
+            if let Some((kind, names)) = lexical {
+                let binding_kind = if kind == VarKind::Const {
+                    BindKind::Const
+                } else {
+                    BindKind::Let
+                };
+                for name in &names {
+                    self.declare_binding(name, Value::Undefined, binding_kind, false)?;
+                }
+                if kind == VarKind::Let {
+                    per_iteration = names;
+                }
+            }
             match init {
                 ForInit::Var { kind, decls } => {
-                    for (name, init) in decls {
-                        let v = match init {
-                            Some(e) => self.eval_expr(e)?,
+                    for (name, initializer) in decls {
+                        if *kind == VarKind::Var && initializer.is_none() {
+                            continue;
+                        }
+                        let value = match initializer {
+                            Some(expression) => self.evaluate_class_field(
+                                expression,
+                                &Value::String(name.as_str().into()),
+                            )?,
                             None => Value::Undefined,
                         };
-                        match kind {
-                            // Hoisted to the function scope already.
-                            VarKind::Var => self.assign_or_set_binding(name, v)?,
-                            VarKind::Let => {
-                                self.declare_binding(name, v, BindKind::Let, true)?;
-                                per_iteration.push(name.clone());
-                            }
-                            VarKind::Const => {
-                                self.declare_binding(name, v, BindKind::Const, true)?
-                            }
+                        if *kind == VarKind::Var {
+                            self.assign_or_set_binding(name, value)?;
+                        } else {
+                            self.global.borrow_mut().initialize(name, value);
                         }
                     }
                 }
@@ -1911,68 +1947,32 @@ impl Interpreter {
                     init,
                     trailing,
                 } => {
-                    // Mirrors `VarDecl`: every name exists (with the right
-                    // kind) before the pattern binds, then the trailing
-                    // declarators run in order.
-                    let v = self.eval_expr(init)?;
-                    let mut names = crate::parser::pattern_names(pattern);
-                    names.extend(trailing.iter().map(|(name, _)| name.clone()));
-                    match kind {
-                        // Hoisted to the function scope already.
-                        VarKind::Var => {
-                            // Destructure into a detached scope, then publish
-                            // each name outward: `assign_or_set_binding`
-                            // walks past the loop scope to the hoisted
-                            // function-scope bindings, like a plain
-                            // `for (var i …)` — writing in place would strand
-                            // the values on the loop scope, which is popped.
-                            let loop_scope = self.global.clone();
-                            self.global =
-                                Rc::new(RefCell::new(Environment::child(loop_scope.clone())));
-                            let destructured = self.destructure(pattern, &v);
-                            let temp = self.global.clone();
-                            self.global = loop_scope;
-                            destructured?;
-                            for name in crate::parser::pattern_names(pattern) {
-                                // Each lookup ends before its write: the
-                                // borrow guard must not outlive the statement.
-                                let value = temp.borrow().get(&name);
-                                if let Some(value) = value {
-                                    self.assign_or_set_binding(&name, value)?;
-                                }
-                            }
-                            for (name, init) in trailing {
-                                let value = match init {
-                                    Some(e) => self.eval_expr(e)?,
-                                    None => Value::Undefined,
-                                };
-                                self.assign_or_set_binding(name, value)?;
-                            }
+                    let value = self.eval_expr(init)?;
+                    if *kind == VarKind::Var {
+                        self.destructure_assignment(pattern, &value)?;
+                    } else {
+                        self.destructure(pattern, &value)?;
+                    }
+                    for (name, initializer) in trailing {
+                        if *kind == VarKind::Var && initializer.is_none() {
+                            continue;
                         }
-                        VarKind::Let | VarKind::Const => {
-                            let bind_kind = if matches!(kind, VarKind::Const) {
-                                BindKind::Const
-                            } else {
-                                BindKind::Let
-                            };
-                            for name in &names {
-                                self.declare_binding(name, Value::Undefined, bind_kind, true)?;
-                                if matches!(kind, VarKind::Let) {
-                                    per_iteration.push(name.clone());
-                                }
-                            }
-                            self.destructure(pattern, &v)?;
-                            for (name, init) in trailing {
-                                if let Some(e) = init {
-                                    let value = self.eval_expr(e)?;
-                                    self.assign_or_set_binding(name, value)?;
-                                }
-                            }
+                        let value = match initializer {
+                            Some(expression) => self.evaluate_class_field(
+                                expression,
+                                &Value::String(name.as_str().into()),
+                            )?,
+                            None => Value::Undefined,
+                        };
+                        if *kind == VarKind::Var {
+                            self.assign_or_set_binding(name, value)?;
+                        } else {
+                            self.global.borrow_mut().initialize(name, value);
                         }
                     }
                 }
-                ForInit::Expr(e) => {
-                    self.eval_expr(e)?;
+                ForInit::Expr(expression) => {
+                    self.eval_expr(expression)?;
                 }
             }
         }
@@ -2419,7 +2419,7 @@ impl Interpreter {
                     return vm_err("invalid object literal cover grammar");
                 }
                 ObjectProp::Shorthand(name) => {
-                    let value = self.global.borrow().get(name).unwrap_or(Value::Undefined);
+                    let value = self.eval_expr(&Expr::Identifier(name.clone()))?;
                     insert_object_property(
                         &mut object,
                         &mut positions,
@@ -2900,22 +2900,16 @@ impl Interpreter {
                         }
                     }
                 } else if *op == UnOp::Typeof {
-                    // `typeof` never throws, even on undeclared identifiers.
-                    let v = if let Expr::Identifier(n) = operand.unparenthesized() {
-                        if n == "undefined" {
-                            Value::Undefined
-                        } else {
-                            {
-                                let scope = self.global.clone();
-                                match self.lookup_binding_in(&scope, n)? {
-                                    Lookup::Value(value) => value,
-                                    Lookup::Missing => Value::Undefined,
-                                    Lookup::Uninitialized => {
-                                        return vm_err(format!(
-                                            "ReferenceError: Cannot access {n} before initialization"
-                                        ));
-                                    }
-                                }
+                    // `typeof` tolerates missing identifiers but preserves TDZ errors.
+                    let v = if let Expr::Identifier(name) = operand.unparenthesized() {
+                        let scope = self.global.clone();
+                        match self.lookup_binding_in(&scope, name)? {
+                            Lookup::Value(value) => value,
+                            Lookup::Missing => Value::Undefined,
+                            Lookup::Uninitialized => {
+                                return vm_err(format!(
+                                    "ReferenceError: Cannot access {name} before initialization"
+                                ));
                             }
                         }
                     } else {

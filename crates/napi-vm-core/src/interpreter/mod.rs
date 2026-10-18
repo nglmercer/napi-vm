@@ -2163,18 +2163,6 @@ impl Interpreter {
         result
     }
 
-    /// Execute a statement list as a block *in the current scope*, hoisting
-    /// its lexical declarations but not creating a new frame.
-    ///
-    /// For constructs that already pushed a scope of their own -- a `catch`
-    /// clause holding its parameter, a `switch` whose cases share one block --
-    /// so their declarations land there rather than in a second, nested frame.
-    pub(crate) fn run_hoisted_here(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
-        self.hoist_lexical(stmts)?;
-        let result = self.run(stmts);
-        self.finish_resources(&self.global.clone(), result)
-    }
-
     /// Execute a function body or a whole program in the current scope,
     /// performing both halves of JavaScript hoisting first: `var` and function
     /// declarations (recursively, through blocks but not into nested

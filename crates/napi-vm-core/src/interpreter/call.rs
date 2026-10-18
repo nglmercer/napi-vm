@@ -750,7 +750,7 @@ impl Interpreter {
                     };
                     self.initialize_pattern_binding(pattern, &err_val, kind)?;
                 }
-                self.run_hoisted_here(cb)
+                self.run_block(cb)
             })();
             self.global = s;
             r

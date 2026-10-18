@@ -43,6 +43,8 @@ included in the completed full-run snapshot. Later live collection changes are
 tracked in the [live collection continuation](test262-live-collections-continuation.md)
 and remain outside that full score.
 
+Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes remain outside the completed full score. See the [lexical scope continuation](test262-lexical-scopes-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

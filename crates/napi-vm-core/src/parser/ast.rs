@@ -814,6 +814,37 @@ pub fn for_loop_captures_bindings(
     body: &[Statement],
     names: &[String],
 ) -> bool {
+    // Direct eval can create closures whose free names are absent from the
+    // parsed loop. Conservatively preserve environments wherever eval is read.
+    let eval_in_init = init.is_some_and(|init| match init {
+        ForInit::Var { decls, .. } => decls.iter().any(|(_, expression)| {
+            expression
+                .as_ref()
+                .is_some_and(|expression| expr_references(expression, "eval"))
+        }),
+        ForInit::Pattern {
+            pattern,
+            init,
+            trailing,
+            ..
+        } => {
+            pattern_references(pattern, "eval")
+                || expr_references(init, "eval")
+                || trailing.iter().any(|(_, expression)| {
+                    expression
+                        .as_ref()
+                        .is_some_and(|expression| expr_references(expression, "eval"))
+                })
+        }
+        ForInit::Expr(expression) => expr_references(expression, "eval"),
+    });
+    if eval_in_init
+        || test.is_some_and(|expression| expr_references(expression, "eval"))
+        || update.is_some_and(|expression| expr_references(expression, "eval"))
+        || stmts_reference(body, "eval")
+    {
+        return true;
+    }
     names.iter().any(|name| {
         init.is_some_and(|init| for_init_captures(init, name))
             || test.is_some_and(|expr| expr_captures_identifier(expr, name))
