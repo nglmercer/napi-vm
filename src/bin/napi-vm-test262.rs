@@ -74,6 +74,28 @@ impl ModuleLoader for CorpusLoader {
             .replace('\\', "/"))
     }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
+        self.load_corpus_module(id, None)
+    }
+    fn load_with_attributes(
+        &self,
+        id: &str,
+        attributes: &[(String, napi_vm::JsString)],
+    ) -> Result<ModuleSource, VmErr> {
+        let module_type = attributes
+            .iter()
+            .find(|(name, _)| name == "type")
+            .map(|(_, value)| value.to_utf8())
+            .transpose()
+            .map_err(|_| VmErr::Msg("TypeError: Invalid import attribute value".into()))?;
+        self.load_corpus_module(id, module_type.as_deref())
+    }
+}
+impl CorpusLoader {
+    fn load_corpus_module(
+        &self,
+        id: &str,
+        module_type: Option<&str>,
+    ) -> Result<ModuleSource, VmErr> {
         if let Ok(source) = self.virtual_loader.load(id) {
             return Ok(source);
         }
@@ -85,15 +107,36 @@ impl ModuleLoader for CorpusLoader {
             ));
         }
         let source = std::fs::read_to_string(&path).map_err(|e| VmErr::Msg(e.to_string()))?;
-        let source = if path
+        let json_path = path
             .extension()
-            .is_some_and(|extension| extension == "json")
-        {
-            let encoded = serde_json::to_string(&source)
-                .map_err(|error| VmErr::Msg(format!("Invalid JSON module source: {error}")))?;
-            format!("export default JSON.parse({encoded});")
-        } else {
-            source
+            .is_some_and(|extension| extension == "json");
+        let source = match module_type {
+            Some("json") if json_path => {
+                let encoded = serde_json::to_string(&source)
+                    .map_err(|error| VmErr::Msg(format!("Invalid JSON module source: {error}")))?;
+                format!("export default JSON.parse({encoded});")
+            }
+            Some("text") => {
+                let encoded = serde_json::to_string(&source)
+                    .map_err(|error| VmErr::Msg(format!("Invalid text module source: {error}")))?;
+                format!("export default {encoded};")
+            }
+            Some("json") => {
+                return Err(VmErr::Msg(
+                    "TypeError: JSON import attribute requires a JSON module".into(),
+                ));
+            }
+            Some(kind) => {
+                return Err(VmErr::Msg(format!(
+                    "TypeError: Unsupported module type import attribute: {kind}"
+                )));
+            }
+            None if json_path => {
+                let encoded = serde_json::to_string(&source)
+                    .map_err(|error| VmErr::Msg(format!("Invalid JSON module source: {error}")))?;
+                format!("export default JSON.parse({encoded});")
+            }
+            None => source,
         };
         Ok(ModuleSource {
             id: id.into(),

@@ -521,10 +521,12 @@ are under `tools/test262/evidence/`; see
 
 The current deferred-import implementation passes its pinned 109-variant
 Test262 selection. The neighboring module-code and dynamic-import selection
-passes 2,444 / 2,502 variants, gaining four passes with zero losses against the
-previous full-run outcomes. These focused results are separate from the older
-full-corpus score; details and evidence are in
-[the deferred-import continuation](docs/test262-deferred-import-continuation.md).
+now passes 2,448 / 2,502 variants after dynamic import attributes gained four
+additional passes with zero losses. The import-attributes directory passes
+42 / 44 variants; both failures are existing `await`-identifier parser cases.
+These focused results are separate from the older full-corpus score. Details
+and evidence are in the [deferred-import continuation](docs/test262-deferred-import-continuation.md)
+and [dynamic import attributes continuation](docs/test262-dynamic-import-attributes-continuation.md).
 
 ## License
 

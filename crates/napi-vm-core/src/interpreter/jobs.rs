@@ -31,6 +31,7 @@ pub enum Job {
         realm: super::Env,
         target: Rc<RefCell<PromiseInner>>,
         specifier: String,
+        attributes: Vec<(String, crate::JsString)>,
         phase: crate::parser::ImportPhase,
         referrer: Option<String>,
     },

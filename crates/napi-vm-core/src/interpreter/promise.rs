@@ -378,16 +378,17 @@ impl Interpreter {
                 realm,
                 target,
                 specifier,
+                attributes,
                 phase,
                 referrer,
             } => {
                 let outer = std::mem::replace(&mut self.cur_mod, referrer);
                 let result = self.with_global_storage(realm, |vm| match phase {
-                    crate::parser::ImportPhase::Evaluation => vm.import_module(&specifier),
+                    crate::parser::ImportPhase::Evaluation => {
+                        vm.import_module_with_attributes(&specifier, &attributes)
+                    }
                     crate::parser::ImportPhase::Source => {
-                        let id = vm.resolve_module_request(&specifier)?.ok_or_else(|| {
-                            VmErr::Msg(format!("TypeError: Module not found: {specifier}"))
-                        })?;
+                        let id = vm.load_module_with_attributes(&specifier, &attributes)?;
                         if !vm.link_module(&id)? {
                             return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
                         }
@@ -396,7 +397,10 @@ impl Interpreter {
                                 .into(),
                         ))
                     }
-                    crate::parser::ImportPhase::Deferred => vm.import_deferred_module(&specifier),
+                    crate::parser::ImportPhase::Deferred => {
+                        let id = vm.load_module_with_attributes(&specifier, &attributes)?;
+                        vm.import_deferred_module(&id)
+                    }
                 });
                 self.cur_mod = outer;
                 match result {

@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-18",
+  "source_base": "f036ec340cef78a66af0581232459adba647f725",
+  "test262_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
+  "focused_import_attributes": {
+    "selection": [
+      "language/expressions/dynamic-import/import-attributes"
+    ],
+    "total": 44,
+    "counts": {
+      "pass": 42,
+      "fail": 2,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "pre_existing_parser_failures": [
+      "language/expressions/dynamic-import/import-attributes/2nd-param-await-ident.js [script]",
+      "language/expressions/dynamic-import/import-attributes/2nd-param-await-ident.js [strict]"
+    ]
+  },
+  "module_async_regression": {
+    "selection": [
+      "language/module-code",
+      "language/expressions/dynamic-import"
+    ],
+    "total": 2502,
+    "counts": {
+      "pass": 2448,
+      "fail": 54,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "previous_focused_passes": 2444,
+    "gains": [
+      "language/expressions/dynamic-import/import-attributes/2nd-param-with-enumeration-enumerable.js [script]",
+      "language/expressions/dynamic-import/import-attributes/2nd-param-with-enumeration-enumerable.js [strict]",
+      "language/expressions/dynamic-import/import-attributes/2nd-param-with-type-text.js [script]",
+      "language/expressions/dynamic-import/import-attributes/2nd-param-with-type-text.js [strict]"
+    ],
+    "losses": []
+  },
+  "full_corpus": "unchanged; latest complete score remains 101488/102956 (98.5741%)",
+  "validation": [
+    "cargo fmt --all -- --check",
+    "cargo check --locked --no-default-features --bin napi-vm-test262",
+    "cargo clippy --locked --workspace --all-targets -- -D warnings",
+    "cargo test --locked --test engine_boundary --test test262_worker (26 passed)"
+  ],
+  "broader_core_test_attempt": "cargo test --locked -p napi-vm-core --lib aborts on bytecode::parity_tests::super_destructuring_tags_and_delete_keep_tier_parity and convert::tests::from_json_rejects_excessive_depth (stack overflow); both failures reproduce individually and are outside dynamic import loading",
+  "implementation_patch_sha256": "e909b59dc378046efaf2418a4037a2a7c999a9cf54487a9cba5eabe49d976d37"
+}

@@ -14,6 +14,16 @@ pub struct ModuleSource {
 pub trait ModuleLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr>;
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr>;
+
+    /// Load a module with the attributes supplied to dynamic `import()`.
+    /// Hosts that do not assign meaning to attributes can keep using `load`.
+    fn load_with_attributes(
+        &self,
+        id: &str,
+        _attributes: &[(String, crate::JsString)],
+    ) -> Result<ModuleSource, VmErr> {
+        self.load(id)
+    }
 }
 
 /// In-memory modules for embedders; no runtime feature or OS access required.

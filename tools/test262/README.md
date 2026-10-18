@@ -60,10 +60,14 @@ and its archived evidence.
 The deferred module evaluation selection at
 `language/import/import-defer` passes **109 / 109** variants. A neighboring
 regression selection for `language/module-code` and
-`language/expressions/dynamic-import` passes **2,444 / 2,502**, with four gains
-and zero losses against the previous full-run outcomes for those same variants.
-Both release reports are archived under
+`language/expressions/dynamic-import` now passes **2,448 / 2,502**, with four
+additional gains and zero losses against the previous committed release
+evidence. The dynamic-import `import-attributes` directory passes **42 / 44**;
+the two pre-existing failures use `await` as a function identifier. Reports
+are archived under
 [`evidence/deferred-import-2026-10-18/`](evidence/deferred-import-2026-10-18/).
+The attribute-loader implementation and reports are under
+[`evidence/dynamic-import-attributes-2026-10-18/`](evidence/dynamic-import-attributes-2026-10-18/).
 Neither focused result changes the full-corpus score.
 
 Full reports, status transitions, measured source patches, source hashes,

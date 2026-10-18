@@ -18,10 +18,12 @@ for the implementation and focused evidence.
 
 The deferred-import implementation passes all 109 variants in
 `language/import/import-defer`. The neighboring module-code and dynamic-import
-selection passes 2,444 / 2,502, gaining four passes and losing none against the
-prior full-run outcomes. These focused results are recorded separately in
-[`latest.json`](../tools/test262/latest.json); they do not change the full-run
-score.
+selection passes 2,448 / 2,502 after dynamic import attributes added four more
+passes with zero losses. The import-attributes directory passes 42 / 44; its
+two `await`-identifier parser failures predate the loader change. These focused
+results are recorded separately in [`latest.json`](../tools/test262/latest.json);
+they do not change the full-run score. See the
+[dynamic import attributes continuation](test262-dynamic-import-attributes-continuation.md).
 
 ## Historical checkpoint
 

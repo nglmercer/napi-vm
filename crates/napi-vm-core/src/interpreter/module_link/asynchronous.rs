@@ -52,14 +52,18 @@ impl Interpreter {
     /// Start an import without blocking on top-level await. Poll the existing
     /// event loop to progress it; the returned Promise resolves to a namespace.
     pub fn import_module(&mut self, specifier: &str) -> Result<Value, VmErr> {
+        self.import_module_with_attributes(specifier, &[])
+    }
+
+    /// Dynamic import uses the same module graph path while allowing the host
+    /// loader to select a source representation from the import attributes.
+    pub(crate) fn import_module_with_attributes(
+        &mut self,
+        specifier: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<Value, VmErr> {
         let result = (|| {
-            let id = if self.cur_mod.is_none() && self.has_module(specifier) {
-                specifier.to_string()
-            } else {
-                self.resolve_module_request(specifier)?.ok_or_else(|| {
-                    VmErr::Msg(format!("TypeError: Module not found: {specifier}"))
-                })?
-            };
+            let id = self.load_module_with_attributes(specifier, attributes)?;
             if !self.link_module(&id)? {
                 return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
             }
@@ -69,6 +73,38 @@ impl Interpreter {
             Ok(promise) => promise,
             Err(error) => Value::settled_promise(PromiseState::Rejected, error_value(&error)),
         })
+    }
+
+    /// Resolve and cache the requested source before graph discovery so the
+    /// root module is loaded with the dynamic import's host attributes.
+    pub(crate) fn load_module_with_attributes(
+        &mut self,
+        specifier: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<String, VmErr> {
+        let id = if self.cur_mod.is_none() && self.has_module(specifier) {
+            specifier.to_string()
+        } else {
+            self.resolve_module_request(specifier)?
+                .ok_or_else(|| VmErr::Msg(format!("TypeError: Module not found: {specifier}")))?
+        };
+        if self.has_module(&id) {
+            return Ok(id);
+        }
+        let Some(loader) = self.module_loader.clone() else {
+            return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
+        };
+        let loaded = loader.load_with_attributes(&id, attributes)?;
+        if loaded.id != id {
+            return Err(VmErr::Msg(
+                "module loader changed canonical identity".into(),
+            ));
+        }
+        if id.starts_with("file:") {
+            self.define_module_file_url(&id, id.clone());
+        }
+        self.define_module(&id, loaded.source);
+        Ok(id)
     }
     fn start_async_module(
         &mut self,

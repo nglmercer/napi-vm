@@ -26,9 +26,9 @@
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
   "source_base": "c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a",
-  "source_state": "last complete full-corpus measurement; later Object integrity, Object.fromEntries, and deferred-import changes are outside this measured snapshot",
+  "source_state": "last complete full-corpus measurement; later Object integrity, Object.fromEntries, deferred-import, and dynamic-import-attributes changes are outside this measured snapshot",
   "evidence": "evidence/shadow-realm-2026-10-18/final-full.json.gz",
-  "note": "Last complete full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. Later Object integrity/Object.fromEntries and deferred-import work have focused release evidence only; those gains are not added to the full-corpus score. ShadowRealm and isPrototypeOf focused selection: 144/144. Deferred imports pass 109/109, and the neighboring module-code/dynamic-import selection gains four passes with zero losses (2,444/2,502). See the feature continuation docs and archived evidence.",
+  "note": "Last complete full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. Later Object integrity/Object.fromEntries, deferred-import, and dynamic-import-attributes work have focused release evidence only; those gains are not added to the full-corpus score. ShadowRealm and isPrototypeOf focused selection: 144/144. Deferred imports pass 109/109. The latest neighboring module-code/dynamic-import selection passes 2,448/2,502, gaining four passes with zero losses over the previous committed focused release evidence. See the feature continuation docs and archived evidence.",
   "source_patch_sha256": "b4df42b571677b7564ffaaf1ab6b6f6d0a1747d62f8d8d4b73c9116e304c1ecb",
   "current_focused": {
     "selection": [
@@ -79,5 +79,22 @@
     "total": 3,
     "counts": {"pass": 3, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
     "evidence": "evidence/deferred-import-2026-10-18/private-elements-regression.json.gz"
+  },
+  "dynamic_import_attributes_focused": {
+    "selection": ["language/expressions/dynamic-import/import-attributes"],
+    "engine_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
+    "total": 44,
+    "counts": {"pass": 42, "fail": 2, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "known_failures": ["2nd-param-await-ident.js script and strict variants; pre-existing parser rejection"],
+    "evidence": "evidence/dynamic-import-attributes-2026-10-18/focused.json.gz",
+    "implementation_patch_sha256": "e909b59dc378046efaf2418a4037a2a7c999a9cf54487a9cba5eabe49d976d37"
+  },
+  "module_async_regression_after_dynamic_attributes": {
+    "selection": ["language/module-code", "language/expressions/dynamic-import"],
+    "engine_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
+    "total": 2502,
+    "counts": {"pass": 2448, "fail": 54, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "comparison": {"previous_focused_pass": 2444, "gained": 4, "lost": 0},
+    "evidence": "evidence/dynamic-import-attributes-2026-10-18/module-async-regression.json.gz"
   }
 }

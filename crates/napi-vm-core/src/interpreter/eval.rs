@@ -1311,31 +1311,30 @@ impl Interpreter {
                         ));
                     }
                     let keys = crate::builtins::object::own_names_for(self, &attributes, true)?;
-                    for key in &keys {
-                        if !matches!(self.get_prop_value_str(&attributes, key)?, Value::String(_)) {
+                    let mut converted = Vec::with_capacity(keys.len());
+                    for key in keys {
+                        let value = self.get_prop_value_str(&attributes, &key)?;
+                        let Value::String(value) = &value else {
                             return Err(VmErr::Msg(
                                 "TypeError: import attribute values must be strings".into(),
                             ));
-                        }
+                        };
+                        converted.push((key, value.clone()));
                     }
-                    if !keys.is_empty() {
-                        return Err(VmErr::Msg(
-                            "TypeError: import attributes are not supported by this module loader"
-                                .into(),
-                        ));
-                    }
+                    return Ok((name, converted));
                 }
             }
-            Ok(name)
+            Ok((name, Vec::new()))
         })();
         match converted {
-            Ok(specifier) => {
+            Ok((specifier, attributes)) => {
                 self.jobs
                     .borrow_mut()
                     .push_microtask(super::jobs::Job::DynamicImport {
                         realm: self.persistent_global.clone(),
                         target: target.clone(),
                         specifier,
+                        attributes,
                         phase,
                         referrer: self.cur_mod.clone(),
                     })
