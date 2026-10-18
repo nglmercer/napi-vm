@@ -43,51 +43,51 @@ worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
 The latest completed full development measurement in `latest.json` passes
-**101,488 / 102,956 variants (98.5741%)**: 1,414 failures, 54 timeouts, and
-zero feature skips, crashes, or harness errors. It adds 134 passes and loses
-zero versus the previous completed full run. The combined release selection
-for `built-ins/ShadowRealm` and
-`built-ins/Object/prototype/isPrototypeOf` passes 144 / 144 variants. The corpus
-revision, runner limits, and full-suite denominator are unchanged.
+**101,633 / 102,956 variants (98.7150%)**: 1,246 failures, 77 timeouts, and
+zero feature skips, crashes, or harness errors. It measures source `8333a38`
+and adds 169 passes while losing 24 against the prior full run. Of those lost
+passes, 23 time out and one JSON-module test fails. The old full run used four
+workers; this run used two. All measured outcomes are retained. The later
+static module-attributes implementation fixes the JSON-module failure.
+Full rows, triage, comparison, and source identity are archived in
+[`evidence/full-refresh-2026-10-18/`](evidence/full-refresh-2026-10-18/).
 
-Since that full-run worker was built, the Object integrity and `fromEntries`
-implementation advanced. The focused selection covering `Object.fromEntries`,
-`freeze`, `seal`, `isFrozen`, `isSealed`, `preventExtensions`, and
-`Reflect.preventExtensions` passes 622 / 622 variants; it does not change the
-full-corpus measurement. See the [Object integrity continuation](../../docs/test262-object-integrity-continuation.md)
-and its archived evidence.
+That full snapshot includes Object integrity and `Object.fromEntries`, deferred
+imports, and the earlier dynamic-import attributes implementation. Their
+historical focused reports remain available under
+[`object-integrity`](evidence/object-integrity-2026-10-18/),
+[`deferred-import`](evidence/deferred-import-2026-10-18/), and
+[`dynamic-import-attributes`](evidence/dynamic-import-attributes-2026-10-18/).
 
-The deferred module evaluation selection at
-`language/import/import-defer` passes **109 / 109** variants. A neighboring
-regression selection for `language/module-code` and
-`language/expressions/dynamic-import` now passes **2,454 / 2,502**, with six
-additional gains and zero losses against the previous committed release
-evidence. Static import attributes pass **17 / 17** and dynamic import
-attributes pass **44 / 44**. The module attributes reports are archived under
-[`evidence/module-attributes-2026-10-18/`](evidence/module-attributes-2026-10-18/).
-The previous dynamic-import-only checkpoint remains under
-[`evidence/dynamic-import-attributes-2026-10-18/`](evidence/dynamic-import-attributes-2026-10-18/).
-The deferred-import reports remain under
-[`evidence/deferred-import-2026-10-18/`](evidence/deferred-import-2026-10-18/).
-Neither focused result changes the full-corpus score.
-
+Later static and dynamic import attributes plus deferred imports pass a combined
+**170 / 170** variants. The neighboring module-code/dynamic-import selection
+passes **2,454 / 2,502**. See the
+[module attributes continuation](../../docs/test262-dynamic-import-attributes-continuation.md)
+and [`module-attributes` evidence](evidence/module-attributes-2026-10-18/).
 
 The control-flow completion release selection passes all **150 / 150**
 completion-only variants and **213 / 216** switch variants. Its neighboring
 control-flow selection passes **3,574 / 3,624**, gaining **71 passes with zero
-losses** against the earlier frozen worker. Reports, comparisons, the measured
-source patch, and worker identity are under
+losses**. Reports and comparisons are under
 [`evidence/control-flow-completion-2026-10-18/`](evidence/control-flow-completion-2026-10-18/).
 See the [control-flow continuation](../../docs/test262-control-flow-completion-continuation.md).
-These focused results also remain outside the older full-corpus score.
+The subsequent strict-tail-call selection passes **35 / 35**, up from 1 / 35,
+with 34 gains and zero losses. The neighboring control-flow selection now
+passes **3,591 / 3,624**, with 17 further gains and zero losses. Switch is fully
+green at **216 / 216**. Native call/apply/bind/proxy regression retains 420 / 424
+passes, and the combined module regression remains 170 / 170. Reports and
+comparisons are under [`evidence/tail-calls-2026-10-18/`](evidence/tail-calls-2026-10-18/);
+see the [tail-call continuation](../../docs/test262-tail-calls-continuation.md).
+The static module-attributes, control-flow, and tail-call changes remain outside
+the completed full-corpus score; focused gains are not added to it.
 
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the
 [ShadowRealm continuation](../../docs/test262-shadow-realm-continuation.md)
 for the implementation and remaining work.
-All 68 selected integration tests and the Node-API host feature check pass.
-The core library has 355 passes and one existing native-addon fixture failure.
+Validation counts in individual continuation documents describe their own
+source snapshots.
 Full-corpus tier differential and actual wasm32 execution remain unmeasured.
 
 The initial full development baseline is in `baseline.json`: 32,359 passes out

@@ -218,6 +218,8 @@ impl Default for ExecutionBudget {
 }
 
 pub struct Interpreter {
+    pub(crate) tail_call_context: bool,
+    tail_call_barriers: usize,
     pub global: Env,
     /// Persistent user-global scope. `global` temporarily points at function
     /// and catch frames while those bodies execute, but `globalThis` aliases
@@ -455,6 +457,8 @@ impl Interpreter {
             props.meta.borrow_mut().realm_global = Some(global.clone());
         }
         let mut interp = Self {
+            tail_call_context: false,
+            tail_call_barriers: 0,
             global: global.clone(),
             persistent_global: global,
             constructor_error_realms: Vec::new(),
@@ -1704,6 +1708,26 @@ impl Interpreter {
         self.persistent_global.borrow().get(name)
     }
 
+    fn tail_call_is_allowed(&self) -> bool {
+        if !self.tail_call_context || self.tail_call_barriers != 0 {
+            return false;
+        }
+        let variable = Environment::variable_environment(&self.global);
+        let mut scope = self.global.clone();
+        loop {
+            if !scope.borrow().resources.is_empty() {
+                return false;
+            }
+            if Rc::ptr_eq(&scope, &variable) {
+                return true;
+            }
+            let Some(parent) = scope.borrow().parent_env() else {
+                return true;
+            };
+            scope = parent;
+        }
+    }
+
     /// Execute a statement list in the *current* scope, with no hoisting.
     ///
     /// This is the raw sequencer. Callers that introduce a scope should use
@@ -1717,15 +1741,25 @@ impl Interpreter {
 
     /// Preserve the distinction between an empty completion and `undefined`.
     fn run_completion(&mut self, stmts: &[Statement]) -> Result<Option<Value>, VmErr> {
-        let mut completion = None;
-        for statement in stmts {
-            match self.eval_stmt_completion(statement) {
-                Ok(Some(value)) => completion = Some(value),
-                Ok(None) => {}
-                Err(error) => return Err(error.update_empty(completion)),
+        let saved_barriers = self.tail_call_barriers;
+        let result = (|| {
+            let mut completion = None;
+            for statement in stmts {
+                match self.eval_stmt_completion(statement) {
+                    Ok(Some(value)) => completion = Some(value),
+                    Ok(None) => {}
+                    Err(error) => return Err(error.update_empty(completion)),
+                }
+                // A preceding using declaration blocks tail position even
+                // when its value is null and there is no disposer to register.
+                if matches!(statement, Statement::ResourceDeclaration { .. }) {
+                    self.tail_call_barriers += 1;
+                }
             }
-        }
-        Ok(completion)
+            Ok(completion)
+        })();
+        self.tail_call_barriers = saved_barriers;
+        result
     }
 
     fn eval_stmt_completion(&mut self, statement: &Statement) -> Result<Option<Value>, VmErr> {

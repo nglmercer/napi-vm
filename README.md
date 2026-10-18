@@ -508,34 +508,35 @@ The core language and bridge are actively developed and covered by the native
 regression suite. Run `npm test` to see the current verified count.
 
 The latest completed full pinned Test262 pass (2026-10-18, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, worker
-`ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d`)
-passes **101,488 / 102,956 variants (98.5741%)**, with 1,414 failures,
-54 timeouts, and zero skips, crashes, or harness errors. It gains 134 passes
-with zero losses against the prior completed full run. ShadowRealm and
-`Object.prototype.isPrototypeOf` pass their combined 144-variant release
-selection. Full rows, triage, comparison, source patch, and the compact result
-are under `tools/test262/evidence/`; see
-[the ShadowRealm continuation](docs/test262-shadow-realm-continuation.md) and
-[tools/test262/README.md](tools/test262/README.md) to reproduce.
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `8333a38`)
+passes **101,633 / 102,956 variants (98.7150%)**, with 1,246 failures,
+77 timeouts, and zero skips, crashes, or harness errors. It gains 169 passes
+and loses 24 against the previous full run: 23 former passes time out and one
+JSON-module test fails. Worker concurrency changed from four to two; measured
+outcomes are retained. The JSON-module failure is fixed by the later static
+module-attributes change. Full results and comparisons are archived in
+[`full-refresh-2026-10-18`](tools/test262/evidence/full-refresh-2026-10-18/).
+See [tools/test262/README.md](tools/test262/README.md) to reproduce.
 
 The current deferred-import implementation passes its pinned 109-variant
 Test262 selection. Static import attributes pass 17 / 17 variants and dynamic
 import attributes pass 44 / 44. The neighboring module-code and dynamic-import
 selection now passes 2,454 / 2,502, gaining six passes with zero losses against
-the previous committed release selection. These focused results are separate
-from the older full-corpus score. Details and evidence are in the
+the previous committed release selection. The completed full snapshot includes deferred imports and earlier dynamic
+attributes; the newer static/module-attribute gains remain focused evidence. Details and evidence are in the
 [deferred-import continuation](docs/test262-deferred-import-continuation.md)
 and [module attributes continuation](docs/test262-dynamic-import-attributes-continuation.md).
 
 
-Control-flow completion semantics now preserve values through blocks, labels,
+Control-flow completion semantics preserve values through blocks, labels,
 switch fall-through, and abrupt loop exits in both AST and bytecode execution.
-All 150 completion variants pass. The broader control-flow release selection
-passes 3,574 / 3,624, gaining 71 passes with zero losses. See the
+All 150 completion variants pass. Strict tail calls now use a shared trampoline;
+all **35 / 35** tail-call variants and **216 / 216** switch variants pass.
+The neighboring control-flow release selection passes **3,591 / 3,624**, with
+17 additional gains and zero losses over the completion checkpoint. See the
 [control-flow continuation](docs/test262-control-flow-completion-continuation.md)
-for evidence and remaining gaps. These focused gains are outside the older
-full-corpus score.
+and [tail-call continuation](docs/test262-tail-calls-continuation.md).
+These focused gains remain outside the completed full-corpus score.
 
 ## License
 

@@ -6,30 +6,29 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d",
+  "engine_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
-  "worker_jobs": 4,
+  "worker_jobs": 2,
   "timeout_seconds": 5.0,
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 101488,
-    "fail": 1414,
+    "pass": 101633,
+    "fail": 1246,
     "skip": 0,
-    "timeout": 54,
+    "timeout": 77,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 98.57414817980496,
+  "pass_percentage": 98.71498504215393,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a",
-  "source_state": "last complete full-corpus measurement; later Object integrity, Object.fromEntries, deferred-import, dynamic-import-attributes, and static module-attributes changes are outside this measured snapshot; later control-flow completion changes are also outside this snapshot",
-  "evidence": "evidence/shadow-realm-2026-10-18/final-full.json.gz",
-  "note": "Last completed full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. Later Object integrity/Object.fromEntries, deferred-import, and import-attributes work have focused release evidence only; those gains are not added to this full-corpus score. ShadowRealm and isPrototypeOf focused selection: 144/144. Deferred imports and static/dynamic import-attributes selections pass 170/170 combined. The latest neighboring module-code/dynamic-import selection passes 2,454/2,502, gaining six passes with zero losses over the previous committed focused release evidence. A refreshed full run on the immediately preceding worker snapshot is in progress. See the feature continuation docs and archived evidence. Control-flow completion release evidence: 3574/3624 neighboring variants, 71 gains and zero losses; all 150 completion-only variants pass.",
-  "source_patch_sha256": "b4df42b571677b7564ffaaf1ab6b6f6d0a1747d62f8d8d4b73c9116e304c1ecb",
+  "source_base": "8333a381832107248fe790ec6a36b5df7b2b632f",
+  "source_state": "clean committed dynamic-import-attributes snapshot; excludes later static attributes, control-flow completion, and tail-call changes",
+  "evidence": "evidence/full-refresh-2026-10-18/final-full.json.gz",
+  "note": "Last completed full pinned run: 101,633 / 102,956 (98.7150%), on source 8333a38. It gains 169 passes and loses 24 against the previous completed full run: 23 former passes time out and one JSON-module case fails. Worker concurrency changed from four to two; measured outcomes are retained. The JSON-module failure is fixed by later static module-attributes work. Static/module attribute and control-flow completion gains remain separate focused evidence: 170/170 combined import variants and 3,574/3,624 neighboring control-flow variants (71 gains, zero losses). No newer focused gains are added to this full score. Later tail-call release evidence passes 35/35 (34 gains, zero losses), 3,591/3,624 control-flow variants (17 more gains, zero losses), and all 216 switch variants. Native-call regression: 420/424, zero lost passes; combined import/deferred module regression: 170/170.",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -54,19 +53,43 @@
     "source_patch_sha256": "1774f9fc42b6c59439368f69fe1d733c852e43fe82a415474e58dbb87d3fbed0"
   },
   "deferred_import_focused": {
-    "selection": ["language/import/import-defer"],
+    "selection": [
+      "language/import/import-defer"
+    ],
     "engine_sha256": "f0e59fa7a76c240da54f655e5bd23f634c8a10df0ddc2ec60ddd57a08fbacf33",
     "total": 109,
-    "counts": {"pass": 109, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "counts": {
+      "pass": 109,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
     "evidence": "evidence/module-attributes-2026-10-18/focused.json.gz",
     "implementation_patch_sha256": "4c04fdce6afc92568eb9bc502a0cec235a0885c9a6ab6ab0b0db4c20199d13f7"
   },
   "module_async_regression": {
-    "selection": ["language/module-code", "language/expressions/dynamic-import"],
+    "selection": [
+      "language/module-code",
+      "language/expressions/dynamic-import"
+    ],
     "engine_sha256": "12c26eff020aceab8426cd6e4c8c19187b4606390c81fbdbd237d0eba00a02d5",
     "total": 2502,
-    "counts": {"pass": 2444, "fail": 58, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
-    "comparison": {"baseline_pass": 2440, "baseline_total": 2502, "gained": 4, "lost": 0},
+    "counts": {
+      "pass": 2444,
+      "fail": 58,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "comparison": {
+      "baseline_pass": 2440,
+      "baseline_total": 2502,
+      "gained": 4,
+      "lost": 0
+    },
     "evidence": "evidence/deferred-import-2026-10-18/module-async-regression.json.gz"
   },
   "private_elements_regression": {
@@ -77,24 +100,56 @@
     ],
     "engine_sha256": "12c26eff020aceab8426cd6e4c8c19187b4606390c81fbdbd237d0eba00a02d5",
     "total": 3,
-    "counts": {"pass": 3, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "counts": {
+      "pass": 3,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
     "evidence": "evidence/deferred-import-2026-10-18/private-elements-regression.json.gz"
   },
   "dynamic_import_attributes_checkpoint": {
-    "selection": ["language/expressions/dynamic-import/import-attributes"],
+    "selection": [
+      "language/expressions/dynamic-import/import-attributes"
+    ],
     "engine_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
     "total": 44,
-    "counts": {"pass": 42, "fail": 2, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
-    "known_failures": ["2nd-param-await-ident.js script and strict variants; pre-existing parser rejection"],
+    "counts": {
+      "pass": 42,
+      "fail": 2,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "known_failures": [
+      "2nd-param-await-ident.js script and strict variants; pre-existing parser rejection"
+    ],
     "evidence": "evidence/dynamic-import-attributes-2026-10-18/focused.json.gz",
     "implementation_patch_sha256": "e909b59dc378046efaf2418a4037a2a7c999a9cf54487a9cba5eabe49d976d37"
   },
   "module_async_regression_after_dynamic_attributes": {
-    "selection": ["language/module-code", "language/expressions/dynamic-import"],
+    "selection": [
+      "language/module-code",
+      "language/expressions/dynamic-import"
+    ],
     "engine_sha256": "de16c9718d03a2bc11b6552ec21960b305aea7d4aaeca1a6d1271360c3b013ca",
     "total": 2502,
-    "counts": {"pass": 2448, "fail": 54, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
-    "comparison": {"previous_focused_pass": 2444, "gained": 4, "lost": 0},
+    "counts": {
+      "pass": 2448,
+      "fail": 54,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "comparison": {
+      "previous_focused_pass": 2444,
+      "gained": 4,
+      "lost": 0
+    },
     "evidence": "evidence/dynamic-import-attributes-2026-10-18/module-async-regression.json.gz"
   },
   "module_attributes_focused": {
@@ -105,30 +160,69 @@
     ],
     "engine_sha256": "f0e59fa7a76c240da54f655e5bd23f634c8a10df0ddc2ec60ddd57a08fbacf33",
     "total": 170,
-    "counts": {"pass": 170, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "counts": {
+      "pass": 170,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
     "evidence": "evidence/module-attributes-2026-10-18/focused.json.gz",
     "implementation_patch_sha256": "4c04fdce6afc92568eb9bc502a0cec235a0885c9a6ab6ab0b0db4c20199d13f7"
   },
   "static_import_attributes_focused": {
-    "selection": ["language/import/import-attributes"],
+    "selection": [
+      "language/import/import-attributes"
+    ],
     "engine_sha256": "f0e59fa7a76c240da54f655e5bd23f634c8a10df0ddc2ec60ddd57a08fbacf33",
     "total": 17,
-    "counts": {"pass": 17, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "counts": {
+      "pass": 17,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
     "evidence": "evidence/module-attributes-2026-10-18/focused.json.gz"
   },
   "dynamic_import_attributes_focused": {
-    "selection": ["language/expressions/dynamic-import/import-attributes"],
+    "selection": [
+      "language/expressions/dynamic-import/import-attributes"
+    ],
     "engine_sha256": "f0e59fa7a76c240da54f655e5bd23f634c8a10df0ddc2ec60ddd57a08fbacf33",
     "total": 44,
-    "counts": {"pass": 44, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "counts": {
+      "pass": 44,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
     "evidence": "evidence/module-attributes-2026-10-18/focused.json.gz"
   },
   "module_async_regression_after_module_attributes": {
-    "selection": ["language/module-code", "language/expressions/dynamic-import"],
+    "selection": [
+      "language/module-code",
+      "language/expressions/dynamic-import"
+    ],
     "engine_sha256": "f0e59fa7a76c240da54f655e5bd23f634c8a10df0ddc2ec60ddd57a08fbacf33",
     "total": 2502,
-    "counts": {"pass": 2454, "fail": 48, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
-    "comparison": {"previous_focused_pass": 2448, "gained": 6, "lost": 0},
+    "counts": {
+      "pass": 2454,
+      "fail": 48,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "comparison": {
+      "previous_focused_pass": 2448,
+      "gained": 6,
+      "lost": 0
+    },
     "evidence": "evidence/module-attributes-2026-10-18/module-async-regression.json.gz"
   },
   "control_flow_completion": {
@@ -266,5 +360,121 @@
     },
     "evidence": "evidence/control-flow-completion-2026-10-18/summary.json",
     "implementation_patch_sha256": "3399f8e1eafb678cd133cfd2a934e5f08a12635146890ca9e24a14924afa0986"
+  },
+  "full_refresh_comparison": {
+    "baseline_worker_jobs": 4,
+    "current_worker_jobs": 2,
+    "new_passes": 169,
+    "lost_passes": 24,
+    "measurement_note": "Worker concurrency changed from four to two. Timeout changes remain measured outcomes; no outcomes are reclassified."
+  },
+  "tail_calls_focused": {
+    "selection": [
+      "language/statements/while/tco-body.js",
+      "language/statements/try/tco-finally.js",
+      "language/statements/try/tco-catch.js",
+      "language/statements/try/tco-catch-finally.js",
+      "language/statements/switch/tco-dftl-body.js",
+      "language/statements/switch/tco-case-body.js",
+      "language/statements/switch/tco-case-body-dflt.js",
+      "language/statements/return/tco.js",
+      "language/statements/labeled/tco.js",
+      "language/statements/if/tco-if-body.js",
+      "language/statements/if/tco-else-body.js",
+      "language/statements/block/tco-stmt.js",
+      "language/statements/block/tco-stmt-list.js",
+      "language/statements/for/tco-var-body.js",
+      "language/statements/for/tco-lhs-body.js",
+      "language/statements/for/tco-let-body.js",
+      "language/statements/for/tco-const-body.js",
+      "built-ins/Proxy/revocable/tco-fn-realm.js",
+      "language/expressions/tco-pos.js",
+      "language/expressions/tagged-template/tco-member.js",
+      "language/expressions/tagged-template/tco-call.js",
+      "language/expressions/conditional/tco-pos.js",
+      "language/expressions/conditional/tco-cond.js",
+      "language/expressions/comma/tco-final.js",
+      "language/expressions/coalesce/tco-pos-undefined.js",
+      "language/expressions/coalesce/tco-pos-null.js",
+      "language/expressions/logical-and/tco-right.js",
+      "language/expressions/logical-or/tco-right.js",
+      "language/expressions/call/tco-non-eval-with.js",
+      "language/expressions/call/tco-non-eval-global.js",
+      "language/expressions/call/tco-non-eval-function.js",
+      "language/expressions/call/tco-non-eval-function-dynamic.js",
+      "language/expressions/call/tco-member-args.js",
+      "language/expressions/call/tco-call-args.js",
+      "language/statements/do-while/tco-body.js"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 35,
+    "counts": {
+      "pass": 35,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 1,
+    "gains": 34,
+    "losses": 0,
+    "evidence": "evidence/tail-calls-2026-10-18/focused.json.gz",
+    "implementation_patch_sha256": "68b50f7b08cab1e09f5fd46fb08c4a0398a4a8ea07b360e991ccc815c4e40794"
+  },
+  "tail_calls_control_flow_regression": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 3624,
+    "counts": {
+      "pass": 3591,
+      "fail": 33,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 3574,
+    "gains": 17,
+    "losses": 0,
+    "evidence": "evidence/tail-calls-2026-10-18/control-flow-regression.json.gz"
+  },
+  "tail_calls_native_regression": {
+    "selection": [
+      "built-ins/Function/prototype/call",
+      "built-ins/Function/prototype/apply",
+      "built-ins/Function/prototype/bind",
+      "built-ins/Reflect/apply",
+      "built-ins/Proxy/apply"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 424,
+    "counts": {
+      "pass": 420,
+      "fail": 4,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_source": "8333a381832107248fe790ec6a36b5df7b2b632f",
+    "baseline_passes": 420,
+    "gains": 0,
+    "losses": 0,
+    "evidence": "evidence/tail-calls-2026-10-18/native-regression.json.gz"
   }
 }

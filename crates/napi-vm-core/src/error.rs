@@ -42,9 +42,20 @@ impl RuntimeErrorData {
     }
 }
 
+/// A call whose caller activation can be released before invoking its callee.
+#[derive(Debug)]
+pub struct TailCall {
+    pub callee: Value,
+    pub receiver: Value,
+    pub arguments: Vec<Value>,
+    pub caller_realm: crate::interpreter::Env,
+    pub caller_module: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum VmErr {
     Ret(Value),
+    TailCall(Box<TailCall>),
     /// A value thrown by user code (`throw expr`). Carries the original value
     /// so `catch (e)` can inspect thrown objects (e.g. `e.message`).
     Throw(Value),
@@ -136,6 +147,7 @@ impl fmt::Display for VmErr {
             }
             VmErr::Throw(v) => write!(f, "{}", throw_display(v)),
             VmErr::Ret(_) => write!(f, "return"),
+            VmErr::TailCall(_) => write!(f, "tail call"),
             VmErr::Break(Some(l), _) => write!(f, "break outside loop (label {})", l),
             VmErr::Break(None, _) => write!(f, "break outside loop"),
             VmErr::Continue(Some(l), _) => write!(f, "continue outside loop (label {})", l),

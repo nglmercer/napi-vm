@@ -443,7 +443,7 @@ fn function_call(
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let receiver = args.first().cloned().unwrap_or(Value::Undefined);
-    interp.call_this(&target, receiver, args.into_iter().skip(1).collect())
+    interp.request_tail_call(target, receiver, args.into_iter().skip(1).collect())
 }
 
 fn function_apply(
@@ -463,7 +463,7 @@ fn function_apply(
     } else {
         interp.argument_list_from_array_like(&array_like)?
     };
-    interp.call_this(&target, receiver, call_args)
+    interp.request_tail_call(target, receiver, call_args)
 }
 
 fn new_function(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

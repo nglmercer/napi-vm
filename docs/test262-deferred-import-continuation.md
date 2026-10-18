@@ -27,10 +27,11 @@ Reports are archived in
 The implementation patch is included in that archive with its SHA-256 in the
 compact result. Three focused class/private-element Test262 variants also pass.
 
-The full pinned corpus has not been rerun after these changes. Its recorded
-score remains **101,488 / 102,956 (98.5741%)** and must not be adjusted by
-focused results. Strict workspace Clippy, formatting, the workspace check, and
-the engine-boundary suite pass.
+A later completed full pinned corpus run on source `8333a38` includes this
+implementation and passes **101,633 / 102,956 (98.7150%)**. See the
+[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-18/).
+Later static module-attributes and control-flow changes remain outside that
+full source snapshot.
 
 The implementation follows the current
 [TC39 deferred-import evaluation proposal](https://tc39.es/proposal-defer-import-eval/).

@@ -2,38 +2,41 @@
 
 ## Current measured state
 
-The latest completed full measurement passes **101,488 / 102,956 (98.5741%)**,
-with 1,414 failures, 54 timeouts, and zero skips, crashes, or harness errors.
-It records 134 new passes and zero lost passes against the previous complete
-run. The ShadowRealm implementation, primitive-string `for-in`, and
-`Object.prototype.isPrototypeOf` receiver semantics are included. See the
-[current compact result](../tools/test262/latest.json), the
-[feature continuation](test262-shadow-realm-continuation.md), and the archived
-[full-run evidence](../tools/test262/evidence/shadow-realm-2026-10-18/).
+The latest completed full measurement passes **101,633 / 102,956 (98.7150%)**,
+with 1,246 failures, 77 timeouts, and zero skips, crashes, or harness errors.
+It measures source `8333a38`, including Object integrity, `Object.fromEntries`,
+deferred imports, and the earlier dynamic-import attributes implementation.
+It gains 169 passes and loses 24 against the previous full run: 23 former
+passes time out and one JSON-module test fails. Concurrency changed from four
+to two workers. No timeout outcomes are reclassified. The JSON-module failure
+is fixed by the later static module-attributes commit `5b119d4`.
+See [`latest.json`](../tools/test262/latest.json) and the
+[full refresh evidence](../tools/test262/evidence/full-refresh-2026-10-18/).
 
-The Object integrity and `Object.fromEntries` changes made after that worker
-passed their focused selection (622 / 622), but have not yet been included in
-a full-corpus run. See the [Object continuation](test262-object-integrity-continuation.md)
-for the implementation and focused evidence.
+Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
+and deferred imports pass 109 / 109 in the combined 170-variant selection.
+The neighboring module-code and dynamic-import selection passes 2,454 / 2,502.
+See the [module attributes continuation](test262-dynamic-import-attributes-continuation.md).
 
-The deferred-import implementation passes all 109 variants in
-`language/import/import-defer`. Static import attributes pass 17 / 17 and
-dynamic import attributes pass 44 / 44. The neighboring module-code and
-dynamic-import selection passes 2,454 / 2,502, gaining six passes with zero
-losses against the previous committed focused release evidence. These focused
-results are recorded separately in [`latest.json`](../tools/test262/latest.json);
-they do not change the full-run score. See the
-[module attributes continuation](test262-dynamic-import-attributes-continuation.md).
+Control-flow completion passes all **150 / 150** statement completion
+variants. Switch passes **213 / 216**, with three proper-tail-call failures
+at that checkpoint. The neighboring control-flow selection passes
+**3,574 / 3,624**, gaining **71 passes with zero losses**. AST and prepared
+bytecode completion checks, 93 integration tests, and 79 selected bytecode
+tests pass; the known unrelated super-destructuring parity failure is excluded
+from that bytecode selection. See the
+[control-flow continuation](test262-control-flow-completion-continuation.md).
+Tail-call execution subsequently passes **35 / 35** variants, with **34 gains
+and zero losses**. Switch now passes **216 / 216** and the neighboring
+control-flow selection passes **3,591 / 3,624** (17 further gains, zero losses).
+Native call/apply/bind/proxy regression remains 420 / 424 and module regression
+remains 170 / 170. Strict Clippy, 104 integration tests, 83 realm tests, and the
+79 selected bytecode tests pass. See the
+[tail-call continuation](test262-tail-calls-continuation.md).
 
-
-Control-flow completion now passes all **150 / 150** statement completion
-variants. Switch passes **213 / 216**, with three proper-tail-call failures.
-The neighboring control-flow selection passes **3,574 / 3,624**, gaining
-**71 passes with zero losses**. AST and prepared bytecode completion checks,
-93 integration tests, and 79 selected bytecode tests pass; the known unrelated
-super-destructuring parity failure is excluded from that bytecode selection.
-See the [control-flow continuation](test262-control-flow-completion-continuation.md).
-The separate full refresh remains on the earlier `8333a38` worker snapshot.
+Static module attributes, control-flow completion, and tail-call execution are
+outside the completed full-run snapshot. Newer focused gains are not added to
+its score.
 
 ## Historical checkpoint
 

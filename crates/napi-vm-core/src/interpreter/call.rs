@@ -2023,7 +2023,51 @@ impl Interpreter {
         }
     }
 
+    pub(crate) fn request_tail_call(
+        &mut self,
+        callee: Value,
+        receiver: Value,
+        arguments: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        if !is_callable_value(&callee) {
+            return Err(VmErr::Msg("TypeError: value is not callable".into()));
+        }
+        Err(VmErr::TailCall(Box::new(crate::error::TailCall {
+            callee,
+            receiver,
+            arguments,
+            caller_realm: self.persistent_global.clone(),
+            caller_module: self.cur_mod.clone(),
+        })))
+    }
+
+    fn resolve_tail_calls(&mut self, mut result: Result<Value, VmErr>) -> Result<Value, VmErr> {
+        loop {
+            let Err(VmErr::TailCall(call)) = result else {
+                return result;
+            };
+            let saved_module = std::mem::replace(&mut self.cur_mod, call.caller_module);
+            let saved_modules = self.enter_module_realm(&call.caller_realm);
+            let saved = std::mem::replace(&mut self.persistent_global, call.caller_realm.clone());
+            let _allocation_realm = super::realm::AllocationRealm::enter(Some(call.caller_realm));
+            result = self.call_this_once(&call.callee, call.receiver, call.arguments);
+            self.cur_mod = saved_module;
+            self.persistent_global = saved;
+            saved_modules.install(self);
+        }
+    }
+
     pub(crate) fn call_this_borrowed(
+        &mut self,
+        function: &Value,
+        receiver: Value,
+        arguments: &[Value],
+    ) -> Result<Value, VmErr> {
+        let result = self.call_this_borrowed_once(function, receiver, arguments);
+        self.resolve_tail_calls(result)
+    }
+
+    fn call_this_borrowed_once(
         &mut self,
         f: &Value,
         this_val: Value,
@@ -2058,6 +2102,9 @@ impl Interpreter {
                     .clone()
             });
             self.push_frame(fname, Span::unknown());
+            let saved_tail_context =
+                std::mem::replace(&mut self.tail_call_context, fd.strict && !fd.is_async);
+            let saved_tail_barriers = std::mem::replace(&mut self.tail_call_barriers, 0);
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
                     crate::bytecode::vm::run_function(
@@ -2071,6 +2118,8 @@ impl Interpreter {
                     )
                 })
             }));
+            self.tail_call_context = saved_tail_context;
+            self.tail_call_barriers = saved_tail_barriers;
             self.persistent_global = saved_persistent;
             self.cur_mod = saved_module;
             saved_modules.install(self);
@@ -2091,11 +2140,22 @@ impl Interpreter {
             self.pop_frame();
             return result;
         }
-        self.call_this(f, this_val, args.to_vec())
+        self.call_this_once(f, this_val, args.to_vec())
     }
 
     #[doc(hidden)]
     pub fn call_this(
+        &mut self,
+        function: &Value,
+        receiver: Value,
+        arguments: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        let result = self.call_this_once(function, receiver, arguments);
+        self.resolve_tail_calls(result)
+    }
+
+    #[doc(hidden)]
+    fn call_this_once(
         &mut self,
         f: &Value,
         this_val: Value,
@@ -2169,7 +2229,7 @@ impl Interpreter {
                     }
                     let mut call_args = bound.arguments.as_ref().clone();
                     call_args.extend(args);
-                    return self.call_this(&bound.target, bound.this_value.clone(), call_args);
+                    return self.call_this_once(&bound.target, bound.this_value.clone(), call_args);
                 }
                 // Calling a generator function does not run its body; it returns
                 // a generator object whose `next()` method drives execution.
@@ -2270,7 +2330,7 @@ impl Interpreter {
                 // mirror the AST path below exactly (async/generator
                 // bodies never compile).
                 if fd.bytecode.is_some() {
-                    return self.call_this_borrowed(f, this_val, &args);
+                    return self.call_this_borrowed_once(f, this_val, &args);
                 }
                 let this_val = self.function_this(fd, this_val);
                 let new_target = self.pending_new_target.take().unwrap_or(Value::Undefined);
@@ -2385,10 +2445,15 @@ impl Interpreter {
                 // Keep the guest call-depth limit while switching to a
                 // guarded stack segment before the tree walker exhausts that
                 // host-provided stack.
+                let saved_tail_context =
+                    std::mem::replace(&mut self.tail_call_context, fd.strict && !fd.is_async);
+                let saved_tail_barriers = std::mem::replace(&mut self.tail_call_barriers, 0);
                 let r =
                     stacker::maybe_grow(RECURSION_STACK_RED_ZONE, RECURSION_STACK_SEGMENT, || {
                         self.run_function_body(&fd.body, fd.needs_hoisting)
                     });
+                self.tail_call_context = saved_tail_context;
+                self.tail_call_barriers = saved_tail_barriers;
                 // Convert a bare message into a located runtime error *before*
                 // popping the frame, so the snapshot carries the full call
                 // chain. Only the error path pays for the snapshot — the
@@ -2421,6 +2486,7 @@ impl Interpreter {
                     let _error_realm = super::realm::AllocationRealm::enter(
                         self.constructor_error_realms.last().cloned(),
                     );
+                    let result = self.resolve_tail_calls(result);
                     match result {
                         Ok(value) if is_js_object(&value) => Ok(value),
                         Ok(Value::Undefined) => self
@@ -2489,9 +2555,9 @@ impl Interpreter {
                 match self.proxy_trap(&handler, "apply")? {
                     Some(trap) => {
                         let arg_list = Value::checked_array(args)?;
-                        self.call_this(&trap, handler, vec![target, this_val, arg_list])
+                        self.call_this_once(&trap, handler, vec![target, this_val, arg_list])
                     }
-                    None => self.call_this(&target, this_val, args),
+                    None => self.call_this_once(&target, this_val, args),
                 }
             }
             // A built-in namespace such as `String` or `Map` is an object
@@ -2509,7 +2575,7 @@ impl Interpreter {
                     } else {
                         this_val
                     };
-                    self.call_this(&target, receiver, args)
+                    self.call_this_once(&target, receiver, args)
                 }
                 None => vm_err("TypeError: object is not a function".to_string()),
             },
@@ -3074,7 +3140,7 @@ fn make_generator_coroutine(
                 Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
                 Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
                 // A break/continue escaping the generator body is a runtime error.
-                Err(e @ (VmErr::Break(..) | VmErr::Continue(..))) => {
+                Err(e @ (VmErr::Break(..) | VmErr::Continue(..) | VmErr::TailCall(_))) => {
                     GenOutcome::Failed(format!("{}", e))
                 }
             }

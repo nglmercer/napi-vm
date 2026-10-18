@@ -206,7 +206,7 @@ fn reflect_apply(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Va
         ));
     }
     let args = interp.argument_list_from_array_like(&arg(&a, 2))?;
-    interp.call_this(&target, arg(&a, 1), args)
+    interp.request_tail_call(target, arg(&a, 1), args)
 }
 
 fn reflect_construct(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {

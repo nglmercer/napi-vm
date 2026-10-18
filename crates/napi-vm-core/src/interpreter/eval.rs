@@ -1501,7 +1501,8 @@ impl Interpreter {
             Statement::Return(e) => {
                 let v = match e {
                     Some(ex) => {
-                        let value = self.eval_expr(ex)?;
+                        let value =
+                            self.eval_expr_in_tail_position(ex, self.tail_call_is_allowed())?;
                         self.prepare_return_value(value)?
                     }
                     None => Value::Undefined,
@@ -1693,13 +1694,21 @@ impl Interpreter {
                 // Run the body, routing thrown and runtime errors into catch.
                 // An abandon teardown bypasses both `catch` and `finally`:
                 // it runs no guest code on the way out.
+                let saved_barriers = self.tail_call_barriers;
+                if catch.is_some() || finally.is_some() {
+                    self.tail_call_barriers += 1;
+                }
                 let body_result = self.run_block(body);
+                self.tail_call_barriers = saved_barriers;
                 if let Err(error) = &body_result
                     && error.is_abandon()
                 {
                     return body_result;
                 }
 
+                if finally.is_some() {
+                    self.tail_call_barriers += 1;
+                }
                 let after_catch = match body_result {
                     Err(VmErr::Throw(val)) => self.run_catch(catch, val),
                     // Control-flow signals are not catchable.
@@ -1720,6 +1729,7 @@ impl Interpreter {
                     other => other,
                 };
 
+                self.tail_call_barriers = saved_barriers;
                 // finally always runs last; its own error/return takes precedence.
                 if let Some(f) = finally {
                     self.run_block(f)
@@ -2255,7 +2265,9 @@ impl Interpreter {
                 }
                 return Err(error);
             }
+            self.tail_call_barriers += 1;
             let outcome = self.run_block_with_lexical_scope_completion(body, body_needs_scope);
+            self.tail_call_barriers -= 1;
             let outcome = if disposal.is_some() {
                 self.finish_completion_resources(&self.global.clone(), outcome)
             } else {
@@ -2664,9 +2676,15 @@ impl Interpreter {
     }
 
     pub(crate) fn eval_expr(&mut self, e: &Expr) -> Result<Value, VmErr> {
+        self.eval_expr_in_tail_position(e, false)
+    }
+
+    fn eval_expr_in_tail_position(&mut self, e: &Expr, tail: bool) -> Result<Value, VmErr> {
         self.consume_fuel(1)?;
         match e {
-            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => self.eval_expr(inner),
+            Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => {
+                self.eval_expr_in_tail_position(inner, tail)
+            }
             Expr::Number(n) => Ok(Value::Number(*n)),
             Expr::String(s) | Expr::EscapedString(s) => {
                 if s.len() > crate::value::MAX_STRING_LEN {
@@ -2746,7 +2764,12 @@ impl Interpreter {
                     }
                     crate::parser::BinOp::And
                     | crate::parser::BinOp::Or
-                    | crate::parser::BinOp::Nullish => return self.eval_expr(right),
+                    | crate::parser::BinOp::Nullish => {
+                        return self.eval_expr_in_tail_position(right, tail);
+                    }
+                    crate::parser::BinOp::Comma => {
+                        return self.eval_expr_in_tail_position(right, tail);
+                    }
                     _ => {}
                 }
                 let r = self.eval_expr(right)?;
@@ -2921,7 +2944,11 @@ impl Interpreter {
                 {
                     crate::builtins::eval_direct(self, arguments)
                 } else {
-                    self.call_this(&function, receiver, arguments)
+                    if tail {
+                        self.request_tail_call(function, receiver, arguments)
+                    } else {
+                        self.call_this(&function, receiver, arguments)
+                    }
                 }
             }
             // `super.x` reads through the superclass prototype.
@@ -3292,9 +3319,9 @@ impl Interpreter {
             } => {
                 let t = self.eval_expr(test)?;
                 if self.truthy(&t) {
-                    self.eval_expr(consequent)
+                    self.eval_expr_in_tail_position(consequent, tail)
                 } else {
-                    self.eval_expr(alternate)
+                    self.eval_expr_in_tail_position(alternate, tail)
                 }
             }
             // A class expression's own name is visible only inside its body,
@@ -3443,7 +3470,11 @@ impl Interpreter {
                 for expr in exprs {
                     args.push(self.eval_expr(expr)?);
                 }
-                self.call_this(&tag_fn, this_val, args)
+                if tail {
+                    self.request_tail_call(tag_fn, this_val, args)
+                } else {
+                    self.call_this(&tag_fn, this_val, args)
+                }
             }
             Expr::Template { quasis, exprs } => {
                 let mut result = crate::JsString::default();

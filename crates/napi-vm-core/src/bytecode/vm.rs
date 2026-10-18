@@ -391,6 +391,35 @@ fn set_prop_cached(
     Ok(())
 }
 
+/// A call is in tail position when its result flows through only register
+/// moves and unconditional joins into a return. Conditional branches and all
+/// observable operations terminate the search, so intermediate calls stay put.
+fn returns_call_result(frame: &CallFrame, mut result: Reg) -> bool {
+    if !frame.handlers.is_empty() {
+        return false;
+    }
+    let mut ip = frame.ip;
+    for _ in 0..frame.function.code.len() {
+        match frame.function.code.get(ip) {
+            Some(Instr::Return { src }) => return *src == result,
+            Some(Instr::Mov { dst, src }) => {
+                if *src == result {
+                    result = *dst;
+                } else if *dst == result {
+                    return false;
+                }
+            }
+            Some(Instr::Jump { target }) => {
+                ip = *target as usize;
+                continue;
+            }
+            _ => return false,
+        }
+        ip += 1;
+    }
+    false
+}
+
 fn run_loop(
     interp: &mut Interpreter,
     frame: &mut CallFrame,
@@ -836,6 +865,10 @@ fn run_loop(
                     frame.registers[dst as usize] =
                         if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
                             crate::builtins::eval_direct(interp, argv)?
+                        } else if interp.tail_call_context && returns_call_result(frame, dst) {
+                            return interp
+                                .request_tail_call(callee, Value::Undefined, argv)
+                                .map(|_| ());
                         } else {
                             interp.call_this(&callee, Value::Undefined, argv)?
                         };
@@ -847,6 +880,10 @@ fn run_loop(
                     frame.registers[dst as usize] =
                         if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
                             crate::builtins::eval_direct(interp, argv)?
+                        } else if interp.tail_call_context && returns_call_result(frame, dst) {
+                            return interp
+                                .request_tail_call(callee, Value::Undefined, argv)
+                                .map(|_| ());
                         } else {
                             interp.call_this(&callee, Value::Undefined, argv)?
                         };
@@ -858,6 +895,15 @@ fn run_loop(
                     argc,
                 } => {
                     let argv = borrow_range(frame, args, argc)?;
+                    if interp.tail_call_context && returns_call_result(frame, dst) {
+                        return interp
+                            .request_tail_call(
+                                frame.registers[callee as usize].clone_for_execution(),
+                                Value::Undefined,
+                                argv.to_vec(),
+                            )
+                            .map(|_| ());
+                    }
                     let value = interp.call_this_borrowed(
                         &frame.registers[callee as usize],
                         Value::Undefined,
@@ -874,6 +920,15 @@ fn run_loop(
                 } => {
                     let argv = borrow_range(frame, args, argc)?;
                     let this = frame.registers[this as usize].clone_for_execution();
+                    if interp.tail_call_context && returns_call_result(frame, dst) {
+                        return interp
+                            .request_tail_call(
+                                frame.registers[callee as usize].clone_for_execution(),
+                                this,
+                                argv.to_vec(),
+                            )
+                            .map(|_| ());
+                    }
                     let value =
                         interp.call_this_borrowed(&frame.registers[callee as usize], this, argv)?;
                     frame.registers[dst as usize].assign_for_execution(value);
@@ -903,6 +958,11 @@ fn run_loop(
                     let template = spread_template(frame, tmpl)?;
                     let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
+                    if interp.tail_call_context && returns_call_result(frame, dst) {
+                        return interp
+                            .request_tail_call(callee, Value::Undefined, argv)
+                            .map(|_| ());
+                    }
                     frame.registers[dst as usize] =
                         interp.call_this(&callee, Value::Undefined, argv)?;
                 }
@@ -916,6 +976,9 @@ fn run_loop(
                     let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
                     let this = frame.registers[this as usize].clone_for_execution();
+                    if interp.tail_call_context && returns_call_result(frame, dst) {
+                        return interp.request_tail_call(callee, this, argv).map(|_| ());
+                    }
                     frame.registers[dst as usize] = interp.call_this(&callee, this, argv)?;
                 }
                 Instr::BuildArray { dst, tmpl } => {

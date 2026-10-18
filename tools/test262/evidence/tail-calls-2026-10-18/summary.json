@@ -1,0 +1,143 @@
+{
+  "date": "2026-10-18",
+  "source_base": "c06ede5e731eca8245835ce43e0dbb7e3c901961",
+  "test262_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "worker_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+  "implementation_patch_sha256": "68b50f7b08cab1e09f5fd46fb08c4a0398a4a8ea07b360e991ccc815c4e40794",
+  "focused": {
+    "selection": [
+      "language/statements/while/tco-body.js",
+      "language/statements/try/tco-finally.js",
+      "language/statements/try/tco-catch.js",
+      "language/statements/try/tco-catch-finally.js",
+      "language/statements/switch/tco-dftl-body.js",
+      "language/statements/switch/tco-case-body.js",
+      "language/statements/switch/tco-case-body-dflt.js",
+      "language/statements/return/tco.js",
+      "language/statements/labeled/tco.js",
+      "language/statements/if/tco-if-body.js",
+      "language/statements/if/tco-else-body.js",
+      "language/statements/block/tco-stmt.js",
+      "language/statements/block/tco-stmt-list.js",
+      "language/statements/for/tco-var-body.js",
+      "language/statements/for/tco-lhs-body.js",
+      "language/statements/for/tco-let-body.js",
+      "language/statements/for/tco-const-body.js",
+      "built-ins/Proxy/revocable/tco-fn-realm.js",
+      "language/expressions/tco-pos.js",
+      "language/expressions/tagged-template/tco-member.js",
+      "language/expressions/tagged-template/tco-call.js",
+      "language/expressions/conditional/tco-pos.js",
+      "language/expressions/conditional/tco-cond.js",
+      "language/expressions/comma/tco-final.js",
+      "language/expressions/coalesce/tco-pos-undefined.js",
+      "language/expressions/coalesce/tco-pos-null.js",
+      "language/expressions/logical-and/tco-right.js",
+      "language/expressions/logical-or/tco-right.js",
+      "language/expressions/call/tco-non-eval-with.js",
+      "language/expressions/call/tco-non-eval-global.js",
+      "language/expressions/call/tco-non-eval-function.js",
+      "language/expressions/call/tco-non-eval-function-dynamic.js",
+      "language/expressions/call/tco-member-args.js",
+      "language/expressions/call/tco-call-args.js",
+      "language/statements/do-while/tco-body.js"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 35,
+    "counts": {
+      "pass": 35,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 1,
+    "gains": 34,
+    "losses": 0
+  },
+  "control_flow_regression": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 3624,
+    "counts": {
+      "pass": 3591,
+      "fail": 33,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_passes": 3574,
+    "gains": 17,
+    "losses": 0
+  },
+  "native_regression": {
+    "selection": [
+      "built-ins/Function/prototype/call",
+      "built-ins/Function/prototype/apply",
+      "built-ins/Function/prototype/bind",
+      "built-ins/Reflect/apply",
+      "built-ins/Proxy/apply"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 424,
+    "counts": {
+      "pass": 420,
+      "fail": 4,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "baseline_source": "8333a381832107248fe790ec6a36b5df7b2b632f",
+    "baseline_passes": 420,
+    "gains": 0,
+    "losses": 0
+  },
+  "modules_regression": {
+    "selection": [
+      "language/import/import-attributes",
+      "language/expressions/dynamic-import/import-attributes",
+      "language/import/import-defer"
+    ],
+    "engine_sha256": "6478c5f13b3e79e418e24f6943e58d42239c27a81e68c178182c96bfb315fa1f",
+    "total": 170,
+    "counts": {
+      "pass": 170,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    }
+  },
+  "switch": {
+    "total": 216,
+    "pass": 216
+  },
+  "validation": [
+    "cargo fmt --check",
+    "git diff --check",
+    "cargo clippy --locked --workspace --all-targets -- -D warnings",
+    "cargo test --locked --test tail_calls --test declaration_completion --test generator_stress --test iterator_protocol --test async_generator_foundation --test test262_worker (104 passed)",
+    "cargo test --locked -p napi-vm-core --test realm_semantics (83 passed)",
+    "cargo test --locked -p napi-vm-core --lib bytecode:: -- --skip super_destructuring_tags_and_delete_keep_tier_parity (79 passed; known unrelated failure excluded)",
+    "cargo build --locked --release --bin napi-vm-test262"
+  ],
+  "full_corpus": "Latest full report measures earlier 8333a38 snapshot. Tail-call focused gains are not added to its full score."
+}
