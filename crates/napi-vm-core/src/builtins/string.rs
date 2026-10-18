@@ -254,12 +254,12 @@ fn is_regexp(i: &mut Interpreter, value: &Value) -> Result<bool, VmErr> {
     })
 }
 fn reject_regexp(i: &mut Interpreter, args: &[Value]) -> Result<(), VmErr> {
-    if let Some(value) = args.first() {
-        if is_regexp(i, value)? {
-            return Err(VmErr::Msg(
-                "TypeError: search string cannot be a RegExp".into(),
-            ));
-        }
+    if let Some(value) = args.first()
+        && is_regexp(i, value)?
+    {
+        return Err(VmErr::Msg(
+            "TypeError: search string cannot be a RegExp".into(),
+        ));
     }
     Ok(())
 }

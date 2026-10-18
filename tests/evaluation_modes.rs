@@ -1,3 +1,5 @@
+#[cfg(feature = "runtime")]
+use napi_vm::interpreter::DrainPolicy;
 use napi_vm::interpreter::EvaluationOptions;
 #[cfg(feature = "runtime")]
 use napi_vm::{ClockMode, VirtualClock};

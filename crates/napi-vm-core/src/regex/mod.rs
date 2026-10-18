@@ -330,10 +330,8 @@ impl Matcher<'_> {
                 ClassItem::Nested { negated, items } => {
                     let sub = self.union_ends(items, pos)?;
                     if *negated {
-                        if sub.is_empty() {
-                            if self.scalar(pos).is_some() {
-                                ends.push(self.advance(pos));
-                            }
+                        if sub.is_empty() && self.scalar(pos).is_some() {
+                            ends.push(self.advance(pos));
                         }
                     } else {
                         ends.extend(sub);
@@ -364,10 +362,10 @@ impl Matcher<'_> {
                 _ => {}
             }
         }
-        if let Some(c) = self.scalar(pos) {
-            if self.union_matches(items, c) {
-                ends.push(self.advance(pos));
-            }
+        if let Some(c) = self.scalar(pos)
+            && self.union_matches(items, c)
+        {
+            ends.push(self.advance(pos));
         }
         Ok(ends)
     }
@@ -381,13 +379,13 @@ impl Matcher<'_> {
         // Verified longer matches as (alternative index, end). Indices
         // ascend because the pair buckets were built in source order.
         let mut longer = Vec::new();
-        if pos + 1 < self.input.len() {
-            if let Some(indices) = strings.candidates(unit, self.input[pos + 1]) {
-                for index in indices {
-                    let alternative = &strings.all()[*index];
-                    if self.string_at(alternative, pos) {
-                        longer.push((*index, pos + alternative.len()));
-                    }
+        if pos + 1 < self.input.len()
+            && let Some(indices) = strings.candidates(unit, self.input[pos + 1])
+        {
+            for index in indices {
+                let alternative = &strings.all()[*index];
+                if self.string_at(alternative, pos) {
+                    longer.push((*index, pos + alternative.len()));
                 }
             }
         }
@@ -872,7 +870,7 @@ impl Matcher<'_> {
             let mut ends = vec![pos];
             let mut current = pos;
             loop {
-                if max.is_some_and(|limit| ends.len() - 1 >= limit as usize) {
+                if max.is_some_and(|limit| ends.len() > limit as usize) {
                     break;
                 }
                 let Some(c) = self.scalar(current) else {
@@ -886,14 +884,14 @@ impl Matcher<'_> {
             }
             let top = ends.len() - 1;
             if greedy {
-                for index in (min as usize..=top).rev() {
-                    if k(ends[index], caps) {
+                for end in ends.iter().take(top + 1).skip(min as usize).rev() {
+                    if k(*end, caps) {
                         return Ok(true);
                     }
                 }
             } else {
-                for index in min as usize..=top {
-                    if k(ends[index], caps) {
+                for end in ends.iter().take(top + 1).skip(min as usize) {
+                    if k(*end, caps) {
                         return Ok(true);
                     }
                 }
@@ -910,7 +908,7 @@ impl Matcher<'_> {
         seen[pos] = true;
         loop {
             let count = layers.len() - 1;
-            if max.map_or(false, |m| count as u64 >= m as u64) {
+            if max.is_some_and(|m| count as u64 >= m as u64) {
                 break;
             }
             if strings {
@@ -1045,6 +1043,7 @@ impl Matcher<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod modifier_tests {
     use super::Regex;
 
@@ -1117,12 +1116,12 @@ mod modifier_tests {
                 "Other",
             ] {
                 for unit in [0xd800, 0xdbff, 0xdc00, 0xdfff] {
-                    let positive = Regex::new(&format!(r"^\p{{{property}}}+$"), flags).unwrap();
+                    let positive = Regex::new(format!(r"^\p{{{property}}}+$"), flags).unwrap();
                     assert!(
                         positive.find_at(&[unit], 0).unwrap().is_some(),
                         "{property}/{flags}"
                     );
-                    let negative = Regex::new(&format!(r"^\P{{{property}}}+$"), flags).unwrap();
+                    let negative = Regex::new(format!(r"^\P{{{property}}}+$"), flags).unwrap();
                     assert!(
                         negative.find_at(&[unit], 0).unwrap().is_none(),
                         "{property}/{flags}"

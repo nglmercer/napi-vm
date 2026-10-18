@@ -512,11 +512,11 @@ fn push(out: &mut Vec<Piece>, kind: &'static str, text: &str) {
     if text.is_empty() {
         return;
     }
-    if let Some(last) = out.last_mut() {
-        if last.kind == kind {
-            last.text.push_str(text);
-            return;
-        }
+    if let Some(last) = out.last_mut()
+        && last.kind == kind
+    {
+        last.text.push_str(text);
+        return;
     }
     out.push(Piece {
         kind,
@@ -727,24 +727,24 @@ fn render(s: &Slots, input: &Math) -> Result<Vec<Piece>, VmErr> {
         Math::Finite(v) => Some(v.clone()),
         _ => None,
     };
-    if s.style == "percent" {
-        if let Some(v) = &mut value {
-            v.multiply_pow10(2);
-        }
+    if s.style == "percent"
+        && let Some(v) = &mut value
+    {
+        v.multiply_pow10(2);
     }
     let mut exponent = 0;
     let mut compact = "0".to_string();
-    if let Some(v) = &value {
-        if !v.is_zero() {
-            let mag = v.absolute.nonzero_magnitude_start();
-            match s.notation.as_str() {
-                "scientific" => exponent = mag,
-                "engineering" => exponent = mag.div_euclid(3) * 3,
-                "compact" => {
-                    (exponent, compact) = compact_pattern(s, mag, "other");
-                }
-                _ => {}
+    if let Some(v) = &value
+        && !v.is_zero()
+    {
+        let mag = v.absolute.nonzero_magnitude_start();
+        match s.notation.as_str() {
+            "scientific" => exponent = mag,
+            "engineering" => exponent = mag.div_euclid(3) * 3,
+            "compact" => {
+                (exponent, compact) = compact_pattern(s, mag, "other");
             }
+            _ => {}
         }
     }
     let mut rounded = value.as_ref().map(|v| {
@@ -752,35 +752,31 @@ fn render(s: &Slots, input: &Math) -> Result<Vec<Piece>, VmErr> {
         v.multiply_pow10(-exponent);
         s.digits.round(&v)
     });
-    if let (Some(original), Some(result)) = (&value, &rounded) {
-        if !result.is_zero() {
-            let grown = result.absolute.nonzero_magnitude_start();
-            let adjust = match s.notation.as_str() {
-                "scientific" if grown >= 1 => 1,
-                "engineering" if grown >= 3 => 3,
-                "compact" => {
-                    let (next, p) = compact_pattern(
-                        s,
-                        original.absolute.nonzero_magnitude_start() + 1,
-                        "other",
-                    );
-                    if next > exponent
-                        && grown + exponent > original.absolute.nonzero_magnitude_start()
-                    {
-                        compact = p;
-                        next - exponent
-                    } else {
-                        0
-                    }
+    if let (Some(original), Some(result)) = (&value, &rounded)
+        && !result.is_zero()
+    {
+        let grown = result.absolute.nonzero_magnitude_start();
+        let adjust = match s.notation.as_str() {
+            "scientific" if grown >= 1 => 1,
+            "engineering" if grown >= 3 => 3,
+            "compact" => {
+                let (next, p) =
+                    compact_pattern(s, original.absolute.nonzero_magnitude_start() + 1, "other");
+                if next > exponent && grown + exponent > original.absolute.nonzero_magnitude_start()
+                {
+                    compact = p;
+                    next - exponent
+                } else {
+                    0
                 }
-                _ => 0,
-            };
-            if adjust != 0 {
-                exponent += adjust;
-                let mut v = original.clone();
-                v.multiply_pow10(-exponent);
-                rounded = Some(s.digits.round(&v));
             }
+            _ => 0,
+        };
+        if adjust != 0 {
+            exponent += adjust;
+            let mut v = original.clone();
+            v.multiply_pow10(-exponent);
+            rounded = Some(s.digits.round(&v));
         }
     }
     let negative = match input {

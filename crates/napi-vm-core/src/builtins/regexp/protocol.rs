@@ -451,13 +451,13 @@ fn substitute(
             48..=57 => {
                 let mut n = (code - 48) as usize;
                 let mut width = 2;
-                if let Some(&next) = template.units().get(at + 2) {
-                    if (48..=57).contains(&next) {
-                        let two = n * 10 + (next - 48) as usize;
-                        if two > 0 && two <= captures.len() {
-                            n = two;
-                            width = 3;
-                        }
+                if let Some(&next) = template.units().get(at + 2)
+                    && (48..=57).contains(&next)
+                {
+                    let two = n * 10 + (next - 48) as usize;
+                    if two > 0 && two <= captures.len() {
+                        n = two;
+                        width = 3;
                     }
                 }
                 if n == 0 || n > captures.len() {

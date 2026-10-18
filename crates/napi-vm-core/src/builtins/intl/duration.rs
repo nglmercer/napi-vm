@@ -288,10 +288,10 @@ fn resolved_options(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<V
         ("numberingSystem".into(), Value::String(s.numbering.into())),
         ("style".into(), Value::String(s.style.into())),
     ];
-    for j in 0..10 {
-        fields.push((NAMES[j].into(), Value::String(s.styles[j].clone().into())));
+    for (j, name) in NAMES.iter().enumerate() {
+        fields.push(((*name).into(), Value::String(s.styles[j].clone().into())));
         fields.push((
-            format!("{}Display", NAMES[j]),
+            format!("{name}Display"),
             Value::String(s.displays[j].clone().into()),
         ));
     }
@@ -326,8 +326,8 @@ fn record(i: &mut Interpreter, value: Value) -> Result<([u128; 10], bool), VmErr
             d.minutes() as i128,
             d.seconds() as i128,
             d.milliseconds() as i128,
-            d.microseconds() as i128,
-            d.nanoseconds() as i128,
+            d.microseconds(),
+            d.nanoseconds(),
         ];
         return Ok((
             fields.map(i128::unsigned_abs),
@@ -399,11 +399,12 @@ fn push(out: &mut Vec<Piece>, kind: &'static str, text: &str, unit: Option<&'sta
     if text.is_empty() {
         return;
     }
-    if let Some(last) = out.last_mut() {
-        if last.kind == kind && last.unit == unit {
-            last.text.push_str(text);
-            return;
-        }
+    if let Some(last) = out.last_mut()
+        && last.kind == kind
+        && last.unit == unit
+    {
+        last.text.push_str(text);
+        return;
     }
     out.push(Piece {
         kind,
@@ -429,16 +430,16 @@ impl fmt::Write for UnitSink {
             for (offset, c) in text.char_indices() {
                 let literal =
                     c.is_whitespace() || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}');
-                if let Some(previous) = old {
-                    if previous != literal {
-                        push(
-                            &mut self.out,
-                            if previous { "literal" } else { "unit" },
-                            &text[start..offset],
-                            Some(self.unit),
-                        );
-                        start = offset;
-                    }
+                if let Some(previous) = old
+                    && previous != literal
+                {
+                    push(
+                        &mut self.out,
+                        if previous { "literal" } else { "unit" },
+                        &text[start..offset],
+                        Some(self.unit),
+                    );
+                    start = offset;
                 }
                 old = Some(literal);
             }
@@ -473,7 +474,7 @@ impl PartsWrite for UnitSink {
     }
 }
 fn number_value(values: &[u128; 10], j: usize, s: &Slots) -> Result<(Decimal, bool), VmErr> {
-    let fractional = j >= 6 && j < 9 && numeric(&s.styles[j + 1]);
+    let fractional = (6..9).contains(&j) && numeric(&s.styles[j + 1]);
     let mut value: Decimal = if fractional {
         let exponent = (9 - j) * 3;
         let mut total = 0u128;

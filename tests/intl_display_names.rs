@@ -17,7 +17,7 @@ fn check_throws(source: &str, class: &str) {
     vm.collect_cycles();
     let result = vm.eval_source("JSON.stringify(result)").unwrap();
     assert!(
-        matches!(&result, Value::String(s) if s.to_string() == format!("\"{class}\"")),
+        matches!(&result, Value::String(s) if *s == format!("\"{class}\"")),
         "{result:?}"
     );
 }

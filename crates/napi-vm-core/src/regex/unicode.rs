@@ -36,8 +36,8 @@ fn ranges(property: &str) -> Option<Vec<RangeInclusive<u32>>> {
         };
     }
     match property {
-        "Any" => return Some(vec![0..=0x10ffff]),
-        "ASCII" => return Some(vec![0..=0x7f]),
+        "Any" => return Some(std::iter::once(0..=0x10ffff).collect()),
+        "ASCII" => return Some(std::iter::once(0..=0x7f).collect()),
         "Assigned" => {
             return Some(
                 CodePointMapData::<GeneralCategory>::new()
@@ -70,10 +70,9 @@ pub(super) fn property(property: &str) -> Option<(ClassUnicode, bool)> {
         let (lo, hi) = (*r.start(), *r.end());
         [(lo, hi.min(0xd7ff)), (lo.max(0xe000), hi)]
             .into_iter()
-            .filter_map(|(lo, hi)| {
-                (lo <= hi).then(|| {
-                    ClassUnicodeRange::new(char::from_u32(lo).unwrap(), char::from_u32(hi).unwrap())
-                })
+            .filter(|&(lo, hi)| lo <= hi)
+            .map(|(lo, hi)| {
+                ClassUnicodeRange::new(char::from_u32(lo).unwrap(), char::from_u32(hi).unwrap())
             })
     });
     Some((ClassUnicode::new(scalar_ranges), surrogates))

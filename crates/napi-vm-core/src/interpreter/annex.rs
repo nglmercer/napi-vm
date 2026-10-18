@@ -72,10 +72,10 @@ fn collect<'a>(
             }
             Statement::ForIn { binding, body, .. } | Statement::ForOf { binding, body, .. } => {
                 let mut names = nested.clone();
-                if let ForBinding::Declaration { kind, pattern, .. } = binding {
-                    if *kind != VarKind::Var {
-                        names.extend(pattern_names(pattern));
-                    }
+                if let ForBinding::Declaration { kind, pattern, .. } = binding
+                    && *kind != VarKind::Var
+                {
+                    names.extend(pattern_names(pattern));
                 }
                 collect(body, &names, true, out);
             }
@@ -87,10 +87,10 @@ fn collect<'a>(
                 collect(body, &nested, true, out);
                 if let Some((parameter, b)) = catch {
                     let mut names = nested.clone();
-                    if let Some(p) = parameter {
-                        if !matches!(p, crate::parser::Pattern::Ident(_)) {
-                            names.extend(pattern_names(p));
-                        }
+                    if let Some(p) = parameter
+                        && !matches!(p, crate::parser::Pattern::Ident(_))
+                    {
+                        names.extend(pattern_names(p));
                     }
                     collect(b, &names, true, out);
                 }
@@ -154,10 +154,10 @@ impl Interpreter {
                     if !attrs.configurable && (!attrs.writable || !attrs.enumerable) {
                         continue;
                     }
-                } else if let Some(object) = variable.borrow().global_object() {
-                    if !self.is_extensible(&object)? {
-                        continue;
-                    }
+                } else if let Some(object) = variable.borrow().global_object()
+                    && !self.is_extensible(&object)?
+                {
+                    continue;
                 }
             }
             self.hoist_var_binding_in(&scope, &name)?;
@@ -219,10 +219,10 @@ impl Interpreter {
                 if !attrs.configurable && (!attrs.writable || !attrs.enumerable) {
                     return Ok(());
                 }
-            } else if let Some(object) = variable.borrow().global_object() {
-                if !self.is_extensible(&object)? {
-                    return Ok(());
-                }
+            } else if let Some(object) = variable.borrow().global_object()
+                && !self.is_extensible(&object)?
+            {
+                return Ok(());
             }
         }
         self.hoist_var_binding_in(scope, name)?;

@@ -192,10 +192,10 @@ fn default_calendar(requested: &[String]) -> String {
     ext_calendar(requested).unwrap_or_else(|| "gregory".into())
 }
 fn number_option(value: Option<String>) -> Result<Option<String>, VmErr> {
-    if let Some(nu) = &value {
-        if !type_check(nu) {
-            return Err(range());
-        }
+    if let Some(nu) = &value
+        && !type_check(nu)
+    {
+        return Err(range());
     }
     Ok(value)
 }
@@ -226,13 +226,13 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions, 
     // CreateDateTimeFormat order: calendar, numberingSystem, hour12,
     // hourCycle, timeZone, components, formatMatcher, dateStyle, timeStyle.
     let calendar_option = option(i, options, "calendar")?;
-    if let Some(ca) = &calendar_option {
-        if !type_check(ca) {
-            return Err(range());
-        }
+    if let Some(ca) = &calendar_option
+        && !type_check(ca)
+    {
+        return Err(range());
     }
-    let numbering = number_option(option(i, &options, "numberingSystem")?)?;
-    let hour12 = match i.member(&options, "hour12")? {
+    let numbering = number_option(option(i, options, "numberingSystem")?)?;
+    let hour12 = match i.member(options, "hour12")? {
         Value::Undefined => None,
         v => Some(v.is_truthy()),
     };
@@ -240,23 +240,23 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions, 
     // back to the locale extension or default) rather than throwing, matching
     // the calendar fallback semantics pinned by
     // resolved-calendar-unicode-extensions-and-options.
-    let hour_cycle_option = option(i, &options, "hourCycle")?;
-    let time_zone = option(i, &options, "timeZone")?;
-    let weekday = choice(i, &options, "weekday", &["long", "short", "narrow"])?;
-    let era = choice(i, &options, "era", &["long", "short", "narrow"])?;
-    let year = choice(i, &options, "year", &["numeric", "2-digit"])?;
+    let hour_cycle_option = option(i, options, "hourCycle")?;
+    let time_zone = option(i, options, "timeZone")?;
+    let weekday = choice(i, options, "weekday", &["long", "short", "narrow"])?;
+    let era = choice(i, options, "era", &["long", "short", "narrow"])?;
+    let year = choice(i, options, "year", &["numeric", "2-digit"])?;
     let month = choice(
         i,
-        &options,
+        options,
         "month",
         &["numeric", "2-digit", "long", "short", "narrow"],
     )?;
-    let day = choice(i, &options, "day", &["numeric", "2-digit"])?;
-    let day_period = choice(i, &options, "dayPeriod", &["short", "long", "narrow"])?;
-    let hour = choice(i, &options, "hour", &["numeric", "2-digit"])?;
-    let minute = choice(i, &options, "minute", &["numeric", "2-digit"])?;
-    let second = choice(i, &options, "second", &["numeric", "2-digit"])?;
-    let fractional = match i.member(&options, "fractionalSecondDigits")? {
+    let day = choice(i, options, "day", &["numeric", "2-digit"])?;
+    let day_period = choice(i, options, "dayPeriod", &["short", "long", "narrow"])?;
+    let hour = choice(i, options, "hour", &["numeric", "2-digit"])?;
+    let minute = choice(i, options, "minute", &["numeric", "2-digit"])?;
+    let second = choice(i, options, "second", &["numeric", "2-digit"])?;
+    let fractional = match i.member(options, "fractionalSecondDigits")? {
         Value::Undefined => None,
         v => {
             let n = i.ecmascript_to_number(&v)?;
@@ -268,7 +268,7 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions, 
     };
     let time_zone_name = choice(
         i,
-        &options,
+        options,
         "timeZoneName",
         &[
             "short",
@@ -279,26 +279,27 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions, 
             "longGeneric",
         ],
     )?;
-    let format_matcher = option(i, &options, "formatMatcher")?;
-    if let Some(matcher) = &format_matcher {
-        if matcher != "basic" && matcher != "best fit" {
-            return Err(range());
-        }
+    let format_matcher = option(i, options, "formatMatcher")?;
+    if let Some(matcher) = &format_matcher
+        && matcher != "basic"
+        && matcher != "best fit"
+    {
+        return Err(range());
     }
     let date_style = choice(
         i,
-        &options,
+        options,
         "dateStyle",
         &["full", "long", "medium", "short"],
     )?;
     let time_style = choice(
         i,
-        &options,
+        options,
         "timeStyle",
         &["full", "long", "medium", "short"],
     )?;
-    if date_style.is_some() || time_style.is_some() {
-        if weekday.is_some()
+    if (date_style.is_some() || time_style.is_some())
+        && (weekday.is_some()
             || era.is_some()
             || year.is_some()
             || month.is_some()
@@ -308,12 +309,11 @@ fn read_raw_options(i: &mut Interpreter, options: &Value) -> Result<RawOptions, 
             || minute.is_some()
             || second.is_some()
             || fractional.is_some()
-            || time_zone_name.is_some()
-        {
-            return Err(VmErr::Msg(
-                "TypeError: dateStyle/timeStyle cannot be combined with field options".into(),
-            ));
-        }
+            || time_zone_name.is_some())
+    {
+        return Err(VmErr::Msg(
+            "TypeError: dateStyle/timeStyle cannot be combined with field options".into(),
+        ));
     }
     Ok(RawOptions {
         calendar: calendar_option,
@@ -615,7 +615,7 @@ fn link_target(name: &str) -> Option<&'static str> {
         .map(|(_, target)| *target)
 }
 fn country_of(name: &str) -> Option<&'static str> {
-    for table in [&ZONE1970_TAB[..], &ZONE_TAB[..]] {
+    for table in [ZONE1970_TAB, ZONE_TAB] {
         if let Some((code, _)) = table.iter().find(|(_, tz)| *tz == name) {
             return Some(*code);
         }
@@ -696,18 +696,17 @@ fn ext_calendar(requested: &[String]) -> Option<String> {
         if best_available_locale(tag).is_none() {
             continue;
         }
-        if let Ok(loc) = tag.parse::<Locale>() {
-            if let Some(ca) = loc
+        if let Ok(loc) = tag.parse::<Locale>()
+            && let Some(ca) = loc
                 .extensions
                 .unicode
                 .keywords
                 .get(&"ca".parse().unwrap())
                 .map(ToString::to_string)
-            {
-                let canonical = canonical_calendar(&ca);
-                if SUPPORTED_CALENDARS.contains(&canonical.as_str()) {
-                    return Some(canonical);
-                }
+        {
+            let canonical = canonical_calendar(&ca);
+            if SUPPORTED_CALENDARS.contains(&canonical.as_str()) {
+                return Some(canonical);
             }
         }
         break;
@@ -721,18 +720,17 @@ fn ext_hour_cycle(requested: &[String]) -> Option<String> {
         if best_available_locale(tag).is_none() {
             continue;
         }
-        if let Ok(loc) = tag.parse::<Locale>() {
-            if let Some(hc) = loc
+        if let Ok(loc) = tag.parse::<Locale>()
+            && let Some(hc) = loc
                 .extensions
                 .unicode
                 .keywords
                 .get(&"hc".parse().unwrap())
                 .map(ToString::to_string)
-            {
-                match hc.as_str() {
-                    "h11" | "h12" | "h23" | "h24" => return Some(hc),
-                    _ => {}
-                }
+        {
+            match hc.as_str() {
+                "h11" | "h12" | "h23" | "h24" => return Some(hc),
+                _ => {}
             }
         }
         break;
@@ -783,18 +781,16 @@ fn style_length(style: &str) -> Length {
 fn component_length(p: &Parts) -> Length {
     let mut widths = Vec::new();
     for w in [&p.weekday, &p.era, &p.month, &p.day_period] {
-        if let Some(w) = w {
-            if matches!(w.as_str(), "long" | "short" | "narrow") {
-                widths.push(w.as_str());
-            }
+        if let Some(w) = w
+            && matches!(w.as_str(), "long" | "short" | "narrow")
+        {
+            widths.push(w.as_str());
         }
     }
     if widths.is_empty() {
         Length::Short
     } else if widths.iter().all(|w| *w == "long") {
         Length::Long
-    } else if widths.iter().all(|w| *w == "short") {
-        Length::Medium
     } else {
         Length::Medium
     }
@@ -1301,19 +1297,18 @@ fn collect_parts(s: &Slots, m: &Moment) -> Result<Vec<(String, String)>, VmErr> 
     // for supported numbering systems), so split on the separator itself.
     let mut split = Vec::new();
     for (kind, text) in out {
-        if kind == "second" {
-            if let Some(dot) = text.rfind(['.', ',', '\u{066b}']) {
-                let (head, tail) = text.split_at(dot);
-                let mut chars = tail.chars();
-                let sep = chars.next().unwrap_or('.').to_string();
-                let frac: String = chars.collect();
-                if !head.is_empty() && !frac.is_empty() && frac.chars().all(|c| c.is_alphanumeric())
-                {
-                    split.push(("second".into(), head.into()));
-                    split.push(("literal".into(), sep));
-                    split.push(("fractionalSecond".into(), frac));
-                    continue;
-                }
+        if kind == "second"
+            && let Some(dot) = text.rfind(['.', ',', '\u{066b}'])
+        {
+            let (head, tail) = text.split_at(dot);
+            let mut chars = tail.chars();
+            let sep = chars.next().unwrap_or('.').to_string();
+            let frac: String = chars.collect();
+            if !head.is_empty() && !frac.is_empty() && frac.chars().all(|c| c.is_alphanumeric()) {
+                split.push(("second".into(), head.into()));
+                split.push(("literal".into(), sep));
+                split.push(("fractionalSecond".into(), frac));
+                continue;
             }
         }
         split.push((kind, text));
@@ -1348,10 +1343,10 @@ fn collect_parts(s: &Slots, m: &Moment) -> Result<Vec<(String, String)>, VmErr> 
     }
     if s.strip_time_digits {
         // Day-period-only formatting renders the rule-based day period name.
-        if let Some(width) = s.day_period.as_deref() {
-            if let Some(name) = day_period_name(&s.locale, width, m.hour) {
-                return Ok(vec![("dayPeriod".into(), name)]);
-            }
+        if let Some(width) = s.day_period.as_deref()
+            && let Some(name) = day_period_name(&s.locale, width, m.hour)
+        {
+            return Ok(vec![("dayPeriod".into(), name)]);
         }
         out.retain(|(kind, _)| {
             !matches!(
@@ -1535,10 +1530,10 @@ fn collect_parts(s: &Slots, m: &Moment) -> Result<Vec<(String, String)>, VmErr> 
         if kind == "hour" && s.hour_cycle.as_deref() == Some("h24") && m.hour == 0 {
             *text = "24".into();
         }
-        if let Some((_, width)) = widths.iter().find(|(k, _)| k == kind) {
-            if let Some(width) = width {
-                *text = pad2(text, *width == "2-digit", zero);
-            }
+        if let Some((_, width)) = widths.iter().find(|(k, _)| k == kind)
+            && let Some(width) = width
+        {
+            *text = pad2(text, *width == "2-digit", zero);
         }
         if matches!(
             kind.as_str(),
@@ -1645,9 +1640,9 @@ pub(crate) fn date_to_locale(
         DateLocaleKind::TimeOnly => "toLocaleTimeString",
     };
     let Value::Date(slot) = &this else {
-        return Err(VmErr::Msg(
-            format!("TypeError: Date.prototype.{name} called on incompatible receiver").into(),
-        ));
+        return Err(VmErr::Msg(format!(
+            "TypeError: Date.prototype.{name} called on incompatible receiver"
+        )));
     };
     let ms = slot.get();
     if ms.is_nan() {
@@ -1851,22 +1846,22 @@ fn check_range_pair(start: &Moment, end: &Moment, what: &str) -> Result<(), VmEr
     match (&start.tclass, &end.tclass) {
         (Some(first), Some(second)) => {
             if first != second {
-                return Err(VmErr::Msg(
-                    format!("TypeError: {what} requires matching Temporal types").into(),
-                ));
+                return Err(VmErr::Msg(format!(
+                    "TypeError: {what} requires matching Temporal types"
+                )));
             }
             if start.tcalendar != end.tcalendar {
-                return Err(VmErr::Msg(
-                    format!("RangeError: {what} requires matching Temporal calendars").into(),
-                ));
+                return Err(VmErr::Msg(format!(
+                    "RangeError: {what} requires matching Temporal calendars"
+                )));
             }
             Ok(())
         }
         _ => {
             if start.kind != end.kind {
-                return Err(VmErr::Msg(
-                    format!("TypeError: {what} requires matching calendars").into(),
-                ));
+                return Err(VmErr::Msg(format!(
+                    "TypeError: {what} requires matching calendars"
+                )));
             }
             Ok(())
         }

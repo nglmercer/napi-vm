@@ -123,13 +123,12 @@ pub(super) fn resolve_numbering(
     requested: &[String],
     numbering_option: Option<String>,
 ) -> Result<(String, String, DecimalFormatter, String), VmErr> {
-    if let Some(nu) = &numbering_option {
-        if !nu
+    if let Some(nu) = &numbering_option
+        && !nu
             .split('-')
             .all(|p| (3..=8).contains(&p.len()) && p.bytes().all(|c| c.is_ascii_alphanumeric()))
-        {
-            return Err(range());
-        }
+    {
+        return Err(range());
     }
     let (base, extension) = requested
         .iter()
@@ -165,20 +164,19 @@ pub(super) fn resolve_numbering(
     };
     Ok((locale, base, decimal, numbering))
 }
+type ResolvedDisplayNumbering = (
+    String,
+    String,
+    DecimalFormatter,
+    String,
+    Option<Vec<char>>,
+    String,
+);
+
 pub(super) fn resolve_display_numbering(
     requested: &[String],
     numbering_option: Option<String>,
-) -> Result<
-    (
-        String,
-        String,
-        DecimalFormatter,
-        String,
-        Option<Vec<char>>,
-        String,
-    ),
-    VmErr,
-> {
+) -> Result<ResolvedDisplayNumbering, VmErr> {
     // ICU only honors the numbering systems it implements. Systems with CLDR
     // digit data are still observable: format with the ICU-resolved numbering
     // and remap the decimal spans afterwards, mirroring NumberFormat.
@@ -358,11 +356,11 @@ impl fmt::Write for Sink {
         } else {
             self.kind
         };
-        if let Some((last_kind, last)) = self.parts.last_mut() {
-            if *last_kind == kind {
-                last.push_str(text);
-                return Ok(());
-            }
+        if let Some((last_kind, last)) = self.parts.last_mut()
+            && *last_kind == kind
+        {
+            last.push_str(text);
+            return Ok(());
         }
         self.parts.push((kind, text.into()));
         Ok(())

@@ -926,10 +926,10 @@ impl Interpreter {
             // Resolve the complete own accessor descriptor instead of treating
             // the first stored function as a setter-only property.
             let descriptor = crate::builtins::object::descriptor_for_key_in(self, o, p)?;
-            if let Some(getter) = descriptor.get_prop("get") {
-                if !matches!(getter, Value::Undefined) {
-                    return self.call_this(&getter, receiver.clone(), vec![]);
-                }
+            if let Some(getter) = descriptor.get_prop("get")
+                && !matches!(getter, Value::Undefined)
+            {
+                return self.call_this(&getter, receiver.clone(), vec![]);
             }
             return Ok(Value::Undefined);
         }
@@ -989,10 +989,8 @@ impl Interpreter {
         if let Value::String(text) = o {
             let own = key == "length"
                 || crate::value::array_index(key).is_some_and(|index| index < text.len());
-            if !own {
-                if let Some(prototype) = self.primitive_reference_prototype(o) {
-                    return self.get_prop_value_str_with_receiver(&prototype, key, receiver);
-                }
+            if !own && let Some(prototype) = self.primitive_reference_prototype(o) {
+                return self.get_prop_value_str_with_receiver(&prototype, key, receiver);
             }
         }
         if let Value::Array(array) = o
@@ -1090,10 +1088,10 @@ impl Interpreter {
                 o,
                 &Value::String(crate::JsString::from_key(key)),
             )?;
-            if let Some(getter) = descriptor.get_prop("get") {
-                if !matches!(getter, Value::Undefined) {
-                    return self.call_this(&getter, receiver.clone(), vec![]);
-                }
+            if let Some(getter) = descriptor.get_prop("get")
+                && !matches!(getter, Value::Undefined)
+            {
+                return self.call_this(&getter, receiver.clone(), vec![]);
             }
             return Ok(Value::Undefined);
         }

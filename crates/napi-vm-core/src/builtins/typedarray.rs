@@ -2832,6 +2832,7 @@ fn abstract_typed_array_constructor(
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use crate::interpreter::Interpreter;
     use crate::value::{PromiseState, Value};

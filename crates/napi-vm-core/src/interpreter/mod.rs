@@ -1474,7 +1474,7 @@ impl Interpreter {
             }
         }
         if let Some(Value::Symbol(ref symbol)) = crate::builtins::well_known("toStringTag") {
-            let key = symbol_slot_key(&symbol);
+            let key = symbol_slot_key(symbol);
             let cell = namespace.property_cell().unwrap();
             cell.borrow_mut()
                 .push((key.clone(), Value::String("Module".into())));

@@ -641,7 +641,7 @@ fn subject_chars(
 
 /// Coerce the pattern argument of a string method: a `RegExp` is used as-is, a
 /// string is a literal to find (not a pattern to compile).
-
+///
 /// `str.match(pattern)`.
 ///
 /// A global pattern returns every matched substring; a non-global one returns

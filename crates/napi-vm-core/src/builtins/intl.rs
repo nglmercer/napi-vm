@@ -117,7 +117,7 @@ fn nonenum(target: &Value, name: &str, value: Value) {
 }
 fn tag(target: &Value, text: &str) {
     if let Some(Value::Symbol(ref symbol)) = super::well_known("toStringTag") {
-        let key = crate::interpreter::symbol_slot_key(&symbol);
+        let key = crate::interpreter::symbol_slot_key(symbol);
         target
             .set_prop(key.clone(), Value::String(text.into()))
             .unwrap();
@@ -298,7 +298,7 @@ fn construct(i: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, V
     let mut loc = if let Some(loc) = slot(&tag) {
         loc
     } else {
-        parse(&i.ecmascript_to_string(&tag)?.to_string())?
+        parse(i.ecmascript_to_string(&tag)?.as_ref())?
     };
     let options = match arg(&args, 1) {
         Value::Undefined => Value::object_with_proto(vec![], None),
@@ -529,12 +529,11 @@ fn keyword_in(loc: &LocaleSlots, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 fn region_for_info(loc: &LocaleSlots) -> String {
-    if let Some(rg) = keyword_in(loc, "rg") {
-        if let Some(prefix) = rg.strip_suffix("zzzz") {
-            if let Ok(region) = prefix.parse::<icu_locale::subtags::Region>() {
-                return region.to_string();
-            }
-        }
+    if let Some(rg) = keyword_in(loc, "rg")
+        && let Some(prefix) = rg.strip_suffix("zzzz")
+        && let Ok(region) = prefix.parse::<icu_locale::subtags::Region>()
+    {
+        return region.to_string();
     }
     if let Some(region) = loc.id.region {
         return region.to_string();
@@ -545,10 +544,10 @@ fn region_for_info(loc: &LocaleSlots) -> String {
         } else {
             2
         };
-        if sd.len() > len {
-            if let Ok(region) = sd[..len].parse::<icu_locale::subtags::Region>() {
-                return region.to_string();
-            }
+        if sd.len() > len
+            && let Ok(region) = sd[..len].parse::<icu_locale::subtags::Region>()
+        {
+            return region.to_string();
         }
     }
     let mut id = loc.id.clone();
@@ -657,13 +656,12 @@ fn get_week_info(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Valu
         .find(|(r, ..)| *r == region)
         .or_else(|| data::WEEK.iter().find(|(r, ..)| *r == "001"))
         .unwrap();
-    if let Some(fw) = keyword_in(&loc, "fw") {
-        if let Some(n) = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    if let Some(fw) = keyword_in(&loc, "fw")
+        && let Some(n) = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
             .iter()
             .position(|day| *day == fw)
-        {
-            first = n as u8 + 1;
-        }
+    {
+        first = n as u8 + 1;
     }
     let weekend = (1..=7)
         .filter(|day| {
@@ -708,22 +706,20 @@ fn maximize_id(id: &mut icu_locale::LanguageIdentifier) {
     for candidate in candidates {
         if let Ok(index) =
             data::LIKELY_SUBTAGS.binary_search_by(|(key, _)| key.cmp(&candidate.as_str()))
-        {
-            if let Ok(likely) = data::LIKELY_SUBTAGS[index]
+            && let Ok(likely) = data::LIKELY_SUBTAGS[index]
                 .1
                 .parse::<icu_locale::LanguageIdentifier>()
-            {
-                if id.language.is_unknown() {
-                    id.language = likely.language;
-                }
-                if id.script.is_none() {
-                    id.script = likely.script;
-                }
-                if id.region.is_none() {
-                    id.region = likely.region;
-                }
-                return;
+        {
+            if id.language.is_unknown() {
+                id.language = likely.language;
             }
+            if id.script.is_none() {
+                id.script = likely.script;
+            }
+            if id.region.is_none() {
+                id.region = likely.region;
+            }
+            return;
         }
     }
 }
@@ -774,10 +770,11 @@ fn best_available_locale(requested: &str) -> Option<String> {
     }
 }
 fn locale_matcher(i: &mut Interpreter, options: &Value) -> Result<(), VmErr> {
-    if let Some(matcher) = option(i, options, "localeMatcher")? {
-        if matcher != "lookup" && matcher != "best fit" {
-            return Err(VmErr::Msg("RangeError: Invalid localeMatcher".into()));
-        }
+    if let Some(matcher) = option(i, options, "localeMatcher")?
+        && matcher != "lookup"
+        && matcher != "best fit"
+    {
+        return Err(VmErr::Msg("RangeError: Invalid localeMatcher".into()));
     }
     Ok(())
 }

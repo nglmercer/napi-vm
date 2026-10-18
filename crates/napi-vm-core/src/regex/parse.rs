@@ -959,13 +959,13 @@ impl Parser {
         // String properties exist only in `v` mode; without it the name
         // falls through to the scalar tables, which reject it. Negated
         // string properties stay an error, matching V8.
-        if self.vsets {
-            if let Some(strings) = Self::string_property(&loose) {
-                if negated {
-                    return Err("Cannot negate strings in character class".to_string());
-                }
-                return Ok(ClassItem::Strings(StringAlts::new(strings)));
+        if self.vsets
+            && let Some(strings) = Self::string_property(&loose)
+        {
+            if negated {
+                return Err("Cannot negate strings in character class".to_string());
             }
+            return Ok(ClassItem::Strings(StringAlts::new(strings)));
         }
         let (class, surrogates) = super::unicode::property(&property)
             .ok_or_else(|| "Invalid Unicode property escape".to_string())?;

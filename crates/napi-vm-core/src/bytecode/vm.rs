@@ -593,11 +593,11 @@ fn run_loop(
                     let name = const_string(frame.function, name)?;
                     let scope = current_scope(interp, frame);
                     let value = frame.registers[src as usize].clone_for_execution();
-                    if interp.update_compiled_annex(&scope, name, value.clone())? {
-                        if let Some(slot) = slot {
-                            frame.slots[slot as usize].value = value;
-                            frame.slots[slot as usize].initialized = true;
-                        }
+                    if interp.update_compiled_annex(&scope, name, value.clone())?
+                        && let Some(slot) = slot
+                    {
+                        frame.slots[slot as usize].value = value;
+                        frame.slots[slot as usize].initialized = true;
                     }
                 }
                 Instr::HoistVarGlobal { name } => {

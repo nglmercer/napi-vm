@@ -100,7 +100,7 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
             .as_deref()
             != Some(if numeric.is_truthy() { "" } else { "false" })
         {
-            resolved.extensions.unicode.keywords.remove(&key("kn"));
+            resolved.extensions.unicode.keywords.remove(key("kn"));
         }
     }
     if let Some(v) = case_first {
@@ -118,7 +118,7 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
             .as_deref()
             != Some(&v)
         {
-            resolved.extensions.unicode.keywords.remove(&key("kf"));
+            resolved.extensions.unicode.keywords.remove(key("kf"));
         }
     }
     let extension_co = original
@@ -159,7 +159,7 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
         _ => {}
     }
     if !keep_extension {
-        resolved.extensions.unicode.keywords.remove(&key("co"));
+        resolved.extensions.unicode.keywords.remove(key("co"));
     }
     if collation != "default" {
         let mut with = resolved.clone();
@@ -217,7 +217,7 @@ fn initialize(i: &mut Interpreter, args: &[Value]) -> Result<Slots, VmErr> {
         Ok(c) => c,
         Err(_) => {
             collation = "default".into();
-            resolved.extensions.unicode.keywords.remove(&key("co"));
+            resolved.extensions.unicode.keywords.remove(key("co"));
             Collator::try_new(resolved.clone().into(), icu).map_err(|_| range())?
         }
     };

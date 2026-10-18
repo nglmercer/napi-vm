@@ -108,7 +108,7 @@ fn hex(s: &crate::JsString, max: usize) -> Decoded {
     let mut result = Decoded {
         read: 0,
         bytes: Vec::new(),
-        error: s.len() % 2 != 0,
+        error: !s.len().is_multiple_of(2),
     };
     if result.error {
         return result;
