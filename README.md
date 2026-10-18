@@ -528,6 +528,15 @@ from the older full-corpus score. Details and evidence are in the
 [deferred-import continuation](docs/test262-deferred-import-continuation.md)
 and [module attributes continuation](docs/test262-dynamic-import-attributes-continuation.md).
 
+
+Control-flow completion semantics now preserve values through blocks, labels,
+switch fall-through, and abrupt loop exits in both AST and bytecode execution.
+All 150 completion variants pass. The broader control-flow release selection
+passes 3,574 / 3,624, gaining 71 passes with zero losses. See the
+[control-flow continuation](docs/test262-control-flow-completion-continuation.md)
+for evidence and remaining gaps. These focused gains are outside the older
+full-corpus score.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -3074,7 +3074,7 @@ fn make_generator_coroutine(
                 Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
                 Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
                 // A break/continue escaping the generator body is a runtime error.
-                Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => {
+                Err(e @ (VmErr::Break(..) | VmErr::Continue(..))) => {
                     GenOutcome::Failed(format!("{}", e))
                 }
             }

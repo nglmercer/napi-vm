@@ -53,9 +53,11 @@ pub enum VmErr {
     RuntimeError(Box<RuntimeErrorData>),
     /// Control-flow signal for `break`, with an optional target label. Caught
     /// by the enclosing loop/switch; not an error and not catchable by `try`.
-    Break(Option<String>),
-    /// Control-flow signal for `continue`, with an optional target label.
-    Continue(Option<String>),
+    /// The second field preserves the completion value, or `None` for empty.
+    /// Boxed to keep the evaluator's `Result` within its hot-path size bound.
+    Break(Option<String>, Option<Box<Value>>),
+    /// Control-flow signal for `continue`, with the same label/value fields.
+    Continue(Option<String>, Option<Box<Value>>),
     /// Internal teardown signal: a suspended generator or async body whose
     /// last handle was dropped is resumed once with `GenResume::Abandon`, and
     /// every suspend point converts that into this. It propagates outward
@@ -76,6 +78,19 @@ pub enum VmErr {
 const _: () = assert!(std::mem::size_of::<Result<Value, VmErr>>() <= 48);
 
 impl VmErr {
+    /// Fill an empty break/continue completion from its enclosing statement list.
+    pub(crate) fn update_empty(self, value: Option<Value>) -> Self {
+        match self {
+            Self::Break(label, current) => {
+                Self::Break(label, current.or_else(|| value.map(Box::new)))
+            }
+            Self::Continue(label, current) => {
+                Self::Continue(label, current.or_else(|| value.map(Box::new)))
+            }
+            other => other,
+        }
+    }
+
     /// Whether this is the internal abandon-teardown signal, which skips
     /// every guest-code handler (`catch`, `finally`, iterator `close`) on
     /// its way out of an abandoned body.
@@ -121,10 +136,10 @@ impl fmt::Display for VmErr {
             }
             VmErr::Throw(v) => write!(f, "{}", throw_display(v)),
             VmErr::Ret(_) => write!(f, "return"),
-            VmErr::Break(Some(l)) => write!(f, "break outside loop (label {})", l),
-            VmErr::Break(None) => write!(f, "break outside loop"),
-            VmErr::Continue(Some(l)) => write!(f, "continue outside loop (label {})", l),
-            VmErr::Continue(None) => write!(f, "continue outside loop"),
+            VmErr::Break(Some(l), _) => write!(f, "break outside loop (label {})", l),
+            VmErr::Break(None, _) => write!(f, "break outside loop"),
+            VmErr::Continue(Some(l), _) => write!(f, "continue outside loop (label {})", l),
+            VmErr::Continue(None, _) => write!(f, "continue outside loop"),
             // Internal only: the initiating `Drop` consumes this before it
             // can reach any rendering. Present so the match stays exhaustive.
             VmErr::Abandon => write!(f, "abandoned generator cleanup"),

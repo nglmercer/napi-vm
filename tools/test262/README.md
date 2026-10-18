@@ -71,6 +71,16 @@ The deferred-import reports remain under
 [`evidence/deferred-import-2026-10-18/`](evidence/deferred-import-2026-10-18/).
 Neither focused result changes the full-corpus score.
 
+
+The control-flow completion release selection passes all **150 / 150**
+completion-only variants and **213 / 216** switch variants. Its neighboring
+control-flow selection passes **3,574 / 3,624**, gaining **71 passes with zero
+losses** against the earlier frozen worker. Reports, comparisons, the measured
+source patch, and worker identity are under
+[`evidence/control-flow-completion-2026-10-18/`](evidence/control-flow-completion-2026-10-18/).
+See the [control-flow continuation](../../docs/test262-control-flow-completion-continuation.md).
+These focused results also remain outside the older full-corpus score.
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

@@ -276,6 +276,12 @@ struct Scope {
 
 /// Break/continue patch lists for one breakable context under compilation
 /// (a loop, a switch body, or a labeled non-loop statement).
+#[derive(Clone, Copy)]
+struct CompletionRegs {
+    value: Reg,
+    present: Option<Reg>,
+}
+
 #[derive(Default)]
 struct LoopCtx {
     breaks: Vec<usize>,
@@ -285,6 +291,7 @@ struct LoopCtx {
     /// Cleanup-stack length when this context opened: a break/continue
     /// targeting it duplicates the cleanups above this depth.
     cleanup_depth: usize,
+    completion_depth: usize,
 }
 
 /// One cleanup an abrupt exit must run, in source order: a `try` region's
@@ -321,6 +328,8 @@ struct Compiler<'a> {
     slots: Vec<SlotInfo>,
     scopes: Vec<Scope>,
     loops: Vec<LoopCtx>,
+    completions: Vec<CompletionRegs>,
+    completion_presence: HashMap<Reg, Reg>,
     /// Labels applied to the next compiled loop, pushed while compiling
     /// `label: <loop>` (labels nest, so a loop may carry several) and
     /// consumed by the loop's context.
@@ -371,6 +380,8 @@ impl<'a> Compiler<'a> {
                 runtime: false,
             }],
             loops: Vec::new(),
+            completions: Vec::new(),
+            completion_presence: HashMap::new(),
             pending_labels: Vec::new(),
             unwind: Vec::new(),
             deferred: Vec::new(),
@@ -404,6 +415,8 @@ impl<'a> Compiler<'a> {
                 runtime: false,
             }],
             loops: Vec::new(),
+            completions: Vec::new(),
+            completion_presence: HashMap::new(),
             pending_labels: Vec::new(),
             unwind: Vec::new(),
             deferred: Vec::new(),
@@ -457,6 +470,7 @@ impl<'a> Compiler<'a> {
 
     fn restore(&mut self, checkpoint: u16) {
         self.next_reg = checkpoint;
+        self.completion_presence.retain(|reg, _| *reg < checkpoint);
     }
 
     fn alloc_slot(&mut self, name: &str, kind: SlotKind) -> Result<Slot, Decline> {
@@ -1234,13 +1248,10 @@ impl<'a> Compiler<'a> {
         stmts: &'a [Statement],
         linked: bool,
     ) -> Result<BytecodeFunction, Decline> {
-        // Register zero is the program completion value.
-        let completion = self.alloc_reg()?;
-        let undef = self.load_undefined()?;
-        self.emit(Instr::Mov {
-            dst: completion,
-            src: undef,
-        });
+        // Register zero is the program completion value. At this outer
+        // boundary an empty result is already represented by undefined.
+        let completion = self.new_completion(false)?;
+        self.completions.push(completion);
         if !linked {
             self.hoist_top(stmts)?;
         }
@@ -1248,14 +1259,10 @@ impl<'a> Compiler<'a> {
         self.restore(checkpoint);
         for stmt in stmts {
             let value = self.compile_stmt(stmt)?;
-            if produces_completion_value(stmt) {
-                self.emit(Instr::Mov {
-                    dst: completion,
-                    src: value,
-                });
-            }
+            self.copy_statement_completion(completion, stmt, value)?;
             self.restore(checkpoint);
         }
+        self.completions.pop();
         self.finish_functions()?;
         self.build_function(None, 0, false, false)
     }
@@ -1300,28 +1307,99 @@ impl<'a> Compiler<'a> {
 
     // -- blocks and statements ---------------------------------------------
 
-    /// Compile a statement list to its completion value. Every statement
-    /// yields a register; only completion-producing ones update the block
-    /// value, mirroring `run`.
-    fn compile_block(&mut self, stmts: &'a [Statement]) -> Result<Reg, Decline> {
-        let block_value = self.alloc_reg()?;
-        let undef = self.load_undefined()?;
+    /// Completion values carry a presence bit: empty differs from undefined.
+    fn new_completion(&mut self, empty: bool) -> Result<CompletionRegs, Decline> {
+        let value = self.load_undefined()?;
+        let present = if empty {
+            let constant = self.const_false()?;
+            let flag = self.load_const(constant)?;
+            self.completion_presence.insert(value, flag);
+            Some(flag)
+        } else {
+            None
+        };
+        Ok(CompletionRegs { value, present })
+    }
+
+    fn completion_regs(&self, value: Reg) -> CompletionRegs {
+        CompletionRegs {
+            value,
+            present: self.completion_presence.get(&value).copied(),
+        }
+    }
+
+    /// UpdateEmpty for a normal statement-list or case completion.
+    fn copy_completion(
+        &mut self,
+        destination: CompletionRegs,
+        source: CompletionRegs,
+    ) -> Result<(), Decline> {
+        let skip = source
+            .present
+            .map(|src| self.emit_jump(|target| Instr::JumpIfFalse { src, target }));
         self.emit(Instr::Mov {
-            dst: block_value,
-            src: undef,
+            dst: destination.value,
+            src: source.value,
         });
+        if let Some(flag) = destination.present {
+            let constant = self.const_true()?;
+            self.emit(Instr::LoadConst {
+                dst: flag,
+                cst: constant,
+            });
+        }
+        if let Some(skip) = skip {
+            self.patch_jump(skip, self.here())?;
+        }
+        Ok(())
+    }
+
+    fn copy_statement_completion(
+        &mut self,
+        destination: CompletionRegs,
+        statement: &Statement,
+        value: Reg,
+    ) -> Result<(), Decline> {
+        if produces_completion_value(statement) {
+            self.copy_completion(destination, self.completion_regs(value))?;
+        }
+        Ok(())
+    }
+
+    /// Merge the enclosing statement lists into the break/continue target
+    /// before jumping over the normal completion moves.
+    fn record_abrupt_completion(&mut self, target: usize) -> Result<(), Decline> {
+        let depth = self.loops[target].completion_depth;
+        let frames = self.completions[depth..].to_vec();
+        let merged = self.new_completion(true)?;
+        for frame in &frames {
+            self.copy_completion(merged, *frame)?;
+        }
+        let destination = frames[0];
+        self.emit(Instr::Mov {
+            dst: destination.value,
+            src: merged.value,
+        });
+        if let Some(flag) = destination.present {
+            self.emit(Instr::Mov {
+                dst: flag,
+                src: merged.present.expect("empty completion flag"),
+            });
+        }
+        Ok(())
+    }
+
+    fn compile_block(&mut self, stmts: &'a [Statement]) -> Result<Reg, Decline> {
+        let completion = self.new_completion(true)?;
+        self.completions.push(completion);
         let checkpoint = self.checkpoint();
         for stmt in stmts {
             let value = self.compile_stmt(stmt)?;
-            if produces_completion_value(stmt) {
-                self.emit(Instr::Mov {
-                    dst: block_value,
-                    src: value,
-                });
-            }
+            self.copy_statement_completion(completion, stmt, value)?;
             self.restore(checkpoint);
         }
-        Ok(block_value)
+        self.completions.pop();
+        Ok(completion.value)
     }
 
     /// Compile statements as a block: a fresh scope with hoisting only
@@ -1410,44 +1488,29 @@ impl<'a> Compiler<'a> {
                 body,
             } => self.compile_for(init.as_deref(), test.as_deref(), update.as_deref(), body),
             Statement::Break => {
-                // Plain `break` targets the innermost breakable context: a
-                // loop, a switch, or a labeled block.
-                let depth = match self.loops.iter().next_back() {
-                    Some(ctx) => ctx.cleanup_depth,
-                    None => return Err(Decline::Func("break outside loop")),
-                };
+                let target = self
+                    .loops
+                    .iter()
+                    .rposition(|ctx| ctx.kind != CtxKind::LabelBlock)
+                    .ok_or(Decline::Func("break outside loop"))?;
+                let depth = self.loops[target].cleanup_depth;
+                self.record_abrupt_completion(target)?;
                 self.duplicate_unwind(depth)?;
-                let addr = self.emit_jump(|target| Instr::Jump { target });
-                match self.loops.iter_mut().next_back() {
-                    Some(ctx) => ctx.breaks.push(addr),
-                    None => return Err(Decline::Func("break outside loop")),
-                }
+                let address = self.emit_jump(|target| Instr::Jump { target });
+                self.loops[target].breaks.push(address);
                 self.load_undefined()
             }
             Statement::Continue => {
-                // Plain `continue` targets the innermost loop, skipping over
-                // any switch or labeled-block contexts (`continue` inside a
-                // switch applies to the enclosing loop).
-                let depth = match self
+                let target = self
                     .loops
                     .iter()
-                    .rev()
-                    .find(|ctx| ctx.kind == CtxKind::Loop)
-                {
-                    Some(ctx) => ctx.cleanup_depth,
-                    None => return Err(Decline::Func("continue outside loop")),
-                };
+                    .rposition(|ctx| ctx.kind == CtxKind::Loop)
+                    .ok_or(Decline::Func("continue outside loop"))?;
+                let depth = self.loops[target].cleanup_depth;
+                self.record_abrupt_completion(target)?;
                 self.duplicate_unwind(depth)?;
-                let addr = self.emit_jump(|target| Instr::Jump { target });
-                match self
-                    .loops
-                    .iter_mut()
-                    .rev()
-                    .find(|ctx| ctx.kind == CtxKind::Loop)
-                {
-                    Some(ctx) => ctx.continues.push(addr),
-                    None => return Err(Decline::Func("continue outside loop")),
-                }
+                let address = self.emit_jump(|target| Instr::Jump { target });
+                self.loops[target].continues.push(address);
                 self.load_undefined()
             }
             Statement::Return(expr) => {
@@ -1520,60 +1583,24 @@ impl<'a> Compiler<'a> {
             },
             Statement::ForOf { .. } => Err(Decline::Func("for-of assignment head")),
             Statement::Labeled { label, body } => self.compile_labeled(label, body),
-            Statement::LabeledBreak(label) => {
-                let depth = match self
+            Statement::LabeledBreak(label) | Statement::LabeledContinue(label) => {
+                let target = self
                     .loops
                     .iter()
-                    .rev()
-                    .find(|ctx| ctx.labels.iter().any(|known| known == label))
-                {
-                    Some(ctx) => ctx.cleanup_depth,
-                    None => return Err(Decline::Func("unresolved break label")),
-                };
-                self.duplicate_unwind(depth)?;
-                let addr = self.emit_jump(|target| Instr::Jump { target });
-                match self
-                    .loops
-                    .iter_mut()
-                    .rev()
-                    .find(|ctx| ctx.labels.iter().any(|known| known == label))
-                {
-                    Some(ctx) => ctx.breaks.push(addr),
-                    None => return Err(Decline::Func("unresolved break label")),
-                }
-                self.load_undefined()
-            }
-            Statement::LabeledContinue(label) => {
-                // `continue label` targets the innermost context carrying
-                // that label, which must be a loop; anything else (or no
-                // match at all) is a compile error the parser normally
-                // rejects ahead of us.
-                let mut depth = None;
-                for ctx in self.loops.iter().rev() {
-                    if ctx.labels.iter().any(|known| known == label) {
-                        if ctx.kind == CtxKind::Loop {
-                            depth = Some(ctx.cleanup_depth);
-                        }
-                        break;
-                    }
-                }
-                let Some(depth) = depth else {
+                    .rposition(|ctx| ctx.labels.iter().any(|known| known == label))
+                    .ok_or(Decline::Func("unresolved control-flow label"))?;
+                let is_continue = matches!(stmt, Statement::LabeledContinue(_));
+                if is_continue && self.loops[target].kind != CtxKind::Loop {
                     return Err(Decline::Func("unresolved continue label"));
-                };
-                self.duplicate_unwind(depth)?;
-                let addr = self.emit_jump(|target| Instr::Jump { target });
-                let mut target = None;
-                for ctx in self.loops.iter_mut().rev() {
-                    if ctx.labels.iter().any(|known| known == label) {
-                        if ctx.kind == CtxKind::Loop {
-                            target = Some(ctx);
-                        }
-                        break;
-                    }
                 }
-                match target {
-                    Some(ctx) => ctx.continues.push(addr),
-                    None => return Err(Decline::Func("unresolved continue label")),
+                let depth = self.loops[target].cleanup_depth;
+                self.record_abrupt_completion(target)?;
+                self.duplicate_unwind(depth)?;
+                let address = self.emit_jump(|target| Instr::Jump { target });
+                if is_continue {
+                    self.loops[target].continues.push(address);
+                } else {
+                    self.loops[target].breaks.push(address);
                 }
                 self.load_undefined()
             }
@@ -2378,7 +2405,11 @@ impl<'a> Compiler<'a> {
         else_: Option<&'a [Statement]>,
     ) -> Result<Reg, Decline> {
         let cond = self.compile_expr(test)?;
-        let join = self.alloc_reg()?;
+        let join = self.load_undefined()?;
+        self.completions.push(CompletionRegs {
+            value: join,
+            present: None,
+        });
         let else_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
         let then_value = self.compile_scoped_block(then)?;
         self.emit(Instr::Mov {
@@ -2404,6 +2435,7 @@ impl<'a> Compiler<'a> {
             }
         }
         self.patch_jump(end_jump, self.here())?;
+        self.completions.pop();
         Ok(join)
     }
 
@@ -2466,7 +2498,10 @@ impl<'a> Compiler<'a> {
     /// One `finally` copy as a block; the block value is discarded, like
     /// the evaluator's, while abrupt exits propagate.
     fn compile_finally_body(&mut self, body: &'a [Statement]) -> Result<(), Decline> {
+        let completion = self.new_completion(false)?;
+        self.completions.push(completion);
         let _ = self.compile_scoped_block(body)?;
+        self.completions.pop();
         Ok(())
     }
 
@@ -2498,6 +2533,10 @@ impl<'a> Compiler<'a> {
             });
             return Ok(value);
         }
+        self.completions.push(CompletionRegs {
+            value,
+            present: None,
+        });
         let err = self.alloc_reg()?;
         let mut finally_addr = None;
         let mut catch_addr = None;
@@ -2588,19 +2627,19 @@ impl<'a> Compiler<'a> {
         }
         self.patch_jump(normal, finally_run)?;
         self.patch_jump(end, done)?;
+        self.completions.pop();
         Ok(value)
     }
 
     /// `label: body`. A labeled loop hands the label to the loop's
     /// context (so `break label`/`continue label` reach it); any other
     /// labeled statement runs inside a `LabelBlock` context whose breaks
-    /// land just past it with the statement value reset to `undefined`,
-    /// matching the evaluator's `LabeledBreak` propagation.
+    /// preserve both the value and presence of the abrupt completion.
     fn compile_labeled(&mut self, label: &'a str, body: &'a Statement) -> Result<Reg, Decline> {
         // Only a directly-wrapped loop takes the label (the evaluator's
         // loops likewise take a single pending label on entry); an outer
-        // label of a nested chain stays a `LabelBlock`, so breaking to it
-        // discards the loop value exactly like the evaluator.
+        // label of a nested chain stays a `LabelBlock` with its own
+        // completion result.
         if matches!(
             body,
             Statement::While { .. }
@@ -2612,33 +2651,27 @@ impl<'a> Compiler<'a> {
             self.pending_labels.push(label.to_string());
             return self.compile_stmt(body);
         }
+        let completion = self.new_completion(true)?;
         self.loops.push(LoopCtx {
             labels: vec![label.to_string()],
             kind: CtxKind::LabelBlock,
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
         });
+        self.completions.push(completion);
         let value = self.compile_stmt(body)?;
+        self.copy_statement_completion(completion, body, value)?;
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()
             .ok_or(Decline::Func("loop stack underflow"))?;
-        debug_assert!(ctx.continues.is_empty());
-        if !ctx.breaks.is_empty() {
-            let over = self.emit_jump(|target| Instr::Jump { target });
-            let taken = self.here();
-            let undef = self.load_undefined()?;
-            self.emit(Instr::Mov {
-                dst: value,
-                src: undef,
-            });
-            let end = self.here();
-            for addr in ctx.breaks {
-                self.patch_jump(addr, taken)?;
-            }
-            self.patch_jump(over, end)?;
+        let end = self.here();
+        for address in ctx.breaks {
+            self.patch_jump(address, end)?;
         }
-        Ok(value)
+        Ok(completion.value)
     }
 
     /// Lexical iteration heads use a boxed TDZ environment, replaced before
@@ -2766,7 +2799,12 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
+        });
+        self.completions.push(CompletionRegs {
+            value: loop_value,
+            present: None,
         });
         let key = self.alloc_reg()?;
         self.emit(Instr::GetProp {
@@ -2779,10 +2817,13 @@ impl<'a> Compiler<'a> {
         self.reset_iteration_head(&names, kind)?;
         self.bind_for_head(&head, key, kind);
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov {
-            dst: loop_value,
-            src: body_value,
-        });
+        self.copy_completion(
+            CompletionRegs {
+                value: loop_value,
+                present: None,
+            },
+            self.completion_regs(body_value),
+        )?;
         let increment = self.here();
         let next = self.alloc_reg()?;
         self.emit(Instr::Binary {
@@ -2798,6 +2839,7 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::Jump {
             target: addr_target(top)?,
         });
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()
@@ -2869,7 +2911,12 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
+        });
+        self.completions.push(CompletionRegs {
+            value: loop_value,
+            present: None,
         });
         let top = self.here();
         self.emit(Instr::LoopHead);
@@ -2903,15 +2950,19 @@ impl<'a> Compiler<'a> {
             _ => return Err(Decline::Func("bad for-of head")),
         }
         let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov {
-            dst: loop_value,
-            src: body_value,
-        });
+        self.copy_completion(
+            CompletionRegs {
+                value: loop_value,
+                present: None,
+            },
+            self.completion_regs(body_value),
+        )?;
         let continue_pad = self.here();
         self.emit(Instr::PopHandler);
         self.emit(Instr::Jump {
             target: addr_target(top)?,
         });
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()
@@ -3003,17 +3054,26 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             kind: CtxKind::Switch,
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
+        });
+        self.completions.push(CompletionRegs {
+            value,
+            present: None,
         });
         let mut bodies = Vec::with_capacity(cases.len());
         for case in cases {
             bodies.push(self.here());
             let case_value = self.compile_block(&case.body)?;
-            self.emit(Instr::Mov {
-                dst: value,
-                src: case_value,
-            });
+            self.copy_completion(
+                CompletionRegs {
+                    value,
+                    present: None,
+                },
+                self.completion_regs(case_value),
+            )?;
         }
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()
@@ -3050,24 +3110,31 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
         });
-        let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov {
-            dst: loop_value,
-            src: body_value,
+        self.completions.push(CompletionRegs {
+            value: loop_value,
+            present: None,
         });
+        let body_value = self.compile_scoped_block(body)?;
+        self.copy_completion(
+            CompletionRegs {
+                value: loop_value,
+                present: None,
+            },
+            self.completion_regs(body_value),
+        )?;
         self.emit(Instr::Jump {
             target: addr_target(test_addr)?,
         });
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()
             .ok_or(Decline::Func("loop stack underflow"))?;
         let end = self.here();
         self.patch_jump(end_jump, end)?;
-        // `break`/`continue` jump over the value move, so neither updates
-        // the loop's completion value — matching the evaluator.
         self.finish_loop(ctx, test_addr, end)?;
         Ok(loop_value)
     }
@@ -3084,13 +3151,21 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
         });
-        let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov {
-            dst: loop_value,
-            src: body_value,
+        self.completions.push(CompletionRegs {
+            value: loop_value,
+            present: None,
         });
+        let body_value = self.compile_scoped_block(body)?;
+        self.copy_completion(
+            CompletionRegs {
+                value: loop_value,
+                present: None,
+            },
+            self.completion_regs(body_value),
+        )?;
         // A `continue` lands here, after the body: the test runs without
         // consuming the budget a second time, like the evaluator.
         let test_addr = self.here();
@@ -3099,6 +3174,7 @@ impl<'a> Compiler<'a> {
             src: cond,
             target: addr_target(body_addr)?,
         });
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()
@@ -3141,13 +3217,21 @@ impl<'a> Compiler<'a> {
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
+            completion_depth: self.completions.len(),
             ..Default::default()
         });
-        let body_value = self.compile_scoped_block(body)?;
-        self.emit(Instr::Mov {
-            dst: loop_value,
-            src: body_value,
+        self.completions.push(CompletionRegs {
+            value: loop_value,
+            present: None,
         });
+        let body_value = self.compile_scoped_block(body)?;
+        self.copy_completion(
+            CompletionRegs {
+                value: loop_value,
+                present: None,
+            },
+            self.completion_regs(body_value),
+        )?;
         // A `continue` runs the update, then the budgeted test. With a
         // boxed head, the scope rotates first: the update assigns the next
         // iteration's cells, so the current iteration's closures keep the
@@ -3162,6 +3246,7 @@ impl<'a> Compiler<'a> {
         self.emit(Instr::Jump {
             target: addr_target(test_addr)?,
         });
+        self.completions.pop();
         let ctx = self
             .loops
             .pop()

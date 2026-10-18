@@ -192,7 +192,7 @@ fn run(source: &str) -> String {
     let mut interp = Interpreter::with_builtins();
     let toks = Lexer::new(source).tokenize_with_spans();
     let stmts = Parser::new_with_spans(toks).parse();
-    let value = interp.run(&stmts).expect("execution failed");
+    let value = interp.run_program_body(&stmts).expect("execution failed");
     interp.vs(&value).unwrap_or_default()
 }
 
@@ -201,7 +201,10 @@ fn run_expecting_error(source: &str) {
     let mut interp = Interpreter::with_builtins();
     let toks = Lexer::new(source).tokenize_with_spans();
     let stmts = Parser::new_with_spans(toks).parse();
-    assert!(interp.run(&stmts).is_err(), "expected an error");
+    assert!(
+        interp.run_program_body(&stmts).is_err(),
+        "expected an error"
+    );
 }
 
 // ── completion ───────────────────────────────────────────────────────
@@ -590,7 +593,10 @@ fn a_generator_exhausting_the_loop_budget_unwinds_cleanly() {
     "#;
     let toks = Lexer::new(source).tokenize_with_spans();
     let stmts = Parser::new_with_spans(toks).parse();
-    assert!(interp.run(&stmts).is_err(), "expected the budget to trip");
+    assert!(
+        interp.run_program_body(&stmts).is_err(),
+        "expected the budget to trip"
+    );
 }
 
 // ── iterator closing ─────────────────────────────────────────────────
@@ -667,7 +673,9 @@ fn a_generator_resuming_itself_is_an_error_not_a_hang() {
     "#;
     let toks = Lexer::new(source).tokenize_with_spans();
     let stmts = Parser::new_with_spans(toks).parse();
-    let err = interp.run(&stmts).expect_err("expected a TypeError");
+    let err = interp
+        .run_program_body(&stmts)
+        .expect_err("expected a TypeError");
     assert!(
         err.to_string().contains("already running"),
         "unexpected error: {err}"

@@ -1510,13 +1510,14 @@ impl Interpreter {
             }
             Statement::If { test, then, else_ } => {
                 let t = self.eval_expr(test)?;
-                if self.truthy(&t) {
+                let result = if self.truthy(&t) {
                     self.run_block(then)
                 } else if let Some(a) = else_ {
                     self.run_block(a)
                 } else {
                     Ok(Value::Undefined)
-                }
+                };
+                result.map_err(|error| error.update_empty(Some(Value::Undefined)))
             }
             Statement::ResourceForOf {
                 name,
@@ -1575,7 +1576,7 @@ impl Interpreter {
                 let saved = std::mem::replace(&mut self.global, scope);
                 let result = self.run_block(body);
                 self.global = saved;
-                result
+                result.map_err(|error| error.update_empty(Some(Value::Undefined)))
             }
             Statement::While { test, body } => {
                 let body_needs_scope = block_needs_lexical_scope(body);
@@ -1587,12 +1588,24 @@ impl Interpreter {
                     if !self.truthy(&t) {
                         break;
                     }
-                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                        Err(VmErr::Break(None)) => break,
-                        Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                        Err(VmErr::Continue(None)) => continue,
-                        Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
-                        other => r = other?,
+                    match self.run_block_with_lexical_scope_completion(body, body_needs_scope) {
+                        Err(VmErr::Break(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                            if let Some(value) = value {
+                                r = *value;
+                            }
+                            break;
+                        }
+                        Err(VmErr::Continue(l, value))
+                            if l.is_none() || label_matches(&label, &l) =>
+                        {
+                            if let Some(value) = value {
+                                r = *value;
+                            }
+                            continue;
+                        }
+                        Ok(Some(value)) => r = value,
+                        Ok(None) => {}
+                        Err(error) => return Err(error.update_empty(Some(r))),
                     }
                 }
                 Ok(r)
@@ -1603,12 +1616,23 @@ impl Interpreter {
                 let mut r = Value::Undefined;
                 loop {
                     self.consume_loop()?;
-                    match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                        Err(VmErr::Break(None)) => break,
-                        Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                        Err(VmErr::Continue(None)) => {}
-                        Err(VmErr::Continue(l)) if label_matches(&label, &l) => {}
-                        other => r = other?,
+                    match self.run_block_with_lexical_scope_completion(body, body_needs_scope) {
+                        Err(VmErr::Break(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                            if let Some(value) = value {
+                                r = *value;
+                            }
+                            break;
+                        }
+                        Err(VmErr::Continue(l, value))
+                            if l.is_none() || label_matches(&label, &l) =>
+                        {
+                            if let Some(value) = value {
+                                r = *value;
+                            }
+                        }
+                        Ok(Some(value)) => r = value,
+                        Ok(None) => {}
+                        Err(error) => return Err(error.update_empty(Some(r))),
                     }
                     let t = self.eval_expr(test)?;
                     if !self.truthy(&t) {
@@ -1650,23 +1674,13 @@ impl Interpreter {
                     "Invalid parameter initialization position".into(),
                 ))
             }
-            Statement::Labeled { label, body } => {
-                // Make the label available to a directly-wrapped loop, which
-                // takes it on entry.
-                let prev = self.active_label.take();
-                self.active_label = Some(label.clone());
-                let r = self.eval_stmt(body);
-                self.active_label = prev;
-                match r {
-                    // Consume a labeled break that escaped a non-loop body.
-                    Err(VmErr::Break(Some(l))) if l == *label => Ok(Value::Undefined),
-                    other => other,
-                }
-            }
-            Statement::Break => Err(VmErr::Break(None)),
-            Statement::Continue => Err(VmErr::Continue(None)),
-            Statement::LabeledBreak(label) => Err(VmErr::Break(Some(label.clone()))),
-            Statement::LabeledContinue(label) => Err(VmErr::Continue(Some(label.clone()))),
+            Statement::Labeled { .. } => self
+                .eval_stmt_completion(s)
+                .map(|value| value.unwrap_or(Value::Undefined)),
+            Statement::Break => Err(VmErr::Break(None, None)),
+            Statement::Continue => Err(VmErr::Continue(None, None)),
+            Statement::LabeledBreak(label) => Err(VmErr::Break(Some(label.clone()), None)),
+            Statement::LabeledContinue(label) => Err(VmErr::Continue(Some(label.clone()), None)),
             Statement::Throw(e) => {
                 let v = self.eval_expr(e)?;
                 vm_throw(v)
@@ -1689,7 +1703,7 @@ impl Interpreter {
                 let after_catch = match body_result {
                     Err(VmErr::Throw(val)) => self.run_catch(catch, val),
                     // Control-flow signals are not catchable.
-                    Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => Err(e),
+                    Err(e @ (VmErr::Break(..) | VmErr::Continue(..))) => Err(e),
                     // Runtime errors (e.g. undeclared identifier, limit guards)
                     // are catchable as real error objects with `name`/`message`.
                     Err(VmErr::Msg(m)) => {
@@ -1708,9 +1722,10 @@ impl Interpreter {
 
                 // finally always runs last; its own error/return takes precedence.
                 if let Some(f) = finally {
-                    self.run_block(f)?;
+                    self.run_block(f)
+                        .map_err(|error| error.update_empty(Some(Value::Undefined)))?;
                 }
-                after_catch
+                after_catch.map_err(|error| error.update_empty(Some(Value::Undefined)))
             }
             Statement::Switch { disc, cases } => {
                 let d = self.eval_expr(disc)?;
@@ -1970,12 +1985,21 @@ impl Interpreter {
                     break;
                 }
             }
-            match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                Err(VmErr::Break(None)) => break,
-                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                Err(VmErr::Continue(None)) => {}
-                Err(VmErr::Continue(l)) if label_matches(&label, &l) => {}
-                other => r = other?,
+            match self.run_block_with_lexical_scope_completion(body, body_needs_scope) {
+                Err(VmErr::Break(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                    if let Some(value) = value {
+                        r = *value;
+                    }
+                    break;
+                }
+                Err(VmErr::Continue(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                    if let Some(value) = value {
+                        r = *value;
+                    }
+                }
+                Ok(Some(value)) => r = value,
+                Ok(None) => {}
+                Err(error) => return Err(error.update_empty(Some(r))),
             }
             if needs_per_iteration_environment {
                 let current = self.global.clone();
@@ -2155,12 +2179,22 @@ impl Interpreter {
             self.consume_loop()?;
             self.enter_iteration_binding_scope(binding);
             self.assign_iteration_binding(binding, &Value::String(k.into()))?;
-            match self.run_block_with_lexical_scope(body, body_needs_scope) {
-                Err(VmErr::Break(None)) => break,
-                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                Err(VmErr::Continue(None)) => continue,
-                Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
-                other => r = other?,
+            match self.run_block_with_lexical_scope_completion(body, body_needs_scope) {
+                Err(VmErr::Break(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                    if let Some(value) = value {
+                        r = *value;
+                    }
+                    break;
+                }
+                Err(VmErr::Continue(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                    if let Some(value) = value {
+                        r = *value;
+                    }
+                    continue;
+                }
+                Ok(Some(value)) => r = value,
+                Ok(None) => {}
+                Err(error) => return Err(error.update_empty(Some(r))),
             }
         }
         Ok(r)
@@ -2221,28 +2255,38 @@ impl Interpreter {
                 }
                 return Err(error);
             }
-            let outcome = self.run_block_with_lexical_scope(body, body_needs_scope);
+            let outcome = self.run_block_with_lexical_scope_completion(body, body_needs_scope);
             let outcome = if disposal.is_some() {
-                self.finish_resources(&self.global.clone(), outcome)
+                self.finish_completion_resources(&self.global.clone(), outcome)
             } else {
                 outcome
             };
             match outcome {
-                Err(VmErr::Break(None)) => break,
-                Err(VmErr::Break(l)) if label_matches(&label, &l) => break,
-                Err(VmErr::Continue(None)) => continue,
-                Err(VmErr::Continue(l)) if label_matches(&label, &l) => continue,
+                Err(VmErr::Break(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                    if let Some(value) = value {
+                        r = *value;
+                    }
+                    break;
+                }
+                Err(VmErr::Continue(l, value)) if l.is_none() || label_matches(&label, &l) => {
+                    if let Some(value) = value {
+                        r = *value;
+                    }
+                    continue;
+                }
                 // `return`, `throw`, or a break/continue aimed at an
                 // outer label also leaves the loop, and also closes.
                 // An abandon teardown is the exception: it runs no
                 // handlers, so it must not close either.
                 Err(error) => {
+                    let error = error.update_empty(Some(r));
                     if !error.is_abandon() {
                         self.close_guest_iterator_for_abrupt(&iterator, is_await, &error)?;
                     }
                     return Err(error);
                 }
-                Ok(value) => r = value,
+                Ok(Some(value)) => r = value,
+                Ok(None) => {}
             }
         }
         if !exhausted {
@@ -2583,38 +2627,40 @@ impl Interpreter {
             self.hoist_lexical_public(&case.body)?;
         }
 
-        let mut r = Value::Undefined;
-        let mut matched = false;
-        let mut found_label = None;
-        for c in cases {
-            if let Some(ref t) = c.test {
-                let tv = self.eval_expr(t)?;
-                if self.seq(disc, &tv) {
-                    matched = true;
+        // Select a clause before executing its body. A default clause is only
+        // used if no selector matches; selectors after a match are not evaluated.
+        let mut selected = None;
+        let mut default = None;
+        for (index, case) in cases.iter().enumerate() {
+            if let Some(test) = &case.test {
+                let value = self.eval_expr(test)?;
+                if self.seq(disc, &value) {
+                    selected = Some(index);
+                    break;
                 }
             } else {
-                matched = true;
+                default = Some(index);
             }
-            if matched {
-                match self.run(&c.body) {
-                    Err(VmErr::Break(l)) => match l {
-                        None => break,
-                        Some(label) => {
-                            found_label = Some(label);
-                            break;
-                        }
-                    },
-                    Err(e) => return Err(e),
-                    Ok(v) => {
-                        r = v;
+        }
+        let mut value = Value::Undefined;
+        if let Some(start) = selected.or(default) {
+            for case in &cases[start..] {
+                match self.run_completion(&case.body) {
+                    Ok(Some(next)) => value = next,
+                    Ok(None) => {}
+                    Err(error) => {
+                        let error = error.update_empty(Some(value));
+                        return match error {
+                            VmErr::Break(None, value) => {
+                                Ok(*value.expect("switch completion value"))
+                            }
+                            other => Err(other),
+                        };
                     }
                 }
             }
         }
-        if let Some(label) = found_label {
-            return Err(VmErr::Break(Some(label)));
-        }
-        Ok(r)
+        Ok(value)
     }
 
     pub(crate) fn eval_expr(&mut self, e: &Expr) -> Result<Value, VmErr> {

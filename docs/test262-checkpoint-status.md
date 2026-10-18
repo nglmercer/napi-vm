@@ -25,6 +25,16 @@ results are recorded separately in [`latest.json`](../tools/test262/latest.json)
 they do not change the full-run score. See the
 [module attributes continuation](test262-dynamic-import-attributes-continuation.md).
 
+
+Control-flow completion now passes all **150 / 150** statement completion
+variants. Switch passes **213 / 216**, with three proper-tail-call failures.
+The neighboring control-flow selection passes **3,574 / 3,624**, gaining
+**71 passes with zero losses**. AST and prepared bytecode completion checks,
+93 integration tests, and 79 selected bytecode tests pass; the known unrelated
+super-destructuring parity failure is excluded from that bytecode selection.
+See the [control-flow continuation](test262-control-flow-completion-continuation.md).
+The separate full refresh remains on the earlier `8333a38` worker snapshot.
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

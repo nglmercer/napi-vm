@@ -1711,19 +1711,45 @@ impl Interpreter {
     /// program should use [`Interpreter::run_program_body`], which performs
     /// the hoisting JavaScript requires before the first statement runs.
     pub fn run(&mut self, stmts: &[Statement]) -> Result<Value, VmErr> {
-        let mut r = Value::Undefined;
-        for s in stmts {
-            let value = self.eval_stmt(s)?;
-            // A statement that produces no completion value leaves the
-            // previous one standing: `1;;` evaluates to 1, not `undefined`.
-            // Declarations and the empty statement are the cases that matter,
-            // and getting this wrong made a trailing `;` erase a script's
-            // result.
-            if produces_completion_value(s) {
-                r = value;
+        self.run_completion(stmts)
+            .map(|value| value.unwrap_or(Value::Undefined))
+    }
+
+    /// Preserve the distinction between an empty completion and `undefined`.
+    fn run_completion(&mut self, stmts: &[Statement]) -> Result<Option<Value>, VmErr> {
+        let mut completion = None;
+        for statement in stmts {
+            match self.eval_stmt_completion(statement) {
+                Ok(Some(value)) => completion = Some(value),
+                Ok(None) => {}
+                Err(error) => return Err(error.update_empty(completion)),
             }
         }
-        Ok(r)
+        Ok(completion)
+    }
+
+    fn eval_stmt_completion(&mut self, statement: &Statement) -> Result<Option<Value>, VmErr> {
+        match statement {
+            Statement::Block(body) => {
+                self.consume_fuel(1)?;
+                self.run_block_with_lexical_scope_completion(body, block_needs_lexical_scope(body))
+            }
+            Statement::Labeled { label, body } => {
+                self.consume_fuel(1)?;
+                let previous = self.active_label.replace(label.clone());
+                let result = self.eval_stmt_completion(body);
+                self.active_label = previous;
+                match result {
+                    Err(VmErr::Break(Some(target), value)) if target == *label => {
+                        Ok(value.map(|value| *value))
+                    }
+                    other => other,
+                }
+            }
+            _ => self
+                .eval_stmt(statement)
+                .map(|value| produces_completion_value(statement).then_some(value)),
+        }
     }
 
     /// Execute a statement list in a fresh block scope.
@@ -1744,14 +1770,35 @@ impl Interpreter {
         stmts: &[Statement],
         needs_scope: bool,
     ) -> Result<Value, VmErr> {
+        self.run_block_with_lexical_scope_completion(stmts, needs_scope)
+            .map(|value| value.unwrap_or(Value::Undefined))
+    }
+
+    fn run_block_with_lexical_scope_completion(
+        &mut self,
+        stmts: &[Statement],
+        needs_scope: bool,
+    ) -> Result<Option<Value>, VmErr> {
         if !needs_scope {
-            return self.run(stmts);
+            return self.run_completion(stmts);
         }
         let outer = self.push_scope();
-        let result = self.hoist_lexical(stmts).and_then(|()| self.run(stmts));
-        let result = self.finish_resources(&self.global.clone(), result);
+        let result = self
+            .hoist_lexical(stmts)
+            .and_then(|()| self.run_completion(stmts));
+        let result = self.finish_completion_resources(&self.global.clone(), result);
         self.pop_scope(outer);
         result
+    }
+
+    fn finish_completion_resources(
+        &mut self,
+        scope: &Env,
+        result: Result<Option<Value>, VmErr>,
+    ) -> Result<Option<Value>, VmErr> {
+        let empty = matches!(&result, Ok(None));
+        self.finish_resources(scope, result.map(|value| value.unwrap_or(Value::Undefined)))
+            .map(|value| if empty { None } else { Some(value) })
     }
 
     pub(crate) fn prepare_parameter_body(

@@ -40,3 +40,7 @@ the `destructuring`, `named_evaluation`, `numeric_binary`,
 `coroutine_backend`, and `engine_boundary` suites; `cargo fmt --check` is
 clean. The `evaluation_modes::compact_property_cache_verification` failure
 was reproduced on the untouched tree and is pre-existing.
+
+Subsequent block, label, loop, switch, and abrupt-completion work is documented
+in the [control-flow continuation](test262-control-flow-completion-continuation.md),
+which includes AST/bytecode validation and current focused release evidence.

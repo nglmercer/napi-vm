@@ -268,7 +268,9 @@ fn spawn_body(
             Err(VmErr::Abandon) => GenOutcome::Abandon,
             Err(VmErr::Msg(m)) => GenOutcome::Threw(crate::error::error_value_from_msg(&m)),
             Err(VmErr::RuntimeError(e)) => GenOutcome::Threw(e.guest_value()),
-            Err(e @ (VmErr::Break(_) | VmErr::Continue(_))) => GenOutcome::Failed(format!("{}", e)),
+            Err(e @ (VmErr::Break(..) | VmErr::Continue(..))) => {
+                GenOutcome::Failed(format!("{}", e))
+            }
         }
     });
 
