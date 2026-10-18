@@ -50,6 +50,13 @@ for `built-ins/ShadowRealm` and
 `built-ins/Object/prototype/isPrototypeOf` passes 144 / 144 variants. The corpus
 revision, runner limits, and full-suite denominator are unchanged.
 
+Since that full-run worker was built, the Object integrity and `fromEntries`
+implementation advanced. The focused selection covering `Object.fromEntries`,
+`freeze`, `seal`, `isFrozen`, `isSealed`, `preventExtensions`, and
+`Reflect.preventExtensions` passes 622 / 622 variants; it does not change the
+full-corpus measurement. See the [Object integrity continuation](../../docs/test262-object-integrity-continuation.md)
+and its archived evidence.
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

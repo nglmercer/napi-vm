@@ -651,32 +651,74 @@ fn object_get_own_property_symbols(
 
 fn object_from_entries(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let source = a.first().cloned().unwrap_or(Value::Undefined);
-    let mut props: Vec<(String, Value)> = Vec::new();
-    let mut symbol_keys = Vec::new();
-    for entry in interp.iterate(&source)? {
-        let raw_key = interp.member(&entry, "0")?;
-        let symbol = match &raw_key {
-            Value::Symbol(symbol) => Some(symbol.clone()),
-            _ => None,
+    let object = Value::checked_object(Vec::new())?;
+    let iterator = interp.iterator_for(&source)?;
+    let next = interp.member(&iterator, "next")?;
+    if !crate::interpreter::is_callable_value(&next) {
+        return Err(type_err("Iterator next is not callable"));
+    }
+
+    loop {
+        interp.consume_loop()?;
+        let step_result = (|| {
+            let step = interp.call_this(&next, iterator.clone(), vec![])?;
+            interp.iterator_result_fields(&step)
+        })();
+        let (done, entry) = match step_result {
+            Ok(result) => result,
+            Err(error) => {
+                let close_result = interp.close_guest_iterator_for_abrupt(&iterator, false, &error);
+                return Err(close_result.err().unwrap_or(error));
+            }
         };
-        let key = interp.property_key(&raw_key)?;
-        let value = interp.member(&entry, "1")?;
-        match props.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, slot)) => *slot = value,
-            None => props.push((key.clone(), value)),
+        if done {
+            return Ok(object);
         }
-        if let Some(symbol) = symbol {
-            symbol_keys.push((key, symbol));
+
+        let add_entry = (|| {
+            if !is_ecmascript_object(&entry) {
+                return Err(type_err("Iterator entry must be an object"));
+            }
+
+            // AddEntriesFromIterable reads both entry properties before it
+            // performs ToPropertyKey, then creates the data property before
+            // requesting the next iterator result.
+            let raw_key = interp.member(&entry, "0")?;
+            let value = interp.member(&entry, "1")?;
+            let key = interp.ecmascript_to_property_key(&raw_key)?;
+
+            let slot = interp.property_key(&key)?;
+            let properties = object.property_cell();
+            let has_own_property = properties
+                .as_ref()
+                .is_some_and(|properties| properties.own_value(&slot).is_some());
+            let property_count = object
+                .property_cell()
+                .map(|properties| properties.borrow().len())
+                .unwrap_or(0);
+            if !has_own_property && property_count >= crate::value::MAX_OBJECT_PROPS {
+                return Err(crate::value::limit_err(
+                    "Maximum object property count exceeded",
+                ));
+            }
+
+            let descriptor = Value::descriptor_record(vec![
+                ("value".into(), value),
+                ("writable".into(), Value::Bool(true)),
+                ("enumerable".into(), Value::Bool(true)),
+                ("configurable".into(), Value::Bool(true)),
+            ]);
+            if !interp.define_own_property(&object, &key, &descriptor)? {
+                return Err(type_err("Cannot create property from entry"));
+            }
+            Ok(())
+        })();
+
+        if let Err(error) = add_entry {
+            let close_result = interp.close_guest_iterator_for_abrupt(&iterator, false, &error);
+            return Err(close_result.err().unwrap_or(error));
         }
     }
-    let object = Value::checked_object(props)?;
-    if let Value::Object { props } = &object {
-        let mut meta = props.meta.borrow_mut();
-        for (key, symbol) in symbol_keys {
-            meta.set_symbol_key(&key, symbol);
-        }
-    }
-    Ok(object)
 }
 
 fn object_has_own(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
@@ -2144,67 +2186,98 @@ fn descriptor_for_array_value(
 
 // --- Integrity levels -------------------------------------------------------
 
-/// Apply `seal`/`freeze`: mark the object non-extensible, and clear
-/// `configurable` (and, when freezing, `writable`) on every own property.
-fn lock(target: &Value, freeze: bool) {
-    if let Value::Array(array) = target {
-        array.set_integrity(freeze);
-        return;
+/// Apply the specification's SetIntegrityLevel algorithm through the
+/// interpreter's internal methods, so Proxy traps and abrupt completions stay
+/// observable in own-key order.
+fn set_integrity_level(
+    interp: &mut Interpreter,
+    target: &Value,
+    freeze: bool,
+) -> Result<bool, VmErr> {
+    if !crate::interpreter::call::is_js_object(target) {
+        return Ok(true);
     }
-    let Some(c) = cell(target) else { return };
-    let keys: Vec<String> = c.borrow().iter().map(|(k, _)| k.clone()).collect();
-    let mut meta = c.meta.borrow_mut();
-    meta.non_extensible = true;
-    for key in keys {
-        let mut attrs = meta.attrs_of(&key);
-        attrs.configurable = false;
-        if freeze {
-            attrs.writable = false;
+    if !interp.prevent_extensions(target)? {
+        return Ok(false);
+    }
+
+    for key in interp.own_property_keys(target)? {
+        interp.check_execution()?;
+        let current = descriptor_for_key_in(interp, target, &key)?;
+        if matches!(current, Value::Undefined) {
+            continue;
         }
-        meta.set_attrs(&key, attrs);
+        let mut fields = vec![("configurable".into(), Value::Bool(false))];
+        if freeze && current.get_prop("get").is_none() && current.get_prop("set").is_none() {
+            fields.push(("writable".into(), Value::Bool(false)));
+        }
+        let descriptor = Value::descriptor_record(fields);
+        if !interp.define_own_property(target, &key, &descriptor)? {
+            return Ok(false);
+        }
     }
+    Ok(true)
 }
 
-/// Do every own property, and the object itself, already satisfy the
-/// integrity level? An object with no properties is frozen as soon as it is
-/// non-extensible.
-fn locked(target: &Value, freeze: bool) -> bool {
-    if let Value::Array(array) = target {
-        return array.is_integrity_locked(freeze);
+/// Test the integrity level using [[IsExtensible]], [[OwnPropertyKeys]], and
+/// [[GetOwnProperty]] so proxies observe the same operations as the spec.
+fn test_integrity_level(
+    interp: &mut Interpreter,
+    target: &Value,
+    freeze: bool,
+) -> Result<bool, VmErr> {
+    if !crate::interpreter::call::is_js_object(target) {
+        return Ok(true);
     }
-    let Some(c) = cell(target) else {
-        // Primitives are frozen and sealed vacuously.
-        return !matches!(target, Value::Array(_));
-    };
-    let meta = c.meta.borrow();
-    if !meta.non_extensible {
-        return false;
+    if interp.is_extensible(target)? {
+        return Ok(false);
     }
-    c.borrow().iter().all(|(k, v)| {
-        let attrs = meta.attrs_of(k);
-        // Accessors have no writable attribute, so freezing does not require
-        // one to be cleared.
-        !attrs.configurable && (!freeze || !attrs.writable || accessor_kind(k, v).is_some())
-    })
+    for key in interp.own_property_keys(target)? {
+        interp.check_execution()?;
+        let current = descriptor_for_key_in(interp, target, &key)?;
+        if matches!(current, Value::Undefined) {
+            continue;
+        }
+        if current
+            .get_prop("configurable")
+            .is_some_and(|configurable| configurable.is_truthy())
+        {
+            return Ok(false);
+        }
+        if freeze
+            && current.get_prop("get").is_none()
+            && current.get_prop("set").is_none()
+            && current
+                .get_prop("writable")
+                .is_some_and(|writable| writable.is_truthy())
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
-fn object_freeze(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_freeze(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    lock(&v, true);
+    if !set_integrity_level(interp, &v, true)? {
+        return Err(type_err("Cannot freeze object"));
+    }
     Ok(v)
 }
-fn object_seal(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_seal(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    lock(&v, false);
+    if !set_integrity_level(interp, &v, false)? {
+        return Err(type_err("Cannot seal object"));
+    }
     Ok(v)
 }
-fn object_is_frozen(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_is_frozen(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(Value::Bool(locked(&v, true)))
+    Ok(Value::Bool(test_integrity_level(interp, &v, true)?))
 }
-fn object_is_sealed(_: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
+fn object_is_sealed(interp: &mut Interpreter, _: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let v = a.first().cloned().unwrap_or(Value::Undefined);
-    Ok(Value::Bool(locked(&v, false)))
+    Ok(Value::Bool(test_integrity_level(interp, &v, false)?))
 }
 fn object_prevent_extensions(
     interp: &mut Interpreter,

@@ -327,6 +327,19 @@ impl Interpreter {
             }
             return Ok(true);
         }
+        if let Value::TypedArray(view) = value {
+            let length_can_change = match &view.buffer {
+                crate::value::BufferBacking::Array(buffer) => buffer.is_resizable(),
+                crate::value::BufferBacking::Shared(buffer) => {
+                    buffer.is_growable() && view.length_tracking
+                }
+            };
+            if length_can_change {
+                return Err(VmErr::Msg(
+                    "TypeError: Cannot prevent extensions on a variable-length typed array".into(),
+                ));
+            }
+        }
         if let Value::Array(array) = value {
             array.meta.borrow_mut().non_extensible = true;
         } else if let Some(properties) = value.property_cell() {

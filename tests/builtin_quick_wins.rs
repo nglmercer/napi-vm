@@ -40,6 +40,46 @@ fn object_is_prototype_of_returns_false_for_primitive_arguments_before_receiver_
 }
 
 #[test]
+fn object_from_entries_interleaves_iteration_and_property_conversion() {
+    assert_tiers(
+        "var log=[];var count=0;var entry={};Object.defineProperty(entry,'0',{get:function(){log.push('key');var key={};key[Symbol.toPrimitive]=function(hint){log.push(hint);return'entry'};return key}});Object.defineProperty(entry,'1',{get:function(){log.push('value');return 42}});var iterator={next:function(){log.push('next'+count);if(count++===0)return{done:false,value:entry};return{done:true}}};var iterable={};iterable[Symbol.iterator]=function(){log.push('iterator');return iterator};var result=Object.fromEntries(iterable);JSON.stringify([log,result.entry]);",
+        "[[\"iterator\",\"next0\",\"key\",\"value\",\"string\",\"next1\"],42]",
+    );
+}
+
+#[test]
+fn object_from_entries_closes_iterator_and_preserves_entry_errors() {
+    assert_tiers(
+        "var marker={};var returned=0;var iterable={[Symbol.iterator]:function(){return{next:function(){return{done:false,value:{get '0'(){throw marker}}}},return:function(){returned++;return undefined}}}};var preserved=false;try{Object.fromEntries(iterable)}catch(error){preserved=error===marker}JSON.stringify([returned,preserved]);",
+        "[1,true]",
+    );
+}
+
+#[test]
+fn object_from_entries_closes_iterator_when_next_throws() {
+    assert_tiers(
+        "var marker={};var returned=0;var iterable={[Symbol.iterator]:function(){return{next:function(){throw marker},return:function(){returned++;return undefined}}}};var preserved=false;try{Object.fromEntries(iterable)}catch(error){preserved=error===marker}JSON.stringify([returned,preserved]);",
+        "[1,true]",
+    );
+}
+
+#[test]
+fn object_integrity_levels_observe_proxy_internal_methods() {
+    assert_tiers(
+        "var log=[];var proxy=new Proxy({}, {preventExtensions:function(){log.push('preventExtensions');return false},ownKeys:function(){log.push('ownKeys');return[]}});var threw=false;try{Object.freeze(proxy)}catch(error){threw=error instanceof TypeError}JSON.stringify([threw,log,Object.isFrozen(1),Object.isSealed(null)]);",
+        "[true,[\"preventExtensions\"],true,true]",
+    );
+}
+
+#[test]
+fn object_integrity_levels_reject_variable_length_typed_arrays() {
+    assert_tiers(
+        "var rab=new ArrayBuffer(4,{maxByteLength:8});var rabView=new Uint8Array(rab,0,0);var rabThrew=false;try{Object.freeze(rabView)}catch(error){rabThrew=error instanceof TypeError}var gsab=new SharedArrayBuffer(4,{maxByteLength:8});var fixedShared=new Uint8Array(gsab,0,1);var trackingShared=new Uint8Array(gsab);var fixedSharedWorks=true;try{Object.preventExtensions(fixedShared)}catch(error){fixedSharedWorks=false}var trackingSharedThrows=false;try{Object.preventExtensions(trackingShared)}catch(error){trackingSharedThrows=error instanceof TypeError}JSON.stringify([rabThrew,fixedSharedWorks,trackingSharedThrows]);",
+        "[true,true,true]",
+    );
+}
+
+#[test]
 fn for_in_boxes_primitive_string_iterables() {
     // This loop shape uses the AST fallback, so assert its semantics directly
     // instead of requiring the bytecode tier used by most tests in this file.

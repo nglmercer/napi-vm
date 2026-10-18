@@ -35,3 +35,8 @@ The top remaining full-run clusters are `staging/sm` (220 non-passing
 variants), `intl402/Temporal` (176), `language/import/import-defer` (95), and
 `built-ins/Object` (79). Broader host realm, GC/finalization timing, and full
 engine-wide realm integration remain separate work.
+
+The full-corpus counts above describe the worker snapshot recorded in
+`latest.json`; subsequent Object integrity and iterator fixes have not had a
+full-corpus rerun. Their 622-variant focused selection is recorded in the
+[Object integrity continuation](test262-object-integrity-continuation.md).

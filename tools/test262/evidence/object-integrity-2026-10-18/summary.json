@@ -1,0 +1,31 @@
+{
+  "source_base": "0dc7817ec2c41a35e244c7711eefdc8f4b25e875",
+  "source_patch_sha256": "1774f9fc42b6c59439368f69fe1d733c852e43fe82a415474e58dbb87d3fbed0",
+  "worker_sha256": "d9296573bfa0f22115e4deda7fe6a509416b475d5a45e6ab7c73a7c4c1d89293",
+  "corpus_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "built-ins/Object/fromEntries",
+    "built-ins/Object/freeze",
+    "built-ins/Object/seal",
+    "built-ins/Object/isFrozen",
+    "built-ins/Object/isSealed",
+    "built-ins/Object/preventExtensions",
+    "built-ins/Reflect/preventExtensions"
+  ],
+  "total": 622,
+  "counts": {
+    "pass": 622,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "worker_jobs": 4,
+  "timeout_seconds": 5.0,
+  "artifacts": [
+    "focused.json.gz",
+    "triage.json.gz",
+    "implementation.patch.gz"
+  ]
+}

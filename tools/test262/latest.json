@@ -26,8 +26,31 @@
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
   "source_base": "c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a",
-  "source_state": "measured working-tree implementation patch; no source edits after worker build",
+  "source_state": "last complete full-corpus measurement; later Object integrity and Object.fromEntries edits are outside this measured snapshot",
   "evidence": "evidence/shadow-realm-2026-10-18/final-full.json.gz",
-  "note": "Final full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. ShadowRealm and isPrototypeOf focused release selection: 144/144. Corpus, denominator, four workers, and five-second timeout unchanged; see docs/test262-shadow-realm-continuation.md and the archived full report, comparison, triage, source patch, and worker digest.",
-  "source_patch_sha256": "b4df42b571677b7564ffaaf1ab6b6f6d0a1747d62f8d8d4b73c9116e304c1ecb"
+  "note": "Last complete full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. The later Object integrity and Object.fromEntries implementation passes its 622-variant focused release selection; focused gains are not added to the full-corpus score. ShadowRealm and isPrototypeOf focused release selection: 144/144. Corpus, denominator, four workers, and five-second timeout unchanged. See docs/test262-shadow-realm-continuation.md, docs/test262-object-integrity-continuation.md, and the archived evidence.",
+  "source_patch_sha256": "b4df42b571677b7564ffaaf1ab6b6f6d0a1747d62f8d8d4b73c9116e304c1ecb",
+  "current_focused": {
+    "selection": [
+      "built-ins/Object/fromEntries",
+      "built-ins/Object/freeze",
+      "built-ins/Object/seal",
+      "built-ins/Object/isFrozen",
+      "built-ins/Object/isSealed",
+      "built-ins/Object/preventExtensions",
+      "built-ins/Reflect/preventExtensions"
+    ],
+    "engine_sha256": "d9296573bfa0f22115e4deda7fe6a509416b475d5a45e6ab7c73a7c4c1d89293",
+    "total": 622,
+    "counts": {
+      "pass": 622,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "evidence": "evidence/object-integrity-2026-10-18/focused.json.gz",
+    "source_patch_sha256": "1774f9fc42b6c59439368f69fe1d733c852e43fe82a415474e58dbb87d3fbed0"
+  }
 }

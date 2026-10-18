@@ -11,6 +11,11 @@ run. The ShadowRealm implementation, primitive-string `for-in`, and
 [feature continuation](test262-shadow-realm-continuation.md), and the archived
 [full-run evidence](../tools/test262/evidence/shadow-realm-2026-10-18/).
 
+The Object integrity and `Object.fromEntries` changes made after that worker
+passed their focused selection (622 / 622), but have not yet been included in
+a full-corpus run. See the [Object continuation](test262-object-integrity-continuation.md)
+for the implementation and focused evidence.
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state
