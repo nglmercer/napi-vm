@@ -2157,6 +2157,16 @@ impl Interpreter {
                     {
                         return Err(crate::value::limit_err("Maximum argument count exceeded"));
                     }
+                    if crate::builtins::shadow_realm::is_wrapped_state(&bound.this_value) {
+                        let mut call_args = bound.arguments.as_ref().clone();
+                        call_args.extend(args);
+                        return crate::builtins::shadow_realm::call_wrapped(
+                            self,
+                            &bound.this_value,
+                            this_val,
+                            call_args,
+                        );
+                    }
                     let mut call_args = bound.arguments.as_ref().clone();
                     call_args.extend(args);
                     return self.call_this(&bound.target, bound.this_value.clone(), call_args);

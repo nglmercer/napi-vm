@@ -1,5 +1,9 @@
 # DurationFormat continuation toward the full-suite 98% goal
 
+Historical continuation snapshot. The current complete pinned-corpus result is
+maintained in [latest.json](../tools/test262/latest.json); the measurements
+below describe the earlier implementation checkpoint.
+
 Implemented `Intl.DurationFormat` with constructor/method descriptors, branded
 slots, locale and numbering-system resolution, all base and unit styles,
 display options, numeric style chaining, fractionalDigits, resolvedOptions,
@@ -60,9 +64,10 @@ parts cases and 165 formatting cases across eleven locales; evidence is in
 `differential.json` and `locale-differential.json` beside the focused results.
 These supplement the pinned corpus and do not affect its denominator.
 
-The full run in tool session `80373` is still live and uses the preceding
-frozen RelativeTimeFormat/Unicode worker. It excludes this DurationFormat
-continuation. Its reports remain under `artifacts/test262/relative-time/`.
-The newest completed full-corpus baseline remains 98,632 / 102,956 (95.8001%).
-The minimum 98% goal remains active. No corpus, skips, worker count, timeout,
-or denominator was changed.
+At this checkpoint, the newest completed full-corpus baseline was 98,632 /
+102,956 (95.8001%), and its live run excluded this DurationFormat work. That
+full-run state is historical. The current overall result and its measured
+source are recorded in [latest.json](../tools/test262/latest.json) and the
+current [ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md).
+No corpus, skips, worker count, timeout, or denominator changed for the
+focused measurements above.

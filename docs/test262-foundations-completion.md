@@ -1,5 +1,9 @@
 # Test262 foundation completion: work in progress
 
+The historical measurements below track foundation milestones, not the current
+overall score. See [latest.json](../tools/test262/latest.json) for the current
+full-corpus result; foundation completion remains a separate criterion.
+
 The continuation starts at merged PR #23 (`fc4c875`). **Phases 1–3 are not
 complete, and this continuation is not ready to merge.** The completion criteria
 are semantic coverage, zero unexplained regressions, zero crashes, correct

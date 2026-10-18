@@ -1,5 +1,10 @@
 # Dense array and regular expression continuation toward 98%
 
+Historical continuation snapshot. Its full and focused measurements below are
+from 2026-10-15; the current pinned-corpus status is maintained in
+[latest.json](../tools/test262/latest.json) and the newer
+[ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md).
+
 The active goal is at least **98% of the complete pinned Test262 corpus**.
 The newest completed full report inspected at the start of this continuation,
 `artifacts/test262/full-results-2026-10-15d.json`, records 98,632 passes,
@@ -104,4 +109,6 @@ artifacts as `unicode-icu-source.sha256`, `unicode-icu-source.patch`, and
 `unicode-icu.rs` (the new source module).
 
 No corpus content, feature skips, denominator, timeout, or worker count was
-changed. The 98% goal remains active and unachieved.
+changed for these historical measurements. The statement above that the 98%
+goal was unachieved describes the state at that checkpoint only; consult the
+current result linked above for today's measured status.

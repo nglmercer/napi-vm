@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "dda45144ab2a946433f3819ad4041fd103451de1d17e051f910907761b29ec9d",
+  "engine_sha256": "ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 4,
@@ -14,20 +14,20 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 98010,
-    "fail": 4944,
+    "pass": 101488,
+    "fail": 1414,
     "skip": 0,
-    "timeout": 2,
+    "timeout": 54,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 95.19600606084153,
+  "pass_percentage": 98.57414817980496,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "8de62fdf908c608f54ff7c6764700fe8bbdb2d51",
-  "source_state": "source_base plus evidence/unicode-annex-builtins/measured.patch",
-  "implementation_patch_sha256": "d104c682349b5004947afdf4fe57cffaac7f010d1a98c10965425635558f11ac",
-  "evidence": "evidence/unicode-annex-builtins/full.json.gz",
-  "note": "95% goal achieved by a complete optimized pinned-corpus run: 98,010 / 102,956 (95.1960%). 1,907 gains and zero losses versus the prior 96,103-pass full snapshot. No feature skips or runner/corpus/budget changes."
+  "source_base": "c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a",
+  "source_state": "measured working-tree implementation patch; no source edits after worker build",
+  "evidence": "evidence/shadow-realm-2026-10-18/final-full.json.gz",
+  "note": "Final full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. ShadowRealm and isPrototypeOf focused release selection: 144/144. Corpus, denominator, four workers, and five-second timeout unchanged; see docs/test262-shadow-realm-continuation.md and the archived full report, comparison, triage, source patch, and worker digest.",
+  "source_patch_sha256": "b4df42b571677b7564ffaaf1ab6b6f6d0a1747d62f8d8d4b73c9116e304c1ecb"
 }

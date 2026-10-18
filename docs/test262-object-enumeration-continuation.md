@@ -1,5 +1,8 @@
 # Object enumeration continuation
 
+Historical implementation checkpoint. Its measured full-suite counts below
+are superseded by [latest.json](../tools/test262/latest.json).
+
 The full pinned corpus now passes 66,894 / 102,956 variants (64.9734%):
 36,060 failures, two timeouts, and no skips, crashes, or harness errors.
 Compared with the preceding object-copy full run, 68 variants newly pass and

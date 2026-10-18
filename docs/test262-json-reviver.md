@@ -1,6 +1,10 @@
 # JSON reviver continuation toward 90% Test262
 
-The full-corpus goal remains open. The preceding full report is 77,085 / 102,956
+Historical feature continuation. Its overall pass goal and baseline below
+describe that earlier checkpoint; see [latest.json](../tools/test262/latest.json)
+for the current full-corpus state.
+
+At this checkpoint, the full-corpus goal remained open. The preceding full report was 77,085 / 102,956
 (74.8718%). This change implements JSON.parse reviver traversal, including the
 source context argument; it does not substitute JSON-only results for that goal.
 

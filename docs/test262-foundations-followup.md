@@ -1,5 +1,9 @@
 # Foundations follow-up after merged PR #24
 
+Historical foundation audit. The full-suite counts below describe that earlier
+source snapshot; the current complete-corpus result is in
+[latest.json](../tools/test262/latest.json).
+
 The branch starts at merge 9c6559e21302694074ee5b4967c0dfd83d0b34dc.
 Its independent full-corpus baseline is c82f617: 63,673/102,956 passes,
 zero lost passes against PR #23, zero crashes/harness errors and two existing

@@ -1,5 +1,9 @@
 # Temporal ZonedDateTime continuation
 
+Historical focused continuation. The full-run handles and overall score below
+belong to this earlier checkpoint; see [latest.json](../tools/test262/latest.json)
+for the current full-corpus result.
+
 Adds Temporal.ZonedDateTime construction, private slots, property-bag and string
 conversion, calendar/time/epoch/offset accessors, duration arithmetic,
 differences, rounding, field replacement, withCalendar/withTimeZone/withPlainTime,
@@ -33,30 +37,29 @@ brands, constructor validation, and transition options. Strict Clippy passes
 for library/worker/Temporal tests. Formatting, whitespace, and all 12 Python
 Test262 tooling tests pass.
 
-The latest completed full run is **84,728 / 102,956 (82.2953%)** for the snapshot
-before YearMonth/MonthDay/ZonedDateTime. It includes three timeouts and no skips,
-crashes or harness errors. Its comparison has 5,486 gains and one lost pass,
-a Proxy timeout which passes on a later worker replay; the measured full
-outcome is retained. latest.json records that completed run.
+At that earlier checkpoint, the latest completed full run was **84,728 /
+102,956 (82.2953%)** for the snapshot before YearMonth/MonthDay/ZonedDateTime.
+It includes three timeouts and no skips, crashes or harness errors. Its
+comparison has 5,486 gains and one lost pass, a Proxy timeout which passes on a
+later worker replay; the measured full outcome is retained.
 
-A new full optimized run including every current Temporal type is active in
-exec session **17009**, output:
+The optimized full run including every then-current Temporal type completed at
+the paths below:
 
 - artifacts/test262/temporal-zoned-release-full.checkpoint.jsonl
 - artifacts/test262/temporal-zoned-release-full.json
 
-Inspect live session/process state before attempting restart/resume. All earlier
-Temporal build and focused-run sessions have completed. The Instant-only debug
-full run remains deliberately interrupted, with its journal retained.
+The Instant-only debug full run remains deliberately interrupted, with its
+journal retained. These handles are historical and require no resumption.
 
-The original goal requires at least 92,661 / 102,956 passing variants. It remains
-active and unverified. Do not present focused gains added to an earlier full
-result as a measured overall percentage.
+At that point the 90% full-corpus threshold (92,661 / 102,956 passes) remained
+unmet. Focused gains were not included in the full-run count.
 
-The full optimized run completed: **90,252 / 102,956 (87.6607%)**, 12,701
+The subsequent full optimized run completed: **90,252 / 102,956 (87.6607%)**, 12,701
 failures and three timeouts; zero skips, crashes, or harness errors. Comparison
 against the preceding PlainDateTime full run has **5,524 gains, zero losses**.
 Full report and transitions are archived in this batch's evidence directory.
-latest.json now records this measurement. Session 17009 has exited with runner
-status 1 for remaining failures. DataView/TypedArray changes are later than
-this measured worker. The goal still needs 2,409 additional passing variants.
+Session 17009 exited with runner status 1 for remaining failures. DataView/
+TypedArray changes came after this worker. Later work surpassed that 90%
+threshold; the current complete-corpus result is in
+[latest.json](../tools/test262/latest.json).

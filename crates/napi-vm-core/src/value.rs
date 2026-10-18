@@ -185,6 +185,10 @@ pub(crate) enum CollectionKind {
 pub struct ObjectMeta {
     /// The realm that owns native methods and implicit intrinsic prototypes.
     pub(crate) realm_global: Option<Env>,
+    /// The isolated global owned by a ShadowRealm instance.
+    pub(crate) shadow_realm_global: Option<Env>,
+    /// Internal target and realm boundary for a ShadowRealm wrapped function.
+    pub(crate) shadow_realm_wrapped: Option<ShadowRealmWrappedSlots>,
     pub(crate) disposable_stack: Option<Rc<RefCell<crate::builtins::disposable::Slots>>>,
     pub(crate) collection_kind: Option<CollectionKind>,
     /// Prototype link. `None` means either a null prototype or the runtime's
@@ -255,6 +259,13 @@ pub struct ObjectMeta {
     pub(crate) host_function_id: Option<usize>,
     /// The revoker's internal [[RevocableProxy]], invisible to property keys.
     pub(crate) revocable_proxy: Option<Rc<ProxyData>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ShadowRealmWrappedSlots {
+    pub(crate) target: Value,
+    pub(crate) target_realm: Env,
+    pub(crate) caller_realm: Env,
 }
 
 /// Private slots have lexical identities and explicit kinds. Callable fields
@@ -764,6 +775,17 @@ impl ArrayCell {
             out.extend(meta.proto.as_deref().cloned());
             out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
             out.extend(
+                meta.shadow_realm_global
+                    .iter()
+                    .cloned()
+                    .map(Value::RealmGlobal),
+            );
+            if let Some(slots) = &meta.shadow_realm_wrapped {
+                out.push(slots.target.clone());
+                out.push(Value::RealmGlobal(slots.target_realm.clone()));
+                out.push(Value::RealmGlobal(slots.caller_realm.clone()));
+            }
+            out.extend(
                 meta.symbol_keys
                     .iter()
                     .map(|(_, symbol)| Value::Symbol(symbol.clone())),
@@ -798,6 +820,8 @@ impl ArrayCell {
         meta.intl_bound_format = None;
         meta.proto = None;
         meta.realm_global = None;
+        meta.shadow_realm_global = None;
+        meta.shadow_realm_wrapped = None;
         true
     }
 }
@@ -910,6 +934,17 @@ impl ObjectCell {
             }
             out.extend(meta.proto.as_deref().cloned());
             out.extend(meta.realm_global.iter().cloned().map(Value::RealmGlobal));
+            out.extend(
+                meta.shadow_realm_global
+                    .iter()
+                    .cloned()
+                    .map(Value::RealmGlobal),
+            );
+            if let Some(slots) = &meta.shadow_realm_wrapped {
+                out.push(slots.target.clone());
+                out.push(Value::RealmGlobal(slots.target_realm.clone()));
+                out.push(Value::RealmGlobal(slots.caller_realm.clone()));
+            }
             if let Some(BoxedPrimitive::Symbol(symbol)) = &meta.boxed_primitive {
                 out.push(Value::Symbol(symbol.clone()));
             }
@@ -949,6 +984,8 @@ impl ObjectCell {
         meta.intl_bound_format = None;
         meta.proto = None;
         meta.realm_global = None;
+        meta.shadow_realm_global = None;
+        meta.shadow_realm_wrapped = None;
         // The layout is empty now; drop the cached shape so a later access
         // rebuilds instead of answering from a stale layout.
         if let Ok(mut shape) = self.shape.try_borrow_mut() {

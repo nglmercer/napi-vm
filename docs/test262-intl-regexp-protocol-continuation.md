@@ -1,7 +1,12 @@
 # Intl locale and RegExp protocol continuation
 
-The user goal is at least 95% passing on the complete pinned Test262 corpus.
-It remains active and unachieved.
+Historical continuation snapshot. The full measurement and goal state below
+describe this earlier checkpoint; see [latest.json](../tools/test262/latest.json)
+and the newer [ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md)
+for the current complete result.
+
+At this checkpoint, the user goal was at least 95% passing on the complete
+pinned Test262 corpus, and it remained unachieved.
 
 ## Completed full measurement
 
@@ -61,12 +66,12 @@ The core library run passes 355 tests and fails the previously documented native
 addon fixture `loads_and_invokes_a_real_node_api_addon` with
 `Cannot redefine property: prototype`.
 
-Remaining failures include other Intl constructors and formatting, Locale
+Remaining failures at this checkpoint included other Intl constructors and formatting, Locale
 collation/number-system/time-zone info methods, regexp Unicode sets and duplicate
 named groups, parser/exotic-object gaps, and tests exceeding current budgets.
-A fresh full release run must verify the combined implementation before any new
-overall percentage is claimed. The goal is complete only when a full pinned run
-proves at least 97,809 passes out of all 102,956 variants.
+The current complete release run verifies a later combined implementation.
+Use the linked current result for its percentage and remaining gap; the
+97,809-pass threshold above was the goal for this historical checkpoint.
 
 ## Release checkpoint
 

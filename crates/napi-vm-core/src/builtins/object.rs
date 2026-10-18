@@ -857,16 +857,13 @@ fn object_is_prototype_of(
     this: Value,
     args: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    // A nullish receiver is not an object, so it prototypes nothing — this
-    // returns `false` instead of throwing.
-    if matches!(this, Value::Null | Value::Undefined) {
-        return Ok(Value::Bool(false));
-    }
-    let receiver = to_object_receiver(&this)?;
     let mut current = args.first().cloned().unwrap_or(Value::Undefined);
     if !is_ecmascript_object(&current) {
         return Ok(Value::Bool(false));
     }
+    // Preserve the specified argument-first order: primitive arguments return
+    // false before ToObject can reject a nullish receiver.
+    let receiver = to_object_receiver(&this)?;
     for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
         let prototype = interp.get_prototype_of(&current)?;
         if matches!(prototype, Value::Null) {

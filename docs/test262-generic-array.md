@@ -1,5 +1,9 @@
 # Generic Array quick wins
 
+Historical implementation checkpoint. Its full-run results below describe an
+earlier source snapshot; current overall results are in
+[latest.json](../tools/test262/latest.json).
+
 Base: merged PR #28, `1a8ab73`. Fresh focused baseline and source inspection
 confirmed the behavior before implementation. The baseline worker digest is
 `1b23d8da7be54d43b56446311251528129c06ea9bd647917412c2b5fe1017129`,

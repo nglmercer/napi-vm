@@ -1,5 +1,9 @@
 # Temporal PlainDate continuation
 
+Historical feature continuation. Its overall pass target below describes that
+earlier checkpoint; see [latest.json](../tools/test262/latest.json) for the
+current full-corpus state.
+
 Adds privately branded Temporal.PlainDate instances, construction, cloning,
 calendar-aware property-bag conversion, ISO/calendar string parsing, field
 accessors, with/withCalendar, arithmetic, differences, equality, comparison,
@@ -31,13 +35,11 @@ Remaining failures largely require absent PlainDateTime, PlainYearMonth,
 PlainMonthDay, ZonedDateTime conversions and locale-aware formatting. This
 batch does not claim those operations are implemented.
 
-The full Instant-only debug run remains active in exec session 11633; its
-frozen worker does not include PlainDate. A release build including PlainDate
-was started in exec session 41856 for the next complete measurement. Check
-live sessions/processes before restarting work. Latest completed full result
-remains 79,243 / 102,956 (76.9678%), before raw JSON/Instant/PlainDate. Focused
-gains must not be added to that total and called a measured full result.
-The overall goal remains at least 92,661 / 102,956 (90%) and is not complete.
+At this historical checkpoint, the Instant-only debug run was still active in
+session 11633 and a later release build had been started in session 41856. Those
+runs are long complete. The latest full report at that time was 79,243 /
+102,956 (76.9678%), before raw JSON/Instant/PlainDate. The current complete
+result is in [latest.json](../tools/test262/latest.json).
 
 Reproduce the focused run:
 

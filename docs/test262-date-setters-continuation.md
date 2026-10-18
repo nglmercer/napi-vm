@@ -1,5 +1,9 @@
 # Date setters continuation
 
+Historical implementation checkpoint. Its full-corpus counts below describe
+that earlier source snapshot; see
+[latest.json](../tools/test262/latest.json) for the current result.
+
 Continues the
 [declaration-completion continuation](test262-declaration-completion-continuation.md)
 from `1bd0a34`. Triage of the fresh full-corpus run at that commit (74,993 /

@@ -1,5 +1,9 @@
 # Object and Math metadata continuation
 
+Historical implementation checkpoint. Its full-suite result below describes
+an earlier source snapshot; current overall results are in
+[latest.json](../tools/test262/latest.json).
+
 Object static and conventional prototype methods now use ordinary native
 function objects with specification lengths, name/length descriptors, and
 Function.prototype inheritance. They remain nonconstructors and have no own

@@ -1,5 +1,9 @@
 # Binary-data continuation
 
+Historical feature continuation. The 90% pass goal below describes the state
+at that checkpoint; see [latest.json](../tools/test262/latest.json) for the
+current full-corpus result.
+
 DataView methods now perform observable ToIndex and ToNumber/ToBigInt
 conversions in order, before buffer-state/bounds validation. Accessors use
 branded prototype descriptors; constructor metadata, new.target prototype
@@ -46,6 +50,7 @@ The optimized full measurement is **91,224 / 102,956 (88.6048%)**, with
 972 gains and zero losses against the preceding Temporal full run. It has two
 timeouts and zero skips, crashes or harness errors. The report and transitions
 are archived in this batch's evidence directory; latest.json reflects it.
-The original 90% goal requires 92,661 passing variants and remains active.
+At this checkpoint, the original 90% goal required 92,661 passing variants and
+remained active.
 Worker SHA-256: 77cb984540cafa5b2dc44035fe988187a16660867f89116d58aaa0b714f62b2a.
 This measured source snapshot predates the subsequent conformance follow-up.

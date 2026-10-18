@@ -42,16 +42,19 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest full development measurement in `latest.json` passes **98,010 out
-of 102,956 variants (95.1960%)**, achieving the minimum 95% goal. There are
-4,944 failures, two timeouts, and zero feature skips, crashes, or harness errors.
-It gains 1,907 passes with zero regressions against the preceding full snapshot.
-The corpus revision, runner limits, and full-suite denominator are unchanged.
+The latest completed full development measurement in `latest.json` passes
+**101,488 / 102,956 variants (98.5741%)**: 1,414 failures, 54 timeouts, and
+zero feature skips, crashes, or harness errors. It adds 134 passes and loses
+zero versus the previous completed full run. The combined release selection
+for `built-ins/ShadowRealm` and
+`built-ins/Object/prototype/isPrototypeOf` passes 144 / 144 variants. The corpus
+revision, runner limits, and full-suite denominator are unchanged.
 
-Complete reports, status transitions, measured source patch, source hashes,
-build environment, and validation logs are archived in
-`evidence/unicode-annex-builtins/`. See
-[the implementation and reproduction record](../../docs/test262-unicode-annex-builtins-continuation.md).
+Full reports, status transitions, measured source patches, source hashes,
+build environment, and validation logs are archived in `evidence/`, including
+the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the
+[ShadowRealm continuation](../../docs/test262-shadow-realm-continuation.md)
+for the implementation and remaining work.
 All 68 selected integration tests and the Node-API host feature check pass.
 The core library has 355 passes and one existing native-addon fixture failure.
 Full-corpus tier differential and actual wasm32 execution remain unmeasured.
@@ -72,7 +75,8 @@ The embeddable engine does not gain ambient filesystem access.
 Async completion lives in the persistent global environment, so callbacks and
 module scopes cannot lose `$DONE` state. A caught `$DONE(error)` still fails the
 variant. `$262.evalScript` evaluates in the global environment and `$262.global`
-is exposed; cross-realm construction is still incomplete.
+is exposed. ShadowRealm-focused conformance is tracked separately from the host
+`$262.createRealm` and finalization semantics described above.
 
 Group all outcomes into actionable failure clusters without dropping skips,
 crashes, timeouts, or harness failures:
@@ -86,7 +90,9 @@ See `docs/test262-conformance-validation.md` for the current validation evidence
 
 
 The host implements `$262.createRealm` and real worker agents with shared-memory
-coordination. Full realm ownership and GC/finalization semantics remain incomplete.
+coordination. ShadowRealm construction, evaluation, callable wrapping, and
+`importValue` now pass their pinned 124-variant Test262 selection. Broader realm
+ownership and GC/finalization semantics remain incomplete.
 ArrayBuffer detachment is implemented; GC requests run at quiescent host boundaries
 and do not guarantee synchronous collection or finalization.
 See [phases 1–3 implementation notes](../../docs/test262-phases-1-3.md).

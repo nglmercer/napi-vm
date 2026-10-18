@@ -1,5 +1,9 @@
 # RelativeTimeFormat continuation toward the full-suite 98% goal
 
+Historical continuation snapshot. The current complete pinned-corpus result is
+maintained in [latest.json](../tools/test262/latest.json); the measurements
+below describe the earlier implementation checkpoint.
+
 Implemented `Intl.RelativeTimeFormat` with branded slots, constructor and method
 metadata, inherited option reads in spec order, locale negotiation, supported
 numbering system resolution, Unicode extension precedence, supportedLocalesOf,
@@ -46,14 +50,9 @@ The preceding frozen-worker RegExp run also completed with 605 gains and zero
 regressions against the full baseline projection. See the
 [RegExp continuation](test262-dense-array-regexp-continuation.md).
 
-These are focused results. The newest inspected full-corpus baseline remains
-98,632 / 102,956 (95.8001%). A fresh full release measurement is required before
-claiming an updated overall rate. The minimum 98% goal remains active.
-No corpus, feature skips, denominator, worker count, or timeout was changed.
-
-A fresh full run is now active in tool session `80373`, writing
-`artifacts/test262/relative-time/full-results.json` and the resumable
-`full.checkpoint.jsonl` beside it. Check that live handle/process before
-restarting. It includes the array, RegExp/Unicode, and RelativeTimeFormat
-changes and uses the final optimized worker identified above. Source patch,
-new source files, and hashes are archived in the same artifact directory.
+These are focused results. At this checkpoint, the newest full-corpus baseline
+was 98,632 / 102,956 (95.8001%). That historical full run did not include the
+changes described here. The current overall result and its measured source are
+recorded in [latest.json](../tools/test262/latest.json) and the current
+[ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md).
+No corpus or runner-budget changes were made for the recorded selections.

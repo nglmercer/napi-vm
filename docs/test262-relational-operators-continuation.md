@@ -1,5 +1,10 @@
 # Relational operators continuation
 
+Historical feature checkpoint. Its focused and full-projection evidence below
+predates the current complete measurement; see [latest.json](../tools/test262/latest.json)
+and the newer [ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md)
+for current conformance status.
+
 Guest `<`, `>`, `<=`, and `>=` use a shared mutable runtime comparison in
 AST and bytecode execution. Both operands undergo ToPrimitive with the number
 hint in original left-to-right order. Abrupt completion of the first operand
@@ -34,10 +39,9 @@ projections are comparison artifacts rather than independently executed runs.
 All selected language equality and relational comparison variants pass.
 Outcomes, comparisons, logs, source patch, and archive hashes are retained in
 [the evidence summary](../tools/test262/evidence/relational-operators-continuation/summary.json).
-The full corpus run is in progress with the pinned revision, four workers,
-five-second timeouts, no feature skips, and unchanged worker budgets.
-Until completion, latest.json retains the equality full-run result of
-67,677 / 102,956 passes.
+At this checkpoint, the full corpus run was in progress and latest.json still
+held the earlier equality result of 67,677 / 102,956. The run later completed;
+that active-run note is historical. Consult the current result linked above.
 
 Full conformance remains incomplete. The legacy immutable Rust `bin_op`
 interface does not perform guest object coercion; guest binary expressions

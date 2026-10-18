@@ -1,7 +1,13 @@
 # Segmenter, list formatting, captures, and buffer transfer continuation
 
-The goal remains at least 95% of all variants in the pinned Test262 corpus.
-The pass threshold is 97,809 / 102,956. It has not been achieved.
+Historical continuation snapshot. Its recorded full run and release checkpoint
+describe the earlier implementation state; the current result is in
+[latest.json](../tools/test262/latest.json) and the newer
+[ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md).
+
+At this checkpoint, the target was at least 95% of all variants in the pinned
+Test262 corpus. The threshold was 97,809 / 102,956 and had not yet been
+achieved.
 
 ## Completed full measurement
 
@@ -66,8 +72,8 @@ core fixture failure remains outside this continuation's changes.
 
 Remaining broad gaps include other Intl formatters, immutable buffers, binary
 encoding APIs, Annex B hoisting, module phases, Unicode regexp sets, and bounded
-execution failures. A full optimized run is required to measure these new changes
-and to determine the remaining gap to the 95% threshold.
+execution failures. A full optimized run was still required at this checkpoint.
+The current complete result and remaining failures are linked above.
 
 ## Release checkpoint
 

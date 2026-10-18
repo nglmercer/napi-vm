@@ -1,5 +1,9 @@
 # Temporal Instant continuation
 
+Historical feature continuation. Its overall pass target below describes that
+earlier checkpoint; see [latest.json](../tools/test262/latest.json) for the
+current full-corpus state.
+
 Adds privately branded Temporal.Instant values using temporal_rs for epoch
 bounds, exact nanosecond arithmetic, string parsing/formatting, differences,
 and rounding. Constructor/factory coercions use guest ToPrimitive, ToBigInt,
@@ -37,9 +41,9 @@ python3 tools/test262/run.py .napi-vm/test262 \
   --output artifacts/test262/temporal-instant-full.json
 ```
 
-At checkpoint writing, this run is still active (exec session 11633). Inspect
-its live process/session before considering restart/resume. The latest completed
-full report remains temporal-time-duration-full.json at 79,243 / 102,956
-(76.9678%), before raw JSON and Instant. The overall 90% goal remains active
-and needs at least 92,661 passing variants. Do not add focused gains to the
-previous full count and present that sum as a measured full result.
+At this historical checkpoint, the run was still active in session 11633.
+That run is long complete. The latest full report then was
+`temporal-time-duration-full.json` at 79,243 / 102,956 (76.9678%), before raw
+JSON and Instant. The current complete result is in
+[latest.json](../tools/test262/latest.json); focused gains must not be added to
+older full counts and presented as a measured full result.

@@ -2975,7 +2975,7 @@ impl Interpreter {
             }
             let mut seen = std::collections::HashSet::new();
             let mut names = Vec::new();
-            let mut current = value.clone();
+            let mut current = crate::builtins::object::to_object_receiver(value)?;
             for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
                 for key in self.own_property_keys(&current)? {
                     let Value::String(name) = &key else {

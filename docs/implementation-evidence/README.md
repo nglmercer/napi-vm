@@ -65,7 +65,28 @@ x64 validation, not remote platform/release readiness.
 source edits and compilation; the completed panic-cleanup implementation passes
 the subsequent library and release checks. Final comparisons run without builds.
 
-## Test262 full pass (2026-10-15)
+## Current Test262 full pass (2026-10-18)
+
+The final pinned-corpus run at working-tree source based on
+`c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a` passes **101,488 / 102,956
+variants (98.5741%)**, with 1,414 failures, 54 timeouts, and zero skips,
+crashes, or harness errors. Compared with the previous completed full run it
+gains 134 passes and loses none. The corpus is
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`; the release worker SHA-256 is
+`ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d`.
+The combined ShadowRealm and `isPrototypeOf` selection passes 144/144.
+
+- Full report, triage, comparison, focused report, and source patch:
+  [`tools/test262/evidence/shadow-realm-2026-10-18/`](../../tools/test262/evidence/shadow-realm-2026-10-18/)
+- Compact result: [`tools/test262/latest.json`](../../tools/test262/latest.json)
+- Source patch SHA-256:
+  `9d76d3383f55620dc96f6091e50fec53e1bc580746263677a3df590eb4322250`
+
+Runner settings remain unchanged at four workers, five seconds per variant,
+and no feature skips. The 98.5741% result is a local pinned-corpus measurement;
+the top remaining clusters are listed in the ShadowRealm continuation.
+
+## Historical Test262 full pass (2026-10-15)
 
 A complete pinned-corpus run at source `aec3df4458ae7866ecb1f0182b61d39dd95cd9ab`
 (clean tree) reproduces the archived 95% snapshot exactly: **98,010 / 102,956
@@ -127,6 +148,7 @@ earlier selection run (all comparisons report zero lost passes):
 A first re-baseline (`full-results-2026-10-15c.json`, 98,525 / 102,956)
 ran on an intermediate build whose repetition layers broke greedy
 backtracking order (120 lost passes, all since recovered and verified on
-selections). A fresh full pass on the fixed build is in progress
-(`artifacts/test262/full-results-2026-10-15d.json`); until it lands, the
-95.1960% headline above remains the last clean complete measurement.
+selections). This 2026-10-15 measurement has since been superseded by later
+full-corpus reports. The current measured state and evidence are maintained in
+[`tools/test262/latest.json`](../../tools/test262/latest.json) and
+[`tools/test262/evidence/shadow-realm-2026-10-18/`](../../tools/test262/evidence/shadow-realm-2026-10-18/).

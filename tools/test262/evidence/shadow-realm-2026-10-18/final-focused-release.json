@@ -1,0 +1,1327 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "built-ins/ShadowRealm",
+    "built-ins/Object/prototype/isPrototypeOf"
+  ],
+  "groups": [],
+  "engine_sha256": "ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 4,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 144,
+  "counts": {
+    "pass": 144,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 100.0,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "results": [
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/arg-is-proxy.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/arg-is-proxy.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/builtin.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/builtin.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/not-a-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/not-a-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/null-this-and-object-arg-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/null-this-and-object-arg-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/null-this-and-primitive-arg-returns-false.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/null-this-and-primitive-arg-returns-false.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/this-value-is-in-prototype-chain-of-arg.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/this-value-is-in-prototype-chain-of-arg.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/undefined-this-and-object-arg-throws.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/undefined-this-and-object-arg-throws.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/undefined-this-and-primitive-arg-returns-false.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/Object/prototype/isPrototypeOf/undefined-this-and-primitive-arg-returns-false.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/length-throws-typeerror.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/length-throws-typeerror.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/name-throws-typeerror.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/name-throws-typeerror.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/throws-typeerror-on-revoked-proxy.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/WrappedFunction/throws-typeerror-on-revoked-proxy.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/descriptor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/descriptor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/extensibility.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/extensibility.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/instance-extensibility.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/instance-extensibility.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/instance.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/instance.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/proto.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/proto.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/Symbol.toStringTag.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/Symbol.toStringTag.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/descriptor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/descriptor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/errors-from-the-other-realm-is-wrapped-into-a-typeerror.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/errors-from-the-other-realm-is-wrapped-into-a-typeerror.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/globalthis-available-properties.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/globalthis-available-properties.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/globalthis-config-only-properties.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/globalthis-config-only-properties.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/globalthis-ordinary-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/globalthis-ordinary-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/nested-realms.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/nested-realms.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/no-conditional-strict-mode.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/no-conditional-strict-mode.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/not-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/not-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/proto.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/proto.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/returns-primitive-values.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/returns-primitive-values.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/returns-proxy-callable-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/returns-proxy-callable-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/returns-symbol-values.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/returns-symbol-values.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-error-from-ctor-realm.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-error-from-ctor-realm.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-syntaxerror-on-bad-syntax.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-syntaxerror-on-bad-syntax.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-typeerror-if-evaluation-resolves-to-non-primitive.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-typeerror-if-evaluation-resolves-to-non-primitive.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-typeerror-wrap-throwing.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-typeerror-wrap-throwing.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-when-argument-is-not-a-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/throws-when-argument-is-not-a-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/validates-realm-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/validates-realm-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-arguments-are-wrapped-into-the-inner-realm-extended.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-arguments-are-wrapped-into-the-inner-realm-extended.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-arguments-are-wrapped-into-the-inner-realm.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-arguments-are-wrapped-into-the-inner-realm.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-from-return-values-share-no-identity.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-from-return-values-share-no-identity.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-multiple-different-realms-nested.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-multiple-different-realms-nested.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-multiple-different-realms.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-multiple-different-realms.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-observing-their-scopes.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-observing-their-scopes.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-proto-from-caller-realm.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-proto-from-caller-realm.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-proxied-observes-boundary.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-proxied-observes-boundary.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-from-caller-realm.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-from-caller-realm.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-on-exceptional-exit.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-on-exceptional-exit.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-on-non-primitive-arguments.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-on-non-primitive-arguments.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-on-non-primitive-returns.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-function-throws-typeerror-on-non-primitive-returns.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-accepts-callable-objects.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-accepts-callable-objects.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-can-resolve-callable-returns.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-can-resolve-callable-returns.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-new-wrapping-on-each-evaluation.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-new-wrapping-on-each-evaluation.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-share-no-properties-extended.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-share-no-properties-extended.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-share-no-properties.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/evaluate/wrapped-functions-share-no-properties.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/descriptor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/descriptor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/import-value.js",
+      "variant": "module",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/length.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/length.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/name.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/name.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/not-constructor.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/not-constructor.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/proto.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/proto.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/specifier-tostring.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/specifier-tostring.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/throws-if-exportname-not-string.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/throws-if-exportname-not-string.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/throws-if-import-value-does-not-exist.js",
+      "variant": "module",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/throws-typeerror-import-syntax-error.js",
+      "variant": "module",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/throws-typeerror-import-throws.js",
+      "variant": "module",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/validates-realm-object.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/importValue/validates-realm-object.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/proto.js",
+      "variant": "script",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    },
+    {
+      "test": "built-ins/ShadowRealm/prototype/proto.js",
+      "variant": "strict",
+      "status": "pass",
+      "engine": {
+        "status": "ok",
+        "phase": "runtime"
+      }
+    }
+  ]
+}

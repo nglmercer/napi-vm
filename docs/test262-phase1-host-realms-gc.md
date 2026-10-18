@@ -1,5 +1,9 @@
 # Phase 1 host, realms, and GC audit
 
+Historical implementation audit. Its full-run reference below describes an
+earlier checkpoint; the current corpus result is in
+[latest.json](../tools/test262/latest.json).
+
 This audit records the staged implementation merged in PR #24. The latest
 completed full measurement is `c82f617`: 63,673/102,956 passed, with 22,266
 new passes and zero lost passes against PR #23. It records implemented
@@ -76,9 +80,11 @@ because basic constructor realm tests pass:
   allocation realm for Array.from/of and all seven implemented species methods.
 - Realm-global property/exotic operations and private method/accessor branding
   depend on the pending Phase 3 global/private/internal-operation work.
-- RegExp legacy statics and missing standard-library algorithms, Intl, ShadowRealm,
+- RegExp legacy statics, missing standard-library algorithms, Intl,
   disposable-stack proposals, and stack accessor proposals have separate failure
-  groups. Their failures are not evidence of completed implementations.
+  groups. ShadowRealm is implemented and its pinned Test262 selection passes;
+  see [the current continuation](test262-shadow-realm-continuation.md). These
+  other failure groups are not evidence of completed implementations.
 - Full-corpus AST/bytecode differential measurement remains a Phase 4 gate; AST
   fallback and execution limits remain enabled.
 

@@ -1,5 +1,9 @@
 # Descriptor map continuation
 
+Historical implementation checkpoint. The full-suite figures below are from
+an earlier source snapshot; the current result is in
+[latest.json](../tools/test262/latest.json).
+
 Object.defineProperties and Object.create now share the runtime descriptor
 operations used by Object.defineProperty. Descriptor maps are boxed, their
 own string and symbol keys are snapshotted, and each key's current enumerable

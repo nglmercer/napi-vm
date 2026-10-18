@@ -1,5 +1,9 @@
 # Math, Array and Number quick wins
 
+Historical implementation checkpoint. Its full-run results below describe an
+earlier source snapshot; current overall results are in
+[latest.json](../tools/test262/latest.json).
+
 This batch starts from merged PR #27 (`ca6e7e0`). The source and fresh focused
 baseline confirmed the missing functions before implementation. The rebuilt
 baseline worker has SHA-256

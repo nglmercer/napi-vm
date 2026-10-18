@@ -1,5 +1,9 @@
 # Array mutation, search and map/filter quick wins
 
+Historical implementation checkpoint. Its full-run results below describe an
+earlier source snapshot; current overall results are in
+[latest.json](../tools/test262/latest.json).
+
 Base: merged PR #29 (`1963230`). A fresh focused baseline and source inspection
 confirmed the remaining implementation gaps. Baseline worker SHA-256:
 `fdf183158d1d62f4b3de8e39472456d0fe4da5f6e81a290078ca41ab5c4c360c`.

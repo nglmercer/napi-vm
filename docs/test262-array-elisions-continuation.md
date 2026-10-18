@@ -1,5 +1,9 @@
 # Array elisions and observable searches: incremental conformance work
 
+Historical implementation checkpoint. The current complete-corpus result is
+maintained in [latest.json](../tools/test262/latest.json); focused and earlier
+full-run figures below describe their recorded source snapshots.
+
 Full conformance remains incomplete. This working-tree continuation preserves
 array elisions as `Expr::Elision`, rather than treating them as explicit
 `undefined` values. AST and bytecode array construction retain index presence;

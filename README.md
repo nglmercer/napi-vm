@@ -507,22 +507,17 @@ flight. VMs that only use the synchronous `run()` do not need it.
 The core language and bridge are actively developed and covered by the native
 regression suite. Run `npm test` to see the current verified count.
 
-A full pinned Test262 pass (2026-10-15, corpus
+The latest completed full pinned Test262 pass (2026-10-18, corpus
 `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, worker
-`dda45144ab2a946433f3819ad4041fd103451de1d17e051f910907761b29ec9d`)
-passes **98,010 / 102,956 variants (95.1960%)**, with 4,944 failures,
-2 timeouts, and zero skips, crashes, or harness errors. The rerun reproduces
-the archived snapshot exactly (zero gains, zero losses). Full rows, the HTML
-dashboard, failure triage, and the comparison are generated under
-`artifacts/test262/` (`full-results-2026-10-15.json`,
-`full-2026-10-15.html`, `full-2026-10-15-triage.json`,
-`full-2026-10-15-comparison.json`); see
+`ba0fdfb17adc61dd7224a2248ec53bd34811cb2dafeec8d433359bf75e9f6d8d`)
+passes **101,488 / 102,956 variants (98.5741%)**, with 1,414 failures,
+54 timeouts, and zero skips, crashes, or harness errors. It gains 134 passes
+with zero losses against the prior completed full run. ShadowRealm and
+`Object.prototype.isPrototypeOf` pass their combined 144-variant release
+selection. Full rows, triage, comparison, source patch, and the compact result
+are under `tools/test262/evidence/`; see
+[the ShadowRealm continuation](docs/test262-shadow-realm-continuation.md) and
 [tools/test262/README.md](tools/test262/README.md) to reproduce.
-Focused follow-up clusters landed after that snapshot (v-mode string tables,
-Annex B accessors, `Object.prototype.toString`, Float16 — each with zero
-lost passes); see
-[docs/implementation-evidence/README.md](docs/implementation-evidence/README.md).
-A full pinned re-baseline is in progress.
 
 ## License
 

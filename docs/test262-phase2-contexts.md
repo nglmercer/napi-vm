@@ -1,5 +1,10 @@
 # Phase 2 contextual grammar and static semantics
 
+Historical foundation checkpoint. The measurements below describe that source
+snapshot; the current overall corpus result is in
+[latest.json](../tools/test262/latest.json). Phase completion remains a
+separate status from the aggregate pass count.
+
 Phase 2 foundation grammar and early-error coverage is implemented in merged
 PR #24. Frozen source `313146b` passes the required checks and pinned corpus validation below. The broader Phase 1
 realm/GC audit and Phases 3–4 remain open; this is not completion of the entire PR.

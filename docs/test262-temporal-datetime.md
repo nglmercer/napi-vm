@@ -1,5 +1,9 @@
 # Temporal PlainDateTime continuation
 
+Historical feature continuation. Its overall pass target below describes that
+earlier checkpoint; see [latest.json](../tools/test262/latest.json) for the
+current full-corpus state.
+
 Adds Temporal.PlainDateTime with private slots, constructor/subclass semantics,
 cloning, field-bag/string conversion, date/time/calendar getters, arithmetic,
 differences, rounding, equality, comparison, with/withPlainTime/withCalendar,
@@ -33,19 +37,17 @@ library/worker/Temporal tests passes, as do formatting and whitespace checks.
 
 The Instant-only full debug run was deliberately interrupted with SIGINT after
 verified debug-speed RegExp timeouts. Its journal is retained, but it is not a
-completed full measurement. The optimized PlainDateTime worker's complete pinned
-run was started in exec session 27032 (verify actual live handle/process before
-resuming). Output paths:
+completed full measurement. The optimized PlainDateTime full run completed at
+the output paths below; its former session handle is historical:
 
 - artifacts/test262/temporal-datetime-release-full.checkpoint.jsonl
 - artifacts/test262/temporal-datetime-release-full.json
 
 The corpus remains 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81, four jobs and a
-five-second variant timeout, with no feature skips. The latest completed full
-report remains 79,243 / 102,956 (76.9678%) before raw JSON and these Temporal
-extensions. The goal remains at least 92,661 passing variants; it is not yet
-verified achieved. Do not present focused gains added to the old full report
-as a measured full percentage.
+five-second variant timeout, with no feature skips. At this checkpoint, the
+latest completed full report was 79,243 / 102,956 (76.9678%) before raw JSON and
+these Temporal extensions. The original 90% target has since been surpassed by
+the current full-corpus result in [latest.json](../tools/test262/latest.json).
 
 The optimized full run has completed: **84,728 / 102,956 (82.2953%)**, 18,225
 failures and three timeouts, with zero skips, crashes, or harness errors.

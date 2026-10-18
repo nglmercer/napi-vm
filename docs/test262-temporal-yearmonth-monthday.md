@@ -1,5 +1,9 @@
 # Temporal PlainYearMonth and PlainMonthDay continuation
 
+Historical feature continuation. Its overall pass target below describes that
+earlier checkpoint; see [latest.json](../tools/test262/latest.json) for the
+current full-corpus state.
+
 Adds privately branded Temporal.PlainYearMonth and Temporal.PlainMonthDay
 objects with constructor/subclass behavior, intrinsic factories, string and
 property-bag conversion, getters, partial replacement, equality, serialization,
@@ -42,10 +46,11 @@ Inspect live process/session state before deciding whether any needs resumption.
 The Instant-only debug full run was interrupted due to verified debug-speed
 RegExp timeouts and must not be represented as completed.
 
-The latest completed full report remains 79,243 / 102,956 (76.9678%) before raw
-JSON and these Temporal extensions. Focused percentages and gains do not replace
-a complete full measurement. The original 90% goal remains active and requires
-at least 92,661 passing variants.
+The latest completed full report at this checkpoint was 79,243 / 102,956
+(76.9678%) before raw JSON and these Temporal extensions. Focused percentages
+and gains do not replace a complete full measurement. The original 90% target
+was later surpassed by the current full-corpus result in
+[latest.json](../tools/test262/latest.json).
 
 The all-Temporal run completed with **9,588 / 13,268 passes**, zero skips,
 timeouts, crashes, or harness errors. Against the full PlainDateTime worker's

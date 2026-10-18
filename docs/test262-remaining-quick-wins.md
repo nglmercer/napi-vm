@@ -1,5 +1,9 @@
 # Remaining Test262 quick wins
 
+Historical implementation checkpoint. Its full-run results below describe an
+earlier source snapshot; current overall results are in
+[latest.json](../tools/test262/latest.json).
+
 Base: merged PR #26, `142a38d`. Corpus:
 `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`. Rust 1.99.0, Linux x86_64.
 

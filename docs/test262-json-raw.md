@@ -1,5 +1,9 @@
 # Raw JSON continuation
 
+Historical feature continuation. Its overall pass target below describes that
+earlier checkpoint; see [latest.json](../tools/test262/latest.json) for the
+current full-corpus state.
+
 Adds JSON.rawJSON and JSON.isRawJSON with a private brand, explicit null
 prototype, frozen rawJSON property, primitive JSON grammar validation, and
 observable string coercion. Stringification checks the brand after toJSON and

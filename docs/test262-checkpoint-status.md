@@ -2,13 +2,14 @@
 
 ## Current measured state
 
-The minimum 95% goal is achieved: **98,010 / 102,956 (95.1960%)** in a complete
-optimized run of pinned Test262 revision
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, with zero skips, crashes, or harness
-errors and two timeouts. Comparison against the preceding full run proves
-1,907 gains and zero regressions. See the
-[implementation/evidence record](test262-unicode-annex-builtins-continuation.md)
-and [current compact result](../tools/test262/latest.json).
+The latest completed full measurement passes **101,488 / 102,956 (98.5741%)**,
+with 1,414 failures, 54 timeouts, and zero skips, crashes, or harness errors.
+It records 134 new passes and zero lost passes against the previous complete
+run. The ShadowRealm implementation, primitive-string `for-in`, and
+`Object.prototype.isPrototypeOf` receiver semantics are included. See the
+[current compact result](../tools/test262/latest.json), the
+[feature continuation](test262-shadow-realm-continuation.md), and the archived
+[full-run evidence](../tools/test262/evidence/shadow-realm-2026-10-18/).
 
 ## Historical checkpoint
 
@@ -55,8 +56,9 @@ comparisons, and hashes remain in tools/test262/evidence. The continuation
 documents describe the measured source snapshot for each result. Local build
 binaries and active-run artifacts remain outside Git.
 
-Implementation work is paused at the user's request. This commit is a source
-and evidence checkpoint, not a completion claim.
+Implementation was paused at the time of this historical checkpoint and later
+resumed. Current implementation and conformance state are tracked in
+[the ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md).
 
 Work later resumed with destructuring validation and then named evaluation
 and exponentiation; see

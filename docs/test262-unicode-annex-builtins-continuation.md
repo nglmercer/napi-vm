@@ -1,6 +1,11 @@
 # Unicode, Annex B, and built-in conformance continuation
 
-The target is at least 97,809 passes out of all 102,956 variants at Test262
+Historical full-run checkpoint from 2026-10-15. Its measured source and counts
+remain useful as evidence for that implementation batch; the current complete
+result is in [latest.json](../tools/test262/latest.json) and the newer
+[ShadowRealm/full-suite continuation](test262-shadow-realm-continuation.md).
+
+At this checkpoint, the target was at least 97,809 passes out of all 102,956 variants at Test262
 revision `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`. Focused selections do not
 establish completion.
 
@@ -66,9 +71,12 @@ they are not skipped or replaced with successful stubs.
 
 ## Completed full measurement
 
-The complete optimized run passes **98,010 / 102,956 (95.1960%)**: 4,944
+At that historical checkpoint, the complete optimized run passed **98,010 /
+102,956 (95.1960%)**: 4,944
 failures, two timeouts, and zero skips, crashes, or harness errors. It exceeds
-the 97,809-pass minimum by 201 variants. The user’s minimum 95% goal is achieved.
+the 97,809-pass minimum by 201 variants. The user’s minimum 95% goal was
+achieved at that time. This is not the current overall score; use the latest
+result linked above.
 All variants in the pinned corpus remain in the denominator.
 
 Comparison against the preceding 96,103-pass full snapshot proves **1,907 gains

@@ -1,5 +1,9 @@
 # Named evaluation and exponentiation continuation
 
+Historical implementation checkpoint. Its full-suite figures below predate
+the current source; see [latest.json](../tools/test262/latest.json) for the
+current complete-corpus result.
+
 Continues the checkpoint in [test262-checkpoint-status.md](test262-checkpoint-status.md),
 after destructuring validation at `8a3cf06`.
 

@@ -1,5 +1,9 @@
 # Test262 phases 1–3: foundation implementation
 
+Historical foundation plan and measurements. Current aggregate corpus results
+are tracked in [latest.json](../tools/test262/latest.json); the foundation
+completion criteria below remain separate from the aggregate score.
+
 These phases are started, not complete. The goal remains a full pinned-corpus pass with no filtered failures. Runtime capabilities remain optional.
 
 ## Phase 1: conformance harness

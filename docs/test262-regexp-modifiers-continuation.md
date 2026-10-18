@@ -1,11 +1,16 @@
 # Scoped regular-expression modifiers continuation
 
+Historical feature continuation. Its pass target and baseline below describe
+that earlier checkpoint; see [latest.json](../tools/test262/latest.json) for
+the current full-corpus state.
+
 Implementation resumed toward the user's minimum 95% full pinned Test262 goal.
-The latest completed full baseline before this continuation is
+The latest completed full baseline at this checkpoint was
 `artifacts/test262/conformance-followup-release-full.json`: 92,800 of 102,956
 variants pass (90.1356%), with 10,154 failures and two timeouts. Subsequent
 Promise, Array.fromAsync, async disposal, and resource statement changes are
-present in the working tree and need a new full measurement.
+present in later snapshots. The current complete-corpus state is recorded in
+[latest.json](../tools/test262/latest.json).
 
 This continuation implements scoped `i`, `m`, and `s` modifiers in the regexp
 parser and matcher. Matcher state is restored before invoking the enclosing
@@ -31,8 +36,9 @@ Verification completed:
 - All nine `promise_semantics` and three `resource_semantics` tests pass.
 
 No corpus, harness, denominator, runner limits, or feature skips were changed.
-The 95% full-suite goal remains open. Full release measurement and comparison
-must precede any new overall pass-rate claim.
+At this checkpoint, the 95% full-suite goal remained open. The later full
+measurement is recorded in [latest.json](../tools/test262/latest.json); the
+current ShadowRealm remeasurement is documented separately.
 
 Release verification uses `artifacts/test262/regexp-modifiers-release-final.json`,
 SHA-256 `c987b1a2f786addf784f377862bb7f92f8599e5c8e813d521e422e4bdcd275b8`.

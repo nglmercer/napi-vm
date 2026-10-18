@@ -1,5 +1,9 @@
 # Object copy semantics and fresh full-corpus evidence
 
+Historical implementation checkpoint. The full-suite counts below describe
+that source snapshot; see [latest.json](../tools/test262/latest.json) for the
+current complete-corpus result.
+
 This is incremental work toward the full-conformance goal. It does not close
 the remaining foundation, standard-library, proposal, native-addon, or bytecode
 coverage gates.

@@ -1,5 +1,9 @@
 # Conformance follow-up
 
+Historical implementation checkpoint. Its full-suite measurement below is
+superseded by the current result in
+[latest.json](../tools/test262/latest.json).
+
 The complete optimized run measures **92,800 / 102,956 (90.1356%)** on pinned
 Test262 5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81. This exceeds the 90% target
 of 92,661 passes by 139 variants. Against the preceding binary-data full run,

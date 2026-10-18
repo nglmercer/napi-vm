@@ -1,5 +1,9 @@
 # Abstract equality continuation
 
+Historical implementation checkpoint. Its full-suite counts below describe
+that snapshot; current overall results are in
+[latest.json](../tools/test262/latest.json).
+
 Guest `==` and `!=` now use the shared mutable runtime comparison from both
 AST and bytecode execution. Object-to-primitive conversion uses the default
 hint, invokes observable conversion methods, and propagates abrupt completion.

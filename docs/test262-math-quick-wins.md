@@ -1,12 +1,16 @@
 # Test262 Math quick wins
 
+Historical selection and full-run evidence. Current overall results are
+recorded in [latest.json](../tools/test262/latest.json).
+
 Base: `17098f0` (2026-10-14 checkout). Corpus: `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`.
 Rust: 1.99.0, Linux x86_64. No dependencies, corpus edits, skips, or assertion changes.
 
 ## Confirmed candidates and ranking
 
-The recorded `latest.json` describes an older snapshot (67,677/102,956), so it is
-not used as the before measurement. Archived outcomes were triaged first, then
+The `latest.json` snapshot at the time described an older source
+(67,677/102,956), so it was not used as the before measurement. Archived
+outcomes were triaged first, then
 Math and Number were rerun against an unmodified release worker at the base SHA.
 
 | Candidate | Newly passing variants | Cost | Decision |

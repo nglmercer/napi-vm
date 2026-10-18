@@ -15,6 +15,7 @@ mod promise;
 mod proxy;
 mod reflect;
 pub(crate) mod regexp;
+pub(crate) mod shadow_realm;
 mod string;
 mod symbol;
 pub(crate) mod temporal;
@@ -101,6 +102,7 @@ pub fn setup_builtins(env: &Env) {
         "Reflect",
         "Intl",
         "JSON",
+        "ShadowRealm",
     ] {
         e.set(name, Value::object(vec![]));
     }
@@ -187,6 +189,7 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     json::install(e);
     date::install(e);
     error::install(e);
+    shadow_realm::install(e);
     promise::install(e);
     reflect::install(e);
     collections::install(e);

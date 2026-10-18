@@ -32,6 +32,39 @@ fn builtin_function_metadata_and_attributes() {
 }
 
 #[test]
+fn object_is_prototype_of_returns_false_for_primitive_arguments_before_receiver_coercion() {
+    assert_tiers(
+        "var falseResults=[];var throws=[];for(var value of [null,undefined]){falseResults.push(Object.prototype.isPrototypeOf.call(value,1));try{Object.prototype.isPrototypeOf.call(value,{}) ;throws.push(false)}catch(error){throws.push(error instanceof TypeError)}}JSON.stringify([falseResults,throws]);",
+        "[[false,false],[true,true]]",
+    );
+}
+
+#[test]
+fn for_in_boxes_primitive_string_iterables() {
+    // This loop shape uses the AST fallback, so assert its semantics directly
+    // instead of requiring the bytecode tier used by most tests in this file.
+    let source = "var key;for(key in '9'){}JSON.stringify(key);";
+    let statements = Parser::new(Lexer::new(source).tokenize())
+        .parse_program()
+        .unwrap();
+    let result = Interpreter::with_builtins()
+        .run_program_body(&statements)
+        .unwrap();
+    assert!(
+        matches!(result, Value::String(ref s) if s == "\"0\""),
+        "AST: {result:?}"
+    );
+}
+
+#[test]
+fn shadow_realm_evaluates_and_wraps_callables_at_the_realm_boundary() {
+    assert_tiers(
+        "var realm=new ShadowRealm();var twice=realm.evaluate('(value)=>value*2');var bad=false;try{twice({})}catch(error){bad=error instanceof TypeError}var thrown=false;try{realm.evaluate('()=>{throw 1}')()}catch(error){thrown=error instanceof TypeError}var objectResult=false;try{realm.evaluate('globalThis')}catch(error){objectResult=error instanceof TypeError}JSON.stringify([realm.evaluate('40+2'),twice(21),bad,thrown,objectResult,ShadowRealm.prototype.evaluate.length,ShadowRealm.prototype.importValue.length,Object.prototype.toString.call(realm)]);",
+        "[42,42,true,true,true,1,2,\"[object ShadowRealm]\"]",
+    );
+}
+
+#[test]
 fn number_constructor_coerces_objects_and_accepts_bigints() {
     assert_tiers(
         "var log='';var obj={[Symbol.toPrimitive]:function(hint){log+=hint;return '12'}};var a=Number(obj);var b=new Number(obj);var bad=false;try{Number(Symbol())}catch(e){bad=e instanceof TypeError}JSON.stringify([a,b.valueOf(),log,Number(3n),Number(Object(4n)),bad,Number(),Number.isNaN(Number(undefined))]);",
@@ -231,9 +264,9 @@ fn global_is_finite_and_is_nan_use_to_number() {
 }
 
 #[test]
-fn is_prototype_of_with_nullish_receiver_returns_false() {
+fn is_prototype_of_throws_for_nullish_receiver() {
     assert_tiers(
-        "JSON.stringify([Object.prototype.isPrototypeOf.call(null, undefined), Object.prototype.isPrototypeOf.call(null, {}), Object.prototype.isPrototypeOf.call(undefined, {}), Object.prototype.isPrototypeOf.call(5, {}), ({}).isPrototypeOf(Object.create({}))]);",
-        "[false,false,false,false,false]",
+        "var errors=[];for(var receiver of [null,undefined]){try{Object.prototype.isPrototypeOf.call(receiver,{}) ;errors.push(false)}catch(error){errors.push(error instanceof TypeError)}}JSON.stringify([errors,Object.prototype.isPrototypeOf.call(5,{}),({}).isPrototypeOf(Object.create({}))]);",
+        "[[true,true],false,false]",
     );
 }

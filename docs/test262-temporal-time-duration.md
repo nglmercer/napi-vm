@@ -1,9 +1,14 @@
 # Temporal PlainTime and Duration continuation
 
-The user goal remains at least 90% passes over the complete pinned corpus, with
-all variants in the denominator. This batch adds Temporal.PlainTime and
-Temporal.Duration bindings backed by temporal_rs 0.2.6. No corpus, test assertion,
-feature skip, timeout, runner setting, or resource limit changes are made.
+Historical feature checkpoint. Its overall pass target and full-suite counts
+below describe that earlier snapshot; current results are in
+[latest.json](../tools/test262/latest.json).
+
+At this historical checkpoint, the user goal was at least 90% passes over the
+complete pinned corpus, with all variants in the denominator. This batch adds
+Temporal.PlainTime and Temporal.Duration bindings backed by temporal_rs 0.2.6.
+No corpus, test assertion, feature skip, timeout, runner setting, or resource
+limit changes are made.
 
 JavaScript property reads, coercion order, receiver branding, descriptors,
 constructor/newTarget handling, and realm prototypes remain VM operations.
