@@ -211,6 +211,7 @@ fn live_module_maps_are_roots_across_interpreters_without_snapshot_updates() {
     value.set_prop("self".into(), value.clone()).unwrap();
     let record = napi_vm_core::interpreter::Module {
         namespace: Default::default(),
+        deferred_namespace: Default::default(),
         exports: std::collections::HashMap::from([("value".into(), value.clone())]),
         default: None,
         scope: None,

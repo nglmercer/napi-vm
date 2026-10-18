@@ -736,6 +736,7 @@ impl Interpreter {
                 current = target;
                 continue;
             }
+            self.evaluate_deferred_namespace_property(&current, &trap_key)?;
             if let Value::TypedArray(view) = &current
                 && let Some(index) = crate::builtins::canonical_numeric_index(&property)
             {
@@ -986,6 +987,7 @@ impl Interpreter {
         key: &str,
         receiver: &Value,
     ) -> Result<Value, VmErr> {
+        self.evaluate_deferred_namespace_string_property(o, key)?;
         if let Value::String(text) = o {
             let own = key == "length"
                 || crate::value::array_index(key).is_some_and(|index| index < text.len());

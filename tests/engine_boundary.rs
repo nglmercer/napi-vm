@@ -55,6 +55,71 @@ fn virtual_modules_support_relative_imports() {
 }
 
 #[test]
+fn static_deferred_import_evaluates_on_export_access() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "deferred",
+        "globalThis.deferredRuns = (globalThis.deferredRuns || 0) + 1; export const value = deferredRuns;"
+            .into(),
+    );
+    let result = vm
+        .eval_source(
+            "import defer * as ns from 'deferred'; JSON.stringify([typeof globalThis.deferredRuns, ns.value, globalThis.deferredRuns])",
+        )
+        .unwrap();
+    assert!(
+        matches!(result, Value::String(ref value) if value == "[\"undefined\",1,1]"),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn deferred_namespace_reflection_evaluates_but_then_does_not() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "deferred-reflection",
+        "globalThis.reflectionRuns = (globalThis.reflectionRuns || 0) + 1; export const value = 7; export const then = 9;"
+            .into(),
+    );
+    let result = vm
+        .eval_source(
+            "import defer * as ns from 'deferred-reflection'; var before = typeof globalThis.reflectionRuns; var thenValue = ns.then; var afterThen = typeof globalThis.reflectionRuns; var keys = Object.keys(ns); JSON.stringify([before, thenValue, afterThen, keys.join(), globalThis.reflectionRuns])",
+        )
+        .unwrap();
+    assert!(
+        matches!(result, Value::String(ref value) if value == "[\"undefined\",null,\"undefined\",\"value\",1]"),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn dynamic_deferred_import_resolves_to_a_lazy_namespace() {
+    let mut vm = Interpreter::with_builtins();
+    vm.define_module(
+        "dynamic-deferred",
+        "globalThis.dynamicDeferredRuns = (globalThis.dynamicDeferredRuns || 0) + 1; export const value = 11;"
+            .into(),
+    );
+    let result = vm
+        .eval_source(
+            "var imported; import.defer('dynamic-deferred').then(ns => imported = ns); await 0; globalThis.dynamicDeferredRuns === undefined && imported.value === 11 && globalThis.dynamicDeferredRuns === 1",
+        )
+        .unwrap();
+    assert!(matches!(result, Value::Bool(true)), "{result:?}");
+}
+
+#[test]
+fn private_elements_reject_non_extensible_receivers() {
+    let mut vm = Interpreter::with_builtins();
+    let result = vm
+        .eval_source(
+            "class Base { constructor(target) { return target; } } class Derived extends Base { #value = 1; static has(value) { return #value in value; } } const extensible = new Derived({}); let rejected = false; try { new Derived(Object.preventExtensions({})); } catch (error) { rejected = error instanceof TypeError; } rejected && Derived.has(extensible)",
+        )
+        .unwrap();
+    assert!(matches!(result, Value::Bool(true)), "{result:?}");
+}
+
+#[test]
 fn addition_obeys_to_primitive_order_and_type_errors() {
     let mut vm = Interpreter::with_builtins();
     let result = vm.eval_source("var log = ''; var left = { [Symbol.toPrimitive](hint) { log += hint + 'L'; return 40; } }; var right = { [Symbol.toPrimitive](hint) { log += hint + 'R'; return 2; } }; var answer = left + right; answer === 42 && log === 'defaultLdefaultR'").unwrap();

@@ -31,12 +31,15 @@ The 42 focused Rust integration tests pass across `builtin_quick_wins` and
 `object_enumeration`. Workspace Clippy passes for all targets and features
 with warnings denied, and `cargo fmt --all -- --check` passes.
 
-The top remaining full-run clusters are `staging/sm` (220 non-passing
-variants), `intl402/Temporal` (176), `language/import/import-defer` (95), and
-`built-ins/Object` (79). Broader host realm, GC/finalization timing, and full
+The top remaining clusters in that full-run snapshot were `staging/sm` (220
+non-passing variants), `intl402/Temporal` (176), `language/import/import-defer`
+(95), and `built-ins/Object` (79). The deferred-import cluster has since been
+implemented and passes its current 109-variant focused selection; the full
+corpus has not been rerun. Broader host realm, GC/finalization timing, and full
 engine-wide realm integration remain separate work.
 
 The full-corpus counts above describe the worker snapshot recorded in
-`latest.json`; subsequent Object integrity and iterator fixes have not had a
-full-corpus rerun. Their 622-variant focused selection is recorded in the
-[Object integrity continuation](test262-object-integrity-continuation.md).
+`latest.json`; subsequent Object integrity, iterator, and deferred-import
+changes have not had a full-corpus rerun. Their focused results are recorded
+in the [Object integrity continuation](test262-object-integrity-continuation.md)
+and [deferred-import continuation](test262-deferred-import-continuation.md).

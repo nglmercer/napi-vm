@@ -134,6 +134,7 @@ pub struct ClassTemplate {
 #[derive(Debug, Clone)]
 pub struct ImportTemplate {
     pub module: crate::JsString,
+    pub phase: crate::parser::ImportPhase,
     pub default: Option<String>,
     pub named: Vec<(String, String)>,
     pub namespace: Option<String>,

@@ -10,7 +10,9 @@ pub(super) struct ModuleGraph {
 }
 struct LinkedModule {
     program: PreparedProgram,
-    requests: Vec<(crate::JsString, String)>,
+    requests: Vec<(crate::JsString, String, crate::parser::ImportPhase)>,
+    has_tla: bool,
+    cycle_root: Option<String>,
     state: ModuleState,
     evaluation: Option<Rc<RefCell<crate::value::PromiseInner>>>,
 }
@@ -216,6 +218,7 @@ impl Interpreter {
             name.into(),
             Module {
                 namespace: Rc::new(RefCell::new(None)),
+                deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),
                 default: None,
                 scope: Some(scope.clone()),
@@ -226,6 +229,8 @@ impl Interpreter {
         self.module_graph.borrow_mut().records.insert(
             name.into(),
             LinkedModule {
+                has_tla: crate::parser::program_has_top_level_await(&program.statements),
+                cycle_root: None,
                 program: program.clone(),
                 requests: Vec::new(),
                 state: ModuleState::Linked,
@@ -310,17 +315,24 @@ impl Interpreter {
             let mut requests = Vec::new();
             for stmt in declarations {
                 let request = match stmt {
-                    Statement::Import { module, .. } => Some(module),
-                    Statement::ExportNamed { source, .. } => source.as_ref(),
-                    Statement::ExportAll { source, .. } => Some(source),
+                    Statement::Import { module, phase, .. } => Some((module, *phase)),
+                    Statement::ExportNamed { source, .. } => source
+                        .as_ref()
+                        .map(|source| (source, crate::parser::ImportPhase::Evaluation)),
+                    Statement::ExportAll { source, .. } => {
+                        Some((source, crate::parser::ImportPhase::Evaluation))
+                    }
                     _ => None,
                 };
-                if let Some(request) = request {
+                if let Some((request, phase)) = request {
                     let resolved = self
                         .resolve_module_request(&Self::host_module_specifier(request)?)?
                         .ok_or_else(|| syntax(format!("Module not found: {request}")))?;
-                    if !requests.iter().any(|(old, _)| old == request) {
-                        requests.push((request.clone(), resolved));
+                    if !requests
+                        .iter()
+                        .any(|(old, _, old_phase)| old == request && *old_phase == phase)
+                    {
+                        requests.push((request.clone(), resolved, phase));
                     }
                 }
             }
@@ -330,7 +342,7 @@ impl Interpreter {
                 .get_mut(name)
                 .unwrap()
                 .requests = requests.clone();
-            for (_, dependency) in requests {
+            for (_, dependency, _) in requests {
                 if !self.discover_module(&dependency, created, depth + 1)? {
                     return Err(syntax(format!("Module not found: {dependency}")));
                 }
@@ -346,6 +358,108 @@ impl Interpreter {
             .as_ref()
             .is_some_and(|id| self.module_graph.borrow().records.contains_key(id))
     }
+
+    /// Trigger evaluation for an operation on a deferred namespace's export
+    /// surface. Symbol properties and `then` are ordinary namespace slots and
+    /// deliberately do not evaluate the module.
+    pub(crate) fn evaluate_deferred_namespace_property(
+        &mut self,
+        namespace: &Value,
+        key: &Value,
+    ) -> Result<(), VmErr> {
+        if matches!(key, Value::Symbol(_))
+            || matches!(key, Value::String(name) if name.to_key() == "then")
+        {
+            return Ok(());
+        }
+        self.evaluate_deferred_namespace(namespace)
+    }
+
+    pub(crate) fn evaluate_deferred_namespace_string_property(
+        &mut self,
+        namespace: &Value,
+        key: &str,
+    ) -> Result<(), VmErr> {
+        if key == "then" {
+            return Ok(());
+        }
+        self.evaluate_deferred_namespace(namespace)
+    }
+
+    pub(crate) fn evaluate_deferred_namespace(&mut self, namespace: &Value) -> Result<(), VmErr> {
+        let Some(properties) = namespace.property_cell() else {
+            return Ok(());
+        };
+        let module = {
+            let meta = properties.meta.borrow();
+            meta.deferred_module_namespace
+                .then(|| meta.module_namespace_module.clone())
+                .flatten()
+        };
+        if let Some(module) = module {
+            if !self.ready_for_sync_execution(&module, &mut HashSet::new()) {
+                return Err(VmErr::Msg(
+                    "TypeError: deferred module is not ready for synchronous evaluation".into(),
+                ));
+            }
+            self.evaluate_linked_module(&module)?;
+        }
+        Ok(())
+    }
+
+    fn ready_for_sync_execution(&self, id: &str, seen: &mut HashSet<String>) -> bool {
+        if !seen.insert(id.into()) {
+            return true;
+        }
+        let Some((state, has_tla, cycle_root, requests)) =
+            self.module_graph.borrow().records.get(id).map(|record| {
+                (
+                    record.state.clone(),
+                    record.has_tla,
+                    record.cycle_root.clone(),
+                    record.requests.clone(),
+                )
+            })
+        else {
+            return true;
+        };
+        match state {
+            ModuleState::Evaluated => cycle_root
+                .as_deref()
+                .is_none_or(|root| self.ready_for_sync_execution(root, seen)),
+            ModuleState::Evaluating => false,
+            ModuleState::Failed(_) => true,
+            ModuleState::Linked => {
+                !has_tla
+                    && requests
+                        .iter()
+                        .all(|(_, dependency, _)| self.ready_for_sync_execution(dependency, seen))
+            }
+        }
+    }
+
+    /// Dynamic `import.defer()` links the graph and resolves to its cached
+    /// deferred namespace without evaluating synchronous module bodies.
+    pub(crate) fn import_deferred_module(&mut self, specifier: &str) -> Result<Value, VmErr> {
+        let id = if self.cur_mod.is_none() && self.has_module(specifier) {
+            specifier.to_string()
+        } else {
+            self.resolve_module_request(specifier)?
+                .ok_or_else(|| VmErr::Msg(format!("TypeError: Module not found: {specifier}")))?
+        };
+        if !self.link_module(&id)? {
+            return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
+        }
+        let module = self
+            .module(&id)
+            .ok_or_else(|| VmErr::Msg(format!("TypeError: Module not found: {id}")))?;
+        let namespace = Self::deferred_namespace_object(&module, &id)?;
+        Ok(Value::settled_promise(
+            crate::value::PromiseState::Fulfilled,
+            namespace,
+        ))
+    }
+
     /// The UTF-8 host contract is enforced during linking, after source
     /// parsing. Invalid UTF-16 never aliases a replacement-character path.
     pub(crate) fn host_module_specifier(request: &crate::JsString) -> Result<String, VmErr> {
@@ -363,8 +477,8 @@ impl Interpreter {
             .get(id)?
             .requests
             .iter()
-            .find(|(r, _)| r == request)
-            .map(|(_, id)| id.clone())
+            .find(|(r, _, _)| r == request)
+            .map(|(_, id, _)| id.clone())
     }
     fn exported_names(&self, id: &str, seen: &mut HashSet<String>) -> HashSet<String> {
         if !seen.insert(id.into()) {
@@ -469,6 +583,7 @@ impl Interpreter {
                         for imported in flat(&program.statements) {
                             if let Statement::Import {
                                 module,
+                                phase,
                                 default,
                                 named,
                                 namespace,
@@ -486,7 +601,12 @@ impl Interpreter {
                                 if namespace.as_deref() == Some(local) {
                                     return self
                                         .module(&target)
-                                        .map(|m| Self::namespace_object(&m))
+                                        .map(|m| match phase {
+                                            crate::parser::ImportPhase::Deferred => {
+                                                Self::deferred_namespace_object(&m, &target)
+                                            }
+                                            _ => Self::namespace_object(&m),
+                                        })
                                         .transpose();
                                 }
                             }
@@ -550,6 +670,7 @@ impl Interpreter {
             for stmt in flat(&program.statements) {
                 if let Statement::Import {
                     module,
+                    phase,
                     default,
                     named,
                     namespace,
@@ -586,8 +707,13 @@ impl Interpreter {
                         self.bind_import(&local, value)?;
                     }
                     if let Some(local) = namespace {
-                        let value =
-                            Self::namespace_object(&self.module(&target).expect("linked module"))?;
+                        let module = self.module(&target).expect("linked module");
+                        let value = match phase {
+                            crate::parser::ImportPhase::Deferred => {
+                                Self::deferred_namespace_object(&module, &target)?
+                            }
+                            _ => Self::namespace_object(&module)?,
+                        };
                         self.declare_binding(local, value, BindKind::Const, true)?;
                     }
                 }
@@ -641,8 +767,10 @@ impl Interpreter {
         let scope = self.module_scope(id);
         let outer_scope = std::mem::replace(&mut self.global, scope);
         let result = (|| {
-            for (_, dependency) in requests {
-                self.evaluate_linked_module(&dependency)?;
+            for (_, dependency, phase) in requests {
+                if phase != crate::parser::ImportPhase::Deferred {
+                    self.evaluate_linked_module(&dependency)?;
+                }
             }
             match &program.executable {
                 Executable::Bytecode(code) => self.run_bytecode_module(code).map(|_| ()),

@@ -1457,6 +1457,8 @@ impl Environment {
 pub struct Module {
     /// Shared namespace identity, also shared by cloned export records.
     pub namespace: Rc<RefCell<Option<Value>>>,
+    /// Deferred namespace identity is distinct from the ordinary namespace.
+    pub deferred_namespace: Rc<RefCell<Option<Value>>>,
     pub exports: HashMap<String, Value>,
     pub default: Option<Value>,
     /// The module's own top-level scope.

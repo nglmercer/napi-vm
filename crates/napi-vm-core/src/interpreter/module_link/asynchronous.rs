@@ -5,6 +5,50 @@ use super::*;
 use crate::value::{PromiseInner, PromiseState};
 const DRIVER: &str = "__symbol_module_driver__";
 impl Interpreter {
+    fn gather_async_dependencies(
+        &self,
+        id: &str,
+        seen: &mut HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        if !seen.insert(id.into()) {
+            return;
+        }
+        let record = self.module_graph.borrow().records.get(id).map(|record| {
+            (
+                record.state.clone(),
+                record.has_tla,
+                record.cycle_root.clone(),
+                record.requests.clone(),
+            )
+        });
+        let Some((state, has_tla, cycle_root, requests)) = record else {
+            return;
+        };
+        if matches!(state, ModuleState::Failed(_)) {
+            return;
+        }
+        if matches!(state, ModuleState::Evaluated)
+            && let Some(root) = cycle_root
+            && self
+                .module_graph
+                .borrow()
+                .records
+                .get(&root)
+                .is_some_and(|record| matches!(record.state, ModuleState::Evaluating))
+        {
+            out.push(root);
+            return;
+        }
+        if has_tla && matches!(state, ModuleState::Linked | ModuleState::Evaluating) {
+            out.push(id.into());
+            return;
+        }
+        for (_, dependency, _) in requests {
+            self.gather_async_dependencies(&dependency, seen, out);
+        }
+    }
+
     /// Start an import without blocking on top-level await. Poll the existing
     /// event loop to progress it; the returned Promise resolves to a namespace.
     pub fn import_module(&mut self, specifier: &str) -> Result<Value, VmErr> {
@@ -31,19 +75,33 @@ impl Interpreter {
         id: &str,
         ancestors: &mut HashSet<String>,
     ) -> Result<Value, VmErr> {
-        let record = self
-            .module_graph
-            .borrow()
-            .records
-            .get(id)
-            .map(|r| (r.state.clone(), r.evaluation.clone(), r.requests.clone()));
-        let Some((state, evaluation, requests)) = record else {
+        let record = self.module_graph.borrow().records.get(id).map(|r| {
+            (
+                r.state.clone(),
+                r.evaluation.clone(),
+                r.cycle_root.clone(),
+                r.requests.clone(),
+            )
+        });
+        let Some((state, evaluation, cycle_root, requests)) = record else {
             return Ok(Value::settled_promise(
                 PromiseState::Fulfilled,
                 Self::namespace_object(&self.module(id).expect("linked module"))?,
             ));
         };
         if let Some(promise) = evaluation {
+            if let Some(root) = cycle_root
+                && !ancestors.contains(&root)
+                && let Some(root_promise) = self
+                    .module_graph
+                    .borrow()
+                    .records
+                    .get(&root)
+                    .and_then(|record| record.evaluation.clone())
+                && root_promise.borrow().state == PromiseState::Pending
+            {
+                return Ok(Value::Promise(root_promise));
+            }
             return Ok(Value::Promise(promise));
         }
         match state {
@@ -72,8 +130,28 @@ impl Interpreter {
         }
         ancestors.insert(id.into());
         let mut dependencies = Vec::new();
-        for (_, dependency) in requests {
-            if !ancestors.contains(&dependency) {
+        let mut scheduled = HashSet::new();
+        for (_, dependency, phase) in requests {
+            if phase == crate::parser::ImportPhase::Deferred {
+                let mut asynchronous = Vec::new();
+                self.gather_async_dependencies(&dependency, &mut HashSet::new(), &mut asynchronous);
+                for asynchronous in asynchronous {
+                    if ancestors.contains(&asynchronous) || !scheduled.insert(asynchronous.clone())
+                    {
+                        continue;
+                    }
+                    match self.start_async_module(&asynchronous, ancestors) {
+                        Ok(dependency) => dependencies.push(dependency),
+                        Err(error) => {
+                            self.finish_async_module(id, &promise, Err(error_value(&error)))?;
+                            ancestors.remove(id);
+                            return Ok(Value::Promise(promise));
+                        }
+                    }
+                }
+                continue;
+            }
+            if !ancestors.contains(&dependency) && scheduled.insert(dependency.clone()) {
                 match self.start_async_module(&dependency, ancestors) {
                     Ok(dependency) => dependencies.push(dependency),
                     Err(error) => {
@@ -81,6 +159,12 @@ impl Interpreter {
                         ancestors.remove(id);
                         return Ok(Value::Promise(promise));
                     }
+                }
+            } else if ancestors.contains(&dependency) {
+                let mut graph = self.module_graph.borrow_mut();
+                let record = graph.records.get_mut(id).expect("evaluating module");
+                if record.cycle_root.is_none() {
+                    record.cycle_root = Some(dependency);
                 }
             }
         }
@@ -90,21 +174,30 @@ impl Interpreter {
             ("target".into(), Value::Promise(promise.clone())),
             ("remaining".into(), Value::Number(dependencies.len() as f64)),
         ]);
-        if dependencies.is_empty() {
-            self.jobs
-                .borrow_mut()
-                .push_microtask(Job::ModuleEvaluation {
-                    realm: self.persistent_global.clone(),
-                    id: id.into(),
-                    target: promise.clone(),
-                });
-        } else {
-            for dependency in dependencies {
-                if let Some(inner) = dependency.as_promise()
-                    && inner.borrow().external_pending
-                {
+        let mut pending = false;
+        for dependency in &dependencies {
+            if let Some(inner) = dependency.as_promise() {
+                let (state, value, external_pending) = {
+                    let inner = inner.borrow();
+                    (inner.state, inner.value.clone(), inner.external_pending)
+                };
+                if external_pending {
                     promise.borrow_mut().external_pending = true;
                 }
+                match state {
+                    PromiseState::Pending => pending = true,
+                    PromiseState::Rejected => {
+                        self.finish_async_module(id, &promise, Err(value))?;
+                        return Ok(Value::Promise(promise));
+                    }
+                    PromiseState::Fulfilled => {}
+                }
+            }
+        }
+        if !pending {
+            self.run_module_evaluation_job(id, &promise)?;
+        } else {
+            for dependency in dependencies {
                 self.register(
                     &dependency,
                     handler(&guard, dependency_fulfilled, &self.persistent_global),
@@ -158,21 +251,35 @@ impl Interpreter {
         self.cur_mod = outer;
         match result {
             Ok(completion) => {
-                if let Some(inner) = completion.as_promise()
-                    && inner.borrow().external_pending
-                {
-                    target.borrow_mut().external_pending = true;
+                if let Some(inner) = completion.as_promise() {
+                    let (state, value, external_pending) = {
+                        let inner = inner.borrow();
+                        (inner.state, inner.value.clone(), inner.external_pending)
+                    };
+                    if external_pending {
+                        target.borrow_mut().external_pending = true;
+                    }
+                    match state {
+                        PromiseState::Fulfilled => self.finish_async_module(id, target, Ok(()))?,
+                        PromiseState::Rejected => {
+                            self.finish_async_module(id, target, Err(value))?
+                        }
+                        PromiseState::Pending => {
+                            let guard = Value::object(vec![
+                                ("id".into(), Value::String(id.into())),
+                                ("target".into(), Value::Promise(target.clone())),
+                            ]);
+                            self.register(
+                                &completion,
+                                handler(&guard, body_fulfilled, &self.persistent_global),
+                                handler(&guard, dependency_rejected, &self.persistent_global),
+                                None,
+                            )?;
+                        }
+                    }
+                } else {
+                    self.finish_async_module(id, target, Ok(()))?;
                 }
-                let guard = Value::object(vec![
-                    ("id".into(), Value::String(id.into())),
-                    ("target".into(), Value::Promise(target.clone())),
-                ]);
-                self.register(
-                    &completion,
-                    handler(&guard, body_fulfilled, &self.persistent_global),
-                    handler(&guard, dependency_rejected, &self.persistent_global),
-                    None,
-                )?;
             }
             Err(error) => self.finish_async_module(id, target, Err(error_value(&error)))?,
         }

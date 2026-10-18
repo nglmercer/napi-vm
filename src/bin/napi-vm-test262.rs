@@ -84,7 +84,17 @@ impl ModuleLoader for CorpusLoader {
                 "ResourceLimit: Module source size exceeded".into(),
             ));
         }
-        let source = std::fs::read_to_string(path).map_err(|e| VmErr::Msg(e.to_string()))?;
+        let source = std::fs::read_to_string(&path).map_err(|e| VmErr::Msg(e.to_string()))?;
+        let source = if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
+            let encoded = serde_json::to_string(&source)
+                .map_err(|error| VmErr::Msg(format!("Invalid JSON module source: {error}")))?;
+            format!("export default JSON.parse({encoded});")
+        } else {
+            source
+        };
         Ok(ModuleSource {
             id: id.into(),
             source,
@@ -311,6 +321,7 @@ fn execute(request: Request) -> Json {
     if let Err(error) = vm.eval_source(&request.harness) {
         return failure("harness", &error);
     }
+    let mut module_evaluation = None;
     let result = if request.module {
         match vm.link_module(&request.id) {
             Ok(true) => {}
@@ -322,9 +333,22 @@ fn execute(request: Request) -> Json {
             }
             Err(error) => return failure("resolution", &error),
         }
-        vm.load_module(&request.id)
-            .and_then(|_| vm.drain_jobs())
-            .map(|_| Value::Undefined)
+        if request.asynchronous {
+            vm.import_module(&request.id).and_then(|promise| {
+                module_evaluation = promise.as_promise();
+                vm.drain_jobs()?;
+                if let Some(inner) = &module_evaluation
+                    && inner.borrow().state == napi_vm::value::PromiseState::Rejected
+                {
+                    return Err(VmErr::Throw(inner.borrow().value.clone()));
+                }
+                Ok(Value::Undefined)
+            })
+        } else {
+            vm.load_module(&request.id)
+                .and_then(|_| vm.drain_jobs())
+                .map(|_| Value::Undefined)
+        }
     } else {
         vm.eval_source(&request.source)
     };
@@ -340,8 +364,11 @@ fn execute(request: Request) -> Json {
                 .borrow()
                 .get("__test262_done_count")
                 .map_or(0.0, |value| value.to_number());
-            if count != 0.0
-                || !vm.jobs.borrow().has_outstanding_work()
+            let module_pending = module_evaluation.as_ref().is_some_and(|promise| {
+                promise.borrow().state == napi_vm::value::PromiseState::Pending
+            });
+            if (count != 0.0 && !module_pending)
+                || (!vm.jobs.borrow().has_outstanding_work() && !module_pending)
                 || std::time::Instant::now() >= deadline
             {
                 break;
@@ -352,6 +379,11 @@ fn execute(request: Request) -> Json {
             collect_requested_gc(&mut vm);
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+    }
+    if let Some(inner) = &module_evaluation
+        && inner.borrow().state == napi_vm::value::PromiseState::Rejected
+    {
+        return failure("runtime", &VmErr::Throw(inner.borrow().value.clone()));
     }
     if let Some(error) = vm.persistent_global.borrow().get("__test262_done_error") {
         return failure("runtime", &VmErr::Throw(error));

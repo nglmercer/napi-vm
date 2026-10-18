@@ -1,0 +1,36 @@
+{
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "12c26eff020aceab8426cd6e4c8c19187b4606390c81fbdbd237d0eba00a02d5",
+  "deferred_import_selection": {
+    "selection": ["language/import/import-defer"],
+    "total": 109,
+    "counts": {"pass": 109, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0}
+  },
+  "module_async_regression": {
+    "selection": ["language/module-code", "language/expressions/dynamic-import"],
+    "total": 2502,
+    "counts": {"pass": 2444, "fail": 58, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "baseline": {"pass": 2440, "fail": 62},
+    "gained": 4,
+    "lost": 0
+  },
+  "private_elements_regression": {
+    "total": 3,
+    "counts": {"pass": 3, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0}
+  },
+  "full_corpus": {
+    "rerun": false,
+    "last_complete_total": 102956,
+    "last_complete_pass": 101488,
+    "pass_percentage": 98.57414817980496
+  },
+  "evidence_files": [
+    "focused.json.gz",
+    "triage.json.gz",
+    "module-async-regression.json.gz",
+    "private-elements-regression.json.gz",
+    "implementation.patch.gz"
+  ],
+  "implementation_patch_sha256": "3b79146f29d6942d6775129cb9764f9f828ec7a0c38fc5057cebd1426ead1ede"
+}

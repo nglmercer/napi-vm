@@ -1579,10 +1579,12 @@ impl<'a> Compiler<'a> {
             }
             Statement::Import {
                 module,
+                phase,
                 default,
                 named,
                 namespace,
                 attributes,
+                ..
             } => {
                 if !attributes.is_empty() {
                     return Err(Decline::Func("import attributes"));
@@ -1597,6 +1599,7 @@ impl<'a> Compiler<'a> {
                 self.require_env_module_binding(bound)?;
                 let tmpl = self.push_const(Constant::ImportTemplate(ImportTemplate {
                     module: module.clone(),
+                    phase: *phase,
                     default: default.clone(),
                     named: named.clone(),
                     namespace: namespace.clone(),

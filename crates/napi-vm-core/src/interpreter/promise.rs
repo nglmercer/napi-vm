@@ -396,9 +396,7 @@ impl Interpreter {
                                 .into(),
                         ))
                     }
-                    crate::parser::ImportPhase::Deferred => Err(VmErr::Msg(
-                        "TypeError: deferred module evaluation is not implemented".into(),
-                    )),
+                    crate::parser::ImportPhase::Deferred => vm.import_deferred_module(&specifier),
                 });
                 self.cur_mod = outer;
                 match result {

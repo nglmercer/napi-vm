@@ -1399,6 +1399,7 @@ impl Interpreter {
                 name.clone(),
                 Module {
                     namespace: Rc::new(RefCell::new(None)),
+                    deferred_namespace: Rc::new(RefCell::new(None)),
                     exports: std::collections::HashMap::new(),
                     default: None,
                     scope: None,
@@ -1490,6 +1491,67 @@ impl Interpreter {
             );
         }
         *module.namespace.borrow_mut() = Some(namespace.clone());
+        Ok(namespace)
+    }
+
+    /// Build the distinct namespace used by `import defer`. The namespace
+    /// omits an exported `then` so Promise resolution does not trigger module
+    /// evaluation while assimilating the namespace object.
+    pub(crate) fn deferred_namespace_object(
+        module: &Module,
+        module_name: &str,
+    ) -> Result<Value, VmErr> {
+        if let Some(namespace) = module.deferred_namespace.borrow().as_ref() {
+            return Ok(namespace.clone());
+        }
+        let mut props: Vec<(String, Value)> = module
+            .exports
+            .iter()
+            .filter(|(name, _)| name.as_str() != "then")
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        if let Some(default) = &module.default {
+            props.push(("default".into(), default.clone()));
+        }
+        props.sort_by(|a, b| crate::JsString::from_key(&a.0).cmp(&crate::JsString::from_key(&b.0)));
+        if props.len() > crate::value::MAX_OBJECT_PROPS {
+            return Err(crate::value::limit_err("Maximum namespace size exceeded"));
+        }
+        let namespace = Value::object_with_proto(props, None);
+        if let Value::Object { props } = &namespace {
+            let mut meta = props.meta.borrow_mut();
+            meta.non_extensible = true;
+            meta.module_namespace = true;
+            meta.deferred_module_namespace = true;
+            meta.module_namespace_module = Some(module_name.into());
+            for (key, _) in props.borrow().iter() {
+                meta.set_attrs(
+                    key,
+                    crate::value::PropAttrs {
+                        writable: true,
+                        enumerable: true,
+                        configurable: false,
+                    },
+                );
+            }
+        }
+        if let Some(Value::Symbol(ref symbol)) = crate::builtins::well_known("toStringTag") {
+            let key = symbol_slot_key(symbol);
+            let cell = namespace.property_cell().unwrap();
+            cell.borrow_mut()
+                .push((key.clone(), Value::String("Deferred Module".into())));
+            let mut meta = cell.meta.borrow_mut();
+            meta.set_symbol_key(&key, symbol.clone());
+            meta.set_attrs(
+                &key,
+                crate::value::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
+        *module.deferred_namespace.borrow_mut() = Some(namespace.clone());
         Ok(namespace)
     }
 
@@ -2406,6 +2468,7 @@ impl Interpreter {
             name.to_string(),
             Module {
                 namespace: Rc::new(RefCell::new(None)),
+                deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),
                 default: None,
                 scope: Some(scope),
@@ -2892,6 +2955,7 @@ impl Interpreter {
             ));
         }
         let Some(proxy) = value.as_proxy() else {
+            self.evaluate_deferred_namespace(value)?;
             return crate::builtins::object::ordinary_own_property_keys(self, value);
         };
         let (target, handler) = proxy.snapshot()?;

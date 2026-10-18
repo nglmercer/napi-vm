@@ -26,9 +26,9 @@
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
   "source_base": "c01a4fb7c8a739b36cecc36095ca6ffb10d8ae9a",
-  "source_state": "last complete full-corpus measurement; later Object integrity and Object.fromEntries edits are outside this measured snapshot",
+  "source_state": "last complete full-corpus measurement; later Object integrity, Object.fromEntries, and deferred-import changes are outside this measured snapshot",
   "evidence": "evidence/shadow-realm-2026-10-18/final-full.json.gz",
-  "note": "Last complete full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. The later Object integrity and Object.fromEntries implementation passes its 622-variant focused release selection; focused gains are not added to the full-corpus score. ShadowRealm and isPrototypeOf focused release selection: 144/144. Corpus, denominator, four workers, and five-second timeout unchanged. See docs/test262-shadow-realm-continuation.md, docs/test262-object-integrity-continuation.md, and the archived evidence.",
+  "note": "Last complete full pinned run: 101,488 / 102,956 (98.5741%), 134 new passes and zero lost passes versus the previous completed full run. Later Object integrity/Object.fromEntries and deferred-import work have focused release evidence only; those gains are not added to the full-corpus score. ShadowRealm and isPrototypeOf focused selection: 144/144. Deferred imports pass 109/109, and the neighboring module-code/dynamic-import selection gains four passes with zero losses (2,444/2,502). See the feature continuation docs and archived evidence.",
   "source_patch_sha256": "b4df42b571677b7564ffaaf1ab6b6f6d0a1747d62f8d8d4b73c9116e304c1ecb",
   "current_focused": {
     "selection": [
@@ -52,5 +52,32 @@
     },
     "evidence": "evidence/object-integrity-2026-10-18/focused.json.gz",
     "source_patch_sha256": "1774f9fc42b6c59439368f69fe1d733c852e43fe82a415474e58dbb87d3fbed0"
+  },
+  "deferred_import_focused": {
+    "selection": ["language/import/import-defer"],
+    "engine_sha256": "12c26eff020aceab8426cd6e4c8c19187b4606390c81fbdbd237d0eba00a02d5",
+    "total": 109,
+    "counts": {"pass": 109, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "evidence": "evidence/deferred-import-2026-10-18/focused.json.gz",
+    "implementation_patch_sha256": "3b79146f29d6942d6775129cb9764f9f828ec7a0c38fc5057cebd1426ead1ede"
+  },
+  "module_async_regression": {
+    "selection": ["language/module-code", "language/expressions/dynamic-import"],
+    "engine_sha256": "12c26eff020aceab8426cd6e4c8c19187b4606390c81fbdbd237d0eba00a02d5",
+    "total": 2502,
+    "counts": {"pass": 2444, "fail": 58, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "comparison": {"baseline_pass": 2440, "baseline_total": 2502, "gained": 4, "lost": 0},
+    "evidence": "evidence/deferred-import-2026-10-18/module-async-regression.json.gz"
+  },
+  "private_elements_regression": {
+    "selection": [
+      "language/statements/class/elements/private-class-field-on-nonextensible-objects.js",
+      "language/statements/class/subclass/private-class-field-on-nonextensible-return-override.js",
+      "staging/sm/PrivateName/modify-non-extensible.js"
+    ],
+    "engine_sha256": "12c26eff020aceab8426cd6e4c8c19187b4606390c81fbdbd237d0eba00a02d5",
+    "total": 3,
+    "counts": {"pass": 3, "fail": 0, "skip": 0, "timeout": 0, "crash": 0, "harness_error": 0},
+    "evidence": "evidence/deferred-import-2026-10-18/private-elements-regression.json.gz"
   }
 }

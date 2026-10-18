@@ -449,15 +449,32 @@ impl Parser {
 
     pub(super) fn import(&mut self) -> Option<Statement> {
         self.adv();
+        let mut phase = super::ImportPhase::Evaluation;
         let def = if self.cur().identifier_name().is_some() {
+            let defer_modifier = matches!(self.cur(), Token::Identifier(name) if name == "defer");
             let nm = self.ident()?;
-            if self.eat(&Token::Comma) {
+            if defer_modifier && self.eat(&Token::Star) {
+                phase = super::ImportPhase::Deferred;
+                self.expect(&Token::KwAs);
+                let ns = self.ident()?;
+                let m = self.from()?;
+                let attributes = self.import_attributes()?;
+                Some(Statement::Import {
+                    attributes,
+                    module: m,
+                    phase,
+                    default: None,
+                    named: vec![],
+                    namespace: Some(ns),
+                })
+            } else if self.eat(&Token::Comma) {
                 if self.eat(&Token::LBrace) {
                     let nd = self.named_imports()?;
                     let m = self.from()?;
                     Some(Statement::Import {
                         attributes: Vec::new(),
                         module: m,
+                        phase,
                         default: Some(nm),
                         named: nd,
                         namespace: None,
@@ -469,6 +486,7 @@ impl Parser {
                     Some(Statement::Import {
                         attributes: Vec::new(),
                         module: m,
+                        phase,
                         default: Some(nm),
                         named: vec![],
                         namespace: Some(ns),
@@ -481,6 +499,7 @@ impl Parser {
                 Some(Statement::Import {
                     attributes: Vec::new(),
                     module: m,
+                    phase,
                     default: Some(nm),
                     named: vec![],
                     namespace: None,
@@ -495,6 +514,7 @@ impl Parser {
             Some(Statement::Import {
                 attributes: Vec::new(),
                 module: m,
+                phase,
                 default: None,
                 named: vec![],
                 namespace: Some(ns),
@@ -505,6 +525,7 @@ impl Parser {
             Some(Statement::Import {
                 attributes: Vec::new(),
                 module: m,
+                phase,
                 default: None,
                 named: nd,
                 namespace: None,
@@ -515,6 +536,7 @@ impl Parser {
             Some(Statement::Import {
                 attributes: Vec::new(),
                 module: m,
+                phase,
                 default: None,
                 named: vec![],
                 namespace: None,

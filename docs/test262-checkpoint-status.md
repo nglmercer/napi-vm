@@ -16,6 +16,13 @@ passed their focused selection (622 / 622), but have not yet been included in
 a full-corpus run. See the [Object continuation](test262-object-integrity-continuation.md)
 for the implementation and focused evidence.
 
+The deferred-import implementation passes all 109 variants in
+`language/import/import-defer`. The neighboring module-code and dynamic-import
+selection passes 2,444 / 2,502, gaining four passes and losing none against the
+prior full-run outcomes. These focused results are recorded separately in
+[`latest.json`](../tools/test262/latest.json); they do not change the full-run
+score.
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

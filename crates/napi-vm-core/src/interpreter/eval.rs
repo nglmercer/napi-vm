@@ -1090,15 +1090,25 @@ impl Interpreter {
     pub(crate) fn stmt_import(
         &mut self,
         module: &crate::JsString,
+        phase: crate::parser::ImportPhase,
         default: Option<&str>,
         named: &[(String, String)],
         namespace: Option<&str>,
     ) -> Result<Value, VmErr> {
+        // Linking has already installed import bindings for an ESM graph.
+        // Executing the declaration itself must not make a deferred edge eager.
+        if self.is_linked_module() {
+            return Ok(Value::Undefined);
+        }
         let module = Self::host_module_specifier(module)?;
         let resolved_module = self.resolve_module_request(&module)?;
         if let Some(name) = resolved_module.as_ref() {
             let name = name.clone();
-            self.ensure_module(&name)?;
+            if phase == crate::parser::ImportPhase::Deferred {
+                self.link_module(&name)?;
+            } else {
+                self.ensure_module(&name)?;
+            }
         }
         if let Some(md) = resolved_module.as_ref().and_then(|name| self.module(name)) {
             if let Some(d) = default {
@@ -1130,7 +1140,16 @@ impl Interpreter {
                 self.bind_import(local, v)?;
             }
             if let Some(ns) = namespace {
-                let namespace_object = Self::namespace_object(&md)?;
+                let namespace_object = if phase == crate::parser::ImportPhase::Deferred {
+                    Self::deferred_namespace_object(
+                        &md,
+                        resolved_module
+                            .as_deref()
+                            .expect("resolved deferred import"),
+                    )?
+                } else {
+                    Self::namespace_object(&md)?
+                };
                 self.set_binding(ns, namespace_object)?;
             }
             Ok(Value::Undefined)
@@ -1716,11 +1735,18 @@ impl Interpreter {
             }
             Statement::Import {
                 module,
+                phase,
                 default,
                 named,
                 namespace,
                 ..
-            } => self.stmt_import(module, default.as_deref(), named, namespace.as_deref()),
+            } => self.stmt_import(
+                module,
+                *phase,
+                default.as_deref(),
+                named,
+                namespace.as_deref(),
+            ),
             Statement::Empty => Ok(Value::Undefined),
         }
     }

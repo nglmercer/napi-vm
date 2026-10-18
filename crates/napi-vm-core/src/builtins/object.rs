@@ -1977,8 +1977,6 @@ pub(crate) fn descriptor_for_key_in(
     target: &Value,
     property_key: &Value,
 ) -> Result<Value, VmErr> {
-    let key_storage = interp.property_key(property_key)?;
-    let key = key_storage.as_str();
     if let Value::Proxy(proxy) = target {
         let (target, handler) = proxy.snapshot()?;
         let trap = interp.get_prop_value_str(&handler, "getOwnPropertyDescriptor")?;
@@ -2066,6 +2064,9 @@ pub(crate) fn descriptor_for_key_in(
         }
         return Ok(descriptor);
     }
+    interp.evaluate_deferred_namespace_property(target, property_key)?;
+    let key_storage = interp.property_key(property_key)?;
+    let key = key_storage.as_str();
     if let Some(global) = interp.global_scope_of(target) {
         let object = global
             .borrow()

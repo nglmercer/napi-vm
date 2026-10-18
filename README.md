@@ -519,6 +519,13 @@ are under `tools/test262/evidence/`; see
 [the ShadowRealm continuation](docs/test262-shadow-realm-continuation.md) and
 [tools/test262/README.md](tools/test262/README.md) to reproduce.
 
+The current deferred-import implementation passes its pinned 109-variant
+Test262 selection. The neighboring module-code and dynamic-import selection
+passes 2,444 / 2,502 variants, gaining four passes with zero losses against the
+previous full-run outcomes. These focused results are separate from the older
+full-corpus score; details and evidence are in
+[the deferred-import continuation](docs/test262-deferred-import-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

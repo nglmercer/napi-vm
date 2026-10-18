@@ -57,6 +57,15 @@ implementation advanced. The focused selection covering `Object.fromEntries`,
 full-corpus measurement. See the [Object integrity continuation](../../docs/test262-object-integrity-continuation.md)
 and its archived evidence.
 
+The deferred module evaluation selection at
+`language/import/import-defer` passes **109 / 109** variants. A neighboring
+regression selection for `language/module-code` and
+`language/expressions/dynamic-import` passes **2,444 / 2,502**, with four gains
+and zero losses against the previous full-run outcomes for those same variants.
+Both release reports are archived under
+[`evidence/deferred-import-2026-10-18/`](evidence/deferred-import-2026-10-18/).
+Neither focused result changes the full-corpus score.
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

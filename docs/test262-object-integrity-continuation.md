@@ -27,10 +27,11 @@ fixes, so the focused gains are not added to the overall score. The compact
 status records the full-run worker separately from this focused worker in
 [`latest.json`](../tools/test262/latest.json).
 
-For the next longer implementation session, deferred module evaluation is the
-best bounded feature target in the remaining failure set: the last full-run
-triage reported 95 non-passing `language/import/import-defer` variants. Split
-that work into static syntax/linking, lazy namespace evaluation, and dynamic
-`import.defer()` behavior, then run the feature directory before considering a
-new full-corpus measurement. The heterogeneous `staging/sm` cluster is larger,
-but offers less scope control for one session.
+The next focused implementation completed deferred module evaluation: its
+pinned 109-variant `language/import/import-defer` selection now passes 109 / 109.
+The adjacent `language/module-code` and `language/expressions/dynamic-import`
+selection passes 2,444 / 2,502, gaining four passes with zero losses against
+the previous full-run outcomes for those exact variants. See the
+[deferred-import continuation](test262-deferred-import-continuation.md) and
+its archived evidence. The full-corpus score remains the older completed
+measurement until the corpus is rerun.

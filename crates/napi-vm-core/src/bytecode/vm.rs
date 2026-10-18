@@ -1238,6 +1238,7 @@ fn run_loop(
                     };
                     interp.stmt_import(
                         &template.module,
+                        template.phase,
                         template.default.as_deref(),
                         &template.named,
                         template.namespace.as_deref(),

@@ -211,6 +211,9 @@ pub struct ObjectMeta {
     pub(crate) immutable_prototype: bool,
     /// Module namespaces reject property writes while retaining live cells.
     pub module_namespace: bool,
+    /// Deferred module namespaces evaluate on string-keyed export operations.
+    pub(crate) deferred_module_namespace: bool,
+    pub(crate) module_namespace_module: Option<String>,
     /// Whether `defineProperty` ever installed a getter/setter pair on this
     /// object. Ordinary objects never do, and property assignment checks this
     /// before looking for the companion slot an accessor pair needs — which
@@ -3030,6 +3033,11 @@ impl Value {
         value: PrivateElement,
     ) -> Result<(), VmErr> {
         let insert = |meta: &mut ObjectMeta| {
+            if meta.non_extensible {
+                return Err(VmErr::Msg(
+                    "TypeError: cannot add a private element to a non-extensible object".into(),
+                ));
+            }
             if meta.private_elements.contains_key(&id) {
                 return Err(VmErr::Msg(
                     "TypeError: private field is already initialized".into(),

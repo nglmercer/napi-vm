@@ -415,6 +415,7 @@ pub enum Statement {
     Import {
         attributes: Vec<(String, crate::JsString)>,
         module: crate::JsString,
+        phase: ImportPhase,
         default: Option<String>,
         named: Vec<(String, String)>,
         namespace: Option<String>,
@@ -1542,4 +1543,272 @@ pub(crate) fn formal_parameter_length<S: AsRef<str>>(params: &[S], body: &[State
             matches!(initializer, Statement::If { then, .. } if matches!(then.first(), Some(Statement::Expr(Expr::Assignment { target, .. })) if matches!(target.as_ref(), Expr::Identifier(target) if target == name)))
         })
     }).count()
+}
+
+/// Whether evaluating a module body can suspend on top-level `await`.
+/// Function and method bodies are deliberately not traversed: their awaits
+/// happen only when those callables are invoked.
+pub(crate) fn program_has_top_level_await(statements: &[Statement]) -> bool {
+    statements.iter().any(statement_has_top_level_await)
+}
+
+fn statement_has_top_level_await(statement: &Statement) -> bool {
+    match statement {
+        Statement::ResourceForOf {
+            iter,
+            body,
+            is_await,
+            ..
+        } => *is_await || expr_has_top_level_await(iter) || program_has_top_level_await(body),
+        Statement::ResourceDeclaration {
+            declarations,
+            is_await,
+        } => *is_await || program_has_top_level_await(declarations),
+        Statement::Expr(expr) => expr_has_top_level_await(expr),
+        Statement::VarDecl {
+            init,
+            destructuring,
+            ..
+        } => {
+            init.as_deref().is_some_and(expr_has_top_level_await)
+                || destructuring
+                    .as_deref()
+                    .is_some_and(pattern_has_top_level_await)
+        }
+        Statement::FnDecl { .. }
+        | Statement::Return(None)
+        | Statement::Break
+        | Statement::Continue
+        | Statement::LabeledBreak(_)
+        | Statement::LabeledContinue(_)
+        | Statement::Import { .. }
+        | Statement::ExportNamed { .. }
+        | Statement::ExportAll { .. }
+        | Statement::Empty => false,
+        Statement::ClassDecl {
+            superclass, body, ..
+        } => {
+            superclass.as_deref().is_some_and(expr_has_top_level_await)
+                || class_has_top_level_await(body)
+        }
+        Statement::Return(expr) => expr.as_deref().is_some_and(expr_has_top_level_await),
+        Statement::Throw(expr) => expr_has_top_level_await(expr),
+        Statement::If { test, then, else_ } => {
+            expr_has_top_level_await(test)
+                || program_has_top_level_await(then)
+                || else_.as_deref().is_some_and(program_has_top_level_await)
+        }
+        Statement::With { object, body }
+        | Statement::While { test: object, body }
+        | Statement::DoWhile { test: object, body } => {
+            expr_has_top_level_await(object) || program_has_top_level_await(body)
+        }
+        Statement::For {
+            init,
+            test,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(for_init_has_top_level_await)
+                || test.as_deref().is_some_and(expr_has_top_level_await)
+                || update.as_deref().is_some_and(expr_has_top_level_await)
+                || program_has_top_level_await(body)
+        }
+        Statement::ForIn { binding, obj, body } => {
+            for_binding_has_top_level_await(binding)
+                || expr_has_top_level_await(obj)
+                || program_has_top_level_await(body)
+        }
+        Statement::ForOf {
+            binding,
+            iter,
+            body,
+            is_await,
+        } => {
+            *is_await
+                || for_binding_has_top_level_await(binding)
+                || expr_has_top_level_await(iter)
+                || program_has_top_level_await(body)
+        }
+        Statement::Block(body) | Statement::Declarations(body) => program_has_top_level_await(body),
+        Statement::ClassInitialization { fields, .. } => program_has_top_level_await(fields),
+        Statement::ParameterInitialization {
+            initializers,
+            fields,
+            ..
+        } => program_has_top_level_await(initializers) || program_has_top_level_await(fields),
+        Statement::Labeled { body, .. } => statement_has_top_level_await(body),
+        Statement::Try {
+            body,
+            catch,
+            finally,
+        } => {
+            program_has_top_level_await(body)
+                || catch.as_ref().is_some_and(|(pattern, body)| {
+                    pattern.as_ref().is_some_and(pattern_has_top_level_await)
+                        || program_has_top_level_await(body)
+                })
+                || finally.as_deref().is_some_and(program_has_top_level_await)
+        }
+        Statement::Switch { disc, cases } => {
+            expr_has_top_level_await(disc)
+                || cases.iter().any(|case| {
+                    case.test.as_ref().is_some_and(expr_has_top_level_await)
+                        || program_has_top_level_await(&case.body)
+                })
+        }
+        Statement::ExportDefault(expr) => expr_has_top_level_await(expr),
+    }
+}
+
+fn for_init_has_top_level_await(init: &ForInit) -> bool {
+    match init {
+        ForInit::Var { decls, .. } => decls
+            .iter()
+            .any(|(_, init)| init.as_ref().is_some_and(expr_has_top_level_await)),
+        ForInit::Pattern {
+            pattern,
+            init,
+            trailing,
+            ..
+        } => {
+            pattern_has_top_level_await(pattern)
+                || expr_has_top_level_await(init)
+                || trailing
+                    .iter()
+                    .any(|(_, init)| init.as_ref().is_some_and(expr_has_top_level_await))
+        }
+        ForInit::Expr(expr) => expr_has_top_level_await(expr),
+    }
+}
+
+fn for_binding_has_top_level_await(binding: &ForBinding) -> bool {
+    match binding {
+        ForBinding::Declaration {
+            pattern,
+            initializer,
+            ..
+        } => {
+            pattern_has_top_level_await(pattern)
+                || initializer.as_deref().is_some_and(expr_has_top_level_await)
+        }
+        ForBinding::Assignment(expr) => expr_has_top_level_await(expr),
+    }
+}
+
+fn pattern_has_top_level_await(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Elision | Pattern::Ident(_) | Pattern::Rest(_) => false,
+        Pattern::Array(items) => items.iter().any(pattern_has_top_level_await),
+        Pattern::Object(props) => props.iter().any(|(key, pattern)| {
+            matches!(key, PatternKey::Computed(expr) if expr_has_top_level_await(expr))
+                || pattern.as_ref().is_some_and(pattern_has_top_level_await)
+        }),
+        Pattern::Default(pattern, value) => {
+            pattern_has_top_level_await(pattern) || expr_has_top_level_await(value)
+        }
+        Pattern::Member {
+            object, property, ..
+        } => expr_has_top_level_await(object) || expr_has_top_level_await(property),
+    }
+}
+
+fn class_has_top_level_await(members: &[ClassMember]) -> bool {
+    members.iter().any(|member| match member {
+        ClassMember::Method { name, .. }
+        | ClassMember::Getter { name, .. }
+        | ClassMember::Setter { name, .. } => member_name_has_top_level_await(name),
+        ClassMember::Field {
+            name,
+            is_static,
+            init,
+        } => {
+            member_name_has_top_level_await(name)
+                || (*is_static && init.as_ref().is_some_and(expr_has_top_level_await))
+        }
+        ClassMember::StaticBlock { body } => program_has_top_level_await(body),
+    })
+}
+
+fn member_name_has_top_level_await(name: &MemberName) -> bool {
+    matches!(name, MemberName::Computed(expr) if expr_has_top_level_await(expr))
+}
+
+fn expr_has_top_level_await(expr: &Expr) -> bool {
+    match expr {
+        Expr::LegacyLiteral(inner) | Expr::Parenthesized(inner) => expr_has_top_level_await(inner),
+        Expr::Array { items, .. } => items.iter().any(expr_has_top_level_await),
+        Expr::Object { props, .. } => props.iter().any(|prop| match prop {
+            ObjectProp::Shorthand(_) => false,
+            ObjectProp::CoverInitializedName { initializer, .. }
+            | ObjectProp::KeyValue(_, initializer)
+            | ObjectProp::Spread(initializer) => expr_has_top_level_await(initializer),
+            ObjectProp::Computed(key, value) => {
+                expr_has_top_level_await(key) || expr_has_top_level_await(value)
+            }
+            ObjectProp::ComputedMethod { key, .. } => expr_has_top_level_await(key),
+            ObjectProp::Method { .. } | ObjectProp::Getter { .. } | ObjectProp::Setter { .. } => {
+                false
+            }
+        }),
+        Expr::Binary { left, right, .. } => {
+            expr_has_top_level_await(left) || expr_has_top_level_await(right)
+        }
+        Expr::Unary { operand, .. } | Expr::Spread(operand) => expr_has_top_level_await(operand),
+        Expr::Call { callee, args } | Expr::New { callee, args } => {
+            expr_has_top_level_await(callee) || args.iter().any(expr_has_top_level_await)
+        }
+        Expr::Member {
+            object, property, ..
+        }
+        | Expr::OptionalChain {
+            object, property, ..
+        } => expr_has_top_level_await(object) || expr_has_top_level_await(property),
+        Expr::TaggedTemplate { tag, exprs, .. } => {
+            expr_has_top_level_await(tag) || exprs.iter().any(expr_has_top_level_await)
+        }
+        Expr::Assignment { target, value, .. } | Expr::LogicalAssignment { target, value, .. } => {
+            expr_has_top_level_await(target) || expr_has_top_level_await(value)
+        }
+        Expr::Conditional {
+            test,
+            consequent,
+            alternate,
+        } => {
+            expr_has_top_level_await(test)
+                || expr_has_top_level_await(consequent)
+                || expr_has_top_level_await(alternate)
+        }
+        Expr::ArrowFn { .. } | Expr::FnExpr { .. } => false,
+        Expr::ClassExpr {
+            superclass, body, ..
+        } => {
+            superclass.as_deref().is_some_and(expr_has_top_level_await)
+                || class_has_top_level_await(body)
+        }
+        Expr::DynamicImport {
+            specifier, options, ..
+        } => {
+            expr_has_top_level_await(specifier)
+                || options.as_deref().is_some_and(expr_has_top_level_await)
+        }
+        Expr::Template { exprs, .. } => exprs.iter().any(expr_has_top_level_await),
+        Expr::Await(_) => true,
+        Expr::Yield(expr) => expr.as_deref().is_some_and(expr_has_top_level_await),
+        Expr::YieldFrom(expr) => expr_has_top_level_await(expr),
+        Expr::Number(_)
+        | Expr::BigIntLiteral(_)
+        | Expr::String(_)
+        | Expr::EscapedString(_)
+        | Expr::Regex(_, _)
+        | Expr::Bool(_)
+        | Expr::Null
+        | Expr::Undefined
+        | Expr::Elision
+        | Expr::Identifier(_)
+        | Expr::This
+        | Expr::Super
+        | Expr::ImportMeta
+        | Expr::NewTarget => false,
+    }
 }
