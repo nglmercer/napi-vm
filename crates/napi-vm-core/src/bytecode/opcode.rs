@@ -494,7 +494,9 @@ pub enum Instr {
     },
     /// Pop the innermost handler: the protected region completed.
     PopHandler,
-    /// Re-raise the error a handler just landed with, after cleanup ran.
+    /// Discard the completion superseded by a break or continue from cleanup.
+    PopPending,
+    /// Re-raise the innermost pending completion after cleanup ran.
     Rethrow,
     /// `dst` = `super[key]`: a lookup on the superclass prototype from
     /// the enclosing method's scope (an error outside one).
@@ -710,6 +712,7 @@ pub enum Opcode {
     PushCatch,
     PushFinally,
     PopHandler,
+    PopPending,
     Rethrow,
     SuperMember,
     SuperReference,
@@ -818,6 +821,7 @@ impl Instr {
             Instr::PushCatch { .. } => Opcode::PushCatch,
             Instr::PushFinally { .. } => Opcode::PushFinally,
             Instr::PopHandler => Opcode::PopHandler,
+            Instr::PopPending => Opcode::PopPending,
             Instr::Rethrow => Opcode::Rethrow,
             Instr::SuperMember { .. } => Opcode::SuperMember,
             Instr::SuperReference { .. } => Opcode::SuperReference,
@@ -1113,6 +1117,7 @@ impl fmt::Display for Instr {
             Instr::PushCatch { target, dst } => write!(f, "PUSH_CATCH @{target}, r{dst}"),
             Instr::PushFinally { target, dst } => write!(f, "PUSH_FINALLY @{target}, r{dst}"),
             Instr::PopHandler => write!(f, "POP_HANDLER"),
+            Instr::PopPending => write!(f, "POP_PENDING"),
             Instr::Rethrow => write!(f, "RETHROW"),
             Instr::SuperMember { dst, key } => write!(f, "SUPER_MEMBER r{dst}, r{key}"),
             Instr::SuperReference {

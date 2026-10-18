@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-18",
+  "source_base": "ad0581dd279ca3688008d6c764f18b185a19157b",
+  "test262_revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "4435959ee9ec63c49b961b604ff11c7a3e83d17f5949d1cbf038d70118668fec",
+  "implementation_patch_sha256": "a4866930359adce87ca2bd7ab36ba5ada1b349bd433beca7e5dade16979d83b0",
+  "selection": [
+    "language/statements/switch",
+    "language/statements/while",
+    "language/statements/do-while",
+    "language/statements/for",
+    "language/statements/for-in",
+    "language/statements/for-of",
+    "language/statements/if",
+    "language/statements/try",
+    "language/statements/with",
+    "language/statements/block",
+    "language/statements/labeled",
+    "language/statements/break",
+    "language/statements/continue",
+    "language/expressions/typeof",
+    "language/expressions/object"
+  ],
+  "total": 5908,
+  "counts": {
+    "pass": 5897,
+    "fail": 11,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": 4,
+  "losses": 0,
+  "validation": {
+    "finally_integration_tests": 11,
+    "neighbor_integration_tests": 30,
+    "selected_bytecode_tests": 79,
+    "bytecode_exclusion": "super_destructuring_tags_and_delete_keep_tier_parity (pre-existing failure)",
+    "strict_workspace_clippy": "pass",
+    "format": "pass"
+  },
+  "full_snapshot": "d8d1652; focused gains are not added to full score"
+}

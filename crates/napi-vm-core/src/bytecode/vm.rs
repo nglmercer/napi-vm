@@ -47,7 +47,8 @@ pub struct CallFrame<'a> {
     pub slots: Vec<RunSlot>,
     pub this_value: Value,
     handlers: Vec<HandlerEntry>,
-    pending: Option<VmErr>,
+    /// Suspended completions belonging to active exceptional cleanup pads.
+    pending: Vec<VmErr>,
     /// Pushed block scopes holding captured bindings, innermost last. The
     /// stack dies with the frame, so abrupt exits need no scope cleanup of
     /// their own — only handler jumps truncate it, to the depth the handler
@@ -59,12 +60,14 @@ pub struct CallFrame<'a> {
 /// `dst` receives the catch value (catch handlers), `catch_returns`
 /// selects finally handlers, which also intercept `return` unwinding.
 /// `scope_depth` truncates `scopes` on interception, popping the block
-/// scopes the abrupt exit crossed.
+/// scopes the abrupt exit crossed. `pending_depth` preserves enclosing cleanup
+/// completions while discarding any cleanup pads the exit crosses.
 struct HandlerEntry {
     target: u32,
     dst: Reg,
     catch_returns: bool,
     scope_depth: usize,
+    pending_depth: usize,
 }
 
 impl<'a> CallFrame<'a> {
@@ -118,7 +121,7 @@ impl<'a> CallFrame<'a> {
             slots,
             this_value,
             handlers: Vec::new(),
-            pending: None,
+            pending: Vec::new(),
             scopes: Vec::new(),
         }
     }
@@ -1122,7 +1125,7 @@ fn run_loop(
                 Instr::CloseIterator { src, unwind } => {
                     let iterator = frame.registers[src as usize].clone_for_execution();
                     if unwind {
-                        let completion = frame.pending.as_ref().ok_or_else(|| {
+                        let completion = frame.pending.last().ok_or_else(|| {
                             internal("iterator unwind without a pending completion")
                         })?;
                         interp.close_guest_iterator_for_abrupt(&iterator, false, completion)?;
@@ -1137,6 +1140,7 @@ fn run_loop(
                         dst,
                         catch_returns: false,
                         scope_depth,
+                        pending_depth: frame.pending.len(),
                     });
                 }
                 Instr::PushFinally { target, dst } => {
@@ -1146,6 +1150,7 @@ fn run_loop(
                         dst,
                         catch_returns: true,
                         scope_depth,
+                        pending_depth: frame.pending.len(),
                     });
                 }
                 Instr::PushScope => {
@@ -1164,7 +1169,13 @@ fn run_loop(
                         return Err(internal("handler stack underflow"));
                     }
                 }
-                Instr::Rethrow => match frame.pending.take() {
+                Instr::PopPending => {
+                    frame
+                        .pending
+                        .pop()
+                        .ok_or_else(|| internal("pending completion stack underflow"))?;
+                }
+                Instr::Rethrow => match frame.pending.pop() {
                     Some(error) => return Err(error),
                     None => return Err(internal("rethrow without a pending error")),
                 },
@@ -1398,7 +1409,10 @@ fn land_handler(
         _ => unreachable!("filtered above"),
     };
     frame.registers[entry.dst as usize] = value;
-    frame.pending = Some(error);
+    frame.pending.truncate(entry.pending_depth);
+    if entry.catch_returns {
+        frame.pending.push(error);
+    }
     frame.scopes.truncate(entry.scope_depth);
     frame.ip = entry.target as usize;
     Ok(())

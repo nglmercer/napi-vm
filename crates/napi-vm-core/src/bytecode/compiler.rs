@@ -304,6 +304,7 @@ enum UnwindCtx<'a> {
         close_iter: Option<Reg>,
     },
     Scope,
+    Pending,
 }
 
 /// What a [`LoopCtx`] entry accepts: loops take both `break` and
@@ -2457,7 +2458,8 @@ impl<'a> Compiler<'a> {
 
     /// Inline the cleanups a break/continue crosses when leaving the
     /// protected regions above `depth`: `for-of` closes and `finally`
-    /// bodies innermost-first, then one handler pop per crossed region.
+    /// bodies innermost-first. Pop each handler before its cleanup so
+    /// cleanup errors cannot land in the same protected region again.
     /// `return` needs none of this: it unwinds as an error the VM handlers
     /// intercept.
     fn duplicate_unwind(&mut self, depth: usize) -> Result<(), Decline> {
@@ -2469,11 +2471,16 @@ impl<'a> Compiler<'a> {
                     self.emit(Instr::PopScope);
                     continue;
                 }
+                UnwindCtx::Pending => {
+                    self.emit(Instr::PopPending);
+                    continue;
+                }
                 UnwindCtx::Handler {
                     finally,
                     close_iter,
                 } => (*finally, *close_iter),
             };
+            self.emit(Instr::PopHandler);
             if let Some(iter) = close_iter {
                 self.emit(Instr::CloseIterator {
                     src: iter,
@@ -2490,7 +2497,6 @@ impl<'a> Compiler<'a> {
                 self.compile_finally_body(body)?;
                 self.unwind.append(&mut crossed);
             }
-            self.emit(Instr::PopHandler);
         }
         Ok(())
     }
@@ -2615,7 +2621,9 @@ impl<'a> Compiler<'a> {
         let end = self.emit_jump(|target| Instr::Jump { target });
         let finally_pad = self.here();
         if let Some(body) = finally.as_deref() {
+            self.unwind.push(UnwindCtx::Pending);
             self.compile_finally_body(body)?;
+            self.unwind.pop();
             self.emit(Instr::Rethrow);
         }
         let done = self.here();
@@ -2973,11 +2981,11 @@ impl<'a> Compiler<'a> {
         let drained = self.here();
         let end_jump = self.emit_jump(|target| Instr::Jump { target });
         let close_pad = self.here();
+        self.emit(Instr::PopHandler);
         self.emit(Instr::CloseIterator {
             src: iterator,
             unwind: false,
         });
-        self.emit(Instr::PopHandler);
         let over_pad = self.emit_jump(|target| Instr::Jump { target });
         self.patch_jump(unwind_pad, self.here())?;
         self.emit(Instr::CloseIterator {

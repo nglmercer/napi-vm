@@ -545,6 +545,8 @@ collection changes remain outside the full score; see the
 
 Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes remain outside the completed full score. See the [lexical scope continuation](docs/test262-lexical-scopes-continuation.md).
 
+Nested finally completions subsequently pass **5,897 / 5,908** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [finally completion continuation](docs/test262-finally-completions-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

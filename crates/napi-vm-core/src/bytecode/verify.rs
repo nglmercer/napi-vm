@@ -722,7 +722,7 @@ impl Checker<'_> {
                 self.check_target(address, *target)?;
                 self.check_reg(address, *dst)?;
             }
-            Instr::PopHandler | Instr::Rethrow => {}
+            Instr::PopHandler | Instr::PopPending | Instr::Rethrow => {}
             Instr::SuperMember { dst, key } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *key)?;
