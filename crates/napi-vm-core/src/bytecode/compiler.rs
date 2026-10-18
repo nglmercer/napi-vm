@@ -305,6 +305,7 @@ enum UnwindCtx<'a> {
     },
     Scope,
     Pending,
+    Enumerator(Reg),
 }
 
 /// What a [`LoopCtx`] entry accepts: loops take both `break` and
@@ -2471,6 +2472,11 @@ impl<'a> Compiler<'a> {
                     self.emit(Instr::PopScope);
                     continue;
                 }
+                UnwindCtx::Enumerator(state) => {
+                    let state = *state;
+                    self.emit(Instr::EnumEnd { state });
+                    continue;
+                }
                 UnwindCtx::Pending => {
                     self.emit(Instr::PopPending);
                     continue;
@@ -2753,8 +2759,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// `for (name in obj)`. Keys snapshot once up front; each iteration
-    /// binds the key and runs the body, like the evaluator.
+    /// `for (name in obj)` shares a lazy descriptor-aware enumerator with AST.
     fn compile_for_in(
         &mut self,
         name: &'a str,
@@ -2774,20 +2779,7 @@ impl<'a> Compiler<'a> {
             dst: keys,
             src: source,
         });
-        let length_key = self.intern_string("length")?;
-        let length_key = self.load_const(length_key)?;
-        let len = self.alloc_reg()?;
-        self.emit(Instr::GetProp {
-            private: false,
-            cache: 0,
-            dst: len,
-            obj: keys,
-            key: length_key,
-        });
-        let zero = self.intern_number(0.0)?;
-        let idx = self.load_const(zero)?;
-        let one = self.intern_number(1.0)?;
-        let one = self.load_const(one)?;
+        self.unwind.push(UnwindCtx::Enumerator(keys));
         let loop_value = self.alloc_reg()?;
         let undef = self.load_undefined()?;
         self.emit(Instr::Mov {
@@ -2796,14 +2788,14 @@ impl<'a> Compiler<'a> {
         });
         let top = self.here();
         self.emit(Instr::LoopHead);
-        let cond = self.alloc_reg()?;
-        self.emit(Instr::Binary {
-            dst: cond,
-            op: BinOp::Lt,
-            lhs: idx,
-            rhs: len,
+        let key = self.alloc_reg()?;
+        let done = self.alloc_reg()?;
+        self.emit(Instr::EnumNext {
+            state: keys,
+            dst: key,
+            done,
         });
-        let end_jump = self.emit_jump(|target| Instr::JumpIfFalse { src: cond, target });
+        let end_jump = self.emit_jump(|target| Instr::JumpIfTrue { src: done, target });
         self.loops.push(LoopCtx {
             labels: std::mem::take(&mut self.pending_labels),
             cleanup_depth: self.unwind.len(),
@@ -2813,14 +2805,6 @@ impl<'a> Compiler<'a> {
         self.completions.push(CompletionRegs {
             value: loop_value,
             present: None,
-        });
-        let key = self.alloc_reg()?;
-        self.emit(Instr::GetProp {
-            private: false,
-            cache: 0,
-            dst: key,
-            obj: keys,
-            key: idx,
         });
         self.reset_iteration_head(&names, kind)?;
         self.bind_for_head(&head, key, kind);
@@ -2833,17 +2817,6 @@ impl<'a> Compiler<'a> {
             self.completion_regs(body_value),
         )?;
         let increment = self.here();
-        let next = self.alloc_reg()?;
-        self.emit(Instr::Binary {
-            dst: next,
-            op: BinOp::Add,
-            lhs: idx,
-            rhs: one,
-        });
-        self.emit(Instr::Mov {
-            dst: idx,
-            src: next,
-        });
         self.emit(Instr::Jump {
             target: addr_target(top)?,
         });
@@ -2855,6 +2828,8 @@ impl<'a> Compiler<'a> {
         let end = self.here();
         self.patch_jump(end_jump, end)?;
         self.finish_loop(ctx, increment, end)?;
+        self.emit(Instr::EnumEnd { state: keys });
+        self.unwind.pop();
         if *kind != VarKind::Var {
             self.pop_scope()?;
         }

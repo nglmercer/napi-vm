@@ -49,6 +49,7 @@ pub struct CallFrame<'a> {
     handlers: Vec<HandlerEntry>,
     /// Suspended completions belonging to active exceptional cleanup pads.
     pending: Vec<VmErr>,
+    enumerators: Vec<(Reg, crate::interpreter::for_in::ForInEnumerator)>,
     /// Pushed block scopes holding captured bindings, innermost last. The
     /// stack dies with the frame, so abrupt exits need no scope cleanup of
     /// their own — only handler jumps truncate it, to the depth the handler
@@ -68,6 +69,7 @@ struct HandlerEntry {
     catch_returns: bool,
     scope_depth: usize,
     pending_depth: usize,
+    enumerator_depth: usize,
 }
 
 impl<'a> CallFrame<'a> {
@@ -122,6 +124,7 @@ impl<'a> CallFrame<'a> {
             this_value,
             handlers: Vec::new(),
             pending: Vec::new(),
+            enumerators: Vec::new(),
             scopes: Vec::new(),
         }
     }
@@ -1090,12 +1093,33 @@ fn run_loop(
                 }
                 Instr::EnumKeys { dst, src } => {
                     let source = frame.registers[src as usize].clone_for_execution();
-                    let keys = interp.keys_with_proxy_trap(&source)?;
-                    frame.registers[dst as usize] = Value::array(
-                        keys.into_iter()
-                            .map(|value| Value::String(crate::JsString::from_key(&value)))
-                            .collect(),
-                    );
+                    frame.enumerators.push((
+                        dst,
+                        crate::interpreter::for_in::ForInEnumerator::new(&source)?,
+                    ));
+                }
+                Instr::EnumNext { state, dst, done } => {
+                    let (register, enumerator) = frame
+                        .enumerators
+                        .last_mut()
+                        .ok_or_else(|| internal("missing for-in enumerator"))?;
+                    if *register != state {
+                        return Err(internal("for-in enumerator mismatch"));
+                    }
+                    let key = enumerator.next(interp)?;
+                    frame.registers[done as usize] = Value::Bool(key.is_none());
+                    frame.registers[dst as usize] = key.map_or(Value::Undefined, |key| {
+                        Value::String(crate::JsString::from_key(&key))
+                    });
+                }
+                Instr::EnumEnd { state } => {
+                    let (register, _) = frame
+                        .enumerators
+                        .pop()
+                        .ok_or_else(|| internal("missing for-in enumerator"))?;
+                    if register != state {
+                        return Err(internal("for-in enumerator mismatch"));
+                    }
                 }
                 Instr::ForOfInit { iter, next, src } => {
                     let source = frame.registers[src as usize].clone_for_execution();
@@ -1141,6 +1165,7 @@ fn run_loop(
                         catch_returns: false,
                         scope_depth,
                         pending_depth: frame.pending.len(),
+                        enumerator_depth: frame.enumerators.len(),
                     });
                 }
                 Instr::PushFinally { target, dst } => {
@@ -1151,6 +1176,7 @@ fn run_loop(
                         catch_returns: true,
                         scope_depth,
                         pending_depth: frame.pending.len(),
+                        enumerator_depth: frame.enumerators.len(),
                     });
                 }
                 Instr::PushScope => {
@@ -1410,6 +1436,7 @@ fn land_handler(
     };
     frame.registers[entry.dst as usize] = value;
     frame.pending.truncate(entry.pending_depth);
+    frame.enumerators.truncate(entry.enumerator_depth);
     if entry.catch_returns {
         frame.pending.push(error);
     }

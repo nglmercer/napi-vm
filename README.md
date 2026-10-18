@@ -547,6 +547,8 @@ Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5
 
 Nested finally completions subsequently pass **5,897 / 5,908** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [finally completion continuation](docs/test262-finally-completions-continuation.md).
 
+Descriptor-aware for-in enumeration subsequently pass **6,498 / 6,515** selected variants, gaining **2 passes with zero losses**. These changes remain outside the completed full score. See the [for-in enumeration continuation](docs/test262-for-in-enumeration-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

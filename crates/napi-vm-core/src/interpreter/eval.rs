@@ -2181,11 +2181,11 @@ impl Interpreter {
             self.destructure(pattern, &value)?;
         }
         let o = self.eval_expr(obj)?;
-        let ks = self.keys_with_proxy_trap(&o)?;
+        let mut enumerator = super::for_in::ForInEnumerator::new(&o)?;
         let body_needs_scope = block_needs_lexical_scope(body);
         let mut r = Value::Undefined;
         let label = self.active_label.take();
-        for k in ks {
+        while let Some(k) = enumerator.next(self)? {
             self.consume_loop()?;
             self.enter_iteration_binding_scope(binding);
             self.assign_iteration_binding(binding, &Value::String(k.into()))?;

@@ -620,5 +620,40 @@
     "source_base": "ad0581dd279ca3688008d6c764f18b185a19157b",
     "implementation_patch_sha256": "a4866930359adce87ca2bd7ab36ba5ada1b349bd433beca7e5dade16979d83b0",
     "evidence": "evidence/finally-completions-2026-10-18/focused.json.gz"
+  },
+  "for_in_enumeration_focused": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue",
+      "language/expressions/typeof",
+      "language/expressions/object",
+      "built-ins/Proxy"
+    ],
+    "engine_sha256": "dde1b0827cae66540337152c74bedc5bab5498e6a35a23301ce8fdfb01a759e7",
+    "total": 6515,
+    "counts": {
+      "pass": 6498,
+      "fail": 17,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 2,
+    "losses": 0,
+    "source_base": "672c721cb97d0c88adab609cc36e75f65e389c49",
+    "implementation_patch_sha256": "34348e32ffb302717bf7f48d9e1799abcc2810c4719894f186259dceb5ce25b2",
+    "evidence": "evidence/for-in-enumeration-2026-10-18/focused.json.gz"
   }
 }

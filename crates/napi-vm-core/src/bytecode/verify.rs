@@ -699,6 +699,14 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *src)?;
             }
+            Instr::EnumNext { state, dst, done } => {
+                self.check_reg(address, *state)?;
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *done)?;
+            }
+            Instr::EnumEnd { state } => {
+                self.check_reg(address, *state)?;
+            }
             Instr::ForOfInit { iter, next, src } => {
                 self.check_reg(address, *iter)?;
                 self.check_reg(address, *next)?;

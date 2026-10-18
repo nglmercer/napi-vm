@@ -7,6 +7,7 @@ pub(crate) mod annex;
 pub mod commonjs;
 mod env;
 mod eval;
+pub(crate) mod for_in;
 pub mod jobs;
 mod module_link;
 mod module_realm;
@@ -3180,43 +3181,13 @@ impl Interpreter {
         Ok(keys)
     }
 
+    #[cfg(all(
+        feature = "node-api-host",
+        any(target_os = "linux", target_os = "macos", target_os = "windows")
+    ))]
     pub(crate) fn keys_with_proxy_trap(&mut self, value: &Value) -> Result<Vec<String>, VmErr> {
-        if !matches!(value, Value::Proxy(_)) {
-            // `for-in` enumerates inherited enumerable string keys as well:
-            // walk the prototype chain. Every own key marks its name visited
-            // (so a non-enumerable own property still shadows an inherited
-            // enumerable of the same name); only enumerable keys are emitted.
-            if matches!(value, Value::Null | Value::Undefined) {
-                return Ok(Vec::new());
-            }
-            let mut seen = std::collections::HashSet::new();
-            let mut names = Vec::new();
-            let mut current = crate::builtins::object::to_object_receiver(value)?;
-            for _ in 0..crate::value::MAX_PROTOTYPE_DEPTH {
-                for key in self.own_property_keys(&current)? {
-                    let Value::String(name) = &key else {
-                        continue;
-                    };
-                    let name = name.to_key();
-                    if !seen.insert(name.clone()) {
-                        continue;
-                    }
-                    let descriptor =
-                        crate::builtins::object::descriptor_for_key_in(self, &current, &key)?;
-                    if descriptor
-                        .get_prop("enumerable")
-                        .is_some_and(|value| value.is_truthy())
-                    {
-                        names.push(name);
-                    }
-                }
-                match self.prototype_of(&current) {
-                    Some(parent) => current = parent.as_ref().clone(),
-                    None => break,
-                }
-            }
-            return Ok(names);
-        }
+        // Node-API's caller walks prototypes itself and filters against each
+        // target's descriptors, so return only this object's own keys here.
         let mut names = Vec::new();
         for key in self.own_property_keys(value)? {
             if let Value::String(name) = &key {

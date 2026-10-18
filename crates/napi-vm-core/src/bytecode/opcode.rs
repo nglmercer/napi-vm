@@ -448,11 +448,20 @@ pub enum Instr {
         src: Reg,
         taken: Reg,
     },
-    /// `dst` = own enumerable keys of `src` as a string array (proxy traps
-    /// honored). Drives `for-in`.
+    /// Start a private for-in enumerator identified by `dst`.
     EnumKeys {
         dst: Reg,
         src: Reg,
+    },
+    /// Advance a private enumerator; set `done` or produce a string in `dst`.
+    EnumNext {
+        state: Reg,
+        dst: Reg,
+        done: Reg,
+    },
+    /// Release the innermost private enumerator.
+    EnumEnd {
+        state: Reg,
     },
     /// Initialize `for-of`: `iter` = the iterator for `src`,
     /// `next` = its `next` method (an error when absent).
@@ -706,6 +715,8 @@ pub enum Opcode {
     CheckDestructObject,
     RestObject,
     EnumKeys,
+    EnumNext,
+    EnumEnd,
     ForOfInit,
     IterNext,
     CloseIterator,
@@ -815,6 +826,8 @@ impl Instr {
             Instr::CheckDestructObject { .. } => Opcode::CheckDestructObject,
             Instr::RestObject { .. } => Opcode::RestObject,
             Instr::EnumKeys { .. } => Opcode::EnumKeys,
+            Instr::EnumNext { .. } => Opcode::EnumNext,
+            Instr::EnumEnd { .. } => Opcode::EnumEnd,
             Instr::ForOfInit { .. } => Opcode::ForOfInit,
             Instr::IterNext { .. } => Opcode::IterNext,
             Instr::CloseIterator { .. } => Opcode::CloseIterator,
@@ -1100,6 +1113,10 @@ impl fmt::Display for Instr {
                 write!(f, "REST_OBJECT r{dst}, r{src}, r{taken}")
             }
             Instr::EnumKeys { dst, src } => write!(f, "ENUM_KEYS r{dst}, r{src}"),
+            Instr::EnumNext { state, dst, done } => {
+                write!(f, "ENUM_NEXT r{state}, r{dst}, r{done}")
+            }
+            Instr::EnumEnd { state } => write!(f, "ENUM_END r{state}"),
             Instr::ForOfInit { iter, next, src } => {
                 write!(f, "FOR_OF_INIT r{iter}, r{next}, r{src}")
             }
