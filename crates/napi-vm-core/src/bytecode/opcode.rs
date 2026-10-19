@@ -111,6 +111,10 @@ pub enum Instr {
         dst: Reg,
         name: u16,
     },
+    /// Reject static method/accessor keys that cannot replace prototype.
+    CheckClassStaticKey {
+        key: Reg,
+    },
     /// Resolve an identifier callee and its environment receiver once.
     LoadCallBinding {
         dst: Reg,
@@ -668,6 +672,7 @@ pub enum Opcode {
     BareVarGlobal,
     LoadGlobal,
     LoadCallBinding,
+    CheckClassStaticKey,
     StoreGlobal,
     ResolveAssignmentBinding,
     ReadAssignmentBinding,
@@ -780,6 +785,7 @@ impl Instr {
             Instr::BareVarGlobal { .. } => Opcode::BareVarGlobal,
             Instr::LoadGlobal { .. } => Opcode::LoadGlobal,
             Instr::LoadCallBinding { .. } => Opcode::LoadCallBinding,
+            Instr::CheckClassStaticKey { .. } => Opcode::CheckClassStaticKey,
             Instr::StoreGlobal { .. } => Opcode::StoreGlobal,
             Instr::ResolveAssignmentBinding { .. } => Opcode::ResolveAssignmentBinding,
             Instr::ReadAssignmentBinding { .. } => Opcode::ReadAssignmentBinding,
@@ -926,6 +932,7 @@ impl fmt::Display for Instr {
             Instr::BareVarLocal { slot } => write!(f, "BARE_VAR_LOCAL s{slot}"),
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
             Instr::LoadGlobal { dst, name } => write!(f, "LOAD_GLOBAL r{dst}, c{name}"),
+            Instr::CheckClassStaticKey { key } => write!(f, "CHECK_CLASS_STATIC_KEY r{key}"),
             Instr::LoadCallBinding {
                 dst,
                 receiver,

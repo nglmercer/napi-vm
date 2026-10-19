@@ -390,6 +390,7 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *name, "string")?;
             }
+            Instr::CheckClassStaticKey { key } => self.check_reg(address, *key)?,
             Instr::LoadCallBinding {
                 dst,
                 receiver,

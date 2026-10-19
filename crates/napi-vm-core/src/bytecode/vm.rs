@@ -522,6 +522,9 @@ fn run_loop(
                     slot.value = value;
                     slot.initialized = true;
                 }
+                Instr::CheckClassStaticKey { key } => {
+                    Interpreter::check_static_method_key(&frame.registers[key as usize])?
+                }
                 Instr::LoadCallBinding {
                     dst,
                     receiver,
@@ -1604,6 +1607,15 @@ fn build_class_from_template(
                 frame.registers[*reg as usize].clone_for_execution()
             }
         };
+        if member.is_static
+            && !matches!(member.name, ClassNameTemplate::Private(_))
+            && matches!(
+                member.kind,
+                ClassMemberKind::Method | ClassMemberKind::Getter | ClassMemberKind::Setter
+            )
+        {
+            Interpreter::check_static_method_key(&property)?;
+        }
         let key = interp.property_key(&property)?;
         let display_name = interp.property_function_name(&property)?;
         if !matches!(member.name, ClassNameTemplate::Private(_)) {

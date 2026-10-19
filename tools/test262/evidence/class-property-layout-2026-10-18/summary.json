@@ -1,0 +1,38 @@
+{
+  "source_base": "3705f74180a55a1157f8be2ae604ef082c537106",
+  "baseline_source": "63a4dda",
+  "engine_sha256": "c3d28437e3b2bbcf8d14eab430c828099fc1a9b099d93113e51edfa742c0d82c",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "language/expressions/class",
+    "language/statements/class",
+    "language/computed-property-names",
+    "language/expressions/object"
+  ],
+  "implementation_patch_sha256": "e19ff4ea2be1faeb107089bf56b3ca0a6cbdbd9de5e57b9eab9a0a98203b4838",
+  "total": 19037,
+  "counts": {
+    "pass": 18986,
+    "fail": 51,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": 38,
+  "losses": 0,
+  "validation": {
+    "class_layout_tests": 7,
+    "targeted_integration_tests": 39,
+    "bytecode_tests_without_exclusions": 80,
+    "class_home_object_tests": 11,
+    "strict_workspace_clippy": "pass",
+    "format": "pass",
+    "core_library": "363 passed, 1 native-addon failure, excessive-depth stack-overflow test excluded"
+  },
+  "limitations": [
+    "Full-suite score still measures 997b476.",
+    "The later promise host-work propagation change is not included in this worker or patch.",
+    "The native-addon bridge gate remains unresolved; see continuation document."
+  ]
+}

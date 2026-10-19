@@ -560,6 +560,8 @@ Async generator delegation subsequently passes **2,858 / 2,858** selected varian
 
 Canonical numeric property keys subsequently pass **2,702 / 2,729** selected variants, gaining **10 passes with zero losses**. All 2,252 object-expression variants pass. These changes remain outside the completed full score. See the [numeric key continuation](docs/test262-numeric-property-keys-continuation.md).
 
+Class property layout subsequently passes **18,986 / 19,037** selected variants, gaining **38 passes with zero losses**. All computed-name and object-expression variants pass. This remains outside the completed full score. See the [class layout continuation](docs/test262-class-property-layout-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

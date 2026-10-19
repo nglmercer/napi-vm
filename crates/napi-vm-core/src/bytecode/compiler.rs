@@ -2028,6 +2028,7 @@ impl<'a> Compiler<'a> {
                     is_generator,
                 } => {
                     let template = self.compile_member_name(member_name)?;
+                    self.check_static_method_key(&template, *st)?;
                     // Only a written-out `constructor` is the constructor,
                     // like the evaluator; a computed "constructor" stays a
                     // plain method.
@@ -2104,6 +2105,7 @@ impl<'a> Compiler<'a> {
                     body: getter_body,
                 } => {
                     let template = self.compile_member_name(member_name)?;
+                    self.check_static_method_key(&template, *st)?;
                     let display = match &template {
                         ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
                             Some(format!("get {key}"))
@@ -2140,6 +2142,7 @@ impl<'a> Compiler<'a> {
                     body: setter_body,
                 } => {
                     let template = self.compile_member_name(member_name)?;
+                    self.check_static_method_key(&template, *st)?;
                     let display = match &template {
                         ClassNameTemplate::Static(key) | ClassNameTemplate::Private(key) => {
                             Some(format!("set {key}"))
@@ -2262,6 +2265,29 @@ impl<'a> Compiler<'a> {
             });
         }
         Ok(dst)
+    }
+
+    fn check_static_method_key(
+        &mut self,
+        key: &ClassNameTemplate,
+        is_static: bool,
+    ) -> Result<(), Decline> {
+        if !is_static {
+            return Ok(());
+        }
+        let key = match key {
+            ClassNameTemplate::Private(_) => return Ok(()),
+            ClassNameTemplate::Computed(reg) => *reg,
+            ClassNameTemplate::Static(name) => {
+                if name != "prototype" {
+                    return Ok(());
+                }
+                let index = self.intern_string(name)?;
+                self.load_const(index)?
+            }
+        };
+        self.emit(Instr::CheckClassStaticKey { key });
+        Ok(())
     }
 
     /// A member name as written, or compiled and coerced when computed.

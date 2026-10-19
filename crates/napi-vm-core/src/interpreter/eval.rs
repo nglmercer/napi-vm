@@ -469,6 +469,15 @@ impl Interpreter {
         Rc::new(RefCell::new(Environment::child(global.clone())))
     }
 
+    pub(crate) fn check_static_method_key(key: &Value) -> Result<(), VmErr> {
+        if matches!(key, Value::String(name) if name == "prototype") {
+            return Err(VmErr::Msg(
+                "TypeError: Cannot redefine class prototype".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Assemble a class value from evaluated parts: the constructor and
     /// the gathered prototype/static members. The member walk (name
     /// evaluation, function building, constructor detection) stays with
@@ -480,7 +489,7 @@ impl Interpreter {
             super_proto,
             constructor,
             constructor_length,
-            proto_props,
+            mut proto_props,
             proto_keys,
             static_keys,
             mut statics,
@@ -494,6 +503,13 @@ impl Interpreter {
             private_statics,
         } = asm;
         let has_constructor_member = proto_props.iter().any(|(key, _)| key == "constructor");
+        let constructor_property =
+            if let Some(index) = proto_props.iter().position(|(key, _)| key == "constructor") {
+                proto_props.remove(index)
+            } else {
+                ("constructor".into(), constructor.clone())
+            };
+        proto_props.insert(0, constructor_property);
         let prototype_has_accessors = proto_props.iter().any(|(key, value)| key.starts_with("__setter:") || matches!(value, Value::Function(function) if function.name.as_deref().is_some_and(|name| name.starts_with("get ") || name.starts_with("set "))));
         let super_proto = if super_cls.is_none() && super_proto.is_none() {
             self.persistent_global
@@ -528,27 +544,46 @@ impl Interpreter {
             prototype.set_prop("constructor".to_string(), constructor.clone())?;
         }
 
-        statics.push((
-            "length".to_owned(),
-            Value::Number(constructor_length as f64),
-        ));
-        static_attrs.push((
-            "length".to_owned(),
-            PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            },
-        ));
-        statics.push(("prototype".to_owned(), prototype.clone()));
-        static_attrs.push((
-            "prototype".to_owned(),
-            PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: false,
-            },
-        ));
+        // Built-in constructor properties precede user definitions. Existing
+        // methods named length/name replace the values without moving them.
+        let mut ordered = vec![
+            (
+                "length".to_owned(),
+                Value::Number(constructor_length as f64),
+            ),
+            ("name".to_owned(), Value::String(name.clone().into())),
+            ("prototype".to_owned(), prototype.clone()),
+        ];
+        for (key, value) in statics {
+            if let Some((_, existing)) = ordered.iter_mut().find(|(name, _)| name == &key) {
+                *existing = value;
+            } else {
+                ordered.push((key, value));
+            }
+        }
+        statics = ordered;
+        static_attrs.insert(
+            0,
+            (
+                "length".to_owned(),
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            ),
+        );
+        static_attrs.insert(
+            0,
+            (
+                "prototype".to_owned(),
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            ),
+        );
         let static_properties =
             crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(statics)));
         if let Some(superclass) = &super_cls
@@ -750,6 +785,9 @@ impl Interpreter {
                     is_generator,
                 } => {
                     let key = self.class_member_name(&member_scope, name)?;
+                    if *st && !matches!(name, MemberName::Private(_)) {
+                        Self::check_static_method_key(&key)?;
+                    }
                     let mname = self.property_key(&key)?;
                     let display_name = self.property_function_name(&key)?;
                     if !matches!(name, MemberName::Private(_)) {
@@ -854,6 +892,9 @@ impl Interpreter {
                     body: gb,
                 } => {
                     let key = self.class_member_name(&member_scope, name)?;
+                    if *st && !matches!(name, MemberName::Private(_)) {
+                        Self::check_static_method_key(&key)?;
+                    }
                     let gname = self.property_key(&key)?;
                     let display_name = self.property_function_name(&key)?;
                     if !matches!(name, MemberName::Private(_)) {
@@ -921,6 +962,9 @@ impl Interpreter {
                     body: sb,
                 } => {
                     let key = self.class_member_name(&member_scope, name)?;
+                    if *st && !matches!(name, MemberName::Private(_)) {
+                        Self::check_static_method_key(&key)?;
+                    }
                     let sname = self.property_key(&key)?;
                     let display_name = self.property_function_name(&key)?;
                     if !matches!(name, MemberName::Private(_)) {
