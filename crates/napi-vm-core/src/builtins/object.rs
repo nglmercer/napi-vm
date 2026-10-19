@@ -433,6 +433,13 @@ fn accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
 }
 
 fn accessor_kind_for(target: &Value, key: &str, value: &Value) -> Option<&'static str> {
+    // Accessor descriptors may explicitly contain `undefined`; in that case
+    // the callable-name encoding is unavailable. The setter companion still
+    // proves that this slot is an accessor pair.
+    let companion = format!("__setter:{key}__");
+    if cell(target).is_some_and(|props| props.own_value(&companion).is_some()) {
+        return Some("set");
+    }
     let symbol = match target {
         Value::Array(array) => array.meta.borrow().symbol_key(key),
         _ => cell(target).and_then(|cell| cell.meta.borrow().symbol_key(key)),
