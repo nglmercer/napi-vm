@@ -395,3 +395,36 @@ fn for_await_waits_for_generator_cleanup_before_leaving() {
         "body,cleanup,finished,closed"
     );
 }
+
+#[test]
+fn async_delegation_preserves_promise_valued_steps() {
+    assert_eq!(
+        run(
+            "var promise=Promise.resolve(7),result;var iterator={[Symbol.asyncIterator](){return this;},next(){return {done:false,value:promise};}};async function* f(){yield* iterator;}f().next().then(r=>result=r.value===promise);",
+            "String(result)"
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn async_delegation_awaits_return_before_getting_the_method() {
+    assert_eq!(
+        run(
+            "var log=[];var iterator={[Symbol.asyncIterator](){return this;},next(){return {done:false,value:1};},get return(){log.push('return');return function(v){log.push('value:'+v);return {done:true,value:v};};}};async function* f(){yield* iterator;}var g=f();g.next();g.return({then(resolve){log.push('then');resolve(9);}}).then(r=>log.push('done:'+r.value));",
+            "log.join(',')"
+        ),
+        "then,return,value:9,done:9"
+    );
+}
+
+#[test]
+fn rejected_delegation_return_is_caught_before_method_lookup() {
+    assert_eq!(
+        run(
+            "var log=[],iterator={[Symbol.asyncIterator](){return this;},next(){return {done:false,value:1};},get return(){log.push('unexpected return');}};async function* f(){try{yield* iterator;}catch(e){yield 'caught:'+e;}}var g=f();g.next();g.return(Promise.reject('reason')).then(r=>log.push(r.value));",
+            "log.join(',')"
+        ),
+        "caught:reason"
+    );
+}

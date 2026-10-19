@@ -3548,6 +3548,11 @@ impl Interpreter {
                             (next_fn.clone(), vec![value.unwrap_or(Value::Undefined)])
                         }
                         crate::value::GenResume::Return(value) => {
+                            let value = if asynchronous {
+                                self.perform_await(value)?
+                            } else {
+                                value
+                            };
                             let method = self.iterator_method(&iterator, "return")?;
                             let Some(method) = method else {
                                 return vm_ret(self.prepare_return_value(value)?);
@@ -3582,11 +3587,9 @@ impl Interpreter {
                             Ok(value)
                         };
                     }
-                    let value = if asynchronous {
-                        self.perform_await(value)?
-                    } else {
-                        value
-                    };
+                    // Async delegation preserves values from real async
+                    // iterators. The async-from-sync adapter awaits its own
+                    // values before producing this result.
 
                     // `yield*` re-yields into the same buffer.
                     #[cfg(not(stackful_coroutines))]

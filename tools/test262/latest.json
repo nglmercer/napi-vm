@@ -808,5 +808,29 @@
     "baseline_source": "997b476776a62cf153a11cacfaa00f2fb7af3ffb",
     "overlapping_prior_with_binding_gains": 6,
     "evidence": "evidence/empty-accessors-2026-10-18/focused.json.gz"
+  },
+  "async_delegation_focused": {
+    "source_base": "a528b0273051f934dc8e0ed2380e7a72526d5ee6",
+    "engine_sha256": "62e3bc78e0f3e1280e96caac49c7a1eade7f975c879eb8a53c1f877350ce020f",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/statements/async-generator",
+      "language/expressions/async-generator",
+      "language/statements/generators",
+      "language/expressions/generators"
+    ],
+    "implementation_patch_sha256": "2f1bcced3da8a3735c38fc84abfd8efa22afd49b6fd14a884b9e5d3d53a26af0",
+    "total": 2858,
+    "counts": {
+      "pass": 2858,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 4,
+    "losses": 0,
+    "evidence": "evidence/async-delegation-2026-10-18/focused.json.gz"
   }
 }

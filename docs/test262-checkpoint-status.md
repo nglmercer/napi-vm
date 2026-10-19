@@ -59,6 +59,8 @@ With and Proxy binding resolution subsequently passes **14,466 / 14,502** select
 
 Empty accessor metadata and duplicate-parameter initialization subsequently pass **14,615 / 14,639** selected variants, gaining **21 passes with zero losses** against the completed full-run projection. Six gains overlap the prior with-binding work. These changes remain outside the full score. See the [descriptor continuation](test262-empty-accessors-continuation.md).
 
+Async generator delegation subsequently passes **2,858 / 2,858** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [async delegation continuation](test262-async-delegation-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state
