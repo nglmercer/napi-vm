@@ -1074,6 +1074,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     );
 
     let mut interpreter = Interpreter::with_builtins();
+    crate::test_support::install_timers(&mut interpreter.global.borrow_mut());
     let expected_sha256: [u8; 32] = Sha256::digest(fs::read(&addon).unwrap()).into();
     let runtime = interpreter
         .enable_native_addons(

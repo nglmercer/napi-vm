@@ -273,6 +273,15 @@ fn promise_then(i: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value
     }
     let c = i.species_constructor(&this, "Promise")?;
     let cap = Capability::new(i, &c)?;
+    // Species capabilities settle their own promise, rather than the internal
+    // reaction placeholder. Await must keep pumping host events for that value.
+    if this.as_promise().is_some_and(|source| {
+        let source = source.borrow();
+        source.state == crate::value::PromiseState::Pending && source.external_pending
+    }) && let Some(target) = cap.promise.as_promise()
+    {
+        target.borrow_mut().external_pending = true;
+    }
     i.register_capability(&this, arg(&a, 0), arg(&a, 1), cap.resolve, cap.reject)?;
     Ok(cap.promise)
 }

@@ -3484,6 +3484,31 @@ mod tests {
     }
 
     #[test]
+    fn promise_species_chains_preserve_pending_host_work() {
+        let mut interpreter = Interpreter::with_builtins();
+        let source = interpreter
+            .eval_source("var external = new Promise(() => {}); external;")
+            .unwrap();
+        source.as_promise().unwrap().borrow_mut().external_pending = true;
+        for expression in [
+            "external.then(value => value)",
+            "external.catch(reason => reason)",
+            "external.finally(() => {})",
+            "class Derived extends Promise {} external.constructor = Derived; external.then(value => value)",
+        ] {
+            let result = interpreter.eval_source(expression).unwrap();
+            assert!(
+                result.as_promise().unwrap().borrow().external_pending,
+                "{expression}"
+            );
+        }
+        let local = interpreter
+            .eval_source("new Promise(() => {}).then(value => value)")
+            .unwrap();
+        assert!(!local.as_promise().unwrap().borrow().external_pending);
+    }
+
+    #[test]
     fn top_level_await_reports_a_promise_with_no_pending_work() {
         let mut interpreter = Interpreter::with_builtins();
         let error = interpreter
