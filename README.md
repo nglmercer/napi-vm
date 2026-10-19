@@ -570,6 +570,8 @@ Var destructuring reference order subsequently passes **528 / 528** selected var
 
 Optional-chain references subsequently pass **16,722 / 16,765** selected variants, gaining **12 passes with zero losses**. All 76 optional-chaining expression variants pass. This remains outside the completed full score. See the [optional-chain continuation](docs/test262-optional-chain-references-continuation.md).
 
+Public hash-named keys subsequently pass **31,739 / 31,860** selected variants, gaining **two passes with zero losses**. This remains outside the completed full score. See the [public hash-key continuation](docs/test262-public-hash-keys-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

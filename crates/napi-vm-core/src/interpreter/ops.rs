@@ -85,10 +85,9 @@ pub fn strict_equals(a: &Value, b: &Value) -> bool {
 /// finds them, but they must stay out of `Object.keys`, `for…in` and
 /// `JSON.stringify`, which enumerate string keys only.
 pub fn is_internal_key(key: &str) -> bool {
-    // A private class member (`#x`) is stored as an ordinary slot named `#x`.
-    // Nothing outside the class body can write that name, and it must not
-    // appear in `Object.keys`, `for…in` or `JSON.stringify`.
-    key.starts_with('#') || key.starts_with("__symbol") || key.starts_with("__setter:")
+    // Private class elements have separate branded storage. A public string
+    // such as "#x" is an ordinary property and must remain enumerable.
+    key.starts_with("__symbol") || key.starts_with("__setter:")
 }
 
 /// The slot name backing a symbol-keyed property.

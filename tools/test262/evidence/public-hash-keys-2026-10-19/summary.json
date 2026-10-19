@@ -1,0 +1,34 @@
+{
+  "source_base": "6f846a9ea2f0994aba9d60d24b408bf819a8fcf1",
+  "engine_sha256": "00ea6b370cee3747bd27d9f05b9d9fe3524d4563bced89ca10b607e397c81e83",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "language/expressions/object",
+    "language/expressions/class",
+    "language/statements/class",
+    "built-ins/Object",
+    "built-ins/Array"
+  ],
+  "implementation_patch_sha256": "e6a3acc3fc672bd52917132ffec2671c6e49a5b264226a29f389a67dc1b9b641",
+  "total": 31860,
+  "counts": {
+    "pass": 31739,
+    "fail": 121,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": 2,
+  "losses": 0,
+  "validation": {
+    "public_hash_tests_in_both_tiers": 3,
+    "core_library_tests_without_exclusions": 368,
+    "strict_workspace_clippy": "pass",
+    "format": "pass"
+  },
+  "limitations": [
+    "Latest full score measures a528b02 and excludes this continuation.",
+    "Subsequent super receiver-order changes are excluded from this worker and patch."
+  ]
+}
