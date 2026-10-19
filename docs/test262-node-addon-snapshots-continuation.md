@@ -25,3 +25,8 @@ Test262 score changes are claimed for this host-bridge-only continuation.
 The broader duplicate mirror identity behavior remains a bridge limitation;
 this change preserves immutable slots during synchronization and does not claim
 to unify all copies across independent calls.
+
+Subsequent status: [native descriptor forwarding](test262-node-addon-descriptors-continuation.md)
+resolves the Counter enumeration failure. The full native-addon fixture and
+366 core-library tests now pass; the excessive-depth stack-overflow test remains
+excluded. Earlier failure observations above describe the state at that stage.

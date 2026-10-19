@@ -27,10 +27,7 @@ mod wire;
 mod wire_apply;
 
 use bridge_script::NODE_BRIDGE;
-use wire::{
-    guest_call_result_to_value, guest_graph_node_snapshot, guest_to_wire, required_string_arg,
-    wire_to_guest,
-};
+use wire::{guest_call_result_to_value, guest_graph_node_snapshot, guest_to_wire, wire_to_guest};
 use wire_apply::{apply_guest_mutation, wire_to_guest_with_context};
 const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WIRE_DEPTH: usize = 128;
@@ -52,6 +49,7 @@ enum ObjectOperation {
     Has,
     Delete,
     OwnKeys,
+    OwnDescriptor,
 }
 
 impl ObjectOperation {
@@ -62,6 +60,7 @@ impl ObjectOperation {
             Self::Has => "has",
             Self::Delete => "deleteProperty",
             Self::OwnKeys => "ownKeys",
+            Self::OwnDescriptor => "getOwnPropertyDescriptor",
         }
     }
 }
@@ -1032,13 +1031,14 @@ impl NodeAddonSidecar {
         }
 
         let target = Value::object(vec![]);
-        let mut traps = Vec::with_capacity(5);
+        let mut traps = Vec::with_capacity(6);
         for operation in [
             ObjectOperation::Get,
             ObjectOperation::Set,
             ObjectOperation::Has,
             ObjectOperation::Delete,
             ObjectOperation::OwnKeys,
+            ObjectOperation::OwnDescriptor,
         ] {
             let local_id = usize::MAX
                 .checked_sub(state.next_local_handle)
@@ -1094,12 +1094,12 @@ impl NodeAddonSidecar {
             ObjectOperation::Get => json!({
                 "op": "get",
                 "id": trap.object_id,
-                "key": required_string_arg(&args, 1)?,
+                "key": guest_to_wire(self, args.get(1).unwrap_or(&Value::Undefined), 0, &mut graph, &proxy_ids)?,
             }),
             ObjectOperation::Set => json!({
                 "op": "set",
                 "id": trap.object_id,
-                "key": required_string_arg(&args, 1)?,
+                "key": guest_to_wire(self, args.get(1).unwrap_or(&Value::Undefined), 0, &mut graph, &proxy_ids)?,
                 "value": guest_to_wire(
                     self,
                     args.get(2).unwrap_or(&Value::Undefined),
@@ -1111,20 +1111,52 @@ impl NodeAddonSidecar {
             ObjectOperation::Has => json!({
                 "op": "has",
                 "id": trap.object_id,
-                "key": required_string_arg(&args, 1)?,
+                "key": guest_to_wire(self, args.get(1).unwrap_or(&Value::Undefined), 0, &mut graph, &proxy_ids)?,
             }),
             ObjectOperation::Delete => json!({
                 "op": "delete",
                 "id": trap.object_id,
-                "key": required_string_arg(&args, 1)?,
+                "key": guest_to_wire(self, args.get(1).unwrap_or(&Value::Undefined), 0, &mut graph, &proxy_ids)?,
             }),
             ObjectOperation::OwnKeys => json!({
                 "op": "ownKeys",
                 "id": trap.object_id,
             }),
+            ObjectOperation::OwnDescriptor => json!({
+                "op": "getOwnPropertyDescriptor",
+                "id": trap.object_id,
+                "key": guest_to_wire(self, args.get(1).unwrap_or(&Value::Undefined), 0, &mut graph, &proxy_ids)?,
+            }),
         };
         let result = self.request_with_callback_handler(request, callback_handler, &graph)?;
-        self.wire_to_guest(&result, 0)
+        let result = self.wire_to_guest(&result, 0)?;
+        if matches!(trap.operation, ObjectOperation::OwnDescriptor)
+            && result
+                .get_prop("configurable")
+                .is_some_and(|value| !value.is_truthy())
+        {
+            let target = args
+                .first()
+                .ok_or_else(|| VmErr::Msg("missing native descriptor target".into()))?;
+            let key = args
+                .get(1)
+                .ok_or_else(|| VmErr::Msg("missing native descriptor key".into()))?;
+            let slot = match key {
+                Value::String(key) => key.to_key(),
+                Value::Symbol(symbol) => {
+                    if let Some(props) = target.property_cell() {
+                        props
+                            .meta
+                            .borrow_mut()
+                            .set_symbol_key(&super::symbol_slot_key(symbol), symbol.clone());
+                    }
+                    super::symbol_slot_key(symbol)
+                }
+                _ => return Err(VmErr::Msg("invalid native descriptor key".into())),
+            };
+            crate::builtins::object::define_property(target, &slot, &result)?;
+        }
+        Ok(result)
     }
 }
 

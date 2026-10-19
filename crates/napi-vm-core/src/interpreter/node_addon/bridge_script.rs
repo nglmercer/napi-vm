@@ -348,14 +348,23 @@ function addonWorkerMain() {
     try{
       let result,receiver;const decodeGraph=newDecodeGraph();
       if(r.op==='load')result=require(r.filename);
-      else if(['get','set','has','delete','ownKeys'].includes(r.op)){
+      else if(['get','set','has','delete','ownKeys','getOwnPropertyDescriptor'].includes(r.op)){
         const entry=refs.get(r.id);if(!entry||!entry.value||typeof entry.value!=='object')throw new Error('native object handle is invalid');
-        const object=entry.value;const key=r.key===undefined?undefined:decode({t:'string',v:r.key},0,decodeGraph);
+        const object=entry.value;const key=r.key===undefined?undefined:decode(r.key,0,decodeGraph);
         if(r.op==='get'){result=Reflect.get(object,key,object);receiver=object;}
         else if(r.op==='set')result=Reflect.set(object,key,decode(r.value,0,decodeGraph),object);
         else if(r.op==='has')result=Reflect.has(object,key);
         else if(r.op==='delete')result=Reflect.deleteProperty(object,key);
-        else result=Object.keys(object);
+        else if(r.op==='getOwnPropertyDescriptor'){
+          const descriptor=Reflect.getOwnPropertyDescriptor(object,key);
+          if(descriptor===undefined)result=undefined;
+          else{
+            const graph=newGraph(),id='n:'+graph.nextId++;
+            const entries=Object.keys(descriptor).map(field=>[field,encode(descriptor[field],object,0,graph),true,true,true]);
+            return {requestId:r.requestId,ok:true,value:{t:'object',id,v:entries,prototype:{t:'defaultPrototype'},extensible:true}};
+          }
+        }
+        else result=Reflect.ownKeys(object);
       }else{
         const entry=refs.get(r.id);if(!entry||typeof entry.value!=='function')throw new Error('native function handle is invalid');
         const args=r.args.map(v=>decode(v,0,decodeGraph));

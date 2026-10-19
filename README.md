@@ -214,6 +214,11 @@ VM values after native calls, including calls that throw. Writeback includes
 nested objects, named array properties, and property attributes on objects.
 Guest `Date`, `RegExp`, and binary values are copied; in-place changes to
 those values fail clearly.
+Native objects expose own-property descriptors and all own string and symbol
+keys to guest reflection. Enumeration, object spread, and Object.assign use
+the native descriptor flags; nonconfigurable descriptors are mirrored on the
+local proxy target. String and symbol reads, writes, membership, and deletion
+forward to the native object.
 Accessor and symbol-keyed properties on plain objects cross the native addon
 bridge. Accessors invoke guest getter and setter callbacks, and symbol keys
 retain identity in both directions. Explicit guest object prototypes preserve

@@ -1035,6 +1035,10 @@ static napi_value init(napi_env env, napi_value exports) {
   if (napi_define_class(env, "Counter", NAPI_AUTO_LENGTH, counter_constructor, NULL,
                         2, counter_methods, &counter) != napi_ok) return NULL;
   if (napi_set_named_property(env, exports, "Counter", counter) != napi_ok) return NULL;
+  napi_value descriptor_script, descriptor_object;
+  if (napi_create_string_utf8(env, "(() => { const o={visible:1}; Object.defineProperties(o,{fixed:{value:42},hidden:{value:9,configurable:true},accessor:{get(){return this.visible+1},enumerable:true}}); o[Symbol('native')]=7; return o; })()", NAPI_AUTO_LENGTH, &descriptor_script) != napi_ok) return NULL;
+  if (napi_run_script(env, descriptor_script, &descriptor_object) != napi_ok) return NULL;
+  if (napi_set_named_property(env, exports, "descriptorObject", descriptor_object) != napi_ok) return NULL;
   return exports;
 }
 
@@ -1713,6 +1717,10 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
         threadsafe_callback_received,
         "Node-API threadsafe callback did not reach the guest event loop"
     );
+    let descriptors = interpreter.eval_source(
+        "{ const native = require('./fixture.node').descriptorObject; const fixed = Object.getOwnPropertyDescriptor(native,'fixed'); const again = Object.getOwnPropertyDescriptor(native,'fixed'); const getter = Object.getOwnPropertyDescriptor(native,'accessor'); const getterAgain = Object.getOwnPropertyDescriptor(native,'accessor'); const symbol = Object.getOwnPropertySymbols(native)[0]; native[symbol]=8; const beforeDelete = native[symbol]===8 && symbol in native; const deleted=delete native[symbol]; fixed.value===42 && !fixed.writable && !fixed.enumerable && !fixed.configurable && again.value===42 && getter.get===getterAgain.get && !getter.configurable && getter.enumerable && native.accessor===2 && Object.getOwnPropertyNames(native).join(',')==='visible,fixed,hidden,accessor' && Object.keys(native).join(',')==='visible,accessor' && beforeDelete && deleted && !(symbol in native) && Object.getOwnPropertyDescriptor(native,'absent')===undefined; }"
+    ).unwrap();
+    assert!(matches!(descriptors, Value::Bool(true)));
     let counter = interpreter
             .eval_source(
                 "{ const addon = require('./fixture.node'); const counter = new addon.Counter(19); counter.increment(); counter.count = 41; counter.increment(); const other = new addon.Counter(5); counter.increment.call(other); const spread = {...counter}; const assigned = Object.assign({}, counter); let iterated = ''; for (const key in counter) iterated += key; ({count:counter.count, receiver:other.count, same:counter === counter.self(), keys:Object.keys(counter).join(','), values:Object.values(counter).join(','), entries:Object.entries(counter)[0][0] + ':' + Object.entries(counter)[0][1], spread:spread.count, assigned:assigned.count, iterated, has:'count' in counter}); }",

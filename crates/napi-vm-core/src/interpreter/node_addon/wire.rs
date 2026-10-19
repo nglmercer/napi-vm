@@ -13,13 +13,6 @@ use crate::value::{
 use super::wire_apply::{apply_guest_mutation, wire_to_guest_with_context};
 use super::{MAX_WIRE_DEPTH, NodeAddonSidecar, WireDecodeContext, WireEncodeContext};
 
-pub(super) fn required_string_arg(args: &[Value], index: usize) -> Result<crate::JsString, VmErr> {
-    match args.get(index) {
-        Some(Value::String(value)) => Ok(value.clone()),
-        _ => Err(VmErr::Msg("native object property key is invalid".into())),
-    }
-}
-
 pub(super) fn typed_kind(name: &str) -> Option<TypedKind> {
     Some(match name {
         "Int8Array" => TypedKind::Int8,
