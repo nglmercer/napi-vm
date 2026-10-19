@@ -39,5 +39,5 @@ covers thirteen control-flow directories plus object expressions and typeof.
 The release selection retains fifteen failures: nested finally completion,
 for-in deletion during traversal, mapped arguments aliasing, with/Proxy
 binding resolution, and noncanonical numeric accessor names. These require
-separate fixes. The latest completed full snapshot measures 101,728 / 102,956
-on source 607d086; focused gains are not added to that full score.
+separate fixes. The latest completed full snapshot measures 101,889 / 102,956
+on source 997b476; this feature is included in that measured full snapshot.

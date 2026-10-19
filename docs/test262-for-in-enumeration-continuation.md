@@ -37,5 +37,4 @@ up from 6,496 / 6,515, with **2 gains and zero losses**.
 All 206 selected for-in variants pass. The selection retains seventeen
 failures, with zero skips, timeouts, crashes, or harness errors.
 Reports, comparisons, worker identity, and the source patch are archived under
-[for-in evidence](../tools/test262/evidence/for-in-enumeration-2026-10-18/). The full score measures 101,728 / 102,956 on 607d086; focused
-gains are not added to that score.
+[for-in evidence](../tools/test262/evidence/for-in-enumeration-2026-10-18/). The full score measures 101,889 / 102,956 on 997b476; this feature is included in that measured full snapshot.

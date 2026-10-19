@@ -50,5 +50,5 @@ selection retains forty failures and has no skips, timeouts, crashes, or
 harness errors. Reports, comparison, worker identity, and the source patch
 are archived under [mapped arguments evidence](../tools/test262/evidence/mapped-arguments-2026-10-18/).
 
-The latest completed full report measures 101,728 / 102,956 on
-607d086; focused gains are not added to that full score.
+The latest completed full report measures 101,889 / 102,956 on
+997b476; this feature is included in that measured full snapshot.

@@ -1,0 +1,23 @@
+{
+  "source_commit": "997b476776a62cf153a11cacfaa00f2fb7af3ffb",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "100e81ac9aea7285c3fe44065dedf05449f0d3320aa923e49a564bdd9b7e7c9e",
+  "total": 102956,
+  "counts": {
+    "pass": 101889,
+    "fail": 982,
+    "skip": 0,
+    "timeout": 85,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 98.96363495085279,
+  "gains": 191,
+  "losses": 30,
+  "lost_statuses": {
+    "fail": 1,
+    "timeout": 29
+  },
+  "baseline": "../full-live-collections-2026-10-18/final-full.json.gz",
+  "note": "One semantic regression is duplicate-parameter initialization in Array.prototype.concat_sloppy-arguments-with-dupes.js; 29 other losses are timeouts. Outcomes are retained. Excludes later with-binding, empty-accessor, and duplicate-parameter fixes."
+}

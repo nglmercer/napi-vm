@@ -43,16 +43,16 @@ worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
 The latest completed full pinned Test262 run (2026-10-18, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `607d086`)
-passes **101,728 / 102,956 variants (98.8073%)**, with 1,076 failures,
-152 timeouts, and zero skips, crashes, or harness errors. It gains 18 passes
-and loses 96 against the preceding full run, with two workers and a
-five-second timeout. All lost passes are measured timeouts: 94 RegExp
-property-escape variants and two staging variants. Outcomes are retained
-without reclassification. The snapshot includes live collection iteration,
-module attributes, control-flow completion, and strict tail calls.
-Reports and comparisons are archived in
-[`evidence/full-live-collections-2026-10-18/`](evidence/full-live-collections-2026-10-18/).
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `997b476`)
+passes **101,889 / 102,956 variants (98.9636%)**, with 982 failures,
+85 timeouts, and zero skips, crashes, or harness errors. It gains 191 passes
+and loses 30 against the preceding full run. One loss is duplicate-parameter
+initialization in `Array.prototype.concat_sloppy-arguments-with-dupes.js`;
+the other 29 are measured timeouts. Outcomes are retained. The snapshot
+includes mapped arguments, lexical scopes, nested finally, descriptor-aware
+for-in, live collections, module attributes, completion values, and tail calls.
+Reports and comparisons are archived under
+[`evidence/full-mapped-arguments-2026-10-18/`](evidence/full-mapped-arguments-2026-10-18/).
 
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
@@ -91,15 +91,17 @@ The static module-attributes, control-flow, and tail-call changes are included
 in the completed full snapshot, along with live collection iteration; see the
 [live collection continuation](../../docs/test262-live-collections-continuation.md).
 
-Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes remain outside the completed full score. See the [lexical scope continuation](../../docs/test262-lexical-scopes-continuation.md).
+Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes are included in the completed full snapshot. See the [lexical scope continuation](../../docs/test262-lexical-scopes-continuation.md).
 
-Nested finally completions subsequently pass **5,897 / 5,908** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [finally completion continuation](../../docs/test262-finally-completions-continuation.md).
+Nested finally completions subsequently pass **5,897 / 5,908** selected variants, gaining **4 passes with zero losses**. These changes are included in the completed full snapshot. See the [finally completion continuation](../../docs/test262-finally-completions-continuation.md).
 
-Descriptor-aware for-in enumeration subsequently passes **6,498 / 6,515** selected variants, gaining **2 passes with zero losses**. These changes remain outside the completed full score. See the [for-in enumeration continuation](../../docs/test262-for-in-enumeration-continuation.md).
+Descriptor-aware for-in enumeration subsequently passes **6,498 / 6,515** selected variants, gaining **2 passes with zero losses**. These changes are included in the completed full snapshot. See the [for-in enumeration continuation](../../docs/test262-for-in-enumeration-continuation.md).
 
-Mapped arguments subsequently pass **13,621 / 13,661** selected variants, gaining **31 passes with zero losses**. All 43 mapped-arguments variants and all 1,442 for-of variants pass. These changes remain outside the completed full score. See the [mapped arguments continuation](../../docs/test262-mapped-arguments-continuation.md).
+Mapped arguments subsequently pass **13,621 / 13,661** selected variants, gaining **31 passes with zero losses**. All 43 mapped-arguments variants and all 1,442 for-of variants pass. These changes are included in the completed full snapshot. See the [mapped arguments continuation](../../docs/test262-mapped-arguments-continuation.md).
 
 With and Proxy binding resolution subsequently passes **14,466 / 14,502** selected variants, gaining **6 passes with zero losses**. See the [with-binding continuation](../../docs/test262-with-bindings-continuation.md).
+
+Empty accessor metadata and duplicate-parameter initialization subsequently pass **14,615 / 14,639** selected variants, gaining **21 passes with zero losses** against the completed full-run projection. Six gains overlap the prior with-binding work. These changes remain outside the full score. See the [descriptor continuation](../../docs/test262-empty-accessors-continuation.md).
 
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including

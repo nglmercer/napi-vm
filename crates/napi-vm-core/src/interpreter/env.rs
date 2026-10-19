@@ -776,8 +776,8 @@ impl Environment {
     }
 
     /// Create a child frame from a pre-built binding list. The call fast
-    /// path uses this to bind `this` + params in one shot, with no
-    /// per-parameter `RefCell` borrows or insertion scans.
+    /// path binds `this` and parameters without per-parameter environment
+    /// borrows. Duplicate names keep their last value in either storage mode.
     pub fn with_bindings(p: Env, vars: SmallVec<[(Key, Value); INLINE_CAP]>) -> Self {
         // Parameters and `this` are `var`-like: reassignable and never in a
         // temporal dead zone.
@@ -789,7 +789,15 @@ impl Environment {
             map.extend(vars);
             Vars::Large(map)
         } else {
-            Vars::Small(vars.collect())
+            let mut bindings: SmallVec<[(Key, Binding); INLINE_CAP]> = SmallVec::new();
+            for (name, binding) in vars {
+                if let Some((_, previous)) = bindings.iter_mut().find(|(key, _)| key == &name) {
+                    *previous = binding;
+                } else {
+                    bindings.push((name, binding));
+                }
+            }
+            Vars::Small(bindings)
         };
         Self {
             vars,

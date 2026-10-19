@@ -433,12 +433,12 @@ fn accessor_kind(key: &str, value: &Value) -> Option<&'static str> {
 }
 
 fn accessor_kind_for(target: &Value, key: &str, value: &Value) -> Option<&'static str> {
-    // Accessor descriptors may explicitly contain `undefined`; in that case
-    // the callable-name encoding is unavailable. The setter companion still
-    // proves that this slot is an accessor pair.
-    let companion = format!("__setter:{key}__");
-    if cell(target).is_some_and(|props| props.own_value(&companion).is_some()) {
-        return Some("set");
+    let empty = match target {
+        Value::Array(array) => array.meta.borrow().is_empty_accessor(key),
+        _ => cell(target).is_some_and(|props| props.meta.borrow().is_empty_accessor(key)),
+    };
+    if empty {
+        return Some("empty");
     }
     let symbol = match target {
         Value::Array(array) => array.meta.borrow().symbol_key(key),
@@ -1524,6 +1524,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
     let mut values: Vec<(String, Value)> = Vec::new();
     // Converting an accessor back to data drops the setter companion slot.
     let mut drop_companion = false;
+    let mut empty_accessor = false;
     if new_is_accessor {
         for accessor in [getter.as_ref(), setter.as_ref()].into_iter().flatten() {
             if !matches!(accessor, Value::Undefined) && !is_callable(accessor) {
@@ -1570,6 +1571,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
             values.push((slot, setter));
         }
         if values.is_empty() {
+            empty_accessor = true;
             // `{ get: undefined, set: undefined }` still converts the slot.
             values.push((key.to_string(), Value::Undefined));
         }
@@ -1612,6 +1614,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
     c.note_mutated();
     let mut meta = c.meta.borrow_mut();
     meta.set_attrs(key, attrs);
+    meta.set_empty_accessor(key, empty_accessor);
     if new_is_accessor {
         meta.has_accessors = true;
     }
@@ -1748,9 +1751,13 @@ fn define_array_property(
     if index.is_some_and(|index| index >= crate::value::MAX_ARRAY_LEN) {
         return Err(crate::value::limit_err("Maximum array length exceeded"));
     }
-    let old_accessor_kind = old_value
-        .as_ref()
-        .and_then(|value| accessor_kind(key, value));
+    let old_accessor_kind = if array.meta.borrow().is_empty_accessor(key) {
+        Some("empty")
+    } else {
+        old_value
+            .as_ref()
+            .and_then(|value| accessor_kind(key, value))
+    };
     let old_is_accessor = old_accessor_kind.is_some();
     let old_is_data = existing && !old_is_accessor;
     let new_is_accessor =
@@ -1800,6 +1807,7 @@ fn define_array_property(
         }
     }
 
+    let empty_accessor;
     if new_is_accessor {
         for accessor in [getter.as_ref(), setter.as_ref()].into_iter().flatten() {
             if !matches!(accessor, Value::Undefined) && !is_callable(accessor) {
@@ -1829,6 +1837,7 @@ fn define_array_property(
             .is_truthy()
             .then(|| name_callable(&setter, &format!("set {key}")))
             .flatten();
+        empty_accessor = getter.is_none() && setter.is_none();
         let primary = getter
             .clone()
             .or_else(|| setter.clone())
@@ -1837,6 +1846,7 @@ fn define_array_property(
         array_set_accessor_setter(array, key, getter.and(setter));
         array.meta.borrow_mut().has_accessors = true;
     } else {
+        empty_accessor = false;
         let property_value = value
             .or_else(|| old_is_data.then(|| old_value.clone()).flatten())
             .unwrap_or(Value::Undefined);
@@ -1844,6 +1854,10 @@ fn define_array_property(
         array_set_accessor_setter(array, key, None);
     }
     array.meta.borrow_mut().set_attrs(key, attributes);
+    array
+        .meta
+        .borrow_mut()
+        .set_empty_accessor(key, empty_accessor);
     Ok(())
 }
 
@@ -2171,7 +2185,7 @@ fn descriptor_for(target: &Value, key: &str) -> Value {
         .then(|| accessor_kind_for(target, key, &value))
         .flatten()
     {
-        Some("get" | "set") => {
+        Some("get" | "set" | "empty") => {
             let slots = c.borrow();
             let getter = slots
                 .iter()
@@ -2208,6 +2222,14 @@ fn descriptor_for_array_value(
     value: Value,
     attrs: PropAttrs,
 ) -> Value {
+    if array.meta.borrow().is_empty_accessor(key) {
+        return Value::descriptor_record(vec![
+            ("get".into(), Value::Undefined),
+            ("set".into(), Value::Undefined),
+            ("enumerable".into(), Value::Bool(attrs.enumerable)),
+            ("configurable".into(), Value::Bool(attrs.configurable)),
+        ]);
+    }
     match accessor_kind_with_symbol(array.meta.borrow().symbol_key(key), key, &value) {
         Some("get") => Value::descriptor_record(vec![
             ("get".to_string(), value),

@@ -56,5 +56,9 @@
     "format": "pass",
     "realm_and_neighbor_suites": "pass"
   },
-  "full_snapshot": "607d086; focused gains are not added to full score"
+  "full_snapshot": "607d086; focused gains are not added to full score",
+  "measurement_limitations": [
+    "The frozen focused worker predates the final template-tag receiver changes included in implementation.patch.gz. Those changes have separate AST/bytecode regression coverage and are included in the subsequent empty-accessor release validation."
+  ],
+  "subsequent_release_evidence": "../empty-accessors-2026-10-18/focused.json.gz"
 }

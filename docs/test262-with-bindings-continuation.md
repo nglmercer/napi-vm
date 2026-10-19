@@ -20,6 +20,10 @@ tests and 79 selected bytecode tests pass; strict Clippy, formatting, realm,
 tail-call, lexical, mapped-arguments, for-in, and finally suites pass. The
 known unrelated super-destructuring parity failure remains excluded.
 
+The frozen focused worker predates the final tag-receiver changes in the
+archived source patch. Tag behavior is covered by the dedicated AST/bytecode
+regressions and the subsequent empty-accessor release validation.
+
 Evidence is archived under [`with-bindings-2026-10-18`](../tools/test262/evidence/with-bindings-2026-10-18/).
-The completed full snapshot remains 101,728 / 102,956 on source 607d086;
+The completed full snapshot remains 101,889 / 102,956 on source 997b476;
 with-binding changes are outside that full run.

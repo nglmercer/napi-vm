@@ -222,6 +222,8 @@ pub struct ObjectMeta {
     /// is the difference between allocating a slot name on every write and
     /// never allocating one.
     pub has_accessors: bool,
+    /// Accessor slots with neither a callable getter nor a callable setter.
+    pub(crate) empty_accessors: Vec<String>,
     /// The primitive carried by a boxed Boolean, Number, String, Symbol, or
     /// BigInt object. Ordinary objects leave this empty.
     pub boxed_primitive: Option<BoxedPrimitive>,
@@ -388,7 +390,19 @@ impl ObjectMeta {
         }
     }
 
+    pub(crate) fn is_empty_accessor(&self, key: &str) -> bool {
+        self.empty_accessors.iter().any(|name| name == key)
+    }
+
+    pub(crate) fn set_empty_accessor(&mut self, key: &str, empty: bool) {
+        self.empty_accessors.retain(|name| name != key);
+        if empty {
+            self.empty_accessors.push(key.into());
+        }
+    }
+
     pub fn forget(&mut self, key: &str) {
+        self.set_empty_accessor(key, false);
         self.attrs.retain(|(k, _)| k != key);
         self.symbol_keys.retain(|(k, _)| k != key);
     }

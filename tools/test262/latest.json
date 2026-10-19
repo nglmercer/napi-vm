@@ -6,7 +6,7 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "0b5a2e4502040997e4e6d5d85be5ddaa65f0a72eaea34900de8da4ff0b7c85f0",
+  "engine_sha256": "100e81ac9aea7285c3fe44065dedf05449f0d3320aa923e49a564bdd9b7e7c9e",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 2,
@@ -14,21 +14,21 @@
   "resumed_files": 0,
   "total": 102956,
   "counts": {
-    "pass": 101728,
-    "fail": 1076,
+    "pass": 101889,
+    "fail": 982,
     "skip": 0,
-    "timeout": 152,
+    "timeout": 85,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 98.80725746921014,
+  "pass_percentage": 98.96363495085279,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "607d086dff90d047ed5677eca90e05ed8b082c84",
-  "source_state": "clean committed live-collection snapshot; includes module attributes, completion values, and tail calls; excludes later lexical scopes, nested finally, for-in enumeration, and mapped arguments",
-  "evidence": "evidence/full-live-collections-2026-10-18/final-full.json.gz",
-  "note": "Last completed full pinned run: 101,728 / 102,956 (98.8073%) on source 607d086. It gains 18 passes and loses 96 against the preceding full run, with two workers and a five-second timeout. All 96 lost passes are measured timeouts (94 RegExp property-escape variants and two staging variants), retained without reclassification. Later lexical scopes, nested finally, descriptor-aware for-in, and mapped arguments remain outside this measured full snapshot.",
+  "source_base": "997b476776a62cf153a11cacfaa00f2fb7af3ffb",
+  "source_state": "clean committed mapped-arguments snapshot; includes lexical scopes, nested finally, for-in, and earlier features; excludes later with bindings, empty accessors, and duplicate parameter initialization fix",
+  "evidence": "evidence/full-mapped-arguments-2026-10-18/final-full.json.gz",
+  "note": "Last completed full pinned run: 101,889 / 102,956 (98.9636%) on source 997b476. It gains 191 passes and loses 30 against the preceding full run. One loss is a duplicate-parameter initialization regression in Array.prototype.concat_sloppy-arguments-with-dupes.js; the other 29 are measured timeouts. Outcomes are retained. Later with bindings, empty accessors, and the duplicate-parameter fix are outside this measured full snapshot.",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -750,6 +750,63 @@
     "losses": 0,
     "source_base": "997b476776a62cf153a11cacfaa00f2fb7af3ffb",
     "implementation_patch_sha256": "5517f58da9cbd082c2ef1b207097b85348f7c9a69e4256fa138c638c0792a0f8",
-    "evidence": "evidence/with-bindings-2026-10-18/focused.json.gz"
+    "evidence": "evidence/with-bindings-2026-10-18/focused.json.gz",
+    "measurement_limitations": [
+      "The frozen focused worker predates the final template-tag receiver changes included in implementation.patch.gz. Those changes have separate AST/bytecode regression coverage and are included in the subsequent empty-accessor release validation."
+    ]
+  },
+  "empty_accessors_focused": {
+    "selection": [
+      "language/statements/switch",
+      "language/statements/while",
+      "language/statements/do-while",
+      "language/statements/for",
+      "language/statements/for-in",
+      "language/statements/for-of",
+      "language/statements/if",
+      "language/statements/try",
+      "language/statements/with",
+      "language/statements/block",
+      "language/statements/labeled",
+      "language/statements/break",
+      "language/statements/continue",
+      "language/expressions/typeof",
+      "language/expressions/object",
+      "built-ins/Proxy",
+      "language/arguments-object",
+      "built-ins/Object/defineProperty",
+      "built-ins/Object/defineProperties",
+      "built-ins/Object/freeze",
+      "built-ins/Object/seal",
+      "built-ins/Reflect/defineProperty",
+      "language/expressions/generators",
+      "language/statements/generators",
+      "language/expressions/async-generator",
+      "language/statements/async-generator",
+      "language/expressions/call",
+      "language/eval-code",
+      "built-ins/eval",
+      "built-ins/Function/prototype/call",
+      "built-ins/Function/prototype/apply",
+      "built-ins/Reflect/apply",
+      "built-ins/Array/prototype/concat"
+    ],
+    "engine_sha256": "08ca2b0cd9c3d5ba53827b227641ad9497cdb093b584f4911b60738c73757578",
+    "total": 14639,
+    "counts": {
+      "pass": 14615,
+      "fail": 24,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 21,
+    "losses": 0,
+    "source_base": "5846880aef42aeea8d6b4c47267c2659eaf27e96",
+    "implementation_patch_sha256": "2a66e503bdfd2439966066112cfe8ddcd62ad9f41d2dec9df6db32e09eb14d55",
+    "baseline_source": "997b476776a62cf153a11cacfaa00f2fb7af3ffb",
+    "overlapping_prior_with_binding_gains": 6,
+    "evidence": "evidence/empty-accessors-2026-10-18/focused.json.gz"
   }
 }

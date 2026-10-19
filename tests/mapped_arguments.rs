@@ -206,3 +206,15 @@ fn var_arguments_preserves_the_object_and_other_bindings_shadow_it() {
         "2,3,4,5",
     );
 }
+
+#[test]
+fn duplicate_parameters_keep_the_last_initial_value_before_any_write() {
+    both(
+        "function f(a,a,a){return [a,arguments[0],arguments[1],arguments[2]].join(',');}function g(a,a){return [a,arguments[0],arguments[1]].join(',');}f(1,2,3)+';'+g(1)",
+        "3,1,2,3;,1,",
+    );
+    both(
+        "function f(a,a,a){arguments[Symbol.isConcatSpreadable]=true;return [].concat(arguments,arguments).join(',');}f(1,2,3)",
+        "1,2,3,1,2,3",
+    );
+}

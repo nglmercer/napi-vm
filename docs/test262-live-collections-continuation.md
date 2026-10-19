@@ -47,7 +47,7 @@ backing-data survival across collection, release on exhaustion, and cycle
 reclamation. Collection, realm, weak-GC, lifecycle, engine-boundary, and iterator
 protocol suites provide neighboring validation.
 
-The latest completed full pinned Test262 run (2026-10-18, corpus
+The full pinned measurement of the live-collection commit (2026-10-18, corpus
 `5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `607d086`)
 passes **101,728 / 102,956 variants (98.8073%)**, with 1,076 failures,
 152 timeouts, and zero skips, crashes, or harness errors. It gains 18 passes
@@ -59,3 +59,8 @@ module attributes, control-flow completion, and strict tail calls.
 See the [full live-collection evidence](../tools/test262/evidence/full-live-collections-2026-10-18/).
 Later lexical scopes, nested finally, for-in enumeration, and mapped arguments
 remain outside that full score. Full conformance remains incomplete.
+
+The newer completed full snapshot on 997b476 includes lexical scopes, nested
+finally, for-in enumeration, and initial mapped arguments. It passes
+101,889 / 102,956 (98.9636%), with 982 failures and 85 timeouts. See the
+[full mapped-arguments evidence](../tools/test262/evidence/full-mapped-arguments-2026-10-18/).
