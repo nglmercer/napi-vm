@@ -54,6 +54,8 @@ Descriptor-aware for-in enumeration subsequently passes **6,498 / 6,515** select
 
 Mapped arguments subsequently pass **13,621 / 13,661** selected variants, gaining **31 passes with zero losses**. All 43 mapped-arguments variants and all 1,442 for-of variants pass. These changes remain outside the completed full score. See the [mapped arguments continuation](test262-mapped-arguments-continuation.md).
 
+With and Proxy binding resolution subsequently passes **14,466 / 14,502** selected variants, gaining **6 passes with zero losses**. See the [with-binding continuation](test262-with-bindings-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

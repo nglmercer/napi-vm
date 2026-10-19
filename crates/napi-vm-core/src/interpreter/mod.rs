@@ -1648,7 +1648,7 @@ impl Interpreter {
         strict: bool,
     ) -> Result<(), VmErr> {
         if let Some(object) = self.with_binding_object(scope, name)? {
-            return self.assign_member_str(&object, name, value);
+            return self.set_object_binding(&object, name, value, strict);
         }
         let mut env = scope.borrow_mut();
         match env.assign(name, value.clone()) {

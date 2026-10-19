@@ -66,52 +66,35 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<super::Lookup, VmErr> {
-        let mut frame = Some(scope.clone());
-        while let Some(environment) = frame {
-            let (local, object, parent, global) = {
-                let frame = environment.borrow();
-                (
-                    frame.own_lexical_binding(name),
-                    frame.with_object.clone(),
-                    frame.parent_env(),
-                    frame.is_global_scope(),
-                )
-            };
-            if global {
-                if local {
-                    return Ok(environment.borrow().lookup(name));
+        let (base, property) = self.resolve_assignment_binding(scope, name)?;
+        self.read_resolved_binding(&base, property, name)
+    }
+
+    /// GetBindingValue on a captured environment reference. A disappearing
+    /// object property yields undefined in sloppy code, without trying an outer
+    /// binding; strict code reports ReferenceError.
+    fn read_resolved_binding(
+        &mut self,
+        base: &Value,
+        property: bool,
+        name: &str,
+    ) -> Result<super::Lookup, VmErr> {
+        if property {
+            if !self.has_property(base, &Value::String(crate::JsString::from_key(name)))? {
+                if self.global.borrow().strict() {
+                    return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
                 }
-                let object = Value::RealmGlobal(environment.clone());
-                return if self
-                    .has_property(&object, &Value::String(crate::JsString::from_key(name)))?
-                {
-                    self.get_prop_value_str(&object, name)
-                        .map(super::Lookup::Value)
-                } else {
-                    Ok(super::Lookup::Missing)
-                };
+                return Ok(super::Lookup::Value(Value::Undefined));
             }
-            if local {
-                return Ok(environment.borrow().lookup(name));
-            }
-            if let Some(object) = object
-                && self.with_has_binding(&object, name)?
-            {
-                return self
-                    .get_prop_value_str(&object, name)
-                    .map(super::Lookup::Value);
-            }
-            frame = parent;
-        }
-        let global = self.realm_global_object();
-        if let Some(prototype) = self.prototype_of(&global)
-            && prototype.has_prop(name)
-        {
             return self
-                .get_prop_value_str_with_receiver(&prototype, name, &global)
+                .get_prop_value_str(base, name)
                 .map(super::Lookup::Value);
         }
-        Ok(super::Lookup::Missing)
+        match base {
+            Value::RealmGlobal(environment) => Ok(environment.borrow().lookup(name)),
+            Value::Undefined => Ok(super::Lookup::Missing),
+            _ => Err(VmErr::Msg("internal error: binding reference base".into())),
+        }
     }
 
     fn with_has_binding(&mut self, object: &Value, name: &str) -> Result<bool, VmErr> {
@@ -137,6 +120,27 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<Option<Value>, VmErr> {
+        let (base, property) = self.resolve_assignment_binding(scope, name)?;
+        Ok(property.then_some(base))
+    }
+
+    /// Resolve a write reference without reading its value or invoking getters.
+    pub(crate) fn resolve_assignment_binding(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<(Value, bool), VmErr> {
+        let (base, property, _) = self.resolve_binding_reference(scope, name)?;
+        Ok((base, property))
+    }
+
+    /// Resolve once and retain the WithBaseObject receiver as part of the
+    /// reference, including when the with object is itself a global object.
+    fn resolve_binding_reference(
+        &mut self,
+        scope: &super::Env,
+        name: &str,
+    ) -> Result<(Value, bool, Value), VmErr> {
         let mut frame = Some(scope.clone());
         while let Some(environment) = frame {
             let (local, object, parent, global) = {
@@ -148,45 +152,60 @@ impl Interpreter {
                     frame.is_global_scope(),
                 )
             };
-            if global {
-                if local {
-                    return Ok(None);
-                }
-                let object = Value::RealmGlobal(environment.clone());
-                return self
-                    .has_property(&object, &Value::String(crate::JsString::from_key(name)))
-                    .map(|has| has.then_some(object));
-            }
             if local {
-                return Ok(None);
+                return Ok((Value::RealmGlobal(environment), false, Value::Undefined));
+            }
+            if global {
+                let object = Value::RealmGlobal(environment);
+                return if self
+                    .has_property(&object, &Value::String(crate::JsString::from_key(name)))?
+                {
+                    Ok((object, true, Value::Undefined))
+                } else {
+                    Ok((Value::Undefined, false, Value::Undefined))
+                };
             }
             if let Some(object) = object
                 && self.with_has_binding(&object, name)?
             {
-                return Ok(Some(object));
+                return Ok((object.clone(), true, object));
             }
             frame = parent;
         }
-        Ok(None)
+        let global = self.realm_global_object();
+        if let Some(prototype) = self.prototype_of(&global)
+            && prototype.has_prop(name)
+        {
+            return Ok((global, true, Value::Undefined));
+        }
+        Ok((Value::Undefined, false, Value::Undefined))
     }
 
-    /// Resolve a write reference without reading its value or invoking getters.
-    pub(crate) fn resolve_assignment_binding(
+    pub(crate) fn read_call_binding(
         &mut self,
         scope: &super::Env,
         name: &str,
-    ) -> Result<(Value, bool), VmErr> {
-        if let Some(object) = self.with_binding_object(scope, name)? {
-            return Ok((object, true));
-        }
-        let mut current = Some(scope.clone());
-        while let Some(environment) = current {
-            if environment.borrow().own_lexical_binding(name) {
-                return Ok((Value::RealmGlobal(environment), false));
+    ) -> Result<(Value, Value), VmErr> {
+        let (base, property, receiver) = self.resolve_binding_reference(scope, name)?;
+        let value = self.require_resolved_binding(&base, property, name)?;
+        Ok((value, receiver))
+    }
+
+    fn require_resolved_binding(
+        &mut self,
+        base: &Value,
+        property: bool,
+        name: &str,
+    ) -> Result<Value, VmErr> {
+        match self.read_resolved_binding(base, property, name)? {
+            super::Lookup::Value(value) => Ok(value),
+            super::Lookup::Uninitialized => Err(VmErr::Msg(format!(
+                "ReferenceError: Cannot access '{name}' before initialization"
+            ))),
+            super::Lookup::Missing => {
+                Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")))
             }
-            current = environment.borrow().parent_env();
         }
-        Ok((Value::Undefined, false))
     }
 
     /// Capture the base and current value once, before the assignment RHS.
@@ -195,26 +214,26 @@ impl Interpreter {
         scope: &super::Env,
         name: &str,
     ) -> Result<(Value, bool, Value), VmErr> {
-        if let Some(object) = self.with_binding_object(scope, name)? {
-            let value = self.get_prop_value_str(&object, name)?;
-            return Ok((object, true, value));
+        let (base, property) = self.resolve_assignment_binding(scope, name)?;
+        let value = self.require_resolved_binding(&base, property, name)?;
+        Ok((base, property, value))
+    }
+
+    /// SetMutableBinding uses the resolved object even if HasBinding's earlier
+    /// unscopables access or the assignment RHS removed the property.
+    pub(crate) fn set_object_binding(
+        &mut self,
+        object: &Value,
+        name: &str,
+        value: Value,
+        strict: bool,
+    ) -> Result<(), VmErr> {
+        let key = Value::String(crate::JsString::from_key(name));
+        let exists = self.has_property(object, &key)?;
+        if !exists && strict {
+            return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
         }
-        let mut current = Some(scope.clone());
-        while let Some(environment) = current {
-            if environment.borrow().own_lexical_binding(name) {
-                let value = match environment.borrow().lookup(name) {
-                    super::Lookup::Value(value) => value,
-                    _ => {
-                        return Err(VmErr::Msg(format!(
-                            "ReferenceError: Cannot access '{name}' before initialization"
-                        )));
-                    }
-                };
-                return Ok((Value::RealmGlobal(environment), false, value));
-            }
-            current = environment.borrow().parent_env();
-        }
-        Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")))
+        self.assign_property_with_receiver(object, &key, value, object, strict)
     }
 
     pub(crate) fn write_assignment_binding(
@@ -225,12 +244,8 @@ impl Interpreter {
         value: Value,
     ) -> Result<(), VmErr> {
         if property {
-            if self.global.borrow().strict()
-                && !self.has_property(base, &Value::String(name.into()))?
-            {
-                return Err(VmErr::Msg(format!("ReferenceError: {name} is not defined")));
-            }
-            return self.assign_member_str(base, name, value);
+            let strict = self.global.borrow().strict();
+            return self.set_object_binding(base, name, value, strict);
         }
         if matches!(base, Value::Undefined) {
             if self.global.borrow().strict() {
@@ -2595,5 +2610,45 @@ mod boxed_primitive_prototype_tests {
                 "{runtime} Object.prototype behavior differed"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod with_binding_reference_tests {
+    use crate::interpreter::{Environment, ExecutionTier, Interpreter};
+    use crate::value::Value;
+
+    #[test]
+    fn bytecode_calls_resolve_with_receivers_once() {
+        let mut vm = Interpreter::with_builtins();
+        vm.eval_source("var log=[],proxy=new Proxy({f:function(){'use strict';return this===proxy;},eval:function(){'use strict';return this===proxy;}},{has:function(t,k){log.push('has:'+String(k));return Reflect.has(t,k);},get:function(t,k,r){log.push('get:'+String(k));return Reflect.get(t,k,r);}});").unwrap();
+        let proxy = vm.global.borrow().get("proxy").unwrap();
+        let original = vm.global.clone();
+        let mut environment = Environment::child(original.clone());
+        environment.with_object = Some(proxy);
+        vm.global = std::rc::Rc::new(std::cell::RefCell::new(environment));
+        let mut expected = Vec::new();
+        for source in ["f()", "f?.()", "f`x`", "eval()", "eval(...[])"] {
+            let name = if source.starts_with("eval") {
+                "eval"
+            } else {
+                "f"
+            };
+            expected.push(format!(
+                "has:{name},get:Symbol(Symbol.unscopables),has:{name},get:{name}"
+            ));
+            let prepared = Interpreter::compile(source).unwrap();
+            assert_eq!(prepared.tier(), ExecutionTier::Bytecode);
+            assert!(
+                matches!(vm.execute(&prepared).unwrap(), Value::Bool(true)),
+                "{source}"
+            );
+        }
+        vm.global = original;
+        let log = vm.eval_source("log.join(',')").unwrap();
+        assert!(
+            matches!(&log, Value::String(s) if s == expected.join(",").as_str()),
+            "{log:?}"
+        );
     }
 }

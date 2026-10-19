@@ -111,6 +111,12 @@ pub enum Instr {
         dst: Reg,
         name: u16,
     },
+    /// Resolve an identifier callee and its environment receiver once.
+    LoadCallBinding {
+        dst: Reg,
+        receiver: Reg,
+        name: u16,
+    },
     ResolveAssignmentBinding {
         base: Reg,
         property: Reg,
@@ -294,12 +300,14 @@ pub enum Instr {
     DirectEval {
         dst: Reg,
         callee: Reg,
+        this: Option<Reg>,
         args: Reg,
         argc: u16,
     },
     DirectEvalSpread {
         dst: Reg,
         callee: Reg,
+        this: Option<Reg>,
         tmpl: u16,
     },
     Call {
@@ -659,6 +667,7 @@ pub enum Opcode {
     BareVarLocal,
     BareVarGlobal,
     LoadGlobal,
+    LoadCallBinding,
     StoreGlobal,
     ResolveAssignmentBinding,
     ReadAssignmentBinding,
@@ -770,6 +779,7 @@ impl Instr {
             Instr::BareVarLocal { .. } => Opcode::BareVarLocal,
             Instr::BareVarGlobal { .. } => Opcode::BareVarGlobal,
             Instr::LoadGlobal { .. } => Opcode::LoadGlobal,
+            Instr::LoadCallBinding { .. } => Opcode::LoadCallBinding,
             Instr::StoreGlobal { .. } => Opcode::StoreGlobal,
             Instr::ResolveAssignmentBinding { .. } => Opcode::ResolveAssignmentBinding,
             Instr::ReadAssignmentBinding { .. } => Opcode::ReadAssignmentBinding,
@@ -916,6 +926,11 @@ impl fmt::Display for Instr {
             Instr::BareVarLocal { slot } => write!(f, "BARE_VAR_LOCAL s{slot}"),
             Instr::BareVarGlobal { name } => write!(f, "BARE_VAR_GLOBAL c{name}"),
             Instr::LoadGlobal { dst, name } => write!(f, "LOAD_GLOBAL r{dst}, c{name}"),
+            Instr::LoadCallBinding {
+                dst,
+                receiver,
+                name,
+            } => write!(f, "LOAD_CALL_BINDING r{dst}, r{receiver}, c{name}"),
             Instr::StoreGlobal { name, src } => write!(f, "STORE_GLOBAL c{name}, r{src}"),
             Instr::ResolveAssignmentBinding {
                 base,
@@ -1032,11 +1047,20 @@ impl fmt::Display for Instr {
             Instr::DirectEval {
                 dst,
                 callee,
+                this,
                 args,
                 argc,
-            } => write!(f, "DIRECT_EVAL r{dst}, r{callee}, r{args}, {argc}"),
-            Instr::DirectEvalSpread { dst, callee, tmpl } => {
-                write!(f, "DIRECT_EVAL_SPREAD r{dst}, r{callee}, c{tmpl}")
+            } => write!(
+                f,
+                "DIRECT_EVAL r{dst}, r{callee}, {this:?}, r{args}, {argc}"
+            ),
+            Instr::DirectEvalSpread {
+                dst,
+                callee,
+                this,
+                tmpl,
+            } => {
+                write!(f, "DIRECT_EVAL_SPREAD r{dst}, r{callee}, {this:?}, c{tmpl}")
             }
             Instr::Call {
                 dst,

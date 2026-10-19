@@ -522,6 +522,17 @@ fn run_loop(
                     slot.value = value;
                     slot.initialized = true;
                 }
+                Instr::LoadCallBinding {
+                    dst,
+                    receiver,
+                    name,
+                } => {
+                    let name = const_string(frame.function, name)?;
+                    let (value, this) =
+                        interp.read_call_binding(&current_scope(interp, frame), name)?;
+                    frame.registers[dst as usize] = value;
+                    frame.registers[receiver as usize] = this;
+                }
                 Instr::ResolveAssignmentBinding {
                     base,
                     property,
@@ -890,35 +901,43 @@ fn run_loop(
                 Instr::DirectEval {
                     dst,
                     callee,
+                    this,
                     args,
                     argc,
                 } => {
                     let argv = take_range(frame, args, argc)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
+                    let this = this.map_or(Value::Undefined, |reg| {
+                        frame.registers[reg as usize].clone_for_execution()
+                    });
                     frame.registers[dst as usize] =
                         if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
                             crate::builtins::eval_direct(interp, argv)?
                         } else if interp.tail_call_context && returns_call_result(frame, dst) {
-                            return interp
-                                .request_tail_call(callee, Value::Undefined, argv)
-                                .map(|_| ());
+                            return interp.request_tail_call(callee, this, argv).map(|_| ());
                         } else {
-                            interp.call_this(&callee, Value::Undefined, argv)?
+                            interp.call_this(&callee, this, argv)?
                         };
                 }
-                Instr::DirectEvalSpread { dst, callee, tmpl } => {
+                Instr::DirectEvalSpread {
+                    dst,
+                    callee,
+                    this,
+                    tmpl,
+                } => {
                     let template = spread_template(frame, tmpl)?;
                     let argv = spread_argv(interp, frame, &template)?;
                     let callee = frame.registers[callee as usize].clone_for_execution();
+                    let this = this.map_or(Value::Undefined, |reg| {
+                        frame.registers[reg as usize].clone_for_execution()
+                    });
                     frame.registers[dst as usize] =
                         if crate::builtins::is_intrinsic_eval(&callee, &interp.persistent_global) {
                             crate::builtins::eval_direct(interp, argv)?
                         } else if interp.tail_call_context && returns_call_result(frame, dst) {
-                            return interp
-                                .request_tail_call(callee, Value::Undefined, argv)
-                                .map(|_| ());
+                            return interp.request_tail_call(callee, this, argv).map(|_| ());
                         } else {
-                            interp.call_this(&callee, Value::Undefined, argv)?
+                            interp.call_this(&callee, this, argv)?
                         };
                 }
                 Instr::Call {

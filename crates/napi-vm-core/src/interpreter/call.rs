@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use super::{Env, Environment, Interpreter, ModifyOutcome};
+use super::{Env, Environment, Interpreter};
 use crate::error::{RuntimeErrorData, VmErr, vm_err};
 use crate::parser::{AssignOp, BinOp, Pattern, PatternKey, Statement};
 use crate::span::Span;
@@ -1915,68 +1915,10 @@ impl Interpreter {
         inc: bool,
         prefix: bool,
     ) -> Result<Value, VmErr> {
-        if let Some(object) = self.with_binding_object(scope, name)? {
-            let key = Value::String(crate::JsString::from_key(name));
-            return self.inc_prop_value(&object, &key, inc, prefix);
-        }
-        if !matches!(scope.borrow().get(name), Some(Value::Number(_))) {
-            let (base, property) = self.resolve_assignment_binding(scope, name)?;
-            let current = match self.lookup_binding_in(scope, name)? {
-                super::Lookup::Value(v) => v,
-                super::Lookup::Missing => {
-                    return vm_err(format!("ReferenceError: {name} is not defined"));
-                }
-                super::Lookup::Uninitialized => {
-                    return vm_err(format!(
-                        "ReferenceError: Cannot access '{name}' before initialization"
-                    ));
-                }
-            };
-            let (previous, updated) = self.numeric_update(&current, inc)?;
-            self.write_assignment_binding(&base, property, name, updated.clone())?;
-            return Ok(if prefix { updated } else { previous });
-        }
-        // Fused read-modify-write: one `borrow_mut` + one scan instead of a
-        // read borrow followed by a separate write borrow. `old` captures
-        // the value before the update so postfix can return it.
-        let mut old = None;
-        let new_val = {
-            let mut env = scope.borrow_mut();
-            env.modify(name, |cur| {
-                let cur_num = self.tn(&cur);
-                old = Some(cur);
-                Value::Number(if inc { cur_num + 1.0 } else { cur_num - 1.0 })
-            })
-        };
-        let new_val = match new_val {
-            ModifyOutcome::Updated(v) => v,
-            ModifyOutcome::ReadOnly(v) => {
-                if scope.borrow().strict() {
-                    return vm_err(format!(
-                        "TypeError: Cannot assign to read-only binding {name}"
-                    ));
-                }
-                v
-            }
-            ModifyOutcome::Missing => {
-                return vm_err(format!("ReferenceError: {name} is not defined"));
-            }
-            ModifyOutcome::Const => {
-                return vm_err(format!(
-                    "TypeError: Assignment to constant variable '{name}'"
-                ));
-            }
-            ModifyOutcome::Uninitialized => {
-                return vm_err(format!(
-                    "ReferenceError: Cannot access '{name}' before initialization"
-                ));
-            }
-        };
-        if prefix {
-            Ok(new_val)
-        } else {
-            Ok(old.unwrap_or(Value::Undefined))
-        }
+        let (base, property, current) = self.read_assignment_binding(scope, name)?;
+        let (previous, updated) = self.numeric_update(&current, inc)?;
+        self.write_assignment_binding(&base, property, name, updated.clone())?;
+        Ok(if prefix { updated } else { previous })
     }
 
     /// Read and write a compound assignment through the same property key.

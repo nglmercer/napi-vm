@@ -4240,33 +4240,26 @@ impl<'a> Compiler<'a> {
         raw: &'a [crate::JsString],
         exprs: &'a [Expr],
     ) -> Result<Reg, Decline> {
-        let tag = tag.unparenthesized();
-        let (callee, receiver) = match tag {
-            Expr::Member {
-                object, property, ..
-            } if matches!(object.as_ref(), Expr::Super) => {
-                let key = self.compile_expr(property)?;
-                let callee = self.alloc_reg()?;
-                self.emit(Instr::SuperMember { dst: callee, key });
-                (callee, Some(self.compile_this()?))
-            }
-            Expr::Member {
-                object, property, ..
-            } => {
-                let obj = self.compile_expr(object)?;
-                let key = self.compile_expr(property)?;
-                let callee = self.alloc_reg()?;
-                self.emit(Instr::GetProp {
-                    private: false,
-                    cache: 0,
-                    dst: callee,
-                    obj,
-                    key,
-                });
-                (callee, Some(obj))
-            }
-            _ => (self.compile_expr(tag)?, None),
-        };
+        // A parenthesized optional chain may produce undefined as the tag;
+        // substitutions still execute before the ensuing callability error.
+        let callee = self.load_undefined()?;
+        let this = self.load_undefined()?;
+        let mut ends = Vec::new();
+        let (function, receiver) = self.compile_call_reference(tag, &mut ends)?;
+        self.emit(Instr::Mov {
+            dst: callee,
+            src: function,
+        });
+        if let Some(receiver) = receiver {
+            self.emit(Instr::Mov {
+                dst: this,
+                src: receiver,
+            });
+        }
+        for end in ends {
+            self.patch_jump(end, self.here())?;
+        }
+        let receiver = Some(this);
         let mut template = Vec::with_capacity(cooked.len());
         for part in cooked {
             let constant = part
@@ -4432,6 +4425,17 @@ impl<'a> Compiler<'a> {
                 });
                 Ok((function, Some(receiver)))
             }
+            Expr::Identifier(name) if matches!(self.resolve(name)?, Binding::Global) => {
+                let dst = self.alloc_reg()?;
+                let receiver = self.alloc_reg()?;
+                let name = self.intern_string(name)?;
+                self.emit(Instr::LoadCallBinding {
+                    dst,
+                    receiver,
+                    name,
+                });
+                Ok((dst, Some(receiver)))
+            }
             other => Ok((self.compile_expr(other)?, None)),
         }
     }
@@ -4510,6 +4514,19 @@ impl<'a> Compiler<'a> {
                 callee: function,
                 tmpl,
             },
+            (CallArgs::Range { start, argc }, _) if direct_eval => Instr::DirectEval {
+                dst,
+                callee: function,
+                this: receiver,
+                args: start,
+                argc,
+            },
+            (CallArgs::Spread { tmpl }, _) if direct_eval => Instr::DirectEvalSpread {
+                dst,
+                callee: function,
+                this: receiver,
+                tmpl,
+            },
             (CallArgs::Range { start, argc }, Some(this)) => Instr::CallMethod {
                 dst,
                 callee: function,
@@ -4521,17 +4538,6 @@ impl<'a> Compiler<'a> {
                 dst,
                 callee: function,
                 this,
-                tmpl,
-            },
-            (CallArgs::Range { start, argc }, None) if direct_eval => Instr::DirectEval {
-                dst,
-                callee: function,
-                args: start,
-                argc,
-            },
-            (CallArgs::Spread { tmpl }, None) if direct_eval => Instr::DirectEvalSpread {
-                dst,
-                callee: function,
                 tmpl,
             },
             (CallArgs::Range { start, argc }, None) => Instr::Call {

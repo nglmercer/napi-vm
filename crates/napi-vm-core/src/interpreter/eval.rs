@@ -2122,19 +2122,8 @@ impl Interpreter {
                 let function = self.get_prop_value(&receiver, &key)?;
                 Ok(Some((function, receiver)))
             }
-            other => {
-                let function = self.eval_expr(other)?;
-                let receiver = if let Expr::Identifier(name) = other {
-                    self.with_binding_object(&self.global.clone(), name)?
-                        .filter(|object| {
-                            !matches!(object, Value::RealmGlobal(_) | Value::GlobalObject)
-                        })
-                        .unwrap_or(Value::Undefined)
-                } else {
-                    Value::Undefined
-                };
-                Ok(Some((function, receiver)))
-            }
+            Expr::Identifier(name) => self.read_call_binding(&self.global.clone(), name).map(Some),
+            other => Ok(Some((self.eval_expr(other)?, Value::Undefined))),
         }
     }
 
@@ -3428,27 +3417,9 @@ impl Interpreter {
                 raw,
                 exprs,
             } => {
-                let (this_val, tag_fn) = match tag.unparenthesized() {
-                    Expr::Member {
-                        object, property, ..
-                    } if matches!(object.as_ref(), Expr::Super) => {
-                        let key = self.eval_expr(property)?;
-                        let (base, receiver, key) =
-                            self.super_reference(&self.global.clone(), &key)?;
-                        let method = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
-                        (receiver, method)
-                    }
-                    // Preserve the receiver so `` obj.tag`…` `` sees `this`.
-                    Expr::Member {
-                        object, property, ..
-                    } => {
-                        let receiver = self.eval_expr(object)?;
-                        let key = self.eval_expr(property)?;
-                        let f = self.get_prop_value(&receiver, &key)?;
-                        (receiver, f)
-                    }
-                    other => (Value::Undefined, self.eval_expr(other)?),
-                };
+                let (tag_fn, this_val) = self
+                    .evaluate_call_reference(tag)?
+                    .unwrap_or((Value::Undefined, Value::Undefined));
                 let strings = Value::array(
                     cooked
                         .iter()

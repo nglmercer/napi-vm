@@ -390,6 +390,15 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_const_is(address, *name, "string")?;
             }
+            Instr::LoadCallBinding {
+                dst,
+                receiver,
+                name,
+            } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *receiver)?;
+                self.check_const_is(address, *name, "string")?;
+            }
             Instr::ResolveAssignmentBinding {
                 base,
                 property,
@@ -565,10 +574,18 @@ impl Checker<'_> {
             Instr::DirectEval {
                 dst,
                 callee,
+                this,
                 args,
                 argc,
+            } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *callee)?;
+                if let Some(this) = this {
+                    self.check_reg(address, *this)?;
+                }
+                self.check_range(address, *args, *argc)?;
             }
-            | Instr::Call {
+            Instr::Call {
                 dst,
                 callee,
                 args,
@@ -660,8 +677,20 @@ impl Checker<'_> {
                 self.check_reg(address, *dst)?;
                 self.check_slot(address, *slot)?;
             }
-            Instr::DirectEvalSpread { dst, callee, tmpl }
-            | Instr::ConstructSpread { dst, callee, tmpl }
+            Instr::DirectEvalSpread {
+                dst,
+                callee,
+                this,
+                tmpl,
+            } => {
+                self.check_reg(address, *dst)?;
+                self.check_reg(address, *callee)?;
+                if let Some(this) = this {
+                    self.check_reg(address, *this)?;
+                }
+                self.check_spread_template(address, *tmpl, false)?;
+            }
+            Instr::ConstructSpread { dst, callee, tmpl }
             | Instr::CallSpread { dst, callee, tmpl } => {
                 self.check_reg(address, *dst)?;
                 self.check_reg(address, *callee)?;
