@@ -111,6 +111,8 @@ Class property layout subsequently passes **18,986 / 19,037** selected variants,
 
 Var destructuring reference order subsequently passes **528 / 528** selected variants, gaining **one pass with zero losses**. All 368 core-library tests pass without exclusions. This remains outside the completed full score. See the [var destructuring continuation](../../docs/test262-var-destructuring-continuation.md).
 
+Optional-chain references subsequently pass **16,722 / 16,765** selected variants, gaining **12 passes with zero losses**. All 76 optional-chaining expression variants pass. This remains outside the completed full score. See the [optional-chain continuation](../../docs/test262-optional-chain-references-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

@@ -334,11 +334,6 @@ impl Interpreter {
         self.get_prototype_of(&home)
     }
 
-    fn super_member(&mut self, key: &Value) -> Result<Value, VmErr> {
-        let (base, receiver, key) = self.super_reference(&self.global.clone(), key)?;
-        self.get_prop_value_with_receiver(&base, &key, &receiver)
-    }
-
     /// Build a class value from its parts: prototype methods and accessors,
     /// static members, instance fields desugared into the constructor, and
     /// static blocks run once the class exists.
@@ -2124,7 +2119,7 @@ impl Interpreter {
     /// Capture the callee and receiver before arguments can mutate bindings,
     /// properties or with records. None is an optional-chain short circuit.
     fn evaluate_call_reference(&mut self, callee: &Expr) -> Result<Option<(Value, Value)>, VmErr> {
-        match callee.unparenthesized() {
+        match callee {
             Expr::Member {
                 object,
                 property,
@@ -2136,7 +2131,9 @@ impl Interpreter {
                     let function = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
                     return Ok(Some((function, receiver)));
                 }
-                let receiver = self.eval_expr(object)?;
+                let Some(receiver) = self.evaluate_chain_value(object)? else {
+                    return Ok(None);
+                };
                 let function = if let Expr::String(key) = property.as_ref() {
                     checked_static_key(key)?;
                     if !computed && key.to_key().starts_with('#') {
@@ -2151,26 +2148,88 @@ impl Interpreter {
                 Ok(Some((function, receiver)))
             }
             Expr::OptionalChain {
-                object, property, ..
+                object,
+                property,
+                computed,
             } => {
-                if matches!(property.as_ref(), Expr::Undefined) {
+                if !computed && matches!(property.as_ref(), Expr::Undefined) {
                     let Some((function, receiver)) = self.evaluate_call_reference(object)? else {
                         return Ok(None);
                     };
                     return Ok((!matches!(function, Value::Null | Value::Undefined))
                         .then_some((function, receiver)));
                 }
-                let receiver = self.eval_expr(object)?;
+                let Some(receiver) = self.evaluate_chain_value(object)? else {
+                    return Ok(None);
+                };
                 if matches!(receiver, Value::Null | Value::Undefined) {
                     return Ok(None);
                 }
                 let key = self.eval_expr(property)?;
-                let function = self.get_prop_value(&receiver, &key)?;
+                let function = if !computed
+                    && matches!(&key, Value::String(name) if name.to_key().starts_with('#'))
+                {
+                    self.get_private_member(&receiver, &self.property_key(&key)?)?
+                } else {
+                    self.get_prop_value(&receiver, &key)?
+                };
                 Ok(Some((function, receiver)))
             }
+            Expr::Parenthesized(inner) => Ok(Some(
+                self.evaluate_call_reference(inner)?
+                    .unwrap_or((Value::Undefined, Value::Undefined)),
+            )),
+            Expr::Call { callee, args } => Ok(self
+                .evaluate_chain_call(callee, args, false)?
+                .map(|value| (value, Value::Undefined))),
             Expr::Identifier(name) => self.read_call_binding(&self.global.clone(), name).map(Some),
             other => Ok(Some((self.eval_expr(other)?, Value::Undefined))),
         }
+    }
+
+    fn evaluate_chain_value(&mut self, expression: &Expr) -> Result<Option<Value>, VmErr> {
+        if matches!(
+            expression,
+            Expr::Member { .. } | Expr::OptionalChain { .. } | Expr::Call { .. }
+        ) {
+            self.consume_fuel(1)?;
+        }
+        match expression {
+            Expr::Member { .. } | Expr::OptionalChain { .. } => Ok(self
+                .evaluate_call_reference(expression)?
+                .map(|(value, _)| value)),
+            Expr::Call { callee, args } => self.evaluate_chain_call(callee, args, false),
+            _ => self.eval_expr(expression).map(Some),
+        }
+    }
+
+    fn evaluate_chain_call(
+        &mut self,
+        callee: &Expr,
+        args: &[Expr],
+        tail: bool,
+    ) -> Result<Option<Value>, VmErr> {
+        if matches!(callee.unparenthesized(), Expr::Super) {
+            let target = self.super_constructor(&self.global.clone())?;
+            let args = self.evaluate_call_arguments(args)?;
+            return self.invoke_ctor(&target, Value::Undefined, args).map(Some);
+        }
+        let direct_eval =
+            matches!(callee.unparenthesized(), Expr::Identifier(name) if name == "eval");
+        let Some((function, receiver)) = self.evaluate_call_reference(callee)? else {
+            return Ok(None);
+        };
+        let arguments = self.evaluate_call_arguments(args)?;
+        let result = if direct_eval
+            && crate::builtins::is_intrinsic_eval(&function, &self.persistent_global)
+        {
+            crate::builtins::eval_direct(self, arguments)
+        } else if tail {
+            self.request_tail_call(function, receiver, arguments)
+        } else {
+            self.call_this(&function, receiver, arguments)
+        };
+        result.map(Some)
     }
 
     fn evaluate_call_arguments(&mut self, args: &[Expr]) -> Result<Vec<Value>, VmErr> {
@@ -2838,7 +2897,9 @@ impl Interpreter {
                         Expr::Member {
                             object, property, ..
                         } => {
-                            let obj = self.eval_expr(object)?;
+                            let Some(obj) = self.evaluate_chain_value(object)? else {
+                                return Ok(Value::Bool(true));
+                            };
                             let key = self.eval_expr(property)?;
                             let strict = self.global.borrow().strict();
                             return self.delete_member_or_throw(&obj, &key, strict);
@@ -2846,7 +2907,9 @@ impl Interpreter {
                         Expr::OptionalChain {
                             object, property, ..
                         } => {
-                            let obj = self.eval_expr(object)?;
+                            let Some(obj) = self.evaluate_chain_value(object)? else {
+                                return Ok(Value::Bool(true));
+                            };
                             if matches!(obj, Value::Null | Value::Undefined) {
                                 return Ok(Value::Bool(true));
                             }
@@ -2905,7 +2968,9 @@ impl Interpreter {
                             property,
                             computed,
                         } => {
-                            let obj = self.eval_expr(object)?;
+                            let Some(obj) = self.evaluate_chain_value(object)? else {
+                                return Ok(Value::Bool(true));
+                            };
                             if let Expr::String(key) = property.as_ref() {
                                 checked_static_key(key)?;
                                 let private = !computed && key.to_key().starts_with('#');
@@ -2956,77 +3021,13 @@ impl Interpreter {
                     self.un_op(*op, &v)
                 }
             }
-            Expr::Call { callee, args } => {
-                if matches!(callee.unparenthesized(), Expr::Super) {
-                    let target = self.super_constructor(&self.global.clone())?;
-                    let args = self.evaluate_call_arguments(args)?;
-                    return self.invoke_ctor(&target, Value::Undefined, args);
-                }
-                let direct_eval =
-                    matches!(callee.unparenthesized(), Expr::Identifier(name) if name == "eval");
-                let Some((function, receiver)) = self.evaluate_call_reference(callee)? else {
-                    return Ok(Value::Undefined);
-                };
-                let arguments = self.evaluate_call_arguments(args)?;
-                if direct_eval
-                    && crate::builtins::is_intrinsic_eval(&function, &self.persistent_global)
-                {
-                    crate::builtins::eval_direct(self, arguments)
-                } else {
-                    if tail {
-                        self.request_tail_call(function, receiver, arguments)
-                    } else {
-                        self.call_this(&function, receiver, arguments)
-                    }
-                }
-            }
-            // `super.x` reads through the superclass prototype.
-            Expr::Member {
-                object,
-                property,
-                computed: _,
-            } if matches!(object.as_ref(), Expr::Super) => {
-                let p = self.eval_expr(property)?;
-                self.super_member(&p)
-            }
-            Expr::Member {
-                object,
-                property,
-                computed,
-            } => {
-                let o = self.eval_expr(object)?;
-                if let Expr::String(key) = property.as_ref() {
-                    checked_static_key(key)?;
-                    if !computed && key.to_key().starts_with('#') {
-                        return self.get_private_member(&o, &key.to_key());
-                    }
-                    if !computed
-                        && key.to_key().starts_with('#')
-                        && !self.has_property(&o, &Value::String(key.clone()))?
-                    {
-                        return vm_err("TypeError: receiver does not contain the private member");
-                    }
-                    return self.get_prop_value_str(&o, &key.to_key());
-                }
-                let p = self.eval_expr(property)?;
-                self.get_prop_value(&o, &p)
-            }
-            Expr::OptionalChain {
-                object,
-                property,
-                computed: _,
-            } => {
-                let o = self.eval_expr(object)?;
-                if matches!(o, Value::Null | Value::Undefined) {
-                    return Ok(Value::Undefined);
-                }
-                if let Expr::String(key) = property.as_ref() {
-                    checked_static_key(key)?;
-                    return self.get_prop_value_str(&o, &key.to_key());
-                }
-                let p = self.eval_expr(property)?;
-                self.get_prop_value(&o, &p)
-            }
+            Expr::Call { callee, args } => Ok(self
+                .evaluate_chain_call(callee, args, tail)?
+                .unwrap_or(Value::Undefined)),
+            Expr::Member { .. } | Expr::OptionalChain { .. } => Ok(self
+                .evaluate_call_reference(e)?
+                .map(|(value, _)| value)
+                .unwrap_or(Value::Undefined)),
             // `a &&= b` / `a ||= b` / `a ??= b`. The right side runs, and the
             // write happens, only when the current value calls for it — so
             // `obj.x ||= expensive()` leaves a truthy `x` untouched and never

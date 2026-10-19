@@ -3552,12 +3552,21 @@ impl<'a> Compiler<'a> {
                 operand,
                 prefix,
             } => self.compile_unary(*op, operand, *prefix),
-            Expr::Call { callee, args } => self.compile_call(callee, args),
+            Expr::Call { callee, args } => {
+                if Self::continues_optional_chain(expr) {
+                    self.compile_chain_expression(expr)
+                } else {
+                    self.compile_call(callee, args)
+                }
+            }
             Expr::Member {
                 object,
                 property,
                 computed,
             } => {
+                if Self::continues_optional_chain(expr) {
+                    return self.compile_chain_expression(expr);
+                }
                 if matches!(object.as_ref(), Expr::Super) {
                     let key = self.compile_expr(property)?;
                     let dst = self.alloc_reg()?;
@@ -3727,9 +3736,7 @@ impl<'a> Compiler<'a> {
                 })?;
                 self.load_const(index)
             }
-            Expr::OptionalChain {
-                object, property, ..
-            } => self.compile_optional_chain(object, property),
+            Expr::OptionalChain { .. } => self.compile_chain_expression(expr),
         }
     }
 
@@ -4172,6 +4179,28 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_delete(&mut self, operand: &'a Expr) -> Result<Reg, Decline> {
+        if Self::continues_optional_chain(operand)
+            && let Expr::Member {
+                object, property, ..
+            }
+            | Expr::OptionalChain {
+                object, property, ..
+            } = operand
+        {
+            let index = self.const_true()?;
+            let dst = self.load_const(index)?;
+            let mut ends = Vec::new();
+            let obj = self.compile_chain_value(object, &mut ends)?;
+            if matches!(operand, Expr::OptionalChain { .. }) {
+                ends.push(self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target }));
+            }
+            let key = self.compile_expr(property)?;
+            self.emit(Instr::DelProp { dst, obj, key });
+            for end in ends {
+                self.patch_jump(end, self.here())?;
+            }
+            return Ok(dst);
+        }
         match operand {
             Expr::Member {
                 object, property, ..
@@ -4400,7 +4429,7 @@ impl<'a> Compiler<'a> {
         callee: &'a Expr,
         ends: &mut Vec<usize>,
     ) -> Result<(Reg, Option<Reg>), Decline> {
-        match callee.unparenthesized() {
+        match callee {
             Expr::Member {
                 object,
                 property,
@@ -4412,7 +4441,7 @@ impl<'a> Compiler<'a> {
                     self.emit(Instr::SuperMember { dst: function, key });
                     return Ok((function, Some(self.compile_this()?)));
                 }
-                let receiver = self.compile_expr(object)?;
+                let receiver = self.compile_chain_value(object, ends)?;
                 let key = self.compile_expr(property)?;
                 let function = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
@@ -4425,9 +4454,11 @@ impl<'a> Compiler<'a> {
                 Ok((function, Some(receiver)))
             }
             Expr::OptionalChain {
-                object, property, ..
+                object,
+                property,
+                computed,
             } => {
-                if matches!(property.as_ref(), Expr::Undefined) {
+                if !computed && matches!(property.as_ref(), Expr::Undefined) {
                     let reference = self.compile_call_reference(object, ends)?;
                     ends.push(self.emit_jump(|target| Instr::JumpIfNullish {
                         src: reference.0,
@@ -4435,7 +4466,7 @@ impl<'a> Compiler<'a> {
                     }));
                     return Ok(reference);
                 }
-                let receiver = self.compile_expr(object)?;
+                let receiver = self.compile_chain_value(object, ends)?;
                 ends.push(self.emit_jump(|target| Instr::JumpIfNullish {
                     src: receiver,
                     target,
@@ -4443,13 +4474,39 @@ impl<'a> Compiler<'a> {
                 let key = self.compile_expr(property)?;
                 let function = self.alloc_reg()?;
                 self.emit(Instr::GetProp {
-                    private: false,
+                    private: !computed && matches!(property.as_ref(), Expr::String(name) if name.to_key().starts_with('#')),
                     cache: 0,
                     dst: function,
                     obj: receiver,
                     key,
                 });
                 Ok((function, Some(receiver)))
+            }
+            Expr::Parenthesized(inner) => {
+                if !Self::continues_optional_chain(inner) {
+                    return self.compile_call_reference(inner, ends);
+                }
+                let function = self.load_undefined()?;
+                let receiver = self.load_undefined()?;
+                let mut local_ends = Vec::new();
+                let (value, this) = self.compile_call_reference(inner, &mut local_ends)?;
+                self.emit(Instr::Mov {
+                    dst: function,
+                    src: value,
+                });
+                if let Some(this) = this {
+                    self.emit(Instr::Mov {
+                        dst: receiver,
+                        src: this,
+                    });
+                }
+                for end in local_ends {
+                    self.patch_jump(end, self.here())?;
+                }
+                Ok((function, this.map(|_| receiver)))
+            }
+            Expr::Call { callee, args } => {
+                Ok((self.compile_call_in_chain(callee, args, ends)?, None))
             }
             Expr::Identifier(name) if matches!(self.resolve(name)?, Binding::Global) => {
                 let dst = self.alloc_reg()?;
@@ -4506,26 +4563,33 @@ impl<'a> Compiler<'a> {
     }
 
     fn compile_call(&mut self, callee: &'a Expr, args: &'a [Expr]) -> Result<Reg, Decline> {
-        let callee = callee.unparenthesized();
-        let direct_eval = matches!(callee, Expr::Identifier(name) if name == "eval");
+        let mut ends = Vec::new();
+        let result = self.compile_call_in_chain(callee, args, &mut ends)?;
+        for end in ends {
+            self.patch_jump(end, self.here())?;
+        }
+        Ok(result)
+    }
+
+    fn compile_call_in_chain(
+        &mut self,
+        callee: &'a Expr,
+        args: &'a [Expr],
+        ends: &mut Vec<usize>,
+    ) -> Result<Reg, Decline> {
+        let direct_eval =
+            matches!(callee.unparenthesized(), Expr::Identifier(name) if name == "eval");
         if direct_eval && (!self.top_level || self.scopes.len() != 1) {
             return Err(Decline::Func("direct eval requires a lexical environment"));
         }
-        // Only optional calls need a default result on the short-circuit
-        // branch. Avoid an extra charged instruction on ordinary calls.
-        let dst = if matches!(callee, Expr::OptionalChain { .. }) {
-            self.load_undefined()?
-        } else {
-            self.alloc_reg()?
-        };
-        let mut ends = Vec::new();
-        let is_super = matches!(callee, Expr::Super);
+        let dst = self.alloc_reg()?;
+        let is_super = matches!(callee.unparenthesized(), Expr::Super);
         let (function, receiver) = if is_super {
             let function = self.alloc_reg()?;
             self.emit(Instr::SuperConstructor { dst: function });
             (function, None)
         } else {
-            self.compile_call_reference(callee, &mut ends)?
+            self.compile_call_reference(callee, ends)?
         };
         let arguments = self.compile_call_arguments(args)?;
         let instruction = match (arguments, receiver) {
@@ -4579,35 +4643,44 @@ impl<'a> Compiler<'a> {
             },
         };
         self.emit(instruction);
-        for end in ends {
-            self.patch_jump(end, self.here())?;
-        }
         Ok(dst)
     }
 
-    fn compile_optional_chain(
+    fn continues_optional_chain(expression: &Expr) -> bool {
+        match expression {
+            Expr::OptionalChain { .. } => true,
+            Expr::Member { object, .. } => Self::continues_optional_chain(object),
+            Expr::Call { callee, .. } => Self::continues_optional_chain(callee),
+            _ => false,
+        }
+    }
+
+    fn compile_chain_value(
         &mut self,
-        object: &'a Expr,
-        property: &'a Expr,
+        expression: &'a Expr,
+        ends: &mut Vec<usize>,
     ) -> Result<Reg, Decline> {
-        let obj = self.compile_expr(object)?;
-        let join = self.alloc_reg()?;
-        let undef = self.load_undefined()?;
+        match expression {
+            Expr::Member { .. } | Expr::OptionalChain { .. } => {
+                Ok(self.compile_call_reference(expression, ends)?.0)
+            }
+            Expr::Call { callee, args } => self.compile_call_in_chain(callee, args, ends),
+            _ => self.compile_expr(expression),
+        }
+    }
+
+    fn compile_chain_expression(&mut self, expression: &'a Expr) -> Result<Reg, Decline> {
+        let result = self.load_undefined()?;
+        let mut ends = Vec::new();
+        let value = self.compile_chain_value(expression, &mut ends)?;
         self.emit(Instr::Mov {
-            dst: join,
-            src: undef,
+            dst: result,
+            src: value,
         });
-        let end = self.emit_jump(|target| Instr::JumpIfNullish { src: obj, target });
-        let key = self.compile_expr(property)?;
-        self.emit(Instr::GetProp {
-            private: false,
-            cache: 0,
-            dst: join,
-            obj,
-            key,
-        });
-        self.patch_jump(end, self.here())?;
-        Ok(join)
+        for end in ends {
+            self.patch_jump(end, self.here())?;
+        }
+        Ok(result)
     }
 
     /// Value first, then the target reference — the evaluator's order.
