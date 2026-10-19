@@ -22,3 +22,7 @@ Validation: 366 core-library tests pass with the known
 from_json_rejects_excessive_depth stack-overflow test excluded. Strict workspace
 Clippy and formatting pass. The full native-addon test also passes in isolation.
 No release Test262 gain is claimed for these host-bridge changes.
+
+Later validation: [iterative host JSON input conversion](json-host-conversion-depth.md)
+fixes the excessive-depth stack overflow. The complete core-library suite now
+passes 368 tests with no exclusions; earlier exclusions above are historical.

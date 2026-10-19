@@ -2,7 +2,7 @@
 //!
 //! Steady-state plugin calls must not route values through generated
 //! JavaScript source or `JSON.stringify` trampolines. These functions move
-//! plain JSON data across the boundary with one recursive Rust walk each
+//! plain JSON data across the boundary with one traversal each
 //! way, enforcing the same depth, size, and cycle rules as the guest
 //! `JSON.parse` / `JSON.stringify` builtins so behavior stays identical.
 //!
@@ -27,53 +27,76 @@ use crate::value::{ArrayCell, BoxedPrimitive, MAX_ARRAY_LEN, MAX_OBJECT_PROPS, O
 /// ordinary objects with default (writable/enumerable/configurable)
 /// attributes, matching what the guest `JSON.parse` builtin produces.
 pub fn value_from_json(value: &JsonValue) -> Result<Value, VmErr> {
-    value_from_json_depth(value, 0)
-}
-
-fn value_from_json_depth(value: &JsonValue, depth: usize) -> Result<Value, VmErr> {
-    if depth > MAX_JSON_DEPTH {
-        return Err(VmErr::Msg(
-            "RangeError: Maximum JSON depth exceeded".to_string(),
-        ));
+    // Host inputs can reach the depth limit on a small Rust thread stack.
+    // Keep traversal state on the heap rather than recursing before rejecting.
+    enum Step<'a> {
+        Visit(&'a JsonValue, usize),
+        Key(&'a str),
+        Array(usize),
+        Object(usize),
     }
-    match value {
-        JsonValue::Null => Ok(Value::Null),
-        JsonValue::Bool(flag) => Ok(Value::Bool(*flag)),
-        JsonValue::Number(number) => Ok(Value::Number(number.as_f64().unwrap_or(f64::NAN))),
-        JsonValue::String(text) => Value::checked_string(text.clone()),
-        JsonValue::Array(items) => {
-            if items.len() > MAX_ARRAY_LEN {
-                return Err(crate::value::limit_err("Maximum array length exceeded"));
+    let mut work = vec![Step::Visit(value, 0)];
+    let mut values = Vec::new();
+    let mut keys = Vec::new();
+    while let Some(step) = work.pop() {
+        match step {
+            Step::Visit(value, depth) => {
+                if depth > MAX_JSON_DEPTH {
+                    return Err(VmErr::Msg("RangeError: Maximum JSON depth exceeded".into()));
+                }
+                match value {
+                    JsonValue::Null => values.push(Value::Null),
+                    JsonValue::Bool(flag) => values.push(Value::Bool(*flag)),
+                    JsonValue::Number(number) => {
+                        values.push(Value::Number(number.as_f64().unwrap_or(f64::NAN)))
+                    }
+                    JsonValue::String(text) => values.push(Value::checked_string(text.clone())?),
+                    JsonValue::Array(items) => {
+                        if items.len() > MAX_ARRAY_LEN {
+                            return Err(crate::value::limit_err("Maximum array length exceeded"));
+                        }
+                        work.push(Step::Array(items.len()));
+                        work.extend(items.iter().rev().map(|item| Step::Visit(item, depth + 1)));
+                    }
+                    JsonValue::Object(map) => {
+                        if map.len() > MAX_OBJECT_PROPS {
+                            return Err(crate::value::limit_err(
+                                "Maximum object property count exceeded",
+                            ));
+                        }
+                        work.push(Step::Object(map.len()));
+                        for (key, item) in map.iter().rev() {
+                            work.push(Step::Visit(item, depth + 1));
+                            work.push(Step::Key(key));
+                        }
+                    }
+                }
             }
-            let mut elements = Vec::with_capacity(items.len());
-            for item in items {
-                elements.push(value_from_json_depth(item, depth + 1)?);
-            }
-            Ok(Value::Array(crate::heap::tracked(Rc::new(ArrayCell::new(
-                elements,
-            )))))
-        }
-        JsonValue::Object(map) => {
-            if map.len() > MAX_OBJECT_PROPS {
-                return Err(crate::value::limit_err(
-                    "Maximum object property count exceeded",
-                ));
-            }
-            let mut props = Vec::with_capacity(map.len());
-            for (key, item) in map {
+            Step::Key(key) => {
                 if key.len() > crate::value::MAX_STRING_LEN {
                     return Err(crate::value::limit_err("Maximum string length exceeded"));
                 }
-                props.push((
-                    crate::JsString::from(key).to_key(),
-                    value_from_json_depth(item, depth + 1)?,
-                ));
+                keys.push(crate::JsString::from(key).to_key());
             }
-            Ok(Value::Object {
-                props: crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(props))),
-            })
+            Step::Array(length) => {
+                let elements = values.split_off(values.len() - length);
+                values.push(Value::Array(crate::heap::tracked(Rc::new(ArrayCell::new(
+                    elements,
+                )))));
+            }
+            Step::Object(length) => {
+                let elements = values.split_off(values.len() - length);
+                let names = keys.split_off(keys.len() - length);
+                let props = names.into_iter().zip(elements).collect();
+                values.push(Value::Object {
+                    props: crate::heap::tracked(Rc::new(ObjectCell::new_with_default_proto(props))),
+                });
+            }
         }
     }
+    Ok(values
+        .pop()
+        .expect("JSON traversal produces one root value"))
 }
 
 /// Serialize a guest value to plain JSON data, mirroring the guest
@@ -286,6 +309,43 @@ mod tests {
         }
         let error = value_from_json(&nested).unwrap_err().to_string();
         assert!(error.contains("Maximum JSON depth"), "{error}");
+    }
+
+    #[test]
+    fn from_json_depth_boundary_works_on_a_small_thread_stack() {
+        let mut accepted = JsonValue::Number(42.into());
+        let mut rejected = JsonValue::Null;
+        for depth in 0..MAX_JSON_DEPTH {
+            accepted = if depth % 2 == 0 {
+                JsonValue::Array(vec![accepted])
+            } else {
+                JsonValue::Object([(String::from("child"), accepted)].into_iter().collect())
+            };
+            rejected = JsonValue::Array(vec![rejected]);
+        }
+        rejected = JsonValue::Array(vec![rejected]);
+        std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(128 * 1024)
+                .spawn_scoped(scope, || {
+                    let mut value = value_from_json(&accepted).unwrap();
+                    for depth in (0..MAX_JSON_DEPTH).rev() {
+                        value = value
+                            .get_prop(if depth % 2 == 0 { "0" } else { "child" })
+                            .unwrap();
+                    }
+                    assert!(matches!(value, Value::Number(42.0)));
+                    assert!(
+                        value_from_json(&rejected)
+                            .unwrap_err()
+                            .to_string()
+                            .contains("Maximum JSON depth")
+                    );
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+        });
     }
 
     #[test]

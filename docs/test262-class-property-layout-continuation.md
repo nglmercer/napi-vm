@@ -47,3 +47,7 @@ Subsequent status: [native descriptor forwarding](test262-node-addon-descriptors
 resolves the Counter enumeration failure. The full native-addon fixture and
 366 core-library tests now pass; the excessive-depth stack-overflow test remains
 excluded. Earlier failure observations above describe the state at that stage.
+
+Later validation: [iterative host JSON input conversion](json-host-conversion-depth.md)
+fixes the excessive-depth stack overflow. The complete core-library suite now
+passes 368 tests with no exclusions; earlier exclusions above are historical.
