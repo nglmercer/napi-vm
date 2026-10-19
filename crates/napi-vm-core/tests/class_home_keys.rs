@@ -117,11 +117,12 @@ fn class_heritage_validates_constructors_and_observable_prototypes() {
 
 #[test]
 fn super_destructuring_tags_and_delete_use_the_same_reference_rules() {
+    // Delete rejects super references before ToPropertyKey (ECMA-262 13.5.1.2).
     truth(
         "class A{set x(v){this.value=v;}tag(parts,v){return this.value+v;}}class B extends A{assign(){[super.x]=[42];}tagged(){return super.tag`value${7}`;}}var b=new B();b.assign();b.value===42&&b.tagged()===49;",
     );
     truth(
-        "var calls=0;var key={toString(){calls++;return 'x';}};class A{method(){return delete super[key];}}var caught;try{new A().method();}catch(e){caught=e;}calls===1&&caught instanceof ReferenceError;",
+        "var calls=0;var key={toString(){calls++;return 'x';}};class A{method(){return delete super[key];}}var caught;try{new A().method();}catch(e){caught=e;}calls===0&&caught instanceof ReferenceError;",
     );
 }
 

@@ -1580,9 +1580,10 @@ fn class_member_attributes_and_field_names_share_semantics() {
 
 #[test]
 fn super_destructuring_tags_and_delete_keep_tier_parity() {
+    // Delete rejects super references before ToPropertyKey (ECMA-262 13.5.1.2).
     for source in [
         "class A{set x(v){this.value=v;}tag(parts,v){return this.value+v;}}class B extends A{assign(){[super.x]=[42];}tagged(){return super.tag`value${7}`;}}var b=new B();b.assign();b.value===42&&b.tagged()===49;",
-        "var calls=0;var key={toString(){calls++;return 'x';}};class A{method(){return delete super[key];}}var caught;try{new A().method();}catch(e){caught=e;}calls===1&&caught instanceof ReferenceError;",
+        "var calls=0;var key={toString(){calls++;return 'x';}};class A{method(){return delete super[key];}}var caught;try{new A().method();}catch(e){caught=e;}calls===0&&caught instanceof ReferenceError;",
     ] {
         check(source, true);
         assert!(matches!(
