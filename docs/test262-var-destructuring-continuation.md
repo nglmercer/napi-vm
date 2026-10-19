@@ -29,3 +29,9 @@ All 17 destructuring integration tests and all 368 core-library tests pass,
 with no exclusions. Strict workspace Clippy and formatting pass. The five
 new regressions run both prepared and raw AST execution; with statements retain
 their existing prepared AST fallback.
+
+Latest full-run update (2026-10-19): the frozen a528b02 snapshot completed at
+101,895 / 102,956 (98.9695%), with 951 failures and 110 timeouts. It gains
+61 passes and loses 55 versus 997b476; all losses are measured timeouts.
+Earlier full-run status statements above describe the historical stage.
+See [archived full evidence](../tools/test262/evidence/full-empty-accessors-2026-10-19/).

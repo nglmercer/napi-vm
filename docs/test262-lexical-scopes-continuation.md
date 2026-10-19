@@ -41,3 +41,9 @@ for-in deletion during traversal, mapped arguments aliasing, with/Proxy
 binding resolution, and noncanonical numeric accessor names. These require
 separate fixes. The latest completed full snapshot measures 101,889 / 102,956
 on source 997b476; this feature is included in that measured full snapshot.
+
+Latest full-run update (2026-10-19): the frozen a528b02 snapshot completed at
+101,895 / 102,956 (98.9695%), with 951 failures and 110 timeouts. It gains
+61 passes and loses 55 versus 997b476; all losses are measured timeouts.
+Earlier full-run status statements above describe the historical stage.
+See [archived full evidence](../tools/test262/evidence/full-empty-accessors-2026-10-19/).

@@ -26,3 +26,9 @@ source patch are archived under [async delegation evidence](../tools/test262/evi
 The completed full measurement remains 101,889 / 102,956 on source 997b476.
 This async delegation change is outside that full snapshot. A separate full
 run on a528b02 is still active; its outcomes will be archived when terminal.
+
+Latest full-run update (2026-10-19): the frozen a528b02 snapshot completed at
+101,895 / 102,956 (98.9695%), with 951 failures and 110 timeouts. It gains
+61 passes and loses 55 versus 997b476; all losses are measured timeouts.
+Earlier full-run status statements above describe the historical stage.
+See [archived full evidence](../tools/test262/evidence/full-empty-accessors-2026-10-19/).

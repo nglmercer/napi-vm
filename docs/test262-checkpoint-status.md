@@ -2,17 +2,17 @@
 
 ## Current measured state
 
-The latest completed full pinned Test262 run (2026-10-18, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `997b476`)
-passes **101,889 / 102,956 variants (98.9636%)**, with 982 failures,
-85 timeouts, and zero skips, crashes, or harness errors. It gains 191 passes
-and loses 30 against the preceding full run. One loss is duplicate-parameter
-initialization in `Array.prototype.concat_sloppy-arguments-with-dupes.js`;
-the other 29 are measured timeouts. Outcomes are retained. The snapshot
-includes mapped arguments, lexical scopes, nested finally, descriptor-aware
-for-in, live collections, module attributes, completion values, and tail calls.
-See [`latest.json`](../tools/test262/latest.json) and the
-[full mapped-arguments evidence](../tools/test262/evidence/full-mapped-arguments-2026-10-18/).
+The latest completed full pinned Test262 run (archived 2026-10-19, corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `a528b02`)
+passes **101,895 / 102,956 variants (98.9695%)**, with 951 failures,
+110 timeouts, and zero skips, crashes, or harness errors. It gains 61 passes
+and loses 55 against the previous full run on `997b476`; all 55 losses are
+measured timeouts. Outcomes are retained without reclassification. This snapshot
+includes with bindings, empty accessor descriptors, and the duplicate-parameter
+initialization fix. Later async delegation, numeric keys, class layout, host
+bridge/JSON work, var destructuring, and optional chains are outside this score.
+Reports, comparison, source identity, and triage are archived in
+[full empty-accessor evidence](../tools/test262/evidence/full-empty-accessors-2026-10-19/).
 
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
@@ -45,7 +45,7 @@ included in the completed full-run snapshot, along with the changes tracked in
 the [live collection continuation](test262-live-collections-continuation.md).
 Lexical scopes, nested finally, for-in, and mapped arguments are included in
 that full score. With bindings, empty accessors, and the duplicate-parameter
-initialization fix remain outside it.
+initialization fix are included in the latest a528b02 full snapshot.
 
 Lexical loop heads, TDZ reads, and catch-body environments subsequently pass **5,893 / 5,908** selected variants, gaining **20 passes with zero losses**. These changes are included in the completed full snapshot. See the [lexical scope continuation](test262-lexical-scopes-continuation.md).
 

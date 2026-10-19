@@ -1,0 +1,22 @@
+{
+  "source_commit": "a528b0273051f934dc8e0ed2380e7a72526d5ee6",
+  "engine_sha256": "08ca2b0cd9c3d5ba53827b227641ad9497cdb093b584f4911b60738c73757578",
+  "command": [
+    "python3",
+    "tools/test262/run.py",
+    ".napi-vm/test262",
+    "--engine",
+    "target/release/napi-vm-test262",
+    "--revision",
+    "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "--jobs",
+    "2",
+    "--timeout",
+    "5",
+    "--checkpoint",
+    "artifacts/test262/full-after-empty-accessors-2026-10-18.checkpoint.jsonl",
+    "--output",
+    "artifacts/test262/full-after-empty-accessors-2026-10-18.json"
+  ],
+  "implementation_evidence": "tools/test262/evidence/empty-accessors-2026-10-18/summary.json"
+}

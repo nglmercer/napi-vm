@@ -42,17 +42,17 @@ Resume rejects changes to the corpus revision, worker digest, selection, skips,
 worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
-The latest completed full pinned Test262 run (2026-10-18, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `997b476`)
-passes **101,889 / 102,956 variants (98.9636%)**, with 982 failures,
-85 timeouts, and zero skips, crashes, or harness errors. It gains 191 passes
-and loses 30 against the preceding full run. One loss is duplicate-parameter
-initialization in `Array.prototype.concat_sloppy-arguments-with-dupes.js`;
-the other 29 are measured timeouts. Outcomes are retained. The snapshot
-includes mapped arguments, lexical scopes, nested finally, descriptor-aware
-for-in, live collections, module attributes, completion values, and tail calls.
-Reports and comparisons are archived under
-[`evidence/full-mapped-arguments-2026-10-18/`](evidence/full-mapped-arguments-2026-10-18/).
+The latest completed full pinned Test262 run (archived 2026-10-19, corpus
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `a528b02`)
+passes **101,895 / 102,956 variants (98.9695%)**, with 951 failures,
+110 timeouts, and zero skips, crashes, or harness errors. It gains 61 passes
+and loses 55 against the previous full run on `997b476`; all 55 losses are
+measured timeouts. Outcomes are retained without reclassification. This snapshot
+includes with bindings, empty accessor descriptors, and the duplicate-parameter
+initialization fix. Later async delegation, numeric keys, class layout, host
+bridge/JSON work, var destructuring, and optional chains are outside this score.
+Reports, comparison, source identity, and triage are archived in
+[full empty-accessor evidence](evidence/full-empty-accessors-2026-10-19/).
 
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their

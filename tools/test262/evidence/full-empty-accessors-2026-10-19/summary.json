@@ -1,0 +1,22 @@
+{
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "08ca2b0cd9c3d5ba53827b227641ad9497cdb093b584f4911b60738c73757578",
+  "total": 102956,
+  "counts": {
+    "pass": 101895,
+    "fail": 951,
+    "skip": 0,
+    "timeout": 110,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 98.96946268308793,
+  "source_commit": "a528b0273051f934dc8e0ed2380e7a72526d5ee6",
+  "gains": 61,
+  "losses": 55,
+  "lost_statuses": {
+    "timeout": 55
+  },
+  "baseline": "../full-mapped-arguments-2026-10-18/final-full.json.gz",
+  "note": "All 55 lost passes are measured timeouts. Outcomes are retained without reclassification. Includes with-binding, empty-accessor, and duplicate-parameter initialization fixes; excludes later async delegation, numeric keys, class layout, host bridge, host JSON, var destructuring, and optional-chain changes."
+}
