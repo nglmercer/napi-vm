@@ -8,6 +8,44 @@ use std::process::Command as ProcessCommand;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[test]
+fn immutable_snapshot_slots_preserve_mirrors_and_mutable_slots_refresh() {
+    let script = NODE_BRIDGE
+        .split("  function applyGuestSnapshots(snapshots,graph){")
+        .nth(1)
+        .unwrap()
+        .split("  function captureMutableState(nodes){")
+        .next()
+        .unwrap();
+    let script = format!(
+        "const types=require('node:util').types;const decode=(value)=>value;function applyGuestSnapshots(snapshots,graph){{{script}{}",
+        r#"
+const original={value:1}, otherMirror={value:1};
+const object={mutable:original};
+Object.defineProperty(object,'fixed',{value:original,writable:false,configurable:false});
+Object.defineProperty(object,'writable',{value:original,writable:true,configurable:false});
+Object.defineProperty(object,'primitive',{value:1,writable:false,configurable:false});
+const graph=new Map([['test',object]]);
+const snapshot={t:'object',id:'test',v:[['fixed',otherMirror,false,false,false],['mutable',otherMirror,true,true,true],['writable',otherMirror,true,false,false],['primitive',1,false,false,false]]};
+applyGuestSnapshots([snapshot],graph);
+if(object.fixed!==original||object.mutable!==otherMirror||object.writable!==otherMirror)throw new Error('mirror identity mismatch');
+snapshot.v[3][1]=2;
+let threw=false;try{applyGuestSnapshots([snapshot],graph);}catch(e){if(!(e instanceof TypeError))throw e;threw=true;}
+if(!threw)throw new Error('changed immutable primitive was accepted');
+"#
+    );
+    let output = ProcessCommand::new("node")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn node_addon_configuration_rejects_entry_outside_roots_before_startup() {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     let base = std::env::temp_dir().join(format!(
@@ -1173,7 +1211,7 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
     ));
     let class_result = interpreter
             .eval_source(
-                "class Box { static value = 2; constructor(value) { this.value = value; } read() { return this.value + Box.value; } } const direct = packageAddon.constructAndRead(Box, 40); const proxiedBox = new Proxy(Box, {construct:(target,args) => Reflect.construct(target,args)}); const proxied = packageAddon.constructAndRead(proxiedBox, 40); const classStatic = packageAddon.readProperty(Box); const classWriteRead = packageAddon.writeThenRead(Box, 23); ({direct, proxied, classStatic, classWriteRead, classValue: Box.value});",
+                "class Box { static value = 2; constructor(value) { this.value = value; } read() { return this.value + Box.value; } } const direct = packageAddon.constructAndRead(Box, 40); for(let repeat=0;repeat<8;repeat++){if(packageAddon.constructAndRead(Box,40)!==42)throw new Error('class mirror drift');} const proxiedBox = new Proxy(Box, {construct:(target,args) => Reflect.construct(target,args)}); const proxied = packageAddon.constructAndRead(proxiedBox, 40); const classStatic = packageAddon.readProperty(Box); const classWriteRead = packageAddon.writeThenRead(Box, 23); ({direct, proxied, classStatic, classWriteRead, classValue: Box.value});",
             )
             .unwrap();
     assert!(matches!(

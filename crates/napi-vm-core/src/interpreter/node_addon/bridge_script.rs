@@ -177,8 +177,11 @@ function addonWorkerMain() {
       waitForSyncGuestCallback(words);
       const length=Atomics.load(words,1);if(length<0||length>MAX_SYNC_CALLBACK_RESULT_BYTES)throw new RangeError('invalid synchronous guest callback response size');
       const response=JSON.parse(Buffer.from(new Uint8Array(shared,8,length)).toString('utf8'));
+      // Returned objects may be referenced by snapshots (for example a new
+      // instance stored on its constructor). Register their graph nodes first.
+      const result=decode(response.value,0,callbackGraph);
       applyGuestSnapshots(response.snapshots||[],callbackGraph);
-      if(!response.ok)throw decode(response.value,0,callbackGraph);return decode(response.value,0,callbackGraph);
+      if(!response.ok)throw result;return result;
     };
     guestCallbackIds.set(callback,callbackId);
     if(callbackGraph.guestCallbacks)callbackGraph.guestCallbacks.set(callback,callbackId);
@@ -249,6 +252,16 @@ function addonWorkerMain() {
           const descriptor={enumerable,configurable};
           if(item.length>=7){if(item[5]!==null)descriptor.get=decode(item[5],0,graph);if(item[6]!==null)descriptor.set=decode(item[6],0,graph);}
           else{descriptor.value=decode(value,0,graph);descriptor.writable=writable;}
+          const existing=Object.getOwnPropertyDescriptor(object,key);
+          // An immutable guest data slot cannot acquire a different value.
+          // Keep its original mirror reference: another callback graph may
+          // encode the same guest object using a different local node id.
+          if(existing&&!existing.configurable&&!existing.writable&&'value' in existing&&
+             'value' in descriptor&&!descriptor.configurable&&!descriptor.writable&&
+             existing.enumerable===descriptor.enumerable&&
+             existing.value!==null&&descriptor.value!==null&&
+             (typeof existing.value==='object'||typeof existing.value==='function')&&
+             (typeof descriptor.value==='object'||typeof descriptor.value==='function'))continue;
           Object.defineProperty(object,key,descriptor);
         }
         for(const key of Reflect.ownKeys(object))if(!desired.has(key))Reflect.deleteProperty(object,key);
