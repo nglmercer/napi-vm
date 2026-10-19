@@ -572,6 +572,8 @@ Optional-chain references subsequently pass **16,722 / 16,765** selected variant
 
 Public hash-named keys subsequently pass **31,739 / 31,860** selected variants, gaining **two passes with zero losses**. This remains outside the completed full score. See the [public hash-key continuation](docs/test262-public-hash-keys-continuation.md).
 
+Super reference receiver order subsequently passes **19,080 / 19,125** selected variants, gaining **ten passes with zero losses**. This remains outside the completed full score. See the [super receiver-order continuation](docs/test262-super-reference-order-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

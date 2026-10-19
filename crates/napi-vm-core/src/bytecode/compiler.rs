@@ -3568,7 +3568,7 @@ impl<'a> Compiler<'a> {
                     return self.compile_chain_expression(expr);
                 }
                 if matches!(object.as_ref(), Expr::Super) {
-                    let key = self.compile_expr(property)?;
+                    let key = self.compile_super_property_key(property)?;
                     let dst = self.alloc_reg()?;
                     self.emit(Instr::SuperMember { dst, key });
                     return Ok(dst);
@@ -4076,8 +4076,14 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn compile_super_property_key(&mut self, property: &'a Expr) -> Result<Reg, Decline> {
+        let receiver = self.alloc_reg()?;
+        self.emit(Instr::LoadGlobalThis { dst: receiver });
+        self.compile_expr(property)
+    }
+
     fn compile_super_reference(&mut self, property: &'a Expr) -> Result<(Reg, Reg, Reg), Decline> {
-        let src = self.compile_expr(property)?;
+        let src = self.compile_super_property_key(property)?;
         let base = self.alloc_reg()?;
         let receiver = self.alloc_reg()?;
         let key = self.alloc_reg()?;
@@ -4436,7 +4442,7 @@ impl<'a> Compiler<'a> {
                 computed,
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    let key = self.compile_expr(property)?;
+                    let key = self.compile_super_property_key(property)?;
                     let function = self.alloc_reg()?;
                     self.emit(Instr::SuperMember { dst: function, key });
                     return Ok((function, Some(self.compile_this()?)));
@@ -4698,7 +4704,7 @@ impl<'a> Compiler<'a> {
             && matches!(object.as_ref(), Expr::Super)
         {
             let (base, receiver, key) = if op == AssignOp::Assign {
-                let raw_key = self.compile_expr(property)?;
+                let raw_key = self.compile_super_property_key(property)?;
                 let undefined = self.const_undefined()?;
                 let src = self.load_const(undefined)?;
                 let base = self.alloc_reg()?;

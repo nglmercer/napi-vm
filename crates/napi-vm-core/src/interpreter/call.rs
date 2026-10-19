@@ -415,7 +415,7 @@ impl Interpreter {
                 private,
             } => {
                 if matches!(object.as_ref(), crate::parser::Expr::Super) {
-                    let key = self.eval_expr(property)?;
+                    let key = self.evaluate_super_property_key(property)?;
                     let (base, receiver, _) =
                         self.super_reference(&self.global.clone(), &Value::Undefined)?;
                     Ok(Some(PreparedPatternTarget::Super {
@@ -531,7 +531,7 @@ impl Interpreter {
                 private,
             } => {
                 if matches!(object.as_ref(), crate::parser::Expr::Super) {
-                    let key = self.eval_expr(property)?;
+                    let key = self.evaluate_super_property_key(property)?;
                     let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
                     let strict = self.global.borrow().strict();
                     self.assign_property_with_receiver(

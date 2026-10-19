@@ -1167,5 +1167,37 @@
       "Subsequent super receiver-order changes are excluded from this worker and patch."
     ],
     "evidence": "evidence/public-hash-keys-2026-10-19/focused.json.gz"
+  },
+  "super_reference_order_focused": {
+    "source_base": "15e6436a255eaf6bbd3677d1e013c5a9009b419d",
+    "engine_sha256": "455f87a52832e07ec0a101be82421854c18b9fb4bf1bc14517de814f3e710272",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/expressions/super",
+      "language/expressions/class",
+      "language/statements/class",
+      "language/expressions/object"
+    ],
+    "implementation_patch_sha256": "daf95839f37db8af95251bf006bd8596eecf31bbf534bc0c28cff0ae0b9f7215",
+    "total": 19125,
+    "counts": {
+      "pass": 19080,
+      "fail": 45,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 10,
+    "losses": 0,
+    "validation": {
+      "super_reference_tests_in_both_tiers": 4,
+      "selected_integration_tests": 15,
+      "core_library_tests_without_exclusions": 368,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "note": "Latest full score measures a528b02 and excludes this continuation.",
+    "evidence": "evidence/super-reference-order-2026-10-19/focused.json.gz"
   }
 }

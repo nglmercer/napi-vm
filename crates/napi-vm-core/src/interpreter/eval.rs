@@ -327,6 +327,13 @@ impl Interpreter {
         Ok((base, receiver, key))
     }
 
+    pub(super) fn evaluate_super_property_key(&mut self, property: &Expr) -> Result<Value, VmErr> {
+        // A derived constructor must have a bound receiver before the key
+        // expression can run (including a nested super() call).
+        self.resolve_this(&self.global.clone())?;
+        self.eval_expr(property)
+    }
+
     pub(crate) fn super_constructor(&mut self, scope: &Env) -> Result<Value, VmErr> {
         let home = scope.borrow().get(SUPER_CONSTRUCTOR_HOME).ok_or_else(|| {
             VmErr::Msg("ReferenceError: super() outside a derived constructor".into())
@@ -2126,7 +2133,7 @@ impl Interpreter {
                 computed,
             } => {
                 if matches!(object.as_ref(), Expr::Super) {
-                    let key = self.eval_expr(property)?;
+                    let key = self.evaluate_super_property_key(property)?;
                     let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
                     let function = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
                     return Ok(Some((function, receiver)));
@@ -2944,7 +2951,7 @@ impl Interpreter {
                     } = operand.unparenthesized()
                         && matches!(object.as_ref(), Expr::Super)
                     {
-                        let key = self.eval_expr(property)?;
+                        let key = self.evaluate_super_property_key(property)?;
                         let (base, receiver, key) =
                             self.super_reference(&self.global.clone(), &key)?;
                         let current = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
@@ -3039,7 +3046,7 @@ impl Interpreter {
                 } = target.unparenthesized()
                     && matches!(object.as_ref(), Expr::Super)
                 {
-                    let key = self.eval_expr(property)?;
+                    let key = self.evaluate_super_property_key(property)?;
                     let (base, receiver, key) = self.super_reference(&self.global.clone(), &key)?;
                     let current = self.get_prop_value_with_receiver(&base, &key, &receiver)?;
                     let should_assign = match op {
@@ -3169,7 +3176,7 @@ impl Interpreter {
                 } = target.unparenthesized()
                     && matches!(object.as_ref(), Expr::Super)
                 {
-                    let key = self.eval_expr(property)?;
+                    let key = self.evaluate_super_property_key(property)?;
                     let (base, receiver, key) = if matches!(op, AssignOp::Assign) {
                         let (base, receiver, _) =
                             self.super_reference(&self.global.clone(), &Value::Undefined)?;
