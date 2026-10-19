@@ -1500,7 +1500,9 @@ impl Interpreter {
                 match kind {
                     VarKind::Var => {
                         if let Some(pat) = destructuring {
-                            self.destructure(pat, &v)?;
+                            // Hoisted var bindings use resolved references,
+                            // captured before source reads and defaults.
+                            self.destructure_assignment(pat, &v)?;
                         } else if init.is_some() {
                             self.assign_or_set_binding(name, v.clone())?;
                         } else if self.global.borrow().get(name).is_none() {

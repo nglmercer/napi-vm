@@ -171,3 +171,43 @@ fn falsy_values_do_not_trigger_defaults() {
         "[null,0,false,\"\",99,1]",
     );
 }
+
+#[test]
+fn var_object_binding_resolves_before_getters_and_defaults() {
+    assert_both(
+        "var log=[];var sourceKey={toString(){log.push('key');return 'p';}};var source={get p(){log.push('get');return undefined;}};var fallback=7,target;var env=new Proxy({}, {has(t,k){log.push('binding:'+k);return false;}});with(env){var {[sourceKey]:target=fallback}=source;}JSON.stringify([target,log]);",
+        "[7,[\"binding:source\",\"binding:sourceKey\",\"key\",\"binding:target\",\"get\",\"binding:fallback\"]]",
+    );
+}
+
+#[test]
+fn var_destructuring_keeps_the_reference_when_source_deletes_the_property() {
+    assert_both(
+        "var target=1;var env={target:2};var source={get p(){delete env.target;return 9;}};with(env){var {p:target}=source;}JSON.stringify([target,env.target]);",
+        "[1,9]",
+    );
+}
+
+#[test]
+fn abrupt_var_target_resolution_precedes_source_getter() {
+    assert_both(
+        "var log=[],target;var source={get p(){log.push('get');return 9;}};var env=new Proxy({}, {has(t,k){if(k==='target')throw 42;return false;}});try{with(env){var {p:target}=source;}}catch(e){log.push(e);}JSON.stringify(log);",
+        "[42]",
+    );
+}
+
+#[test]
+fn lexical_destructuring_keeps_its_own_binding_inside_with() {
+    assert_both(
+        "var env={target:2};var source={get p(){delete env.target;return 9;}};var value;with(env){let {p:target}=source;value=target;}JSON.stringify([value,env.target]);",
+        "[9,null]",
+    );
+}
+
+#[test]
+fn var_array_binding_resolves_before_the_iterator_step() {
+    assert_both(
+        "var target=1;var env={target:2};var source={[Symbol.iterator](){return {next(){delete env.target;return {value:9,done:false};},return(){return {};}};}};with(env){var [target]=source;}JSON.stringify([target,env.target]);",
+        "[1,9]",
+    );
+}

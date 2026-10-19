@@ -109,6 +109,8 @@ Canonical numeric property keys subsequently pass **2,702 / 2,729** selected var
 
 Class property layout subsequently passes **18,986 / 19,037** selected variants, gaining **38 passes with zero losses**. All computed-name and object-expression variants pass. This remains outside the completed full score. See the [class layout continuation](../../docs/test262-class-property-layout-continuation.md).
 
+Var destructuring reference order subsequently passes **528 / 528** selected variants, gaining **one pass with zero losses**. All 368 core-library tests pass without exclusions. This remains outside the completed full score. See the [var destructuring continuation](../../docs/test262-var-destructuring-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

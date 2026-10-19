@@ -1066,5 +1066,36 @@
       "The native-addon bridge gate remains unresolved; see continuation document."
     ],
     "evidence": "evidence/class-property-layout-2026-10-18/focused.json.gz"
+  },
+  "var_destructuring_focused": {
+    "source_base": "87e36436abdc97ae0863f526d5accc7599060e03",
+    "baseline_provenance": "Class property layout release c3d28437, archived in class-property-layout-2026-10-18; intervening host-bridge and host-JSON fixes are included only in the fresh worker.",
+    "engine_sha256": "c44699f2151b702584db67c7ace5bc111512698cab564632b76c28e1b2b4f9e5",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/destructuring",
+      "language/statements/variable",
+      "language/statements/with"
+    ],
+    "implementation_patch_sha256": "fb155097cbe85f2e1b2a9b65c495e586ec755323f3fe64c36dbddc4f2f62b4c3",
+    "total": 528,
+    "counts": {
+      "pass": 528,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 1,
+    "losses": 0,
+    "validation": {
+      "destructuring_integration_tests": 17,
+      "core_library_tests_without_exclusions": 368,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "note": "Latest completed full score still measures 997b476; focused results are not added to that score.",
+    "evidence": "evidence/var-destructuring-2026-10-18/focused.json.gz"
   }
 }
