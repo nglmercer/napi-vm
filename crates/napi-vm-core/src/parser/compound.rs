@@ -125,7 +125,7 @@ impl Parser {
                         name
                     }
                     Token::Number(n) | Token::LegacyNumber(n) => {
-                        let v = crate::format::number_string(*n);
+                        let v = crate::format::ecmascript_number_string(*n);
                         self.adv();
                         v
                     }

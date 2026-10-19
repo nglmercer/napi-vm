@@ -178,7 +178,7 @@ impl Parser {
                             name
                         }
                         Token::Number(n) | Token::LegacyNumber(n) => {
-                            let v = crate::format::number_string(*n);
+                            let v = crate::format::ecmascript_number_string(*n);
                             self.adv();
                             v
                         }
@@ -216,7 +216,9 @@ impl Parser {
                                         Expr::String(s) | Expr::EscapedString(s) => {
                                             Some(s.to_key())
                                         }
-                                        Expr::Number(n) => Some(n.to_string()),
+                                        Expr::Number(n) => {
+                                            Some(crate::format::ecmascript_number_string(*n))
+                                        }
                                         _ => None,
                                     };
                                     if let Some(key_str) = key_str {

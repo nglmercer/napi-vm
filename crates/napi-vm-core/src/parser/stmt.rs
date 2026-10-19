@@ -394,7 +394,8 @@ impl Parser {
                             }
                             Token::Number(n) => {
                                 keyword_only = true;
-                                let key = PatternKey::Name(crate::format::number_string(*n));
+                                let key =
+                                    PatternKey::Name(crate::format::ecmascript_number_string(*n));
                                 self.adv();
                                 key
                             }

@@ -105,6 +105,8 @@ Empty accessor metadata and duplicate-parameter initialization subsequently pass
 
 Async generator delegation subsequently passes **2,858 / 2,858** selected variants, gaining **4 passes with zero losses**. These changes remain outside the completed full score. See the [async delegation continuation](../../docs/test262-async-delegation-continuation.md).
 
+Canonical numeric property keys subsequently pass **2,702 / 2,729** selected variants, gaining **10 passes with zero losses**. All 2,252 object-expression variants pass. These changes remain outside the completed full score. See the [numeric key continuation](../../docs/test262-numeric-property-keys-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the
