@@ -139,7 +139,7 @@ Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/imp
 
 Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This remains outside the completed full snapshot. See the [async cycle continuation](../../docs/test262-async-cycle-continuation.md).
 
-Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and explicit binary loader API are enabled; runtime adapter integration follows. This remains outside the completed full snapshot. See the [byte module continuation](../../docs/test262-byte-modules-continuation.md).
+Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and binary loader API support file, HTTP, package, and TypeScript adapters with permission and size checks. This remains outside the completed full snapshot. See the [byte module continuation](../../docs/test262-byte-modules-continuation.md).
 
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including

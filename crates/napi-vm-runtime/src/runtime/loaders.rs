@@ -64,6 +64,18 @@ impl ModuleLoader for FileLoader {
         }
         Ok(resolved.into())
     }
+    fn load_bytes(
+        &self,
+        id: &str,
+        _: &[(String, crate::JsString)],
+    ) -> Result<crate::ModuleBytes, VmErr> {
+        Ok(crate::ModuleBytes {
+            id: id.into(),
+            bytes: self
+                .permissions
+                .read_bytes(Self::path(id)?, self.max_bytes)?,
+        })
+    }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         let source = self
             .permissions
@@ -115,6 +127,17 @@ impl ModuleLoader for HttpLoader {
         Ok(url.into())
     }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
+        let loaded = self.load_bytes(id, &[])?;
+        Ok(ModuleSource {
+            id: loaded.id,
+            source: String::from_utf8(loaded.bytes).map_err(|e| VmErr::Msg(e.to_string()))?,
+        })
+    }
+    fn load_bytes(
+        &self,
+        id: &str,
+        _: &[(String, crate::JsString)],
+    ) -> Result<crate::ModuleBytes, VmErr> {
         let request = super::network::FetchRequest {
             url: id.into(),
             method: "GET".into(),
@@ -139,9 +162,9 @@ impl ModuleLoader for HttpLoader {
         self.redirects
             .borrow_mut()
             .insert(id.into(), response["url"].as_str().unwrap_or(id).into());
-        Ok(ModuleSource {
+        Ok(crate::ModuleBytes {
             id: id.into(),
-            source: String::from_utf8(bytes).map_err(|e| VmErr::Msg(e.to_string()))?,
+            bytes,
         })
     }
 }

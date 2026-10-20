@@ -85,7 +85,7 @@ impl NpmLoader {
     }
     fn candidate(&self, path: &Path, mode: Mode, directory: bool) -> Result<PathBuf, VmErr> {
         let path = Self::normalize(path)?;
-        let initial_error = match self.text(&path) {
+        let initial_error = match self.permissions.read_bytes(&path, self.max_bytes) {
             Ok(_) => return Ok(path),
             Err(error) => error,
         };
@@ -95,7 +95,11 @@ impl NpmLoader {
         if matches!(mode, Mode::Require) {
             for extension in ["js", "json", "cjs"] {
                 let candidate = PathBuf::from(format!("{}.{}", path.display(), extension));
-                if self.text(&candidate).is_ok() {
+                if self
+                    .permissions
+                    .read_bytes(&candidate, self.max_bytes)
+                    .is_ok()
+                {
                     return Ok(candidate);
                 }
             }
@@ -119,7 +123,11 @@ impl NpmLoader {
             }
             for filename in ["index.js", "index.json", "index.cjs"] {
                 let candidate = path.join(filename);
-                if self.text(&candidate).is_ok() {
+                if self
+                    .permissions
+                    .read_bytes(&candidate, self.max_bytes)
+                    .is_ok()
+                {
                     return Ok(candidate);
                 }
             }
@@ -358,6 +366,18 @@ impl ModuleLoader for NpmLoader {
             });
         }
         Self::id(&self.resolve_path(specifier, referrer, Mode::Import, 0)?)
+    }
+    fn load_bytes(
+        &self,
+        id: &str,
+        _: &[(String, crate::JsString)],
+    ) -> Result<crate::ModuleBytes, VmErr> {
+        Ok(crate::ModuleBytes {
+            id: id.into(),
+            bytes: self
+                .permissions
+                .read_bytes(Self::from_id(id)?, self.max_bytes)?,
+        })
     }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         let path = Self::from_id(id)?;

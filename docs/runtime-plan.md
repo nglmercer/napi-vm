@@ -186,6 +186,11 @@ Specify condition precedence and compatibility treatment of the nonstandard
 Acceptance: reproducible locked installs, export-map edge cases, cyclic ESM/CJS
 graphs, cache tampering rejection and a version-pinned real-package corpus.
 
+Binary module integration now exposes `type: 'bytes'` through FileLoader,
+HttpLoader, NpmLoader, and TypeScriptLoader. Permission and resource-limit
+checks remain on the raw byte path; TypeScript does not transform binary
+requests. See [byte module implementation and validation](test262-byte-modules-continuation.md).
+
 ### M5 — P1 optional Node and TypeScript
 
 Enable Node behavior explicitly with `--compat=node` and implement tiers:

@@ -84,6 +84,13 @@ impl ModuleLoader for TypeScriptLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr> {
         self.inner.resolve(specifier, referrer)
     }
+    fn load_bytes(
+        &self,
+        id: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<crate::ModuleBytes, VmErr> {
+        self.inner.load_bytes(id, attributes)
+    }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         let mut loaded = self.inner.load(id)?;
         let path = url::Url::parse(id)

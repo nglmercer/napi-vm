@@ -32,6 +32,16 @@ The same two ArrayBuffer timeouts remain in both runs without reclassification.
 See the [archived evidence](../tools/test262/evidence/byte-modules-2026-10-20/summary.json). The completed full snapshot
 ffc10c7 excludes this continuation.
 
-Runtime file, HTTP, package, and TypeScript loader adapters still require
-explicit binary-hook integration; this batch enables the engine, VirtualLoader,
-CompositeLoader, and the Test262 file host.
+Runtime file, HTTP, package, and TypeScript adapters now implement the binary
+hook. File and package reads retain permission and size checks. HTTP byte
+loading reuses the same checked fetch, redirect policy, status validation, and
+response limit as text loading. TypeScript wrappers forward raw byte requests
+without transformation. Package candidate resolution checks bytes rather than
+decoding text, allowing non-UTF-8 resources to resolve.
+
+Validation: two binary-adapter tests (including a local HTTP server, denied
+file/network access, size limits, immutable imports, and TypeScript bypass),
+six package tests, and two TypeScript tests pass with all runtime features.
+All-feature runtime Clippy and formatting pass. This host integration does not
+change the Test262 worker score. See
+[runtime adapter evidence](../tools/test262/evidence/runtime-byte-adapters-2026-10-20/summary.json).
