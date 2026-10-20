@@ -12,6 +12,10 @@ pub(super) const DEFAULT_BINDING: &str = "*default*";
 /// (which may be a single `VarDecl` or a block of them for `let a, b`).
 fn declared_names(stmt: &Statement) -> Vec<String> {
     match stmt {
+        Statement::VarDecl {
+            destructuring: Some(pattern),
+            ..
+        } => super::pattern_names(pattern),
         Statement::VarDecl { name, .. } if !name.is_empty() => vec![name.clone()],
         Statement::Block(stmts) | Statement::Declarations(stmts) => {
             stmts.iter().flat_map(declared_names).collect()

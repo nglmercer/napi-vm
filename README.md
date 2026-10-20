@@ -586,6 +586,8 @@ Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected vari
 
 Cyclic and ambiguous export resolution subsequently passes **2,618 / 2,637** module/import variants, gaining **two passes with zero losses**. This remains outside the running full snapshot. See the [export resolution continuation](docs/test262-export-resolution-continuation.md).
 
+Exported destructuring bindings subsequently pass **3,486 / 3,504** selected variants, gaining **one pass with zero losses**. All **253 / 253** top-level-await variants pass. This remains outside the running full snapshot. See the [export patterns continuation](docs/test262-export-patterns-continuation.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

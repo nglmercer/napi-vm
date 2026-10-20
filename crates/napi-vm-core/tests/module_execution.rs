@@ -578,3 +578,66 @@ fn invalid_indirect_exports_fail_linking_without_a_consumer_or_effects() {
         number(&mut vm, "effects", 0.);
     }
 }
+
+#[test]
+fn exported_destructuring_exposes_all_bound_names_and_live_updates() {
+    for kind in ["var", "let", "const"] {
+        let mut vm = Interpreter::with_builtins();
+        source(
+            &mut vm,
+            "patterns",
+            &format!(
+                "export {kind} {{a, nested: [b=2,,...tail], ...rest}}={{a:1,nested:[undefined,9,3,4],extra:5}}, [c,{{d:e}},...remaining]=[6,{{d:7}},8];"
+            ),
+        );
+        source(&mut vm, "barrel", "export * from 'patterns';");
+        vm.load_module("barrel").unwrap();
+        number(
+            &mut vm,
+            "import {a,b,tail,rest,c,e,remaining} from 'barrel'; a+b+tail[0]+tail[1]+rest.extra+c+e+remaining[0]",
+            36.,
+        );
+        assert!(
+            matches!(vm.eval_source("import * as ns from 'patterns'; Object.keys(ns).join(',')").unwrap(), Value::String(ref s) if s == "a,b,c,e,remaining,rest,tail")
+        );
+    }
+    let mut vm = Interpreter::with_builtins();
+    source(
+        &mut vm,
+        "live",
+        "export let {value}={value:1}; export function bump(){value++;}",
+    );
+    number(
+        &mut vm,
+        "import {value,bump} from 'live'; bump(); value",
+        2.,
+    );
+}
+
+#[test]
+fn exported_destructuring_bindings_exist_before_initialization() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var observed=false").unwrap();
+    source(
+        &mut vm,
+        "lexical",
+        "import {value as self} from 'lexical'; try {self;} catch(e){observed=e instanceof ReferenceError;} export let {value}={value:7};",
+    );
+    vm.load_module("lexical").unwrap();
+    assert!(matches!(
+        vm.eval_source("observed").unwrap(),
+        Value::Bool(true)
+    ));
+    number(&mut vm, "import {value} from 'lexical'; value", 7.);
+    source(
+        &mut vm,
+        "duplicate",
+        "export let {value}={value:1}; export {value};",
+    );
+    assert!(
+        vm.link_module("duplicate")
+            .unwrap_err()
+            .to_string()
+            .contains("SyntaxError")
+    );
+}

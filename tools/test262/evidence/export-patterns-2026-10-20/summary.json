@@ -1,0 +1,38 @@
+{
+  "source_base": "6bbc8d2c836dcdad56698028509c36e32e406cd3",
+  "worker_sha256": "8cc9b267a961801f8112d8b516479b5c13c119fc50f6e32ee36458a81e9bb4d3",
+  "working_tree_changes": true,
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "language/module-code",
+    "language/import",
+    "language/expressions/dynamic-import",
+    "language/statements/variable",
+    "language/statements/let",
+    "language/statements/const"
+  ],
+  "implementation_patch_sha256": "4b51608f9227a7a19fe6746b38d74c9db67d59dfbc94401130b7e128d18921bb",
+  "total": 3504,
+  "counts": {
+    "pass": 3486,
+    "fail": 18,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": 1,
+  "losses": 0,
+  "validation": {
+    "module_integration_tests": 27,
+    "core_library_tests": 369,
+    "strict_workspace_clippy": "pass",
+    "format": "pass",
+    "top_level_await_selection": {
+      "pass": 253,
+      "total": 253
+    }
+  },
+  "note": "Running full snapshot ffc10c7 excludes this continuation. Baseline worker 2915ae8a contains preceding export resolution fix.",
+  "evidence": "evidence/export-patterns-2026-10-20/focused.json.gz"
+}
