@@ -1976,7 +1976,7 @@ fn typed_array_static_methods_are_shared_inherited_and_realm_owned() {
         !Object.hasOwn(Int8Array,'from') && !Object.hasOwn(Uint8Array,'of') &&
         Int8Array.from===Uint8Array.from && T.from===Int8Array.from &&
         T.of===Float64Array.of && T.from!==U.from &&
-        T.from.length===3 && T.of.length===0 &&
+        T.from.length===1 && T.of.length===0 &&
         d.writable && !d.enumerable && d.configurable &&
         Object.getPrototypeOf(U.from)===other.Function.prototype;
     "#,

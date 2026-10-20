@@ -389,6 +389,14 @@ pub(super) fn install(e: &mut Environment) {
     }
 
     let typed_array_prototype = typed_array_prototype(object_prototype.clone());
+    let array_to_string = e
+        .get("Array")
+        .and_then(|constructor| constructor.get_prop("prototype"))
+        .and_then(|prototype| prototype.get_prop("toString"))
+        .expect("Array.prototype.toString intrinsic");
+    typed_array_prototype
+        .set_prop("toString".into(), array_to_string)
+        .expect("TypedArray.prototype.toString alias");
     let abstract_constructor =
         Value::object(vec![("prototype".into(), typed_array_prototype.clone())]);
     super::make_callable(
@@ -422,7 +430,7 @@ pub(super) fn install(e: &mut Environment) {
     // Concrete constructors and user subclasses inherit the same methods
     // from their realm's %TypedArray%; their receiver selects construction.
     for (name, length, callable) in [
-        ("from", 3, typed_from as super::NativeFn),
+        ("from", 1, typed_from as super::NativeFn),
         ("of", 0, typed_of as super::NativeFn),
     ] {
         abstract_constructor
