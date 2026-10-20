@@ -1383,14 +1383,7 @@ fn define_ordinary_property(target: &Value, key: &str, descriptor: &Value) -> Re
 
     if let Value::TypedArray(view) = target {
         // Integer-indexed elements never become ordinary property slots.
-        let numeric = key.parse::<f64>().ok();
-        let canonical = key == "-0"
-            || key == "NaN"
-            || key == "Infinity"
-            || key == "-Infinity"
-            || numeric.is_some_and(|index| index.to_string() == key);
-        if canonical {
-            let index = numeric.unwrap_or(f64::NAN);
+        if let Some(index) = crate::builtins::canonical_numeric_index(key) {
             if view.buffer.is_immutable() {
                 if !crate::builtins::valid_integer_index(view, index) {
                     return Err(type_err("Cannot redefine an invalid typed array index"));
