@@ -167,3 +167,39 @@ fn deferred_host_attributes_select_source_without_executing_the_body() {
         "import {read} from 'main';read()===42 && effects===1",
     );
 }
+
+#[test]
+fn data_url_byte_modules_decode_binary_without_javascript_media_or_utf8() {
+    use napi_vm_core::DataUrlLoader;
+    for url in [
+        "data:application/octet-stream;base64,AP+A",
+        "data:image/png,%00%ff%80",
+        "data:text/plain;charset=iso-8859-1,%00%ff%80",
+        "data:,%00%FF%80#ignored",
+    ] {
+        let mut vm = Interpreter::with_builtins();
+        vm.set_module_loader(Rc::new(DataUrlLoader::new(16)));
+        let code = format!(
+            "import bytes from {} with {{type:'bytes'}};bytes.buffer.immutable && bytes.length===3 && bytes[0]===0 && bytes[1]===255 && bytes[2]===128",
+            serde_json::to_string(url).unwrap()
+        );
+        truth(&mut vm, &code);
+    }
+}
+#[test]
+fn data_url_byte_loading_preserves_validation_and_size_limits() {
+    use napi_vm_core::DataUrlLoader;
+    let loader = DataUrlLoader::new(2);
+    for url in [
+        "data:,%00%ff%80",
+        "data:;base64,AP+A",
+        "data:,%zz",
+        "data:;base64,?",
+        "data:;base64;base64,AA==",
+    ] {
+        assert!(loader.load_bytes(url, &[]).is_err(), "{url}");
+    }
+    assert!(loader.load("data:text/plain,1").is_err());
+    assert!(loader.load("data:application/javascript,%ff").is_err());
+    assert_eq!(loader.load("data:text/javascript,1").unwrap().source, "1");
+}

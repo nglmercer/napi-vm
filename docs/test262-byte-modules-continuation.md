@@ -52,3 +52,11 @@ attribute tests and 33 module tests pass, with strict workspace Clippy and
 formatting. A host-selection regression also verifies that the selected body
 remains deferred until namespace access. No Test262 gain is claimed. See
 [deferred attribute evidence](../tools/test262/evidence/defer-attributes-2026-10-20/summary.json).
+
+DataUrlLoader also supports byte modules with arbitrary media types and raw
+percent/base64 decoding. Binary loads do not apply charset decoding; ordinary
+text loads retain JavaScript media and UTF-8 validation. Duplicate base64 flags,
+malformed encodings, and oversized payloads reject. Resolution validates raw
+data before the selected text or byte loading path runs. Eight byte-module
+tests and 33 module tests pass, together with strict workspace Clippy and
+formatting. No Test262 score gain is claimed for this loader extension.

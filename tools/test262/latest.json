@@ -1571,5 +1571,17 @@
       "format": "pass"
     },
     "note": "Deferred import attributes parsed once at common tail; binary regression fails before fix. No Test262 score gain claimed. Frozen full worker 75c6857 excludes this fix."
+  },
+  "data_url_byte_validation": {
+    "source_base": "cdb1cfd8b6c345a709e6bed622c5f3ff69c37c0e",
+    "implementation_patch_sha256": "bafe30ac03dcdda47b5f38879d5b6a98f60b6ea0fc1f968d627ab29bfd1a4175",
+    "validation": {
+      "byte_module_tests": 8,
+      "module_tests": 33,
+      "runtime_data_url_test": 1,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "note": "No Test262 gain claimed. Frozen full worker 75c6857 excludes this host-loader extension."
   }
 }

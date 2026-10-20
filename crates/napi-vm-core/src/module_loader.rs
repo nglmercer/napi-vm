@@ -140,7 +140,7 @@ impl ModuleLoader for VirtualLoader {
     }
 }
 
-/// JavaScript data URLs, with no host IO or ambient permissions.
+/// JavaScript and binary data URLs, with no host IO or ambient permissions.
 pub struct DataUrlLoader {
     max_bytes: usize,
 }
@@ -149,15 +149,8 @@ impl DataUrlLoader {
         Self { max_bytes }
     }
 }
-impl ModuleLoader for DataUrlLoader {
-    fn resolve(&self, specifier: &str, _referrer: Option<&str>) -> Result<String, VmErr> {
-        if !specifier.starts_with("data:") {
-            return Err(VmErr::Msg("Unsupported data module specifier".into()));
-        }
-        self.load(specifier)?;
-        Ok(specifier.into())
-    }
-    fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
+impl DataUrlLoader {
+    fn decode(&self, id: &str, javascript: bool) -> Result<Vec<u8>, VmErr> {
         use base64::Engine;
         let (metadata, payload) = id
             .strip_prefix("data:")
@@ -168,20 +161,25 @@ impl ModuleLoader for DataUrlLoader {
         }
         let mut parameters = metadata.split(';');
         let media = parameters.next().unwrap_or("");
-        if !matches!(
-            media.to_ascii_lowercase().as_str(),
-            "text/javascript"
-                | "application/javascript"
-                | "application/ecmascript"
-                | "text/ecmascript"
-        ) {
+        if javascript
+            && !matches!(
+                media.to_ascii_lowercase().as_str(),
+                "text/javascript"
+                    | "application/javascript"
+                    | "application/ecmascript"
+                    | "text/ecmascript"
+            )
+        {
             return Err(VmErr::Msg("Unsupported data module media type".into()));
         }
         let mut encoded = false;
         for parameter in parameters {
-            if parameter.eq_ignore_ascii_case("base64") && !encoded {
+            if parameter.eq_ignore_ascii_case("base64") {
+                if encoded {
+                    return Err(VmErr::Msg("Unsupported data module encoding".into()));
+                }
                 encoded = true;
-            } else if !parameter.eq_ignore_ascii_case("charset=utf-8") {
+            } else if javascript && !parameter.eq_ignore_ascii_case("charset=utf-8") {
                 return Err(VmErr::Msg("Unsupported data module encoding".into()));
             }
         }
@@ -214,9 +212,25 @@ impl ModuleLoader for DataUrlLoader {
         if bytes.len() > self.max_bytes {
             return Err(VmErr::Msg("ResourceLimit: module size exceeded".into()));
         }
+        Ok(bytes)
+    }
+}
+impl ModuleLoader for DataUrlLoader {
+    fn resolve(&self, specifier: &str, _referrer: Option<&str>) -> Result<String, VmErr> {
+        self.decode(specifier, false)?;
+        Ok(specifier.into())
+    }
+    fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         Ok(ModuleSource {
             id: id.into(),
-            source: String::from_utf8(bytes).map_err(|e| VmErr::Msg(e.to_string()))?,
+            source: String::from_utf8(self.decode(id, true)?)
+                .map_err(|e| VmErr::Msg(e.to_string()))?,
+        })
+    }
+    fn load_bytes(&self, id: &str, _: &[(String, crate::JsString)]) -> Result<ModuleBytes, VmErr> {
+        Ok(ModuleBytes {
+            id: id.into(),
+            bytes: self.decode(id, false)?,
         })
     }
 }
