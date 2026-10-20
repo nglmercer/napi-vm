@@ -34,7 +34,7 @@ Array unscopables, and String/Boolean constructor length metadata. The subsequen
 addresses those failures.
 See the [archived evidence](../tools/test262/evidence/array-logical-lengths-2026-10-20/summary.json).
 
-The active full run on `daadb9b` excludes this change and the preceding sparse
+The completed full run on `daadb9b` excludes this change and the preceding sparse
 index implementation. Neither focused result should be added to the full score.
 Other array methods still have dense materialization limits and some shared
 length clamps; this continuation does not finish all Array semantics.

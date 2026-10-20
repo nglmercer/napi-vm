@@ -19,9 +19,7 @@ Reflect variants, gaining **12 passes with zero losses**. See the
 
 See [Properties of the Object Constructor](https://tc39.es/ecma262/multipage/fundamental-objects.html#sec-properties-of-the-object-constructor).
 
-Full-run tracking update: the completed `1bffdb8` run excludes this change.
-The active frozen `daadb9b` full run includes it; its final score is pending.
-
-The completed `daadb9b` full run now includes this continuation: 101,978 /
-102,956 passing, 753 failures, and 225 timeouts. Earlier tracking statements
-above describe the prior checkpoint. See the current checkpoint status.
+Full-run tracking: the completed `daadb9b` snapshot includes this change.
+It passes 101,978 / 102,956 variants, with 753 failures and 225 timeouts.
+All 155 lost passes against `1bffdb8` are measured timeouts, retained without
+reclassification. See the [current checkpoint](test262-checkpoint-status.md).

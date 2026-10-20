@@ -34,6 +34,6 @@ script/strict cases for String split regexp escapes, startsWith arity, and
 String.raw Symbol length coercion.
 See the [archived evidence](../tools/test262/evidence/core-constructor-metadata-2026-10-20/summary.json).
 
-The active full run on `daadb9b` excludes this continuation as well as the earlier
+The completed full run on `daadb9b` excludes this continuation as well as the earlier
 sparse-index and logical-length implementations. The latest completed full
 score remains separate from these focused measurements.

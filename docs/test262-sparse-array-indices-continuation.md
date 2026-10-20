@@ -34,5 +34,5 @@ See the [archived evidence](../tools/test262/evidence/sparse-array-indices-2026-
 This work does not finish Array conformance. At that checkpoint, generic methods still contained
 length clamps and dense result limits. The subsequent [logical length
 continuation](test262-array-logical-lengths-continuation.md) addresses concat,
-splice, slice, and push. The active frozen full run on `daadb9b` excludes this
+splice, slice, and push. The completed full run on `daadb9b` excludes this
 continuation; its outcomes must remain separate from the focused measurement.
