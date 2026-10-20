@@ -2375,20 +2375,23 @@ fn typed_slice(
     let destination = require(&result)?;
     let count = count.min(source.effective_length().saturating_sub(start));
     if source.kind == destination.kind {
-        let bytes = source
-            .buffer
-            .read(
-                source.byte_offset + start * source.kind.size(),
-                count * source.kind.size(),
-            )
-            .ok_or_else(|| VmErr::Msg("TypeError: TypedArray source became detached".into()))?;
-        destination.buffer.write(destination.byte_offset, &bytes);
+        // The spec copies raw bytes in forward order. A species constructor
+        // can return an overlapping view, so a snapshot changes the result.
+        for index in 0..count * source.kind.size() {
+            interp.consume_loop()?;
+            let byte = source
+                .buffer
+                .read(source.byte_offset + start * source.kind.size() + index, 1)
+                .ok_or_else(|| VmErr::Msg("TypeError: TypedArray source became detached".into()))?;
+            destination
+                .buffer
+                .write(destination.byte_offset + index, &byte);
+        }
     } else {
-        let values = (start..start + count)
-            .map(|index| read_element(&source, index).unwrap_or(Value::Undefined))
-            .collect::<Vec<_>>();
-        for (index, value) in values.iter().enumerate() {
-            write_element_in(interp, &destination, index, value)?;
+        for index in 0..count {
+            interp.consume_loop()?;
+            let value = read_element(&source, start + index).unwrap_or(Value::Undefined);
+            write_element_in(interp, &destination, index, &value)?;
         }
     }
     Ok(result)
