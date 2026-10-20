@@ -71,6 +71,9 @@ fn unavailable(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, Vm
         "TypeError: AbstractModuleSource cannot be invoked directly".into(),
     ))
 }
-fn tag(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    Ok(Value::Undefined)
+fn tag(_: &mut Interpreter, receiver: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    let name = receiver
+        .property_cell()
+        .and_then(|properties| properties.meta.borrow().module_source_class_name.clone());
+    Ok(name.map_or(Value::Undefined, Value::String))
 }

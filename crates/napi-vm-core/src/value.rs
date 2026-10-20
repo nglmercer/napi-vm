@@ -185,6 +185,8 @@ pub(crate) enum CollectionKind {
 pub struct ObjectMeta {
     /// The realm that owns native methods and implicit intrinsic prototypes.
     pub(crate) realm_global: Option<Env>,
+    /// Host-created module-source brand; never inherited through prototypes.
+    pub(crate) module_source_class_name: Option<crate::JsString>,
     /// The isolated global owned by a ShadowRealm instance.
     pub(crate) shadow_realm_global: Option<Env>,
     /// Internal target and realm boundary for a ShadowRealm wrapped function.

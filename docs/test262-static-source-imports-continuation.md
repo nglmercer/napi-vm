@@ -34,3 +34,14 @@ loading, and re-exports remain required work.
 
 All 369 core-library tests also pass without exclusions. Evidence is archived
 in [intrinsic validation](../tools/test262/evidence/abstract-module-source-2026-10-20/summary.json).
+
+Hosts can now create branded source objects using
+`Interpreter::create_module_source_object(class_name)`. The class name is an
+internal metadata slot, read only from the actual receiver by the intrinsic
+tag getter. Inherited slots, proxies, and guest properties cannot forge it.
+Objects inherit the creating realm’s AbstractModuleSource prototype; getters
+from another realm can read the brand. Freezing preserves it. This API does
+not yet connect source objects to module loading or re-exports.
+
+All three source-phase tests and 369 core-library tests pass, with strict
+workspace Clippy and formatting. See [brand validation evidence](../tools/test262/evidence/module-source-brand-2026-10-20/summary.json).

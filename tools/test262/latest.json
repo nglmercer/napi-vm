@@ -1623,5 +1623,19 @@
       "No release/full score update claimed.",
       "Host-branded module source objects and source-phase graph/reexport semantics remain unfinished."
     ]
+  },
+  "module_source_brand_validation": {
+    "source_base": "e354597859b0356052d199baf4a6b38cf2f98226",
+    "implementation_patch_sha256": "189af8d524ee665eef259aec3a95fb03aa593cd94073f4fe52bc0be75dcdcf9b",
+    "validation": {
+      "source_phase_tests": 3,
+      "core_library_tests": 369,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "limitations": [
+      "No Test262 score gain claimed.",
+      "Host source loading and source-phase graph/reexport semantics remain unfinished."
+    ]
   }
 }

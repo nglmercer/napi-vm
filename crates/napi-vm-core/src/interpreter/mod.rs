@@ -563,6 +563,21 @@ impl Interpreter {
             .expect("builtins installed")
     }
 
+    /// Create a host-defined module-source object with an internal class name.
+    /// Guest properties, prototypes, and proxies cannot manufacture this brand.
+    pub fn create_module_source_object(&self, class_name: impl Into<crate::JsString>) -> Value {
+        let constructor = self.abstract_module_source_constructor();
+        let prototype = constructor
+            .get_prop("prototype")
+            .expect("module-source prototype");
+        let value = Value::object_with_proto(Vec::new(), Some(Rc::new(prototype)));
+        let properties = value.property_cell().expect("source object");
+        let mut metadata = properties.meta.borrow_mut();
+        metadata.realm_global = Some(self.persistent_global.clone());
+        metadata.module_source_class_name = Some(class_name.into());
+        value
+    }
+
     /// Install a host-selected loader; no ambient file or network loader exists.
     pub fn set_module_loader(&mut self, loader: Rc<dyn crate::ModuleLoader>) {
         self.module_loader = Some(loader);

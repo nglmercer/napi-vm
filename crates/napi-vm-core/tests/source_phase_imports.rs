@@ -45,3 +45,27 @@ fn unavailable_static_source_import_never_executes_module_bodies() {
         Value::Number(0.)
     ));
 }
+
+#[test]
+fn host_module_source_brand_is_internal_realm_owned_and_not_inherited() {
+    let mut vm = Interpreter::with_builtins();
+    let source = vm.create_module_source_object("HostModule");
+    vm.global.borrow_mut().set("source", source);
+    let constructor = vm.abstract_module_source_constructor();
+    vm.global.borrow_mut().set("Abstract", constructor);
+    let result=vm.eval_source("var getter=Object.getOwnPropertyDescriptor(Abstract.prototype,Symbol.toStringTag).get;source instanceof Abstract && getter.call(source)==='HostModule' && Object.prototype.toString.call(source)==='[object HostModule]' && getter.call(Object.create(source))===undefined && getter.call(new Proxy(source,{}))===undefined && getter.call({ModuleSourceClassName:'Fake'})===undefined").unwrap();
+    assert!(matches!(result, Value::Bool(true)));
+    vm.eval_source("Object.freeze(source);").unwrap();
+    assert!(
+        matches!(vm.eval_source("getter.call(source)").unwrap(),Value::String(ref name) if name=="HostModule")
+    );
+    let other = vm.create_realm();
+    vm.global
+        .borrow_mut()
+        .set("other", other.create_module_source_object("OtherModule"));
+    assert!(matches!(
+        vm.eval_source("!(other instanceof Abstract) && getter.call(other)==='OtherModule'")
+            .unwrap(),
+        Value::Bool(true)
+    ));
+}
