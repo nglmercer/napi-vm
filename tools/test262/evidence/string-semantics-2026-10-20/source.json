@@ -1,0 +1,10 @@
+{
+  "source_base": "824db051ef4b6f809d622421ace71b83f88d729c",
+  "implementation_paths": [
+    "crates/napi-vm-core/src/builtins/string.rs",
+    "crates/napi-vm-core/src/regex/parse.rs",
+    "crates/napi-vm-core/tests/string_semantic_gaps.rs"
+  ],
+  "source_patch_sha256": "f03cc25212fc37c572d3a6d599e794de208fe467aee35dca028513214c992990",
+  "baseline_engine_sha256": "a69dc5846793327a080d8681fec1fc87077509542e8e9a36a647dc9b9377e88c"
+}

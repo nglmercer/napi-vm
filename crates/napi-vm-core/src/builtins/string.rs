@@ -63,24 +63,26 @@ fn string_value_of(_: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Va
     }
 }
 fn string_raw(interp: &mut Interpreter, _: Value, args: Vec<Value>) -> Result<Value, VmErr> {
-    let template = args.first().cloned().unwrap_or(Value::Undefined);
-    let raw = interp.member(&template, "raw")?;
-    let length = interp.member(&raw, "length")?.to_number().max(0.0) as usize;
-    if length > crate::value::MAX_ARRAY_LEN {
-        return Err(crate::value::limit_err("Maximum array length exceeded"));
-    }
+    let template = super::object::to_object_receiver(args.first().unwrap_or(&Value::Undefined))?;
+    let raw_value = interp.get_prop_value_str(&template, "raw")?;
+    let raw = super::object::to_object_receiver(&raw_value)?;
+    let length = super::array::array_like_length_number(interp, &raw)?;
     let mut out = JsString::default();
-    for i in 0..length {
-        let part = interp.member(&raw, &i.to_string())?;
+    let mut index = 0.0;
+    while index < length {
+        interp.consume_loop()?;
+        let part =
+            interp.get_prop_value_str(&raw, &crate::format::ecmascript_number_string(index))?;
         out.push_str(interp.ecmascript_to_string(&part)?);
-        if i + 1 < length
-            && let Some(v) = args.get(i + 1)
+        if index + 1.0 < length
+            && let Some(value) = args.get(index as usize + 1)
         {
-            out.push_str(interp.ecmascript_to_string(v)?);
+            out.push_str(interp.ecmascript_to_string(value)?);
         }
         if out.len() > crate::value::MAX_STRING_LEN {
             return Err(crate::value::limit_err("Maximum string length exceeded"));
         }
+        index += 1.0;
     }
     bounded_string(out)
 }
@@ -785,6 +787,7 @@ pub(super) fn install(e: &mut Environment) {
                 ("codePointAt", 1),
                 ("concat", 1),
                 ("endsWith", 1),
+                ("startsWith", 1),
                 ("includes", 1),
                 ("indexOf", 1),
                 ("lastIndexOf", 1),

@@ -1004,10 +1004,10 @@ impl Parser {
             'f' => '\u{000C}' as u32,
             'v' => '\u{000B}' as u32,
             '0' => '\0' as u32,
-            'x' => self.code_point(2)?,
+            'x' => self.hex_escape_or_identity('x', 2)?,
             'u' => {
                 // `\u{1F600}` in Unicode mode, `￿` otherwise.
-                if self.eat('{') {
+                if self.unicode && self.eat('{') {
                     let mut value: u32 = 0;
                     while let Some(c) = self.peek()
                         && c != '}'
@@ -1023,7 +1023,7 @@ impl Parser {
                     }
                     value
                 } else {
-                    let high = self.code_point(4)?;
+                    let high = self.hex_escape_or_identity('u', 4)?;
                     if self.unicode
                         && (0xD800..=0xDBFF).contains(&high)
                         && self.chars.get(self.pos..self.pos + 2) == Some(&['\\', 'u'])
@@ -1059,6 +1059,18 @@ impl Parser {
                 other as u32
             }
         })
+    }
+
+    fn hex_escape_or_identity(&mut self, escaped: char, digits: usize) -> ParseResult<u32> {
+        let saved = self.pos;
+        match self.code_point(digits) {
+            Ok(value) => Ok(value),
+            Err(_) if !self.unicode => {
+                self.pos = saved;
+                Ok(escaped as u32)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn code_point(&mut self, digits: usize) -> ParseResult<u32> {
