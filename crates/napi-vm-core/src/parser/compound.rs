@@ -455,9 +455,28 @@ impl Parser {
         self.adv();
         let mut phase = super::ImportPhase::Evaluation;
         let def = if self.cur().identifier_name().is_some() {
+            let source_modifier = matches!(self.cur(), Token::Identifier(name) if name == "source")
+                && self.peek().identifier_name().is_some()
+                && (!matches!(self.peek(), Token::KwFrom)
+                    || self
+                        .toks
+                        .get(self.pos + 2)
+                        .is_some_and(|(token, _)| matches!(token, Token::KwFrom)));
             let defer_modifier = matches!(self.cur(), Token::Identifier(name) if name == "defer");
             let nm = self.ident()?;
-            if defer_modifier && self.eat(&Token::Star) {
+            if source_modifier {
+                phase = super::ImportPhase::Source;
+                let binding = self.ident()?;
+                let module = self.from()?;
+                Some(Statement::Import {
+                    attributes: Vec::new(),
+                    module,
+                    phase,
+                    default: Some(binding),
+                    named: vec![],
+                    namespace: None,
+                })
+            } else if defer_modifier && self.eat(&Token::Star) {
                 phase = super::ImportPhase::Deferred;
                 self.expect(&Token::KwAs);
                 let ns = self.ident()?;

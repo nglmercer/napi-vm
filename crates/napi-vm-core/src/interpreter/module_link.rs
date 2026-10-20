@@ -434,6 +434,12 @@ impl Interpreter {
                     _ => None,
                 };
                 if let Some((request, phase, attributes)) = request {
+                    if phase == crate::parser::ImportPhase::Source {
+                        return Err(VmErr::Msg(
+                            "TypeError: Host loader does not provide source-phase module objects"
+                                .into(),
+                        ));
+                    }
                     let resolved = self
                         .resolve_module_request(&Self::host_module_specifier(request)?)?
                         .ok_or_else(|| syntax(format!("Module not found: {request}")))?;

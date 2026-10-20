@@ -1152,6 +1152,11 @@ impl Interpreter {
         if self.is_linked_module() {
             return Ok(Value::Undefined);
         }
+        if phase == crate::parser::ImportPhase::Source {
+            return Err(VmErr::Msg(
+                "TypeError: Host loader does not provide source-phase module objects".into(),
+            ));
+        }
         let module = Self::host_module_specifier(module)?;
         let resolved_module = if attributes.is_empty() {
             self.resolve_module_request(&module)?
