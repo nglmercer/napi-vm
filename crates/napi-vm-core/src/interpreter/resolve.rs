@@ -1854,6 +1854,35 @@ pub(crate) fn install_iterator_intrinsics(environment: &mut super::Environment) 
             },
         );
     }
+    let Value::Symbol(ref dispose_symbol) =
+        crate::builtins::well_known("asyncDispose").expect("asyncDispose")
+    else {
+        unreachable!()
+    };
+    let dispose_key = super::symbol_slot_key(dispose_symbol);
+    async_iterator
+        .set_prop(
+            dispose_key.clone(),
+            crate::builtins::native_method(
+                "[Symbol.asyncDispose]",
+                0,
+                async_iterator_dispose,
+                function_prototype.clone(),
+            ),
+        )
+        .expect("async iterator dispose");
+    if let Value::Object { props } = &async_iterator {
+        let mut metadata = props.meta.borrow_mut();
+        metadata.set_symbol_key(&dispose_key, dispose_symbol.clone());
+        metadata.set_attrs(
+            &dispose_key,
+            crate::value::PropAttrs {
+                writable: true,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
     environment.install_intrinsic("%AsyncIteratorPrototype%", async_iterator.clone());
     let async_from_sync = Value::object_with_proto(vec![], Some(Rc::new(async_iterator.clone())));
     for (name, callable) in [
@@ -2651,4 +2680,41 @@ mod with_binding_reference_tests {
             "{log:?}"
         );
     }
+}
+
+fn async_iterator_dispose(
+    interp: &mut Interpreter,
+    receiver: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let outcome = (|| {
+        let Some(method) = interp.get_method(&receiver, &Value::String("return".into()))? else {
+            return Ok(Value::settled_promise(
+                crate::value::PromiseState::Fulfilled,
+                Value::Undefined,
+            ));
+        };
+        let result = interp.call_this(&method, receiver, vec![])?;
+        let wrapper = interp.promise_resolve_intrinsic(result)?;
+        let fulfilled = interp.native_function_in_realm("", async_dispose_unwrap);
+        interp.register(&wrapper, fulfilled, Value::Undefined, None)
+    })();
+    match outcome {
+        Ok(promise) => Ok(promise),
+        Err(error) => {
+            let reason = match error {
+                VmErr::Throw(value) => value,
+                VmErr::RuntimeError(data) => data.guest_value(),
+                VmErr::Msg(message) => crate::error::error_value_from_msg(&message),
+                other => return Err(other),
+            };
+            Ok(Value::settled_promise(
+                crate::value::PromiseState::Rejected,
+                reason,
+            ))
+        }
+    }
+}
+fn async_dispose_unwrap(_: &mut Interpreter, _: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+    Ok(Value::Undefined)
 }

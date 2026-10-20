@@ -138,6 +138,8 @@ Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, ga
 
 Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/intrinsic variants, gaining **13 combined passes with zero losses** versus `75c6857`. Static and dynamic source bindings and re-exports share cached host-branded objects without executing target modules. This is outside the completed full score. See the [source-phase continuation](../../docs/test262-static-source-imports-continuation.md).
 
+Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This remains outside the completed full score. See the [async disposal continuation](../../docs/test262-async-iterator-disposal-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

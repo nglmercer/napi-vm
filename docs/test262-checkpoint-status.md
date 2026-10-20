@@ -94,6 +94,8 @@ Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, ga
 
 Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/intrinsic variants, gaining **13 combined passes with zero losses** versus `75c6857`. Static and dynamic source bindings and re-exports share cached host-branded objects without executing target modules. This is outside the completed full score. See the [source-phase continuation](test262-static-source-imports-continuation.md).
 
+Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This remains outside the completed full score. See the [async disposal continuation](test262-async-iterator-disposal-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state
