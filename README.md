@@ -514,22 +514,22 @@ The core language and bridge are actively developed and covered by the native
 regression suite. Run `npm test` to see the current verified count.
 
 The latest completed full pinned Test262 run (archived 2026-10-20, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `75c6857`)
-passes **102,050 / 102,956 variants (99.1200%)**, with 814 failures,
-92 timeouts, and zero skips, crashes, or harness errors. It gains 94 passes
-and loses 17 against the previous full run on `ffc10c7`; all 17 losses are
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `1bffdb8`)
+passes **102,079 / 102,956 variants (99.1482%)**, with 783 failures,
+94 timeouts, and zero skips, crashes, or harness errors. It gains 53 passes
+and loses 24 against the previous full run on `75c6857`; all 24 losses are
 measured timeouts, retained without reclassification. The frozen worker
-`3613dfa4…` resumed 14,556 verified checkpoint files after interruption.
-It includes namespace TDZ, export resolution and patterns, harness exception
-classification, dynamic deferred imports, async cycles, and engine byte modules.
-Reports and comparison are archived in [full byte-module evidence](tools/test262/evidence/full-byte-modules-2026-10-20/).
+`2b13d3a9…` resumed 14,562 verified checkpoint files after interruption.
+It includes source-phase imports, runtime binary adapters, data URL bytes,
+deferred attributes, and async iterator disposal.
+Reports and comparison are archived in [full async-disposal evidence](tools/test262/evidence/full-async-disposal-2026-10-20/).
 
-This full snapshot excludes runtime binary adapters, data URL bytes, the
-static deferred-attribute correction, and source-phase import work. Subsequent
-focused measurements remain separate from the full score.
+This full snapshot excludes subsequent Object constructor metadata, Object
+locale-string invocation, and Array string invocation fixes. Focused results
+for those changes remain separate from the full score.
 
-A fresh full pinned run is in progress on clean source `1bffdb8` (worker
-`2b13d3a9…`), including source-phase imports and async iterator disposal. The
+A fresh full pinned run is in progress on clean source `daadb9b` (worker
+`852c7c9c…`), including those three fixes. The
 completed full score above remains authoritative until that report finishes.
 
 The current deferred-import implementation passes its pinned 109-variant
@@ -598,15 +598,15 @@ Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import 
 
 Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and binary loader API support file, HTTP, package, and TypeScript adapters with permission and size checks. This change is included in the completed full snapshot. See the [byte module continuation](docs/test262-byte-modules-continuation.md).
 
-Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/intrinsic variants, gaining **13 combined passes with zero losses** versus `75c6857`. Static and dynamic source bindings and re-exports share cached host-branded objects without executing target modules. This is outside the completed full score. See the [source-phase continuation](docs/test262-static-source-imports-continuation.md).
+Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/intrinsic variants, gaining **13 combined passes with zero losses** versus `75c6857`. Static and dynamic source bindings and re-exports share cached host-branded objects without executing target modules. This is included in the completed full score. See the [source-phase continuation](docs/test262-static-source-imports-continuation.md).
 
-Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This remains outside the completed full score. See the [async disposal continuation](docs/test262-async-iterator-disposal-continuation.md).
+Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This is included in the completed full score. See the [async disposal continuation](docs/test262-async-iterator-disposal-continuation.md).
 
-Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This remains outside the completed and active full snapshots. See the [Object metadata continuation](docs/test262-object-constructor-metadata-continuation.md).
+Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This is included in the active full run and remains outside the completed full score. See the [Object metadata continuation](docs/test262-object-constructor-metadata-continuation.md).
 
-Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This remains outside the completed and active full snapshots. See the [locale-string continuation](docs/test262-object-locale-string-continuation.md).
+Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This is included in the active full run and remains outside the completed full score. See the [locale-string continuation](docs/test262-object-locale-string-continuation.md).
 
-Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This remains outside the completed and active full snapshots. See the [array string continuation](docs/test262-array-string-invocation-continuation.md).
+Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This is included in the active full run and remains outside the completed full score. See the [array string continuation](docs/test262-array-string-invocation-continuation.md).
 
 ## License
 

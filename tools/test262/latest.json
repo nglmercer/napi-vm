@@ -6,29 +6,29 @@
     "."
   ],
   "groups": [],
-  "engine_sha256": "3613dfa4451eb240bde6804502828ca01ed81629187a190d2c302dcde5cc8440",
+  "engine_sha256": "2b13d3a9356fa8439d0310a1494b1891844ff52cada34815a5dc89e8933ea31a",
   "skip_features": [],
   "denominator": "all selected variants, including skips and errors",
   "worker_jobs": 2,
   "timeout_seconds": 5.0,
-  "resumed_files": 14556,
+  "resumed_files": 14562,
   "total": 102956,
   "counts": {
-    "pass": 102050,
-    "fail": 814,
+    "pass": 102079,
+    "fail": 783,
     "skip": 0,
-    "timeout": 92,
+    "timeout": 94,
     "crash": 0,
     "harness_error": 0
   },
-  "pass_percentage": 99.12001243249543,
+  "pass_percentage": 99.14817980496522,
   "limitations": [
     "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
   ],
-  "source_base": "75c6857554cf3f59ce832798aeea98ee2ebde225",
-  "source_state": "clean committed frozen snapshot; All 17 lost passes are measured timeouts, retained without reclassification. Clean frozen source 75c6857 includes namespace TDZ, export resolution/patterns, harness classification, dynamic defer, async cycles, and engine byte modules. Excludes runtime binary adapters, data URL bytes, deferred attribute correction, and source-phase import work.",
-  "evidence": "evidence/full-byte-modules-2026-10-20/final-full.json.gz",
-  "note": "Latest completed full pinned run: 102,050 / 102,956 (99.1200%) on 75c6857. All 17 lost passes are measured timeouts, retained without reclassification. Clean frozen source 75c6857 includes namespace TDZ, export resolution/patterns, harness classification, dynamic defer, async cycles, and engine byte modules. Excludes runtime binary adapters, data URL bytes, deferred attribute correction, and source-phase import work.",
+  "source_base": "1bffdb830f961f9a4255f5c8580cf4ba08609502",
+  "source_state": "clean committed frozen snapshot; Includes source-phase imports, runtime binary adapters, data URL bytes, deferred attributes, and async iterator disposal. Excludes subsequent Object constructor metadata, Object locale-string invocation, and Array string invocation fixes. All 24 lost passes are measured timeouts, retained without reclassification.",
+  "evidence": "evidence/full-async-disposal-2026-10-20/final-full.json.gz",
+  "note": "Latest completed full pinned run: 102,079 / 102,956 (99.1482%) on 1bffdb8. Includes source-phase imports, runtime binary adapters, data URL bytes, deferred attributes, and async iterator disposal. Excludes subsequent Object constructor metadata, Object locale-string invocation, and Array string invocation fixes. All 24 lost passes are measured timeouts, retained without reclassification.",
   "current_focused": {
     "selection": [
       "built-ins/Object/fromEntries",
@@ -1471,6 +1471,22 @@
       "pass_percentage": 99.04522320214461,
       "evidence": "evidence/full-default-export-names-2026-10-20/final-full.json.gz",
       "note": "Latest completed full pinned run: 101,973 / 102,956 (99.0452%) on ffc10c7. All 52 lost passes are measured timeouts, retained without reclassification. Frozen clean source ffc10c7 includes default-export names and native snapshot fixes; excludes subsequent namespace TDZ, export resolution, export patterns, harness classification, dynamic defer, async cycle, and byte module changes."
+    },
+    {
+      "source_base": "75c6857554cf3f59ce832798aeea98ee2ebde225",
+      "engine_sha256": "3613dfa4451eb240bde6804502828ca01ed81629187a190d2c302dcde5cc8440",
+      "total": 102956,
+      "counts": {
+        "pass": 102050,
+        "fail": 814,
+        "skip": 0,
+        "timeout": 92,
+        "crash": 0,
+        "harness_error": 0
+      },
+      "pass_percentage": 99.12001243249543,
+      "evidence": "evidence/full-byte-modules-2026-10-20/final-full.json.gz",
+      "note": "Latest completed full pinned run: 102,050 / 102,956 (99.1200%) on 75c6857. All 17 lost passes are measured timeouts, retained without reclassification. Clean frozen source 75c6857 includes namespace TDZ, export resolution/patterns, harness classification, dynamic defer, async cycles, and engine byte modules. Excludes runtime binary adapters, data URL bytes, deferred attribute correction, and source-phase import work."
     }
   ],
   "historical_full_refresh_comparison": {
@@ -1492,27 +1508,27 @@
     ]
   },
   "full_refresh_comparison": {
-    "baseline_source": "ffc10c7",
+    "baseline_source": "75c6857",
     "worker_jobs": 2,
     "timeout_seconds": 5,
-    "new_passes": 94,
-    "lost_passes": 17,
+    "new_passes": 53,
+    "lost_passes": 24,
     "lost_statuses": {
-      "timeout": 17
+      "timeout": 24
     },
-    "evidence": "evidence/full-byte-modules-2026-10-20/comparison.json.gz"
+    "evidence": "evidence/full-async-disposal-2026-10-20/comparison.json.gz"
   },
   "last_full_run": {
     "status": "complete",
-    "source_base": "75c6857554cf3f59ce832798aeea98ee2ebde225",
-    "engine_sha256": "3613dfa4451eb240bde6804502828ca01ed81629187a190d2c302dcde5cc8440",
-    "started_utc": "2026-10-20T14:50:48.278868+00:00",
+    "source_base": "1bffdb830f961f9a4255f5c8580cf4ba08609502",
+    "engine_sha256": "2b13d3a9356fa8439d0310a1494b1891844ff52cada34815a5dc89e8933ea31a",
+    "started_utc": "2026-10-20T16:19:58.165289+00:00",
     "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-    "local_checkpoint": "artifacts/test262/full-after-byte-modules-2026-10-20.checkpoint.jsonl",
-    "local_output": "artifacts/test262/full-after-byte-modules-2026-10-20.json",
-    "note": "All 17 lost passes are measured timeouts, retained without reclassification. Clean frozen source 75c6857 includes namespace TDZ, export resolution/patterns, harness classification, dynamic defer, async cycles, and engine byte modules. Excludes runtime binary adapters, data URL bytes, deferred attribute correction, and source-phase import work.",
-    "resumed_files": 14556,
-    "evidence": "evidence/full-byte-modules-2026-10-20/final-full.json.gz"
+    "local_checkpoint": "artifacts/test262/full-after-async-disposal-2026-10-20.checkpoint.jsonl",
+    "local_output": "artifacts/test262/full-after-async-disposal-2026-10-20.json",
+    "note": "Includes source-phase imports, runtime binary adapters, data URL bytes, deferred attributes, and async iterator disposal. Excludes subsequent Object constructor metadata, Object locale-string invocation, and Array string invocation fixes. All 24 lost passes are measured timeouts, retained without reclassification.",
+    "resumed_files": 14562,
+    "evidence": "evidence/full-async-disposal-2026-10-20/final-full.json.gz"
   },
   "byte_modules_focused": {
     "source_base": "3042060595c4b8d1bd23a01002095b5e6749bce1",
@@ -1715,17 +1731,6 @@
     "note": "Latest completed full score measures 75c6857 and excludes this continuation. Frozen baseline is 9ce1a5f source-loader worker.",
     "evidence": "evidence/async-iterator-disposal-2026-10-20/focused.json.gz"
   },
-  "running_full": {
-    "status": "running",
-    "source_base": "1bffdb830f961f9a4255f5c8580cf4ba08609502",
-    "engine_sha256": "2b13d3a9356fa8439d0310a1494b1891844ff52cada34815a5dc89e8933ea31a",
-    "started_utc": "2026-10-20T16:19:58.165289+00:00",
-    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
-    "local_checkpoint": "artifacts/test262/full-after-async-disposal-2026-10-20.checkpoint.jsonl",
-    "local_output": "artifacts/test262/full-after-async-disposal-2026-10-20.json",
-    "note": "Frozen clean source 1bffdb8 includes source-phase imports, runtime binary adapters, data URL bytes, deferred attribute fix, and async iterator disposal. Completed full score above remains unchanged. Resumed verified matching checkpoint after process interruption; frozen worker hash unchanged.",
-    "resumed_files": 14562
-  },
   "object_constructor_metadata_focused": {
     "source_base": "0b746fca6801d1ea1ecb4fbaffecec0aa7f7354c",
     "worker_sha256": "3936404a05fc9a5e886b4eedd0861db35ea28d0e976191ea124e3261b8ba031b",
@@ -1822,5 +1827,15 @@
     },
     "note": "All eight remaining failures are unchanged Proxy cases. Completed full score measures 75c6857; active full worker 1bffdb8 excludes this continuation.",
     "evidence": "evidence/array-string-invocation-2026-10-20/focused.json.gz"
+  },
+  "running_full": {
+    "status": "running",
+    "source_base": "daadb9b6b748bb6f65d6a9219a723636dec68b80",
+    "engine_sha256": "852c7c9cb1f864d31d97b26518de85032d71dfeeaa6345c0b7b49bdca8fa57d4",
+    "started_utc": "2026-10-20T19:30:16.792152+00:00",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "local_checkpoint": "artifacts/test262/full-after-array-string-2026-10-20.checkpoint.jsonl",
+    "local_output": "artifacts/test262/full-after-array-string-2026-10-20.json",
+    "note": "Includes Object metadata, Object locale-string, and Array string invocation fixes. PID 168512 verified live during refresh."
   }
 }

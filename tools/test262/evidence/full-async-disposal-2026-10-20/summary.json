@@ -1,0 +1,35 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "."
+  ],
+  "groups": [],
+  "engine_sha256": "2b13d3a9356fa8439d0310a1494b1891844ff52cada34815a5dc89e8933ea31a",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 14562,
+  "total": 102956,
+  "counts": {
+    "pass": 102079,
+    "fail": 783,
+    "skip": 0,
+    "timeout": 94,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.14817980496522,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "source_base": "1bffdb830f961f9a4255f5c8580cf4ba08609502",
+  "new_passes": 53,
+  "lost_passes": 24,
+  "lost_statuses": {
+    "timeout": 24
+  },
+  "note": "Includes source-phase imports, runtime binary adapters, data URL bytes, deferred attributes, and async iterator disposal. Excludes subsequent Object constructor metadata, Object locale-string invocation, and Array string invocation fixes. All 24 lost passes are measured timeouts, retained without reclassification."
+}

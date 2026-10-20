@@ -19,3 +19,6 @@ Reflect variants, gaining **12 passes with zero losses**. See the
 102,050 / 102,956 on 75c6857.
 
 See [Properties of the Object Constructor](https://tc39.es/ecma262/multipage/fundamental-objects.html#sec-properties-of-the-object-constructor).
+
+Full-run tracking update: the completed `1bffdb8` run excludes this change.
+The active frozen `daadb9b` full run includes it; its final score is pending.
