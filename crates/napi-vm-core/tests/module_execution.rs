@@ -509,3 +509,72 @@ export let value=42;
     vm.load_module("namespace-receiver").unwrap();
     assert!(matches!(vm.eval_source("namespaceSuperError==='ReferenceError'&&namespaceReflectError==='ReferenceError'&&namespaceDirectError==='TypeError'&&namespaceSetResult===false"),Ok(Value::Bool(true))));
 }
+
+#[test]
+fn indirect_export_cycles_can_resolve_through_another_star() {
+    for middle in ["export {value} from 'a';", "export {value} from 'd';"] {
+        let mut vm = Interpreter::with_builtins();
+        source(&mut vm, "a", "export * from 'b'; export * from 'c';");
+        source(&mut vm, "b", middle);
+        source(&mut vm, "d", "export {value} from 'a';");
+        source(
+            &mut vm,
+            "c",
+            "export let value=42; export function bump(){value++;}",
+        );
+        vm.load_module("a").unwrap();
+        number(&mut vm, "import {value,bump} from 'a'; bump(); value", 43.);
+    }
+}
+
+#[test]
+fn nested_star_ambiguity_is_not_masked_by_another_matching_export() {
+    for stars in [
+        "export * from 'amb'; export * from 'left';",
+        "export * from 'left'; export * from 'amb';",
+    ] {
+        let mut vm = Interpreter::with_builtins();
+        source(&mut vm, "left", "export const value=1;");
+        source(&mut vm, "right", "export const value=1;");
+        source(
+            &mut vm,
+            "amb",
+            "export * from 'left'; export * from 'right';",
+        );
+        source(&mut vm, "outer", stars);
+        vm.load_module("outer").unwrap();
+        number(
+            &mut vm,
+            "import * as ns from 'outer'; Object.keys(ns).length",
+            0.,
+        );
+        source(&mut vm, "consumer", "import {value} from 'outer';");
+        assert!(
+            vm.link_module("consumer")
+                .unwrap_err()
+                .to_string()
+                .contains("SyntaxError")
+        );
+    }
+}
+
+#[test]
+fn invalid_indirect_exports_fail_linking_without_a_consumer_or_effects() {
+    for text in [
+        "export {missing} from 'dep';",
+        "export {value} from 'cycle';",
+    ] {
+        let mut vm = Interpreter::with_builtins();
+        vm.eval_source("var effects=0").unwrap();
+        source(&mut vm, "dep", "effects++; export const found=1;");
+        source(&mut vm, "cycle", "effects++; export {value} from 'bad';");
+        source(&mut vm, "bad", &format!("effects++; {text}"));
+        assert!(
+            vm.link_module("bad")
+                .unwrap_err()
+                .to_string()
+                .contains("SyntaxError")
+        );
+        number(&mut vm, "effects", 0.);
+    }
+}

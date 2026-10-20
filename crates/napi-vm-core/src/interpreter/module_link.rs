@@ -4,6 +4,23 @@ mod asynchronous;
 use super::*;
 use std::collections::HashSet;
 
+enum ExportResolution {
+    Binding(Value),
+    NotFound,
+    Ambiguous,
+}
+impl ExportResolution {
+    fn from_binding(value: Option<Value>) -> Self {
+        value.map_or(Self::NotFound, Self::Binding)
+    }
+    fn binding(self) -> Option<Value> {
+        match self {
+            Self::Binding(value) => Some(value),
+            Self::NotFound | Self::Ambiguous => None,
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ModuleGraph {
     records: HashMap<String, LinkedModule>,
@@ -118,7 +135,7 @@ impl Interpreter {
                 for id in &created {
                     let names = self.exported_names(id, &mut HashSet::new());
                     for export in names {
-                        if let Some(value) =
+                        if let ExportResolution::Binding(value) =
                             self.resolve_export(id, &export, &mut HashSet::new())?
                         {
                             let mut modules = self.modules.borrow_mut();
@@ -127,6 +144,31 @@ impl Interpreter {
                                 record.default = Some(value);
                             } else {
                                 record.exports.insert(export, value);
+                            }
+                        }
+                    }
+                }
+            }
+            // Indirect exports must resolve even when nobody imports them.
+            // Validate after walking the graph so circular requests can return
+            // NotFound to a star search without prematurely throwing.
+            for id in &created {
+                let program = self.module_graph.borrow().records[id].program.clone();
+                for stmt in flat(&program.statements) {
+                    if let Statement::ExportNamed {
+                        source: Some(source),
+                        specifiers,
+                        ..
+                    } = stmt
+                    {
+                        for (local, exported) in specifiers {
+                            if !matches!(
+                                self.resolve_export(id, exported, &mut HashSet::new())?,
+                                ExportResolution::Binding(_)
+                            ) {
+                                return Err(syntax(format!(
+                                    "Module '{source}' has no unambiguous export '{local}'"
+                                )));
                             }
                         }
                     }
@@ -557,9 +599,9 @@ impl Interpreter {
         id: &str,
         name: &str,
         seen: &mut HashSet<(String, String)>,
-    ) -> Result<Option<Value>, VmErr> {
+    ) -> Result<ExportResolution, VmErr> {
         if !seen.insert((id.into(), name.into())) {
-            return Ok(None);
+            return Ok(ExportResolution::NotFound);
         }
         let program = self
             .module_graph
@@ -568,18 +610,22 @@ impl Interpreter {
             .get(id)
             .map(|r| r.program.clone());
         let Some(program) = program else {
-            return Ok(self.module(id).and_then(|m| {
-                if name == "default" {
-                    m.default
-                } else {
-                    m.exports.get(name).cloned()
-                }
-            }));
+            return Ok(ExportResolution::from_binding(self.module(id).and_then(
+                |m| {
+                    if name == "default" {
+                        m.default
+                    } else {
+                        m.exports.get(name).cloned()
+                    }
+                },
+            )));
         };
         for stmt in flat(&program.statements) {
             match stmt {
                 Statement::ExportDefault(_) if name == "default" => {
-                    return Ok(self.module(id).and_then(|m| m.default));
+                    return Ok(ExportResolution::from_binding(
+                        self.module(id).and_then(|m| m.default),
+                    ));
                 }
                 Statement::ExportNamed {
                     attributes,
@@ -593,14 +639,7 @@ impl Interpreter {
                             let target = self
                                 .request_target(id, source, attributes)
                                 .expect("resolved request");
-                            return self
-                                .resolve_export(&target, local, seen)?
-                                .map(Some)
-                                .ok_or_else(|| {
-                                    syntax(format!(
-                                        "Module '{source}' has no unambiguous export '{local}'"
-                                    ))
-                                });
+                            return self.resolve_export(&target, local, seen);
                         }
                         // A local export can name an import; follow its source
                         // rather than creating a second, disconnected cell.
@@ -633,17 +672,20 @@ impl Interpreter {
                                             }
                                             _ => Self::namespace_object(&m),
                                         })
-                                        .transpose();
+                                        .transpose()
+                                        .map(ExportResolution::from_binding);
                                 }
                             }
                         }
-                        return Ok(self.module(id).and_then(|m| {
-                            if name == "default" {
-                                m.default
-                            } else {
-                                m.exports.get(name).cloned()
-                            }
-                        }));
+                        return Ok(ExportResolution::from_binding(self.module(id).and_then(
+                            |m| {
+                                if name == "default" {
+                                    m.default
+                                } else {
+                                    m.exports.get(name).cloned()
+                                }
+                            },
+                        )));
                     }
                 }
                 Statement::ExportAll {
@@ -657,13 +699,14 @@ impl Interpreter {
                     return self
                         .module(&target)
                         .map(|m| Self::namespace_object(&m))
-                        .transpose();
+                        .transpose()
+                        .map(ExportResolution::from_binding);
                 }
                 _ => {}
             }
         }
         if name == "default" {
-            return Ok(None);
+            return Ok(ExportResolution::NotFound);
         }
         let mut resolved: Option<Value> = None;
         for stmt in flat(&program.statements) {
@@ -676,21 +719,24 @@ impl Interpreter {
                 let target = self
                     .request_target(id, source, attributes)
                     .expect("resolved star");
-                if let Some(candidate) = self.resolve_export(&target, name, &mut seen.clone())? {
-                    if let Some(previous) = &resolved {
-                        let same = match (previous, &candidate) {
-                            (Value::Binding(a), Value::Binding(b)) => Rc::ptr_eq(a, b),
-                            _ => strict_equals(previous, &candidate),
-                        };
-                        if !same {
-                            return Ok(None);
-                        }
+                let candidate = match self.resolve_export(&target, name, seen)? {
+                    ExportResolution::Binding(value) => value,
+                    ExportResolution::NotFound => continue,
+                    ExportResolution::Ambiguous => return Ok(ExportResolution::Ambiguous),
+                };
+                if let Some(previous) = &resolved {
+                    let same = match (previous, &candidate) {
+                        (Value::Binding(a), Value::Binding(b)) => Rc::ptr_eq(a, b),
+                        _ => strict_equals(previous, &candidate),
+                    };
+                    if !same {
+                        return Ok(ExportResolution::Ambiguous);
                     }
-                    resolved = Some(candidate);
                 }
+                resolved = Some(candidate);
             }
         }
-        Ok(resolved)
+        Ok(ExportResolution::from_binding(resolved))
     }
     fn link_imports(&mut self, id: &str) -> Result<(), VmErr> {
         let program = self.module_graph.borrow().records[id].program.clone();
@@ -732,6 +778,7 @@ impl Interpreter {
                     for (remote, local) in bindings {
                         let value = self
                             .resolve_export(&target, &remote, &mut HashSet::new())?
+                            .binding()
                             .ok_or_else(|| {
                                 syntax(format!(
                                     "Module '{module}' has no unambiguous export '{remote}'"
