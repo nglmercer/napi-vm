@@ -21,3 +21,7 @@ See [Properties of the Object Constructor](https://tc39.es/ecma262/multipage/fun
 
 Full-run tracking update: the completed `1bffdb8` run excludes this change.
 The active frozen `daadb9b` full run includes it; its final score is pending.
+
+The completed `daadb9b` full run now includes this continuation: 101,978 /
+102,956 passing, 753 failures, and 225 timeouts. Earlier tracking statements
+above describe the prior checkpoint. See the current checkpoint status.

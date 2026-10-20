@@ -1,0 +1,23 @@
+{
+  "source_commit": "daadb9b6b748bb6f65d6a9219a723636dec68b80",
+  "source_state": "clean committed snapshot",
+  "engine_sha256": "852c7c9cb1f864d31d97b26518de85032d71dfeeaa6345c0b7b49bdca8fa57d4",
+  "command": [
+    "python3",
+    "tools/test262/run.py",
+    ".napi-vm/test262",
+    "--engine",
+    "target/release/napi-vm-test262",
+    "--revision",
+    "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "--jobs",
+    "2",
+    "--timeout",
+    "5",
+    "--checkpoint",
+    "artifacts/test262/full-after-array-string-2026-10-20.checkpoint.jsonl",
+    "--output",
+    "artifacts/test262/full-after-array-string-2026-10-20.json"
+  ],
+  "started_utc": "2026-10-20T19:30:16.792152+00:00"
+}

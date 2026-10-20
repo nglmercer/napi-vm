@@ -1,0 +1,34 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "."
+  ],
+  "groups": [],
+  "engine_sha256": "852c7c9cb1f864d31d97b26518de85032d71dfeeaa6345c0b7b49bdca8fa57d4",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 102956,
+  "counts": {
+    "pass": 101978,
+    "fail": 753,
+    "skip": 0,
+    "timeout": 225,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.05007964567388,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "source_base": "daadb9b6b748bb6f65d6a9219a723636dec68b80",
+  "new_passes": 54,
+  "lost_passes": 155,
+  "lost_statuses": {
+    "timeout": 155
+  }
+}

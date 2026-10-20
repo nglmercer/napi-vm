@@ -3,23 +3,20 @@
 ## Current measured state
 
 The latest completed full pinned Test262 run (archived 2026-10-20, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `1bffdb8`)
-passes **102,079 / 102,956 variants (99.1482%)**, with 783 failures,
-94 timeouts, and zero skips, crashes, or harness errors. It gains 53 passes
-and loses 24 against the previous full run on `75c6857`; all 24 losses are
-measured timeouts, retained without reclassification. The frozen worker
-`2b13d3a9…` resumed 14,562 verified checkpoint files after interruption.
-It includes source-phase imports, runtime binary adapters, data URL bytes,
-deferred attributes, and async iterator disposal.
-Reports and comparison are archived in [full async-disposal evidence](../tools/test262/evidence/full-async-disposal-2026-10-20/).
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `daadb9b`)
+passes **101,978 / 102,956 variants (99.0501%)**, with 753 failures,
+225 timeouts, and zero skips, crashes, or harness errors. It gains 54 passes
+and loses 155 against the previous full run on `1bffdb8`; all 155 losses are
+measured timeouts, retained without reclassification. Of the gains, 30 were
+previous failures and 24 were previous timeouts. The frozen worker is
+`852c7c9c…`; this run did not resume a checkpoint.
+It includes Object constructor metadata, Object locale-string invocation,
+and Array string invocation, along with earlier module and disposal changes.
+Reports and comparison are archived in [full Array-string evidence](../tools/test262/evidence/full-array-string-2026-10-20/).
 
-This full snapshot excludes subsequent Object constructor metadata, Object
-locale-string invocation, and Array string invocation fixes. Focused results
-for those changes remain separate from the full score.
-
-A fresh full pinned run is in progress on clean source `daadb9b` (worker
-`852c7c9c…`), including those three fixes. The
-completed full score above remains authoritative until that report finishes.
+This snapshot excludes subsequent sparse indices, logical Array lengths,
+core constructor metadata/unscopables, and String semantic fixes. Focused
+results remain separate from this full score. No newer full run is active.
 
 Later static import attributes pass 17 / 17, dynamic attributes pass 44 / 44,
 and deferred imports pass 109 / 109 in the combined 170-variant selection.
@@ -100,17 +97,17 @@ Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/
 
 Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This is included in the completed full score. See the [async disposal continuation](test262-async-iterator-disposal-continuation.md).
 
-Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This is included in the active full run and remains outside the completed full score. See the [Object metadata continuation](test262-object-constructor-metadata-continuation.md).
+Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This is included in the completed full score. See the [Object metadata continuation](test262-object-constructor-metadata-continuation.md).
 
-Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This is included in the active full run and remains outside the completed full score. See the [locale-string continuation](test262-object-locale-string-continuation.md).
+Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This is included in the completed full score. See the [locale-string continuation](test262-object-locale-string-continuation.md).
 
-Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This is included in the active full run and remains outside the completed full score. See the [array string continuation](test262-array-string-invocation-continuation.md).
+Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This is included in the completed full score. See the [array string continuation](test262-array-string-invocation-continuation.md).
 
-Sparse array indices subsequently pass **9,005 / 9,037** selected Array and property-reflection variants, gaining **30 passes with zero losses**. Large indices use traced sparse storage; logical length, descriptors, deletion, truncation, host writes, and map species results share the updated paths. All 369 core tests, 95 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [sparse array continuation](test262-sparse-array-indices-continuation.md).
+Sparse array indices subsequently pass **9,005 / 9,037** selected Array and property-reflection variants, gaining **30 passes with zero losses**. Large indices use traced sparse storage; logical length, descriptors, deletion, truncation, host writes, and map species results share the updated paths. All 369 core tests, 95 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [sparse array continuation](test262-sparse-array-indices-continuation.md).
 
-Logical Array lengths subsequently pass **9,027 / 9,037** selected Array and property-reflection variants, gaining **22 passes with zero losses**. Slice, splice, and concat retain safe-integer indices and species ordering; push and unshift preserve writes before array-length errors. All 369 core tests, 101 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [logical length continuation](test262-array-logical-lengths-continuation.md).
+Logical Array lengths subsequently pass **9,027 / 9,037** selected Array and property-reflection variants, gaining **22 passes with zero losses**. Slice, splice, and concat retain safe-integer indices and species ordering; push and unshift preserve writes before array-length errors. All 369 core tests, 101 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [logical length continuation](test262-array-logical-lengths-continuation.md).
 
-Core constructor metadata subsequently passes **12,255 / 12,261** selected Array, String, Number, Boolean, and property-reflection variants, gaining **14 passes with zero losses**. Object, Array, String, Number, and Boolean share ordered own length/name metadata; Array unscopables excludes with. All **6,117 / 6,117** Array variants pass. All 369 core tests, 107 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [core constructor continuation](test262-core-constructor-metadata-continuation.md).
+Core constructor metadata subsequently passes **12,255 / 12,261** selected Array, String, Number, Boolean, and property-reflection variants, gaining **14 passes with zero losses**. Object, Array, String, Number, and Boolean share ordered own length/name metadata; Array unscopables excludes with. All **6,117 / 6,117** Array variants pass. All 369 core tests, 107 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [core constructor continuation](test262-core-constructor-metadata-continuation.md).
 
 
 ## Historical checkpoint
