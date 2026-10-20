@@ -9,6 +9,7 @@ pub(crate) mod intl;
 pub(crate) mod iterator;
 pub(crate) mod json;
 mod math;
+mod module_source;
 mod number;
 pub(crate) mod object;
 mod promise;
@@ -190,6 +191,7 @@ fn install_functions(e: &mut crate::interpreter::Environment) {
     date::install(e);
     error::install(e);
     shadow_realm::install(e);
+    module_source::install(e);
     promise::install(e);
     reflect::install(e);
     collections::install(e);

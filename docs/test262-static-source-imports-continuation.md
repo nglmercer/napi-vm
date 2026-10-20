@@ -18,3 +18,19 @@ Both new regressions fail before this change. Two source-phase tests, eight
 byte-module tests, 33 module tests, strict workspace Clippy, and formatting pass.
 No release Test262 gain is claimed. The active full worker freezes 75c6857 and
 excludes this continuation.
+
+The realm-owned AbstractModuleSource intrinsic is now installed without a global
+binding and exposed to conformance tests through `$262.AbstractModuleSource`.
+Its abstract call/construct paths throw TypeError; metadata, prototype links,
+constructor back-reference, and getter-only Symbol.toStringTag descriptors are
+installed. Ordinary receivers have no ModuleSourceClassName slot, so the getter
+returns undefined. Each realm owns distinct constructor and prototype objects.
+The public embedding accessor is `abstract_module_source_constructor()`.
+
+All eight pinned AbstractModuleSource cases pass with a debug worker; this is
+not a release score update. All 21 worker integration tests, strict workspace
+Clippy, and formatting pass. Host source-object branding, source hooks, graph
+loading, and re-exports remain required work.
+
+All 369 core-library tests also pass without exclusions. Evidence is archived
+in [intrinsic validation](../tools/test262/evidence/abstract-module-source-2026-10-20/summary.json).

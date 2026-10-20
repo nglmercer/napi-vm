@@ -394,3 +394,20 @@ fn worker_loads_raw_byte_modules_within_its_explicit_root() {
     std::fs::remove_file(outside).unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn module_source_intrinsic_is_abstract_and_owned_by_each_realm() {
+    let report = worker(json!({"source":r#"
+   var C=$262.AbstractModuleSource;
+   if(typeof C!=='function'||typeof AbstractModuleSource!=='undefined')throw new Error('intrinsic exposure');
+   if(C.name!=='AbstractModuleSource'||C.length!==0||Object.getPrototypeOf(C)!==Function.prototype)throw new Error('constructor metadata');
+   var count=0;for(var invoke of [()=>C(),()=>new C(),()=>new (class extends C {})()]){try{invoke();}catch(e){if(e instanceof TypeError)count++;}}
+   if(count!==3)throw new Error('abstract construction');
+   var descriptor=Object.getOwnPropertyDescriptor(C.prototype,Symbol.toStringTag);
+   if(typeof descriptor.get!=='function'||descriptor.set!==undefined||descriptor.enumerable||!descriptor.configurable)throw new Error('tag descriptor');
+   for(var receiver of [null,undefined,1,{},C.prototype,Object.create(C.prototype)])if(descriptor.get.call(receiver)!==undefined)throw new Error('tag receiver');
+   var other=$262.createRealm().AbstractModuleSource;
+   if(other===C||other.prototype===C.prototype)throw new Error('realm identity');
+ "#}));
+    assert_eq!(report["status"], "ok", "{report}");
+}

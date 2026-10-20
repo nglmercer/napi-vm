@@ -554,6 +554,15 @@ impl Interpreter {
         crate::test_support::interpreter()
     }
 
+    /// Realm-owned abstract constructor for host module-source objects. It is
+    /// an intrinsic, not a global JavaScript binding.
+    pub fn abstract_module_source_constructor(&self) -> Value {
+        self.persistent_global
+            .borrow()
+            .intrinsic("AbstractModuleSource")
+            .expect("builtins installed")
+    }
+
     /// Install a host-selected loader; no ambient file or network loader exists.
     pub fn set_module_loader(&mut self, loader: Rc<dyn crate::ModuleLoader>) {
         self.module_loader = Some(loader);

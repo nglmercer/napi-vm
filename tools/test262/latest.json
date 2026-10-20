@@ -1598,5 +1598,30 @@
       "Host module-source objects and their linking/reexport semantics remain unimplemented.",
       "No release Test262 gain claimed. Frozen full worker 75c6857 excludes this change."
     ]
+  },
+  "abstract_module_source_debug": {
+    "source_base": "e2734fa676edb7f8abb5ed3758b9f3c2ef7eafb1",
+    "implementation_patch_sha256": "42e40839081a02052901a57cb094e9f324ea85110e98a606b2387b34be4e24c6",
+    "profile": "debug",
+    "engine_sha256": "af2bd7909c2eafeed790c8768219f11404b920f758e9f18891a0bece92d26dbd",
+    "total": 8,
+    "counts": {
+      "pass": 8,
+      "fail": 0,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "validation": {
+      "worker_tests": 21,
+      "core_library_tests": 369,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "limitations": [
+      "No release/full score update claimed.",
+      "Host-branded module source objects and source-phase graph/reexport semantics remain unfinished."
+    ]
   }
 }
