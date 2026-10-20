@@ -6,5 +6,7 @@
     "crates/napi-vm-core/tests/string_semantic_gaps.rs"
   ],
   "source_patch_sha256": "f03cc25212fc37c572d3a6d599e794de208fe467aee35dca028513214c992990",
-  "baseline_engine_sha256": "a69dc5846793327a080d8681fec1fc87077509542e8e9a36a647dc9b9377e88c"
+  "baseline_engine_sha256": "a69dc5846793327a080d8681fec1fc87077509542e8e9a36a647dc9b9377e88c",
+  "engine_sha256": "6ea1c131c0500c96451704f41e9e076fddb234e641e2f3b23e33d9dd040f2fc9",
+  "source_state": "Intended base plus archived patch; exact full-source attribution is unverified because the queued build shared an actively edited checkout. Worker SHA256 and measured results are authoritative."
 }

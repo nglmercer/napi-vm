@@ -1,0 +1,43 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "built-ins/String",
+    "built-ins/RegExp",
+    "annexB/built-ins/RegExp",
+    "language/literals/regexp",
+    "annexB/language/literals/regexp"
+  ],
+  "groups": [],
+  "engine_sha256": "6ea1c131c0500c96451704f41e9e076fddb234e641e2f3b23e33d9dd040f2fc9",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 6819,
+  "counts": {
+    "pass": 6541,
+    "fail": 38,
+    "skip": 0,
+    "timeout": 240,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 95.9231558879601,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "new_passes": 172,
+  "lost_passes": 142,
+  "lost_statuses": {
+    "timeout": 140,
+    "fail": 2
+  },
+  "string_counts": {
+    "pass": 2443
+  },
+  "note": "Frozen original String/legacy escape patch. Two named-group regressions and 140 lost-pass timeouts retained as measured. A subsequent capture-name correction requires separate verification.",
+  "source_attribution": "intended base plus patch; exact full-source attribution unverified"
+}

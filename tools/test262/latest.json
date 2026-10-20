@@ -2096,5 +2096,50 @@
     "lost_passes": 0,
     "note": "Entire Math selection; exact sumPrecise adds all 20 previously failing variants. Excluded from completed full daadb9b snapshot.",
     "evidence": "evidence/math-sum-precise-2026-10-20/release-focused.json.gz"
-  }
+  },
+  "string_semantics_focused": {
+    "domain": "ECMAScript",
+    "suite": "Test262",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "built-ins/String",
+      "built-ins/RegExp",
+      "annexB/built-ins/RegExp",
+      "language/literals/regexp",
+      "annexB/language/literals/regexp"
+    ],
+    "groups": [],
+    "engine_sha256": "6ea1c131c0500c96451704f41e9e076fddb234e641e2f3b23e33d9dd040f2fc9",
+    "skip_features": [],
+    "denominator": "all selected variants, including skips and errors",
+    "worker_jobs": 2,
+    "timeout_seconds": 5.0,
+    "resumed_files": 0,
+    "total": 6819,
+    "counts": {
+      "pass": 6541,
+      "fail": 38,
+      "skip": 0,
+      "timeout": 240,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "pass_percentage": 95.9231558879601,
+    "limitations": [
+      "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+    ],
+    "new_passes": 172,
+    "lost_passes": 142,
+    "lost_statuses": {
+      "timeout": 140,
+      "fail": 2
+    },
+    "string_counts": {
+      "pass": 2443
+    },
+    "note": "Frozen original String/legacy escape patch. Two named-group regressions and 140 lost-pass timeouts retained as measured. A subsequent capture-name correction requires separate verification.",
+    "evidence": "evidence/string-semantics-2026-10-20/focused.json.gz",
+    "source_attribution": "intended base plus patch; exact full-source attribution unverified"
+  },
+  "focused_provenance_note": "Recent queued focused builds shared a mutable checkout. Their measured worker hashes and outcomes remain valid; exact clean-commit attribution for String, TypedArray, and Math queued runs requires detached-checkout remeasurement. Completed full-run snapshots are unaffected."
 }
