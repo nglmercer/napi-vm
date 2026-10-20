@@ -610,6 +610,8 @@ Array string invocation subsequently passes **755 / 763** selected string and Pr
 
 Sparse array indices subsequently pass **9,005 / 9,037** selected Array and property-reflection variants, gaining **30 passes with zero losses**. Large indices use traced sparse storage; logical length, descriptors, deletion, truncation, host writes, and map species results share the updated paths. All 369 core tests, 95 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [sparse array continuation](docs/test262-sparse-array-indices-continuation.md).
 
+Logical Array lengths subsequently pass **9,027 / 9,037** selected Array and property-reflection variants, gaining **22 passes with zero losses**. Slice, splice, and concat retain safe-integer indices and species ordering; push and unshift preserve writes before array-length errors. All 369 core tests, 101 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [logical length continuation](docs/test262-array-logical-lengths-continuation.md).
+
 
 ## License
 

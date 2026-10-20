@@ -526,104 +526,84 @@ fn array_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Resu
     super::object::object_to_string(interp, object, vec![])
 }
 
-/// `splice(start, deleteCount, ...items)`: remove a range in place and insert
-/// replacements, returning what was removed.
-fn delete_array_property_or_throw(
-    interp: &mut Interpreter,
-    object: &Value,
-    index: usize,
-) -> Result<(), VmErr> {
-    delete_numeric_property_or_throw(interp, object, index.to_string())
-}
-
+/// Splice uses logical LengthOfArrayLike throughout; only the species
+/// constructor decides whether the removed-array length is representable.
 fn array_splice(
     interp: &mut Interpreter,
     this: Value,
     arguments: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    // Read `length` once: observable getters run a single time.
-    let length_value = interp.get_prop_value_str(&this, "length")?;
-    let length_number = interp.ecmascript_to_number(&length_value)?;
-    let logical = to_integer_or_infinity(length_number).clamp(0.0, 9_007_199_254_740_991.0);
-    let length = if !length_number.is_finite() || length_number <= 0.0 {
-        0
-    } else {
-        (length_number.trunc() as usize).min(crate::value::MAX_ARRAY_LEN)
-    };
-    let start_number =
-        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?;
-    let delete_number = arguments
-        .get(1)
-        .map(|value| interp.ecmascript_to_number(value))
-        .transpose()?;
-    // ArraySpeciesCreate throws for result lengths above 2^32-1. Check the
-    // logical remove count first; the clamped path below still bounds the
-    // actual allocation.
-    let logical_start = relative_number_index(start_number, logical);
-    let logical_remove = if arguments.is_empty() {
-        0.0
-    } else if let Some(delete) = delete_number {
-        to_integer_or_infinity(delete)
+    let length = array_like_length_number(interp, &this)?;
+    let start = relative_number_index(
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let inserted = arguments.len().saturating_sub(2) as f64;
+    let remove = match arguments.len() {
+        0 => 0.0,
+        1 => length - start,
+        _ => to_integer_or_infinity(interp.ecmascript_to_number(&arguments[1])?)
             .max(0.0)
-            .min(logical - logical_start)
-    } else {
-        logical - logical_start
+            .min(length - start),
     };
-    if logical_remove > 4294967295.0 {
-        return Err(VmErr::Msg("RangeError: Invalid array length".into()));
+    let new_length = (length - remove) + inserted;
+    if inserted > 9_007_199_254_740_991.0 - (length - remove) {
+        return Err(VmErr::Msg("TypeError: Invalid array-like length".into()));
     }
-    let start = relative_index(start_number, length);
-    let remove = if arguments.is_empty() {
-        0
-    } else if let Some(delete) = delete_number {
-        to_integer_or_infinity(delete)
-            .max(0.0)
-            .min((length - start) as f64) as usize
-    } else {
-        length - start
-    };
-    let inserted = arguments.len().saturating_sub(2);
-    let new_length = length - remove + inserted;
-    if new_length > crate::value::MAX_ARRAY_LEN {
-        return Err(crate::value::limit_err("Maximum array length exceeded"));
-    }
-    let result = array_species_create(interp, &this, remove as f64)?;
-    for offset in 0..remove {
+    let result = array_species_create(interp, &this, remove)?;
+    let mut offset = 0.0;
+    while offset < remove {
         interp.consume_loop()?;
-        if let Some(value) = array_element(interp, &this, start + offset, true)? {
-            create_array_result_element(interp, &result, offset, value)?;
+        if let Some(value) = array_element_number(interp, &this, start + offset, true)? {
+            create_array_result_element_number(interp, &result, offset, value)?;
         }
+        offset += 1.0;
     }
-    interp.set_member_str_or_throw(&result, "length", Value::Number(remove as f64))?;
+    interp.set_member_str_or_throw(&result, "length", Value::Number(remove))?;
     if inserted < remove {
-        for index in start..length - remove {
+        let mut index = start;
+        while index < length - remove {
             interp.consume_loop()?;
-            let destination = index + inserted;
-            if let Some(value) = array_element(interp, &this, index + remove, true)? {
-                interp.set_member_str_or_throw(&this, &destination.to_string(), value)?;
+            let destination = crate::format::ecmascript_number_string(index + inserted);
+            if let Some(value) = array_element_number(interp, &this, index + remove, true)? {
+                interp.set_member_str_or_throw(&this, &destination, value)?;
             } else {
-                delete_array_property_or_throw(interp, &this, destination)?;
+                delete_numeric_property_or_throw(interp, &this, destination)?;
             }
+            index += 1.0;
         }
-        for index in (new_length..length).rev() {
-            delete_array_property_or_throw(interp, &this, index)?;
+        let mut index = length;
+        while index > new_length {
+            interp.consume_loop()?;
+            index -= 1.0;
+            delete_numeric_property_or_throw(
+                interp,
+                &this,
+                crate::format::ecmascript_number_string(index),
+            )?;
         }
     } else if inserted > remove {
-        for index in (start..length - remove).rev() {
+        let mut index = length - remove;
+        while index > start {
             interp.consume_loop()?;
-            let destination = index + inserted;
-            if let Some(value) = array_element(interp, &this, index + remove, true)? {
-                interp.set_member_str_or_throw(&this, &destination.to_string(), value)?;
+            let destination = crate::format::ecmascript_number_string(index + inserted - 1.0);
+            if let Some(value) = array_element_number(interp, &this, index + remove - 1.0, true)? {
+                interp.set_member_str_or_throw(&this, &destination, value)?;
             } else {
-                delete_array_property_or_throw(interp, &this, destination)?;
+                delete_numeric_property_or_throw(interp, &this, destination)?;
             }
+            index -= 1.0;
         }
     }
     for (offset, value) in arguments.into_iter().skip(2).enumerate() {
-        interp.set_member_str_or_throw(&this, &(start + offset).to_string(), value)?;
+        interp.set_member_str_or_throw(
+            &this,
+            &crate::format::ecmascript_number_string(start + offset as f64),
+            value,
+        )?;
     }
-    interp.set_member_str_or_throw(&this, "length", Value::Number(new_length as f64))?;
+    interp.set_member_str_or_throw(&this, "length", Value::Number(new_length))?;
     Ok(result)
 }
 
@@ -907,24 +887,21 @@ fn array_shift(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<V
     Ok(first)
 }
 
-/// Check logical growth independently of the existing array allocation guard.
-fn array_growth_length(this: &Value, length: f64, added: usize) -> Result<f64, VmErr> {
+/// Validate logical growth before any observable indexed writes.
+fn array_growth_length(length: f64, added: usize) -> Result<f64, VmErr> {
     if added as f64 > 9_007_199_254_740_991.0 - length {
         return Err(VmErr::Msg(
             "TypeError: Array-like length exceeds MAX_SAFE_INTEGER".into(),
         ));
     }
     let result = length + added as f64;
-    if matches!(this, Value::Array(_)) && result > crate::value::MAX_ARRAY_LEN as f64 {
-        return Err(crate::value::limit_err("Maximum array length exceeded"));
-    }
     Ok(result)
 }
 
 fn array_unshift(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
     let length = array_like_length_number(interp, &this)?;
-    let result_length = array_growth_length(&this, length, a.len())?;
+    let result_length = array_growth_length(length, a.len())?;
     if !a.is_empty() {
         let mut index = length;
         while index > 0.0 {
@@ -1259,7 +1236,7 @@ pub(super) fn array_like_length_number(
 fn array_push(interp: &mut Interpreter, this: Value, a: Vec<Value>) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
     let mut length = array_like_length_number(interp, &this)?;
-    let result_length = array_growth_length(&this, length, a.len())?;
+    let result_length = array_growth_length(length, a.len())?;
     for value in a {
         interp.consume_loop()?;
         interp.set_member_str_or_throw(
@@ -1445,44 +1422,26 @@ fn array_slice(
     arguments: Vec<Value>,
 ) -> Result<Value, VmErr> {
     let this = super::object::to_object_receiver(&this)?;
-    // Read `length` once: the logical (spec) length drives the 2^32-1
-    // ArrayCreate check while the clamped length bounds the allocation.
-    let length_value = interp.get_prop_value_str(&this, "length")?;
-    let length_number = interp.ecmascript_to_number(&length_value)?;
-    let logical = to_integer_or_infinity(length_number).clamp(0.0, 9_007_199_254_740_991.0);
-    let length = if !length_number.is_finite() || length_number <= 0.0 {
-        0
-    } else {
-        (length_number.trunc() as usize).min(crate::value::MAX_ARRAY_LEN)
+    let length = array_like_length_number(interp, &this)?;
+    let start = relative_number_index(
+        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?,
+        length,
+    );
+    let end = match arguments.get(1) {
+        None | Some(Value::Undefined) => length,
+        Some(value) => relative_number_index(interp.ecmascript_to_number(value)?, length),
     };
-    let start_number =
-        interp.ecmascript_to_number(arguments.first().unwrap_or(&Value::Undefined))?;
-    let end_number = match arguments.get(1) {
-        None | Some(Value::Undefined) => None,
-        Some(value) => Some(interp.ecmascript_to_number(value)?),
-    };
-    // ArrayCreate throws for lengths above 2^32-1. The clamped `length`
-    // above would swallow that spec error, so validate the logical count
-    // first; the clamped path below still bounds the actual allocation.
-    let logical_start = relative_number_index(start_number, logical);
-    let logical_end = end_number.map_or(logical, |end| relative_number_index(end, logical));
-    if logical_end - logical_start > 4294967295.0 {
-        return Err(VmErr::Msg("RangeError: Invalid array length".into()));
-    }
-    let start = relative_index(start_number, length);
-    let end = match end_number {
-        None => length,
-        Some(value) => relative_index(value, length),
-    };
-    let count = end.saturating_sub(start);
-    let result = array_species_create(interp, &this, count as f64)?;
-    for offset in 0..count {
+    let count = (end - start).max(0.0);
+    let result = array_species_create(interp, &this, count)?;
+    let mut offset = 0.0;
+    while offset < count {
         interp.consume_loop()?;
-        if let Some(value) = array_element(interp, &this, start + offset, true)? {
-            create_array_result_element(interp, &result, offset, value)?;
+        if let Some(value) = array_element_number(interp, &this, start + offset, true)? {
+            create_array_result_element_number(interp, &result, offset, value)?;
         }
+        offset += 1.0;
     }
-    interp.set_member_str_or_throw(&result, "length", Value::Number(count as f64))?;
+    interp.set_member_str_or_throw(&result, "length", Value::Number(count))?;
     Ok(result)
 }
 
@@ -1494,7 +1453,7 @@ fn array_concat(
     let this = super::object::to_object_receiver(&this)?;
     let result = array_species_create(interp, &this, 0.0)?;
     let spreadable = super::well_known("isConcatSpreadable").expect("Symbol.isConcatSpreadable");
-    let mut next = 0;
+    let mut next = 0.0;
     for item in std::iter::once(this).chain(arguments) {
         let spread = if crate::interpreter::call::is_js_object(&item) {
             let value = interp.get_prop_value(&item, &spreadable)?;
@@ -1507,26 +1466,28 @@ fn array_concat(
             false
         };
         if spread {
-            let length = array_like_length(interp, &item)?;
-            if next + length > crate::value::MAX_ARRAY_LEN {
-                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            let length = array_like_length_number(interp, &item)?;
+            if length > 9_007_199_254_740_991.0 - next {
+                return Err(VmErr::Msg("TypeError: Invalid concatenated length".into()));
             }
-            for index in 0..length {
+            let mut index = 0.0;
+            while index < length {
                 interp.consume_loop()?;
-                if let Some(value) = array_element(interp, &item, index, true)? {
-                    create_array_result_element(interp, &result, next, value)?;
+                if let Some(value) = array_element_number(interp, &item, index, true)? {
+                    create_array_result_element_number(interp, &result, next, value)?;
                 }
-                next += 1;
+                index += 1.0;
+                next += 1.0;
             }
         } else {
-            if next >= crate::value::MAX_ARRAY_LEN {
-                return Err(crate::value::limit_err("Maximum array length exceeded"));
+            if next >= 9_007_199_254_740_991.0 {
+                return Err(VmErr::Msg("TypeError: Invalid concatenated length".into()));
             }
-            create_array_result_element(interp, &result, next, item)?;
-            next += 1;
+            create_array_result_element_number(interp, &result, next, item)?;
+            next += 1.0;
         }
     }
-    interp.set_member_str_or_throw(&result, "length", Value::Number(next as f64))?;
+    interp.set_member_str_or_throw(&result, "length", Value::Number(next))?;
     Ok(result)
 }
 

@@ -31,7 +31,8 @@ The final release passes **9,005 / 9,037**, gaining **30 passes with zero losses
 There are 32 failures and 0 timeouts; no skips, crashes, or harness errors.
 See the [archived evidence](../tools/test262/evidence/sparse-array-indices-2026-10-20/summary.json).
 
-This work does not finish Array conformance. Generic methods still contain
-length clamps and dense result limits, including remaining concat, splice,
-slice, and push failures. The active frozen full run on `daadb9b` excludes this
+This work does not finish Array conformance. At that checkpoint, generic methods still contained
+length clamps and dense result limits. The subsequent [logical length
+continuation](test262-array-logical-lengths-continuation.md) addresses concat,
+splice, slice, and push. The active frozen full run on `daadb9b` excludes this
 continuation; its outcomes must remain separate from the focused measurement.
