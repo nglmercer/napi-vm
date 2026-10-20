@@ -1042,7 +1042,7 @@ fn object_to_locale_string(
     this: Value,
     _: Vec<Value>,
 ) -> Result<Value, VmErr> {
-    let method = interp.prop_str(&this, "toString")?;
+    let method = interp.get_prop_value_str(&this, "toString")?;
     if !is_callable(&method) {
         return Err(type_err("toString is not callable"));
     }

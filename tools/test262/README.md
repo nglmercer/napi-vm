@@ -146,6 +146,8 @@ Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-
 
 Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This remains outside the completed and active full snapshots. See the [Object metadata continuation](../../docs/test262-object-constructor-metadata-continuation.md).
 
+Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This remains outside the completed and active full snapshots. See the [locale-string continuation](../../docs/test262-object-locale-string-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the
