@@ -9,25 +9,7 @@ use crate::value::{BoxedPrimitive, ObjectCell, PropAttrs, Value};
 
 pub(super) fn install(e: &mut Environment) {
     let Some(o) = e.get("Object") else { return };
-    for (key, value) in [
-        ("length", Value::Number(1.)),
-        ("name", Value::String("Object".into())),
-    ] {
-        o.set_prop(key.into(), value)
-            .expect("Object constructor metadata");
-        o.property_cell()
-            .expect("Object constructor")
-            .meta
-            .borrow_mut()
-            .set_attrs(
-                key,
-                PropAttrs {
-                    writable: false,
-                    enumerable: false,
-                    configurable: true,
-                },
-            );
-    }
+    super::install_constructor_metadata(&o, "Object", 1);
     let prototype = Value::object(vec![
         ("constructor".into(), o.clone()),
         (

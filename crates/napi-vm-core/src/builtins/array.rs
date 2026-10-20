@@ -62,6 +62,7 @@ pub(super) fn relative_index(number: f64, length: usize) -> usize {
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(a) = e.get("Array") {
+        super::install_constructor_metadata(&a, "Array", 1);
         let statics: &[(&str, NativeFn)] = &[
             ("isArray", array_is_array),
             ("from", array_from),
@@ -230,7 +231,6 @@ pub(super) fn install(e: &mut Environment) {
                     "toSorted",
                     "toSpliced",
                     "values",
-                    "with",
                 ]
                 .into_iter()
                 .map(|name| (name.into(), Value::Bool(true)))

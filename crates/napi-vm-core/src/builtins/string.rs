@@ -671,6 +671,7 @@ fn string_replace_all(i: &mut Interpreter, t: Value, a: Vec<Value>) -> Result<Va
 }
 pub(super) fn install(e: &mut Environment) {
     if let Some(s) = e.get("String") {
+        super::install_constructor_metadata(&s, "String", 1);
         s.set_prop(
             "fromCharCode".to_string(),
             nf("fromCharCode", string_from_char_code),

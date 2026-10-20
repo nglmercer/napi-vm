@@ -307,6 +307,29 @@ fn nf(name: &str, callable: NativeFn) -> Value {
     }
 }
 
+/// Create the initial own metadata of a built-in constructor before its
+/// additional properties are installed. Calling and construction use internal
+/// slots, independently of these configurable public properties.
+pub(crate) fn install_constructor_metadata(target: &Value, name: &str, length: usize) {
+    let properties = target.property_cell().expect("built-in constructor");
+    for (key, value) in [
+        ("length", Value::Number(length as f64)),
+        ("name", Value::String(name.into())),
+    ] {
+        target
+            .set_prop(key.into(), value)
+            .expect("constructor metadata");
+        properties.meta.borrow_mut().set_attrs(
+            key,
+            PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+    }
+}
+
 /// Finish installed native methods once Function.prototype is available.
 pub(crate) fn install_method_metadata(e: &Environment, target: &Value, methods: &[(&str, usize)]) {
     let prototype = e.get("Function").and_then(|f| f.get_prop("prototype"));

@@ -28,8 +28,10 @@ Object.getOwnPropertyDescriptor, Reflect.defineProperty, and Reflect.ownKeys.
 Its baseline passes 9,005 / 9,037 variants, with 32 failures and no other
 non-pass outcomes. The final release passes **9,027 / 9,037**, gaining **22 passes with zero losses**.
 There are 10 failures and 0 timeouts, with no skips, crashes, or harness errors.
-The remaining cases concern Array length/name metadata, Array unscopables, and
-String/Boolean constructor length metadata.
+The remaining cases at that checkpoint concerned Array length/name metadata,
+Array unscopables, and String/Boolean constructor length metadata. The subsequent
+[core constructor continuation](test262-core-constructor-metadata-continuation.md)
+addresses those failures.
 See the [archived evidence](../tools/test262/evidence/array-logical-lengths-2026-10-20/summary.json).
 
 The active full run on `daadb9b` excludes this change and the preceding sparse

@@ -612,6 +612,8 @@ Sparse array indices subsequently pass **9,005 / 9,037** selected Array and prop
 
 Logical Array lengths subsequently pass **9,027 / 9,037** selected Array and property-reflection variants, gaining **22 passes with zero losses**. Slice, splice, and concat retain safe-integer indices and species ordering; push and unshift preserve writes before array-length errors. All 369 core tests, 101 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [logical length continuation](docs/test262-array-logical-lengths-continuation.md).
 
+Core constructor metadata subsequently passes **12,255 / 12,261** selected Array, String, Number, Boolean, and property-reflection variants, gaining **14 passes with zero losses**. Object, Array, String, Number, and Boolean share ordered own length/name metadata; Array unscopables excludes with. All **6,117 / 6,117** Array variants pass. All 369 core tests, 107 integration tests, strict workspace Clippy, and formatting pass. This remains outside the completed and active full snapshots. See the [core constructor continuation](docs/test262-core-constructor-metadata-continuation.md).
+
 
 ## License
 

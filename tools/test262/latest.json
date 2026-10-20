@@ -1934,5 +1934,59 @@
     "core_tests": 369,
     "note": "Logical slice/splice/concat indexing, species ordering, and push/unshift growth. Active full run daadb9b excludes this change and sparse-index storage.",
     "evidence": "evidence/array-logical-lengths-2026-10-20/focused.json.gz"
+  },
+  "core_constructor_metadata_focused": {
+    "domain": "ECMAScript",
+    "suite": "Test262",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "built-ins/Array",
+      "built-ins/Object/defineProperty",
+      "built-ins/Object/getOwnPropertyDescriptor",
+      "built-ins/Reflect/defineProperty",
+      "built-ins/Reflect/ownKeys",
+      "built-ins/String",
+      "built-ins/Number",
+      "built-ins/Boolean"
+    ],
+    "groups": [],
+    "engine_sha256": "a69dc5846793327a080d8681fec1fc87077509542e8e9a36a647dc9b9377e88c",
+    "skip_features": [],
+    "denominator": "all selected variants, including skips and errors",
+    "worker_jobs": 2,
+    "timeout_seconds": 5.0,
+    "resumed_files": 0,
+    "total": 12261,
+    "counts": {
+      "pass": 12255,
+      "fail": 6,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "pass_percentage": 99.95106435037926,
+    "limitations": [
+      "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+    ],
+    "source_base": "2037a03c3cdbb1ef521f2512be1a7d1062c79503",
+    "source_patch_sha256": "e22c4a15711b9a7c3ea9eb89d267799eb618f27fef1db80e599d2c4e5212e6fb",
+    "baseline_counts": {
+      "pass": 12241,
+      "fail": 20,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "new_passes": 14,
+    "lost_passes": 0,
+    "core_tests": 369,
+    "integration_tests": 107,
+    "note": "Own ordered core constructor metadata and Array unscopables; active full daadb9b excludes this change.",
+    "evidence": "evidence/core-constructor-metadata-2026-10-20/focused.json.gz",
+    "array_counts": {
+      "pass": 6117
+    }
   }
 }

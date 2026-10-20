@@ -8,6 +8,7 @@ use crate::value::{BoxedPrimitive, Value};
 
 pub(super) fn install(e: &mut Environment) {
     if let Some(n) = e.get("Number") {
+        super::install_constructor_metadata(&n, "Number", 1);
         n.set_prop("isNaN".to_string(), nf("isNaN", number_is_nan))
             .expect("built-in Number property");
         n.set_prop("isFinite".to_string(), nf("isFinite", number_is_finite))
@@ -46,25 +47,6 @@ pub(super) fn install(e: &mut Environment) {
         )
         .expect("built-in Number property");
         super::make_callable(&n, number_ctor, Some(number_construct));
-        for (key, value) in [
-            ("name", Value::String("Number".into())),
-            ("length", Value::Number(1.0)),
-        ] {
-            n.set_prop(key.into(), value)
-                .expect("Number constructor metadata");
-            n.property_cell()
-                .expect("Number constructor")
-                .meta
-                .borrow_mut()
-                .set_attrs(
-                    key,
-                    crate::value::PropAttrs {
-                        writable: false,
-                        enumerable: false,
-                        configurable: true,
-                    },
-                );
-        }
         let methods = [
             "toString",
             "toLocaleString",
@@ -104,6 +86,7 @@ pub(super) fn install(e: &mut Environment) {
         );
     }
     if let Some(b) = e.get("Boolean") {
+        super::install_constructor_metadata(&b, "Boolean", 1);
         super::make_callable(&b, boolean_ctor, Some(boolean_construct));
         super::install_primitive_prototype(
             e,
