@@ -2138,7 +2138,17 @@ pub(crate) fn descriptor_for_key_in(
             .expect("realm object record");
         return Ok(descriptor_for(&object, key));
     }
-    Ok(descriptor_for(target, key))
+    let descriptor = descriptor_for(target, key);
+    if !matches!(property_key, Value::Symbol(_))
+        && cell(target).is_some_and(|properties| properties.meta.borrow().module_namespace)
+        && !matches!(descriptor, Value::Undefined)
+    {
+        // Namespace [[GetOwnProperty]] reads the live export binding. A slot
+        // exists during its TDZ, but descriptor queries must still throw.
+        let value = interp.member(target, key)?;
+        descriptor.set_prop("value".into(), value)?;
+    }
+    Ok(descriptor)
 }
 
 fn descriptor_for(target: &Value, key: &str) -> Value {

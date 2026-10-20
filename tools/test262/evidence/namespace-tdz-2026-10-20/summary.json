@@ -1,0 +1,31 @@
+{
+  "source_base": "de317bf5b930ab866539dc59c0f495d25e2c41dd",
+  "worker_sha256": "627cc3b374213fe856b152164f32b4aa9872371dd62af2efc3c0f651bc750cda",
+  "working_tree_changes": true,
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "implementation_patch_sha256": "e8df8c3c37a477f4ef12f965fc48297e3ce9215f361ae538e6d14236b3c9e556",
+  "total": 7916,
+  "counts": {
+    "pass": 7887,
+    "fail": 29,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "gains": 6,
+  "losses": 0,
+  "deferred_imports": {
+    "pass": 109,
+    "total": 109,
+    "losses": 0
+  },
+  "validation": {
+    "module_integration_tests": 22,
+    "core_library_tests": 369,
+    "strict_workspace_clippy": "pass",
+    "format": "pass"
+  },
+  "note": "Preliminary comparison retained: six gains and one deletion regression, corrected in final worker. Running full snapshot ffc10c7 excludes this change.",
+  "evidence": "evidence/namespace-tdz-2026-10-20/focused.json.gz"
+}

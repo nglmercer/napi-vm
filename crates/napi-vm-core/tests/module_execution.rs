@@ -448,3 +448,64 @@ fn contextual_default_import_bindings_link_and_evaluate_without_renaming() {
         );
     }
 }
+
+#[test]
+fn namespace_descriptors_read_tdz_bindings_but_key_queries_do_not() {
+    let mut vm = Interpreter::with_builtins();
+    source(
+        &mut vm,
+        "namespace-tdz",
+        r#"
+import * as ns from 'namespace-tdz';
+var errors=[];
+for (const operation of [
+ ()=>Object.getOwnPropertyDescriptor(ns,'value'),
+ ()=>Reflect.getOwnPropertyDescriptor(ns,'value'),
+ ()=>Object.prototype.hasOwnProperty.call(ns,'value'),
+ ()=>Object.hasOwn(ns,'value'),
+ ()=>Object.keys(ns),
+ ()=>Object.getOwnPropertyDescriptors(ns),
+ ()=>Object.prototype.propertyIsEnumerable.call(ns,'value'),
+ ()=>{for(const key in ns){}}
+]) { try{operation();errors.push('missing');}catch(e){errors.push(e.name);} }
+globalThis.namespaceTdzReport=errors.join(',');
+globalThis.namespaceTdzKeys=Object.getOwnPropertyNames(ns).join(',');
+globalThis.namespaceTdzPresence=('value' in ns)&&Reflect.has(ns,'value')&&!('missing' in ns)&&Object.getOwnPropertyDescriptor(ns,'missing')===undefined;
+globalThis.namespaceTdzSymbol=Object.getOwnPropertyDescriptor(ns,Symbol.toStringTag).value;
+globalThis.namespaceDeleteResult=Reflect.deleteProperty(ns,'value')===false&&Reflect.deleteProperty(ns,'missing')===true&&Reflect.deleteProperty(ns,Symbol.toStringTag)===false;
+try{delete ns.value;globalThis.namespaceDeleteError='missing';}catch(e){globalThis.namespaceDeleteError=e.name;}
+
+export let value=1;
+export default null;
+"#,
+    );
+    vm.load_module("namespace-tdz").unwrap();
+    let errors = vm.eval_source("namespaceTdzReport").unwrap();
+    assert!(
+        matches!(errors,Value::String(ref s) if s=="ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError"),
+        "{errors:?}"
+    );
+    assert!(matches!(vm.eval_source("namespaceTdzKeys==='default,value'&&namespaceTdzPresence&&namespaceTdzSymbol==='Module'&&namespaceDeleteResult&&namespaceDeleteError==='TypeError'"),Ok(Value::Bool(true))));
+    assert!(matches!(vm.eval_source("import * as ns from 'namespace-tdz';var d=Object.getOwnPropertyDescriptor(ns,'value');d.value===1&&d.writable&&d.enumerable&&!d.configurable&&Object.keys(ns).join(',')==='default,value'"),Ok(Value::Bool(true))));
+}
+
+#[test]
+fn namespace_receiver_descriptors_throw_before_ordinary_write_rejection() {
+    let mut vm = Interpreter::with_builtins();
+    source(
+        &mut vm,
+        "namespace-receiver",
+        r#"
+import * as ns from 'namespace-receiver';
+class A{constructor(){return ns;}}
+class B extends A{constructor(){super();super.value=14;}}
+try{new B();globalThis.namespaceSuperError='missing';}catch(e){globalThis.namespaceSuperError=e.name;}
+try{Reflect.set({},'value',2,ns);globalThis.namespaceReflectError='missing';}catch(e){globalThis.namespaceReflectError=e.name;}
+try{ns.value=2;globalThis.namespaceDirectError='missing';}catch(e){globalThis.namespaceDirectError=e.name;}
+globalThis.namespaceSetResult=Reflect.set(ns,'value',2);
+export let value=42;
+"#,
+    );
+    vm.load_module("namespace-receiver").unwrap();
+    assert!(matches!(vm.eval_source("namespaceSuperError==='ReferenceError'&&namespaceReflectError==='ReferenceError'&&namespaceDirectError==='TypeError'&&namespaceSetResult===false"),Ok(Value::Bool(true))));
+}

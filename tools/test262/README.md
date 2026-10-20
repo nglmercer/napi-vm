@@ -124,6 +124,8 @@ Super reference receiver order subsequently passes **19,080 / 19,125** selected 
 
 Default export names subsequently pass **18,120 / 18,184** selected variants, gaining **seven passes with zero losses**. This remains outside the completed full score. See the [default export-name continuation](../../docs/test262-default-export-names-continuation.md).
 
+Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected variants, gaining **six passes with zero losses**; deferred imports remain **109 / 109**. This continuation is excluded from the running full snapshot. See the [namespace continuation](../../docs/test262-namespace-tdz-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the

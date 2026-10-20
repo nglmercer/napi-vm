@@ -861,6 +861,18 @@ impl Interpreter {
             }
             return self.delete_member_key(&target, key, depth + 1);
         }
+        if !matches!(key, Value::Symbol(_))
+            && obj
+                .property_cell()
+                .is_some_and(|properties| properties.meta.borrow().module_namespace)
+        {
+            // Namespace [[Delete]] checks export presence without reading its
+            // binding, unlike the namespace [[GetOwnProperty]] operation.
+            self.evaluate_deferred_namespace_property(obj, key)?;
+            let slot = self.property_key(key)?;
+            let properties = obj.property_cell().expect("namespace properties");
+            return Ok(Value::Bool(properties.own_index(&slot).is_none()));
+        }
         let descriptor = crate::builtins::object::descriptor_for_key_in(self, obj, key)?;
         if !matches!(descriptor, Value::Undefined)
             && !descriptor
