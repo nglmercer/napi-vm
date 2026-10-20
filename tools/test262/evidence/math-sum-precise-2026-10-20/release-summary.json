@@ -1,0 +1,32 @@
+{
+  "domain": "ECMAScript",
+  "suite": "Test262",
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "selection": [
+    "built-ins/Math"
+  ],
+  "groups": [],
+  "engine_sha256": "c0c2358b5559844b2ff22cb59f0631e676323e8ddc898ed91c62a11c294f7749",
+  "skip_features": [],
+  "denominator": "all selected variants, including skips and errors",
+  "worker_jobs": 2,
+  "timeout_seconds": 5.0,
+  "resumed_files": 0,
+  "total": 654,
+  "counts": {
+    "pass": 654,
+    "fail": 0,
+    "skip": 0,
+    "timeout": 0,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 100.0,
+  "limitations": [
+    "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+  ],
+  "source_commit": "d18faf70a6a9b694c3928b9503cf3e0e35114c74",
+  "new_passes": 20,
+  "lost_passes": 0,
+  "note": "Entire Math selection; exact sumPrecise adds all 20 previously failing variants. Excluded from completed full daadb9b snapshot."
+}

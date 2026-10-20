@@ -20,3 +20,9 @@ regressions, strict workspace Clippy, and formatting pass. See the
 [native and debug evidence](../tools/test262/evidence/math-sum-precise-2026-10-20/).
 Optimized release verification is pending; this debug result is not added to
 the published full release score.
+
+Optimized release verification on `d18faf7` passes **654 / 654** Math variants,
+gaining **20 passes with zero losses** against the frozen pre-change worker.
+No failures, timeouts, skips, crashes, or harness errors remain in this selection.
+See the [release evidence](../tools/test262/evidence/math-sum-precise-2026-10-20/release-summary.json).
+This remains separate from the completed full snapshot.

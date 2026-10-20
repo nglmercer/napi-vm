@@ -111,6 +111,8 @@ Core constructor metadata subsequently passes **12,255 / 12,261** selected Array
 
 TypedArray numeric keys subsequently pass **4,290 / 4,336** selected TypedArray and constructor variants, gaining **24 passes with zero losses**. Forty failures and six unchanged timeouts remain. Noncanonical numeric-looking keys use ordinary property semantics. This remains outside the completed full snapshot. See the [numeric-key continuation](test262-typed-array-numeric-keys-continuation.md).
 
+Exact Math.sumPrecise subsequently brings the full Math selection to **654 / 654**, gaining **20 passes with zero losses**. Finite numbers accumulate exactly before one ties-to-even rounding; iterator closing, signed zero, and non-number rejection are verified. All 369 core tests, four native regressions, strict workspace Clippy, and formatting pass. This remains outside the completed full snapshot. See the [Math continuation](test262-math-sum-precise-continuation.md).
+
 
 ## Historical checkpoint
 
