@@ -641,3 +641,86 @@ fn exported_destructuring_bindings_exist_before_initialization() {
             .contains("SyntaxError")
     );
 }
+
+#[test]
+fn dynamic_deferred_import_waits_for_async_work_and_defers_sync_bodies() {
+    for direct in [false, true] {
+        let mut vm = Interpreter::with_builtins();
+        vm.eval_source("var trace='';var release;var ready=false;var ns;var calls=0;var originalThen=Promise.prototype.then;Promise.prototype.then=function(a,b){calls++;return originalThen.call(this,a,b);};var gate=new Promise(r=>release=r);").unwrap();
+        source(
+            &mut vm,
+            "async",
+            "trace+='A';await gate;trace+='B';export const value=7;",
+        );
+        source(
+            &mut vm,
+            "root",
+            "import {value} from 'async';trace+='S';export {value};",
+        );
+        let target = if direct { "async" } else { "root" };
+        vm.eval_source(&format!(
+            "originalThen.call(import.defer('{target}'),n=>{{ready=true;ns=n;}});"
+        ))
+        .unwrap();
+        assert!(matches!(
+            vm.eval_source("ready").unwrap(),
+            Value::Bool(false)
+        ));
+        assert!(matches!(vm.eval_source("trace").unwrap(),Value::String(ref s) if s=="A"));
+        vm.eval_source("release();").unwrap();
+        assert!(matches!(
+            vm.eval_source("ready").unwrap(),
+            Value::Bool(true)
+        ));
+        assert!(matches!(vm.eval_source("trace").unwrap(),Value::String(ref s) if s=="AB"));
+        number(&mut vm, "calls", 0.);
+        number(&mut vm, "ns.value", 7.);
+        let expected = if direct { "AB" } else { "ABS" };
+        assert!(matches!(vm.eval_source("trace").unwrap(),Value::String(ref s) if s==expected));
+    }
+}
+
+#[test]
+fn dynamic_deferred_import_rejects_when_async_dependencies_fail() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var effects=0;var reason=0;").unwrap();
+    source(&mut vm, "bad", "await 0;throw 42;");
+    source(
+        &mut vm,
+        "root",
+        "import 'bad';effects++;export const value=1;",
+    );
+    vm.eval_source("import.defer('root').catch(e=>reason=e);")
+        .unwrap();
+    number(&mut vm, "reason", 42.);
+    number(&mut vm, "effects", 0.);
+}
+
+#[test]
+fn dynamic_deferred_import_starts_all_async_branches_and_waits_for_each() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var starts=0;var effects=0;var releaseA,releaseB;var ready=false;var ns;var gateA=new Promise(r=>releaseA=r);var gateB=new Promise(r=>releaseB=r);").unwrap();
+    source(&mut vm, "a", "starts++;await gateA;export const a=1;");
+    source(&mut vm, "b", "starts++;await gateB;export const b=2;");
+    source(
+        &mut vm,
+        "root",
+        "import {a} from 'a';import {b} from 'b';effects++;export const total=a+b;",
+    );
+    vm.eval_source("import.defer('root').then(n=>{ready=true;ns=n;});")
+        .unwrap();
+    number(&mut vm, "starts", 2.);
+    vm.eval_source("releaseA();").unwrap();
+    assert!(matches!(
+        vm.eval_source("ready").unwrap(),
+        Value::Bool(false)
+    ));
+    vm.eval_source("releaseB();").unwrap();
+    assert!(matches!(
+        vm.eval_source("ready").unwrap(),
+        Value::Bool(true)
+    ));
+    number(&mut vm, "effects", 0.);
+    number(&mut vm, "ns.total", 3.);
+    number(&mut vm, "effects", 1.);
+}

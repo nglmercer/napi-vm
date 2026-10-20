@@ -5,6 +5,53 @@ use super::*;
 use crate::value::{PromiseInner, PromiseState};
 const DRIVER: &str = "__symbol_module_driver__";
 impl Interpreter {
+    pub(super) fn start_deferred_module(&mut self, id: &str) -> Result<Value, VmErr> {
+        let module = self.module(id).expect("linked deferred module");
+        let namespace = Self::deferred_namespace_object(&module, id)?;
+        let target = Value::pending_promise();
+        let mut asynchronous = Vec::new();
+        self.gather_async_dependencies(id, &mut HashSet::new(), &mut asynchronous);
+        if asynchronous.is_empty() {
+            self.resolve_promise(&target, namespace)?;
+            return Ok(Value::Promise(target));
+        }
+        // Start every asynchronous branch before waiting for any of them.
+        // Synchronous ancestors remain linked until their namespace is used.
+        let mut dependencies = Vec::new();
+        for dependency in asynchronous {
+            dependencies.push(self.start_async_module(&dependency, &mut HashSet::new())?);
+        }
+        let guard = Value::object(vec![
+            ("id".into(), Value::String(id.into())),
+            ("target".into(), Value::Promise(target.clone())),
+            ("namespace".into(), namespace),
+            ("remaining".into(), Value::Number(dependencies.len() as f64)),
+        ]);
+        for dependency in dependencies {
+            if dependency
+                .as_promise()
+                .is_some_and(|p| p.borrow().external_pending)
+            {
+                target.borrow_mut().external_pending = true;
+            }
+            self.register(
+                &dependency,
+                handler(
+                    &guard,
+                    deferred_dependency_fulfilled,
+                    &self.persistent_global,
+                ),
+                handler(
+                    &guard,
+                    deferred_dependency_rejected,
+                    &self.persistent_global,
+                ),
+                None,
+            )?;
+        }
+        Ok(Value::Promise(target))
+    }
+
     fn gather_async_dependencies(
         &self,
         id: &str,
@@ -449,5 +496,37 @@ fn dependency_rejected(
 fn body_fulfilled(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
     let (_, id, target) = driver(&this)?;
     interp.finish_async_module(&id, &target, Ok(()))?;
+    Ok(Value::Undefined)
+}
+
+fn deferred_dependency_fulfilled(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let (guard, _, target) = driver(&this)?;
+    if target.borrow().state == PromiseState::Pending {
+        let remaining = guard
+            .get_prop("remaining")
+            .expect("dependency count")
+            .to_number()
+            - 1.;
+        guard.set_prop("remaining".into(), Value::Number(remaining))?;
+        if remaining == 0. {
+            interp.resolve_promise(
+                &target,
+                guard.get_prop("namespace").expect("deferred namespace"),
+            )?;
+        }
+    }
+    Ok(Value::Undefined)
+}
+fn deferred_dependency_rejected(
+    interp: &mut Interpreter,
+    this: Value,
+    args: Vec<Value>,
+) -> Result<Value, VmErr> {
+    let (_, _, target) = driver(&this)?;
+    interp.reject_promise(&target, args.into_iter().next().unwrap_or(Value::Undefined));
     Ok(Value::Undefined)
 }

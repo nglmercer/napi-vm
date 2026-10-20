@@ -507,14 +507,7 @@ impl Interpreter {
         if !self.link_module(&id)? {
             return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
         }
-        let module = self
-            .module(&id)
-            .ok_or_else(|| VmErr::Msg(format!("TypeError: Module not found: {id}")))?;
-        let namespace = Self::deferred_namespace_object(&module, &id)?;
-        Ok(Value::settled_promise(
-            crate::value::PromiseState::Fulfilled,
-            namespace,
-        ))
+        self.start_deferred_module(&id)
     }
 
     /// The UTF-8 host contract is enforced during linking, after source

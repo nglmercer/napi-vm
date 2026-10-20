@@ -404,7 +404,9 @@ impl Interpreter {
                 });
                 self.cur_mod = outer;
                 match result {
-                    Ok(promise) => self.resolve_promise(&target, promise),
+                    Ok(promise) => self
+                        .register(&promise, Value::Undefined, Value::Undefined, Some(target))
+                        .map(|_| ()),
                     Err(error) => {
                         self.reject_promise(&target, promise_error_reason(error));
                         Ok(())

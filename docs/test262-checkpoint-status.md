@@ -88,6 +88,8 @@ Exported destructuring bindings subsequently pass **3,486 / 3,504** selected var
 
 Harness-error classification subsequently passes **2,621 / 2,637** selected module/import variants, correcting **two passes with zero losses**. This is a worker measurement correction, excluded from the running full snapshot. See the [harness error continuation](test262-harness-error-continuation.md).
 
+Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This remains outside the running full snapshot. See the [dynamic defer continuation](test262-dynamic-defer-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state
