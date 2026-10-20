@@ -1536,5 +1536,15 @@
     },
     "note": "Completed full snapshot ffc10c7 excludes this continuation. Both measured ArrayBuffer timeouts are preserved; binary capability is opt-in for host loaders. Runtime file/network/package adapters are a subsequent continuation.",
     "evidence": "evidence/byte-modules-2026-10-20/focused.json.gz"
+  },
+  "running_full": {
+    "status": "running",
+    "source_base": "75c6857554cf3f59ce832798aeea98ee2ebde225",
+    "engine_sha256": "3613dfa4451eb240bde6804502828ca01ed81629187a190d2c302dcde5cc8440",
+    "started_utc": "2026-10-20T14:50:48.278868+00:00",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "local_checkpoint": "artifacts/test262/full-after-byte-modules-2026-10-20.checkpoint.jsonl",
+    "local_output": "artifacts/test262/full-after-byte-modules-2026-10-20.json",
+    "note": "Frozen clean source 75c6857 includes namespace TDZ, export resolution/patterns, harness classification, dynamic defer, async cycles, and engine byte modules. The completed full score above is unchanged."
   }
 }

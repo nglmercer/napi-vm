@@ -58,6 +58,10 @@ exported destructuring, harness classification, dynamic deferred-import,
 async cycle, and byte-module changes. Their focused results below remain
 separate measurements.
 
+A fresh full pinned run is in progress on clean source `75c6857` (worker
+`3613dfa4…`), including all subsequent module fixes and engine byte modules.
+The completed full score above remains authoritative until that report finishes.
+
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
 historical focused reports remain available under
