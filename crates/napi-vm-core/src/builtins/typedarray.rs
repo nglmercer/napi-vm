@@ -523,7 +523,7 @@ pub(super) fn install(e: &mut Environment) {
                 },
             );
         }
-        super::make_callable(&namespace, new_typed_array, None);
+        super::make_callable(&namespace, super::require_new, Some(new_typed_array));
         let prototype = Value::object_with_proto(
             vec![
                 ("constructor".into(), namespace.clone()),
