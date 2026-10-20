@@ -100,6 +100,8 @@ Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/
 
 Async iterator disposal subsequently passes **1,788 / 1,788** selected resource-management and async generator variants, gaining **18 passes with zero losses**. AsyncIteratorPrototype now supplies `Symbol.asyncDispose`, awaiting return and forwarding rejection through intrinsic promise operations. This remains outside the completed full score. See the [async disposal continuation](test262-async-iterator-disposal-continuation.md).
 
+Object constructor metadata subsequently passes **7,984 / 8,001** selected Object, Function, and Reflect variants, gaining **12 passes with zero losses**. Object now owns ordered length/name properties and inherits Function.prototype. This remains outside the completed and active full snapshots. See the [Object metadata continuation](test262-object-constructor-metadata-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

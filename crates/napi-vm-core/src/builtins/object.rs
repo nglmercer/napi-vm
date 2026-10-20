@@ -9,6 +9,25 @@ use crate::value::{BoxedPrimitive, ObjectCell, PropAttrs, Value};
 
 pub(super) fn install(e: &mut Environment) {
     let Some(o) = e.get("Object") else { return };
+    for (key, value) in [
+        ("length", Value::Number(1.)),
+        ("name", Value::String("Object".into())),
+    ] {
+        o.set_prop(key.into(), value)
+            .expect("Object constructor metadata");
+        o.property_cell()
+            .expect("Object constructor")
+            .meta
+            .borrow_mut()
+            .set_attrs(
+                key,
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+    }
     let prototype = Value::object(vec![
         ("constructor".into(), o.clone()),
         (
@@ -130,6 +149,10 @@ pub(super) fn install_function_metadata(e: &Environment) {
         return;
     };
     let function_prototype = e.get("Function").and_then(|v| v.get_prop("prototype"));
+    object
+        .property_cell()
+        .expect("Object constructor")
+        .set_proto(function_prototype.clone().map(Rc::new));
     for (target, methods) in [
         (
             object.clone(),
