@@ -1430,5 +1430,41 @@
     },
     "note": "Running full snapshot ffc10c7 excludes this continuation. All four dynamic deferred-import failures in this selection now pass.",
     "evidence": "evidence/dynamic-defer-2026-10-20/focused.json.gz"
+  },
+  "async_cycle_focused": {
+    "source_base": "ec391b30904a451d653997809c8ea6b66d3aa01b",
+    "worker_sha256": "197e4006ee719c06bd98d908b3ec295707a56d3552adec8ba08734bd1dd3e172",
+    "working_tree_changes": true,
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/module-code",
+      "language/import",
+      "language/expressions/dynamic-import"
+    ],
+    "implementation_patch_sha256": "d07406686ed62de2095ed8bba4b05389509429eed5c696891b4be2cc003d1dd3",
+    "total": 2637,
+    "counts": {
+      "pass": 2627,
+      "fail": 10,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 2,
+    "losses": 0,
+    "validation": {
+      "module_integration_tests": 33,
+      "core_library_tests": 369,
+      "worker_integration_tests": 19,
+      "strict_workspace_clippy": "pass",
+      "format": "pass",
+      "dynamic_import_selection": {
+        "pass": 1900,
+        "total": 1900
+      }
+    },
+    "note": "Running full snapshot ffc10c7 excludes this continuation. Dynamic imports now all pass in this pinned corpus selection.",
+    "evidence": "evidence/async-cycle-2026-10-20/focused.json.gz"
   }
 }

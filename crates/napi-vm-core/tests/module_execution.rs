@@ -724,3 +724,75 @@ fn dynamic_deferred_import_starts_all_async_branches_and_waits_for_each() {
     number(&mut vm, "ns.total", 3.);
     number(&mut vm, "effects", 1.);
 }
+
+#[test]
+fn importing_any_member_of_a_failed_async_cycle_reuses_the_cycle_error() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var failure={marker:42};var first;var observed=0;")
+        .unwrap();
+    source(&mut vm, "a", "import 'b';await 0;export const tag='a';");
+    source(&mut vm, "b", "import 'c';await 0;throw failure;");
+    source(&mut vm, "c", "import 'a';await 0;export const tag='c';");
+    vm.eval_source("import('b').catch(e=>first=e);").unwrap();
+    assert!(matches!(
+        vm.eval_source("first===failure").unwrap(),
+        Value::Bool(true)
+    ));
+    vm.eval_source(
+        "for(var id of ['a','b','c']) import(id).catch(e=>{if(e===failure)observed++;});",
+    )
+    .unwrap();
+    number(&mut vm, "observed", 3.);
+}
+
+#[test]
+fn importing_a_completed_cycle_member_waits_for_root_and_returns_its_own_namespace() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source(
+        "var release;var gate=new Promise(r=>release=r);var ready=false;var rootNs;var memberNs;",
+    )
+    .unwrap();
+    source(&mut vm, "a", "import 'b';await 0;export const tag='a';");
+    source(&mut vm, "b", "import 'c';await gate;export const tag='b';");
+    source(&mut vm, "c", "import 'a';await 0;export const tag='c';");
+    vm.eval_source("import('b').then(n=>rootNs=n);").unwrap();
+    vm.eval_source("import('c').then(n=>{ready=true;memberNs=n;});")
+        .unwrap();
+    assert!(matches!(
+        vm.eval_source("ready").unwrap(),
+        Value::Bool(false)
+    ));
+    vm.eval_source("release();").unwrap();
+    assert!(matches!(
+        vm.eval_source("ready && memberNs.tag==='c' && rootNs.tag==='b' && memberNs!==rootNs")
+            .unwrap(),
+        Value::Bool(true)
+    ));
+}
+
+#[test]
+fn overlapping_async_cycles_merge_without_including_acyclic_dependencies() {
+    let mut vm = Interpreter::with_builtins();
+    vm.eval_source("var release;var gate=new Promise(r=>release=r);var reason=0;var rejected=0;var independent;").unwrap();
+    source(
+        &mut vm,
+        "a",
+        "import 'b';import 'independent';await gate;throw 42;",
+    );
+    source(
+        &mut vm,
+        "b",
+        "import 'c';import 'd';await 0;export const tag='b';",
+    );
+    source(&mut vm, "c", "import 'b';await 0;export const tag='c';");
+    source(&mut vm, "d", "import 'a';await 0;export const tag='d';");
+    source(&mut vm, "independent", "export const tag='independent';");
+    vm.eval_source("import('a').catch(e=>reason=e);").unwrap();
+    vm.eval_source("release();").unwrap();
+    number(&mut vm, "reason", 42.);
+    vm.eval_source("for(var id of ['a','b','c','d']) import(id).catch(e=>{if(e===42)rejected++;});import('independent').then(n=>independent=n.tag);").unwrap();
+    number(&mut vm, "rejected", 4.);
+    assert!(
+        matches!(vm.eval_source("independent").unwrap(),Value::String(ref s) if s=="independent")
+    );
+}

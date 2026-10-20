@@ -8,18 +8,27 @@ impl Interpreter {
     pub(super) fn start_deferred_module(&mut self, id: &str) -> Result<Value, VmErr> {
         let module = self.module(id).expect("linked deferred module");
         let namespace = Self::deferred_namespace_object(&module, id)?;
-        let target = Value::pending_promise();
         let mut asynchronous = Vec::new();
         self.gather_async_dependencies(id, &mut HashSet::new(), &mut asynchronous);
-        if asynchronous.is_empty() {
-            self.resolve_promise(&target, namespace)?;
-            return Ok(Value::Promise(target));
-        }
         // Start every asynchronous branch before waiting for any of them.
         // Synchronous ancestors remain linked until their namespace is used.
         let mut dependencies = Vec::new();
         for dependency in asynchronous {
-            dependencies.push(self.start_async_module(&dependency, &mut HashSet::new())?);
+            dependencies.push(self.start_async_module(&dependency, &mut Vec::new())?);
+        }
+        self.namespace_after_dependencies(id, namespace, dependencies)
+    }
+
+    fn namespace_after_dependencies(
+        &mut self,
+        id: &str,
+        namespace: Value,
+        dependencies: Vec<Value>,
+    ) -> Result<Value, VmErr> {
+        let target = Value::pending_promise();
+        if dependencies.is_empty() {
+            self.resolve_promise(&target, namespace)?;
+            return Ok(Value::Promise(target));
         }
         let guard = Value::object(vec![
             ("id".into(), Value::String(id.into())),
@@ -38,12 +47,12 @@ impl Interpreter {
                 &dependency,
                 handler(
                     &guard,
-                    deferred_dependency_fulfilled,
+                    namespace_dependency_fulfilled,
                     &self.persistent_global,
                 ),
                 handler(
                     &guard,
-                    deferred_dependency_rejected,
+                    namespace_dependency_rejected,
                     &self.persistent_global,
                 ),
                 None,
@@ -114,7 +123,7 @@ impl Interpreter {
             if !self.link_module(&id)? {
                 return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
             }
-            self.start_async_module(&id, &mut HashSet::new())
+            self.start_async_module(&id, &mut Vec::new())
         })();
         Ok(match result {
             Ok(promise) => promise,
@@ -157,10 +166,42 @@ impl Interpreter {
         self.define_module(&key, loaded.source);
         Ok(key)
     }
+    fn record_async_cycle(&self, ancestors: &[String], dependency: &str) {
+        let mut start = ancestors
+            .iter()
+            .position(|id| id == dependency)
+            .expect("active back edge");
+        let mut graph = self.module_graph.borrow_mut();
+        // A later back edge can merge a previously discovered component into
+        // an earlier one, including members that have left the recursive path.
+        for id in &ancestors[start..] {
+            if let Some(root) = graph.records[id].cycle_root.as_ref()
+                && let Some(index) = ancestors.iter().position(|id| id == root)
+            {
+                start = start.min(index);
+            }
+        }
+        let root = ancestors[start].clone();
+        let mut members: HashSet<String> = ancestors[start..].iter().cloned().collect();
+        for id in &ancestors[start..] {
+            members.extend(graph.records[id].cycle_root.iter().cloned());
+        }
+        for (id, record) in &mut graph.records {
+            if members.contains(id)
+                || record
+                    .cycle_root
+                    .as_ref()
+                    .is_some_and(|id| members.contains(id))
+            {
+                record.cycle_root = Some(root.clone());
+            }
+        }
+    }
+
     fn start_async_module(
         &mut self,
         id: &str,
-        ancestors: &mut HashSet<String>,
+        ancestors: &mut Vec<String>,
     ) -> Result<Value, VmErr> {
         let record = self.module_graph.borrow().records.get(id).map(|r| {
             (
@@ -177,17 +218,22 @@ impl Interpreter {
             ));
         };
         if let Some(promise) = evaluation {
-            if let Some(root) = cycle_root
-                && !ancestors.contains(&root)
-                && let Some(root_promise) = self
-                    .module_graph
-                    .borrow()
-                    .records
-                    .get(&root)
-                    .and_then(|record| record.evaluation.clone())
-                && root_promise.borrow().state == PromiseState::Pending
-            {
-                return Ok(Value::Promise(root_promise));
+            let root_promise = cycle_root
+                .filter(|root| root != id && !ancestors.contains(root))
+                .and_then(|root| {
+                    self.module_graph
+                        .borrow()
+                        .records
+                        .get(&root)
+                        .and_then(|record| record.evaluation.clone())
+                });
+            if let Some(root_promise) = root_promise {
+                let namespace = Self::namespace_object(&self.module(id).expect("cycle member"))?;
+                return self.namespace_after_dependencies(
+                    id,
+                    namespace,
+                    vec![Value::Promise(root_promise)],
+                );
             }
             return Ok(Value::Promise(promise));
         }
@@ -215,7 +261,7 @@ impl Interpreter {
             record.evaluation = Some(promise.clone());
             record.state = ModuleState::Evaluating;
         }
-        ancestors.insert(id.into());
+        ancestors.push(id.into());
         let mut dependencies = Vec::new();
         let mut scheduled = HashSet::new();
         for (_, dependency, phase, _) in requests {
@@ -223,15 +269,18 @@ impl Interpreter {
                 let mut asynchronous = Vec::new();
                 self.gather_async_dependencies(&dependency, &mut HashSet::new(), &mut asynchronous);
                 for asynchronous in asynchronous {
-                    if ancestors.contains(&asynchronous) || !scheduled.insert(asynchronous.clone())
-                    {
+                    if ancestors.contains(&asynchronous) {
+                        self.record_async_cycle(ancestors, &asynchronous);
+                        continue;
+                    }
+                    if !scheduled.insert(asynchronous.clone()) {
                         continue;
                     }
                     match self.start_async_module(&asynchronous, ancestors) {
                         Ok(dependency) => dependencies.push(dependency),
                         Err(error) => {
                             self.finish_async_module(id, &promise, Err(error_value(&error)))?;
-                            ancestors.remove(id);
+                            ancestors.pop();
                             return Ok(Value::Promise(promise));
                         }
                     }
@@ -243,19 +292,15 @@ impl Interpreter {
                     Ok(dependency) => dependencies.push(dependency),
                     Err(error) => {
                         self.finish_async_module(id, &promise, Err(error_value(&error)))?;
-                        ancestors.remove(id);
+                        ancestors.pop();
                         return Ok(Value::Promise(promise));
                     }
                 }
             } else if ancestors.contains(&dependency) {
-                let mut graph = self.module_graph.borrow_mut();
-                let record = graph.records.get_mut(id).expect("evaluating module");
-                if record.cycle_root.is_none() {
-                    record.cycle_root = Some(dependency);
-                }
+                self.record_async_cycle(ancestors, &dependency);
             }
         }
-        ancestors.remove(id);
+        ancestors.pop();
         let guard = Value::object(vec![
             ("id".into(), Value::String(id.into())),
             ("target".into(), Value::Promise(promise.clone())),
@@ -499,7 +544,7 @@ fn body_fulfilled(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Resul
     Ok(Value::Undefined)
 }
 
-fn deferred_dependency_fulfilled(
+fn namespace_dependency_fulfilled(
     interp: &mut Interpreter,
     this: Value,
     _: Vec<Value>,
@@ -521,7 +566,7 @@ fn deferred_dependency_fulfilled(
     }
     Ok(Value::Undefined)
 }
-fn deferred_dependency_rejected(
+fn namespace_dependency_rejected(
     interp: &mut Interpreter,
     this: Value,
     args: Vec<Value>,

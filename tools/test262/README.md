@@ -134,6 +134,8 @@ Harness-error classification subsequently passes **2,621 / 2,637** selected modu
 
 Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This remains outside the running full snapshot. See the [dynamic defer continuation](../../docs/test262-dynamic-defer-continuation.md).
 
+Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This remains outside the running full snapshot. See the [async cycle continuation](../../docs/test262-async-cycle-continuation.md).
+
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including
 the [2026-10-18 final run](evidence/shadow-realm-2026-10-18/). See the
