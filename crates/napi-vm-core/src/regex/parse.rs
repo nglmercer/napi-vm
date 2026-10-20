@@ -505,7 +505,13 @@ impl Parser {
             }
             if c == '\\' {
                 self.expect('u')?;
-                let code = self.escaped_char('u')?;
+                // Capture names use RegExpIdentifierName's Unicode escape
+                // grammar even when the surrounding pattern is legacy-mode.
+                let unicode = self.unicode;
+                self.unicode = true;
+                let parsed = self.escaped_char('u');
+                self.unicode = unicode;
+                let code = parsed?;
                 if code > 0xffff {
                     units.push(0xd800 + ((code - 0x10000) >> 10) as u16);
                     units.push(0xdc00 + ((code - 0x10000) & 0x3ff) as u16);
