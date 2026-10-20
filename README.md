@@ -528,6 +528,10 @@ This full snapshot excludes runtime binary adapters, data URL bytes, the
 static deferred-attribute correction, and source-phase import work. Subsequent
 focused measurements remain separate from the full score.
 
+A fresh full pinned run is in progress on clean source `1bffdb8` (worker
+`2b13d3a9…`), including source-phase imports and async iterator disposal. The
+completed full score above remains authoritative until that report finishes.
+
 The current deferred-import implementation passes its pinned 109-variant
 Test262 selection. Static import attributes pass 17 / 17 variants and dynamic
 import attributes pass 44 / 44. The neighboring module-code and dynamic-import

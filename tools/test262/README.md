@@ -57,6 +57,10 @@ This full snapshot excludes runtime binary adapters, data URL bytes, the
 static deferred-attribute correction, and source-phase import work. Subsequent
 focused measurements remain separate from the full score.
 
+A fresh full pinned run is in progress on clean source `1bffdb8` (worker
+`2b13d3a9…`), including source-phase imports and async iterator disposal. The
+completed full score above remains authoritative until that report finishes.
+
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
 historical focused reports remain available under
