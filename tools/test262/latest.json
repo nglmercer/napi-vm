@@ -1787,5 +1787,40 @@
     },
     "note": "Completed full score measures 75c6857; active full worker 1bffdb8 excludes this change. Gains are Object and Array primitive toLocaleString getter cases.",
     "evidence": "evidence/object-locale-string-2026-10-20/focused.json.gz"
+  },
+  "array_string_invocation_focused": {
+    "source_base": "988f5117f8e07c023133a622dde2c79bb3a1d611",
+    "worker_sha256": "852c7c9cb1f864d31d97b26518de85032d71dfeeaa6345c0b7b49bdca8fa57d4",
+    "working_tree_changes": true,
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "built-ins/Array/prototype/toString",
+      "built-ins/Object/prototype/toString",
+      "built-ins/Array/prototype/join",
+      "built-ins/TypedArray/prototype/toString",
+      "built-ins/Proxy"
+    ],
+    "implementation_patch_sha256": "883eeb2d9afceebc137021ea372039ed502a0039fe2ce69bc48bd15924167a33",
+    "total": 763,
+    "counts": {
+      "pass": 755,
+      "fail": 8,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 2,
+    "losses": 0,
+    "validation": {
+      "array_string_tests": 5,
+      "realm_semantics_tests": 83,
+      "related_object_tests": 4,
+      "core_library_tests_without_exclusions": 369,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "note": "All eight remaining failures are unchanged Proxy cases. Completed full score measures 75c6857; active full worker 1bffdb8 excludes this continuation.",
+    "evidence": "evidence/array-string-invocation-2026-10-20/focused.json.gz"
   }
 }

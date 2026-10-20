@@ -104,6 +104,8 @@ Object constructor metadata subsequently passes **7,984 / 8,001** selected Objec
 
 Object locale-string invocation subsequently passes **122 / 122** selected Object, Array, and TypedArray locale-string variants, gaining **two passes with zero losses**. Getter reads retain the original receiver and propagate accessor/proxy errors. This remains outside the completed and active full snapshots. See the [locale-string continuation](test262-object-locale-string-continuation.md).
 
+Array string invocation subsequently passes **755 / 763** selected string and Proxy variants, gaining **two passes with zero losses**. All selected Array, Object, join, and typed-array string cases pass; eight Proxy failures are unchanged. Join accessors, intrinsic fallback, and proxy brand handling are corrected. This remains outside the completed and active full snapshots. See the [array string continuation](test262-array-string-invocation-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

@@ -955,21 +955,17 @@ fn object_is_prototype_of(
 /// on prototype objects, so deleting or shadowing a tag falls back to
 /// `"Object"` instead of leaking the value kind.
 fn object_to_string_tag(value: &Value) -> Result<String, VmErr> {
-    // Proxies expose their target's brand; following the links throws on a
-    // revoked proxy, matching `IsArray`'s abrupt path.
-    let mut source = value.clone();
-    while let Value::Proxy(proxy) = &source {
-        source = proxy.snapshot()?.0;
-    }
-    if super::array::is_array(&source)? {
+    // Only IsArray and IsCallable forward through proxy targets. Other
+    // builtin tags depend on internal slots on the receiver itself.
+    if super::array::is_array(value)? {
         return Ok("Array".into());
     }
-    let callable = crate::interpreter::is_callable_value(&source);
-    let errored = source.is_error_object();
-    Ok(match &source {
+    let callable = crate::interpreter::is_callable_value(value);
+    let errored = value.is_error_object();
+    Ok(match value {
         Value::Uninitialized | Value::Undefined => "Undefined".into(),
         Value::Null => "Null".into(),
-        Value::Object { .. } if callable => "Function".into(),
+        Value::Object { .. } | Value::Proxy(_) if callable => "Function".into(),
         Value::Object { .. } if errored => "Error".into(),
         Value::Object { props } => {
             let meta = props.meta.borrow();
@@ -998,20 +994,18 @@ fn object_to_string_tag(value: &Value) -> Result<String, VmErr> {
         #[cfg(stackful_coroutines)]
         Value::AsyncTask(_) => "AsyncTask".into(),
         Value::Date(_) => "Date".into(),
-        Value::ArrayBuffer(_) => "ArrayBuffer".into(),
-        Value::SharedArrayBuffer(_) => "SharedArrayBuffer".into(),
-        Value::TypedArray(view) if view.is_buffer => "Uint8Array".into(),
-        Value::TypedArray(view) => view.kind.name().into(),
-        Value::DataView(_) => "DataView".into(),
         Value::RegExp(_) => "RegExp".into(),
         Value::Error(_) => "Error".into(),
-        // The proxy chain above always resolves, so reaching this arm means
-        // the value kind itself carries no brand.
+        // Other objects obtain their modern brands through @@toStringTag.
         _ => "Object".into(),
     })
 }
 
-fn object_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
+pub(super) fn object_to_string(
+    interp: &mut Interpreter,
+    this: Value,
+    _: Vec<Value>,
+) -> Result<Value, VmErr> {
     let this = this.deref_binding();
     if matches!(this, Value::Undefined | Value::Uninitialized) {
         return Ok(Value::String(crate::JsString::from("[object Undefined]")));

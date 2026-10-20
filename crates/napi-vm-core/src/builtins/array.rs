@@ -516,21 +516,14 @@ pub fn array_method(name: &str) -> Option<Value> {
 }
 
 fn array_to_string(interp: &mut Interpreter, this: Value, _: Vec<Value>) -> Result<Value, VmErr> {
-    let join = interp.prop_str(&this, "join")?;
-    if matches!(
-        join,
-        Value::Function(_) | Value::NativeFunction { .. } | Value::HostFunction { .. }
-    ) {
-        return interp.call_this(&join, this, vec![]);
+    let object = super::object::to_object_receiver(&this)?;
+    let join = interp.get_prop_value_str(&object, "join")?;
+    if crate::interpreter::is_callable_value(&join) {
+        return interp.call_this(&join, object, vec![]);
     }
-    let object_prototype = interp
-        .global
-        .borrow()
-        .get("Object")
-        .and_then(|object| object.get_prop("prototype"))
-        .ok_or_else(|| VmErr::Msg("TypeError: Object.prototype is unavailable".into()))?;
-    let method = interp.prop_str(&object_prototype, "toString")?;
-    interp.call_this(&method, this, vec![])
+    // The fallback is the intrinsic, independent of mutable global bindings
+    // and the public Object.prototype.toString property.
+    super::object::object_to_string(interp, object, vec![])
 }
 
 /// `splice(start, deleteCount, ...items)`: remove a range in place and insert
