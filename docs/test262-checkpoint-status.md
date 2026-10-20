@@ -73,6 +73,8 @@ Public hash-named keys subsequently pass **31,739 / 31,860** selected variants, 
 
 Super reference receiver order subsequently passes **19,080 / 19,125** selected variants, gaining **ten passes with zero losses**. This remains outside the completed full score. See the [super receiver-order continuation](test262-super-reference-order-continuation.md).
 
+Default export names subsequently pass **18,120 / 18,184** selected variants, gaining **seven passes with zero losses**. This remains outside the completed full score. See the [default export-name continuation](test262-default-export-names-continuation.md).
+
 ## Historical checkpoint
 
 The following records an earlier paused checkpoint; its counts and pause state

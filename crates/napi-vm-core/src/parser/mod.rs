@@ -11,6 +11,15 @@ pub(crate) use validate::{EvalContext, use_strict};
 pub use ast::*;
 pub use cache::{parse_cached, parse_cached_with_goal};
 
+/// The module's hidden binding is not the public function/class name.
+pub(crate) fn declaration_display_name(binding: &str) -> &str {
+    if binding == compound::DEFAULT_BINDING {
+        "default"
+    } else {
+        binding
+    }
+}
+
 /// Grammar goal; Auto preserves the existing embedding API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParseGoal {

@@ -1199,5 +1199,44 @@
     },
     "note": "Latest full score measures a528b02 and excludes this continuation.",
     "evidence": "evidence/super-reference-order-2026-10-19/focused.json.gz"
+  },
+  "default_export_names_focused": {
+    "source_base": "e3910df0a9ae47ba265ffa32ae8a1aad18779728",
+    "engine_sha256": "e957fbdb5c6582e668dd1f0acdd488c225667d2a29feefa07be83872e1cd74f7",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/module-code",
+      "language/expressions/class",
+      "language/statements/class",
+      "built-ins/Function"
+    ],
+    "implementation_patch_sha256": "9aa8fbec5e9ecc19aebd3586a5c1eb2decf05151e299d180bb5609b6aa33f70a",
+    "total": 18184,
+    "counts": {
+      "pass": 18120,
+      "fail": 64,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 7,
+    "losses": 0,
+    "validation": {
+      "default_export_tests": 4,
+      "module_integration_tests": 20,
+      "strict_workspace_clippy": "pass",
+      "format": "pass",
+      "core_library_before_snapshot_order_followup": {
+        "pass": 367,
+        "fail": 1,
+        "failure": "native-addon invalid guest object reference"
+      }
+    },
+    "limitations": [
+      "Latest completed full score measures a528b02 and excludes this continuation.",
+      "Worker and implementation patch exclude the subsequent native-addon snapshot ordering fix."
+    ],
+    "evidence": "evidence/default-export-names-2026-10-20/focused.json.gz"
   }
 }

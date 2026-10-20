@@ -718,7 +718,12 @@ impl Interpreter {
         superclass: Option<&Expr>,
         body: &[ClassMember],
     ) -> Result<Value, VmErr> {
-        self.build_class_with_name(name, name, superclass, body)
+        self.build_class_with_name(
+            name,
+            crate::parser::declaration_display_name(name),
+            superclass,
+            body,
+        )
     }
 
     fn build_class_with_name(
@@ -1438,7 +1443,7 @@ impl Interpreter {
                 strict: self.global.borrow().strict() || crate::parser::use_strict(body),
                 native: None,
                 identity: Rc::new(0),
-                name: Some(name.as_str().into()),
+                name: Some(crate::parser::declaration_display_name(name).into()),
                 properties: FunctionData::properties_with_function_kind(
                     &self.persistent_global,
                     *is_async,
@@ -1796,7 +1801,7 @@ impl Interpreter {
                 result
             }
             Statement::ExportDefault(e) => {
-                let v = self.eval_expr(e)?;
+                let v = self.evaluate_class_field(e, &Value::String("default".into()))?;
                 self.stmt_export_default(v)
             }
             Statement::ExportNamed {

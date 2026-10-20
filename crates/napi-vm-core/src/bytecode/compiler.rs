@@ -962,7 +962,7 @@ impl<'a> Compiler<'a> {
         for decl in fns {
             let value = self.defer_function(FuncDef {
                 named_expression: false,
-                name: Some(decl.name.to_string()),
+                name: Some(crate::parser::declaration_display_name(decl.name).to_owned()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
                 is_arrow: false,
@@ -1026,7 +1026,7 @@ impl<'a> Compiler<'a> {
             let slot = self.declare_slot_if_absent(decl.name, SlotKind::Var)?;
             let value = self.defer_function(FuncDef {
                 named_expression: false,
-                name: Some(decl.name.to_string()),
+                name: Some(crate::parser::declaration_display_name(decl.name).to_owned()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
                 is_arrow: false,
@@ -1083,7 +1083,7 @@ impl<'a> Compiler<'a> {
         for decl in fns {
             let value = self.defer_function(FuncDef {
                 named_expression: false,
-                name: Some(decl.name.to_string()),
+                name: Some(crate::parser::declaration_display_name(decl.name).to_owned()),
                 params: SharedSlice::Borrowed(decl.params),
                 body: FuncBody::Stmts(SharedSlice::Borrowed(decl.body)),
                 is_arrow: false,
@@ -1640,7 +1640,7 @@ impl<'a> Compiler<'a> {
                 self.load_undefined()
             }
             Statement::ExportDefault(expr) => {
-                let src = self.compile_expr(expr)?;
+                let src = self.compile_named_assignment_value(expr, "default")?;
                 self.emit(Instr::ExportDefault { src });
                 self.load_undefined()
             }
@@ -2226,7 +2226,7 @@ impl<'a> Compiler<'a> {
             FuncDef {
                 named_expression: false,
                 // The evaluator names the constructor after the class.
-                name: Some(name.to_string()),
+                name: Some(crate::parser::declaration_display_name(name).to_owned()),
                 params: ctor_params,
                 body: FuncBody::Stmts(ctor_body),
                 is_arrow: false,
@@ -2239,7 +2239,7 @@ impl<'a> Compiler<'a> {
         let tmpl = self.push_const(Constant::ClassTemplate(ClassTemplate {
             private_fields,
             private_declarations,
-            name: name.to_string(),
+            name: crate::parser::declaration_display_name(name).to_owned(),
             expr_name,
             superclass,
             super_proto,

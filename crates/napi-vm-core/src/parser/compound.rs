@@ -6,7 +6,7 @@ use crate::lexer::Token;
 
 /// Binding name synthesized for an anonymous `export default class`/`function`.
 /// Not a valid JavaScript identifier, so guest code can never reference it.
-const DEFAULT_BINDING: &str = "*default*";
+pub(super) const DEFAULT_BINDING: &str = "*default*";
 
 /// Collect the bound identifier names from a variable declaration statement
 /// (which may be a single `VarDecl` or a block of them for `let a, b`).
