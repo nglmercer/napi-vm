@@ -1487,6 +1487,7 @@ impl Interpreter {
             modules.insert(
                 name.clone(),
                 Module {
+                    source_object: None,
                     namespace: Rc::new(RefCell::new(None)),
                     deferred_namespace: Rc::new(RefCell::new(None)),
                     exports: std::collections::HashMap::new(),
@@ -2621,6 +2622,7 @@ impl Interpreter {
         let prior = self.modules.borrow_mut().insert(
             name.to_string(),
             Module {
+                source_object: None,
                 namespace: Rc::new(RefCell::new(None)),
                 deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),

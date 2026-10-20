@@ -100,7 +100,10 @@ impl Interpreter {
             out.push(id.into());
             return;
         }
-        for (_, dependency, _, _) in requests {
+        for (_, dependency, phase, _) in requests {
+            if phase == crate::parser::ImportPhase::Source {
+                continue;
+            }
             self.gather_async_dependencies(&dependency, seen, out);
         }
     }
@@ -256,6 +259,9 @@ impl Interpreter {
         let mut dependencies = Vec::new();
         let mut scheduled = HashSet::new();
         for (_, dependency, phase, _) in requests {
+            if phase == crate::parser::ImportPhase::Source {
+                continue;
+            }
             if phase == crate::parser::ImportPhase::Deferred {
                 let mut asynchronous = Vec::new();
                 self.gather_async_dependencies(&dependency, &mut HashSet::new(), &mut asynchronous);

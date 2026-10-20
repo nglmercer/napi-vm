@@ -1,0 +1,23 @@
+{
+  "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+  "engine_sha256": "3613dfa4451eb240bde6804502828ca01ed81629187a190d2c302dcde5cc8440",
+  "total": 102956,
+  "counts": {
+    "pass": 102050,
+    "fail": 814,
+    "skip": 0,
+    "timeout": 92,
+    "crash": 0,
+    "harness_error": 0
+  },
+  "pass_percentage": 99.12001243249543,
+  "source_commit": "75c6857554cf3f59ce832798aeea98ee2ebde225",
+  "gains": 94,
+  "losses": 17,
+  "lost_statuses": {
+    "timeout": 17
+  },
+  "baseline": "../full-default-export-names-2026-10-20/final-full.json.gz",
+  "resumed_files": 14556,
+  "note": "All 17 lost passes are measured timeouts, retained without reclassification. Clean frozen source 75c6857 includes namespace TDZ, export resolution/patterns, harness classification, dynamic defer, async cycles, and engine byte modules. Excludes runtime binary adapters, data URL bytes, deferred attribute correction, and source-phase import work."
+}

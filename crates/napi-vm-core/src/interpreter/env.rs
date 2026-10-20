@@ -1463,6 +1463,8 @@ impl Environment {
 
 #[derive(Clone)]
 pub struct Module {
+    /// Host module-source object, shared with evaluation-phase records.
+    pub source_object: Option<Value>,
     /// Shared namespace identity, also shared by cloned export records.
     pub namespace: Rc<RefCell<Option<Value>>>,
     /// Deferred namespace identity is distinct from the ordinary namespace.

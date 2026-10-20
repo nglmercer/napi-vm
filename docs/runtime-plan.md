@@ -191,6 +191,13 @@ HttpLoader, NpmLoader, and TypeScriptLoader. Permission and resource-limit
 checks remain on the raw byte path; TypeScript does not transform binary
 requests. See [byte module implementation and validation](test262-byte-modules-continuation.md).
 
+The module loader also supports an explicit `load_source_object` host hook.
+Static and dynamic source-phase imports share cached branded objects without
+linking or evaluating their target's ordinary module graph. Local and star
+re-exports preserve source-object identity. Unsupported hosts reject source
+representations; the engine does not infer one from JavaScript text. See
+[source-phase implementation](test262-static-source-imports-continuation.md).
+
 ### M5 — P1 optional Node and TypeScript
 
 Enable Node behavior explicitly with `--compat=node` and implement tiers:

@@ -203,6 +203,59 @@ impl Interpreter {
         self.republish_roots();
         result
     }
+    pub(crate) fn load_source_module_object(
+        &mut self,
+        specifier: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<Value, VmErr> {
+        let canonical = self
+            .resolve_module_request(specifier)?
+            .ok_or_else(|| VmErr::Msg(format!("TypeError: Module not found: {specifier}")))?;
+        let key = self.module_request_key(&canonical, attributes);
+        self.ensure_source_object(&key, &canonical, attributes)
+    }
+    fn ensure_source_object(
+        &mut self,
+        key: &str,
+        canonical: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<Value, VmErr> {
+        if let Some(value) = self.module(key).and_then(|module| module.source_object) {
+            return Ok(value);
+        }
+        let loader = self.module_loader.clone().ok_or_else(|| {
+            VmErr::Msg("TypeError: Host loader does not provide source-phase module objects".into())
+        })?;
+        let (identity, value) = loader.load_source_object(self, canonical, attributes)?;
+        if identity != canonical {
+            return Err(VmErr::Msg(
+                "module loader changed canonical identity".into(),
+            ));
+        }
+        if !value
+            .property_cell()
+            .is_some_and(|properties| properties.meta.borrow().module_source_class_name.is_some())
+        {
+            return Err(VmErr::Msg(
+                "TypeError: Host loader returned an unbranded module-source object".into(),
+            ));
+        }
+        self.modules
+            .borrow_mut()
+            .entry(key.into())
+            .or_insert_with(|| Module {
+                source_object: None,
+                namespace: Rc::new(RefCell::new(None)),
+                deferred_namespace: Rc::new(RefCell::new(None)),
+                exports: HashMap::new(),
+                default: None,
+                scope: None,
+            })
+            .source_object = Some(value.clone());
+        self.republish_roots();
+        Ok(value)
+    }
+
     pub(super) fn load_host_module(
         &mut self,
         loader: &Rc<dyn crate::ModuleLoader>,
@@ -236,9 +289,11 @@ impl Interpreter {
                 length_tracking: false,
                 is_buffer: false,
             }));
+            let source_object = self.module(key).and_then(|module| module.source_object);
             self.modules.borrow_mut().insert(
                 key.into(),
                 Module {
+                    source_object,
                     namespace: Rc::new(RefCell::new(None)),
                     deferred_namespace: Rc::new(RefCell::new(None)),
                     exports: HashMap::new(),
@@ -277,7 +332,9 @@ impl Interpreter {
             return Ok(true);
         }
         if !self.module_sources.borrow().contains_key(name) {
-            if self.modules.borrow().contains_key(name) {
+            if self.modules.borrow().get(name).is_some_and(|module| {
+                module.source_object.is_none() || module.scope.is_some() || module.default.is_some()
+            }) {
                 return Ok(true);
             }
             let Some(loader) = self.module_loader.clone() else {
@@ -285,7 +342,9 @@ impl Interpreter {
             };
             let canonical = self.canonical_module_id(name);
             self.load_host_module(&loader, name, &canonical, attributes)?;
-            if self.modules.borrow().contains_key(name) {
+            if !self.module_sources.borrow().contains_key(name)
+                && self.modules.borrow().contains_key(name)
+            {
                 return Ok(true);
             }
         }
@@ -316,9 +375,11 @@ impl Interpreter {
             .get(name)
             .and_then(|m| m.scope.clone())
             .unwrap_or_else(|| self.new_module_scope());
+        let source_object = self.module(name).and_then(|module| module.source_object);
         self.modules.borrow_mut().insert(
             name.into(),
             Module {
+                source_object,
                 namespace: Rc::new(RefCell::new(None)),
                 deferred_namespace: Rc::new(RefCell::new(None)),
                 exports: HashMap::new(),
@@ -434,16 +495,13 @@ impl Interpreter {
                     _ => None,
                 };
                 if let Some((request, phase, attributes)) = request {
-                    if phase == crate::parser::ImportPhase::Source {
-                        return Err(VmErr::Msg(
-                            "TypeError: Host loader does not provide source-phase module objects"
-                                .into(),
-                        ));
-                    }
                     let resolved = self
                         .resolve_module_request(&Self::host_module_specifier(request)?)?
                         .ok_or_else(|| syntax(format!("Module not found: {request}")))?;
                     let target = self.module_request_key(&resolved, attributes);
+                    if phase == crate::parser::ImportPhase::Source {
+                        self.ensure_source_object(&target, &resolved, attributes)?;
+                    }
                     if !requests.iter().any(|(old, _, old_phase, old_attributes)| {
                         old == request && *old_phase == phase && old_attributes == attributes
                     }) {
@@ -457,7 +515,10 @@ impl Interpreter {
                 .get_mut(name)
                 .unwrap()
                 .requests = requests.clone();
-            for (_, dependency, _, attributes) in requests {
+            for (_, dependency, phase, attributes) in requests {
+                if phase == crate::parser::ImportPhase::Source {
+                    continue;
+                }
                 if !self.discover_module(&dependency, &attributes, created, depth + 1)? {
                     return Err(syntax(format!("Module not found: {dependency}")));
                 }
@@ -546,8 +607,9 @@ impl Interpreter {
             ModuleState::Failed(_) => true,
             ModuleState::Linked => {
                 !has_tla
-                    && requests.iter().all(|(_, dependency, _, _)| {
-                        self.ready_for_sync_execution(dependency, seen)
+                    && requests.iter().all(|(_, dependency, phase, _)| {
+                        *phase == crate::parser::ImportPhase::Source
+                            || self.ready_for_sync_execution(dependency, seen)
                     })
             }
         }
@@ -709,6 +771,12 @@ impl Interpreter {
                                     .request_target(id, module, attributes)
                                     .expect("resolved import");
                                 if default.as_deref() == Some(local) {
+                                    if *phase == crate::parser::ImportPhase::Source {
+                                        return Ok(ExportResolution::from_binding(
+                                            self.module(&target)
+                                                .and_then(|module| module.source_object),
+                                        ));
+                                    }
                                     return self.resolve_export(&target, "default", seen);
                                 }
                                 if let Some((remote, _)) = named.iter().find(|(_, n)| n == local) {
@@ -822,6 +890,19 @@ impl Interpreter {
                     let target = self
                         .request_target(id, module, attributes)
                         .expect("resolved import");
+                    if *phase == crate::parser::ImportPhase::Source {
+                        let value = self
+                            .module(&target)
+                            .and_then(|module| module.source_object)
+                            .expect("loaded source object");
+                        self.declare_binding(
+                            default.as_deref().expect("source binding"),
+                            value,
+                            BindKind::Const,
+                            true,
+                        )?;
+                        continue;
+                    }
                     let mut bindings = named.clone();
                     if let Some(local) = default {
                         bindings.push(("default".into(), local.clone()));
@@ -899,7 +980,7 @@ impl Interpreter {
         let outer_scope = std::mem::replace(&mut self.global, scope);
         let result = (|| {
             for (_, dependency, phase, _) in requests {
-                if phase != crate::parser::ImportPhase::Deferred {
+                if phase == crate::parser::ImportPhase::Evaluation {
                     self.evaluate_linked_module(&dependency)?;
                 }
             }

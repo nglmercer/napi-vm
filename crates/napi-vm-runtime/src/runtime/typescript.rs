@@ -84,6 +84,14 @@ impl ModuleLoader for TypeScriptLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr> {
         self.inner.resolve(specifier, referrer)
     }
+    fn load_source_object(
+        &self,
+        vm: &mut crate::Interpreter,
+        id: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<(String, crate::Value), VmErr> {
+        self.inner.load_source_object(vm, id, attributes)
+    }
     fn load_bytes(
         &self,
         id: &str,

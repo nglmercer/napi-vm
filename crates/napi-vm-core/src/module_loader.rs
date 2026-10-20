@@ -22,6 +22,20 @@ pub trait ModuleLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr>;
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr>;
 
+    /// Return a branded source object without linking or evaluating its module.
+    /// The hook runs on the owning interpreter; the returned identity must
+    /// match the canonical request. The engine caches successful objects.
+    fn load_source_object(
+        &self,
+        _vm: &mut crate::Interpreter,
+        _id: &str,
+        _attributes: &[(String, crate::JsString)],
+    ) -> Result<(String, crate::Value), VmErr> {
+        Err(VmErr::Msg(
+            "SyntaxError: Host loader does not provide source-phase module objects".into(),
+        ))
+    }
+
     /// Load a resource for `type: "bytes"`, without UTF-8 decoding. Binary
     /// support is an explicit host capability; text-only loaders may reject it.
     fn load_bytes(
@@ -280,6 +294,14 @@ impl ModuleLoader for CompositeLoader {
         attributes: &[(String, crate::JsString)],
     ) -> Result<ModuleSource, VmErr> {
         self.loader(id, None).load_with_attributes(id, attributes)
+    }
+    fn load_source_object(
+        &self,
+        vm: &mut crate::Interpreter,
+        id: &str,
+        attributes: &[(String, crate::JsString)],
+    ) -> Result<(String, crate::Value), VmErr> {
+        self.loader(id, None).load_source_object(vm, id, attributes)
     }
     fn load_bytes(
         &self,

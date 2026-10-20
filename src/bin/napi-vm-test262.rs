@@ -54,6 +54,10 @@ impl CorpusLoader {
 }
 impl ModuleLoader for CorpusLoader {
     fn resolve(&self, specifier: &str, referrer: Option<&str>) -> Result<String, VmErr> {
+        // Test262 reserves this host-provided source representation.
+        if specifier == "<module source>" {
+            return Ok(specifier.into());
+        }
         let referrer = referrer.unwrap_or(&self.entry);
         if let Ok(id) = self.virtual_loader.resolve(specifier, Some(referrer)) {
             return Ok(id);
@@ -75,6 +79,22 @@ impl ModuleLoader for CorpusLoader {
     }
     fn load(&self, id: &str) -> Result<ModuleSource, VmErr> {
         self.load_corpus_module(id, None)
+    }
+    fn load_source_object(
+        &self,
+        vm: &mut Interpreter,
+        id: &str,
+        _: &[(String, napi_vm::JsString)],
+    ) -> Result<(String, Value), VmErr> {
+        if id == "<module source>" {
+            return Ok((
+                id.into(),
+                vm.create_module_source_object("Test262ModuleSource"),
+            ));
+        }
+        Err(VmErr::Msg(
+            "SyntaxError: Module has no source-phase representation".into(),
+        ))
     }
     fn load_bytes(
         &self,

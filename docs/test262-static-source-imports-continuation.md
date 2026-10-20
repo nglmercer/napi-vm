@@ -1,47 +1,49 @@
-# Static source-phase import grammar
+# Source-phase module imports
 
-Static `import source binding from 'module'` declarations now retain the source
-phase in the AST. Contextual binding names `source` and `from`, line terminators,
-and import attributes are supported. Ordinary `import source from 'module'`
-remains an evaluation-phase default import. Namespace, named, and combined
-clauses are not accepted after the source modifier.
+Static `import source binding from 'module'` declarations retain the source
+phase and attributes. Contextual names `source` and `from` and line terminators
+are supported. Ordinary default imports named source remain evaluation-phase
+imports. Namespace, named, and combined clauses are not accepted after the
+source modifier.
 
-The grammar follows the [source-phase imports proposal](https://tc39.es/proposal-source-phase-imports/).
-The existing loader contract does not provide module-source objects. Linking a
-static source request therefore reports a host TypeError before evaluating any
-module body; the script embedding import path rejects it as well. This is an
-explicit unsupported capability, rather than treating the request as a default
-export import. Host-provided source objects, their intrinsic prototype,
-re-exports, and source-phase graph loading remain required work.
+Hosts implement `ModuleLoader::load_source_object(vm, id, attributes)` and return
+the canonical identity and a branded object created through
+`Interpreter::create_module_source_object(class_name)`. Unsupported hosts reject
+by default. The object inherits the realm-owned AbstractModuleSource prototype;
+its internal class-name slot cannot be forged through properties, inheritance,
+or proxies. The abstract constructor throws on call and construction and is an
+intrinsic rather than a global JavaScript binding. Embedders access it through
+`abstract_module_source_constructor()`.
 
-Both new regressions fail before this change. Two source-phase tests, eight
-byte-module tests, 33 module tests, strict workspace Clippy, and formatting pass.
-No release Test262 gain is claimed. The active full worker freezes 75c6857 and
-excludes this continuation.
+The engine caches source objects by canonical resource and normalized attributes.
+Static imports, dynamic `import.source`, local re-exports, namespace access, and
+star re-exports share identity. A source request does not load evaluation text,
+link the target’s evaluation dependencies, or execute a module body. A later
+ordinary import can load and evaluate the same resource while retaining the
+source object. Source bindings are immutable. Hosts constructing `Module` records directly
+initialize the new `source_object` field to None unless providing a source value. Host identity/brand violations
+reject and are not cached. Cached source objects are traced by GC and released
+when their module records are removed. Composite and TypeScript loaders forward
+the source hook; other hosts explicitly opt in.
 
-The realm-owned AbstractModuleSource intrinsic is now installed without a global
-binding and exposed to conformance tests through `$262.AbstractModuleSource`.
-Its abstract call/construct paths throw TypeError; metadata, prototype links,
-constructor back-reference, and getter-only Symbol.toStringTag descriptors are
-installed. Ordinary receivers have no ModuleSourceClassName slot, so the getter
-returns undefined. Each realm owns distinct constructor and prototype objects.
-The public embedding accessor is `abstract_module_source_constructor()`.
+The Test262 host supplies the reserved `<module source>` representation. Other
+source requests reject when no host representation exists. This follows the
+[source-phase imports proposal](https://tc39.es/proposal-source-phase-imports/).
 
-All eight pinned AbstractModuleSource cases pass with a debug worker; this is
-not a release score update. All 21 worker integration tests, strict workspace
-Clippy, and formatting pass. Host source-object branding, source hooks, graph
-loading, and re-exports remain required work.
+Validation covers grammar, source-only loading, shared static/dynamic/re-export
+identity, ordinary evaluation after source loading, immutable bindings, invalid
+host results and retry, cross-realm branding, and GC lifetime. Eight source tests,
+eight byte-module tests, 33 module tests, 22 GC tests, 21 worker tests, and 369
+core-library tests pass. Strict workspace Clippy, all-feature runtime Clippy, and formatting pass.
+The final release passes **2,645 / 2,645** selected variants, gaining **13
+passes with zero losses** versus 75c6857. These combined gains include the
+preceding grammar, intrinsic, and brand checkpoints; they are not added to the
+completed full score. Preliminary error-type regressions were found and fixed,
+and source edges now do not block deferred synchronous readiness. See
+[final source-loader evidence](../tools/test262/evidence/source-loader-2026-10-20/summary.json). The completed full snapshot 75c6857 excludes this
+continuation.
 
-All 369 core-library tests also pass without exclusions. Evidence is archived
-in [intrinsic validation](../tools/test262/evidence/abstract-module-source-2026-10-20/summary.json).
-
-Hosts can now create branded source objects using
-`Interpreter::create_module_source_object(class_name)`. The class name is an
-internal metadata slot, read only from the actual receiver by the intrinsic
-tag getter. Inherited slots, proxies, and guest properties cannot forge it.
-Objects inherit the creating realm’s AbstractModuleSource prototype; getters
-from another realm can read the brand. Freezing preserves it. This API does
-not yet connect source objects to module loading or re-exports.
-
-All three source-phase tests and 369 core-library tests pass, with strict
-workspace Clippy and formatting. See [brand validation evidence](../tools/test262/evidence/module-source-brand-2026-10-20/summary.json).
+Earlier grammar and intrinsic checkpoints remain archived in
+[grammar evidence](../tools/test262/evidence/static-source-imports-2026-10-20/summary.json),
+[intrinsic evidence](../tools/test262/evidence/abstract-module-source-2026-10-20/summary.json),
+and [brand evidence](../tools/test262/evidence/module-source-brand-2026-10-20/summary.json).

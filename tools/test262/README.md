@@ -43,24 +43,19 @@ worker count, or timeout. An interrupted final journal write is rerun. The final
 report still contains all selected outcomes and records the restored file count.
 
 The latest completed full pinned Test262 run (archived 2026-10-20, corpus
-`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `ffc10c7`)
-passes **101,973 / 102,956 variants (99.0452%)**, with 860 failures,
-123 timeouts, and zero skips, crashes, or harness errors. It gains 130 passes
-and loses 52 against the previous full run on `a528b02`; all 52 losses are
+`5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81`, source `75c6857`)
+passes **102,050 / 102,956 variants (99.1200%)**, with 814 failures,
+92 timeouts, and zero skips, crashes, or harness errors. It gains 94 passes
+and loses 17 against the previous full run on `ffc10c7`; all 17 losses are
 measured timeouts, retained without reclassification. The frozen worker
-`2c59c922…` includes async delegation, numeric keys, class layout, host bridge/JSON,
-var destructuring, optional chains, super receiver order, default-export names,
-and native snapshot fixes. Reports, comparison, source identity, and triage are
-archived in [full default-export evidence](evidence/full-default-export-names-2026-10-20/).
+`3613dfa4…` resumed 14,556 verified checkpoint files after interruption.
+It includes namespace TDZ, export resolution and patterns, harness exception
+classification, dynamic deferred imports, async cycles, and engine byte modules.
+Reports and comparison are archived in [full byte-module evidence](evidence/full-byte-modules-2026-10-20/).
 
-This full snapshot excludes subsequent namespace TDZ, export resolution,
-exported destructuring, harness classification, dynamic deferred-import,
-async cycle, and byte-module changes. Their focused results below remain
-separate measurements.
-
-A fresh full pinned run is in progress on clean source `75c6857` (worker
-`3613dfa4…`), including all subsequent module fixes and engine byte modules.
-The completed full score above remains authoritative until that report finishes.
+This full snapshot excludes runtime binary adapters, data URL bytes, the
+static deferred-attribute correction, and source-phase import work. Subsequent
+focused measurements remain separate from the full score.
 
 That full snapshot includes Object integrity and `Object.fromEntries`, deferred
 imports, and the earlier dynamic-import attributes implementation. Their
@@ -127,19 +122,21 @@ Super reference receiver order subsequently passes **19,080 / 19,125** selected 
 
 Default export names subsequently pass **18,120 / 18,184** selected variants, gaining **seven passes with zero losses**. This is included in the completed full score. See the [default export-name continuation](../../docs/test262-default-export-names-continuation.md).
 
-Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected variants, gaining **six passes with zero losses**; deferred imports remain **109 / 109**. This continuation is excluded from the completed full snapshot. See the [namespace continuation](../../docs/test262-namespace-tdz-continuation.md).
+Namespace descriptor TDZ fixes subsequently pass **7,887 / 7,916** selected variants, gaining **six passes with zero losses**; deferred imports remain **109 / 109**. This change is included in the completed full snapshot. See the [namespace continuation](../../docs/test262-namespace-tdz-continuation.md).
 
-Cyclic and ambiguous export resolution subsequently passes **2,618 / 2,637** module/import variants, gaining **two passes with zero losses**. This remains outside the completed full snapshot. See the [export resolution continuation](../../docs/test262-export-resolution-continuation.md).
+Cyclic and ambiguous export resolution subsequently passes **2,618 / 2,637** module/import variants, gaining **two passes with zero losses**. This change is included in the completed full snapshot. See the [export resolution continuation](../../docs/test262-export-resolution-continuation.md).
 
-Exported destructuring bindings subsequently pass **3,486 / 3,504** selected variants, gaining **one pass with zero losses**. All **253 / 253** top-level-await variants pass. This remains outside the completed full snapshot. See the [export patterns continuation](../../docs/test262-export-patterns-continuation.md).
+Exported destructuring bindings subsequently pass **3,486 / 3,504** selected variants, gaining **one pass with zero losses**. All **253 / 253** top-level-await variants pass. This change is included in the completed full snapshot. See the [export patterns continuation](../../docs/test262-export-patterns-continuation.md).
 
-Harness-error classification subsequently passes **2,621 / 2,637** selected module/import variants, correcting **two passes with zero losses**. This is a worker measurement correction, excluded from the completed full snapshot. See the [harness error continuation](../../docs/test262-harness-error-continuation.md).
+Harness-error classification subsequently passes **2,621 / 2,637** selected module/import variants, correcting **two passes with zero losses**. This is a worker measurement correction, included in the completed full snapshot. See the [harness error continuation](../../docs/test262-harness-error-continuation.md).
 
-Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This remains outside the completed full snapshot. See the [dynamic defer continuation](../../docs/test262-dynamic-defer-continuation.md).
+Dynamic deferred imports subsequently pass **2,625 / 2,637** selected module/import variants, gaining **four passes with zero losses** by awaiting asynchronous dependencies through internal reactions. This change is included in the completed full snapshot. See the [dynamic defer continuation](../../docs/test262-dynamic-defer-continuation.md).
 
-Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This remains outside the completed full snapshot. See the [async cycle continuation](../../docs/test262-async-cycle-continuation.md).
+Async cycle outcomes subsequently pass **2,627 / 2,637** selected module/import variants, gaining **two passes with zero losses**. All **1,900 / 1,900** dynamic-import variants pass. This change is included in the completed full snapshot. See the [async cycle continuation](../../docs/test262-async-cycle-continuation.md).
 
-Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and binary loader API support file, HTTP, package, and TypeScript adapters with permission and size checks. This remains outside the completed full snapshot. See the [byte module continuation](../../docs/test262-byte-modules-continuation.md).
+Immutable byte modules subsequently pass **4,334 / 4,341** selected variants, gaining **five passes with zero losses**; all **5 / 5** import-bytes variants pass. Two pre-existing ArrayBuffer timeouts remain measured. The engine and binary loader API support file, HTTP, package, and TypeScript adapters with permission and size checks. This change is included in the completed full snapshot. See the [byte module continuation](../../docs/test262-byte-modules-continuation.md).
+
+Source-phase imports subsequently pass **2,645 / 2,645** selected module/import/intrinsic variants, gaining **13 combined passes with zero losses** versus `75c6857`. Static and dynamic source bindings and re-exports share cached host-branded objects without executing target modules. This is outside the completed full score. See the [source-phase continuation](../../docs/test262-static-source-imports-continuation.md).
 
 Full reports, status transitions, measured source patches, source hashes,
 build environment, and validation logs are archived in `evidence/`, including

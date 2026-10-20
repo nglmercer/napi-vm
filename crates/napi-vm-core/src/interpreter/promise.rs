@@ -388,14 +388,10 @@ impl Interpreter {
                         vm.import_module_with_attributes(&specifier, &attributes)
                     }
                     crate::parser::ImportPhase::Source => {
-                        let id = vm.load_module_with_attributes(&specifier, &attributes)?;
-                        if !vm.link_module(&id)? {
-                            return Err(VmErr::Msg(format!("TypeError: Module not found: {id}")));
-                        }
-                        Err(VmErr::Msg(
-                            "SyntaxError: JavaScript modules do not provide source-phase objects"
-                                .into(),
-                        ))
+                        let object = vm.load_source_module_object(&specifier, &attributes)?;
+                        let promise = Value::pending_promise();
+                        vm.resolve_promise(&promise, object)?;
+                        Ok(Value::Promise(promise))
                     }
                     crate::parser::ImportPhase::Deferred => {
                         let id = vm.load_module_with_attributes(&specifier, &attributes)?;

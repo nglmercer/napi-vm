@@ -210,6 +210,7 @@ fn live_module_maps_are_roots_across_interpreters_without_snapshot_updates() {
     let value = Value::object(vec![("answer".into(), Value::Number(42.))]);
     value.set_prop("self".into(), value.clone()).unwrap();
     let record = napi_vm_core::interpreter::Module {
+        source_object: None,
         namespace: Default::default(),
         deferred_namespace: Default::default(),
         exports: std::collections::HashMap::from([("value".into(), value.clone())]),
@@ -413,4 +414,34 @@ fn private_static_method_values_are_traced_and_collect_with_the_class() {
     run(&mut vm, "C=undefined;");
     assert!(vm.collect_cycles().collected > 0);
     yes(&mut vm, "ref.deref()===undefined;");
+}
+
+#[test]
+fn cached_source_objects_are_traced_and_released_with_module_records() {
+    let mut owner = Interpreter::with_builtins();
+    let mut collector = Interpreter::with_builtins();
+    let source = owner.create_module_source_object("HostModule");
+    source
+        .set_prop("answer".into(), Value::Number(42.))
+        .unwrap();
+    source.set_prop("self".into(), source.clone()).unwrap();
+    owner.modules.borrow_mut().insert(
+        "source-only".into(),
+        napi_vm_core::interpreter::Module {
+            source_object: Some(source.clone()),
+            namespace: Default::default(),
+            deferred_namespace: Default::default(),
+            exports: Default::default(),
+            default: None,
+            scope: None,
+        },
+    );
+    collector.collect_cycles();
+    assert!(matches!(
+        source.get_prop("answer"),
+        Some(Value::Number(42.))
+    ));
+    owner.remove_module("source-only");
+    drop(source);
+    assert!(collector.collect_cycles().collected > 0);
 }
