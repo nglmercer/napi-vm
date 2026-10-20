@@ -340,3 +340,33 @@ fn conformance_host_timers_use_the_owner_queue_and_can_be_cancelled() {
     }));
     assert_eq!(result["status"], "ok", "{result}");
 }
+
+#[test]
+fn harness_errors_are_identified_by_prototype_without_guest_stringification() {
+    let harness = "function Test262Error(message){this.message=message||'';} Test262Error.prototype.toString=function(){throw 99;};";
+    for (source, module, asynchronous) in [
+        ("throw new Test262Error();", false, false),
+        ("throw new Test262Error();", true, false),
+        (
+            "export default (()=>{throw new Test262Error();})();",
+            true,
+            false,
+        ),
+        ("$DONE(new Test262Error());", false, true),
+        ("throw Object.create(Test262Error.prototype);", false, false),
+        (
+            "const saved=Test262Error; Test262Error=function(){}; throw new saved();",
+            false,
+            false,
+        ),
+    ] {
+        let report = worker(
+            json!({"source":source,"harness":harness,"module":module,"asynchronous":asynchronous}),
+        );
+        assert_eq!(report["phase"], "runtime", "{source}: {report}");
+        assert_eq!(report["error_type"], "Test262Error", "{source}: {report}");
+    }
+    let report =
+        worker(json!({"source":"throw new (function Test262Error(){})();","harness":harness}));
+    assert_eq!(report["error_type"], "EngineError");
+}

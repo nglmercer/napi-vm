@@ -1367,5 +1367,36 @@
     },
     "note": "Running full snapshot ffc10c7 excludes this continuation. Baseline worker 2915ae8a contains preceding export resolution fix.",
     "evidence": "evidence/export-patterns-2026-10-20/focused.json.gz"
+  },
+  "harness_error_measurement": {
+    "source_base": "401c2df03383e5c573e36ef5eaa9cc019dfe98e2",
+    "worker_sha256": "3d219d74bf86a136ad506796efbfd161cbafb07f2bd33acadff6196dd86c137b",
+    "working_tree_changes": true,
+    "domain": "Test262 measurement",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "language/module-code",
+      "language/import",
+      "language/expressions/dynamic-import"
+    ],
+    "implementation_patch_sha256": "5db7f408a6c2e4580b90497f434b6e43951941a1b5e8cfe107efe0bcc067ea62",
+    "total": 2637,
+    "counts": {
+      "pass": 2621,
+      "fail": 16,
+      "skip": 0,
+      "timeout": 0,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "gains": 2,
+    "losses": 0,
+    "validation": {
+      "worker_integration_tests": 19,
+      "strict_workspace_clippy": "pass",
+      "format": "pass"
+    },
+    "note": "Corrected harness exception classification, not an ECMAScript feature gain. Running full snapshot ffc10c7 excludes this correction; its outcomes are not rewritten.",
+    "evidence": "evidence/harness-error-2026-10-20/focused.json.gz"
   }
 }

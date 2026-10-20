@@ -281,7 +281,17 @@ fn realm_host(vm: &mut Interpreter) -> Value {
     host
 }
 
-fn error_type(error: &VmErr) -> String {
+fn error_type(error: &VmErr, harness_error_prototype: Option<&Value>) -> String {
+    if let (VmErr::Throw(value), Some(prototype)) = (error, harness_error_prototype) {
+        let mut current = value.proto_of();
+        for _ in 0..napi_vm::value::MAX_PROTOTYPE_DEPTH {
+            let Some(candidate) = current else { break };
+            if napi_vm::interpreter::strict_equals(&candidate, prototype) {
+                return "Test262Error".into();
+            }
+            current = candidate.proto_of();
+        }
+    }
     if let VmErr::Throw(value) = error
         && let Some(Value::String(ref name)) = value.get_prop("name")
     {
@@ -302,8 +312,8 @@ fn error_type(error: &VmErr) -> String {
     }
     "EngineError".into()
 }
-fn failure(phase: &str, error: &VmErr) -> Json {
-    json!({"status": "error", "phase": phase, "error_type": error_type(error), "message": error.to_string()})
+fn failure(phase: &str, error: &VmErr, harness_error_prototype: Option<&Value>) -> Json {
+    json!({"status": "error", "phase": phase, "error_type": error_type(error, harness_error_prototype), "message": error.to_string()})
 }
 fn execute(request: Request) -> Json {
     GC_REQUESTED.with(|requested| requested.set(false));
@@ -374,8 +384,18 @@ fn execute(request: Request) -> Json {
     let host = realm_host(&mut vm);
     vm.global.borrow_mut().set("$262", host);
     if let Err(error) = vm.eval_source(&request.harness) {
-        return failure("harness", &error);
+        return failure("harness", &error, None);
     }
+    // Test262Error deliberately has no `name` property. Capture its identity
+    // before the test can replace the global; reporting must not execute guest
+    // getters, @@hasInstance, or toString methods.
+    let harness_error_prototype = vm
+        .global
+        .borrow()
+        .get("Test262Error")
+        .and_then(|constructor| constructor.get_prop("prototype"));
+    let failure =
+        |phase: &str, error: &VmErr| failure(phase, error, harness_error_prototype.as_ref());
     let mut module_evaluation = None;
     let result = if request.module {
         match vm.link_module(&request.id) {
