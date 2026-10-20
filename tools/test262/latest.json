@@ -2029,5 +2029,39 @@
     "source_patch_sha256": "63f35dc34b7f90a6890e68e482bacc5ed88414614d25f10b9c8d3a4c1ca52ad8",
     "note": "Frozen numeric-key implementation only; excludes subsequent require-new and buffer coercion fixes.",
     "evidence": "evidence/typed-array-numeric-keys-2026-10-20/focused.json.gz"
+  },
+  "typed_array_calls_buffer_focused": {
+    "domain": "ECMAScript",
+    "suite": "Test262",
+    "revision": "5992dc3b60faf62a48fd6be8a40ae9d9a8c84d81",
+    "selection": [
+      "built-ins/TypedArrayConstructors",
+      "built-ins/TypedArray"
+    ],
+    "groups": [],
+    "engine_sha256": "73877e19d0027cd8327fa1ce1e137f2d8f2ada543267ef2dab20b21bffacc0c7",
+    "skip_features": [],
+    "denominator": "all selected variants, including skips and errors",
+    "worker_jobs": 2,
+    "timeout_seconds": 5.0,
+    "resumed_files": 0,
+    "total": 4336,
+    "counts": {
+      "pass": 4322,
+      "fail": 8,
+      "skip": 0,
+      "timeout": 6,
+      "crash": 0,
+      "harness_error": 0
+    },
+    "pass_percentage": 99.67712177121771,
+    "limitations": [
+      "Host capabilities depend on the selected worker; GC requests run at quiescent host boundaries"
+    ],
+    "new_passes": 32,
+    "lost_passes": 0,
+    "source_commit": "7e762ff861c18b1cdfb04094d925858bfeee2947",
+    "note": "Includes require-new and ArrayBuffer coercion fixes. Excludes subsequent SharedArrayBuffer coercion and Math.sumPrecise.",
+    "evidence": "evidence/typed-array-calls-buffer-2026-10-20/focused.json.gz"
   }
 }

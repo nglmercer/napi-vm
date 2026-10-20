@@ -16,3 +16,8 @@ and formatting. Native evidence is in the
 [archive](../tools/test262/evidence/typed-array-constructor-calls-2026-10-20/).
 Release Test262 measurement for this change is pending; the earlier numeric-key
 release comparison excludes this constructor-call change.
+
+Combined optimized release verification on `7e762ff` passes **4,322 / 4,336**,
+gaining **32 passes with zero losses** versus the numeric-key worker. Eight
+failures and six unchanged timeouts remain; there are no other non-pass outcomes.
+See the [release evidence](../tools/test262/evidence/typed-array-calls-buffer-2026-10-20/summary.json).

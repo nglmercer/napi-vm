@@ -17,3 +17,8 @@ Clippy and formatting. Native evidence is in the
 [archive](../tools/test262/evidence/typed-array-buffer-coercion-2026-10-20/).
 Release conformance measurements are recorded separately;
 no release gain is claimed before a matching report is complete.
+
+Combined optimized release verification on `7e762ff` passes **4,322 / 4,336**,
+gaining **32 passes with zero losses** versus the numeric-key worker. Eight
+failures and six unchanged timeouts remain; there are no other non-pass outcomes.
+See the [release evidence](../tools/test262/evidence/typed-array-calls-buffer-2026-10-20/summary.json).
